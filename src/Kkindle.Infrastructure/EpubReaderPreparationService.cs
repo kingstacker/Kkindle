@@ -21,12 +21,12 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "36";
+    private const string ExtractionFormatVersion = "39";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
         "connect-src 'none'; form-action 'none'; img-src 'self' file:; " +
-        "font-src 'self' file:; style-src 'self' 'unsafe-inline' file:; " +
+        "font-src 'self' file: data:; style-src 'self' 'unsafe-inline' file:; " +
         "media-src 'none'; worker-src 'none'; frame-ancestors 'none';";
     private const string ReaderBridgeScript = """
         (() => {
@@ -479,10 +479,53 @@ public sealed class EpubReaderPreparationService
               try { isFootnoteLink(element); } catch (_) { }
             });
           };
+          const isFootnoteDefinitionElement = element => {
+            if (!(element instanceof Element)) return false;
+            const metadata = [
+              element.getAttribute('epub:type') || '',
+              element.getAttribute('role') || '',
+              element.getAttribute('class') || '',
+              element.getAttribute('id') || ''
+            ].join(' ');
+            return /\b(?:doc-)?(?:footnote|endnote)\b/i.test(metadata)
+              || /(?:^|[\s_-])(?:duokan-)?(?:footnote|endnote)(?:[\s_-]|$)/i.test(metadata);
+          };
+          const hideFootnoteDefinitions = () => {
+            try {
+              document.querySelectorAll('aside, section, div, ol, ul, li, p').forEach(element => {
+                if (isFootnoteDefinitionElement(element))
+                  element.style.setProperty('display', 'none', 'important');
+              });
+              document.querySelectorAll('a').forEach(anchor => {
+                if (!isFootnoteLink(anchor)) return;
+                const rawHref = anchor.getAttribute('href')
+                  || anchor.getAttribute('data-kkindle-footnote-href') || '';
+                let url;
+                try { url = new URL(rawHref, location.href); }
+                catch (_) { return; }
+                if (!url.hash) return;
+                let id;
+                try { id = decodeURIComponent(url.hash.slice(1)); }
+                catch (_) { id = url.hash.slice(1); }
+                const target = id ? document.getElementById(id) : null;
+                if (!target) return;
+                const definition = target.closest('aside, section, div, ol, ul, li, p');
+                const visibleTarget = definition && isFootnoteDefinitionElement(definition)
+                  ? definition
+                  : target;
+                visibleTarget.style.setProperty('display', 'none', 'important');
+              });
+            } catch (_) { }
+          };
           if (document.readyState === 'loading')
-            document.addEventListener('DOMContentLoaded', markFootnoteLinks, { once: true });
-          else
+            document.addEventListener('DOMContentLoaded', () => {
+              markFootnoteLinks();
+              hideFootnoteDefinitions();
+            }, { once: true });
+          else {
             markFootnoteLinks();
+            hideFootnoteDefinitions();
+          }
           const isPageTurnTarget = element =>
             element instanceof Element
             && !element.closest('a, button, input, textarea, select, option, label, #kkindle-selection-bar');
@@ -499,7 +542,13 @@ public sealed class EpubReaderPreparationService
               pagePointerDown = {
                 id: event.pointerId,
                 x: event.clientX || 0,
-                y: event.clientY || 0
+                y: event.clientY || 0,
+                hadSelection: (() => {
+                  const selection = window.getSelection?.();
+                  return !!(selection
+                    && !selection.isCollapsed
+                    && (selection.toString() || '').trim());
+                })()
               };
             } catch (_) { }
           }, true);
@@ -527,10 +576,29 @@ public sealed class EpubReaderPreparationService
           }, true);
           document.addEventListener("mouseup", () => reportSelection(null), true);
           document.addEventListener("pointerup", event => {
-            reportSelection(null);
             try {
               const start = pagePointerDown;
               pagePointerDown = null;
+              const moved = start
+                ? Math.abs((event.clientX || 0) - start.x)
+                  + Math.abs((event.clientY || 0) - start.y)
+                : Number.POSITIVE_INFINITY;
+              // A click that starts while text is selected is a dismiss action.
+              // Clear it before the normal page-turn test so one click neither
+              // needs a second pass nor falls through to a side-page turn. A
+              // drag is still allowed to replace the old selection.
+              if (start?.hadSelection
+                  && start.id === event.pointerId
+                  && event.button === 0
+                  && event.isPrimary !== false
+                  && moved <= 12) {
+                const selection = window.getSelection?.();
+                selection?.removeAllRanges?.();
+                dismissedSelectionText = "";
+                reportSelection(null);
+                return;
+              }
+              reportSelection(null);
               if (!start
                   || start.id !== event.pointerId
                   || event.button !== 0
@@ -539,8 +607,6 @@ public sealed class EpubReaderPreparationService
                   || !isPageTurnTarget(event.target)) {
                 return;
               }
-              const moved = Math.abs((event.clientX || 0) - start.x)
-                + Math.abs((event.clientY || 0) - start.y);
               if (moved > 12) return;
               window.requestAnimationFrame?.(() => {
                 try {

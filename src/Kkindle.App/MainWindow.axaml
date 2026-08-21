@@ -3799,16 +3799,17 @@
                                           VerticalScrollBarVisibility="Auto"
                                           Padding="24,18"
                                           ScrollChanged="ReaderLinuxTextFallbackScroll_ScrollChanged">
-                                <StackPanel Spacing="18">
+                                <StackPanel Spacing="0">
                                     <SelectableTextBlock x:Name="ReaderLinuxTextFallbackText"
                                                         IsVisible="False" />
                                     <ItemsControl ItemsSource="{Binding ReaderLinuxTextFallbackBlocks}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border Margin="0,6,0,0">
+                                                <Border Margin="{Binding DisplayMargin}">
                                                     <Grid>
                                                         <local:ReaderLinuxTextFallbackTextBlock Block="{Binding}"
                                                                                                   IsVisible="{Binding IsText}"
+                                                                                                  FontFamily="{StaticResource DefaultAppFontFamily}"
                                                                                                   FontSize="{Binding FontSize}"
                                                                                                   LineHeight="{Binding LineHeight}"
                                                                                                   MaxWidth="{Binding MaxWidth}"
@@ -3817,7 +3818,6 @@
                                                                                                   SelectionBrush="#C9C9C9"
                                                                                                   InvertedSelectionBackground="{StaticResource InkBrush}"
                                                                                                   InvertedSelectionForeground="{StaticResource PaperBrush}"
-                                                                                                  TextAlignment="Left"
                                                                                                   TextWrapping="Wrap"
                                                                                                   HorizontalAlignment="Center"
                                                                                                   PointerReleased="ReaderLinuxTextFallback_ContentPointerReleased"
@@ -3849,6 +3849,7 @@
                                            IsVisible="False" />
                                     <local:ReaderLinuxTextFallbackTextBlock x:Name="ReaderLinuxTextFallbackPageLeft"
                                                         Grid.Column="0"
+                                                        FontFamily="{StaticResource DefaultAppFontFamily}"
                                                         Foreground="{StaticResource InkBrush}"
                                                         SelectionBrush="#C9C9C9"
                                                         InvertedSelectionBackground="{StaticResource InkBrush}"
@@ -3873,6 +3874,7 @@
                                            IsVisible="False" />
                                     <local:ReaderLinuxTextFallbackTextBlock x:Name="ReaderLinuxTextFallbackPageRight"
                                                         Grid.Column="2"
+                                                        FontFamily="{StaticResource DefaultAppFontFamily}"
                                                         Foreground="{StaticResource InkBrush}"
                                                         SelectionBrush="#C9C9C9"
                                                         InvertedSelectionBackground="{StaticResource InkBrush}"
