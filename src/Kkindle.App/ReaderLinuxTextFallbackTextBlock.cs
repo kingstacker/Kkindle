@@ -26,6 +26,10 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         AvaloniaProperty.Register<ReaderLinuxTextFallbackTextBlock, int>(
             nameof(ChapterTitleLength));
 
+    public static readonly StyledProperty<string?> LayoutTextProperty =
+        AvaloniaProperty.Register<ReaderLinuxTextFallbackTextBlock, string?>(
+            nameof(LayoutText));
+
     /// <summary>
     /// Foreground used to repaint the selected range. Selection colors must
     /// stay out of layout: base SelectableTextBlock feeds this brush into the
@@ -74,6 +78,16 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         set => SetValue(ChapterTitleLengthProperty, value);
     }
 
+    /// <summary>
+    /// Logical page text retained when Avalonia renders the visible content
+    /// through Inlines and consequently leaves Text empty.
+    /// </summary>
+    public string? LayoutText
+    {
+        get => GetValue(LayoutTextProperty);
+        set => SetValue(LayoutTextProperty, value);
+    }
+
     public IBrush? InvertedSelectionForeground
     {
         get => GetValue(InvertedSelectionForegroundProperty);
@@ -104,7 +118,8 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
             RebuildContent();
         }
         else if (change.Property == ChapterTitleStartProperty
-            || change.Property == ChapterTitleLengthProperty)
+            || change.Property == ChapterTitleLengthProperty
+            || change.Property == LayoutTextProperty)
         {
             InvalidateVisual();
         }
@@ -112,6 +127,56 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
 
     protected override void RenderTextLayout(DrawingContext context, Point origin)
     {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("KKINDLE_TRACE_FALLBACK_TITLE"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                $"fallback-render title={Block?.IsChapterTitle == true} chapter={ChapterTitleStart}/{ChapterTitleLength} inlines={Inlines?.Count ?? 0} text={Text}");
+        }
+
+        if (Block?.IsChapterTitle == true && Inlines is not { Count: > 0 })
+        {
+            var titleText = Text ?? string.Empty;
+            var titleWidth = GetStyledLayoutWidth();
+            var titleLayout = CreateStyledLayout(
+                titleText,
+                Brushes.Black,
+                FontWeight.Bold,
+                TextAlignment.Center,
+                titleWidth);
+            DrawCenteredLayout(context, titleLayout, origin);
+
+            var titleSelectionLength = Math.Abs(SelectionEnd - SelectionStart);
+            var inverted = InvertedSelectionForeground;
+            var backing = InvertedSelectionBackground ?? SelectionBrush;
+            if (titleSelectionLength > 0 && inverted is not null && backing is not null)
+            {
+                var selectionStart = Math.Min(SelectionStart, SelectionEnd);
+                var selectionRects = titleLayout
+                    .HitTestTextRange(selectionStart, titleSelectionLength)
+                    .Select(rect => PixelRect.FromRect(rect, 1).ToRect(1))
+                    .ToArray();
+                var invertedTitleLayout = CreateStyledLayout(
+                    titleText,
+                    inverted,
+                    FontWeight.Bold,
+                    TextAlignment.Center,
+                    titleWidth);
+                foreach (var snapped in selectionRects)
+                {
+                    using (context.PushTransform(Matrix.CreateTranslation(origin)))
+                    {
+                        context.FillRectangle(backing, snapped);
+                        using (context.PushClip(snapped))
+                            DrawCenteredLayout(context, invertedTitleLayout, new Point(0, 0));
+                    }
+                }
+            }
+            return;
+        }
+
         // Avalonia's TextAlignment.Justify also stretches the final line of a
         // paragraph. That makes a one-line heading look like a row of
         // separated characters. Keep the base layout left-aligned for hit
@@ -161,9 +226,11 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
             return;
         }
 
-        // Inline footnote controls have their own embedded layout, so retain
-        // Avalonia's renderer for those exceptional blocks.
+        // Inline footnote controls have their own embedded layout. Retain the
+        // base renderer for body content, then replace its first title line
+        // with the same solid-black centered layout used by plain pages.
         base.RenderTextLayout(context, origin);
+        DrawInlinePageChapterTitleOverlay(context, origin);
     }
 
     private void DrawNaturalJustifiedLayout(
@@ -174,16 +241,70 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
     {
         PrepareNaturalJustification(layout);
         var chapterTitleLayout = CreateChapterTitleLayout(foreground);
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("KKINDLE_TRACE_FALLBACK_TITLE"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                $"fallback-natural lines={layout.TextLines.Count} title-layout={chapterTitleLayout is not null} "
+                + $"title-lines={chapterTitleLayout?.TextLines.Count ?? -1} width={Bounds.Width}/{layout.MaxWidth}");
+        }
         var lineOffset = 0d;
         for (var lineIndex = 0; lineIndex < layout.TextLines.Count; lineIndex++)
         {
             var line = layout.TextLines[lineIndex];
             if (chapterTitleLayout is not null && IsChapterTitleLine(line, lineIndex))
-                chapterTitleLayout.Draw(context, origin + new Vector(0, lineOffset));
+                DrawCenteredLayout(
+                    context,
+                    chapterTitleLayout,
+                    origin + new Vector(0, lineOffset));
             else
                 line.Draw(context, origin + new Vector(0, lineOffset));
             lineOffset += line.Height;
         }
+    }
+
+    private void DrawCenteredLayout(
+        DrawingContext context,
+        TextLayout layout,
+        Point origin)
+    {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("KKINDLE_TRACE_FALLBACK_TITLE"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            context.FillRectangle(Brushes.Red, new Rect(origin, new Size(8, 8)));
+        }
+        // TextLayout already owns paragraph alignment. Drawing its individual
+        // TextLine objects adds their internal start offset a second time on
+        // Linux and pushes a centered heading toward the right edge.
+        layout.Draw(context, origin);
+    }
+
+    private void DrawInlinePageChapterTitleOverlay(
+        DrawingContext context,
+        Point origin)
+    {
+        if (Inlines is not { Count: > 0 }
+            || TextLayout is not { TextLines.Count: > 0 } layout)
+        {
+            return;
+        }
+
+        var titleLayout = CreateChapterTitleLayout(foreground: null);
+        if (titleLayout is null || !IsChapterTitleLine(layout.TextLines[0], 0))
+            return;
+
+        var width = double.IsFinite(Bounds.Width) && Bounds.Width > 0
+            ? Bounds.Width
+            : titleLayout.MaxWidth;
+        var height = Math.Max(layout.TextLines[0].Height, titleLayout.Height);
+        context.FillRectangle(
+            Brushes.White,
+            new Rect(origin, new Size(Math.Max(1, width), Math.Max(1, height))));
+        DrawCenteredLayout(context, titleLayout, origin);
     }
 
     private void PrepareNaturalJustification(TextLayout layout)
@@ -219,21 +340,13 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
 
     private bool IsChapterTitleLine(TextLine line, int lineIndex)
     {
-        if (ChapterTitleStart < 0 || ChapterTitleLength <= 0)
-            return false;
-
-        // In a paged TextLayout the first line of a page can expose a local
-        // start of zero for subsequent lines as well. The title range is
-        // always placed at the beginning of its page by the paginator, so use
-        // the line ordinal for that stable case and never repaint the same
-        // title once per line.
-        if (ChapterTitleStart == 0)
-            return lineIndex == 0;
-
-        var titleEnd = ChapterTitleStart + ChapterTitleLength;
-        var lineStart = line.Start;
-        var lineEnd = line.Start + line.Length - line.NewLineLength;
-        return lineStart < titleEnd && lineEnd > ChapterTitleStart;
+        return ReaderLinuxTextFallbackTitleLinePolicy.IsTitleLine(
+            ChapterTitleStart,
+            ChapterTitleLength,
+            line.Start,
+            line.Length,
+            line.NewLineLength,
+            lineIndex);
     }
 
     private TextLayout? CreateChapterTitleLayout(IBrush? foreground)
@@ -241,7 +354,9 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         if (ChapterTitleStart < 0 || ChapterTitleLength <= 0)
             return null;
 
-        var text = Text ?? string.Empty;
+        var text = !string.IsNullOrEmpty(LayoutText)
+            ? LayoutText
+            : Text ?? string.Empty;
         if (ChapterTitleStart >= text.Length)
             return null;
 
@@ -251,9 +366,18 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
             ? null
             : CreateStyledLayout(
                 title,
-                foreground ?? Foreground ?? Brushes.Black,
+                foreground ?? Brushes.Black,
                 FontWeight.Bold,
-                TextAlignment.Center);
+                TextAlignment.Center,
+                GetStyledLayoutWidth());
+    }
+
+    private double? GetStyledLayoutWidth()
+    {
+        var width = double.IsFinite(MaxWidth) && MaxWidth > 0
+            ? MaxWidth
+            : Bounds.Width;
+        return double.IsFinite(width) && width > 0 ? width : null;
     }
 
     private static JustificationProperties? CreateJustificationProperties(double width)
@@ -282,7 +406,8 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         string text,
         IBrush foreground,
         FontWeight fontWeight,
-        TextAlignment textAlignment)
+        TextAlignment textAlignment,
+        double? layoutWidth = null)
     {
         var typeface = new Typeface(FontFamily, FontStyle, fontWeight, FontStretch);
         var defaultProperties = new GenericTextRunProperties(
@@ -302,6 +427,8 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
             0,
             LetterSpacing);
         var maxSize = GetMaxSizeFromConstraint();
+        if (layoutWidth is > 0 && double.IsFinite(layoutWidth.Value))
+            maxSize = new Size(layoutWidth.Value, maxSize.Height);
         return new TextLayout(
             new SimpleTextSource(text, defaultProperties),
             paragraphProperties,

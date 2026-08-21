@@ -13,6 +13,8 @@
     <Compile Include="..\..\src\Kkindle.App\ReaderPaginationScripts.cs" Link="ReaderPaginationScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderNavigationScripts.cs" Link="ReaderNavigationScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderWaveScripts.cs" Link="ReaderWaveScripts.cs" />
+    <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackTitleLinePolicy.cs" Link="ReaderLinuxTextFallbackTitleLinePolicy.cs" />
+    <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackPagingPolicy.cs" Link="ReaderLinuxTextFallbackPagingPolicy.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">

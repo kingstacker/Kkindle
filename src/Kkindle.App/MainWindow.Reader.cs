@@ -414,11 +414,15 @@ public partial class MainWindow
             return;
         }
 
+        var moveLinuxFallbackToEnd = OperatingSystem.IsLinux()
+            && !_readerIsPdf
+            && offset < 0
+            && !startAtChapterTitle;
         _readerLinuxTextFallbackTargetTitle = null;
         if (OperatingSystem.IsLinux() && !_readerIsPdf)
         {
             _readerScrollPosition = offset < 0 ? -1 : 0;
-            _readerLinuxTextFallbackMoveToChapterEnd = offset < 0 && !startAtChapterTitle;
+            _readerLinuxTextFallbackMoveToChapterEnd = moveLinuxFallbackToEnd;
             _readerLinuxTextFallbackEndFragment = null;
         }
         _readerCurrentFragment = null;
@@ -468,6 +472,8 @@ public partial class MainWindow
                     SetReaderHostLayer();
                     await UpdateReaderScrollStateAsync(host);
                     await UpdateLinuxReaderTextFallbackAsync(token);
+                    PositionLinuxReaderTextFallbackAtChapterEnd(
+                        moveLinuxFallbackToEnd);
                     return true;
                 },
                 token);

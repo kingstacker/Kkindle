@@ -1673,6 +1673,7 @@ public partial class MainWindow
         var visible = !ReaderAssistantPanel.IsVisible;
         ReaderAssistantPanel.IsVisible = visible;
         ReaderRoot.ColumnDefinitions[2].Width = visible ? new GridLength(360) : new GridLength(0);
+        ScheduleLinuxReaderTextFallbackReflow();
     }
 
 }

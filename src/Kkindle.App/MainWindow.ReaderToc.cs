@@ -555,6 +555,7 @@ public partial class MainWindow
         ReaderTocPanel.IsVisible = _readerTocExpanded;
         ReaderTocCompactPanel.IsVisible = _readerTocMinimal;
         ReaderTocToggleButton.Opacity = _readerTocExpanded ? 0.58 : 1;
+        ScheduleLinuxReaderTextFallbackReflow();
     }
 
     private void UpdateReaderZenTocToggle()
