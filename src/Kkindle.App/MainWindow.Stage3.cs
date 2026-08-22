@@ -3096,7 +3096,11 @@ public partial class MainWindow
     private void UpdateCalibreDetectionStatus()
     {
         var configuredPath = (CalibrePathBox.Text ?? string.Empty).Trim().Trim('"');
-        var isDetected = !string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath);
+        var configuredFileName = Path.GetFileName(configuredPath);
+        var isDetected = !string.IsNullOrWhiteSpace(configuredPath)
+            && File.Exists(configuredPath)
+            && (configuredFileName.Equals("ebook-convert", StringComparison.OrdinalIgnoreCase)
+                || configuredFileName.Equals("ebook-convert.exe", StringComparison.OrdinalIgnoreCase));
         var status = isDetected ? "已检测到 Calibre" : "未检测到 Calibre";
         CalibreDetectionStatusDot.Fill = new SolidColorBrush(Color.Parse(isDetected ? "#2E8B57" : "#D6A100"));
         ToolTip.SetTip(CalibreDetectionStatusDot, status);
@@ -3339,7 +3343,7 @@ public partial class MainWindow
         {
             Title = "选择 Calibre ebook-convert",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("Calibre") { Patterns = ["*.exe", "ebook-convert", "ebook-convert.exe"] }]
+            FileTypeFilter = [new FilePickerFileType("Calibre ebook-convert") { Patterns = ["ebook-convert", "ebook-convert.exe"] }]
         });
         var path = files.FirstOrDefault()?.TryGetLocalPath();
         if (!string.IsNullOrWhiteSpace(path)) CalibrePathBox.Text = path;

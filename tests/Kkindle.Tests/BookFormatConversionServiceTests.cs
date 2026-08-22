@@ -114,6 +114,34 @@ public sealed class BookFormatConversionServiceTests
     }
 
     [Theory]
+    [InlineData("Linux", "calibre", "ebook-convert")]
+    [InlineData("MacOS", "calibre", "ebook-convert")]
+    [InlineData("Windows", "calibre.exe", "ebook-convert.exe")]
+    public void CalibreLocatorRepairsConfiguredGuiLauncherPath(
+        string operatingSystemName,
+        string launcherName,
+        string converterName)
+    {
+        var operatingSystem = Enum.Parse<DesktopOperatingSystem>(operatingSystemName);
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var launcher = Path.Combine(root, launcherName);
+            var converter = Path.Combine(root, converterName);
+            File.WriteAllText(launcher, "fake calibre launcher");
+            File.WriteAllText(converter, "fake ebook-convert");
+
+            Assert.Equal(
+                Path.GetFullPath(converter),
+                CalibreExecutableLocator.Locate(root, launcher, null, operatingSystem));
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Theory]
     [InlineData("Linux", "ebook-convert")]
     [InlineData("MacOS", "ebook-convert")]
     [InlineData("Windows", "ebook-convert.exe")]
