@@ -570,6 +570,16 @@ public sealed class EpubReaderTests
             Assert.Contains("display: inline-flex; align-items: center; justify-content: center", bridge, StringComparison.Ordinal);
             Assert.Contains("selectionBar.style.display = 'flex'", bridge, StringComparison.Ordinal);
             Assert.Contains("dismissedSelectionText", bridge, StringComparison.Ordinal);
+            Assert.Contains("highlightWrap.addEventListener('mouseleave', closeStyles)", bridge, StringComparison.Ordinal);
+            Assert.Contains(".kk-sel-highlight-wrap:not(:hover) .kk-sel-styles", bridge, StringComparison.Ordinal);
+            Assert.Contains("document.addEventListener('mousemove'", bridge, StringComparison.Ordinal);
+            Assert.Contains("containsPoint(panel, event.clientX, event.clientY)", bridge, StringComparison.Ordinal);
+            Assert.Contains("document.addEventListener('mouseleave', closeStyles", bridge, StringComparison.Ordinal);
+            Assert.Contains("position: absolute; top: 100%; left: 0", bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain("styleHoverTimer", bridge, StringComparison.Ordinal);
+            Assert.Contains("isSelectionBarTarget", bridge, StringComparison.Ordinal);
+            Assert.Contains("if (!hadSelection && !canTurnPage)", bridge, StringComparison.Ordinal);
+            Assert.Contains("selectionBar?.style.display === 'flex'", bridge, StringComparison.Ordinal);
             Assert.Contains("pagePointerDown", bridge, StringComparison.Ordinal);
             Assert.Contains("document.addEventListener(\"pointerup\"", bridge, StringComparison.Ordinal);
             Assert.Contains("requestAnimationFrame?.(() =>", bridge, StringComparison.Ordinal);

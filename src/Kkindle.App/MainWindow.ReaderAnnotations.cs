@@ -91,6 +91,11 @@ public partial class MainWindow
             MarkReadingMaterialsDirty();
             await RefreshReaderAnnotationsAsync(ReaderToken);
             _selectedReaderAnnotation = ReaderAnnotations.FirstOrDefault(item => item.Id == annotation.Id);
+            if (IsLinuxReaderTextFallbackActive())
+            {
+                ApplyLinuxReaderTextFallbackAnnotationRanges();
+                ClearLinuxReaderTextFallbackVisualSelection();
+            }
             if (!_readerIsPdf && CurrentReaderHost is { } host)
             {
                 await ApplySavedAnnotationsAsync(host, ReaderToken);
@@ -187,6 +192,8 @@ public partial class MainWindow
             MarkReadingMaterialsDirty();
             _selectedReaderAnnotation = null;
             await RefreshReaderAnnotationsAsync(ReaderToken);
+            if (IsLinuxReaderTextFallbackActive())
+                ApplyLinuxReaderTextFallbackAnnotationRanges();
             if (!_readerIsPdf && CurrentReaderHost is { } host)
                 await ApplySavedAnnotationsAsync(host, ReaderToken);
             ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";

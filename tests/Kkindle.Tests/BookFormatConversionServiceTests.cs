@@ -254,6 +254,28 @@ public sealed class BookFormatConversionServiceTests
     }
 
     [Fact]
+    public void KfxPluginValidationUsesInitializerNextToImportMarker()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(root, "KFX Input.zip");
+            using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "dependencies/__init__.py", "name = 'Dependency'");
+                TestHelpers.AddZipEntry(archive, "plugin-import-name-kfx_input.txt", "kfx_input");
+                TestHelpers.AddZipEntry(archive, "__init__.py", "name = 'KFX Input'");
+            }
+
+            CalibreSetupService.ValidateKfxPluginPackage(path);
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
     public void KfxPluginValidationRejectsUnrelatedZip()
     {
         var root = TestHelpers.CreateTempDirectory();

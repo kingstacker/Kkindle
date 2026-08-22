@@ -2557,16 +2557,16 @@ public partial class MainWindow
 
     private void DeviceResourcePage_DragOver(object? sender, DragEventArgs e)
     {
-        var paths = GetDraggedPaths(e)
-            .Where(path => KindleResourcePolicy.IsSupportedFile(_deviceResourceKind, path))
-            .ToArray();
-        e.DragEffects = paths.Length > 0 ? DragDropEffects.Copy : DragDropEffects.None;
+        e.DragEffects = LibraryDropImportPolicy.CanAccept(e.DataTransfer)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
         e.Handled = true;
     }
 
     private async void DeviceResourcePage_Drop(object? sender, DragEventArgs e)
     {
-        var paths = GetDraggedPaths(e)
+        var draggedPaths = LibraryDropImportPolicy.GetLocalPaths(e.DataTransfer);
+        var paths = draggedPaths
             .Where(path => KindleResourcePolicy.IsSupportedFile(_deviceResourceKind, path))
             .ToArray();
         e.Handled = true;
@@ -2574,7 +2574,7 @@ public partial class MainWindow
         {
             await ImportDeviceResourcePathsAsync(paths);
         }
-        else if (GetDraggedPaths(e).Length > 0)
+        else if (draggedPaths.Length > 0)
         {
             var formats = _deviceResourceKind == KindleResourceKind.Font ? "TTF / OTF" : "AZW / AZW3 / MOBI / KFX";
             await ShowMessageAsync("无法导入", $"拖入的文件中没有可用的 {formats} 文件。");
@@ -3093,7 +3093,7 @@ public partial class MainWindow
         await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
     }
 
-    private void UpdateCalibreDetectionStatus()
+    private void UpdateCalibreDetectionStatus(bool updateKfxStatusText = true)
     {
         var configuredPath = (CalibrePathBox.Text ?? string.Empty).Trim().Trim('"');
         var configuredFileName = Path.GetFileName(configuredPath);
@@ -3125,12 +3125,13 @@ public partial class MainWindow
         var detectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         detectionCancellation.CancelAfter(TimeSpan.FromSeconds(15));
         _calibreDetectionCancellation = detectionCancellation;
-        _ = DetectKfxInputInstallationAsync(configuredPath, detectionCancellation);
+        _ = DetectKfxInputInstallationAsync(configuredPath, detectionCancellation, updateKfxStatusText);
     }
 
     private async Task DetectKfxInputInstallationAsync(
         string calibrePath,
-        CancellationTokenSource detectionCancellation)
+        CancellationTokenSource detectionCancellation,
+        bool updateStatusText)
     {
         try
         {
@@ -3142,9 +3143,12 @@ public partial class MainWindow
             ToolTip.SetTip(
                 InstallKfxInputButton,
                 installed ? "KFX Input 已安装" : "未检测到 KFX Input，点击安装");
-            CalibreSetupStatusText.Text = installed
-                ? "已检测到 KFX Input 插件。"
-                : "未检测到 KFX Input，可点击安装。";
+            if (updateStatusText)
+            {
+                CalibreSetupStatusText.Text = installed
+                    ? "已检测到 KFX Input 插件。"
+                    : "未检测到 KFX Input，可点击安装。";
+            }
         }
         catch (OperationCanceledException) when (detectionCancellation.IsCancellationRequested)
         {
@@ -3153,7 +3157,8 @@ public partial class MainWindow
             {
                 InstallKfxInputButton.IsEnabled = true;
                 ToolTip.SetTip(InstallKfxInputButton, "未能确认 KFX Input 状态，点击可重新安装");
-                CalibreSetupStatusText.Text = "KFX Input 状态检查超时，可点击安装。";
+                if (updateStatusText)
+                    CalibreSetupStatusText.Text = "KFX Input 状态检查超时，可点击安装。";
             }
         }
         catch (Exception exception)
@@ -3161,7 +3166,8 @@ public partial class MainWindow
             if (!ReferenceEquals(_calibreDetectionCancellation, detectionCancellation)) return;
             InstallKfxInputButton.IsEnabled = true;
             ToolTip.SetTip(InstallKfxInputButton, "未能确认 KFX Input 状态，点击可重新安装");
-            CalibreSetupStatusText.Text = $"KFX Input 状态检查失败：{exception.Message}";
+            if (updateStatusText)
+                CalibreSetupStatusText.Text = $"KFX Input 状态检查失败：{exception.Message}";
         }
         finally
         {
@@ -3376,6 +3382,7 @@ public partial class MainWindow
             if (value.Percentage is { } percentage) CalibreSetupProgressBar.Value = percentage;
         });
 
+        var setupFailed = false;
         try
         {
             using var setup = new CalibreSetupService();
@@ -3402,6 +3409,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
+            setupFailed = true;
             CalibreSetupStatusText.Text = $"安装失败：{exception.Message}";
         }
         finally
@@ -3409,7 +3417,7 @@ public partial class MainWindow
             _calibreSetupBusy = false;
             CalibreSetupProgressBar.IsVisible = false;
             CalibreSetupProgressBar.IsIndeterminate = false;
-            UpdateCalibreDetectionStatus();
+            UpdateCalibreDetectionStatus(updateKfxStatusText: !setupFailed);
         }
     }
 

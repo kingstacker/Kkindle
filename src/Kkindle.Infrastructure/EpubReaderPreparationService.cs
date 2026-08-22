@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "39";
+    private const string ExtractionFormatVersion = "43";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -279,13 +279,16 @@ public sealed class EpubReaderPreparationService
                   position: relative; display: inline-flex; align-items: center;
                 }
                 #kkindle-selection-bar .kk-sel-styles {
-                  position: absolute; top: calc(100% + 4px); left: 0; display: none;
+                  position: absolute; top: 100%; left: 0; display: none;
                   min-width: 230px; background: #FFFFFF; border: 1px solid #000000;
                   padding: 3px; z-index: 2;
                 }
                 #kkindle-selection-bar .kk-sel-styles.open { display: block; }
+                #kkindle-selection-bar .kk-sel-highlight-wrap:not(:hover) .kk-sel-styles {
+                  display: none !important;
+                }
                 #kkindle-selection-bar .kk-sel-styles.above {
-                  top: auto; bottom: calc(100% + 4px);
+                  top: auto; bottom: 100%;
                 }
                 #kkindle-selection-bar .kk-sel-styles button {
                   display: block; width: 100%; min-width: 0; text-align: left;
@@ -353,11 +356,10 @@ public sealed class EpubReaderPreparationService
               hideSelectionBar();
               send({ type: 'selectionAction', action });
             }, true);
-            // Hover opens the style picker; leaving both the button and the
-            // picker closes it after a short grace (WinUI reference).
-            let styleHoverTimer = 0;
+            // Hover opens the style picker. The button and flyout are flush,
+            // so leaving their shared wrapper means the pointer is in neither
+            // region and the flyout can close immediately.
             const openStyles = () => {
-              window.clearTimeout(styleHoverTimer);
               const panel = document.getElementById('kk-sel-styles');
               if (!panel) return;
               panel.classList.add('open');
@@ -369,16 +371,31 @@ public sealed class EpubReaderPreparationService
                 panel.classList.add('above');
             };
             const closeStyles = () => {
-              window.clearTimeout(styleHoverTimer);
-              styleHoverTimer = window.setTimeout(() => {
-                document.getElementById('kk-sel-styles')?.classList.remove('open');
-              }, 240);
+              document.getElementById('kk-sel-styles')?.classList.remove('open', 'above');
             };
-            selectionBar.querySelector('#kk-sel-highlight').addEventListener('mouseenter', openStyles);
-            selectionBar.querySelector('#kk-sel-highlight').addEventListener('mouseleave', closeStyles);
-            const stylePanel = selectionBar.querySelector('#kk-sel-styles');
-            stylePanel.addEventListener('mouseenter', openStyles);
-            stylePanel.addEventListener('mouseleave', closeStyles);
+            const highlightWrap = selectionBar.querySelector('.kk-sel-highlight-wrap');
+            highlightWrap.addEventListener('mouseenter', openStyles);
+            highlightWrap.addEventListener('mouseleave', closeStyles);
+            // This also covers a menu opened by click. Check coordinates on
+            // every mouse move instead of relying on pointer enter/leave,
+            // which some WebKitGTK builds do not deliver consistently for an
+            // absolutely positioned child. CSS :hover above is the visual
+            // fallback, while this clears the menu's open state as well.
+            document.addEventListener('mousemove', event => {
+              const panel = document.getElementById('kk-sel-styles');
+              if (!panel?.classList.contains('open')) return;
+              const button = document.getElementById('kk-sel-highlight');
+              const containsPoint = (element, x, y) => {
+                if (!element) return false;
+                const rect = element.getBoundingClientRect();
+                return x >= rect.left && x <= rect.right
+                  && y >= rect.top && y <= rect.bottom;
+              };
+              if (containsPoint(button, event.clientX, event.clientY)
+                  || containsPoint(panel, event.clientX, event.clientY)) return;
+              closeStyles();
+            }, true);
+            document.addEventListener('mouseleave', closeStyles, true);
             document.body.appendChild(selectionBar);
           };
           const placeSelectionBar = (x, y, bottom, viewportWidth, viewportHeight) => {
@@ -529,13 +546,36 @@ public sealed class EpubReaderPreparationService
           const isPageTurnTarget = element =>
             element instanceof Element
             && !element.closest('a, button, input, textarea, select, option, label, #kkindle-selection-bar');
+          const isSelectionBarTarget = element =>
+            element instanceof Element
+            && !!element.closest('#kkindle-selection-bar');
           let pagePointerDown = null;
           document.addEventListener("pointerdown", event => {
             try {
               if (event.button !== 0
                   || event.isPrimary === false
-                  || window.__kkindleReaderFlowMode !== 1
-                  || !isPageTurnTarget(event.target)) {
+                  || isSelectionBarTarget(event.target)) {
+                pagePointerDown = null;
+                return;
+              }
+              const selection = window.getSelection?.();
+              const hasLiveSelection = !!(selection
+                && !selection.isCollapsed
+                && (selection.toString() || '').trim());
+              // Light-dismiss is passed through by the native Avalonia popup.
+              // On some Linux WebView builds that focus transition collapses
+              // window.getSelection() before this handler runs, even though
+              // the selection action bar was open when the click began. Treat
+              // the visible bar as selection state too so this same click can
+              // only dismiss it and can never also turn the page.
+              const hadSelection = hasLiveSelection
+                || selectionBar?.style.display === 'flex';
+              const canTurnPage = window.__kkindleReaderFlowMode === 1
+                && isPageTurnTarget(event.target);
+              // Track every outside press while the selection popup is open,
+              // including scroll mode and links/form controls. Paginated page
+              // turns continue to share the same click-vs-drag bookkeeping.
+              if (!hadSelection && !canTurnPage) {
                 pagePointerDown = null;
                 return;
               }
@@ -543,12 +583,8 @@ public sealed class EpubReaderPreparationService
                 id: event.pointerId,
                 x: event.clientX || 0,
                 y: event.clientY || 0,
-                hadSelection: (() => {
-                  const selection = window.getSelection?.();
-                  return !!(selection
-                    && !selection.isCollapsed
-                    && (selection.toString() || '').trim());
-                })()
+                hadSelection,
+                canTurnPage
               };
             } catch (_) { }
           }, true);
@@ -603,6 +639,7 @@ public sealed class EpubReaderPreparationService
                   || start.id !== event.pointerId
                   || event.button !== 0
                   || event.isPrimary === false
+                  || !start.canTurnPage
                   || window.__kkindleReaderFlowMode !== 1
                   || !isPageTurnTarget(event.target)) {
                 return;

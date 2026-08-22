@@ -79,9 +79,14 @@ public partial class MainWindow
     private string? _readerFootnoteHref;
     private Point? _readerFootnotePlacementPoint;
     private DispatcherTimer? _readerFootnoteHoverTimer;
+    private DispatcherTimer? _readerSelectionHighlightPointerTimer;
+    private long _readerSelectionHighlightOpenedTick;
+    private int _readerSelectionHighlightOutsideTicks;
     private bool _readerLinuxTextFallbackUpdating;
     private bool _readerLinuxTextFallbackPointerPressed;
     private bool _readerLinuxTextFallbackSelectionAtPointerPress;
+    private bool _readerLinuxTextFallbackSelectionDismissPress;
+    private int _readerLinuxTextFallbackSelectionSyncSequence;
     private Point _readerLinuxTextFallbackPointerStart;
     private Vector _readerLinuxTextFallbackSelectionScrollOffset;
     private bool _readerLinuxTextFallbackSelectionScrollLocked;
@@ -283,6 +288,7 @@ public partial class MainWindow
         public string FootnoteLabel { get; } = string.Empty;
         public string FootnoteHref { get; } = string.Empty;
         internal IReadOnlyList<ReaderLinuxTextFallbackFootnote> InlineFootnotes { get; } = [];
+        public IReadOnlyList<ReaderLinuxTextFallbackAnnotationRange> AnnotationRanges { get; private set; } = [];
         internal bool HasInlineFootnotes => InlineFootnotes.Count > 0;
         public bool IsText => Image is null && string.IsNullOrWhiteSpace(FootnoteHref);
         public bool IsImage => Image is not null;
@@ -308,6 +314,12 @@ public partial class MainWindow
 
         public void ResizeText(double width) => Width = width;
 
+        internal void SetAnnotationRanges(IReadOnlyList<ReaderLinuxTextFallbackAnnotationRange> ranges)
+        {
+            AnnotationRanges = ranges;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AnnotationRanges)));
+        }
+
         public event PropertyChangedEventHandler? PropertyChanged;
     }
 
@@ -326,6 +338,12 @@ public partial class MainWindow
     internal sealed record ReaderLinuxTextFallbackFootnote(
         string Label,
         string Href);
+
+    public sealed record ReaderLinuxTextFallbackAnnotationRange(
+        int Start,
+        int Length,
+        string Style,
+        string Color);
 
     private sealed record ReaderLinuxTextFallbackPageItem(
         string Text,
@@ -1147,6 +1165,7 @@ public partial class MainWindow
                     RebuildLinuxReaderTextFallbackPages();
                     SyncLinuxReaderTextFallbackState(saveProgress: false);
                     PrimeReaderContinuousEdgeTracking();
+                    ReaderLinuxTextFallbackOverlay.Focus();
                 },
                 DispatcherPriority.Loaded);
         }
@@ -1711,6 +1730,7 @@ public partial class MainWindow
             styledTextBlock.ChapterTitleStart = -1;
             styledTextBlock.ChapterTitleLength = 0;
             styledTextBlock.LayoutText = string.Empty;
+            styledTextBlock.AnnotationRanges = [];
         }
         footnoteButton.Content = string.Empty;
         footnoteButton.Tag = null;
@@ -1758,6 +1778,10 @@ public partial class MainWindow
                 pageStyledTextBlock.ChapterTitleStart = titleStart;
                 pageStyledTextBlock.ChapterTitleLength = titleLength;
                 pageStyledTextBlock.LayoutText = page.Text;
+                pageStyledTextBlock.AnnotationRanges =
+                    GetLinuxReaderTextFallbackAnnotationRanges(
+                        page.PaginationOffset,
+                        page.Text.Length);
             }
             if (page.HasInlineFootnotes)
                 RenderLinuxReaderTextFallbackInlinePage(textBlock, page);
@@ -2145,7 +2169,47 @@ public partial class MainWindow
                 textMaxWidth));
         }
 
+        ApplyLinuxReaderTextFallbackAnnotationRanges();
         UpdateLinuxReaderTextFallbackBlockWidths();
+    }
+
+    private IReadOnlyList<ReaderLinuxTextFallbackAnnotationRange> GetLinuxReaderTextFallbackAnnotationRanges(
+        int textOffset,
+        int textLength)
+    {
+        if (textLength <= 0) return [];
+        var chapterPath = GetReaderChapterPath();
+        if (string.IsNullOrWhiteSpace(chapterPath)) return [];
+        var textEnd = textOffset + textLength;
+        return ReaderAnnotations
+            .Where(item => string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase))
+            .Where(item => item.EndOffset > textOffset && item.StartOffset < textEnd)
+            .Select(item =>
+            {
+                var start = Math.Max(textOffset, item.StartOffset);
+                var end = Math.Min(textEnd, Math.Max(item.StartOffset, item.EndOffset));
+                return new ReaderLinuxTextFallbackAnnotationRange(
+                    start - textOffset,
+                    Math.Max(0, end - start),
+                    NormalizeReaderAnnotationStyle(item.UnderlineStyle),
+                    NormalizeReaderAnnotationColor(item.Color));
+            })
+            .Where(item => item.Length > 0)
+            .ToArray();
+    }
+
+    private void ApplyLinuxReaderTextFallbackAnnotationRanges()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        foreach (var block in ReaderLinuxTextFallbackBlocks.Where(item => item.IsText))
+        {
+            block.SetAnnotationRanges(GetLinuxReaderTextFallbackAnnotationRanges(
+                block.TextOffset,
+                block.Text.Length));
+        }
+
+        if (IsLinuxReaderTextFallbackActive() && _readerLayout.FlowMode == 1)
+            RenderLinuxReaderTextFallbackPage();
     }
 
     private void PromoteLinuxReaderFirstChapterTitle()
@@ -2417,6 +2481,29 @@ public partial class MainWindow
         ClearLinuxReaderTextFallbackSelectionState();
     }
 
+    private void ScheduleLinuxReaderTextFallbackSelectionSync(
+        Point placementPoint,
+        double? selectionBottom = null)
+    {
+        var sequence = ++_readerLinuxTextFallbackSelectionSyncSequence;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (sequence != _readerLinuxTextFallbackSelectionSyncSequence
+                    || !IsLinuxReaderTextFallbackActive()
+                    || ReaderSelectionHostPopup.IsOpen)
+                    return;
+
+                // SelectableTextBlock occasionally commits SelectionEnd after
+                // its PointerReleased route has completed. Re-read it on the
+                // next input frame so a valid drag never loses its toolbar.
+                SyncLinuxReaderTextFallbackSelectionState(
+                    placementPoint,
+                    selectionBottom);
+            },
+            DispatcherPriority.Input);
+    }
+
     private bool TrySyncLinuxReaderTextFallbackSelectionFromBlock(
         SelectableTextBlock block,
         string pageText,
@@ -2598,7 +2685,11 @@ public partial class MainWindow
         if (_readerLinuxTextFallbackPageItems.Count == 0) return 0;
         pageIndex = Math.Clamp(pageIndex, 0, Math.Max(0, GetLinuxReaderTextFallbackPageCount() - 1));
         return !_readerLinuxTextFallbackPageItems[pageIndex].IsImage
-            ? _readerLinuxTextFallbackPageItems[pageIndex].TextOffset
+            // Selection and annotation painting must use the same coordinate
+            // space. TextOffset is the source-block offset and is shared by
+            // every measured page produced from that block group, so using it
+            // makes selections on later pages save against the first page.
+            ? _readerLinuxTextFallbackPageItems[pageIndex].PaginationOffset
             : 0;
     }
 
@@ -2699,6 +2790,8 @@ public partial class MainWindow
             ? fallbackBlock.TranslatePoint(new Point(0, fallbackBlock.Bounds.Height), ReaderWebViewHost)?.Y
             : null;
         SyncLinuxReaderTextFallbackSelectionState(fallbackPoint, fallbackBottom);
+        if (string.IsNullOrWhiteSpace(_readerPendingSelection))
+            ScheduleLinuxReaderTextFallbackSelectionSync(fallbackPoint, fallbackBottom);
     }
 
     private void ReaderLinuxTextFallbackFootnoteButton_PointerEntered(object? sender, PointerEventArgs e)
@@ -2773,6 +2866,20 @@ public partial class MainWindow
 
     private void ReaderLinuxTextFallback_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        _readerLinuxTextFallbackSelectionSyncSequence++;
+        if (_readerLinuxTextFallbackSelectionDismissPress)
+        {
+            // Consume the marker on the matching press. Keeping it until a
+            // later release lets a footer/chrome dismiss leak across a page
+            // turn and swallow the first selection drag on the new page.
+            _readerLinuxTextFallbackSelectionDismissPress = false;
+            _readerLinuxTextFallbackPointerPressed = false;
+            _readerLinuxTextFallbackSelectionAtPointerPress = false;
+            _readerLinuxTextFallbackSelectionScrollLocked = false;
+            e.Handled = true;
+            return;
+        }
+
         if (!IsLinuxReaderTextFallbackActive()
             || (_readerLayout.FlowMode != 0 && _readerLayout.FlowMode != 1))
         {
@@ -2820,6 +2927,16 @@ public partial class MainWindow
 
     private void ReaderLinuxTextFallback_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_readerLinuxTextFallbackSelectionDismissPress)
+        {
+            _readerLinuxTextFallbackSelectionDismissPress = false;
+            _readerLinuxTextFallbackPointerPressed = false;
+            _readerLinuxTextFallbackSelectionAtPointerPress = false;
+            ReleaseLinuxTextFallbackSelectionScrollLock();
+            e.Handled = true;
+            return;
+        }
+
         if (!IsLinuxReaderTextFallbackActive())
         {
             _readerLinuxTextFallbackPointerPressed = false;
@@ -2883,6 +3000,13 @@ public partial class MainWindow
         if (!string.IsNullOrWhiteSpace(_readerPendingSelection))
         {
             _readerLinuxTextFallbackPointerPressed = false;
+            return;
+        }
+        if (pointerWasPressed && moved > 12)
+        {
+            _readerLinuxTextFallbackPointerPressed = false;
+            ScheduleLinuxReaderTextFallbackSelectionSync(
+                e.GetPosition(ReaderWebViewHost));
             return;
         }
 
@@ -5734,13 +5858,14 @@ public partial class MainWindow
                             ReaderHighlightButton.IsVisible = true;
                             ReaderAnnotateButton.IsVisible = true;
                         }
-                        if (OperatingSystem.IsLinux())
-                        {
-                            var x = ReadDouble(root, "x");
-                            var y = ReadDouble(root, "y");
-                            var bottom = ReadDouble(root, "bottom");
-                            ShowReaderSelectionPopup(new Point(x, y), bottom);
-                        }
+                        // The WebView bridge renders its own action bar above
+                        // the native browser surface. Opening the Avalonia
+                        // popup here as well creates two perfectly overlapping
+                        // bars: the upper layer can clear the selection before
+                        // the lower layer saves a highlight, and light-dismiss
+                        // can pass the same edge click through as a page turn.
+                        // Keep ReaderSelectionHostPopup exclusively for the
+                        // Linux text fallback, which has no in-page toolbar.
                     }
                     else
                     {
@@ -6020,8 +6145,60 @@ public partial class MainWindow
 
     private void HideReaderSelectionPopup()
     {
+        StopReaderSelectionHighlightPointerTracking();
+        if (ReaderSelectionHighlightMenuButton?.Flyout is PopupFlyoutBase { IsOpen: true } flyout)
+            flyout.Hide();
         if (ReaderSelectionHostPopup is not null)
             ReaderSelectionHostPopup.IsOpen = false;
+    }
+
+    private void ReaderRoot_SelectionDismissPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!ReaderSelectionHostPopup.IsOpen
+            || string.IsNullOrWhiteSpace(_readerPendingSelection)
+            || !e.GetCurrentPoint(ReaderRoot).Properties.IsLeftButtonPressed)
+            return;
+
+        // The flyout presenter has its own visual root, so its menu items are
+        // not visual descendants of ReaderSelectionPopupBar. They are still
+        // part of the selection UI: treating one as an outside click clears
+        // the pending selection before the style Click handler can save it.
+        if (e.Source is Visual source
+            && (ReferenceEquals(source, ReaderSelectionPopupBar)
+                || source.GetVisualAncestors().Contains(ReaderSelectionPopupBar)
+                || source is MenuFlyoutPresenter
+                || source.GetVisualAncestors().OfType<MenuFlyoutPresenter>().Any()))
+            return;
+
+        e.Handled = true;
+        if (IsLinuxReaderTextFallbackActive())
+        {
+            // ReaderRoot receives the tunnel event before the fallback
+            // content's own pointer handlers. Remember this press through its
+            // matching release; otherwise clearing the selection here makes
+            // the release handler believe it was an ordinary edge click and
+            // it turns the page.
+            var fallbackPoint = e.GetPosition(ReaderLinuxTextFallbackOverlay);
+            _readerLinuxTextFallbackSelectionDismissPress =
+                fallbackPoint.X >= 0
+                && fallbackPoint.X <= ReaderLinuxTextFallbackOverlay.Bounds.Width
+                && fallbackPoint.Y >= 0
+                && fallbackPoint.Y <= ReaderLinuxTextFallbackOverlay.Bounds.Height;
+            ClearLinuxReaderTextFallbackSelectionState();
+            return;
+        }
+
+        HideReaderSelectionPopup();
+        _readerPendingSelection = null;
+        _readerPendingSelectionStartOffset = 0;
+        _readerPendingSelectionEndOffset = 0;
+        _readerPendingSelectionPrefix = string.Empty;
+        _readerPendingSelectionSuffix = string.Empty;
+        ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
+        ReaderHighlightButton.IsVisible = false;
+        ReaderAnnotateButton.IsVisible = false;
+        if (!_readerIsPdf && CurrentReaderHost is { } host)
+            _ = ClearCurrentReaderSelectionAsync(host);
     }
 
     private async void ReaderSelectionCopyButton_Click(object? sender, RoutedEventArgs e)
@@ -6032,21 +6209,112 @@ public partial class MainWindow
 
     private async void ReaderSelectionHighlightButton_Click(object? sender, RoutedEventArgs e)
     {
-        HideReaderSelectionPopup();
         await ApplyReaderHighlightStyleAsync("solid");
     }
 
     private void ReaderSelectionHighlightMenuButton_PointerEntered(object? sender, PointerEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
-        if (sender is Button { Flyout: { } flyout } button)
+        if (sender is Button { Flyout: { IsOpen: false } flyout } button)
+        {
             flyout.ShowAt(button);
+            StartReaderSelectionHighlightPointerTracking();
+        }
+    }
+
+    private void StartReaderSelectionHighlightPointerTracking()
+    {
+        StopReaderSelectionHighlightPointerTracking();
+        _readerSelectionHighlightOpenedTick = Environment.TickCount64;
+        _readerSelectionHighlightOutsideTicks = 0;
+        _readerSelectionHighlightPointerTimer ??= new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(40)
+        };
+        _readerSelectionHighlightPointerTimer.Tick -= ReaderSelectionHighlightPointerTimer_Tick;
+        _readerSelectionHighlightPointerTimer.Tick += ReaderSelectionHighlightPointerTimer_Tick;
+        _readerSelectionHighlightPointerTimer.Start();
+    }
+
+    private void StopReaderSelectionHighlightPointerTracking()
+    {
+        _readerSelectionHighlightPointerTimer?.Stop();
+    }
+
+    private void ReaderSelectionHighlightPointerTimer_Tick(object? sender, EventArgs e)
+    {
+        if (ReaderSelectionHighlightMenuButton.Flyout is not PopupFlyoutBase { IsOpen: true } flyout)
+        {
+            StopReaderSelectionHighlightPointerTracking();
+            return;
+        }
+        if (!TryGetReaderCursorScreenPoint(out var screenPoint))
+            return;
+
+        var buttonRect = GetReaderScreenRect(ReaderSelectionHighlightMenuButton);
+        var presenter = ReaderSelectionHighlightSolidItem
+            .GetVisualAncestors()
+            .OfType<MenuFlyoutPresenter>()
+            .FirstOrDefault();
+        if (presenter is null
+            && Environment.TickCount64 - _readerSelectionHighlightOpenedTick < 400)
+            return;
+        PixelRect? presenterRect = presenter is null ? null : GetReaderScreenRect(presenter);
+        if (ContainsReaderScreenPoint(buttonRect, screenPoint)
+            || presenterRect is { } menuRect && ContainsReaderScreenPoint(menuRect, screenPoint)
+            || IsReaderSelectionHighlightMenuBridge(screenPoint, buttonRect, presenterRect))
+        {
+            _readerSelectionHighlightOutsideTicks = 0;
+            return;
+        }
+
+        // Require two consecutive outside samples. A single X11 sample can
+        // briefly land between the button and a newly arranged flyout while
+        // the compositor is moving it into its final tangent position.
+        if (++_readerSelectionHighlightOutsideTicks < 2)
+            return;
+
+        flyout.Hide();
+        StopReaderSelectionHighlightPointerTracking();
+    }
+
+    private static PixelRect GetReaderScreenRect(Control control)
+    {
+        var topLeft = control.PointToScreen(new Point(0, 0));
+        var bottomRight = control.PointToScreen(new Point(control.Bounds.Width, control.Bounds.Height));
+        return new PixelRect(
+            Math.Min(topLeft.X, bottomRight.X),
+            Math.Min(topLeft.Y, bottomRight.Y),
+            Math.Abs(bottomRight.X - topLeft.X),
+            Math.Abs(bottomRight.Y - topLeft.Y));
+    }
+
+    private static bool ContainsReaderScreenPoint(PixelRect rect, PixelPoint point) =>
+        point.X >= rect.X
+        && point.X <= rect.X + rect.Width
+        && point.Y >= rect.Y
+        && point.Y <= rect.Y + rect.Height;
+
+    private static bool IsReaderSelectionHighlightMenuBridge(
+        PixelPoint point,
+        PixelRect button,
+        PixelRect? presenter)
+    {
+        if (presenter is not { } menu) return false;
+        var left = Math.Max(button.X, menu.X);
+        var right = Math.Min(button.X + button.Width, menu.X + menu.Width);
+        var top = Math.Min(button.Y + button.Height, menu.Y + menu.Height);
+        var bottom = Math.Max(button.Y, menu.Y);
+        return left <= right
+            && point.X >= left
+            && point.X <= right
+            && point.Y >= top
+            && point.Y <= bottom;
     }
 
     private async void ReaderSelectionHighlightStyleItem_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: string style }) return;
-        HideReaderSelectionPopup();
         await ApplyReaderHighlightStyleAsync(style);
     }
 
@@ -7372,6 +7640,68 @@ public partial class MainWindow
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr window, out ReaderNativeRect rect);
+
+    [DllImport("libX11.so.6")]
+    private static extern IntPtr XOpenDisplay(IntPtr displayName);
+
+    [DllImport("libX11.so.6")]
+    private static extern IntPtr XDefaultRootWindow(IntPtr display);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XQueryPointer(
+        IntPtr display,
+        IntPtr window,
+        out IntPtr root,
+        out IntPtr child,
+        out int rootX,
+        out int rootY,
+        out int windowX,
+        out int windowY,
+        out uint mask);
+
+    private static IntPtr _readerX11Display;
+
+    private static bool TryGetReaderCursorScreenPoint(out PixelPoint point)
+    {
+        point = default;
+        if (OperatingSystem.IsWindows())
+        {
+            if (!GetCursorPos(out var cursor)) return false;
+            point = new PixelPoint(cursor.X, cursor.Y);
+            return true;
+        }
+
+        if (!OperatingSystem.IsLinux()) return false;
+        try
+        {
+            if (_readerX11Display == IntPtr.Zero)
+                _readerX11Display = XOpenDisplay(IntPtr.Zero);
+            if (_readerX11Display == IntPtr.Zero) return false;
+            var rootWindow = XDefaultRootWindow(_readerX11Display);
+            if (rootWindow == IntPtr.Zero
+                || XQueryPointer(
+                    _readerX11Display,
+                    rootWindow,
+                    out _,
+                    out _,
+                    out var rootX,
+                    out var rootY,
+                    out _,
+                    out _,
+                    out _) == 0)
+                return false;
+            point = new PixelPoint(rootX, rootY);
+            return true;
+        }
+        catch (DllNotFoundException)
+        {
+            return false;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
 
     private void StartReaderZenPointerWatch()
     {

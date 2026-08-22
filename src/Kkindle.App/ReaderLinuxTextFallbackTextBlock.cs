@@ -30,6 +30,10 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         AvaloniaProperty.Register<ReaderLinuxTextFallbackTextBlock, string?>(
             nameof(LayoutText));
 
+    public static readonly StyledProperty<IReadOnlyList<MainWindow.ReaderLinuxTextFallbackAnnotationRange>?> AnnotationRangesProperty =
+        AvaloniaProperty.Register<ReaderLinuxTextFallbackTextBlock, IReadOnlyList<MainWindow.ReaderLinuxTextFallbackAnnotationRange>?>(
+            nameof(AnnotationRanges));
+
     /// <summary>
     /// Foreground used to repaint the selected range. Selection colors must
     /// stay out of layout: base SelectableTextBlock feeds this brush into the
@@ -88,6 +92,12 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         set => SetValue(LayoutTextProperty, value);
     }
 
+    public IReadOnlyList<MainWindow.ReaderLinuxTextFallbackAnnotationRange>? AnnotationRanges
+    {
+        get => GetValue(AnnotationRangesProperty);
+        set => SetValue(AnnotationRangesProperty, value);
+    }
+
     public IBrush? InvertedSelectionForeground
     {
         get => GetValue(InvertedSelectionForegroundProperty);
@@ -119,7 +129,8 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         }
         else if (change.Property == ChapterTitleStartProperty
             || change.Property == ChapterTitleLengthProperty
-            || change.Property == LayoutTextProperty)
+            || change.Property == LayoutTextProperty
+            || change.Property == AnnotationRangesProperty)
         {
             InvalidateVisual();
         }
@@ -147,6 +158,7 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
                 TextAlignment.Center,
                 titleWidth);
             DrawCenteredLayout(context, titleLayout, origin);
+            DrawAnnotationDecorations(context, origin, titleLayout);
 
             var titleSelectionLength = Math.Abs(SelectionEnd - SelectionStart);
             var inverted = InvertedSelectionForeground;
@@ -186,6 +198,7 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         if (Inlines is not { Count: > 0 } && TextLayout is { } naturalLayout)
         {
             DrawNaturalJustifiedLayout(context, origin, naturalLayout);
+            DrawAnnotationDecorations(context, origin, naturalLayout);
             if (selectionLength <= 0)
                 return;
 
@@ -230,7 +243,145 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
         // base renderer for body content, then replace its first title line
         // with the same solid-black centered layout used by plain pages.
         base.RenderTextLayout(context, origin);
+        if (TextLayout is { } inlineLayout)
+            DrawAnnotationDecorations(context, origin, inlineLayout);
         DrawInlinePageChapterTitleOverlay(context, origin);
+    }
+
+    private void DrawAnnotationDecorations(
+        DrawingContext context,
+        Point origin,
+        TextLayout layout)
+    {
+        if (AnnotationRanges is not { Count: > 0 }) return;
+        var sourceLength = (!string.IsNullOrEmpty(LayoutText)
+                ? LayoutText
+                : Block?.Text ?? Text ?? string.Empty)
+            .Length;
+        foreach (var annotation in AnnotationRanges)
+        {
+            var start = Math.Clamp(annotation.Start, 0, sourceLength);
+            var length = Math.Clamp(annotation.Length, 0, sourceLength - start);
+            if (length <= 0) continue;
+
+            Color color;
+            try { color = Color.Parse(annotation.Color); }
+            catch { color = Colors.Black; }
+            var brush = new SolidColorBrush(color);
+            foreach (var rect in layout.HitTestTextRange(start, length))
+            {
+                var lineRect = new Rect(
+                    rect.X + origin.X,
+                    rect.Y + origin.Y,
+                    rect.Width,
+                    rect.Height);
+                if (annotation.Style == "marker")
+                {
+                    context.FillRectangle(
+                        new SolidColorBrush(Color.FromArgb(72, color.R, color.G, color.B)),
+                        lineRect);
+                    continue;
+                }
+
+                // Keep the decoration inside the line's hit-test rectangle.
+                // Drawing on its lower edge is clipped by some GTK backends,
+                // which made the custom dotted and wavy paths disappear.
+                var y = lineRect.Bottom - Math.Min(2, Math.Max(0.75, lineRect.Height / 3));
+                if (annotation.Style == "dotted")
+                {
+                    DrawDottedAnnotationLine(
+                        context,
+                        brush,
+                        lineRect.Left,
+                        lineRect.Right,
+                        y);
+                    continue;
+                }
+
+                if (annotation.Style == "wavy")
+                {
+                    DrawWavyAnnotationLine(
+                        context,
+                        brush,
+                        lineRect.Left,
+                        lineRect.Right,
+                        y);
+                    continue;
+                }
+
+                var dash = annotation.Style == "dashed" ? DashStyle.Dash : null;
+                var pen = new Pen(brush, 1.6, dash);
+                context.DrawLine(
+                    pen,
+                    new Point(lineRect.Left, y),
+                    new Point(lineRect.Right, y));
+                if (annotation.Style == "double")
+                {
+                    context.DrawLine(
+                        pen,
+                        new Point(lineRect.Left, y - 2.5),
+                        new Point(lineRect.Right, y - 2.5));
+                }
+            }
+        }
+    }
+
+    private static void DrawDottedAnnotationLine(
+        DrawingContext context,
+        IBrush brush,
+        double left,
+        double right,
+        double y)
+    {
+        if (right <= left) return;
+
+        // Draw actual filled dots instead of relying on DashStyle.Dot. The
+        // latter is treated as an empty dash pattern by the GTK renderer in
+        // the Avalonia version used by the Linux fallback.
+        const double radius = 1.15;
+        const double spacing = 4.25;
+        var first = left + radius;
+        var last = right - radius;
+        if (last < first)
+            first = (left + right) / 2;
+
+        for (var x = first; x <= last + 0.01; x += spacing)
+            context.DrawEllipse(brush, null, new Point(x, y), radius, radius);
+    }
+
+    private static void DrawWavyAnnotationLine(
+        DrawingContext context,
+        IBrush brush,
+        double left,
+        double right,
+        double y)
+    {
+        if (right <= left) return;
+
+        // Use short line segments rather than a StreamGeometry. A few GTK
+        // Skia combinations drop an open StreamGeometry that has no fill,
+        // while ordinary DrawLine calls are rendered consistently.
+        var pen = new Pen(brush, 1.6)
+        {
+            LineCap = PenLineCap.Round
+        };
+        const double wavelength = 8;
+        const double amplitude = 1.5;
+        const double step = 1.5;
+        var previous = new Point(left, y);
+        for (var x = left + step; x < right; x += step)
+        {
+            var phase = (x - left) / wavelength * Math.PI * 2;
+            var current = new Point(x, y + Math.Sin(phase) * amplitude);
+            context.DrawLine(pen, previous, current);
+            previous = current;
+        }
+
+        var endPhase = (right - left) / wavelength * Math.PI * 2;
+        context.DrawLine(
+            pen,
+            previous,
+            new Point(right, y + Math.Sin(endPhase) * amplitude));
     }
 
     private void DrawNaturalJustifiedLayout(

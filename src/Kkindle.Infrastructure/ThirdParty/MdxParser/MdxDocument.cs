@@ -31,8 +31,8 @@ namespace MdxParser
                         var fDigest = XXHash64.Hash(Encoding.ASCII.GetBytes(Header.UUID.Substring(0, mid)));
                         var eDigest = XXHash64.Hash(Encoding.ASCII.GetBytes(Header.UUID.Substring(mid)));
                         List<byte> bytes = new List<byte>();
-                        bytes.AddRange(BitConverter.GetBytes(fDigest).Reverse());
-                        bytes.AddRange(BitConverter.GetBytes(eDigest).Reverse());
+                        bytes.AddRange(Enumerable.Reverse(BitConverter.GetBytes(fDigest)));
+                        bytes.AddRange(Enumerable.Reverse(BitConverter.GetBytes(eDigest)));
                         return bytes.ToArray();
                     }
                 }
@@ -333,9 +333,9 @@ namespace MdxParser
         public long readNumber(byte[] bytes)
         {
             if (NumberWidth == 8)
-                return BitConverter.ToInt64(bytes.Reverse().ToArray());
+                return BitConverter.ToInt64(Enumerable.Reverse(bytes).ToArray());
             else
-                return BitConverter.ToInt32(bytes.Reverse().ToArray());
+                return BitConverter.ToInt32(Enumerable.Reverse(bytes).ToArray());
         }
     }
 }

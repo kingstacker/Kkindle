@@ -21,6 +21,7 @@
         TransparencyLevelHint="Transparent"
         UseLayoutRounding="True"
         WindowDecorations="None"
+        DragDrop.AllowDrop="True"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
         KeyDown="MainWindow_KeyDown">
@@ -538,11 +539,7 @@
             <Grid x:Name="LibraryContentHost"
                   Grid.Row="3"
                   RowDefinitions="Auto,*"
-                  Background="Transparent"
-                  DragDrop.AllowDrop="True"
-                      DragDrop.DragOver="LibraryPane_DragOver"
-                      DragDrop.DragLeave="LibraryPane_DragLeave"
-                      DragDrop.Drop="LibraryPane_Drop">
+                  Background="Transparent">
                     <Border x:Name="CollectionHeader"
                             Padding="0,0,0,10"
                             BorderBrush="{StaticResource InkBrush}"
@@ -788,11 +785,11 @@
                                 IsHitTestVisible="False"
                                 ZIndex="30">
                             <StackPanel Spacing="7" HorizontalAlignment="Center">
-                                <TextBlock Text="松开以导入书籍"
+                                <TextBlock Text="松开以导入书籍或文件夹"
                                            FontSize="18"
                                            FontWeight="SemiBold"
                                            HorizontalAlignment="Center" />
-                                <TextBlock Text="支持 EPUB、PDF、MOBI、AZW3"
+                                <TextBlock Text="支持 EPUB、PDF、MOBI、AZW3，并自动扫描子目录"
                                            FontSize="11"
                                            Foreground="{StaticResource MutedInkBrush}"
                                            HorizontalAlignment="Center" />
@@ -3816,6 +3813,7 @@
                                                                                                   Width="{Binding Width}"
                                                                                                   Foreground="{StaticResource InkBrush}"
                                                                                                   SelectionBrush="#C9C9C9"
+                                                                                                  AnnotationRanges="{Binding AnnotationRanges}"
                                                                                                   InvertedSelectionBackground="{StaticResource InkBrush}"
                                                                                                   InvertedSelectionForeground="{StaticResource PaperBrush}"
                                                                                                   TextWrapping="Wrap"
@@ -4515,6 +4513,7 @@
             <Popup x:Name="ReaderSelectionHostPopup"
                    IsOpen="False"
                    IsLightDismissEnabled="True"
+                   OverlayDismissEventPassThrough="True"
                    ShouldUseOverlayLayer="True"
                    TakesFocusFromNativeControl="False">
                 <Border x:Name="ReaderSelectionPopupBar"
@@ -4533,8 +4532,11 @@
                                 Classes="readerSelectionAction"
                                 PointerEntered="ReaderSelectionHighlightMenuButton_PointerEntered">
                             <Button.Flyout>
-                                <MenuFlyout>
-                                    <MenuItem Header="直线  ───" Classes="readerSelectionStyle" Tag="solid" Click="ReaderSelectionHighlightStyleItem_Click" />
+                                <MenuFlyout ShowMode="Transient"
+                                            Placement="Bottom"
+                                            VerticalOffset="4"
+                                            OverlayDismissEventPassThrough="True">
+                                    <MenuItem x:Name="ReaderSelectionHighlightSolidItem" Header="直线  ───" Classes="readerSelectionStyle" Tag="solid" Click="ReaderSelectionHighlightStyleItem_Click" />
                                     <MenuItem Header="双线  ═══" Classes="readerSelectionStyle" Tag="double" Click="ReaderSelectionHighlightStyleItem_Click" />
                                     <MenuItem Header="虚线  ┄┄┄" Classes="readerSelectionStyle" Tag="dashed" Click="ReaderSelectionHighlightStyleItem_Click" />
                                     <MenuItem Header="点线  ···" Classes="readerSelectionStyle" Tag="dotted" Click="ReaderSelectionHighlightStyleItem_Click" />

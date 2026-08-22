@@ -194,7 +194,7 @@ namespace MdxParser.Models
         private int readWidth(byte[] data)
         {
             if (data.Length>1)
-                return BitConverter.ToInt16(data.Reverse().ToArray(), 0);
+                return BitConverter.ToInt16(Enumerable.Reverse(data).ToArray(), 0);
             else
                 return data[0];
         }

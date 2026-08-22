@@ -2,21 +2,20 @@
 
 > 供后续 AI 和开发者快速接手。本文只记录当前有效状态，不保留已完成的迁移流水账。
 >
-> 更新时间：2026-08-19
+> 更新时间：2026-08-22
 >
-> 项目目录：C:\Users\kings\Desktop\01_Projects\Kkindle
+> 本次验证目录：/home/stacker/work_pro/Kkindle
 
 ## 1. 当前状态
 
 - Kkindle 是 C# / .NET 8 / Avalonia 12.1.1 跨平台桌面应用，Windows、Linux、macOS 各有一个瘦启动项目。
 - Avalonia 是唯一 UI 实现；src/Kkindle.App.WinUI 已完整删除。4 个阅读器脚本和应用图标已迁入 src/Kkindle.App，解决方案、测试及三端打包引用均已更新。
 - 当前开发版本为 0.6.0-dev.3，统一定义在 Directory.Build.props。关于页通过程序集 AssemblyInformationalVersion 显示版本，不再维护 UI 硬编码版本号。
-- Git 主分支为 master，远程为 git@github.com:kingstacker/Kkindle.git。
-- 2026-08-19 验证结果：可移植测试 218 项、Windows 测试 31 项、平台公共测试 7 项，共 256 项全部通过；Windows、Linux、macOS Debug Rebuild 均为 0 错误。
-- 最新 Windows x64 Debug 运行目录为 artifacts/Kkindle-debug-win-x64-latest/。入口 Kkindle.exe 为 158,720 字节，SHA-256：
-  C8D9FA28672DF465383AACE86B943C07A1143C1CB408DE771FC90BC0C3C5CBF5。
-- 调试产物不提交 Git。运行时必须保留 EXE 同目录的 DLL、PDB、WebView 和资源文件，不能只复制 EXE。
-- 尚未完成 Linux/macOS 真实桌面、真实 Kindle 设备和 macOS 签名/公证验收；当前跨平台结论是“项目可编译”，不是三端真机功能完全验收。
+- 当前工作分支为 `codex/fix-calibre-output-profile`，主分支为 `master`，远程为 git@github.com:kingstacker/Kkindle.git。
+- 当前 `global.json` 固定 .NET SDK 10.0.400；Avalonia 主包和桌面包为 12.1.1，Avalonia.Controls.WebView 为 12.1.0。
+- 2026-08-22 验证结果：可移植测试 237 项全部通过；Linux Debug 构建 0 警告、0 错误。Linux Debug 版已实际通过 EPUB→AZW3 转换，书库中两本测试书均显示 `AZW3 · EPUB`。
+- Linux Debug 入口为 `src/Kkindle.Desktop.Linux/bin/Debug/net8.0/Kkindle`。调试产物不提交 Git；运行时必须保留同目录的 DLL、PDB、WebView 和资源文件，不能只复制入口文件。
+- Linux 真实桌面启动和 Calibre 转换已验收；Windows/macOS 真实桌面、真实 Kindle 设备和 macOS 签名/公证仍未完整验收。
 
 ## 2. 项目结构
 
@@ -46,7 +45,9 @@
 ### 3.1 书库与阅读器
 
 - 本地书库支持 EPUB、PDF、MOBI、AZW3 导入，SHA-256 去重，同书多格式合并，元数据/封面编辑、搜索筛选、收藏和分类。
+- Linux 文件管理器拖放支持 `text/uri-list` 与 GNOME 文件拖放格式；拖入文件夹会递归收集 EPUB、PDF、MOBI、AZW3，并去重后导入。
 - Kreader 支持 EPUB、PDF 和 AZW3 临时转 EPUB；包括分页、双栏、滚动、书签、搜索、划线批注、脚注、AI、阅读统计、禅模式及进度恢复。
+- Linux 文本回退阅读器支持跨页选择同步、批注范围渲染、划线样式、选择工具栏轻触关闭和分页/滚动交互；WebView 自带选择工具栏不再与 Avalonia 工具栏重复显示。
 - 极简目录使用细线矩形三横图标，收起/展开按钮与字体按钮视觉对齐。
 - 极简目录章节浮窗异步读取 EPUB 章节正文前 4 个非空行；按章节路径缓存，切换书籍时清空。PDF 只显示页码。
 - 阅读统计图表的竖线已改为细线。
@@ -80,7 +81,9 @@
 
 - 三端发行包都不捆绑 Calibre 或 KFX Input。
 - Calibre 路径统一由 CalibreExecutableLocator 发现，禁止在业务代码中写死 .exe。
+- 如果用户误把 `calibre`/`calibre.exe` 主程序配置为转换器，定位器会自动解析同目录的 `ebook-convert`；设置页文件选择器也只允许选择 `ebook-convert`。
 - 检测到 Calibre 后只禁用 Calibre 下载/安装按钮；KFX Input 按钮必须通过 calibre-customize --list-plugins 确认插件已安装后才禁用。
+- KFX Input 插件包校验要求导入标记文件与同目录 `__init__.py` 配对，避免误把依赖目录初始化文件当作插件入口。
 - Kkindle 自己安装 KFX Input 时才使用独立 CALIBRE_CONFIG_DIRECTORY，已有用户配置保持不变。
 - GitHub Release 工作流根据提交记录调用 GitHub generate-notes API 生成 Changelog；创建和更新 Release 都使用同一份自动说明。
 
@@ -114,7 +117,16 @@
 
 ## 5. 构建与验证
 
-仓库 global.json 固定 SDK 8.0.423。本机验证从临时目录执行绝对项目路径，以确保使用仓库锁定的 SDK：
+仓库 `global.json` 当前固定 SDK 10.0.400。Linux 本机验证命令：
+
+    cd /home/stacker/work_pro/Kkindle
+
+    dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj --no-restore
+    dotnet build src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj --no-restore
+
+结果：237 项测试通过；Linux Debug 构建 0 警告、0 错误。2026-08-22 还通过 Debug UI 使用系统 `ebook-convert` 实际完成两本 EPUB→AZW3 转换，并额外验证了配置指向 `calibre` 主程序时的自动纠正。
+
+Windows 验证从临时目录执行绝对项目路径，以确保使用仓库锁定的 SDK：
 
     cd C:\Users\kings\AppData\Local\Temp
 
@@ -154,7 +166,7 @@ robocopy 返回码 0 至 7 都表示成功。同步时必须保留目标目录�
 
 ## 8. 工作约定
 
-- 工作区可能包含用户尚未提交的修改，不要回滚不属于当前任务的变更。
+- 工作区可能包含用户尚未提交的修改，不要回滚不属于当前任务的变更；用户明确要求“提交全部改动”时，仍不要提交 `.claude/settings.local.json` 等本机权限配置。
 - 默认只生成 Windows x64 Debug；除非用户明确要求，不生成 Release、安装包、便携包或 GitHub Release。
 - 单文件导入、转换或封面解析失败不能升级为整批失败。
 - 修改行为时同步更新测试和本文档；提交前运行 git diff --check。
