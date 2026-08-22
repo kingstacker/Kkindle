@@ -13,6 +13,7 @@
 
 ## 调试 EXE 生成约定（用户明确要求，2026-08-16）
 
+- 当前仓库 `global.json` 固定使用 .NET SDK **10.0.400**；Avalonia 主包和桌面包为 **12.1.1**，`Avalonia.Controls.WebView` 为 **12.1.0**。
 - **每次修改代码后，必须重新构建 x64 Debug EXE 并同步到 `artifacts\Kkindle-debug-win-x64-latest\`**，然后在回复中告知用户 exe 路径。
 - 构建命令（项目根目录执行）：
   - `dotnet build src/Kkindle.Desktop.Windows/Kkindle.Desktop.Windows.csproj -c Debug -p:Platform=x64`
@@ -20,3 +21,11 @@
 - 同步到 latest 目录时**只覆盖文件、不删除内容**，保留 `data\`、`backups\`、`kkindle-crash.log` 等运行时数据：
   - `robocopy src\Kkindle.Desktop.Windows\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64 artifacts\Kkindle-debug-win-x64-latest /E /XF kkindle-crash.log /XD data backups`（robocopy 退出码 ≤7 视为成功）
 - 除非用户明确要求，不生成 Release EXE、安装包或便携包；默认只出保留完整调试工具与运行依赖的 x64 Debug EXE（与 `AI_HANDOFF.md` 第 8 节一致）。
+
+## Linux Debug 验证信息（2026-08-22）
+
+- Linux Debug 入口：`src/Kkindle.Desktop.Linux/bin/Debug/net8.0/Kkindle`。
+- 构建命令：`dotnet build src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj --no-restore`。
+- 测试命令：`dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj --no-restore`。
+- 最近一次结果：237 项测试通过，Linux Debug 构建 0 警告、0 错误；Debug UI 已实际验证 EPUB→AZW3 转换成功。
+- Linux/macOS 不是 Windows x64 EXE 同步规则的替代目标；只有用户明确要求时才构建对应 Debug 产物。

@@ -35,7 +35,7 @@ namespace MdxParser.Models
             var intBuf = new byte[4];
             stream.Read(intBuf, 0, intBuf.Length);
             if (reversed)
-                return BitConverter.ToInt32(intBuf.Reverse().ToArray(), 0);
+                return BitConverter.ToInt32(Enumerable.Reverse(intBuf).ToArray(), 0);
             else
                 return BitConverter.ToInt32(intBuf.ToArray(), 0);
         }
@@ -50,7 +50,7 @@ namespace MdxParser.Models
             var intBuf = new byte[4];
             stream.Read(intBuf, 0, intBuf.Length);
             if (reversed)
-                return BitConverter.ToUInt32(intBuf.Reverse().ToArray(), 0);
+                return BitConverter.ToUInt32(Enumerable.Reverse(intBuf).ToArray(), 0);
             else
                 return BitConverter.ToUInt32(intBuf.ToArray(), 0);
         }
@@ -63,7 +63,7 @@ namespace MdxParser.Models
         {
             var intBuf = new byte[8];
             stream.Read(intBuf, 0, intBuf.Length);
-            return BitConverter.ToInt64(intBuf.Reverse().ToArray(), 0);
+            return BitConverter.ToInt64(Enumerable.Reverse(intBuf).ToArray(), 0);
         }
         public void readBytes(Stream stream, byte[] data)
         {

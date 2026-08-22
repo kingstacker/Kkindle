@@ -124,7 +124,7 @@ public static partial class KindleClippingsParser
             CultureInfo.GetCultureInfo("ko-KR")
         };
 
-        foreach (var section in metadata.Split('|', StringSplitOptions.TrimEntries).Reverse())
+        foreach (var section in Enumerable.Reverse(metadata.Split('|', StringSplitOptions.TrimEntries)))
         {
             var marker = markers.FirstOrDefault(value => section.Contains(value, StringComparison.OrdinalIgnoreCase));
             if (marker is null) continue;

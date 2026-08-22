@@ -159,6 +159,29 @@ public partial class MainWindow : Window
 
         InitializeComponent();
         ApplyApplicationIcon();
+        // Linux file managers can mark external drag events handled on the
+        // first child under the pointer. Observe the bubbled event even then,
+        // at the top-level window that owns the native XDND target.
+        AddHandler(
+            DragDrop.DragEnterEvent,
+            LibraryPane_DragOver,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        AddHandler(
+            DragDrop.DragOverEvent,
+            LibraryPane_DragOver,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        AddHandler(
+            DragDrop.DragLeaveEvent,
+            LibraryPane_DragLeave,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        AddHandler(
+            DragDrop.DropEvent,
+            LibraryPane_Drop,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
         // SelectableTextBlock handles PointerPressed while beginning a text
         // selection. Listen after handled events so the reader can freeze its
         // scroll offset before Avalonia brings the selection into view.
@@ -171,6 +194,11 @@ public partial class MainWindow : Window
             InputElement.PointerReleasedEvent,
             ReaderLinuxTextFallback_PointerReleased,
             RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        ReaderRoot.AddHandler(
+            InputElement.PointerPressedEvent,
+            ReaderRoot_SelectionDismissPointerPressed,
+            RoutingStrategies.Tunnel,
             handledEventsToo: true);
         BookGrid.ItemsPanel = new FuncTemplate<Panel?>(() =>
         {
@@ -1003,14 +1031,19 @@ public partial class MainWindow : Window
 
         try
         {
-            var inputPaths = ExpandImportableFiles(selectedPaths);
+            var inputPaths = LibraryDropImportPolicy.ExpandImportableFiles(selectedPaths);
             if (inputPaths.Length == 0)
             {
                 SetTaskStatus("所选位置没有 EPUB、PDF、MOBI 或 AZW3 文件。");
                 await ShowMessageAsync("无法导入", "拖入的文件或文件夹中没有 EPUB、PDF、MOBI 或 AZW3 书籍文件。");
                 return;
             }
-            IReadOnlyDictionary<string, IReadOnlyCollection<string>>? requestedFormats = null;
+            var requestedFormats = await ChooseImportFormatsAsync(inputPaths);
+            if (requestedFormats is null)
+            {
+                SetTaskStatus("已取消导入。");
+                return;
+            }
             SetTaskStatus($"正在导入 {inputPaths.Length} 个位置…");
             ShowTaskProgressPopup();
             TaskProgressPopupText.Text = $"正在导入 {inputPaths.Length} 个位置…";
@@ -1062,30 +1095,6 @@ public partial class MainWindow : Window
             SetTaskStatus($"导入失败：{exception.Message}");
             await ShowMessageAsync("导入失败", exception.Message);
         }
-    }
-
-    private static string[] ExpandImportableFiles(IEnumerable<string> selectedPaths)
-    {
-        var supported = new HashSet<string>([".epub", ".pdf", ".mobi", ".azw3"], StringComparer.OrdinalIgnoreCase);
-        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var selectedPath in selectedPaths)
-        {
-            try
-            {
-                var fullPath = Path.GetFullPath(selectedPath);
-                if (File.Exists(fullPath))
-                {
-                    if (supported.Contains(Path.GetExtension(fullPath))) files.Add(fullPath);
-                    continue;
-                }
-                if (!Directory.Exists(fullPath)) continue;
-                foreach (var file in Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories))
-                    if (supported.Contains(Path.GetExtension(file))) files.Add(Path.GetFullPath(file));
-            }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
-        return files.OrderBy(path => path, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 
     private Task<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?> ChooseImportFormatsAsync(
@@ -1161,20 +1170,24 @@ public partial class MainWindow : Window
         CompleteImportFormatSelection(e.Key == Key.Enter);
     }
 
-    private static string[] GetDraggedPaths(DragEventArgs e) =>
-        e.DataTransfer.TryGetFiles()?
-            .Select(item => item.TryGetLocalPath())
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(path => path!)
-            .ToArray()
-        ?? [];
-
     private void LibraryPane_DragOver(object? sender, DragEventArgs e)
     {
         _dropOverlayHideTimer?.Stop();
-        var paths = GetDraggedPaths(e);
-        e.DragEffects = paths.Length > 0 ? DragDropEffects.Copy : DragDropEffects.None;
-        LibraryDropOverlay.IsVisible = paths.Length > 0;
+        if (!LibraryWorkspace.IsVisible)
+        {
+            e.DragEffects = DragDropEffects.None;
+            LibraryDropOverlay.IsVisible = false;
+            e.Handled = true;
+            return;
+        }
+        // X11/Wayland drag payloads are often delivered lazily. Reading the
+        // paths during DragOver can return an empty list for directories and
+        // advertising None prevents the file manager from ever sending Drop.
+        // The advertised File format is enough here; materialize paths only
+        // after the drop is accepted.
+        var hasStorageItems = LibraryDropImportPolicy.CanAccept(e.DataTransfer);
+        e.DragEffects = hasStorageItems ? DragDropEffects.Copy : DragDropEffects.None;
+        LibraryDropOverlay.IsVisible = hasStorageItems;
         e.Handled = true;
     }
 
@@ -1238,11 +1251,19 @@ public partial class MainWindow : Window
     private async void LibraryPane_Drop(object? sender, DragEventArgs e)
     {
         _dropOverlayHideTimer?.Stop();
-        var paths = GetDraggedPaths(e);
+        if (!LibraryWorkspace.IsVisible)
+        {
+            LibraryDropOverlay.IsVisible = false;
+            e.Handled = true;
+            return;
+        }
+        var paths = LibraryDropImportPolicy.GetLocalPaths(e.DataTransfer);
         LibraryDropOverlay.IsVisible = false;
         e.Handled = true;
         if (paths.Length > 0)
             await ImportPathsAsync(paths);
+        else
+            SetTaskStatus("无法读取拖入的文件或文件夹路径。");
     }
 
     private async Task OpenBookAsync(

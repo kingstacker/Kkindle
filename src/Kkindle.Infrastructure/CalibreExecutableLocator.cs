@@ -78,7 +78,32 @@ internal static class CalibreExecutableLocator
     {
         if (string.IsNullOrWhiteSpace(overridePath)) return null;
         var path = Path.GetFullPath(overridePath.Trim().Trim('"'));
-        if (File.Exists(path)) return path;
+        if (File.Exists(path))
+        {
+            // The settings field is meant for ebook-convert, but users often
+            // select calibre/calibre.exe from the same installation. Resolve
+            // that launcher to its sibling converter instead of starting the
+            // GUI, which rejects conversion-only options such as
+            // --output-profile.
+            if (IsEbookConvertFile(path, executableName)) return path;
+
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                var siblingCandidates = new[]
+                {
+                    Path.Combine(directory, executableName),
+                    Path.Combine(directory, "ebook-convert"),
+                    Path.Combine(directory, "ebook-convert.exe")
+                };
+                return siblingCandidates
+                    .Where(File.Exists)
+                    .Select(Path.GetFullPath)
+                    .FirstOrDefault();
+            }
+
+            return null;
+        }
         if (!Directory.Exists(path)) return null;
 
         var candidates = new List<string> { Path.Combine(path, executableName) };
@@ -87,6 +112,14 @@ internal static class CalibreExecutableLocator
         candidates.Add(Path.Combine(path, "Calibre2", executableName));
         candidates.Add(Path.Combine(path, "Calibre", executableName));
         return candidates.Where(File.Exists).Select(Path.GetFullPath).FirstOrDefault();
+    }
+
+    private static bool IsEbookConvertFile(string path, string executableName)
+    {
+        var fileName = Path.GetFileName(path);
+        return fileName.Equals(executableName, StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("ebook-convert", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("ebook-convert.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void AddWindowsInstall(List<string> candidates, string? root, string executableName)

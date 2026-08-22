@@ -340,9 +340,12 @@ public sealed class CalibreSetupService : IDisposable
             throw new InvalidDataException("KFX Input 插件包结构无效。");
         var importMarker = archive.Entries.FirstOrDefault(entry =>
             entry.FullName.EndsWith("plugin-import-name-kfx_input.txt", StringComparison.OrdinalIgnoreCase));
+        var pluginDirectory = importMarker is null
+            ? string.Empty
+            : importMarker.FullName[..Math.Max(0, importMarker.FullName.LastIndexOf('/') + 1)];
+        var initializerPath = $"{pluginDirectory}__init__.py";
         var initializer = archive.Entries.FirstOrDefault(entry =>
-            entry.FullName.Equals("__init__.py", StringComparison.OrdinalIgnoreCase)
-            || entry.FullName.EndsWith("/__init__.py", StringComparison.OrdinalIgnoreCase));
+            entry.FullName.Equals(initializerPath, StringComparison.OrdinalIgnoreCase));
         if (importMarker is null || initializer is null || initializer.Length > 2 * 1024 * 1024)
             throw new InvalidDataException("下载内容不是有效的 KFX Input 插件包。");
         using var reader = new StreamReader(initializer.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);

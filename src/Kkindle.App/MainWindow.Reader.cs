@@ -624,6 +624,18 @@ public partial class MainWindow
 
     private void FocusCurrentReaderHost()
     {
+        if (IsLinuxReaderTextFallbackActive())
+        {
+            Dispatcher.UIThread.Post(
+                () =>
+                {
+                    if (ReaderRoot.IsVisible && IsLinuxReaderTextFallbackActive())
+                        ReaderLinuxTextFallbackOverlay.Focus();
+                },
+                DispatcherPriority.Input);
+            return;
+        }
+
         if (CurrentReaderHost?.View is not Control readerControl) return;
         Dispatcher.UIThread.Post(
             () =>
