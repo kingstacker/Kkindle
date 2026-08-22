@@ -158,6 +158,10 @@ public sealed class KindleEmailSender
         var validationError = settings.Validate();
         if (validationError is not null) throw new InvalidOperationException(validationError);
         if (!File.Exists(filePath)) throw new FileNotFoundException("找不到要发送的书籍文件。", filePath);
+        var fileSizeBytes = new FileInfo(filePath).Length;
+        if (!KindleEmailSelectionPolicy.IsWithinAttachmentLimit(fileSizeBytes))
+            throw new InvalidOperationException(
+                $"书籍文件大小为 {fileSizeBytes / (1024d * 1024d):0.#} MB，超过 Send to Kindle 邮箱单本 50 MB 的限制。");
 
         using var message = new MailMessage
         {

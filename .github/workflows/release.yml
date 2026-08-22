@@ -267,6 +267,40 @@ jobs:
             -f "tag_name=${RELEASE_TAG}" \
             --jq '.body' > "$RUNNER_TEMP/kkindle-release-notes.md"
           test -s "$RUNNER_TEMP/kkindle-release-notes.md"
+      - name: Create update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          setup_name="Kkindle-${version}-win-x64-setup.exe"
+          checksum_name="SHA256SUMS.txt"
+          test -f "artifacts/${setup_name}"
+          test -f "artifacts/${checksum_name}"
+          prerelease=false
+          [[ "$version" == *-* ]] && prerelease=true
+          download_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          jq -n \
+            --arg tag_name "$RELEASE_TAG" \
+            --arg html_url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}" \
+            --rawfile body "$RUNNER_TEMP/kkindle-release-notes.md" \
+            --arg setup_name "$setup_name" \
+            --arg setup_url "${download_base}/${setup_name}" \
+            --argjson setup_size "$(stat -c%s "artifacts/${setup_name}")" \
+            --arg checksum_name "$checksum_name" \
+            --arg checksum_url "${download_base}/${checksum_name}" \
+            --argjson checksum_size "$(stat -c%s "artifacts/${checksum_name}")" \
+            --argjson prerelease "$prerelease" \
+            '{
+              tag_name: $tag_name,
+              html_url: $html_url,
+              body: $body,
+              draft: false,
+              prerelease: $prerelease,
+              assets: [
+                { name: $setup_name, browser_download_url: $setup_url, size: $setup_size },
+                { name: $checksum_name, browser_download_url: $checksum_url, size: $checksum_size }
+              ]
+            }' > artifacts/update-manifest.json
       - name: Create or update GitHub Release
         shell: bash
         run: |

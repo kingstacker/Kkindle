@@ -25,6 +25,7 @@ public sealed record AppSettings
     public int AutoBackupRetention { get; init; } = 5;
     public bool AiEnabled { get; init; } = true;
     public bool NetworkEnabled { get; init; } = true;
+    public bool AutoUpdateCheckEnabled { get; init; } = true;
     public bool AutoDoubanMatchOnImport { get; init; }
     public bool AutoConnectDevice { get; init; } = true;
     public bool CompareKindleLibraryEnabled { get; init; } = true;

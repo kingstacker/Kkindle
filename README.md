@@ -5,6 +5,16 @@
 
 Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle 设备管理器。它使用 Avalonia 构建，将本地书库、格式转换、阅读、批注、AI 辅助阅读和 Kindle 传输集中在一个简洁的灰白纸张风格界面中。
 
+## 三端状态
+
+| 平台 | 基本测试 | 平台验证 | 当前状态 |
+| --- | --- | --- | --- |
+| Windows 11 x64 | 已完成：Release 构建、自动化测试、Windows 安装包冒烟测试 | 已在 Windows 11 实机测试 | 基本功能可用，可发布 |
+| Linux x64 | 已完成：Release 构建、公共平台测试、Linux 包启动冒烟测试 | 已在 Debian 13 实机测试 | 基本功能可用，可发布 |
+| macOS Intel/Apple Silicon | 已完成：Release 构建与签名/包校验流程 | 尚未进行 macOS 实机测试 | 可生成发布包，等待实机验证 |
+
+macOS 当前发布包未宣称经过实际设备验证；正式使用前请先在目标 macOS 版本上验证启动、阅读器和 Kindle USB 挂载功能。
+
 ## 界面预览
 
 ### 电脑书库
@@ -140,6 +150,8 @@ Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle �
 
 三端发行包均自包含 .NET 运行时且不捆绑 Calibre；应用会自动发现系统安装的 Calibre，也可在设置中指定 `ebook-convert`。Linux 数据遵循 XDG 目录，macOS 数据位于 `~/Library/Application Support/Kkindle`。
 
+Windows 安装版默认在启动后检查 GitHub Releases 的最新稳定版，也可在“设置 > 关于”中手动检查。确认更新后，程序会下载安装包、根据 `SHA256SUMS.txt` 校验并静默安装，然后重新启动。Windows 便携版目前只会打开 Release 下载页；Linux 与 macOS 的应用内安装器将在后续版本接入。
+
 ## 从源码运行
 
 ```powershell
@@ -173,7 +185,7 @@ Windows 应用数据默认保存在可执行文件旁；Linux 使用 XDG 数据�
 
 ## GitHub 自动发版
 
-`.github/workflows/release.yml` 会在推送 `vX.Y.Z` 标签时分别在 Windows、Ubuntu 和 macOS runner 上构建三端自包含发行包、统一计算校验值并创建 GitHub Release。带后缀的标签会发布为预发行版。
+`.github/workflows/release.yml` 会在推送 `vX.Y.Z` 标签时分别在 Windows、Ubuntu 和 macOS runner 上构建三端自包含发行包、统一计算校验值、生成 `update-manifest.json` 并创建 GitHub Release。带后缀的标签会发布为预发行版。
 
 ```powershell
 git tag v1.0.0

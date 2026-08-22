@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
     private readonly KindleEmailSender _kindleEmailSender;
+    private readonly UpdateService? _updateService;
     private AppSettings _appSettings = new();
     private ZLibrarySettings _zLibrarySettings = new();
     private KindleEmailSettings _kindleEmailSettings = new();
@@ -156,6 +157,9 @@ public partial class MainWindow : Window
         _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, _secretProtector);
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, _secretProtector);
         _kindleEmailSender = new KindleEmailSender();
+        _updateService = services?.UpdateInstaller is { } updateInstaller
+            ? new UpdateService(updateInstaller)
+            : null;
         ViewModel = new LibraryViewModel(library, paths.Data);
 
         InitializeComponent();
@@ -378,6 +382,7 @@ public partial class MainWindow : Window
             _filterControlsReady = true;
             UpdateLibraryUi();
             SetTaskStatus(ViewModel.StatusText);
+            StartAutomaticUpdateCheck();
             if (Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1" && ViewModel.Books.Count > 0)
             {
                 _selectedCard = ViewModel.Books[0];
@@ -562,6 +567,7 @@ public partial class MainWindow : Window
         _doubanBatchService?.Dispose();
         _zLibraryService.Dispose();
         _aiChatClient.Dispose();
+        _updateService?.Dispose();
         _readerNavigationCancellation?.Dispose();
         _readerSessionCancellation?.Dispose();
         _readerActiveHost?.Dispose();

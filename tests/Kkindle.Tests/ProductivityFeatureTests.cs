@@ -29,6 +29,7 @@ public sealed class ProductivityFeatureTests
                 AutoBackupRetention = 99,
                 AiEnabled = false,
                 NetworkEnabled = false,
+                AutoUpdateCheckEnabled = false,
                 AutoConnectDevice = true,
                 CompareKindleLibraryEnabled = false,
                 DefaultReaderLayout = new ReaderLayoutSettings(FontScale: 9, LineHeight: -1)
@@ -41,6 +42,7 @@ public sealed class ProductivityFeatureTests
             Assert.True(restored.AutoGenerateEpubAndAzw3OnImport);
             Assert.False(restored.AiEnabled);
             Assert.False(restored.NetworkEnabled);
+            Assert.False(restored.AutoUpdateCheckEnabled);
             Assert.True(restored.AutoConnectDevice);
             Assert.False(restored.CompareKindleLibraryEnabled);
             Assert.InRange(restored.DefaultReaderLayout.FontScale, 0.75, 2.0);
@@ -56,6 +58,7 @@ public sealed class ProductivityFeatureTests
             Assert.True(defaults.CollectionsMutuallyExclusive);
             Assert.True(defaults.AutoConnectDevice);
             Assert.True(defaults.CompareKindleLibraryEnabled);
+            Assert.True(defaults.AutoUpdateCheckEnabled);
         }
         finally { TestHelpers.TryDelete(root); }
     }

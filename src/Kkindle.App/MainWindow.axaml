@@ -2069,6 +2069,10 @@
                                             <ToggleSwitch x:Name="NetworkEnabledCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="关闭后豆瓣匹配、Z-Library、邮件发送与工具下载安装等联网功能不可用" />
                                         </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock Text="自动检查应用更新" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="AutoUpdateCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="启动后自动检查 GitHub Releases 中的稳定版本" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="导入时自动豆瓣匹配" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             <ToggleSwitch x:Name="AutoDoubanMatchCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="导入完成后自动按书名和作者在豆瓣搜索，置信度高的直接补全评分、简介与封面" />
                                         </Grid>
@@ -2353,6 +2357,19 @@
                                                    Text="版本未知"
                                                    FontSize="12"
                                                    Foreground="{StaticResource MutedInkBrush}" />
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock x:Name="AboutUpdateStatusText"
+                                                       Text="尚未检查更新"
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Center" />
+                                            <Button x:Name="CheckForUpdatesButton"
+                                                    Grid.Column="1"
+                                                    Content="检查更新"
+                                                    Classes="quiet"
+                                                    Click="CheckForUpdatesButton_Click" />
+                                        </Grid>
                                         <Rectangle Height="1" Fill="{StaticResource HairlineBrush}" />
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
                                             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">

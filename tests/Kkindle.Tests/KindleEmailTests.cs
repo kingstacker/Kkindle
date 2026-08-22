@@ -24,6 +24,44 @@ public sealed class KindleEmailTests
     }
 
     [Fact]
+    public void AllowsAttachmentsUpToFiftyMegabytes()
+    {
+        Assert.True(KindleEmailSelectionPolicy.IsWithinAttachmentLimit(KindleEmailSelectionPolicy.MaximumAttachmentBytes));
+        Assert.False(KindleEmailSelectionPolicy.IsWithinAttachmentLimit(KindleEmailSelectionPolicy.MaximumAttachmentBytes + 1));
+    }
+
+    [Fact]
+    public async Task SenderRejectsOversizedAttachmentBeforeConnecting()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var filePath = Path.Combine(root, "oversized.epub");
+            await using (var stream = File.Create(filePath))
+                stream.SetLength(KindleEmailSelectionPolicy.MaximumAttachmentBytes + 1);
+
+            var settings = new KindleEmailSettings
+            {
+                KindleEmailAddress = "kindle@example.com",
+                SenderEmailAddress = "sender@example.com",
+                SmtpHost = "smtp.example.com",
+                SmtpPort = 587,
+                SmtpUsername = "sender@example.com",
+                SmtpPassword = "app-password"
+            };
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                new KindleEmailSender().SendAsync(settings, filePath, "Send to Kindle"));
+
+            Assert.Contains("超过 Send to Kindle 邮箱单本 50 MB 的限制", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
     public void ValidatesSmtpSettingsAndNormalizesWhitespace()
     {
         var settings = new KindleEmailSettings

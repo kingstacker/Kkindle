@@ -79,7 +79,8 @@ internal static class Program
             SecretProtector: new WindowsSecretProtector(),
             CreateDeviceChangeNotifier: handle => new WindowsDeviceChangeNotifier(handle),
             KindleDeviceService: new KindleDeviceService(paths, new BookMetadataService()),
-            ReaderHostFactory: () => new NativeWebViewReaderHost(ConfigureWebView2));
+            ReaderHostFactory: () => new NativeWebViewReaderHost(ConfigureWebView2),
+            UpdateInstaller: new WindowsAppUpdateInstaller());
     }
 
     private static void ConfigureWebView2(IntPtr coreWebView2Pointer)

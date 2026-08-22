@@ -1605,17 +1605,42 @@ public partial class MainWindow
             return;
         }
 
-        var pending = cards
+        var candidates = cards
             .Select(card => (Card: card, File: KindleEmailSelectionPolicy.SelectPreferred(card.Book.Files)))
             .Where(entry => entry.File is not null)
             .Select(entry => (entry.Card, File: entry.File!, Path: ViewModel.GetAbsoluteFilePath(entry.File!)))
             .Where(entry => File.Exists(entry.Path))
+            .Select(entry => (entry.Card, entry.File, entry.Path, SizeBytes: new FileInfo(entry.Path).Length))
             .ToArray();
-        if (pending.Length == 0)
+        if (candidates.Length == 0)
         {
             SetTaskStatus("发送到 Kindle 邮箱只支持 EPUB 或 PDF；所选书籍没有可发送格式。");
             return;
         }
+
+        var oversized = candidates
+            .Where(entry => !KindleEmailSelectionPolicy.IsWithinAttachmentLimit(entry.SizeBytes))
+            .ToArray();
+        if (oversized.Length > 0)
+        {
+            var oversizedLines = string.Join(
+                Environment.NewLine,
+                oversized.Take(4).Select(entry =>
+                    $"《{entry.Card.Title}》({FormatKindleEmailAttachmentSize(entry.SizeBytes)})"));
+            if (oversized.Length > 4)
+                oversizedLines += $"{Environment.NewLine}…等 {oversized.Length} 本";
+
+            SetTaskStatus($"有 {oversized.Length} 本书超过 50 MB，无法发送到 Kindle 邮箱。");
+            await ShowMessageAsync(
+                "无法发送到 Kindle 邮箱",
+                $"以下书籍超过 Send to Kindle 邮箱单本 50 MB 的限制，将不会发送：{Environment.NewLine}{Environment.NewLine}{oversizedLines}");
+        }
+
+        var pending = candidates
+            .Where(entry => KindleEmailSelectionPolicy.IsWithinAttachmentLimit(entry.SizeBytes))
+            .ToArray();
+        if (pending.Length == 0) return;
+
         var titleLines = string.Join(Environment.NewLine, pending.Take(3).Select(entry => $"《{entry.Card.Title}》"));
         if (pending.Length > 3) titleLines += $"{Environment.NewLine}…等 {pending.Length} 本";
         if (!await ConfirmAsync(
@@ -1625,7 +1650,7 @@ public partial class MainWindow
 
         var sent = 0;
         var skipped = cards.Count - pending.Length;
-        foreach (var (card, _, sourcePath) in pending)
+        foreach (var (card, _, sourcePath, _) in pending)
         {
             try
             {
@@ -1788,6 +1813,8 @@ public partial class MainWindow
 
         try
         {
+            if (!await EnsureKindleEmailAttachmentWithinLimitAsync(_selectedCard.Title, sourcePath))
+                return;
             if (!await ConfirmAsync("发送到 Kindle 邮箱", $"确定将《{_selectedCard.Title}》发送到 {_kindleEmailSettings.KindleEmailAddress}？"))
                 return;
             SetTaskStatus($"正在通过邮件发送《{_selectedCard.Title}》…");
@@ -1808,6 +1835,20 @@ public partial class MainWindow
             SetTaskStatus($"邮件发送失败：{exception.Message}");
             await ShowMessageAsync("发送失败", exception.Message);
         }
+    }
+
+    private static string FormatKindleEmailAttachmentSize(long fileSizeBytes) =>
+        $"{fileSizeBytes / (1024d * 1024d):0.#} MB";
+
+    private async Task<bool> EnsureKindleEmailAttachmentWithinLimitAsync(string title, string filePath)
+    {
+        var fileSizeBytes = new FileInfo(filePath).Length;
+        if (KindleEmailSelectionPolicy.IsWithinAttachmentLimit(fileSizeBytes)) return true;
+
+        var message = $"《{title}》文件大小为 {FormatKindleEmailAttachmentSize(fileSizeBytes)}，超过 Send to Kindle 邮箱单本 50 MB 的限制。";
+        SetTaskStatus(message);
+        await ShowMessageAsync("无法发送到 Kindle 邮箱", message);
+        return false;
     }
 
     private async Task ExportDeviceBookAsync(KindleBookCardViewModel card) =>
@@ -3034,6 +3075,7 @@ public partial class MainWindow
             AutoGenerateReaderFormatsCheck.IsChecked = _appSettings.AutoGenerateEpubAndAzw3OnImport;
             CollectionsMutuallyExclusiveCheck.IsChecked = _appSettings.CollectionsMutuallyExclusive;
             NetworkEnabledCheck.IsChecked = _appSettings.NetworkEnabled;
+            AutoUpdateCheck.IsChecked = _appSettings.AutoUpdateCheckEnabled;
             AutoDoubanMatchCheck.IsChecked = _appSettings.AutoDoubanMatchOnImport;
             AutoConnectDeviceCheck.IsChecked = _appSettings.AutoConnectDevice;
             CompareKindleLibraryCheck.IsChecked = _appSettings.CompareKindleLibraryEnabled;
@@ -3046,6 +3088,10 @@ public partial class MainWindow
             DefaultVerticalWritingCheck.IsChecked = _appSettings.DefaultReaderLayout.VerticalWriting;
             SelectSettingsFontFamily(_appSettings.DefaultReaderLayout.FontFamily);
             AboutVersionText.Text = $"版本 {ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly)}";
+            CheckForUpdatesButton.IsEnabled = _updateService is not null;
+            AboutUpdateStatusText.Text = _updateService is null
+                ? "当前平台暂不支持应用内更新"
+                : "尚未检查更新";
             SettingsDataPathText.Text = _paths.Data;
             ZLibraryEmailBox.Text = _zLibrarySettings.Email;
             ZLibraryPasswordBox.Text = _zLibrarySettings.Password;
@@ -3074,6 +3120,7 @@ public partial class MainWindow
         _appSettingsAutoSaveConfigured = true;
         AiEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         NetworkEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        AutoUpdateCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoDoubanMatchCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         CollectionsMutuallyExclusiveCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ReadingMaterialsCollapsedByDefaultCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -3476,6 +3523,7 @@ public partial class MainWindow
             CollectionsMutuallyExclusive = CollectionsMutuallyExclusiveCheck.IsChecked != false,
             AiEnabled = AiEnabledCheck.IsChecked != false,
             NetworkEnabled = NetworkEnabledCheck.IsChecked != false,
+            AutoUpdateCheckEnabled = AutoUpdateCheck.IsChecked != false,
             AutoDoubanMatchOnImport = AutoDoubanMatchCheck.IsChecked == true,
             AutoConnectDevice = AutoConnectDeviceCheck.IsChecked != false,
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
@@ -3924,6 +3972,11 @@ public partial class MainWindow
                 downloadsDirectory,
                 new Progress<TransferProgress>(item.SetDownloadProgress),
                 _lifetimeCancellation.Token);
+            if (!await EnsureKindleEmailAttachmentWithinLimitAsync(item.Title, downloadedPath))
+            {
+                item.SetStatus("文件超过 50 MB，无法发送到 Kindle 邮箱");
+                return;
+            }
             item.SetStatus("正在发送邮件…");
             SetTaskStatus($"正在发送《{item.Title}》到 Kindle 邮箱…");
             await _kindleEmailSender.SendAsync(

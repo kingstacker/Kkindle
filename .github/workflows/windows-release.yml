@@ -88,6 +88,33 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ steps.version.outputs.version }}'
+          $setupName = "Kkindle-$version-win-x64-setup.exe"
+          $checksumName = "SHA256SUMS.txt"
+          $setupFile = Get-Item -LiteralPath (Join-Path $env:RELEASE_DIR $setupName)
+          $checksumFile = Get-Item -LiteralPath (Join-Path $env:RELEASE_DIR $checksumName)
+          $downloadBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG"
+          $manifest = [ordered]@{
+            tag_name = $env:RELEASE_TAG
+            html_url = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
+            body = ""
+            draft = $false
+            prerelease = $version -match '-'
+            assets = @(
+              [ordered]@{
+                name = $setupName
+                browser_download_url = "$downloadBase/$setupName"
+                size = $setupFile.Length
+              },
+              [ordered]@{
+                name = $checksumName
+                browser_download_url = "$downloadBase/$checksumName"
+                size = $checksumFile.Length
+              }
+            )
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content `
+            -LiteralPath (Join-Path $env:RELEASE_DIR 'update-manifest.json') `
+            -Encoding utf8NoBOM
           $assets = @(Get-ChildItem -File $env:RELEASE_DIR | ForEach-Object { $_.FullName })
           $releaseArgs = @(
             $env:RELEASE_TAG,

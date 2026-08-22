@@ -70,4 +70,5 @@ public sealed record AppServices(
     IKindleDeviceService? KindleDeviceService = null,
     Func<IReaderHost>? ReaderHostFactory = null,
     AppPaths? Paths = null,
-    string? RootConfigurationDirectory = null);
+    string? RootConfigurationDirectory = null,
+    IAppUpdateInstaller? UpdateInstaller = null);
