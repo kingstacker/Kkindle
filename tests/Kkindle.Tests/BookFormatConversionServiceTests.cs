@@ -1,10 +1,26 @@
+using System.Diagnostics;
 using System.IO.Compression;
+using Kkindle.Core;
 using Kkindle.Infrastructure;
 
 namespace Kkindle.Tests;
 
 public sealed class BookFormatConversionServiceTests
 {
+    [Fact]
+    public void ConversionMetadataIsPassedToCalibreAsSeparateArguments()
+    {
+        var startInfo = new ProcessStartInfo();
+
+        BookFormatConversionService.AddMetadataArguments(
+            startInfo,
+            new FormatConversionMetadata("雪的练习生", "作者甲 / 作者乙"));
+
+        Assert.Equal(
+            ["--title", "雪的练习生", "--authors", "作者甲 / 作者乙"],
+            startInfo.ArgumentList);
+    }
+
     [Fact]
     public async Task ThrowsWhenSourceBookDoesNotExist()
     {

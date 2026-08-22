@@ -322,7 +322,8 @@ public sealed class ProductivityFeatureTests
             string sourcePath,
             string destinationPath,
             IProgress<FormatConversionProgress>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            FormatConversionMetadata? metadata = null)
         {
             using var archive = ZipFile.Open(destinationPath, ZipArchiveMode.Create);
             TestHelpers.AddZipEntry(archive, "OEBPS/dictionary.xhtml", """

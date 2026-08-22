@@ -111,6 +111,7 @@ public partial class MainWindow : Window
     private Point _rubberBandStart;
     private Point _rubberBandCurrent;
     private bool _rubberBandPressedOnCard;
+    private bool _rubberBandGestureActive;
 
     public MainWindow()
         : this(CreateDefaultDependencies())
@@ -647,6 +648,7 @@ public partial class MainWindow : Window
             card.SetGalleryTextVisible(!_appSettings.GridGalleryDisplay);
             card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
         }
+        RefreshLibraryPresenceState();
         SyncCardSelectionVisuals();
 
         var showingBooks = _libraryViewMode is LibraryViewMode.Grid or LibraryViewMode.List;
@@ -681,7 +683,14 @@ public partial class MainWindow : Window
         {
             var refreshedCard = ViewModel.Books.FirstOrDefault(card => card.Book.Id == _selectedCard.Book.Id);
             if (refreshedCard is not null)
-                SelectBook(refreshedCard);
+            {
+                // A library refresh replaces every card instance. Preserve the
+                // selection without turning that data refresh into a request to
+                // open the detail pane (for example after format conversion).
+                _selectedCard = refreshedCard;
+                if (LibraryDetailPane.IsVisible)
+                    SelectBook(refreshedCard);
+            }
             else if (!ViewModel.LibraryBooks.Any(book => book.Id == _selectedCard.Book.Id))
                 ClearSelectedBook();
         }
@@ -1017,8 +1026,6 @@ public partial class MainWindow : Window
                 coverPaths));
         }
 
-        if (_selectedCard is not null)
-            SelectBook(_selectedCard);
     }
 
     private async Task ImportPathsAsync(IEnumerable<string> paths)
@@ -1246,6 +1253,17 @@ public partial class MainWindow : Window
             if ((current is Grid || current is Border)
                 && current is Control control
                 && control.DataContext is BookCardViewModel)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsScrollBarSource(object? source)
+    {
+        for (var current = source as Visual; current is not null; current = current.GetVisualParent())
+        {
+            if (current is ScrollBar)
                 return true;
         }
 
@@ -1820,7 +1838,9 @@ public partial class MainWindow : Window
         ShowBookConversionPopup(card.Title, sourceFile.Format, target, initialProgress);
         SetTaskStatus(initialProgress.Message);
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "KkindleConversions", Guid.NewGuid().ToString("N"));
-        var temporaryOutput = Path.Combine(temporaryDirectory, "converted." + target);
+        var temporaryOutput = Path.Combine(
+            temporaryDirectory,
+            KindleTransferPolicy.CreateSafeFileName(card.Title, "." + target));
         try
         {
             Directory.CreateDirectory(temporaryDirectory);
@@ -1829,7 +1849,8 @@ public partial class MainWindow : Window
                 sourcePath,
                 temporaryOutput,
                 progress,
-                _conversionCancellation.Token);
+                _conversionCancellation.Token,
+                new FormatConversionMetadata(card.Book.Title, card.Book.Authors));
             ApplyBookConversionProgress(new FormatConversionProgress(100, "正在写入书库…"));
             await _library.AddFileToBookAsync(card.Book.Id, temporaryOutput, _conversionCancellation.Token);
             await RefreshLibraryAsync();
@@ -1922,9 +1943,13 @@ public partial class MainWindow : Window
                         continue;
                     }
 
-                    var temporaryOutput = Path.Combine(temporaryRoot, $"{Guid.NewGuid():N}.{targetFormat}");
+                    var bookTemporaryDirectory = Path.Combine(temporaryRoot, book.Id.ToString("N"));
+                    var temporaryOutput = Path.Combine(
+                        bookTemporaryDirectory,
+                        KindleTransferPolicy.CreateSafeFileName(book.Title, "." + targetFormat));
                     try
                     {
+                        Directory.CreateDirectory(bookTemporaryDirectory);
                         var sourcePath = _library.GetAbsoluteFilePath(sourceFile);
                         SetTaskStatus($"正在为《{book.Title}》生成 {targetFormat.ToUpperInvariant()}…");
                         await _formatConverter.ConvertAsync(
@@ -1932,7 +1957,8 @@ public partial class MainWindow : Window
                             temporaryOutput,
                             new Progress<FormatConversionProgress>(value =>
                                 SetTaskStatus($"正在生成 {targetFormat.ToUpperInvariant()}：{book.Title}（{value.RoundedPercentage}%）")),
-                            cancellationToken);
+                            cancellationToken,
+                            new FormatConversionMetadata(book.Title, book.Authors));
                         var addedFile = await _library.AddFileToBookAsync(book.Id, temporaryOutput, cancellationToken);
                         book.Files.Add(addedFile);
                         generatedCount++;
@@ -2785,6 +2811,7 @@ public partial class MainWindow : Window
         _rubberBandSelecting = false;
         _rubberBandPointerSequenceHandled = false;
         _rubberBandPressedOnCard = true;
+        _rubberBandGestureActive = true;
         // Keep the initial gesture on the card so ListBoxItem/ScrollViewer
         // cannot steal movement before the drag crosses the threshold.
         e.Pointer.Capture(control);
@@ -2835,6 +2862,17 @@ public partial class MainWindow : Window
             || !e.GetCurrentPoint(BookGrid).Properties.IsLeftButtonPressed)
             return;
 
+        // handledEventsToo lets this handler observe presses already owned by
+        // the embedded ScrollViewer. Never steal the pointer from its ScrollBar
+        // thumb, and ignore the rest of that pointer sequence as rubber-band UI.
+        if (IsScrollBarSource(e.Source))
+        {
+            _rubberBandGestureActive = false;
+            _rubberBandPressedOnCard = false;
+            _rubberBandSelecting = false;
+            return;
+        }
+
         // 按下发生在书籍卡片上时由 BookCard_PointerPressed 处理点选/多选，
         // 松开时不得再清空选择（否则点选的黑边在松开瞬间被抹掉）。
         _rubberBandPressedOnCard = IsBookCardSource(e.Source);
@@ -2844,13 +2882,16 @@ public partial class MainWindow : Window
         _rubberBandCurrent = _rubberBandStart;
         _rubberBandSelecting = false;
         _rubberBandPointerSequenceHandled = false;
+        _rubberBandGestureActive = true;
         e.Pointer.Capture(BookGrid);
         BookGrid.Focus();
     }
 
     private void BookGrid_PointerMoved(object? sender, PointerEventArgs e)
     {
-        if (!e.GetCurrentPoint(BookGrid).Properties.IsLeftButtonPressed) return;
+        if (!_rubberBandGestureActive
+            || !e.GetCurrentPoint(BookGrid).Properties.IsLeftButtonPressed)
+            return;
         _rubberBandCurrent = e.GetPosition(BookGrid);
         if (!_rubberBandSelecting)
         {
@@ -2875,6 +2916,8 @@ public partial class MainWindow : Window
 
     private void BookGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (!_rubberBandGestureActive) return;
+        _rubberBandGestureActive = false;
         if (_rubberBandPointerSequenceHandled) return;
         _rubberBandPointerSequenceHandled = true;
         if (!_rubberBandSelecting)
@@ -2899,8 +2942,11 @@ public partial class MainWindow : Window
 
     private void BookGrid_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
-        if (_rubberBandSelecting && !ReferenceEquals(e.Pointer.Captured, BookGrid))
+        if (ReferenceEquals(e.Pointer.Captured, BookGrid))
+            return;
+        if (_rubberBandSelecting)
             FinishRubberBandSelection(null);
+        _rubberBandGestureActive = false;
         _rubberBandPressedOnCard = false;
     }
 

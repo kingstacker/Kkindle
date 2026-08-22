@@ -131,7 +131,8 @@ internal static class ReaderNavigationScripts
         string needle,
         int flowMode,
         bool vertical,
-        bool twoPage = false) =>
+        bool twoPage = false,
+        bool revealFootnote = false) =>
         $$"""
         (() => {
           const body = document.body;
@@ -139,6 +140,7 @@ internal static class ReaderNavigationScripts
           const flowMode = {{flowMode}};
           const vertical = {{(vertical ? "true" : "false")}};
           const twoPage = {{(twoPage ? "true" : "false")}};
+          const revealFootnote = {{(revealFootnote ? "true" : "false")}};
           let id = '{{needle}}';
           try { id = decodeURIComponent(id); } catch { }
 
@@ -195,6 +197,26 @@ internal static class ReaderNavigationScripts
           // the first valid heading, paragraph, or image.
           let el = null;
           try { el = document.getElementById(id) || Array.from(document.getElementsByName(id))[0]; } catch { }
+          if (revealFootnote && el) {
+            let revealTarget = el;
+            for (let current = el; current && current !== body; current = current.parentElement) {
+              const metadata = [
+                current.getAttribute?.('epub:type') || '',
+                current.getAttribute?.('role') || '',
+                current.getAttribute?.('class') || '',
+                current.getAttribute?.('id') || ''
+              ].join(' ');
+              if (/\b(?:doc-)?(?:footnote|endnote)\b/i.test(metadata)
+                  || /(?:^|[\s_-])(?:duokan-)?(?:footnote|endnote)(?:[\s_-]|$)/i.test(metadata)) {
+                revealTarget = current;
+                break;
+              }
+            }
+            revealTarget.hidden = false;
+            revealTarget.removeAttribute?.('hidden');
+            revealTarget.style?.setProperty('display', 'block', 'important');
+            revealTarget.style?.setProperty('visibility', 'visible', 'important');
+          }
           let content = null;
           if (el && valid(el)) {
             if (isHeading(el) || el.matches(blockSel)) content = el;

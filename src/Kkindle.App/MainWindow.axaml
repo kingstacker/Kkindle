@@ -1823,32 +1823,69 @@
                                                            FontSize="10"
                                                            TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
-                                            <Grid Grid.Column="2" Width="110" VerticalAlignment="Center">
-                                                <Button Content="↓  下载"
-                                                        Width="110"
-                                                        Height="38"
-                                                        Padding="0"
-                                                        Classes="quiet"
-                                                        Tag="{Binding}"
-                                                        IsEnabled="{Binding IsNotDownloading}"
-                                                        AutomationProperties.Name="下载"
-                                                        ToolTip.Tip="下载"
-                                                        Click="ZLibraryDownloadButton_Click" />
+                                            <StackPanel Grid.Column="2" Width="110" VerticalAlignment="Center" Spacing="5">
+                                                <Grid Width="110" Height="38">
+                                                    <Button Width="110"
+                                                            Height="38"
+                                                            Padding="0"
+                                                            Classes="quiet"
+                                                            Background="{StaticResource PaperBrush}"
+                                                            Foreground="{StaticResource InkBrush}"
+                                                            BorderBrush="{StaticResource InkBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="0"
+                                                            Tag="{Binding}"
+                                                            IsVisible="{Binding IsDownloadIdle}"
+                                                            AutomationProperties.Name="下载"
+                                                            ToolTip.Tip="下载"
+                                                            Click="ZLibraryDownloadButton_Click">
+                                                        <Path Width="18"
+                                                              Height="18"
+                                                              Stretch="Uniform"
+                                                              Stroke="{Binding $parent[Button].Foreground}"
+                                                              StrokeThickness="1.5"
+                                                              Fill="Transparent"
+                                                              Data="M 9,2 L 9,12 M 5,8 L 9,12 L 13,8 M 3,15 L 15,15" />
+                                                    </Button>
+                                                    <Border Width="110"
+                                                            Height="38"
+                                                            Background="{StaticResource PaperBrush}"
+                                                            BorderBrush="{StaticResource InkBrush}"
+                                                            BorderThickness="1"
+                                                            IsVisible="{Binding IsDownloading}">
+                                                        <Grid ClipToBounds="True">
+                                                            <Border Width="{Binding DownloadFillWidth}"
+                                                                    HorizontalAlignment="Left"
+                                                                    Background="{StaticResource InkBrush}" />
+                                                        </Grid>
+                                                    </Border>
+                                                    <Border Width="110"
+                                                            Height="38"
+                                                            Background="{StaticResource InkBrush}"
+                                                            IsVisible="{Binding IsDownloadCompleted}"
+                                                            AutomationProperties.Name="下载完成">
+                                                        <Path Width="18"
+                                                              Height="14"
+                                                              HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"
+                                                              Stretch="Uniform"
+                                                              Stroke="{StaticResource PaperBrush}"
+                                                              StrokeThickness="2"
+                                                              StrokeLineCap="Round"
+                                                              StrokeJoin="Round"
+                                                              Fill="Transparent"
+                                                              Data="M 2,7 L 7,12 L 16,2" />
+                                                    </Border>
+                                                </Grid>
                                                 <TextBlock Text="{Binding StatusMessage}"
                                                            HorizontalAlignment="Center"
-                                                           VerticalAlignment="Bottom"
                                                            MaxWidth="110"
-                                                           Margin="0,0,0,-22"
                                                            FontSize="10"
                                                            Foreground="{StaticResource MutedInkBrush}"
                                                            TextWrapping="Wrap"
+                                                           MaxLines="2"
                                                            TextTrimming="CharacterEllipsis" />
-                                                <ProgressBar Value="{Binding DownloadProgress}"
-                                                             IsVisible="{Binding IsDownloading}"
-                                                             Height="4"
-                                                             VerticalAlignment="Bottom"
-                                                             Margin="0,0,0,-8" />
-                                            </Grid>
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
@@ -4623,6 +4660,8 @@
                                    FontSize="11"
                                    LineHeight="17"
                                    TextWrapping="Wrap"
+                                   MaxLines="4"
+                                   TextTrimming="CharacterEllipsis"
                                    IsVisible="False" />
                     </StackPanel>
                 </Border>

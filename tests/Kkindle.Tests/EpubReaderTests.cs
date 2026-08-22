@@ -330,6 +330,8 @@ public sealed class EpubReaderTests
             Assert.Contains("footnoteHoverElement", bridge, StringComparison.Ordinal);
             Assert.Contains("if (footnoteHoverElement === element) return", bridge, StringComparison.Ordinal);
             Assert.DoesNotContain("element.removeAttribute('href')", bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain("if (footnote) return", bridge, StringComparison.Ordinal);
+            Assert.Contains("send({ type: \"link\", href: absoluteHref", bridge, StringComparison.Ordinal);
             Assert.Contains("type: \"footnoteHover\"", bridge, StringComparison.Ordinal);
             Assert.Contains("nativeContinuousScroll", bridge, StringComparison.Ordinal);
             Assert.Contains("if (nativeContinuousScroll) return", bridge, StringComparison.Ordinal);
@@ -572,11 +574,16 @@ public sealed class EpubReaderTests
             Assert.Contains("display: inline-flex; align-items: center; justify-content: center", bridge, StringComparison.Ordinal);
             Assert.Contains("selectionBar.style.display = 'flex'", bridge, StringComparison.Ordinal);
             Assert.Contains("dismissedSelectionText", bridge, StringComparison.Ordinal);
-            Assert.Contains("highlightWrap.addEventListener('mouseleave', closeStyles)", bridge, StringComparison.Ordinal);
-            Assert.Contains(".kk-sel-highlight-wrap:not(:hover) .kk-sel-styles", bridge, StringComparison.Ordinal);
+            Assert.Contains("highlightButton.addEventListener('mouseenter', openStyles)", bridge, StringComparison.Ordinal);
+            Assert.Contains("highlightButton.addEventListener('mouseleave', scheduleCloseStyles)", bridge, StringComparison.Ordinal);
+            Assert.Contains("highlightPanel.addEventListener('mouseenter', clearCloseStylesTimer)", bridge, StringComparison.Ordinal);
+            Assert.Contains("if (!pointerIsInHighlightMenu()) closeStyles()", bridge, StringComparison.Ordinal);
+            Assert.Contains("}, 160)", bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain(".kk-sel-highlight-wrap:not(:hover) .kk-sel-styles", bridge, StringComparison.Ordinal);
             Assert.Contains("document.addEventListener('mousemove'", bridge, StringComparison.Ordinal);
-            Assert.Contains("containsPoint(panel, event.clientX, event.clientY)", bridge, StringComparison.Ordinal);
-            Assert.Contains("document.addEventListener('mouseleave', closeStyles", bridge, StringComparison.Ordinal);
+            Assert.Contains("pointerIsInHighlightMenu()", bridge, StringComparison.Ordinal);
+            Assert.Contains("document.documentElement.addEventListener('mouseleave', closeStyles)", bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain("document.addEventListener('mouseleave', closeStyles, true)", bridge, StringComparison.Ordinal);
             Assert.Contains("position: absolute; top: 100%; left: 0", bridge, StringComparison.Ordinal);
             Assert.DoesNotContain("styleHoverTimer", bridge, StringComparison.Ordinal);
             Assert.Contains("isSelectionBarTarget", bridge, StringComparison.Ordinal);
@@ -596,7 +603,7 @@ public sealed class EpubReaderTests
                 pointerDirectionIndex,
                 StringComparison.Ordinal);
             Assert.InRange(pointerSendIndex - pointerDirectionIndex, 1, 160);
-            Assert.EndsWith("\n44", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n47", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

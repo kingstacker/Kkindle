@@ -42,7 +42,8 @@ public sealed class ReaderFormatCacheTests
             string sourcePath,
             string destinationPath,
             IProgress<FormatConversionProgress>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            FormatConversionMetadata? metadata = null)
         {
             CallCount++;
             await File.WriteAllTextAsync(destinationPath, "epub", cancellationToken);

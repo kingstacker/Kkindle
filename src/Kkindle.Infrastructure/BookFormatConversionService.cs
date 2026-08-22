@@ -35,7 +35,8 @@ public sealed class BookFormatConversionService : IBookFormatConverter
         string sourcePath,
         string destinationPath,
         IProgress<FormatConversionProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        FormatConversionMetadata? metadata = null)
     {
         var source = Path.GetFullPath(sourcePath);
         var destination = Path.GetFullPath(destinationPath);
@@ -91,6 +92,7 @@ public sealed class BookFormatConversionService : IBookFormatConverter
 
             startInfo.ArgumentList.Add(source);
             startInfo.ArgumentList.Add(destination);
+            AddMetadataArguments(startInfo, metadata);
             if (targetFormat == "azw3")
             {
                 // Rebuild KF8/AZW3 for the connected Kindle generation instead of
@@ -169,6 +171,23 @@ public sealed class BookFormatConversionService : IBookFormatConverter
         {
             if (shortSourceCopy is not null)
                 TryDeleteShortSourceCopy(shortSourceCopy);
+        }
+    }
+
+    internal static void AddMetadataArguments(
+        ProcessStartInfo startInfo,
+        FormatConversionMetadata? metadata)
+    {
+        if (metadata is null) return;
+        if (!string.IsNullOrWhiteSpace(metadata.Title))
+        {
+            startInfo.ArgumentList.Add("--title");
+            startInfo.ArgumentList.Add(metadata.Title.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(metadata.Authors))
+        {
+            startInfo.ArgumentList.Add("--authors");
+            startInfo.ArgumentList.Add(metadata.Authors.Trim());
         }
     }
 

@@ -24,6 +24,15 @@ public static class KindleTransferPolicy
     public static bool RequiresConversionToAzw3(BookFile file) =>
         file.Format.Trim().TrimStart('.').ToLowerInvariant() is "mobi" or "epub";
 
+    public static bool RequiresLegacyMetadataRepair(BookFile file, string sourcePath)
+    {
+        if (!file.Format.Trim().TrimStart('.').Equals("azw3", StringComparison.OrdinalIgnoreCase))
+            return false;
+        var stem = Path.GetFileNameWithoutExtension(sourcePath);
+        return stem.Equals("converted", StringComparison.OrdinalIgnoreCase)
+            || (stem.Length == 32 && stem.All(Uri.IsHexDigit));
+    }
+
     public static string CreateSafeFileName(string? title, string extension)
     {
         extension = extension.StartsWith('.') ? extension : $".{extension}";

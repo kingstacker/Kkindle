@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "44";
+    private const string ExtractionFormatVersion = "47";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -256,9 +256,6 @@ public sealed class EpubReaderPreparationService
                   padding: 3px; z-index: 2;
                 }
                 #kkindle-selection-bar .kk-sel-styles.open { display: block; }
-                #kkindle-selection-bar .kk-sel-highlight-wrap:not(:hover) .kk-sel-styles {
-                  display: none !important;
-                }
                 #kkindle-selection-bar .kk-sel-styles.above {
                   top: auto; bottom: 100%;
                 }
@@ -312,7 +309,7 @@ public sealed class EpubReaderPreparationService
               event.stopPropagation();
               const style = target.dataset.highlight;
               if (style) {
-                document.getElementById('kk-sel-styles')?.classList.remove('open');
+                closeStyles();
                 dismissedSelectionText = (window.getSelection?.().toString() || '').trim();
                 hideSelectionBar();
                 send({ type: 'selectionAction', action: 'highlight', style });
@@ -321,17 +318,34 @@ public sealed class EpubReaderPreparationService
               const action = target.dataset.action;
               if (!action) return;
               if (action === 'highlight-menu') {
-                document.getElementById('kk-sel-styles')?.classList.toggle('open');
+                const panel = document.getElementById('kk-sel-styles');
+                if (panel?.classList.contains('open')) closeStyles();
+                else openStyles();
                 return;
               }
               dismissedSelectionText = (window.getSelection?.().toString() || '').trim();
               hideSelectionBar();
               send({ type: 'selectionAction', action });
             }, true);
-            // Hover opens the style picker. The button and flyout are flush,
-            // so leaving their shared wrapper means the pointer is in neither
-            // region and the flyout can close immediately.
+            let closeStylesTimer = 0;
+            let selectionPointerX = -1;
+            let selectionPointerY = -1;
+            const clearCloseStylesTimer = () => {
+              if (!closeStylesTimer) return;
+              window.clearTimeout(closeStylesTimer);
+              closeStylesTimer = 0;
+            };
+            const containsPoint = (element, x, y) => {
+              if (!element) return false;
+              const rect = element.getBoundingClientRect();
+              return x >= rect.left && x <= rect.right
+                && y >= rect.top && y <= rect.bottom;
+            };
+            const pointerIsInHighlightMenu = () =>
+              containsPoint(document.getElementById('kk-sel-highlight'), selectionPointerX, selectionPointerY)
+              || containsPoint(document.getElementById('kk-sel-styles'), selectionPointerX, selectionPointerY);
             const openStyles = () => {
+              clearCloseStylesTimer();
               const panel = document.getElementById('kk-sel-styles');
               if (!panel) return;
               panel.classList.add('open');
@@ -343,31 +357,31 @@ public sealed class EpubReaderPreparationService
                 panel.classList.add('above');
             };
             const closeStyles = () => {
+              clearCloseStylesTimer();
               document.getElementById('kk-sel-styles')?.classList.remove('open', 'above');
             };
-            const highlightWrap = selectionBar.querySelector('.kk-sel-highlight-wrap');
-            highlightWrap.addEventListener('mouseenter', openStyles);
-            highlightWrap.addEventListener('mouseleave', closeStyles);
-            // This also covers a menu opened by click. Check coordinates on
-            // every mouse move instead of relying on pointer enter/leave,
-            // which some WebKitGTK builds do not deliver consistently for an
-            // absolutely positioned child. CSS :hover above is the visual
-            // fallback, while this clears the menu's open state as well.
+            const scheduleCloseStyles = () => {
+              if (closeStylesTimer) return;
+              closeStylesTimer = window.setTimeout(() => {
+                closeStylesTimer = 0;
+                if (!pointerIsInHighlightMenu()) closeStyles();
+              }, 160);
+            };
+            const highlightButton = selectionBar.querySelector('#kk-sel-highlight');
+            const highlightPanel = selectionBar.querySelector('#kk-sel-styles');
+            highlightButton.addEventListener('mouseenter', openStyles);
+            highlightButton.addEventListener('mouseleave', scheduleCloseStyles);
+            highlightPanel.addEventListener('mouseenter', clearCloseStylesTimer);
+            highlightPanel.addEventListener('mouseleave', scheduleCloseStyles);
             document.addEventListener('mousemove', event => {
+              selectionPointerX = event.clientX;
+              selectionPointerY = event.clientY;
               const panel = document.getElementById('kk-sel-styles');
               if (!panel?.classList.contains('open')) return;
-              const button = document.getElementById('kk-sel-highlight');
-              const containsPoint = (element, x, y) => {
-                if (!element) return false;
-                const rect = element.getBoundingClientRect();
-                return x >= rect.left && x <= rect.right
-                  && y >= rect.top && y <= rect.bottom;
-              };
-              if (containsPoint(button, event.clientX, event.clientY)
-                  || containsPoint(panel, event.clientX, event.clientY)) return;
-              closeStyles();
+              if (pointerIsInHighlightMenu()) clearCloseStylesTimer();
+              else scheduleCloseStyles();
             }, true);
-            document.addEventListener('mouseleave', closeStyles, true);
+            document.documentElement.addEventListener('mouseleave', closeStyles);
             document.body.appendChild(selectionBar);
           };
           const placeSelectionBar = (x, y, bottom, viewportWidth, viewportHeight) => {
@@ -576,7 +590,6 @@ public sealed class EpubReaderPreparationService
                 let absoluteHref;
                 try { absoluteHref = new URL(href, location.href).href; }
                 catch (_) { absoluteHref = href; }
-                if (footnote) return;
                 send({ type: "link", href: absoluteHref, target: element.target || "", footnote });
                 return;
               }

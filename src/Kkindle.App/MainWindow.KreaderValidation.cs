@@ -2,6 +2,8 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
+using Avalonia;
+using Avalonia.VisualTree;
 using Kkindle.Core;
 
 namespace Kkindle;
@@ -73,6 +75,8 @@ public partial class MainWindow
         Require(initial.GetProperty("bookmarkCorner").GetBoolean(), "bookmark corner missing");
         Require(initial.GetProperty("footnoteLinks").GetInt32() > 0, "footnote link not detected");
         await log.WriteLineAsync("PASS EPUB initial render, bridge, footnote marker");
+        await ValidateWindowsFootnoteHoverAndClickAsync(host, log);
+        await ValidateWindowsSelectionHighlightHoverAsync(host, log);
         await log.WriteLineAsync(
             $"DEBUG surface initial: activeSlot={ReaderActiveHostSlot.IsVisible} overlay={ReaderLinuxTextFallbackOverlay.IsVisible}");
         await PauseKreaderValidationAtInitialPageAsync(log);
@@ -176,6 +180,278 @@ public partial class MainWindow
         var aiSources = await _readerData.SearchBookAsync(_readerBookCard.Book.Id, "AI context linux", 10, ReaderToken, exactPhraseOnly: true);
         Require(aiSources.Count > 0, "EPUB AI/search context index found no chunks");
         await log.WriteLineAsync("PASS EPUB in-page search, whole-book search, AI context index");
+    }
+
+    private async Task ValidateWindowsFootnoteHoverAndClickAsync(IReaderHost host, TextWriter log)
+    {
+        if (!OperatingSystem.IsWindows() || host.View is not Avalonia.Controls.Control view)
+            return;
+
+        await host.InvokeScriptAsync("""
+            (() => {
+              const anchor = document.querySelector('a[epub\\:type*="noteref"], a[role*="doc-noteref"]');
+              anchor?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+            })();
+            """);
+        await Task.Delay(150);
+        var rawRect = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+            (() => {
+              const anchor = document.querySelector('a[epub\\:type*="noteref"], a[role*="doc-noteref"]');
+              if (!anchor) return null;
+              const rect = anchor.getBoundingClientRect();
+              return JSON.stringify({
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+                viewportWidth: document.documentElement.clientWidth || window.innerWidth || 1,
+                viewportHeight: document.documentElement.clientHeight || window.innerHeight || 1
+              });
+            })();
+            """));
+        Require(!string.IsNullOrWhiteSpace(rawRect), "footnote marker rectangle missing");
+        using var rectDocument = JsonDocument.Parse(rawRect!);
+        var rect = rectDocument.RootElement;
+        var topLeft = view.PointToScreen(new Avalonia.Point(0, 0));
+        var scaling = Avalonia.Controls.TopLevel.GetTopLevel(view)?.RenderScaling ?? 1d;
+        var width = Math.Max(1, view.Bounds.Width * scaling);
+        var height = Math.Max(1, view.Bounds.Height * scaling);
+        var screenX = topLeft.X + (int)Math.Round(rect.GetProperty("x").GetDouble()
+            * width / Math.Max(1, rect.GetProperty("viewportWidth").GetDouble()));
+        var screenY = topLeft.Y + (int)Math.Round(rect.GetProperty("y").GetDouble()
+            * height / Math.Max(1, rect.GetProperty("viewportHeight").GetDouble()));
+        Require(SetCursorPos(screenX - 40, screenY), "failed to move cursor away from footnote marker");
+        await Task.Delay(80);
+        Require(SetCursorPos(screenX, screenY), "failed to position cursor over footnote marker");
+
+        var hoverStates = new List<bool>();
+        for (var sample = 0; sample < 8; sample++)
+        {
+            await Task.Delay(100);
+            hoverStates.Add(ReaderFootnoteHostPopup.IsOpen);
+        }
+        if (!ReaderFootnoteHostPopup.IsOpen)
+        {
+            var hit = DecodeReaderScriptString(await host.InvokeScriptAsync($$"""
+                (() => {
+                  const x = {{rect.GetProperty("x").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)}};
+                  const y = {{rect.GetProperty("y").GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)}};
+                  const element = document.elementFromPoint(x, y);
+                  return JSON.stringify({
+                    tag: element?.tagName || '',
+                    href: element?.closest?.('a')?.href || '',
+                    text: element?.textContent || ''
+                  });
+                })();
+                """));
+            await log.WriteLineAsync($"DEBUG footnote hover states={string.Join(',', hoverStates)} hit={hit}");
+        }
+        Require(ReaderFootnoteHostPopup.IsOpen, "footnote popup closed while pointer stayed over marker");
+        Require(
+            ReaderFootnoteText.Text?.Contains("Footnote validation body", StringComparison.Ordinal) == true,
+            "footnote popup text missing");
+
+        await host.InvokeScriptAsync("""
+            (() => {
+              const anchor = document.querySelector('a[epub\\:type*="noteref"], a[role*="doc-noteref"]');
+              anchor?.click();
+              return !!anchor;
+            })();
+            """);
+        var navigated = false;
+        for (var attempt = 0; attempt < 20 && !navigated; attempt++)
+        {
+            await Task.Delay(100);
+            var result = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+                (() => {
+                  const target = document.getElementById('footnote-1');
+                  return JSON.stringify({
+                    visible: !!target && getComputedStyle(target).display !== 'none',
+                    hash: window.__kkindleReaderLogicalHash || location.hash || ''
+                  });
+                })();
+                """));
+            if (string.IsNullOrWhiteSpace(result)) continue;
+            using var resultDocument = JsonDocument.Parse(result);
+            var root = resultDocument.RootElement;
+            navigated = root.GetProperty("visible").GetBoolean()
+                && root.GetProperty("hash").GetString()?.Contains("footnote-1", StringComparison.Ordinal) == true;
+        }
+        if (!navigated)
+        {
+            var diagnostic = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+                (() => {
+                  const anchor = document.querySelector('a[epub\\:type*="noteref"], a[role*="doc-noteref"]');
+                  const target = document.getElementById('footnote-1');
+                  return JSON.stringify({
+                    href: anchor?.href || '',
+                    targetDisplay: target ? getComputedStyle(target).display : '',
+                    targetInlineDisplay: target?.style?.getPropertyValue('display') || '',
+                    hash: window.__kkindleReaderLogicalHash || location.hash || ''
+                  });
+                })();
+                """));
+            await log.WriteLineAsync(
+                $"DEBUG footnote click navigation: {diagnostic}; currentFragment={_readerCurrentFragment}; status={ReaderStatusText.Text}");
+        }
+        Require(navigated, "clicking footnote marker did not reveal and navigate to its target");
+        HideReaderFootnotePopup();
+        await log.WriteLineAsync("PASS Windows footnote hover stability and click navigation");
+    }
+
+    private async Task ValidateWindowsSelectionHighlightHoverAsync(IReaderHost host, TextWriter log)
+    {
+        if (!OperatingSystem.IsWindows() || host.View is not Avalonia.Controls.Control view)
+            return;
+
+        await host.InvokeScriptAsync("""
+            (() => {
+              const paragraph = Array.from(document.querySelectorAll('p'))
+                .find(item => (item.textContent || '').trim().length >= 24);
+              const textNode = paragraph?.firstChild;
+              if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return false;
+              const range = document.createRange();
+              range.setStart(textNode, 0);
+              range.setEnd(textNode, Math.min(20, textNode.textContent?.length || 0));
+              const selection = window.getSelection();
+              selection?.removeAllRanges();
+              selection?.addRange(range);
+              document.dispatchEvent(new Event('selectionchange'));
+              return true;
+            })();
+            """);
+        await Task.Delay(150);
+        var rawButtonRect = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+            (() => {
+              const bar = document.getElementById('kkindle-selection-bar');
+              const button = document.getElementById('kk-sel-highlight');
+              const panel = document.getElementById('kk-sel-styles');
+              if (!bar || !button || !panel) return null;
+              if (!window.__kkindleValidationPointerInstalled) {
+                window.__kkindleValidationPointerInstalled = true;
+                window.__kkindleValidationMenuTrace = [];
+                const trace = (label, event) => window.__kkindleValidationMenuTrace.push({
+                  at: Math.round(performance.now()),
+                  label,
+                  target: event?.target?.id || event?.target?.dataset?.highlight || event?.target?.tagName || '',
+                  related: event?.relatedTarget?.id || event?.relatedTarget?.dataset?.highlight || event?.relatedTarget?.tagName || '',
+                  classes: panel.className
+                });
+                for (const type of ['mouseenter', 'mouseleave', 'mouseover', 'mouseout']) {
+                  button.addEventListener(type, event => trace('button:' + type, event));
+                  panel.addEventListener(type, event => trace('panel:' + type, event));
+                }
+                document.documentElement.addEventListener('mouseleave', event => trace('html:mouseleave', event));
+                new MutationObserver(() => trace('panel:class', null))
+                  .observe(panel, { attributes: true, attributeFilter: ['class'] });
+                document.addEventListener('mousemove', event => {
+                  window.__kkindleValidationPointer = {
+                    x: event.clientX,
+                    y: event.clientY,
+                    target: event.target?.id || event.target?.dataset?.highlight || event.target?.tagName || ''
+                  };
+                }, true);
+              }
+              panel.classList.remove('open', 'above');
+              bar.style.display = 'flex';
+              bar.style.left = '120px';
+              bar.style.top = '120px';
+              const rect = button.getBoundingClientRect();
+              return JSON.stringify({
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+                viewportWidth: document.documentElement.clientWidth || window.innerWidth || 1,
+                viewportHeight: document.documentElement.clientHeight || window.innerHeight || 1
+              });
+            })();
+            """));
+        Require(!string.IsNullOrWhiteSpace(rawButtonRect), "selection highlight button rectangle missing");
+        using var buttonDocument = JsonDocument.Parse(rawButtonRect!);
+        var buttonRect = buttonDocument.RootElement;
+        var topLeft = view.PointToScreen(new Avalonia.Point(0, 0));
+        var scaling = Avalonia.Controls.TopLevel.GetTopLevel(view)?.RenderScaling ?? 1d;
+        var width = Math.Max(1, view.Bounds.Width * scaling);
+        var height = Math.Max(1, view.Bounds.Height * scaling);
+        int ToScreenX(double x, double viewportWidth) =>
+            topLeft.X + (int)Math.Round(x * width / Math.Max(1, viewportWidth));
+        int ToScreenY(double y, double viewportHeight) =>
+            topLeft.Y + (int)Math.Round(y * height / Math.Max(1, viewportHeight));
+        var viewportWidth = buttonRect.GetProperty("viewportWidth").GetDouble();
+        var viewportHeight = buttonRect.GetProperty("viewportHeight").GetDouble();
+        Require(
+            SetCursorPos(
+                ToScreenX(buttonRect.GetProperty("x").GetDouble(), viewportWidth),
+                ToScreenY(buttonRect.GetProperty("y").GetDouble(), viewportHeight)),
+            "failed to position cursor over selection highlight button");
+        await Task.Delay(300);
+        Require(await IsKreaderHighlightMenuOpenAsync(host), "selection highlight submenu did not open on hover");
+
+        var rawPanelRect = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+            (() => {
+              const panel = document.getElementById('kk-sel-styles');
+              if (!panel) return null;
+              const rect = panel.getBoundingClientRect();
+              return JSON.stringify({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+            })();
+            """));
+        Require(!string.IsNullOrWhiteSpace(rawPanelRect), "selection highlight submenu rectangle missing");
+        using var panelDocument = JsonDocument.Parse(rawPanelRect!);
+        var panelRect = panelDocument.RootElement;
+        Require(
+            SetCursorPos(
+                ToScreenX(panelRect.GetProperty("x").GetDouble(), viewportWidth),
+                ToScreenY(panelRect.GetProperty("y").GetDouble(), viewportHeight)),
+            "failed to position cursor inside selection highlight submenu");
+        await Task.Delay(450);
+        var remainedOpen = await IsKreaderHighlightMenuOpenAsync(host);
+        if (!remainedOpen)
+        {
+            var diagnostic = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+                (() => {
+                  const bar = document.getElementById('kkindle-selection-bar');
+                  const button = document.getElementById('kk-sel-highlight');
+                  const panel = document.getElementById('kk-sel-styles');
+                  const pointer = window.__kkindleValidationPointer || { x: -1, y: -1, target: '' };
+                  const rect = element => {
+                    const value = element?.getBoundingClientRect();
+                    return value ? { left: value.left, top: value.top, right: value.right, bottom: value.bottom } : null;
+                  };
+                  return JSON.stringify({
+                    pointer,
+                    hit: document.elementFromPoint(pointer.x, pointer.y)?.outerHTML || '',
+                    button: rect(button),
+                    panel: rect(panel),
+                    barDisplay: bar ? getComputedStyle(bar).display : '',
+                    panelDisplay: panel ? getComputedStyle(panel).display : '',
+                    selection: window.getSelection()?.toString() || '',
+                    trace: window.__kkindleValidationMenuTrace || []
+                  });
+                })();
+                """));
+            await log.WriteLineAsync("DEBUG selection submenu dismissed: " + diagnostic);
+        }
+        Require(remainedOpen, "selection highlight submenu closed while pointer was inside it");
+
+        Require(
+            SetCursorPos(ToScreenX(20, viewportWidth), ToScreenY(20, viewportHeight)),
+            "failed to position cursor outside selection highlight controls");
+        await Task.Delay(400);
+        Require(!await IsKreaderHighlightMenuOpenAsync(host), "selection highlight submenu stayed open after pointer left button and menu");
+        await host.InvokeScriptAsync("""
+            (() => {
+              const bar = document.getElementById('kkindle-selection-bar');
+              document.getElementById('kk-sel-styles')?.classList.remove('open', 'above');
+              if (bar) bar.style.display = 'none';
+              window.getSelection()?.removeAllRanges();
+            })();
+            """);
+        await log.WriteLineAsync("PASS Windows selection highlight submenu hover open, retain, dismiss");
+    }
+
+    private static async Task<bool> IsKreaderHighlightMenuOpenAsync(IReaderHost host)
+    {
+        var value = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+            document.getElementById('kk-sel-styles')?.classList.contains('open') ? 'open' : 'closed';
+            """));
+        return string.Equals(value, "open", StringComparison.Ordinal);
     }
 
     private async Task SetKreaderValidationLayoutAsync(int flowMode, bool twoPage)

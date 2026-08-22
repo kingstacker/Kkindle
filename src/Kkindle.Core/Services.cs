@@ -23,7 +23,8 @@ public interface IBookFormatConverter
         string sourcePath,
         string destinationPath,
         IProgress<FormatConversionProgress>? progress = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        FormatConversionMetadata? metadata = null);
 }
 
 public interface IMetadataService

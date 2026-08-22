@@ -586,7 +586,7 @@ public partial class MainWindow
         _deviceClippingCache.Clear();
         DeviceBookCountText.Text = "0";
         _devices = [];
-        ApplyDeviceBookFilter();
+        RefreshLibraryPresenceState();
         UpdateDeviceBookSelectionUi();
         _deviceDisplayName = null;
         DevicePageDeviceText.Text = "未检测到设备";
@@ -633,24 +633,7 @@ public partial class MainWindow
             DeviceBookCountText.Text = DeviceBooks.Count.ToString();
             UpdateDeviceBookSelectionUi();
 
-            var comparison = BookLibraryComparer.Compare(ViewModel.LibraryBooks, books);
-            foreach (var localCard in ViewModel.Books)
-            {
-                localCard.SetLibraryPresence(
-                    comparison.BooksOnKindle.Contains(localCard.Book.Id)
-                        ? BookLibraryPresence.Both
-                        : BookLibraryPresence.ComputerOnly);
-                localCard.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
-            }
-            foreach (var card in DeviceBooks)
-            {
-                var presence = comparison.KindleBooksOnComputer.Contains(card.Book.RelativePath)
-                    ? BookLibraryPresence.Both
-                    : BookLibraryPresence.KindleOnly;
-                card.SetLibraryPresence(presence);
-            }
-
-            ApplyDeviceBookFilter();
+            RefreshLibraryPresenceState();
             DevicePageStatusText.Text = $"已读取 {books.Count} 本书 · {device.ConnectionLabel}";
             _deviceBooksLoaded = true;
             _deviceBooksDirty = false;
@@ -664,6 +647,32 @@ public partial class MainWindow
             DeviceBookEmptyState.IsVisible = true;
             DevicePageStatusText.Text = "Kindle 书库扫描失败。";
         }
+    }
+
+    private void RefreshLibraryPresenceState(bool refreshDeviceView = true)
+    {
+        var comparison = BookLibraryComparer.Compare(
+            ViewModel.LibraryBooks,
+            DeviceBooks.Select(card => card.Book));
+        foreach (var localCard in ViewModel.Books)
+        {
+            localCard.SetLibraryPresence(
+                comparison.BooksOnKindle.Contains(localCard.Book.Id)
+                    ? BookLibraryPresence.Both
+                    : BookLibraryPresence.ComputerOnly);
+            localCard.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
+        }
+        foreach (var card in DeviceBooks)
+        {
+            card.SetLibraryPresence(
+                comparison.KindleBooksOnComputer.Contains(card.Book.RelativePath)
+                    ? BookLibraryPresence.Both
+                    : BookLibraryPresence.KindleOnly);
+            card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
+        }
+
+        if (refreshDeviceView && _stage3Ready)
+            ApplyDeviceBookFilter();
     }
 
     private async Task WarmDeviceCachesAsync(
@@ -1164,7 +1173,7 @@ public partial class MainWindow
             foreach (var book in DeviceBooks) book.Dispose();
             DeviceBooks.Clear();
             DeviceBookCountText.Text = "0";
-            ApplyDeviceBookFilter();
+            RefreshLibraryPresenceState();
             UpdateDeviceBookSelectionUi();
             _acceptedDeviceId = null;
             _ignoredDeviceId = null;
@@ -1378,7 +1387,8 @@ public partial class MainWindow
         if (!File.Exists(sourcePath))
             throw new FileNotFoundException("找不到本地书籍文件，请先刷新书库。", sourcePath);
 
-        if (!KindleTransferPolicy.RequiresConversionToAzw3(sourceFile))
+        var requiresMetadataRepair = KindleTransferPolicy.RequiresLegacyMetadataRepair(sourceFile, sourcePath);
+        if (!KindleTransferPolicy.RequiresConversionToAzw3(sourceFile) && !requiresMetadataRepair)
             return new PreparedKindleTransfer(sourceFile, sourcePath);
 
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "Kkindle", "kindle-ready", Guid.NewGuid().ToString("N"));
@@ -1396,7 +1406,12 @@ public partial class MainWindow
                     $"正在生成 Kindle 兼容版本 · {value.RoundedPercentage}%")));
             try
             {
-                await _formatConverter.ConvertAsync(sourcePath, destinationPath, conversionProgress, cancellationToken);
+                await _formatConverter.ConvertAsync(
+                    sourcePath,
+                    destinationPath,
+                    conversionProgress,
+                    cancellationToken,
+                    new FormatConversionMetadata(book.Title, book.Authors));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1411,8 +1426,19 @@ public partial class MainWindow
                 var normalized = Path.Combine(
                     temporaryDirectory,
                     KindleTransferPolicy.CreateSafeFileName(book.Title, ".epub"));
-                await _formatConverter.ConvertAsync(sourcePath, normalized, conversionProgress, cancellationToken);
-                await _formatConverter.ConvertAsync(normalized, destinationPath, conversionProgress, cancellationToken);
+                var metadata = new FormatConversionMetadata(book.Title, book.Authors);
+                await _formatConverter.ConvertAsync(
+                    sourcePath,
+                    normalized,
+                    conversionProgress,
+                    cancellationToken,
+                    metadata);
+                await _formatConverter.ConvertAsync(
+                    normalized,
+                    destinationPath,
+                    conversionProgress,
+                    cancellationToken,
+                    metadata);
             }
 
             var output = new FileInfo(destinationPath);
@@ -1866,7 +1892,8 @@ public partial class MainWindow
                             importPath,
                             new Progress<FormatConversionProgress>(value =>
                                 DevicePageStatusText.Text = $"正在将《{card.Title}》转换为 EPUB：{value.RoundedPercentage}%"),
-                            _lifetimeCancellation.Token);
+                            _lifetimeCancellation.Token,
+                            new FormatConversionMetadata(card.Book.Title, card.Book.Authors));
                     }
                     importPaths.Add(importPath);
                 }
@@ -1947,7 +1974,7 @@ public partial class MainWindow
                 firstFailure ??= exception.Message;
             }
         }
-        ApplyDeviceBookFilter();
+        RefreshLibraryPresenceState();
         UpdateDeviceBookSelectionUi();
         var completionMessage = $"已从 Kindle 删除 {removed} 本书。";
         DevicePageStatusText.Text = completionMessage;
@@ -1970,7 +1997,7 @@ public partial class MainWindow
                 DeviceBooks.Remove(card);
                 card.Dispose();
                 DeviceBookCountText.Text = DeviceBooks.Count.ToString();
-                ApplyDeviceBookFilter();
+                RefreshLibraryPresenceState();
                 UpdateDeviceBookSelectionUi();
                 DevicePageStatusText.Text = $"已从 Kindle 删除《{card.Title}》。";
                 ShowTransferToast("从 Kindle 删除书籍", $"已从 Kindle 删除《{card.Title}》。", progress: 100, autoHide: true);
@@ -4347,6 +4374,7 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject
     private static readonly string[] CoverFallbackHosts = ["https://covers.z-library.sk"];
     private Bitmap? _coverImage;
     private bool _isDownloading;
+    private bool _isDownloadCompleted;
     private double _downloadProgress;
     private string _statusMessage = string.Empty;
 
@@ -4396,16 +4424,30 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject
         get => _isDownloading;
         set
         {
+            if (value)
+            {
+                DownloadProgress = 0;
+                if (SetProperty(ref _isDownloadCompleted, false, nameof(IsDownloadCompleted)))
+                    OnPropertyChanged(nameof(IsDownloadIdle));
+            }
             if (!SetProperty(ref _isDownloading, value)) return;
             OnPropertyChanged(nameof(IsNotDownloading));
+            OnPropertyChanged(nameof(IsDownloadIdle));
         }
     }
     public bool IsNotDownloading => !IsDownloading;
+    public bool IsDownloadCompleted => _isDownloadCompleted;
+    public bool IsDownloadIdle => !IsDownloading && !IsDownloadCompleted;
     public double DownloadProgress
     {
         get => _downloadProgress;
-        private set => SetProperty(ref _downloadProgress, value);
+        private set
+        {
+            if (!SetProperty(ref _downloadProgress, Math.Clamp(value, 0, 100))) return;
+            OnPropertyChanged(nameof(DownloadFillWidth));
+        }
     }
+    public double DownloadFillWidth => DownloadProgress * 1.08;
     public string StatusMessage
     {
         get => _statusMessage;
@@ -4416,7 +4458,12 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject
         DownloadProgress = progress.Percentage;
         StatusMessage = $"正在下载 {progress.Percentage:0}%";
     }
-    public void MarkDownloadCompleted() => DownloadProgress = 100;
+    public void MarkDownloadCompleted()
+    {
+        DownloadProgress = 100;
+        if (!SetProperty(ref _isDownloadCompleted, true, nameof(IsDownloadCompleted))) return;
+        OnPropertyChanged(nameof(IsDownloadIdle));
+    }
     public void SetStatus(string message) => StatusMessage = message;
 
     public async Task LoadCoverAsync(CancellationToken cancellationToken = default)

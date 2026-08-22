@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -9,6 +10,7 @@ namespace Kkindle.Infrastructure;
 
 public sealed class BookMetadataService : IMetadataService
 {
+    private const uint AuthorRecordType = 100;
     private const uint KindleCoverOffsetRecordType = 201;
 
     public async Task<BookMetadata> ReadMetadataAsync(string path, CancellationToken cancellationToken = default)
@@ -26,12 +28,18 @@ public sealed class BookMetadataService : IMetadataService
     {
         var title = CleanFileTitle(Path.GetFileNameWithoutExtension(path));
         byte[]? coverBytes = null;
+        var authors = "未知作者";
         if (extension is ".mobi" or ".azw" or ".azw3" or ".kfx")
-            coverBytes = await ReadKindleCoverAsync(path, cancellationToken);
+        {
+            var kindleMetadata = await ReadKindleMetadataAsync(path, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(kindleMetadata.Title)) title = kindleMetadata.Title;
+            if (!string.IsNullOrWhiteSpace(kindleMetadata.Authors)) authors = kindleMetadata.Authors;
+            coverBytes = kindleMetadata.CoverBytes;
+        }
         return new BookMetadata
         {
             Title = title,
-            Authors = "未知作者",
+            Authors = authors,
             CoverBytes = coverBytes,
             CoverExtension = ".jpg"
         };
@@ -132,17 +140,94 @@ public sealed class BookMetadataService : IMetadataService
         return title.Replace('_', ' ').Trim();
     }
 
-    private static async Task<byte[]?> ReadKindleCoverAsync(
+    private static async Task<(string? Title, string? Authors, byte[]? CoverBytes)> ReadKindleMetadataAsync(
         string path,
         CancellationToken cancellationToken)
     {
         const long maximumContainerSize = 128L * 1024 * 1024;
         var file = new FileInfo(path);
-        if (!file.Exists || file.Length <= 0 || file.Length > maximumContainerSize) return null;
+        if (!file.Exists || file.Length <= 0 || file.Length > maximumContainerSize)
+            return (null, null, null);
 
         var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
-        return TryReadKindleCoverJpeg(bytes)
+        TryReadKindleTextMetadata(bytes, out var title, out var authors);
+        var cover = TryReadKindleCoverJpeg(bytes)
             ?? ReadLargestEmbeddedJpeg(bytes, cancellationToken);
+        return (title, authors, cover);
+    }
+
+    private static bool TryReadKindleTextMetadata(
+        ReadOnlySpan<byte> bytes,
+        out string? title,
+        out string? authors)
+    {
+        title = null;
+        authors = null;
+        if (!TryReadPalmDatabaseRecords(bytes, out var records)) return false;
+
+        foreach (var record in records)
+        {
+            var data = bytes.Slice(record.Start, record.Length);
+            var mobiOffset = IndexOf(data, "MOBI"u8);
+            if (mobiOffset < 0 || mobiOffset > data.Length - 0x4C) continue;
+
+            var encoding = ReadUInt32(data, mobiOffset + 0x0C);
+            var titleOffset = ReadUInt32(data, mobiOffset + 0x44);
+            var titleLength = ReadUInt32(data, mobiOffset + 0x48);
+            if (titleLength > 0
+                && titleOffset <= (uint)data.Length
+                && titleLength <= (uint)data.Length - titleOffset)
+            {
+                title = DecodeKindleText(data.Slice((int)titleOffset, (int)titleLength), encoding);
+            }
+
+            var authorValues = ReadExthTextValues(data, AuthorRecordType, encoding);
+            if (authorValues.Count > 0)
+                authors = string.Join(" / ", authorValues.Distinct(StringComparer.CurrentCultureIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(authors)) return true;
+        }
+        return false;
+    }
+
+    private static List<string> ReadExthTextValues(
+        ReadOnlySpan<byte> bytes,
+        uint recordType,
+        uint textEncoding)
+    {
+        var values = new List<string>();
+        for (var offset = 0; offset <= bytes.Length - 12; offset++)
+        {
+            if (!bytes.Slice(offset, 4).SequenceEqual("EXTH"u8)) continue;
+            var headerLength = ReadUInt32(bytes, offset + 4);
+            var recordCount = ReadUInt32(bytes, offset + 8);
+            if (headerLength < 12 || headerLength > bytes.Length - offset || recordCount > 4096)
+                continue;
+
+            var recordOffset = offset + 12;
+            var headerEnd = offset + (int)headerLength;
+            for (var index = 0; index < recordCount && recordOffset <= headerEnd - 8; index++)
+            {
+                var currentType = ReadUInt32(bytes, recordOffset);
+                var recordLength = ReadUInt32(bytes, recordOffset + 4);
+                if (recordLength < 8 || recordLength > headerEnd - recordOffset) break;
+                if (currentType == recordType)
+                {
+                    var value = DecodeKindleText(
+                        bytes.Slice(recordOffset + 8, (int)recordLength - 8),
+                        textEncoding);
+                    if (!string.IsNullOrWhiteSpace(value)) values.Add(value);
+                }
+                recordOffset += (int)recordLength;
+            }
+            offset = headerEnd - 1;
+        }
+        return values;
+    }
+
+    private static string DecodeKindleText(ReadOnlySpan<byte> value, uint textEncoding)
+    {
+        var encoding = textEncoding == 65001 ? Encoding.UTF8 : Encoding.Latin1;
+        return encoding.GetString(value).Trim('\0', ' ', '\r', '\n', '\t');
     }
 
     private static byte[]? TryReadKindleCoverJpeg(ReadOnlySpan<byte> bytes)

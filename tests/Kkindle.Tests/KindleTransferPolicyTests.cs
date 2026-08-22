@@ -5,6 +5,17 @@ namespace Kkindle.Tests;
 
 public sealed class KindleTransferPolicyTests
 {
+    [Theory]
+    [InlineData("converted.azw3", true)]
+    [InlineData("0123456789abcdef0123456789abcdef.azw3", true)]
+    [InlineData("雪的练习生.azw3", false)]
+    public void LegacyGeneratedAzw3NamesRequireMetadataRepair(string fileName, bool expected)
+    {
+        var file = new BookFile { Format = "azw3" };
+
+        Assert.Equal(expected, KindleTransferPolicy.RequiresLegacyMetadataRepair(file, fileName));
+    }
+
     [Fact]
     public void PrefersAzw3OverEpubForUsbTransfer()
     {

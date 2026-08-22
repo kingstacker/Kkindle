@@ -76,8 +76,10 @@ public partial class MainWindow
     private int _readerBookmarkIndicatorSequence;
     private int _readerFootnoteHoverSequence;
     private bool _readerFootnotePollRunning;
+    private int _readerFootnoteHoverMissCount;
     private string? _readerFootnoteHref;
     private Point? _readerFootnotePlacementPoint;
+    private PixelPoint? _readerFootnoteAnchorScreenPoint;
     private DispatcherTimer? _readerFootnoteHoverTimer;
     private DispatcherTimer? _readerSelectionHighlightPointerTimer;
     private long _readerSelectionHighlightOpenedTick;
@@ -4687,7 +4689,8 @@ public partial class MainWindow
                 escaped,
                 _readerLayout.FlowMode,
                 _readerLayout.VerticalWriting,
-                _readerLayout.TwoPageMode));
+                _readerLayout.TwoPageMode,
+                revealFootnote: intent == ReaderNavigationIntent.Footnote));
         }
     }
 
@@ -5532,9 +5535,6 @@ public partial class MainWindow
 
     private async Task HandleReaderLinkAsync(string href, bool showFootnote = false)
     {
-        if (showFootnote)
-            return;
-
         _readerFootnoteHoverSequence++;
         if (_readerDocument is null || !Uri.TryCreate(href, UriKind.Absolute, out var uri) || !uri.IsFile) return;
         var path = Path.GetFullPath(uri.LocalPath);
@@ -5553,7 +5553,7 @@ public partial class MainWindow
         await NavigateToReaderItemAsync(
             item,
             _readerSessionCancellation?.Token ?? CancellationToken.None,
-            ReaderNavigationIntent.Link);
+            showFootnote ? ReaderNavigationIntent.Footnote : ReaderNavigationIntent.Link);
     }
 
     private async Task HandleReaderFootnoteHoverAsync(
@@ -5567,6 +5567,8 @@ public partial class MainWindow
             || !uri.IsFile
             || string.IsNullOrWhiteSpace(uri.Fragment))
             return;
+        if (OperatingSystem.IsWindows() && GetCursorPos(out var cursor))
+            _readerFootnoteAnchorScreenPoint = new PixelPoint(cursor.X, cursor.Y);
         var sequence = ++_readerFootnoteHoverSequence;
         var path = Path.GetFullPath(uri.LocalPath);
         if (!IsPathInside(_readerDocument.RootPath, path)) return;
@@ -5600,8 +5602,10 @@ public partial class MainWindow
     {
         _readerFootnoteHoverTimer?.Stop();
         _readerFootnotePollRunning = false;
+        _readerFootnoteHoverMissCount = 0;
         _readerFootnoteHref = null;
         _readerFootnotePlacementPoint = null;
+        _readerFootnoteAnchorScreenPoint = null;
         HideReaderFootnotePopup();
     }
 
@@ -5625,10 +5629,25 @@ public partial class MainWindow
             || !OperatingSystem.IsWindows()
             || !ReaderRoot.IsVisible
             || ReaderLayoutSettingsPopup.IsOpen
-            || CurrentReaderHost is not { View: Control view } host
             || !GetCursorPos(out var cursor))
         {
-            HideReaderFootnotePopup();
+            RegisterReaderFootnoteHoverMiss();
+            return;
+        }
+
+        var windowScaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1d;
+        if (ReaderFootnoteHostPopup.IsOpen
+            && _readerFootnoteAnchorScreenPoint is { } anchor
+            && Math.Abs(cursor.X - anchor.X) <= 24 * windowScaling
+            && Math.Abs(cursor.Y - anchor.Y) <= 24 * windowScaling)
+        {
+            _readerFootnoteHoverMissCount = 0;
+            return;
+        }
+
+        if (CurrentReaderHost is not { View: Control view } host)
+        {
+            RegisterReaderFootnoteHoverMiss();
             return;
         }
 
@@ -5640,7 +5659,7 @@ public partial class MainWindow
         var relativeY = cursor.Y - topLeft.Y;
         if (relativeX < 0 || relativeX >= width || relativeY < 0 || relativeY >= height)
         {
-            HideReaderFootnotePopup();
+            RegisterReaderFootnoteHoverMiss();
             return;
         }
 
@@ -5652,7 +5671,7 @@ public partial class MainWindow
         }
         catch
         {
-            HideReaderFootnotePopup();
+            RegisterReaderFootnoteHoverMiss();
             return;
         }
 
@@ -5660,7 +5679,7 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(raw)
             || string.Equals(raw, "null", StringComparison.OrdinalIgnoreCase))
         {
-            HideReaderFootnotePopup();
+            RegisterReaderFootnoteHoverMiss();
             return;
         }
 
@@ -5672,15 +5691,16 @@ public partial class MainWindow
         }
         catch (JsonException)
         {
-            HideReaderFootnotePopup();
+            RegisterReaderFootnoteHoverMiss();
             return;
         }
 
         if (string.IsNullOrWhiteSpace(href))
         {
-            HideReaderFootnotePopup();
+            RegisterReaderFootnoteHoverMiss();
             return;
         }
+        _readerFootnoteHoverMissCount = 0;
         if (ReaderFootnoteHostPopup.IsOpen
             && string.Equals(_readerFootnoteHref, href, StringComparison.Ordinal))
         {
@@ -5737,6 +5757,7 @@ public partial class MainWindow
         }
 
         ReaderFootnoteText.Text = text;
+        _readerFootnoteHoverMissCount = 0;
         ReaderFootnotePopup.IsVisible = true;
         if (placementPoint is { } point)
             _readerFootnotePlacementPoint = point;
@@ -5769,6 +5790,12 @@ public partial class MainWindow
         ReaderFootnoteHostPopup.IsOpen = true;
     }
 
+    private void RegisterReaderFootnoteHoverMiss()
+    {
+        if (!ReaderFootnoteHostPopup.IsOpen || ++_readerFootnoteHoverMissCount >= 2)
+            HideReaderFootnotePopup();
+    }
+
     private void HideReaderFootnotePopup()
     {
         // Invalidate a resolver that is still awaiting the note text. This
@@ -5779,6 +5806,8 @@ public partial class MainWindow
         ReaderFootnoteText.Text = string.Empty;
         _readerFootnotePlacementPoint = null;
         _readerFootnoteHref = null;
+        _readerFootnoteAnchorScreenPoint = null;
+        _readerFootnoteHoverMissCount = 0;
     }
 
     private void HandleReaderBridgeMessage(string? body)
@@ -5924,7 +5953,12 @@ public partial class MainWindow
                     }
                     break;
                 case "footnoteLeave":
-                    HideReaderFootnotePopup();
+                    // Opening the native Popup above WebView2 can itself make
+                    // Chromium report pointerout. On Windows the screen-space
+                    // hover poll is authoritative and dismisses after the
+                    // pointer has genuinely left the marker.
+                    if (!OperatingSystem.IsWindows())
+                        HideReaderFootnotePopup();
                     break;
                 case "resize":
                     ScheduleReaderRelayout();
@@ -7681,6 +7715,10 @@ public partial class MainWindow
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out ReaderNativePoint point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetCursorPos(int x, int y);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

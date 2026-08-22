@@ -350,6 +350,8 @@ public sealed record FormatConversionProgress(double Percentage, string Message)
     public int RoundedPercentage => Math.Clamp((int)Math.Round(Percentage), 0, 100);
 }
 
+public sealed record FormatConversionMetadata(string Title, string Authors);
+
 public sealed class ZLibraryBook
 {
     public long Id { get; set; }
