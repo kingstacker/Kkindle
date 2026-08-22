@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 
 namespace Kkindle;
 
@@ -8,10 +7,7 @@ namespace Kkindle;
 // body, so animation cannot alter the multicolumn scroll extent.
 internal static class ReaderWaveScripts
 {
-    public const int TotalDurationMs = 560;
-
-    private const int WavePointCount = 13;
-    private const int WaveBandCount = 18;
+    public const int TotalDurationMs = 420;
 
     public static string CreateWaveOverlayScript(
         string dataUrl,
@@ -24,15 +20,13 @@ internal static class ReaderWaveScripts
         var totalDuration = Math.Clamp(totalDurationMs, 240, 2000);
         var w = Format(width);
         var h = Format(height);
-        var bandHeight = Format(Math.Max(2, height / WaveBandCount + 1));
-        var old0 = CreateWaveClipPolygon(0, forward, showNewPage: false, 0);
-        var old1 = CreateWaveClipPolygon(.18, forward, showNewPage: false, .8);
-        var old2 = CreateWaveClipPolygon(.45, forward, showNewPage: false, 1.7);
-        var old3 = CreateWaveClipPolygon(.72, forward, showNewPage: false, 2.5);
-        var old4 = CreateWaveClipPolygon(.92, forward, showNewPage: false, 3.3);
-        var old5 = CreateWaveClipPolygon(1, forward, showNewPage: false, 0);
-        var bandStart = forward ? width - 44 : -52;
-        var bandEnd = forward ? -52 : width - 44;
+        var old0 = CreateRefreshClip(0, forward);
+        var old1 = CreateRefreshClip(.14, forward);
+        var old2 = CreateRefreshClip(.56, forward);
+        var old3 = CreateRefreshClip(.88, forward);
+        var old4 = CreateRefreshClip(1, forward);
+        var frontStart = forward ? width - 18 : -22;
+        var frontEnd = forward ? -22 : width - 18;
         return $$"""
             (() => {
               try {
@@ -52,36 +46,32 @@ internal static class ReaderWaveScripts
                   #kk-wave-image { position: absolute; inset: 0;
                                    width: ${W}px !important; height: ${H}px !important;
                                    max-width: none !important; max-height: none !important;
-                                   margin: 0 !important; padding: 0 !important;
-                                   will-change: clip-path, filter;
-                                   animation: kk-kindle-refresh {{totalDuration}}ms linear both;
+                                   margin: 0 !important; padding: 0 !important; }
+                  #kk-wave-image { will-change: clip-path, filter;
+                                   animation: kk-kindle-refresh-old {{totalDuration}}ms cubic-bezier(.22,.62,.28,1) both;
                                    animation-play-state: {{(startPaused ? "paused" : "running")}}; }
-                  @keyframes kk-kindle-refresh {
-                    0%   { clip-path: {{old0}}; filter: brightness(1) contrast(1); }
-                    18%  { clip-path: {{old1}}; filter: grayscale(.65) brightness(.91) contrast(1.16); }
-                    45%  { clip-path: {{old2}}; filter: grayscale(1) brightness(.84) contrast(1.28); }
-                    72%  { clip-path: {{old3}}; filter: grayscale(.85) brightness(.94) contrast(1.12); }
-                    92%  { clip-path: {{old4}}; filter: grayscale(.35) brightness(1.02) contrast(1.04); }
-                    100% { clip-path: {{old5}}; filter: none; }
+                  @keyframes kk-kindle-refresh-old {
+                    0%   { clip-path: {{old0}}; filter: none; }
+                    18%  { clip-path: {{old1}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
+                    54%  { clip-path: {{old2}}; filter: grayscale(.2) brightness(1.01) contrast(.975); }
+                    82%  { clip-path: {{old3}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
+                    100% { clip-path: {{old4}}; filter: none; }
                   }
-                  #kk-wave .kk-refresh-band { position: absolute; left: 0;
-                                              top: var(--kk-y); width: 96px;
-                                              height: {{bandHeight}}px; opacity: 0;
-                                              will-change: transform, opacity;
-                                              background: linear-gradient(90deg,
-                                                transparent 0%, rgba(255,255,255,.72) 24%,
-                                                rgba(80,80,80,.32) 49%, rgba(255,255,255,.82) 70%,
-                                                transparent 100%);
-                                              mix-blend-mode: multiply;
-                                              transform: translate3d(calc(var(--kk-start) + var(--kk-offset)),0,0);
-                                              animation: kk-refresh-front {{totalDuration}}ms linear both;
-                                              animation-play-state: {{(startPaused ? "paused" : "running")}}; }
-                  @keyframes kk-refresh-front {
-                    0%   { opacity: 0; transform: translate3d(calc(var(--kk-start) + var(--kk-offset)),0,0); }
-                    8%   { opacity: .92; }
-                    55%  { opacity: .78; }
-                    92%  { opacity: .9; }
-                    100% { opacity: 0; transform: translate3d(calc(var(--kk-end) + var(--kk-offset)),0,0); }
+                  #kk-wave-front { position: absolute; left: 0; top: 0;
+                                   width: 40px; height: 100%; opacity: 0;
+                                   will-change: transform, opacity;
+                                   background: linear-gradient(90deg,
+                                     transparent 0%, rgba(70,70,70,.025) 22%,
+                                     rgba(255,255,255,.62) 48%, rgba(92,92,92,.035) 72%,
+                                     transparent 100%);
+                                   transform: translate3d({{Format(frontStart)}}px,0,0);
+                                   animation: kk-kindle-refresh-front {{totalDuration}}ms cubic-bezier(.22,.62,.28,1) both;
+                                   animation-play-state: {{(startPaused ? "paused" : "running")}}; }
+                  @keyframes kk-kindle-refresh-front {
+                    0%   { opacity: 0; transform: translate3d({{Format(frontStart)}}px,0,0); }
+                    8%   { opacity: .76; }
+                    88%  { opacity: .64; }
+                    100% { opacity: 0; transform: translate3d({{Format(frontEnd)}}px,0,0); }
                   }
                 `;
                 document.head.appendChild(style);
@@ -92,23 +82,15 @@ internal static class ReaderWaveScripts
                 canvas.id = 'kk-wave-image';
                 canvas.dataset.kkReady = 'false';
                 container.appendChild(canvas);
-
-                for (let j = 0; j < {{WaveBandCount}}; j++) {
-                  const band = document.createElement('div');
-                  band.className = 'kk-refresh-band';
-                  const phase = 2 * Math.PI * 1.65 * (j / {{WaveBandCount}});
-                  band.style.setProperty('--kk-y', (j * H / {{WaveBandCount}}).toFixed(2) + 'px');
-                  band.style.setProperty('--kk-offset', (Math.sin(phase) * 30).toFixed(2) + 'px');
-                  band.style.setProperty('--kk-start', '{{Format(bandStart)}}px');
-                  band.style.setProperty('--kk-end', '{{Format(bandEnd)}}px');
-                  container.appendChild(band);
-                }
+                const front = document.createElement('div');
+                front.id = 'kk-wave-front';
+                container.appendChild(front);
 
                 root.appendChild(container);
                 window.__kkindleStartWaveOverlay = () => {
                   canvas.dataset.kkStartRequested = 'true';
                   if (canvas.dataset.kkReady !== 'true') return true;
-                  container.querySelectorAll('#kk-wave-image, .kk-refresh-band').forEach(node => {
+                  container.querySelectorAll('#kk-wave-image, #kk-wave-front').forEach(node => {
                     node.style.animationPlayState = 'running';
                   });
                   return true;
@@ -149,6 +131,9 @@ internal static class ReaderWaveScripts
           return window.__kkindleStartWaveOverlay?.() === true;
         })();
         """;
+
+    public static string WaveOverlayReadyScript =>
+        "document.getElementById('kk-wave-image')?.dataset.kkReady === 'true'";
 
     public static string CreateSlideViewTransitionStartScript(
         bool forward,
@@ -192,7 +177,7 @@ internal static class ReaderWaveScripts
         """;
 
     // The slide transition uses the same captured-page model as the wave: a
-    // fixed, clipped overlay moves while the live multicolumn document changes
+    // fixed snapshot moves while the live multicolumn document changes
     // underneath. Transforming body/documentElement changes Chromium's scroll
     // extent and can clamp a fractional last-page position before it is shown.
     public static string CreateSlideOverlayScript(
@@ -206,9 +191,8 @@ internal static class ReaderWaveScripts
         var duration = Math.Clamp(durationMs, 120, 1200);
         var w = Format(width);
         var h = Format(height);
-        var clipEnd = forward ? "inset(0 100% 0 0)" : "inset(0 0 0 100%)";
-        var edgeStart = forward ? width - 28 : -56;
-        var edgeEnd = forward ? -56 : width - 28;
+        var slideEnd = forward ? "-100%" : "100%";
+        var edge = forward ? "-18px" : "18px";
         return $$"""
             (() => {
               try {
@@ -228,26 +212,19 @@ internal static class ReaderWaveScripts
                                     max-width: none !important; max-height: none !important;
                                     margin: 0 !important; padding: 0 !important;
                                     opacity: 1;
-                                    will-change: clip-path;
-                                    clip-path: inset(0);
-                                    animation: kk-slide-wipe {{duration}}ms cubic-bezier(.35,0,.18,1) both;
+                                    will-change: transform;
+                                    transform: translate3d(0,0,0);
+                                    animation: kk-slide-page {{duration}}ms cubic-bezier(.38,0,.2,1) both;
                                     animation-play-state: {{(startPaused ? "paused" : "running")}}; }
                   #kk-slide-edge { position: absolute; left: 0; top: 0;
-                                   width: 72px; height: 100%; opacity: 0;
-                                   background: linear-gradient(90deg,
-                                     transparent, rgba(0,0,0,.15), rgba(255,255,255,.48), transparent);
-                                   will-change: transform, opacity;
-                                   animation: kk-slide-edge {{duration}}ms cubic-bezier(.35,0,.18,1) both;
+                                   width: 100%; height: 100%; opacity: 1;
+                                   box-shadow: {{edge}} 0 28px rgba(0,0,0,.2);
+                                   will-change: transform;
+                                   animation: kk-slide-page {{duration}}ms cubic-bezier(.38,0,.2,1) both;
                                    animation-play-state: {{(startPaused ? "paused" : "running")}}; }
-                  @keyframes kk-slide-wipe {
-                    0% { clip-path: inset(0); }
-                    100% { clip-path: {{clipEnd}}; }
-                  }
-                  @keyframes kk-slide-edge {
-                    0% { opacity: 0; transform: translate3d({{Format(edgeStart)}}px,0,0); }
-                    8% { opacity: .68; }
-                    92% { opacity: .5; }
-                    100% { opacity: 0; transform: translate3d({{Format(edgeEnd)}}px,0,0); }
+                  @keyframes kk-slide-page {
+                    0% { transform: translate3d(0,0,0); }
+                    100% { transform: translate3d({{slideEnd}},0,0); }
                   }
                 `;
                 document.head.appendChild(style);
@@ -306,6 +283,9 @@ internal static class ReaderWaveScripts
         })();
         """;
 
+    public static string SlideOverlayReadyScript =>
+        "document.getElementById('kk-slide-image')?.dataset.kkReady === 'true'";
+
     public static string CreateSlideCleanupScript() =>
         """
         (() => {
@@ -322,50 +302,41 @@ internal static class ReaderWaveScripts
         bool wave)
     {
         var duration = Math.Clamp(durationMs, 180, 1600);
-        var slideOrigin = forward ? "100%" : "-100%";
+        var slideTarget = forward ? "-100%" : "100%";
         var slideShadow = forward ? "-22px" : "22px";
-        var wave0 = CreateWaveClipPolygon(0, forward, showNewPage: true, 0);
-        var wave1 = CreateWaveClipPolygon(.18, forward, showNewPage: true, .8);
-        var wave2 = CreateWaveClipPolygon(.45, forward, showNewPage: true, 1.7);
-        var wave3 = CreateWaveClipPolygon(.72, forward, showNewPage: true, 2.5);
-        var wave4 = CreateWaveClipPolygon(.92, forward, showNewPage: true, 3.3);
-        var wave5 = CreateWaveClipPolygon(1, forward, showNewPage: true, 0);
+        var refresh0 = CreateRefreshClip(0, forward);
+        var refresh1 = CreateRefreshClip(.14, forward);
+        var refresh2 = CreateRefreshClip(.56, forward);
+        var refresh3 = CreateRefreshClip(.88, forward);
+        var refresh4 = CreateRefreshClip(1, forward);
         var animationCss = wave
             ? $$"""
               ::view-transition-old(root) {
-                z-index: 1; mix-blend-mode: normal;
-                animation: kk-kindle-old {{duration}}ms linear both;
+                z-index: 2; mix-blend-mode: normal;
+                animation: kk-kindle-refresh-old {{duration}}ms cubic-bezier(.22,.62,.28,1) both;
               }
               ::view-transition-new(root) {
-                z-index: 2; mix-blend-mode: normal;
-                animation: kk-kindle-new {{duration}}ms linear both;
+                z-index: 1; mix-blend-mode: normal; animation: none;
               }
-              @keyframes kk-kindle-old {
-                0% { filter: brightness(1) contrast(1); }
-                32% { filter: grayscale(1) brightness(.86) contrast(1.24); }
-                68% { filter: grayscale(.72) brightness(.94) contrast(1.12); }
-                100% { filter: none; }
-              }
-              @keyframes kk-kindle-new {
-                0% { clip-path: {{wave0}}; filter: grayscale(1) brightness(.82) contrast(1.3) drop-shadow({{slideShadow}} 0 16px rgba(0,0,0,.42)); }
-                18% { clip-path: {{wave1}}; filter: grayscale(1) brightness(.88) contrast(1.24) drop-shadow({{slideShadow}} 0 18px rgba(0,0,0,.38)); }
-                45% { clip-path: {{wave2}}; filter: grayscale(.9) brightness(.94) contrast(1.18) drop-shadow({{slideShadow}} 0 20px rgba(0,0,0,.34)); }
-                72% { clip-path: {{wave3}}; filter: grayscale(.55) brightness(.97) contrast(1.1) drop-shadow({{slideShadow}} 0 16px rgba(0,0,0,.26)); }
-                92% { clip-path: {{wave4}}; filter: grayscale(.18) brightness(1) contrast(1.03) drop-shadow({{slideShadow}} 0 10px rgba(0,0,0,.14)); }
-                100% { clip-path: {{wave5}}; filter: none; }
+              @keyframes kk-kindle-refresh-old {
+                0% { clip-path: {{refresh0}}; filter: none; }
+                18% { clip-path: {{refresh1}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
+                54% { clip-path: {{refresh2}}; filter: grayscale(.2) brightness(1.01) contrast(.975); }
+                82% { clip-path: {{refresh3}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
+                100% { clip-path: {{refresh4}}; filter: none; }
               }
               """
             : $$"""
               ::view-transition-old(root) {
-                z-index: 1; mix-blend-mode: normal; animation: none;
+                z-index: 2; mix-blend-mode: normal;
+                animation: kk-slide-old {{duration}}ms cubic-bezier(.38,0,.2,1) both;
               }
               ::view-transition-new(root) {
-                z-index: 2; mix-blend-mode: normal;
-                animation: kk-slide-new {{duration}}ms cubic-bezier(.35,0,.18,1) both;
+                z-index: 1; mix-blend-mode: normal; animation: none;
               }
-              @keyframes kk-slide-new {
-                0% { opacity: 1; transform: translate3d({{slideOrigin}},0,0); box-shadow: {{slideShadow}} 0 34px rgba(0,0,0,.2); }
-                100% { opacity: 1; transform: translate3d(0,0,0); box-shadow: 0 0 0 rgba(0,0,0,0); }
+              @keyframes kk-slide-old {
+                0% { opacity: 1; transform: translate3d(0,0,0); box-shadow: {{slideShadow}} 0 28px rgba(0,0,0,.2); }
+                100% { opacity: 1; transform: translate3d({{slideTarget}},0,0); box-shadow: 0 0 0 rgba(0,0,0,0); }
               }
               """;
 
@@ -412,30 +383,13 @@ internal static class ReaderWaveScripts
             """;
     }
 
-    private static string CreateWaveClipPolygon(
-        double progress,
-        bool forward,
-        bool showNewPage,
-        double phase)
+    private static string CreateRefreshClip(double progress, bool forward)
     {
         progress = Math.Clamp(progress, 0, 1);
-        var boundary = forward ? 100 * (1 - progress) : 100 * progress;
-        var amplitude = 5.2 * Math.Sin(Math.PI * progress);
-        var boundaryPoints = new string[WavePointCount];
-        for (var index = 0; index < WavePointCount; index++)
-        {
-            var y = index * 100d / (WavePointCount - 1);
-            var wave = Math.Sin(index * Math.PI * 3.3 / (WavePointCount - 1) + phase);
-            var x = Math.Clamp(boundary + amplitude * wave, 0, 100);
-            boundaryPoints[index] = $"{Format(x)}% {Format(y)}%";
-        }
-
-        var leftRegion = showNewPage ? !forward : forward;
-        var polygon = new StringBuilder("polygon(");
-        polygon.Append(leftRegion ? "0% 0%, 0% 100%" : "100% 0%, 100% 100%");
-        for (var index = WavePointCount - 1; index >= 0; index--)
-            polygon.Append(", ").Append(boundaryPoints[index]);
-        return polygon.Append(')').ToString();
+        var inset = Format(progress * 100);
+        return forward
+            ? $"inset(0 {inset}% 0 0)"
+            : $"inset(0 0 0 {inset}%)";
     }
 
     private static string Format(double value) =>

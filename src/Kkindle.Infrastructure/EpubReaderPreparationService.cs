@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "43";
+    private const string ExtractionFormatVersion = "44";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -72,34 +72,6 @@ public sealed class EpubReaderPreparationService
               scrollQueued = false;
               reportScroll();
             });
-          };
-
-          // Keep in-chapter pagination inside the WebKit document. Native
-          // message delivery is then required only at a chapter boundary;
-          // a transient host bridge failure cannot make an otherwise rendered
-          // page stop responding to clicks, page keys, or the wheel.
-          const turnPaginatedPage = direction => {
-            const element = document.scrollingElement || document.documentElement;
-            const body = document.body;
-            if (!element || !body || window.__kkindleReaderFlowMode !== 1) return false;
-            const step = element.clientWidth
-              || document.documentElement.clientWidth
-              || window.innerWidth
-              || 0;
-            if (step <= 0) return false;
-            const rawMax = Math.max(0, (element.scrollWidth || 0) - (element.clientWidth || 0));
-            const trailingInset = parseFloat(getComputedStyle(body).paddingRight) || 0;
-            const maximum = Math.max(
-              0,
-              Math.round(Math.max(0, rawMax - trailingInset) / step) * step);
-            const current = element.scrollLeft >= maximum - 4
-              ? maximum
-              : Math.max(0, Math.min(maximum, Math.round((element.scrollLeft || 0) / step) * step));
-            const target = Math.max(0, Math.min(maximum, current + (direction < 0 ? -step : step)));
-            if (Math.abs(target - current) < 1) return false;
-            window.scrollTo({ left: target, top: 0, behavior: 'instant' });
-            queueScrollReport();
-            return true;
           };
 
           // Publisher styles can make Chromium expose a viewport-sized
@@ -654,8 +626,7 @@ public sealed class EpubReaderPreparationService
                   const x = event.clientX || 0;
                   if (x < width / 3 || x > width * 2 / 3) {
                     const direction = x < width / 3 ? -1 : 1;
-                    if (!turnPaginatedPage(direction))
-                      send({ type: "page", direction });
+                    send({ type: "page", direction });
                   }
                 } catch (_) { }
               });
@@ -696,9 +667,8 @@ public sealed class EpubReaderPreparationService
           }, true);
           // Handle navigation on keydown so arrows respond immediately and
           // retain native key-repeat behavior. Horizontal continuous reading
-          // leaves up/down to Chromium's native scrolling; routing those keys
-          // through an asynchronous host script can swallow the key without
-          // moving the document. The host still owns page and chapter changes.
+          // leaves up/down to Chromium's native scrolling. Paginated turns
+          // always go through the host so the selected transition is applied.
           document.addEventListener("keydown", event => {
             const key = event.key || '';
             const lower = key.toLowerCase();
@@ -735,12 +705,6 @@ public sealed class EpubReaderPreparationService
               : ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key);
             if (controlled) {
               event.preventDefault();
-              const pageDirection = key === 'ArrowLeft' || key === 'PageUp'
-                ? -1
-                : key === 'ArrowRight' || key === 'PageDown'
-                  ? 1
-                  : 0;
-              if (pageDirection !== 0 && turnPaginatedPage(pageDirection)) return;
               send({ type: "key", key });
             }
           }, true);
@@ -794,8 +758,7 @@ public sealed class EpubReaderPreparationService
             if (Math.abs(paginatedWheelRemainder) < 120) return;
             const direction = paginatedWheelRemainder > 0 ? 1 : -1;
             paginatedWheelRemainder %= 120;
-            if (!turnPaginatedPage(direction))
-              send({ type: "page", direction });
+            send({ type: "page", direction });
           }, { passive: false });
           // Keyboard-driven selections (Shift+arrows) never raise mouseup, so
           // report on selectionchange as well (debounced through rAF), matching

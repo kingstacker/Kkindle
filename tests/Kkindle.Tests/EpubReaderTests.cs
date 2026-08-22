@@ -312,7 +312,9 @@ public sealed class EpubReaderTests
             Assert.Contains("chrome.webview", bridge, StringComparison.Ordinal);
             Assert.Contains("postAvWebViewMessage", bridge, StringComparison.Ordinal);
             Assert.Contains("type: \"scroll\"", bridge, StringComparison.Ordinal);
-            Assert.Contains("turnPaginatedPage", bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain("turnPaginatedPage", bridge, StringComparison.Ordinal);
+            Assert.Contains("send({ type: \"page\", direction });", bridge, StringComparison.Ordinal);
+            Assert.Contains("send({ type: \"key\", key });", bridge, StringComparison.Ordinal);
             Assert.Contains("paginatedWheelRemainder", bridge, StringComparison.Ordinal);
             Assert.Contains("visibility: visible !important; opacity: 1 !important;", bridge, StringComparison.Ordinal);
             Assert.Contains("contextmenu", bridge, StringComparison.Ordinal);
@@ -584,8 +586,17 @@ public sealed class EpubReaderTests
             Assert.Contains("document.addEventListener(\"pointerup\"", bridge, StringComparison.Ordinal);
             Assert.Contains("requestAnimationFrame?.(() =>", bridge, StringComparison.Ordinal);
             Assert.Contains("const direction = x < width / 3 ? -1 : 1", bridge, StringComparison.Ordinal);
-            Assert.Contains("if (!turnPaginatedPage(direction))", bridge, StringComparison.Ordinal);
-            Assert.False(markerText.EndsWith("\n0", StringComparison.Ordinal));
+            Assert.Contains("send({ type: \"page\", direction });", bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain("turnPaginatedPage", bridge, StringComparison.Ordinal);
+            var pointerDirectionIndex = bridge.IndexOf(
+                "const direction = x < width / 3 ? -1 : 1",
+                StringComparison.Ordinal);
+            var pointerSendIndex = bridge.IndexOf(
+                "send({ type: \"page\", direction });",
+                pointerDirectionIndex,
+                StringComparison.Ordinal);
+            Assert.InRange(pointerSendIndex - pointerDirectionIndex, 1, 160);
+            Assert.EndsWith("\n44", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

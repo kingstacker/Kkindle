@@ -5,7 +5,7 @@
          Kkindle.App. All UI code lives there; nothing but wiring belongs here.
          A Linux or macOS head is a sibling of this project. -->
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <RootNamespace>Kkindle.Desktop.Windows</RootNamespace>
     <AssemblyName>Kkindle</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>

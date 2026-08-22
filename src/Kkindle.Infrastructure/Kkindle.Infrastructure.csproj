@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Kkindle.Infrastructure</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);CS0105;CS0108;CS0164;CS0169;CS0649;CS0600;CS0618;CS8618;CS8600;CS8603;CS8625;CS8765;SYSLIB0023</NoWarn>

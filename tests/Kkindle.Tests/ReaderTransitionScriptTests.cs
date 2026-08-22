@@ -5,11 +5,10 @@ namespace Kkindle.Tests;
 public sealed class ReaderTransitionScriptTests
 {
     [Theory]
-    [InlineData(true, "translate3d(100%,0,0)", "-22px")]
-    [InlineData(false, "translate3d(-100%,0,0)", "22px")]
-    public void SlideMovesTheNewSnapshotOverAStationaryOldPage(
+    [InlineData(true, "-22px")]
+    [InlineData(false, "22px")]
+    public void SlideMovesTheCapturedOldPageOffTheReader(
         bool forward,
-        string expectedOrigin,
         string expectedShadow)
     {
         var script = ReaderWaveScripts.CreateSlideViewTransitionStartScript(
@@ -19,7 +18,7 @@ public sealed class ReaderTransitionScriptTests
         Assert.Contains("::view-transition-old(root)", script, StringComparison.Ordinal);
         Assert.Contains("animation: none", script, StringComparison.Ordinal);
         Assert.Contains("::view-transition-new(root)", script, StringComparison.Ordinal);
-        Assert.Contains(expectedOrigin, script, StringComparison.Ordinal);
+        Assert.Contains("@keyframes kk-slide-old", script, StringComparison.Ordinal);
         Assert.Contains(expectedShadow, script, StringComparison.Ordinal);
         Assert.DoesNotContain("body.style.transform", script, StringComparison.Ordinal);
     }
@@ -27,26 +26,26 @@ public sealed class ReaderTransitionScriptTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void WaveUsesAWavyHighContrastRefreshFront(bool forward)
+    public void EinkRefreshUsesAStraightLowContrastSweep(bool forward)
     {
         var script = ReaderWaveScripts.CreateWaveViewTransitionStartScript(
             forward,
             durationMs: 760);
 
-        Assert.Contains("kk-kindle-new", script, StringComparison.Ordinal);
-        Assert.Contains("clip-path: polygon(", script, StringComparison.Ordinal);
-        Assert.Contains("grayscale(1)", script, StringComparison.Ordinal);
-        Assert.Contains("drop-shadow(", script, StringComparison.Ordinal);
-        Assert.Contains("brightness(.86) contrast(1.24)", script, StringComparison.Ordinal);
+        Assert.Contains("kk-kindle-refresh-old", script, StringComparison.Ordinal);
+        Assert.Contains("clip-path: inset(", script, StringComparison.Ordinal);
+        Assert.Contains("grayscale(.2)", script, StringComparison.Ordinal);
+        Assert.Contains("contrast(.975)", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("polygon(", script, StringComparison.Ordinal);
         Assert.DoesNotContain("body.style.transform", script, StringComparison.Ordinal);
     }
 
     [Theory]
-    [InlineData(true, "inset(0 100% 0 0)")]
-    [InlineData(false, "inset(0 0 0 100%)")]
-    public void ChapterSlideFallbackWipesTheOldSnapshotInTheTurnDirection(
+    [InlineData(true, "translate3d(-100%,0,0)")]
+    [InlineData(false, "translate3d(100%,0,0)")]
+    public void ChapterSlideFallbackMovesTheOldSnapshotInTheTurnDirection(
         bool forward,
-        string expectedClip)
+        string expectedTarget)
     {
         var script = ReaderWaveScripts.CreateSlideOverlayScript(
             "data:image/png;base64,AA==",
@@ -56,12 +55,19 @@ public sealed class ReaderTransitionScriptTests
             durationMs: 430,
             startPaused: true);
 
-        Assert.Contains(expectedClip, script, StringComparison.Ordinal);
+        Assert.Contains(expectedTarget, script, StringComparison.Ordinal);
         Assert.Contains("#kk-slide-edge", script, StringComparison.Ordinal);
         Assert.Contains("document.createElement('canvas')", script, StringComparison.Ordinal);
         Assert.Contains("createImageBitmap(new Blob", script, StringComparison.Ordinal);
         Assert.DoesNotContain("document.createElement('img')", script, StringComparison.Ordinal);
         Assert.DoesNotContain("kk-slide-away", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CapturedOverlaysExposeAReadyGateBeforeTheRefreshStarts()
+    {
+        Assert.Contains("kk-wave-image", ReaderWaveScripts.WaveOverlayReadyScript, StringComparison.Ordinal);
+        Assert.Contains("kk-slide-image", ReaderWaveScripts.SlideOverlayReadyScript, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,6 +83,11 @@ public sealed class ReaderTransitionScriptTests
         Assert.Contains("document.createElement('canvas')", script, StringComparison.Ordinal);
         Assert.Contains("createImageBitmap(new Blob", script, StringComparison.Ordinal);
         Assert.Contains("__kkindleStartWaveOverlay", script, StringComparison.Ordinal);
+        Assert.Contains("#kk-wave-front", script, StringComparison.Ordinal);
+        Assert.Contains("kk-kindle-refresh-front", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("kk-wave-ghost", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("kk-refresh-band", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("polygon(", script, StringComparison.Ordinal);
         Assert.DoesNotContain("document.createElement('img')", script, StringComparison.Ordinal);
     }
 }

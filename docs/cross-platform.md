@@ -23,7 +23,7 @@ before building. Release scripts run from the repository root and refuse other
 SDK versions so Linux, macOS and Windows packages are produced by the same SDK.
 
 ```sh
-dotnet --version # must print 8.0.423
+dotnet --version # must print 10.0.400
 dotnet build src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj -c Release
 dotnet build src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj -c Release
 bash scripts/build-linux-release.sh 0.5.2 artifacts/linux linux-x64

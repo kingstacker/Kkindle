@@ -122,7 +122,7 @@ Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle �
 ## 环境要求
 
 - Windows 11 x64、主流 x64 Linux 桌面，或 macOS 12 及以上（Intel/Apple Silicon）
-- 从源码构建统一使用 `global.json` 指定的 [.NET SDK 8.0.423](https://dotnet.microsoft.com/download/dotnet/8.0)；发布脚本会拒绝其它 SDK。
+- 从源码构建统一使用 `global.json` 指定的 [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0)；发布脚本会拒绝其它 SDK。
 - Linux 需要 WebKitGTK、Secret Service/`secret-tool`
 - 三端如需格式转换，均需用户另行安装 Calibre，或在设置中指定已有的 `ebook-convert`
 - Windows 支持 USB 磁盘和 WPD/MTP Kindle；Linux/macOS 当前支持挂载为 USB 磁盘的 Kindle
@@ -143,7 +143,7 @@ Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle �
 ## 从源码运行
 
 ```powershell
-dotnet --version  # 必须输出 8.0.423
+dotnet --version  # 必须输出 10.0.400
 dotnet restore Kkindle.sln
 dotnet build Kkindle.sln -p:Platform=x64
 dotnet test Kkindle.sln --no-build -p:Platform=x64
@@ -193,7 +193,7 @@ git push origin v1.0.0
 项目包含书库与旧数据库迁移、备份、阅读进度、排版、格式策略、PDF 文本提取、词典、字体和应用设置等自动化测试：
 
 ```powershell
-dotnet --version  # 必须输出 8.0.423
+dotnet --version  # 必须输出 10.0.400
 dotnet test Kkindle.sln -c Debug -p:Platform=x64
 dotnet test Kkindle.sln -c Release -p:Platform=x64
 ```

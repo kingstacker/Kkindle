@@ -387,6 +387,10 @@ public partial class MainWindow : Window
             {
                 _ = Dispatcher.UIThread.InvokeAsync(RunKreaderValidationAndExitAsync);
             }
+            if (Environment.GetEnvironmentVariable("KKINDLE_ANIMATION_PROBE") == "1")
+            {
+                _ = Dispatcher.UIThread.InvokeAsync(RunKreaderAnimationProbeAndExitAsync);
+            }
 #endif
             if (int.TryParse(Environment.GetEnvironmentVariable("KKINDLE_OPEN_BOOK_INDEX"), out var openIndex)
                 && openIndex >= 0 && openIndex < ViewModel.Books.Count)
@@ -443,16 +447,16 @@ public partial class MainWindow : Window
         }
     }
 
-    // The shadow host reserves 12 DIP around the UI; maximized windows span the
-    // full screen, so the margin (and with it the shadow) collapses to zero.
+    // Keep content and its frame flush with the client area in every state.
+    // Transparent gutters are rendered as opaque white on some Windows/DPI
+    // combinations; resize hit targets are overlays and need no reserved space.
     private void UpdateWindowShadowMargin()
     {
         if (WindowShadowHost is null) return;
         var maximized = WindowState is WindowState.Maximized or WindowState.FullScreen;
-        var frameMargin = maximized ? new Thickness(0) : new Thickness(12);
-        WindowShadowHost.Margin = frameMargin;
+        WindowShadowHost.Margin = new Thickness(0);
         if (WindowFrameOverlay is not null)
-            WindowFrameOverlay.Margin = frameMargin;
+            WindowFrameOverlay.Margin = new Thickness(0);
         if (WindowResizeLayer is not null)
             WindowResizeLayer.IsVisible = !maximized;
     }

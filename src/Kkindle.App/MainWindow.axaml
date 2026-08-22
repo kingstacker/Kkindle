@@ -47,16 +47,12 @@
         </DataTemplate>
     </Window.Resources>
 
-    <!-- Transparent window with a shadowed content host: the UI floats on the
-         desktop with a soft drop shadow around the whole main interface. Two
-         shadow layers (tight + diffuse) read softer than a single heavy one.
-         A hairline (sub-pixel) light-grey outline marks the main interface
-         edge so the floating surface stays visible against any desktop
-         background. The invisible resize handles beside the shadow restore
-         window resizing, which layered windows lose. -->
+    <!-- The content reaches the client-area edges. Resize handles are layered
+         over those edges instead of reserving a transparent outer gutter; on
+         Windows that gutter can be composed as an opaque white strip. -->
     <Grid>
         <Border x:Name="WindowShadowHost"
-                Margin="4"
+                Margin="0"
                 Background="{StaticResource PaperBrush}"
                 BorderBrush="#000000"
                 BorderThickness="1">
@@ -3729,7 +3725,7 @@
                                                           Tag="slide"
                                                           Click="ReaderAnimationItem_Click" />
                                                 <MenuItem x:Name="ReaderAnimationWaveItem"
-                                                          Header="水波流动"
+                                                          Header="电子墨水刷新"
                                                           ToggleType="Radio"
                                                           Tag="wave"
                                                           Click="ReaderAnimationItem_Click" />
@@ -4759,11 +4755,9 @@
 
         <!-- Draw the frame as a sibling above the content. The native WebView
              is a separate child window and can cover WindowShadowHost's own
-             right stroke; this overlay keeps all four sides on one geometry.
-             Its margin is kept in sync with WindowShadowHost (12 DIP in a
-             normal window, 0 when maximized). -->
+             right stroke; this overlay keeps all four sides on one geometry. -->
         <Border x:Name="WindowFrameOverlay"
-                Margin="12"
+                Margin="0"
                 Background="Transparent"
                 BorderBrush="#000000"
                 BorderThickness="1"

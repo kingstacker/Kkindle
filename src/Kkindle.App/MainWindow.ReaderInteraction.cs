@@ -6910,16 +6910,16 @@ public partial class MainWindow
         CancellationToken cancellationToken,
         bool animate = true)
     {
-        // The legacy reader applies page animations only to pagination. In
-        // continuous mode chapter navigation must remain an immediate scroll
-        // transition instead of fading or sliding the whole document.
+        // The selected animation applies to every visible reader content
+        // change, including chapter/TOC jumps in continuous mode. A chapter
+        // boundary is still a full-screen turn from the reader's point of
+        // view, so it must not silently drop the user's animation choice.
         // WebKitGTK/WPE can expose a blank compositor frame while opacity is
         // animated on a horizontally overflowing multicolumn document. Page
         // turns are already instantaneous DOM scrolls, so Linux keeps that
         // deterministic path instead of fading the browser surface.
         var animation = animate
             && !OperatingSystem.IsLinux()
-            && _readerLayout.FlowMode == 1
             ? _readerPageAnimation
             : ReaderAnimationNone;
         if (animation == ReaderAnimationNone)
@@ -6927,21 +6927,6 @@ public partial class MainWindow
 
         if (animation is ReaderAnimationSlide or ReaderAnimationWave)
         {
-            if (ReferenceEquals(outgoingHost, incomingHost))
-            {
-                var viewTransition = await TryRunReaderViewTransitionAsync(
-                    incomingHost,
-                    direction,
-                    animation,
-                    changeContentAsync,
-                    cancellationToken);
-                if (viewTransition.Succeeded)
-                {
-                    await UpdateReaderScrollStateAsync(incomingHost);
-                    return viewTransition.Result!;
-                }
-            }
-
             var snapshot = outgoingHost is IReaderPageSnapshotProvider provider
                 ? await provider.CaptureVisiblePageAsync(cancellationToken)
                 : null;
@@ -6976,6 +6961,25 @@ public partial class MainWindow
                         await UpdateReaderScrollStateAsync(incomingHost);
                         return slideResult.Result!;
                     }
+                }
+            }
+
+            // Keep the native View Transition only as a last-resort fallback.
+            // The captured-page path is the same on in-chapter and chapter
+            // turns, so the reader never changes animation implementation at
+            // a chapter boundary.
+            if (ReferenceEquals(outgoingHost, incomingHost))
+            {
+                var viewTransition = await TryRunReaderViewTransitionAsync(
+                    incomingHost,
+                    direction,
+                    animation,
+                    changeContentAsync,
+                    cancellationToken);
+                if (viewTransition.Succeeded)
+                {
+                    await UpdateReaderScrollStateAsync(incomingHost);
+                    return viewTransition.Result!;
                 }
             }
 
@@ -7052,7 +7056,7 @@ public partial class MainWindow
     private const int ReaderTransitionOutDurationMs = 300;
     private const int ReaderTransitionInDurationMs = 360;
     private const int ReaderSlideDurationMs = 430;
-    private const int ReaderWaveDurationMs = 560;
+    private const int ReaderWaveDurationMs = 420;
 
     private async Task<(bool Succeeded, T? Result)> TryRunReaderViewTransitionAsync<T>(
         IReaderHost host,
@@ -7139,6 +7143,13 @@ public partial class MainWindow
 
         try
         {
+            if (!await WaitForReaderOverlayReadyAsync(
+                    incomingHost,
+                    ReaderWaveScripts.WaveOverlayReadyScript,
+                    cancellationToken))
+            {
+                return (false, default);
+            }
             // The captured old page remains frozen above the reader while the
             // live page or prepared chapter changes underneath. Starting only
             // after that change prevents the previous implementation's visible
@@ -7194,6 +7205,13 @@ public partial class MainWindow
 
         try
         {
+            if (!await WaitForReaderOverlayReadyAsync(
+                    incomingHost,
+                    ReaderWaveScripts.SlideOverlayReadyScript,
+                    cancellationToken))
+            {
+                return (false, default);
+            }
             // Only the frozen bitmap moves. The real paginated body is never
             // transformed, so its fractional scroll extent cannot be clamped.
             var result = await changeContentAsync();
@@ -7217,6 +7235,21 @@ public partial class MainWindow
                     ReaderWaveScripts.CreateSlideCleanupScript());
             }
         }
+    }
+
+    private static async Task<bool> WaitForReaderOverlayReadyAsync(
+        IReaderHost host,
+        string readyScript,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await TryInvokeReaderBooleanScriptAsync(host, readyScript))
+                return true;
+            await Task.Delay(10, cancellationToken);
+        }
+        return false;
     }
 
     private static async Task TryInvokeReaderTransitionAsync(IReaderHost host, string script)
@@ -7396,16 +7429,28 @@ public partial class MainWindow
 
     private void ReaderAnimationItem_Click(object? sender, RoutedEventArgs e)
     {
-        if (ReferenceEquals(sender, ReaderAnimationFadeItem))
-            _readerPageAnimation = ReaderAnimationFade;
-        else if (ReferenceEquals(sender, ReaderAnimationSlideItem))
-            _readerPageAnimation = ReaderAnimationSlide;
-        else if (ReferenceEquals(sender, ReaderAnimationWaveItem))
-            _readerPageAnimation = ReaderAnimationWave;
-        else
-            _readerPageAnimation = ReaderAnimationNone;
+        // MenuFlyout can route Click through a generated MenuItem instance;
+        // comparing the sender by object identity therefore loses the user's
+        // choice and silently falls back to "无动画". The Tag is the stable
+        // value declared in XAML and survives that routing behavior.
+        var tag = (sender as MenuItem)?.Tag as string;
+        _readerPageAnimation = tag switch
+        {
+            "fade" => ReaderAnimationFade,
+            "slide" => ReaderAnimationSlide,
+            "wave" => ReaderAnimationWave,
+            "none" => ReaderAnimationNone,
+            _ => _readerPageAnimation
+        };
         SyncReaderAnimationMenu();
         ReaderMoreButton.Flyout?.Hide();
+        ShowReaderTransientStatus(_readerPageAnimation switch
+        {
+            ReaderAnimationFade => "翻页动画：淡入淡出",
+            ReaderAnimationSlide => "翻页动画：左右滑动",
+            ReaderAnimationWave => "翻页动画：电子墨水刷新",
+            _ => "翻页动画：无动画"
+        });
     }
 
     private void SyncReaderAnimationMenu()

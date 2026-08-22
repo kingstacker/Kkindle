@@ -2,8 +2,8 @@
   <PropertyGroup>
     <!-- Windows-only tests: KindleDeviceService reaches WPD/MTP through COM,
          so these cannot run on Linux or macOS. Everything portable lives in
-         Kkindle.Tests, which targets plain net8.0 for that reason. -->
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+         Kkindle.Tests, which targets plain net10.0 for that reason. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>Kkindle.Tests.Windows</RootNamespace>

@@ -8,13 +8,13 @@
 
 ## 1. 当前状态
 
-- Kkindle 是 C# / .NET 8 / Avalonia 12.1.1 跨平台桌面应用，Windows、Linux、macOS 各有一个瘦启动项目。
+- Kkindle 是 C# / .NET 10 / Avalonia 12.1.1 跨平台桌面应用，Windows、Linux、macOS 各有一个瘦启动项目。
 - Avalonia 是唯一 UI 实现；src/Kkindle.App.WinUI 已完整删除。4 个阅读器脚本和应用图标已迁入 src/Kkindle.App，解决方案、测试及三端打包引用均已更新。
 - 当前开发版本为 0.6.0-dev.3，统一定义在 Directory.Build.props。关于页通过程序集 AssemblyInformationalVersion 显示版本，不再维护 UI 硬编码版本号。
-- 当前工作分支为 `codex/fix-calibre-output-profile`，主分支为 `master`，远程为 git@github.com:kingstacker/Kkindle.git。
+- 当前工作分支为 `master`，已合并 `origin/codex/fix-calibre-output-profile`，远程为 git@github.com:kingstacker/Kkindle.git。
 - 当前 `global.json` 固定 .NET SDK 10.0.400；Avalonia 主包和桌面包为 12.1.1，Avalonia.Controls.WebView 为 12.1.0。
-- 2026-08-22 验证结果：可移植测试 237 项全部通过；Linux Debug 构建 0 警告、0 错误。Linux Debug 版已实际通过 EPUB→AZW3 转换，书库中两本测试书均显示 `AZW3 · EPUB`。
-- Linux Debug 入口为 `src/Kkindle.Desktop.Linux/bin/Debug/net8.0/Kkindle`。调试产物不提交 Git；运行时必须保留同目录的 DLL、PDB、WebView 和资源文件，不能只复制入口文件。
+- 2026-08-22 验证结果：.NET 10 全解决方案构建 0 警告、0 错误；Windows、可移植及平台公共测试共 276 项全部通过。Linux Debug 版此前已实际通过 EPUB→AZW3 转换，书库中两本测试书均显示 `AZW3 · EPUB`。
+- Linux Debug 入口为 `src/Kkindle.Desktop.Linux/bin/Debug/net10.0/Kkindle`。调试产物不提交 Git；运行时必须保留同目录的 DLL、PDB、WebView 和资源文件，不能只复制入口文件。
 - Linux 真实桌面启动和 Calibre 转换已验收；Windows/macOS 真实桌面、真实 Kindle 设备和 macOS 签名/公证仍未完整验收。
 
 ## 2. 项目结构
@@ -142,7 +142,7 @@ Windows 验证从临时目录执行绝对项目路径，以确保使用仓库锁
 
     dotnet build C:\Users\kings\Desktop\01_Projects\Kkindle\src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj -c Debug -p:Platform=x64 --no-restore
 
-    robocopy C:\Users\kings\Desktop\01_Projects\Kkindle\src\Kkindle.Desktop.Windows\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64 C:\Users\kings\Desktop\01_Projects\Kkindle\artifacts\Kkindle-debug-win-x64-latest /E /XF kkindle-crash.log /XD data backups
+    robocopy C:\Users\kings\Desktop\01_Projects\Kkindle\src\Kkindle.Desktop.Windows\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64 C:\Users\kings\Desktop\01_Projects\Kkindle\artifacts\Kkindle-debug-win-x64-latest /E /XF kkindle-crash.log /XD data backups
 
 robocopy 返回码 0 至 7 都表示成功。同步时必须保留目标目录的 data/、backups/、kkindle-crash.log 和 WebView2 用户数据。
 

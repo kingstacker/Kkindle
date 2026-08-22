@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- Deliberately plain net8.0, never net8.0-windows: this project holds all
+    <!-- Deliberately plain net10.0, never net10.0-windows: this project holds all
          UI code, and keeping it platform-neutral makes the compiler reject any
          Windows-only API that creeps in. Platform services arrive through the
          Kkindle.Core interfaces, wired by a per-platform head project
          (Kkindle.Desktop.Windows today). -->
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Kkindle</RootNamespace>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
