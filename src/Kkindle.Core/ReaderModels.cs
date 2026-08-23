@@ -48,7 +48,9 @@ public sealed record BookContentChunkDraft(
 // ------------------------------------------------------------------
 // Reader persistence: progress restore, bookmarks, per-book layout
 // settings and cumulative reading stats. All rows are keyed by the
-// BookFile so every format of the same book keeps its own position.
+// BookFile so every format of the same book keeps its own position. The
+// vertical-writing switch is a global preference; the app overlays that
+// global value when a per-book layout row is restored.
 // ------------------------------------------------------------------
 
 public sealed record ReaderProgressRow(
@@ -96,7 +98,14 @@ public sealed record ReaderLayoutSettings(
     string FontFamily = ReaderFontDefaults.DefaultFamily,
     int FlowMode = 1,
     bool VerticalWriting = false,
-    bool TwoPageMode = false);
+    bool TwoPageMode = false)
+{
+    // Keep this as an initialized property instead of a new positional
+    // constructor parameter. Older JSON settings do not contain the field;
+    // the initializer therefore preserves the long-standing indented layout
+    // when those settings are deserialized.
+    public bool ParagraphIndent { get; init; } = true;
+}
 
 // ------------------------------------------------------------------
 // Layout settings safety net. Persisted per-book settings can carry
@@ -141,6 +150,7 @@ public static class ReaderLayoutDefaults
         var fontFamily = string.IsNullOrWhiteSpace(settings.FontFamily)
             ? ReaderFontDefaults.DefaultFamily
             : settings.FontFamily.Trim();
+        var verticalWriting = settings.VerticalWriting;
         return settings with
         {
             FontScale = fontScale,
@@ -148,9 +158,13 @@ public static class ReaderLayoutDefaults
             MaxWidth = maxWidth,
             BodyPadding = bodyPadding,
             FontFamily = fontFamily,
-            FlowMode = settings.FlowMode == 1 ? 1 : 0,
-            VerticalWriting = settings.VerticalWriting,
-            TwoPageMode = settings.TwoPageMode
+            // Vertical text is deliberately a single-page-only layout. Keep
+            // the invariant here rather than relying on individual controls:
+            // persisted legacy rows and programmatic callers must not be able
+            // to recreate vertical scrolling or a vertical two-page spread.
+            FlowMode = verticalWriting ? 1 : settings.FlowMode == 1 ? 1 : 0,
+            VerticalWriting = verticalWriting,
+            TwoPageMode = !verticalWriting && settings.TwoPageMode
         };
     }
 }

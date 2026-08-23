@@ -16,7 +16,7 @@ public sealed class ReaderLayoutDefaultsTests
         Assert.Equal(1, defaults.FlowMode);
         Assert.False(defaults.VerticalWriting);
         Assert.False(defaults.TwoPageMode);
-        Assert.False(defaults.VerticalWriting && defaults.FlowMode == 1);
+        Assert.True(defaults.ParagraphIndent);
     }
 
     [Fact]
@@ -37,9 +37,9 @@ public sealed class ReaderLayoutDefaultsTests
         Assert.Equal(ReaderLayoutDefaults.MinLineHeight, normalized.LineHeight);
         Assert.Equal(ReaderLayoutDefaults.MinMaxWidth, normalized.MaxWidth);
         Assert.Equal(ReaderLayoutDefaults.MaxBodyPadding, normalized.BodyPadding);
-        Assert.Equal(0, normalized.FlowMode); // only 0 or 1 are valid flow modes; 7 falls back to scroll
+        Assert.Equal(1, normalized.FlowMode); // vertical writing always uses pagination
         Assert.True(normalized.VerticalWriting); // user choice is preserved
-        Assert.True(normalized.TwoPageMode); // page layout preference is preserved across normalization
+        Assert.False(normalized.TwoPageMode); // vertical writing only supports a single page
     }
 
     [Fact]
@@ -62,14 +62,17 @@ public sealed class ReaderLayoutDefaultsTests
     }
 
     [Fact]
-    public void NormalizeForcesInvalidFlowModeToScrollMode()
+    public void NormalizeForcesVerticalWritingToSinglePageMode()
     {
         var invalid = new ReaderLayoutSettings(FlowMode: 3, VerticalWriting: true);
         var normalized = ReaderLayoutDefaults.Normalize(invalid);
-        Assert.Equal(0, normalized.FlowMode);
+        Assert.Equal(1, normalized.FlowMode);
+        Assert.False(normalized.TwoPageMode);
 
-        var paged = new ReaderLayoutSettings(FlowMode: 1, VerticalWriting: true);
-        Assert.Equal(1, ReaderLayoutDefaults.Normalize(paged).FlowMode);
+        var twoPage = new ReaderLayoutSettings(FlowMode: 1, VerticalWriting: true, TwoPageMode: true);
+        var normalizedTwoPage = ReaderLayoutDefaults.Normalize(twoPage);
+        Assert.Equal(1, normalizedTwoPage.FlowMode);
+        Assert.False(normalizedTwoPage.TwoPageMode);
     }
 
     [Fact]

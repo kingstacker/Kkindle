@@ -99,7 +99,6 @@ public partial class MainWindow
     public ObservableCollection<Stage3DashboardDayViewModel> DashboardDays { get; } = [];
     public ObservableCollection<Stage3DashboardBarViewModel> DashboardBookTimes { get; } = [];
     public ObservableCollection<Stage3DashboardBarViewModel> DashboardProgressBuckets { get; } = [];
-    public ObservableCollection<Stage3DashboardBarViewModel> DashboardReadingStatuses { get; } = [];
     public ObservableCollection<Stage3DashboardRecentViewModel> DashboardRecentItems { get; } = [];
     public ObservableCollection<ZLibraryBookCardViewModel> ZLibraryBooks { get; } = [];
     public ObservableCollection<ManagedFont> ManagedFonts { get; } = [];
@@ -1366,15 +1365,20 @@ public partial class MainWindow
     {
         private readonly string? _temporaryDirectory;
 
-        public PreparedKindleTransfer(BookFile file, string sourcePath, string? temporaryDirectory = null)
+        public PreparedKindleTransfer(BookFile file, string sourcePath, string? temporaryDirectory = null, string? coverOverridePath = null)
         {
             File = file;
             SourcePath = sourcePath;
+            CoverOverridePath = coverOverridePath;
             _temporaryDirectory = temporaryDirectory;
         }
 
         public BookFile File { get; }
         public string SourcePath { get; }
+
+        // Library cover to prefer over the file's embedded one when building
+        // the Kindle home-screen thumbnail (e.g. a Douban-matched cover).
+        public string? CoverOverridePath { get; }
 
         public void Dispose()
         {
@@ -1389,6 +1393,24 @@ public partial class MainWindow
         }
     }
 
+    // CoverPath is stored relative to the data root; older entries may be
+    // absolute. Returns null when the book has no readable local cover.
+    private string? ResolveBookCoverAbsolutePath(Book book)
+    {
+        if (string.IsNullOrWhiteSpace(book.CoverPath)) return null;
+        try
+        {
+            var path = Path.IsPathRooted(book.CoverPath)
+                ? book.CoverPath
+                : Path.GetFullPath(Path.Combine(_paths.Data, book.CoverPath));
+            return File.Exists(path) ? path : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
     private async Task<PreparedKindleTransfer> PrepareKindleTransferAsync(
         Book book,
         IProgress<TransferProgress>? progress,
@@ -1399,10 +1421,11 @@ public partial class MainWindow
         var sourcePath = _library.GetAbsoluteFilePath(sourceFile);
         if (!File.Exists(sourcePath))
             throw new FileNotFoundException("找不到本地书籍文件，请先刷新书库。", sourcePath);
+        var coverOverridePath = ResolveBookCoverAbsolutePath(book);
 
         var requiresMetadataRepair = KindleTransferPolicy.RequiresLegacyMetadataRepair(sourceFile, sourcePath);
         if (!KindleTransferPolicy.RequiresConversionToAzw3(sourceFile) && !requiresMetadataRepair)
-            return new PreparedKindleTransfer(sourceFile, sourcePath);
+            return new PreparedKindleTransfer(sourceFile, sourcePath, coverOverridePath: coverOverridePath);
 
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "Kkindle", "kindle-ready", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporaryDirectory);
@@ -1424,7 +1447,7 @@ public partial class MainWindow
                     destinationPath,
                     conversionProgress,
                     cancellationToken,
-                    new FormatConversionMetadata(book.Title, book.Authors));
+                    new FormatConversionMetadata(book.Title, book.Authors, coverOverridePath));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1439,7 +1462,7 @@ public partial class MainWindow
                 var normalized = Path.Combine(
                     temporaryDirectory,
                     KindleTransferPolicy.CreateSafeFileName(book.Title, ".epub"));
-                var metadata = new FormatConversionMetadata(book.Title, book.Authors);
+                var metadata = new FormatConversionMetadata(book.Title, book.Authors, coverOverridePath);
                 await _formatConverter.ConvertAsync(
                     sourcePath,
                     normalized,
@@ -1470,7 +1493,7 @@ public partial class MainWindow
                 Size = output.Length,
                 Sha256 = await Hashing.Sha256Async(destinationPath, cancellationToken)
             };
-            return new PreparedKindleTransfer(preparedFile, destinationPath, temporaryDirectory);
+            return new PreparedKindleTransfer(preparedFile, destinationPath, temporaryDirectory, coverOverridePath);
         }
         catch
         {
@@ -1552,7 +1575,8 @@ public partial class MainWindow
                         prepared.File,
                         prepared.SourcePath,
                         progress,
-                        cancellation.Token);
+                        cancellationToken: cancellation.Token,
+                        coverOverridePath: prepared.CoverOverridePath);
                     sent++;
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -1764,7 +1788,8 @@ public partial class MainWindow
                     prepared.File,
                     prepared.SourcePath,
                     progress,
-                    cancellation.Token);
+                    cancellationToken: cancellation.Token,
+                    coverOverridePath: prepared.CoverOverridePath);
                 ShowTransferToast("发送到 Kindle 设备", $"已发送《{card.Title}》到 {device.Name}。", progress: 100, autoHide: true);
                 SetTaskStatus($"已发送《{card.Title}》到 {device.Name}。");
             }
@@ -2103,6 +2128,12 @@ public partial class MainWindow
         {
             if (_deviceWarmTask is not null)
                 await _deviceWarmTask;
+            // Kindle covers below come from DeviceBooks. A same-identity
+            // reconnect never re-arms _deviceWarmTask and leaves that list
+            // empty while clippings can still be re-read, which would drop
+            // every Kindle cover from this page.
+            if (_kindle is not null && CurrentDevice is not null && !_deviceBooksLoaded)
+                await RefreshDeviceBooksAsync(_lifetimeCancellation.Token);
             var books = await _library.SearchAsync(cancellationToken: _lifetimeCancellation.Token);
             var titles = books.ToDictionary(book => book.Id, book => book.Title);
             foreach (var book in books)
@@ -2381,29 +2412,12 @@ public partial class MainWindow
         ?? _readingMaterialCoverPaths
             .Where(pair => pair.Key.StartsWith($"{source}\u001F", StringComparison.OrdinalIgnoreCase))
             .Select(pair => (Title: pair.Key[(pair.Key.IndexOf('\u001F') + 1)..], Path: pair.Value))
-            .Where(pair => AreCoverTitlesRelated(pair.Title, title))
-            .OrderByDescending(pair => Math.Min(NormalizeCoverTitle(pair.Title).Length, NormalizeCoverTitle(title).Length))
+            .Where(pair => ReadingMaterialCoverMatcher.AreTitlesRelated(pair.Title, title))
+            .OrderByDescending(pair => Math.Min(
+                ReadingMaterialCoverMatcher.NormalizeTitle(pair.Title).Length,
+                ReadingMaterialCoverMatcher.NormalizeTitle(title).Length))
             .Select(pair => pair.Path)
             .FirstOrDefault();
-
-    private static bool AreCoverTitlesRelated(string left, string right)
-    {
-        var normalizedLeft = NormalizeCoverTitle(left);
-        var normalizedRight = NormalizeCoverTitle(right);
-        return normalizedLeft.Length >= 4
-            && normalizedRight.Length >= 4
-            && (normalizedLeft.Contains(normalizedRight, StringComparison.OrdinalIgnoreCase)
-                || normalizedRight.Contains(normalizedLeft, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string NormalizeCoverTitle(string value)
-    {
-        var withoutParenthetical = Regex.Replace(value, @"[（(][^）)]{0,100}[）)]", string.Empty);
-        return new string(withoutParenthetical
-            .Where(character => char.IsLetterOrDigit(character) || character >= '\u4E00' && character <= '\u9FFF')
-            .ToArray())
-            .ToLowerInvariant();
-    }
 
     private string? GetReadingMaterialCoverPathForGroup(IReadOnlyList<Stage3ReadingMaterialViewModel> items)
     {
@@ -2780,12 +2794,15 @@ public partial class MainWindow
             DashboardBooksStartedText.Text = $"{dashboard.BooksStarted} 本";
             DashboardBooksFinishedText.Text = $"{dashboard.BooksFinished} 本";
             DashboardTotalTimeText.Text = FormatReadingTime(dashboard.TotalSeconds);
-            DashboardAverageProgressText.Text = $"{dashboard.AverageProgress:0.#}%";
+            DashboardAverageProgressText.Text = $"平均进度 {dashboard.AverageProgress:0.#}%";
             DashboardBookmarksText.Text = $"{dashboard.BookmarkCount.ToString(CultureInfo.InvariantCulture)} / {dashboard.AnnotationCount.ToString(CultureInfo.InvariantCulture)}";
-            DashboardAnnotationsText.Text = dashboard.AnnotationCount.ToString(CultureInfo.InvariantCulture);
-            var hours = dashboard.TotalSeconds / 3600d;
-            ReadingDashboardSummaryText.Text = $"已开始 {dashboard.BooksStarted} 本 · 已读完 {dashboard.BooksFinished} 本 · 累计 {hours:0.0} 小时";
-            ReadingDashboardDetailText.Text = $"平均进度 {dashboard.AverageProgress:0}% · 书签 {dashboard.BookmarkCount} 条 · 批注 {dashboard.AnnotationCount} 条";
+
+            var weekSeconds = dashboard.DailyReading.Skip(7).Sum(day => day.ActiveSeconds);
+            DashboardDailyAverageText.Text = weekSeconds == 0
+                ? "近 7 天日均 —"
+                : $"近 7 天日均 {FormatReadingTime((long)Math.Round(weekSeconds / 7d))}";
+            DashboardStreakText.Text = $"{ComputeReadingStreakDays(dashboard.DailyReading)} 天";
+            DashboardStatusText.IsVisible = false;
 
             _readingDashboardItems.Clear();
             foreach (var item in dashboard.RecentBooks)
@@ -2800,19 +2817,18 @@ public partial class MainWindow
                 _readingDashboardItems.Add(recent);
                 DashboardRecentItems.Add(recent);
             }
-            DashboardRecentText.Text = _readingDashboardItems.Count == 0
-                ? "还没有阅读记录。打开一本 EPUB 后，这里会显示最近进度。"
-                : string.Join(Environment.NewLine, _readingDashboardItems.Select(item => item.Display));
             DashboardRecentEmptyText.IsVisible = _readingDashboardItems.Count == 0;
 
             DashboardDays.Clear();
             var maximumSeconds = Math.Max(1, dashboard.DailyReading.Max(day => day.ActiveSeconds));
+            var today = DateOnly.FromDateTime(DateTime.Today);
             foreach (var day in dashboard.DailyReading)
             {
                 DashboardDays.Add(new Stage3DashboardDayViewModel(
                     day.Date.ToString("MM-dd", CultureInfo.InvariantCulture),
                     day.ActiveSeconds == 0 ? "" : $"{day.ActiveSeconds / 60d:0.#} 分",
-                    day.ActiveSeconds == 0 ? 4 : 10 + 108d * day.ActiveSeconds / maximumSeconds));
+                    day.ActiveSeconds == 0 ? 4 : 10 + 108d * day.ActiveSeconds / maximumSeconds,
+                    day.Date == today ? 1d : 0.3));
             }
 
             PopulateDashboardBars(DashboardBookTimes, dashboard.RecentBooks
@@ -2832,24 +2848,29 @@ public partial class MainWindow
                 ("75–99%", (double)progressValues.Count(value => value >= 75 && value < 99.5), $"{progressValues.Count(value => value >= 75 && value < 99.5)} 本"),
                 ("完成", (double)progressValues.Count(value => value >= 99.5), $"{progressValues.Count(value => value >= 99.5)} 本")
             ]);
-
-            var readingCount = Math.Max(0, dashboard.BooksStarted - dashboard.BooksFinished);
-            PopulateDashboardBars(DashboardReadingStatuses,
-            [
-                ("阅读中", (double)readingCount, $"{readingCount} 本"),
-                ("已完成", (double)dashboard.BooksFinished, $"{dashboard.BooksFinished} 本")
-            ]);
-            ReadingDashboardStatusText.Text = string.Empty;
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            ReadingDashboardSummaryText.Text = "阅读数据暂时不可用";
-            ReadingDashboardDetailText.Text = exception.Message;
-            ReadingDashboardStatusText.Text = $"阅读数据暂时不可用：{exception.Message}";
+            DashboardStatusText.Text = $"阅读数据暂时不可用：{exception.Message}";
+            DashboardStatusText.IsVisible = true;
         }
+    }
+
+    // Consecutive active days inside the 14-day window, ending today or
+    // yesterday (today alone may not have started yet without breaking it).
+    private static int ComputeReadingStreakDays(IReadOnlyList<ReadingDashboardDay> days)
+    {
+        var streak = 0;
+        for (var i = days.Count - 1; i >= 0; i--)
+        {
+            if (days[i].ActiveSeconds > 0) streak++;
+            else if (streak == 0 && i == days.Count - 1) continue;
+            else break;
+        }
+        return streak;
     }
 
     private static void PopulateDashboardBars(
@@ -2896,8 +2917,8 @@ public partial class MainWindow
                 .AppendLine(item.UpdatedAt.ToString("O", CultureInfo.InvariantCulture));
         }
         await File.WriteAllTextAsync(path, csv.ToString(), new UTF8Encoding(true), _lifetimeCancellation.Token);
-        ReadingDashboardDetailText.Text = $"已导出 {_readingDashboardItems.Count} 条阅读数据到 {path}。";
-        ReadingDashboardStatusText.Text = $"已导出 {_readingDashboardItems.Count} 条阅读数据到 {path}。";
+        DashboardStatusText.Text = $"已导出 {_readingDashboardItems.Count} 条阅读数据到 {path}";
+        DashboardStatusText.IsVisible = true;
     }
 
     private static string FormatReadingTime(long seconds)
@@ -2911,7 +2932,7 @@ public partial class MainWindow
     {
         ShowStage3Page(SettingsPage, SettingsNavigationButton);
         SettingsDataPathText.Text = _paths.Data;
-        ShowSettingsSection("General");
+        ShowSettingsSection("Library");
     }
 
     private async void KindleEmailSettingsButton_Click(object? sender, RoutedEventArgs e)
@@ -2950,8 +2971,8 @@ public partial class MainWindow
     {
         var sections = new Dictionary<string, Control>(StringComparer.OrdinalIgnoreCase)
         {
-            ["General"] = SettingsGeneralSection,
             ["Library"] = SettingsLibrarySection,
+            ["Calibre"] = SettingsCalibreSection,
             ["Kindle"] = SettingsKindleSection,
             ["Reading"] = SettingsReadingSection,
             ["Backup"] = SettingsBackupSection,
@@ -2962,15 +2983,15 @@ public partial class MainWindow
             section.IsVisible = false;
         if (!sections.TryGetValue(tag, out var activeSection))
         {
-            tag = "General";
-            activeSection = SettingsGeneralSection;
+            tag = "Library";
+            activeSection = SettingsLibrarySection;
         }
         activeSection.IsVisible = true;
 
         var buttons = new[]
         {
-            SettingsGeneralButton,
             SettingsLibraryButton,
+            SettingsCalibreButton,
             SettingsKindleButton,
             SettingsReadingButton,
             SettingsBackupButton,
@@ -3094,12 +3115,7 @@ public partial class MainWindow
             CompareKindleLibraryCheck.IsChecked = _appSettings.CompareKindleLibraryEnabled;
             GridGalleryDisplayCheck.IsChecked = _appSettings.GridGalleryDisplay;
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
-            DefaultFontScaleBox.Value = (decimal)_appSettings.DefaultReaderLayout.FontScale;
-            DefaultLineHeightBox.Value = (decimal)_appSettings.DefaultReaderLayout.LineHeight;
-            DefaultMaxWidthBox.Value = (decimal)_appSettings.DefaultReaderLayout.MaxWidth;
-            DefaultBodyPaddingBox.Value = (decimal)_appSettings.DefaultReaderLayout.BodyPadding;
             DefaultVerticalWritingCheck.IsChecked = _appSettings.DefaultReaderLayout.VerticalWriting;
-            SelectSettingsFontFamily(_appSettings.DefaultReaderLayout.FontFamily);
             AboutVersionText.Text = $"版本 {ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly)}";
             CheckForUpdatesButton.IsEnabled = _updateService is not null;
             AboutUpdateStatusText.Text = _updateService is null
@@ -3144,12 +3160,7 @@ public partial class MainWindow
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         DefaultVerticalWritingCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        DefaultFontFamilyBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        DefaultFontScaleBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        DefaultLineHeightBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        DefaultMaxWidthBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        DefaultBodyPaddingBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
         CalibrePathBox.TextChanged += (_, _) =>
         {
             UpdateCalibreDetectionStatus();
@@ -3313,14 +3324,6 @@ public partial class MainWindow
                     }));
             }),
             TaskScheduler.Default);
-    }
-
-    private void SelectSettingsFontFamily(string family)
-    {
-        DefaultFontFamilyBox.SelectedItem = DefaultFontFamilyBox.Items
-            .OfType<ComboBoxItem>()
-            .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), family, StringComparison.OrdinalIgnoreCase))
-            ?? DefaultFontFamilyBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
     }
 
     private async Task RefreshManagedResourcesAsync(CancellationToken cancellationToken = default)
@@ -3545,7 +3548,6 @@ public partial class MainWindow
     private async Task SaveAppSettingsCoreAsync()
     {
         var selectedFormat = (PreferredOpenFormatBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "epub";
-        var defaultLayout = _appSettings.DefaultReaderLayout;
         var autoConnectChanged = _appSettings.AutoConnectDevice != (AutoConnectDeviceCheck.IsChecked != false);
         _appSettings = AppSettings.Normalize(_appSettings with
         {
@@ -3563,16 +3565,11 @@ public partial class MainWindow
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
             GridGalleryDisplay = GridGalleryDisplayCheck.IsChecked == true,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
-            DefaultReaderLayout = new ReaderLayoutSettings(
-                DefaultFontScaleBox.Value is { } fontScale ? (double)fontScale : defaultLayout.FontScale,
-                DefaultLineHeightBox.Value is { } lineHeight ? (double)lineHeight : defaultLayout.LineHeight,
-                DefaultMaxWidthBox.Value is { } maxWidth ? (double)maxWidth : defaultLayout.MaxWidth,
-                DefaultBodyPaddingBox.Value is { } bodyPadding ? (double)bodyPadding : defaultLayout.BodyPadding,
-                (DefaultFontFamilyBox.SelectedItem as ComboBoxItem)?.Tag?.ToString()
-                    ?? defaultLayout.FontFamily,
-                defaultLayout.FlowMode,
-                DefaultVerticalWritingCheck.IsChecked == true,
-                defaultLayout.TwoPageMode)
+            // 排版默认值已在阅读器内设置，这里只同步竖排开关。
+            DefaultReaderLayout = _appSettings.DefaultReaderLayout with
+            {
+                VerticalWriting = DefaultVerticalWritingCheck.IsChecked == true
+            }
         });
         try
         {
@@ -4193,7 +4190,8 @@ public partial class MainWindow
 public sealed record Stage3DashboardDayViewModel(
     string DateLabel,
     string TimeLabel,
-    double BarHeight);
+    double BarHeight,
+    double BarOpacity);
 
 public sealed record Stage3DashboardBarViewModel(
     string Label,
@@ -4206,7 +4204,11 @@ public sealed record Stage3DashboardRecentViewModel(
     long Seconds,
     DateTimeOffset UpdatedAt)
 {
-    public string Display => $"{Title} · {ProgressPercent:0.#}% · {FormatTime(Seconds)} · {UpdatedAt.ToLocalTime():MM-dd HH:mm}";
+    public string ProgressLabel => $"{ProgressPercent:0.#}%";
+
+    public string DurationLabel => FormatTime(Seconds);
+
+    public string UpdatedLabel => UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
 
     private static string FormatTime(long seconds) => seconds switch
     {

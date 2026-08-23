@@ -189,6 +189,14 @@ public sealed class BookFormatConversionService : IBookFormatConverter
             startInfo.ArgumentList.Add("--authors");
             startInfo.ArgumentList.Add(metadata.Authors.Trim());
         }
+        // Calibre embeds the given image as the output cover, replacing the
+        // source file's own (possibly low-resolution) one. This is how a
+        // Douban-matched cover reaches the Kindle instead of the old cover.
+        if (!string.IsNullOrWhiteSpace(metadata.CoverPath) && File.Exists(metadata.CoverPath))
+        {
+            startInfo.ArgumentList.Add("--cover");
+            startInfo.ArgumentList.Add(metadata.CoverPath);
+        }
     }
 
     private static string CreateShortSourceCopy(string sourcePath)

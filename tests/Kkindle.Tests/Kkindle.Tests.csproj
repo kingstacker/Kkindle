@@ -16,6 +16,7 @@
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackTitleLinePolicy.cs" Link="ReaderLinuxTextFallbackTitleLinePolicy.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackPagingPolicy.cs" Link="ReaderLinuxTextFallbackPagingPolicy.cs" />
     <Compile Include="..\..\src\Kkindle.App\LibraryDropImportPolicy.cs" Link="LibraryDropImportPolicy.cs" />
+    <Compile Include="..\..\src\Kkindle.App\ReadingMaterialCoverMatcher.cs" Link="ReadingMaterialCoverMatcher.cs" />
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.3" />

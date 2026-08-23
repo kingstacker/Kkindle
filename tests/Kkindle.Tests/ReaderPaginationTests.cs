@@ -4,6 +4,39 @@ namespace Kkindle.Tests;
 
 public sealed class ReaderPaginationTests
 {
+    [Theory]
+    [InlineData(true, false, -1)]
+    [InlineData(false, false, 1)]
+    [InlineData(true, true, 1)]
+    [InlineData(false, true, -1)]
+    public void ClickDirectionMirrorsOnlyVerticalWriting(
+        bool onLeft,
+        bool verticalWriting,
+        int expectedDirection)
+    {
+        Assert.Equal(
+            expectedDirection,
+            ReaderPaginationPolicy.GetClickDirection(onLeft, verticalWriting));
+    }
+
+    [Theory]
+    [InlineData(1, false, 1)]
+    [InlineData(-1, false, -1)]
+    [InlineData(1, true, -1)]
+    [InlineData(-1, true, 1)]
+    [InlineData(0, true, 0)]
+    public void VisualTurnDirectionMirrorsOnlyVerticalWriting(
+        int navigationDirection,
+        bool verticalWriting,
+        int expectedDirection)
+    {
+        Assert.Equal(
+            expectedDirection,
+            ReaderPaginationPolicy.GetVisualTurnDirection(
+                navigationDirection,
+                verticalWriting));
+    }
+
     [Fact]
     public void ColumnWidthSupportsSingleAndTwoPageSpreads()
     {

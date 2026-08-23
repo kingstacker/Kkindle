@@ -1,5 +1,6 @@
 using Kkindle.Core;
 using Kkindle.Infrastructure;
+using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Tests;
 
@@ -131,7 +132,10 @@ public sealed class ReaderProductivityTests
                 FontFamily: "SimSun",
                 FlowMode: 1,
                 VerticalWriting: true,
-                TwoPageMode: true);
+                TwoPageMode: true)
+            {
+                ParagraphIndent = false
+            };
             await service.SaveLayoutSettingsAsync(bookId, fileId, settings);
 
             var restored = await service.GetLayoutSettingsAsync(fileId);
@@ -144,9 +148,61 @@ public sealed class ReaderProductivityTests
             Assert.Equal(1, restored.FlowMode);
             Assert.True(restored.VerticalWriting);
             Assert.True(restored.TwoPageMode);
+            Assert.False(restored.ParagraphIndent);
 
             // A book with no saved settings still resolves to the default record.
             Assert.Null(await service.GetLayoutSettingsAsync(Guid.NewGuid()));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task MigratesLegacyLayoutRowsWithParagraphIndentEnabled()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var fileId = Guid.NewGuid();
+            var bookId = Guid.NewGuid();
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE ReaderLayoutSettings (
+                        BookFileId TEXT PRIMARY KEY,
+                        BookId TEXT NOT NULL,
+                        FontScale REAL NOT NULL,
+                        LineHeight REAL NOT NULL,
+                        MaxWidth REAL NOT NULL,
+                        BodyPadding REAL NOT NULL,
+                        FontFamily TEXT NULL,
+                        FlowMode INTEGER NOT NULL,
+                        VerticalWriting INTEGER NOT NULL,
+                        TwoPageMode INTEGER NOT NULL,
+                        UpdatedAt TEXT NOT NULL
+                    );
+                    INSERT INTO ReaderLayoutSettings (
+                        BookFileId, BookId, FontScale, LineHeight, MaxWidth,
+                        BodyPadding, FontFamily, FlowMode, VerticalWriting,
+                        TwoPageMode, UpdatedAt)
+                    VALUES ($fileId, $bookId, 1.2, 1.8, 1200, 24,
+                        'SimSun', 1, 0, 0, $updatedAt);
+                    """;
+                command.Parameters.AddWithValue("$fileId", fileId.ToString());
+                command.Parameters.AddWithValue("$bookId", bookId.ToString());
+                command.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var service = new ReaderDataService(paths);
+            await service.InitializeAsync();
+
+            var migrated = await service.GetLayoutSettingsAsync(fileId);
+            Assert.NotNull(migrated);
+            Assert.True(migrated!.ParagraphIndent);
         }
         finally { TestHelpers.TryDelete(root); }
     }

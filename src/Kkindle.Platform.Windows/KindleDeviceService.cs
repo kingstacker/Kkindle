@@ -405,10 +405,10 @@ public sealed class KindleDeviceService : IKindleDeviceService
         book.Authors = "未知作者";
     }
 
-    public async Task SendBookAsync(KindleDevice device, BookFile bookFile, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default)
+    public async Task SendBookAsync(KindleDevice device, BookFile bookFile, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default, string? coverOverridePath = null)
     {
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("书籍源文件不存在。", sourcePath);
-        var thumbnail = await KindleThumbnailService.CreateAsync(sourcePath, _metadata, cancellationToken);
+        var thumbnail = await KindleThumbnailService.CreateAsync(sourcePath, _metadata, cancellationToken, coverOverridePath);
         if (device.Transport == KindleTransport.Wpd)
         {
             await Task.Run(
@@ -421,7 +421,10 @@ public sealed class KindleDeviceService : IKindleDeviceService
         var fileName = KindleTransferPolicy.CreateSafeFileName(
             Path.GetFileNameWithoutExtension(sourcePath),
             Path.GetExtension(sourcePath));
-        var destination = GetUniqueDestination(documents, fileName);
+        // Re-sending a book replaces the existing copy instead of creating a
+        // "title (2).azw3" duplicate, so updated covers and metadata actually
+        // reach the book's existing Kindle entry.
+        var destination = Path.Combine(documents, fileName);
         var temporary = destination + ".kkindle-part";
         try
         {

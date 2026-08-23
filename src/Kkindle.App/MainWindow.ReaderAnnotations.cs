@@ -104,8 +104,6 @@ public partial class MainWindow
             else if (_readerIsPdf)
                 await ApplySavedReaderPdfAnnotationsAsync(ReaderToken);
             HideReaderSelectionPopup();
-            ReaderHighlightButton.IsVisible = false;
-            ReaderAnnotateButton.IsVisible = false;
             _readerPendingSelection = null;
             _readerPendingSelectionStartOffset = 0;
             _readerPendingSelectionEndOffset = 0;
@@ -234,8 +232,6 @@ public partial class MainWindow
             {
             }
         }
-        ReaderHighlightButton.IsVisible = false;
-        ReaderAnnotateButton.IsVisible = false;
         HideReaderSelectionPopup();
         _readerPendingSelection = null;
         _readerPendingSelectionStartOffset = 0;

@@ -105,6 +105,7 @@ public partial class MainWindow : Window
     private DoubanBookCandidate? _doubanSelectedCandidate;
     private DoubanBookMetadata? _doubanPreviewMetadata;
     private CancellationTokenSource? _doubanMatchCancellation;
+    private bool _doubanResearchPending;
     private TaskCompletionSource<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?>? _importFormatSelectionCompletion;
     private readonly List<(string FilePath, ToggleSwitch Toggle)> _importFormatSelectionRows = [];
     private bool _rubberBandSelecting;
@@ -2112,36 +2113,39 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Same cleaning as batch matching: import metadata noise (subtitles,
+        // bracketed series info, stuffed author strings) makes Douban's strict
+        // keyword search miss otherwise obvious hits.
+        var searchTitle = CleanDoubanTitle(card.Book.Title);
+        var searchAuthor = CleanDoubanAuthor(card.Book.Authors);
+        if (string.IsNullOrWhiteSpace(searchTitle)) searchTitle = card.Book.Title.Trim();
+        DoubanSearchBox.Text = searchTitle;
+        _doubanResearchPending = false;
+
         var cancellation = new CancellationTokenSource();
         _doubanMatchCancellation = cancellation;
         try
         {
-            SetTaskStatus($"正在搜索《{card.Title}》的豆瓣信息…");
+            SetTaskStatus($"正在搜索《{searchTitle}》的豆瓣信息…");
             ShowTaskProgressPopup();
             TaskProgressPopupBar.IsIndeterminate = true;
-            TaskProgressPopupText.Text = $"正在搜索《{card.Title}》的豆瓣信息…";
-            var candidates = await _douban.SearchAsync(
-                card.Book.Title,
-                card.Book.Authors,
-                cancellation.Token);
-            if (candidates.Count == 0)
-            {
-                SetTaskStatus("豆瓣没有返回匹配结果。");
-                await ShowMessageAsync("没有找到", "豆瓣没有返回匹配条目。可以先修正本地书名或作者后再试。");
-                return;
-            }
-
-            DisposeDoubanCandidates();
-            foreach (var item in candidates)
-                DoubanCandidates.Add(new DoubanCandidateViewModel(item));
-
-            TaskProgressPopupText.Text = "正在加载豆瓣候选封面…";
-            SetTaskStatus("正在加载豆瓣候选封面…");
-            await LoadDoubanCandidateCoversAsync(cancellation.Token);
+            TaskProgressPopupText.Text = $"正在搜索《{searchTitle}》的豆瓣信息…";
+            await SearchAndShowDoubanCandidatesAsync(searchTitle, searchAuthor, cancellation.Token);
 
             while (true)
             {
                 var candidate = await ChooseDoubanCandidateAsync();
+
+                if (_doubanResearchPending)
+                {
+                    // The user edited the keywords in the overlay; search again
+                    // and keep the dialog open with the refreshed list.
+                    _doubanResearchPending = false;
+                    var query = DoubanSearchBox.Text?.Trim() ?? string.Empty;
+                    if (query.Length > 0)
+                        await SearchAndShowDoubanCandidatesAsync(query, null, cancellation.Token);
+                    continue;
+                }
                 if (candidate is null)
                 {
                     SetTaskStatus("已取消豆瓣匹配。");
@@ -2225,6 +2229,70 @@ public partial class MainWindow : Window
             if (ReferenceEquals(_doubanMatchCancellation, cancellation)) _doubanMatchCancellation = null;
             cancellation.Dispose();
         }
+    }
+
+    // Runs one Douban query and refreshes the candidate overlay (list plus
+    // covers). Empty results or failures keep the dialog open with a status
+    // message so the keywords can be corrected and searched again; only
+    // access-verification blocks bubble up to abort the whole match.
+    private async Task SearchAndShowDoubanCandidatesAsync(
+        string title,
+        string? authors,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            TaskProgressPopupText.Text = $"正在搜索豆瓣“{title}”…";
+            SetTaskStatus($"正在搜索豆瓣“{title}”…");
+            var candidates = await _douban.SearchAsync(title, authors, cancellationToken);
+            if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(authors))
+            {
+                // Dirty author strings ("【日】伊坂幸太郎", translators mixed
+                // in) poison the query; retry with the title alone.
+                candidates = await _douban.SearchAsync(title, null, cancellationToken);
+            }
+            DisposeDoubanCandidates();
+            foreach (var item in candidates)
+                DoubanCandidates.Add(new DoubanCandidateViewModel(item));
+            if (candidates.Count > 0)
+            {
+                TaskProgressPopupText.Text = "正在加载豆瓣候选封面…";
+                SetTaskStatus("正在加载豆瓣候选封面…");
+                await LoadDoubanCandidateCoversAsync(cancellationToken);
+                SetTaskStatus($"豆瓣返回 {candidates.Count} 条结果，请选择匹配条目。");
+            }
+            else
+            {
+                SetTaskStatus($"豆瓣没有返回“{title}”的结果，可修改关键词后重新搜索。");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException exception)
+            when (exception.Message.Contains("访问验证") || exception.Message.Contains("限制了访问"))
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus($"豆瓣搜索失败：{exception.Message}");
+        }
+    }
+
+    private void DoubanResearchButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(DoubanSearchBox.Text)) return;
+        _doubanResearchPending = true;
+        _doubanCandidateCompletion?.TrySetResult(null);
+    }
+
+    private void DoubanSearchBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key is not Key.Enter) return;
+        e.Handled = true;
+        DoubanResearchButton_Click(sender, e);
     }
 
     private Task<DoubanBookCandidate?> ChooseDoubanCandidateAsync()
@@ -2427,6 +2495,7 @@ public partial class MainWindow : Window
     {
         DoubanCandidateOverlay.IsVisible = false;
         DoubanPreviewOverlay.IsVisible = false;
+        _doubanResearchPending = false;
         _doubanCandidateCompletion?.TrySetResult(null);
         _doubanApplyCompletion?.TrySetResult(null);
         _doubanCandidateCompletion = null;

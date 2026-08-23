@@ -30,6 +30,28 @@ public sealed class DoubanMetadataTests
     }
 
     [Fact]
+    public async Task SearchParsesEveryReturnedItemWithoutTruncation()
+    {
+        // A page carries ~15 items (count:15, total:300+); an old cap kept only
+        // the first 10, which read as "incomplete results" in the picker.
+        var items = string.Join(",", Enumerable.Range(1, 15).Select(index =>
+            "{\"abstract\":\"简介 " + index + "\",\"cover_url\":\"https://img.example/" + index +
+            ".jpg\",\"id\":" + (1000 + index) + ",\"title\":\"书名" + index +
+            "\",\"url\":\"https://book.douban.com/subject/" + (1000 + index) + "/\"}"));
+        using var service = new DoubanMetadataService(new TestHelpers.StubHttpMessageHandler(_ => HtmlResponse(
+            $$"""
+            <html><script>
+            window.__DATA__ = {"count":15,"total":304,"items":[{{items}}]}; window.__USER__ = {};
+            </script></html>
+            """)), TimeSpan.Zero);
+
+        var results = await service.SearchAsync("三体", "刘慈欣");
+
+        Assert.Equal(15, results.Count);
+        Assert.Equal("书名15", results[^1].Title);
+    }
+
+    [Fact]
     public async Task DetailsParsesStructuredDataInfoAndIntroduction()
     {
         using var service = new DoubanMetadataService(new TestHelpers.StubHttpMessageHandler(_ => HtmlResponse("""

@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "47";
+    private const string ExtractionFormatVersion = "48";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -638,8 +638,11 @@ public sealed class EpubReaderPreparationService
                   if (width <= 0) return;
                   const x = event.clientX || 0;
                   if (x < width / 3 || x > width * 2 / 3) {
-                    const direction = x < width / 3 ? -1 : 1;
-                    send({ type: "page", direction });
+                    const onLeft = x < width / 3;
+                    // Report the physical click side, not a page-local idea of
+                    // writing direction. The host owns the global vertical
+                    // preference and maps this side to a turn direction.
+                    send({ type: "pageClick", side: onLeft ? "left" : "right" });
                   }
                 } catch (_) { }
               });
@@ -937,6 +940,8 @@ public sealed class EpubReaderPreparationService
             chapterTitles.Add(await ReadChapterTitleAsync(chapter, cancellationToken));
         }
 
+        await ReplaceDuplicateChapterTitlesWithBodyPreviewAsync(chapters, chapterTitles, cancellationToken);
+
         return new EpubReaderDocument(cacheRoot, chapters, navigation, chapterTitles);
     }
 
@@ -1153,6 +1158,71 @@ public sealed class EpubReaderPreparationService
 
     private static string NormalizeTitle(string? value) =>
         string.Join(' ', (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    private const int ChapterTitlePreviewMaxLength = 20;
+
+    private static readonly HashSet<string> BodyPreviewSkippedElements = new(StringComparer.OrdinalIgnoreCase)
+    { "head", "title", "script", "style" };
+
+    // Calibre-style conversions stamp the same book-level <title> on every
+    // split file, so spine chapters missing from the book's own TOC (front
+    // matter such as author bios and dedications) would all show one identical
+    // label. Give each member of a duplicate group a title derived from its
+    // first body line instead.
+    private static async Task ReplaceDuplicateChapterTitlesWithBodyPreviewAsync(
+        IReadOnlyList<string> chapters,
+        List<string> chapterTitles,
+        CancellationToken cancellationToken)
+    {
+        var duplicates = chapterTitles
+            .Where(title => title.Length > 0)
+            .GroupBy(title => title, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        if (duplicates.Count == 0) return;
+
+        for (var index = 0; index < chapterTitles.Count; index++)
+        {
+            if (!duplicates.Contains(chapterTitles[index])) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            var preview = TruncateChapterTitle(
+                await ReadChapterBodyPreviewAsync(chapters[index], cancellationToken));
+            // A preview that collides again would just move the duplication;
+            // keep the original label when no distinct first line exists.
+            if (preview.Length > 0 && !duplicates.Contains(preview))
+                chapterTitles[index] = preview;
+        }
+    }
+
+    private static async Task<string> ReadChapterBodyPreviewAsync(
+        string chapterPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var document = await LoadXmlAsync(chapterPath, cancellationToken);
+            return document
+                .DescendantNodes()
+                .OfType<XText>()
+                .Where(text => text.Parent is XElement parent && IsBodyPreviewElement(parent))
+                .Select(text => NormalizeTitle(text.Value))
+                .FirstOrDefault(value => value.Length > 0) ?? string.Empty;
+        }
+        catch { return string.Empty; }
+    }
+
+    private static bool IsBodyPreviewElement(XElement element) =>
+        !BodyPreviewSkippedElements.Contains(element.Name.LocalName)
+        && element.Ancestors().All(ancestor => !BodyPreviewSkippedElements.Contains(ancestor.Name.LocalName));
+
+    private static string TruncateChapterTitle(string value)
+    {
+        value = NormalizeTitle(value);
+        return value.Length <= ChapterTitlePreviewMaxLength
+            ? value
+            : value[..ChapterTitlePreviewMaxLength].TrimEnd() + "…";
+    }
 
     private sealed record ManifestItem(string? Id, string? Href, string? MediaType, string? Properties);
 

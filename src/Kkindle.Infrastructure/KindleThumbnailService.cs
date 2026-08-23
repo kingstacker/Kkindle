@@ -19,10 +19,29 @@ public static class KindleThumbnailService
     public static async Task<KindleThumbnail?> CreateAsync(
         string bookPath,
         IMetadataService metadataService,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? coverOverridePath = null)
     {
         var fileName = await ReadThumbnailFileNameAsync(bookPath, cancellationToken);
         if (fileName is null) return null;
+
+        // A library-managed cover (e.g. a freshly matched Douban one) wins
+        // over whatever is still embedded in the book file.
+        if (!string.IsNullOrWhiteSpace(coverOverridePath))
+        {
+            try
+            {
+                var overrideBytes = await File.ReadAllBytesAsync(coverOverridePath, cancellationToken);
+                if (overrideBytes.Length > 0)
+                    return new KindleThumbnail(fileName, overrideBytes);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
 
         var metadata = await metadataService.ReadMetadataAsync(bookPath, cancellationToken);
         return metadata.CoverBytes is { Length: > 0 } cover

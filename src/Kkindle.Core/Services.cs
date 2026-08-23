@@ -40,7 +40,7 @@ public interface IKindleDeviceService
         KindleDevice device,
         IProgress<KindleScanProgress>? progress = null,
         CancellationToken cancellationToken = default);
-    Task SendBookAsync(KindleDevice device, BookFile bookFile, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default);
+    Task SendBookAsync(KindleDevice device, BookFile bookFile, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default, string? coverOverridePath = null);
     Task RemoveBookAsync(KindleDevice device, KindleBook book, CancellationToken cancellationToken = default);
     Task<string> ExportBookAsync(KindleDevice device, KindleBook book, string destinationDirectory, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<KindleDeviceResource>> ScanResourcesAsync(KindleDevice device, KindleResourceKind kind, CancellationToken cancellationToken = default);

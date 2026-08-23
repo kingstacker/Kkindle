@@ -287,7 +287,23 @@ internal static class ReaderNavigationScripts
           const rect = block.getBoundingClientRect();
           const docTop = rect.top + scroller.scrollTop;
           const docLeft = rect.left + scroller.scrollLeft;
-          if (flowMode === 1) {
+          if (flowMode === 1 && vertical) {
+            // Vertical-rl pagination anchors scroll at the right edge with a
+            // negative scrollLeft range. Later content sits to the LEFT of the
+            // viewport, so measure how far the target's right edge is behind
+            // the visible content edge and reveal its owning viewport page.
+            const padRight = parseFloat(bodyStyle.paddingRight) || 0;
+            const step = {{ReaderPaginationScripts.VerticalStepExpression}};
+            const rawMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+            const max = rawMax;
+            const contentRight = scroller.clientWidth - padRight;
+            const distance = Math.abs(scroller.scrollLeft || 0)
+              + Math.max(0, contentRight - rect.right);
+            const pageIndex = step > 0
+              ? Math.max(0, Math.floor(distance / step + 1e-6))
+              : 0;
+            window.scrollTo({ left: -(Math.min(max, pageIndex * step)), top: 0, behavior: 'instant' });
+          } else if (flowMode === 1) {
             const padLeft = parseFloat(bodyStyle.paddingLeft) || 0;
             const padRight = parseFloat(bodyStyle.paddingRight) || 0;
             const step = {{ReaderPaginationScripts.PageStepExpression}};

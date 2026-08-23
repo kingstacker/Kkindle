@@ -123,7 +123,8 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         BookFile bookFile,
         string sourcePath,
         IProgress<TransferProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? coverOverridePath = null)
     {
         EnsureMassStorage(device);
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("书籍源文件不存在。", sourcePath);
@@ -132,7 +133,10 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         var fileName = KindleTransferPolicy.CreateSafeFileName(
             Path.GetFileNameWithoutExtension(sourcePath),
             Path.GetExtension(sourcePath));
-        var destination = GetUniqueDestination(documents, fileName);
+        // Re-sending a book replaces the existing copy instead of creating a
+        // "title (2).azw3" duplicate, so updated covers and metadata actually
+        // reach the book's existing Kindle entry.
+        var destination = Path.Combine(documents, fileName);
         var temporary = destination + ".kkindle-part";
         try
         {
@@ -144,7 +148,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
                 throw new IOException("传输校验失败，设备上的文件未被替换。");
             File.Move(temporary, destination, true);
 
-            var thumbnail = await KindleThumbnailService.CreateAsync(sourcePath, _metadata, cancellationToken);
+            var thumbnail = await KindleThumbnailService.CreateAsync(sourcePath, _metadata, cancellationToken, coverOverridePath);
             if (thumbnail is not null)
                 await WriteThumbnailAsync(device, thumbnail, cancellationToken);
         }

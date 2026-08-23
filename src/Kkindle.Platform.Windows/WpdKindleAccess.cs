@@ -599,7 +599,10 @@ internal static class WpdKindleAccess
             var safeName = KindleTransferPolicy.CreateSafeFileName(
                 Path.GetFileNameWithoutExtension(sourceInfo.Name),
                 sourceInfo.Extension);
-            var finalName = GetUniqueFileName(documents, safeName);
+            // Re-sending a book replaces the device copy (so an updated cover
+            // reaches the existing entry) instead of creating a "(2)" duplicate.
+            var finalName = safeName;
+            RemoveExistingDocument(device, documents, finalName, cancellationToken);
             transferName = finalName;
             var stagedPath = Path.Combine(stagingDirectory, finalName);
             File.Copy(sourcePath, stagedPath, overwrite: false);
@@ -657,6 +660,27 @@ internal static class WpdKindleAccess
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
+    }
+
+    private static void RemoveExistingDocument(
+        KindleDevice device,
+        dynamic documents,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        dynamic? existing = FindChild(documents, name);
+        if (existing is null || (bool)existing.IsFolder) return;
+
+        ShellFileOperation.DeletePermanently((object)existing);
+        var deleteStartedAt = DateTime.UtcNow;
+        var relativePath = $@"documents\{name}";
+        while (DateTime.UtcNow - deleteStartedAt < TimeSpan.FromSeconds(20))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!ReadStorageItemState(device, relativePath).Exists) return;
+            Thread.Sleep(250);
+        }
+        throw new TimeoutException("等待 Kindle 删除旧版书籍超时。");
     }
 
     private static void UploadBookThumbnail(

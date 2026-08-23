@@ -168,7 +168,7 @@ public sealed class KindleDeviceTests
     }
 
     [Fact]
-    public async Task SameNameWithDifferentContentCreatesNumberedFile()
+    public async Task SameNameWithDifferentContentReplacesExistingBook()
     {
         var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
         var firstDirectory = Path.Combine(root, "first");
@@ -189,9 +189,11 @@ public sealed class KindleDeviceTests
 
             var books = await service.ScanBooksAsync(device);
 
-            Assert.Equal(2, books.Count);
-            Assert.Contains(books, book => book.FileName == "book.epub");
-            Assert.Contains(books, book => book.FileName == "book (2).epub");
+            // Re-sending overwrites the device copy so updated covers and
+            // metadata reach the existing entry instead of a "(2)" duplicate.
+            var book = Assert.Single(books);
+            Assert.Equal("book.epub", book.FileName);
+            Assert.Equal("second book", await File.ReadAllTextAsync(Path.Combine(root, "documents", "book.epub")));
         }
         finally
         {

@@ -105,7 +105,6 @@ public sealed class DoubanMetadataService : IDisposable
                 url,
                 rating,
                 ratingCount));
-            if (results.Count == 10) break;
         }
         return results;
     }

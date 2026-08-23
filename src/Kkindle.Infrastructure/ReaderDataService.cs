@@ -108,6 +108,7 @@ public sealed partial class ReaderDataService
                     FlowMode INTEGER NOT NULL DEFAULT 0,
                     VerticalWriting INTEGER NOT NULL DEFAULT 0,
                     TwoPageMode INTEGER NOT NULL DEFAULT 0,
+                    ParagraphIndent INTEGER NOT NULL DEFAULT 1,
                     UpdatedAt TEXT NOT NULL
                 );
 
@@ -135,6 +136,7 @@ public sealed partial class ReaderDataService
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
             await EnsureReaderLayoutTwoPageColumnAsync(connection, cancellationToken);
+            await EnsureReaderLayoutParagraphIndentColumnAsync(connection, cancellationToken);
             await EnsureReaderAnnotationStyleColumnAsync(connection, cancellationToken);
             await EnsureReaderBookmarkPositionColumnsAsync(connection, cancellationToken);
 
@@ -457,6 +459,35 @@ public sealed partial class ReaderDataService
         await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task EnsureReaderLayoutParagraphIndentColumnAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        using var inspect = connection.CreateCommand();
+        inspect.CommandText = "PRAGMA table_info(ReaderLayoutSettings);";
+        var hasParagraphIndentColumn = false;
+        await using (var reader = await inspect.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (reader.FieldCount > 1
+                    && string.Equals(reader.GetString(1), "ParagraphIndent", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasParagraphIndentColumn = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasParagraphIndentColumn) return;
+
+        // Existing readers have always kept the publisher/default paragraph
+        // indent, so migrate old rows to the enabled state.
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE ReaderLayoutSettings ADD COLUMN ParagraphIndent INTEGER NOT NULL DEFAULT 1;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task EnsureReaderAnnotationStyleColumnAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
@@ -518,7 +549,7 @@ public sealed partial class ReaderDataService
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT FontScale, LineHeight, MaxWidth, BodyPadding, FontFamily, FlowMode, VerticalWriting, TwoPageMode
+            SELECT FontScale, LineHeight, MaxWidth, BodyPadding, FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent
             FROM ReaderLayoutSettings
             WHERE BookFileId = $bookFileId;
             """;
@@ -533,7 +564,10 @@ public sealed partial class ReaderDataService
             reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
             reader.GetInt32(5),
             reader.GetInt32(6) != 0,
-            reader.GetInt32(7) != 0);
+            reader.GetInt32(7) != 0)
+        {
+            ParagraphIndent = reader.GetInt32(8) != 0
+        };
     }
 
     public async Task SaveLayoutSettingsAsync(
@@ -550,15 +584,15 @@ public sealed partial class ReaderDataService
             command.CommandText = """
                 INSERT INTO ReaderLayoutSettings (
                     BookFileId, BookId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                    FontFamily, FlowMode, VerticalWriting, TwoPageMode, UpdatedAt)
+                    FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt)
                 VALUES (
                     $bookFileId, $bookId, $fontScale, $lineHeight, $maxWidth, $bodyPadding,
-                    $fontFamily, $flowMode, $verticalWriting, $twoPageMode, $updatedAt)
+                    $fontFamily, $flowMode, $verticalWriting, $twoPageMode, $paragraphIndent, $updatedAt)
                 ON CONFLICT(BookFileId) DO UPDATE SET
                     BookId=$bookId, FontScale=$fontScale, LineHeight=$lineHeight,
                     MaxWidth=$maxWidth, BodyPadding=$bodyPadding, FontFamily=$fontFamily,
                     FlowMode=$flowMode, VerticalWriting=$verticalWriting,
-                    TwoPageMode=$twoPageMode, UpdatedAt=$updatedAt;
+                    TwoPageMode=$twoPageMode, ParagraphIndent=$paragraphIndent, UpdatedAt=$updatedAt;
                 """;
             command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
             command.Parameters.AddWithValue("$bookId", bookId.ToString());
@@ -570,6 +604,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$flowMode", settings.FlowMode);
             command.Parameters.AddWithValue("$verticalWriting", settings.VerticalWriting ? 1 : 0);
             command.Parameters.AddWithValue("$twoPageMode", settings.TwoPageMode ? 1 : 0);
+            command.Parameters.AddWithValue("$paragraphIndent", settings.ParagraphIndent ? 1 : 0);
             command.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }

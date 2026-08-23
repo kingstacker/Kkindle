@@ -723,6 +723,8 @@ public partial class MainWindow
             var position = horizontal
                 ? ReadDouble(root, "left")
                 : ReadDouble(root, "top");
+            if (_readerLayout.VerticalWriting)
+                position = Math.Abs(position);
             var fragment = ReadString(root, "fragment").TrimStart('#');
             try { fragment = Uri.UnescapeDataString(fragment); } catch { }
             return new ReaderBookmarkLocation(
@@ -817,7 +819,11 @@ public partial class MainWindow
         if (position is int exactPosition && savedFlowMode == _readerLayout.FlowMode)
         {
             var horizontal = _readerLayout.FlowMode == 1 || _readerLayout.VerticalWriting;
-            var left = horizontal ? exactPosition : 0;
+            // Saved positions are positive distances from the scroll origin;
+            // vertical writing anchors that origin at the right edge.
+            var left = horizontal
+                ? (_readerLayout.VerticalWriting ? -exactPosition : exactPosition)
+                : 0;
             var top = horizontal ? 0 : exactPosition;
             try
             {
@@ -826,7 +832,7 @@ public partial class MainWindow
                 _readerScrollPosition = exactPosition;
                 _readerPendingBookmarkQuote = null;
                 if (_readerLayout.FlowMode == 1)
-                    await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+                    await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
             }
             catch
             {
@@ -893,7 +899,7 @@ public partial class MainWindow
         {
             await host.InvokeScriptAsync(script);
             if (_readerLayout.FlowMode == 1)
-                await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+                await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
         }
         catch
         {
@@ -1482,6 +1488,7 @@ public partial class MainWindow
             ReaderMaxWidthSlider.Value = _readerLayout.MaxWidth;
             ReaderBodyPaddingSlider.Value = _readerLayout.BodyPadding;
             ReaderVerticalWritingCheck.IsChecked = _readerLayout.VerticalWriting;
+            ReaderParagraphIndentCheck.IsChecked = _readerLayout.ParagraphIndent;
             SelectReaderFontFamily(_readerLayout.FontFamily);
             SelectReaderFlowMode(_readerLayout.FlowMode, _readerLayout.TwoPageMode);
             SelectReaderPageAnimation(_readerPageAnimation);
@@ -1497,10 +1504,10 @@ public partial class MainWindow
         ReaderLayoutSettingsPopup.PlacementAnchor = PopupAnchor.TopLeft;
         ReaderLayoutSettingsPopup.PlacementGravity = PopupGravity.BottomRight;
         ReaderLayoutSettingsPopup.HorizontalOffset = 0;
-        ReaderLayoutSettingsPopup.VerticalOffset = 38;
+        ReaderLayoutSettingsPopup.VerticalOffset = 0;
         ReaderLayoutSettingsOverlay.Margin = new Thickness(0);
         ReaderLayoutSettingsOverlay.Width = Math.Max(0, ReaderRoot.Bounds.Width);
-        ReaderLayoutSettingsOverlay.Height = Math.Max(0, ReaderRoot.Bounds.Height - 38);
+        ReaderLayoutSettingsOverlay.Height = Math.Max(0, ReaderRoot.Bounds.Height);
         ReaderLayoutSettingsPopup.IsOpen = true;
     }
 
@@ -1514,7 +1521,8 @@ public partial class MainWindow
         && ReaderMaxWidthSlider is not null
         && ReaderBodyPaddingSlider is not null
         && ReaderFontFamilyBox is not null
-        && ReaderVerticalWritingCheck is not null;
+        && ReaderVerticalWritingCheck is not null
+        && ReaderParagraphIndentCheck is not null;
 
     private bool _suppressReaderLayoutChange;
     private CancellationTokenSource? _readerLayoutApplyCancellation;
@@ -1534,7 +1542,38 @@ public partial class MainWindow
         ScheduleReaderLayoutApply();
     }
 
-    private void ReaderVerticalWritingCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
+    private async void ReaderVerticalWritingCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
+        _readerLayoutApplyCancellation?.Cancel();
+        _readerLayoutApplyCancellation?.Dispose();
+        _readerLayoutApplyCancellation = null;
+
+        _readerLayout = NormalizeReaderLayoutForPlatform(ReadReaderLayoutFromControls());
+        SyncReaderFlowMenu();
+        UpdateReaderLayoutStatus();
+        try
+        {
+            UpdateReaderZoomLabel();
+            await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
+            await SaveReaderLayoutAsync(CancellationToken.None);
+            await SaveGlobalReaderVerticalWritingAsync(
+                _readerLayout.VerticalWriting,
+                CancellationToken.None);
+            ReaderLayoutSettingsStatusText.Text = _readerLayout.VerticalWriting
+                ? "竖排已全局开启；竖排仅支持单页阅读。"
+                : "竖排已全局关闭；现在可选择滚动、单页或双栏。";
+        }
+        catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
+        {
+        }
+        catch
+        {
+            ReaderLayoutSettingsStatusText.Text = "竖排设置保存失败，请重试。";
+        }
+    }
+
+    private void ReaderParagraphIndentCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
     {
         if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
         UpdateReaderLayoutStatus();
@@ -1544,7 +1583,9 @@ public partial class MainWindow
     private void UpdateReaderLayoutStatus()
     {
         var (flowMode, twoPageMode) = GetSelectedReaderFlowMode();
-        ReaderLayoutSettingsStatusText.Text = twoPageMode && flowMode != 1
+        ReaderLayoutSettingsStatusText.Text = ReaderVerticalWritingCheck.IsChecked == true
+            ? "竖排是全局设置，并固定使用单页阅读。"
+            : twoPageMode && flowMode != 1
             ? "双页仅用于分页模式；当前模式下暂不生效。"
             : "设置立即生效，并保存在本机。";
     }
@@ -1577,7 +1618,7 @@ public partial class MainWindow
         });
     }
 
-    private ReaderLayoutSettings ReadReaderLayoutFromControls() => new(
+    private ReaderLayoutSettings ReadReaderLayoutFromControls() => new ReaderLayoutSettings(
         ReaderFontScaleSlider.Value,
         ReaderLineHeightSlider.Value,
         ReaderMaxWidthSlider.Value,
@@ -1585,7 +1626,10 @@ public partial class MainWindow
         (ReaderFontFamilyBox.SelectedItem as ComboBoxItem)?.Tag as string ?? string.Empty,
         GetSelectedReaderFlowMode().FlowMode,
         ReaderVerticalWritingCheck.IsChecked == true,
-        GetSelectedReaderFlowMode().TwoPageMode);
+        GetSelectedReaderFlowMode().TwoPageMode)
+    {
+        ParagraphIndent = ReaderParagraphIndentCheck.IsChecked == true
+    };
 
     private void ReaderLayoutSettingsCloseButton_Click(object? sender, RoutedEventArgs e)
         => ReaderLayoutSettingsPopup.IsOpen = false;
@@ -1600,6 +1644,7 @@ public partial class MainWindow
             ReaderMaxWidthSlider.Value = ReaderLayoutDefaults.DefaultMaxWidth;
             ReaderBodyPaddingSlider.Value = ReaderLayoutDefaults.DefaultBodyPadding;
             ReaderVerticalWritingCheck.IsChecked = false;
+            ReaderParagraphIndentCheck.IsChecked = true;
             SelectReaderFontFamily(ReaderFontDefaults.DefaultFamily);
             SelectReaderFlowMode(1, false);
             SelectReaderPageAnimation(ReaderAnimationFade);
@@ -1614,6 +1659,7 @@ public partial class MainWindow
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
         await SaveReaderLayoutAsync(CancellationToken.None);
+        await SaveGlobalReaderVerticalWritingAsync(false, CancellationToken.None);
         ReaderLayoutSettingsStatusText.Text = "已恢复默认排版。";
     }
 

@@ -486,14 +486,16 @@
             <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
 
+        <!-- Section headers: same size as items but semibold gray, so the
+             collapsible parents outweigh their children without ink. -->
         <Style Selector="Button.sidebarSection">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Height" Value="30" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0" />
-            <Setter Property="Padding" Value="10,6" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Margin" Value="12,2,0,2" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -503,10 +505,16 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Padding="{TemplateBinding Padding}"
+                    <Border Padding="4,6"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}">
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6">
+                        <Border.Transitions>
+                            <Transitions>
+                                <BrushTransition Property="Background" Duration="0:0:0.12" />
+                            </Transitions>
+                        </Border.Transitions>
                         <ContentPresenter Content="{TemplateBinding Content}"
                                           Foreground="{TemplateBinding Foreground}"
                                           HorizontalAlignment="Stretch"
@@ -524,7 +532,7 @@
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection.active">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection Path">
@@ -536,6 +544,9 @@
         <Style Selector="Button.sidebarSection:pressed Path, Button.sidebarSection.active Path">
             <Setter Property="Stroke" Value="{StaticResource InkBrush}" />
         </Style>
+        <!-- Sidebar entries: quiet “ink dot” selection — no filled rows, only
+             a 4 px dot beside the active item, with a faint rounded wash on
+             hover so the rail reads like a paper table of contents. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Height" Value="34" />
@@ -544,20 +555,26 @@
             <Setter Property="Padding" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource SidebarIndicatorBrush}" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{TemplateBinding Background}">
-                        <Grid ColumnDefinitions="3,10,*">
-                            <Rectangle Width="3"
-                                       Height="16"
-                                       Fill="{TemplateBinding BorderBrush}"
-                                       VerticalAlignment="Center" />
+                    <Border Background="{TemplateBinding Background}" CornerRadius="6">
+                        <Border.Transitions>
+                            <Transitions>
+                                <BrushTransition Property="Background" Duration="0:0:0.12" />
+                            </Transitions>
+                        </Border.Transitions>
+                        <Grid ColumnDefinitions="4,7,*">
+                            <Ellipse Width="4"
+                                     Height="4"
+                                     Fill="{TemplateBinding BorderBrush}"
+                                     VerticalAlignment="Center" />
                             <ContentPresenter Grid.Column="2"
                                               Content="{TemplateBinding Content}"
                                               Foreground="{TemplateBinding Foreground}"
@@ -578,35 +595,40 @@
         </Style>
         <Style Selector="Button.sidebarItem.active">
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
-        <!-- Settings uses the WinUI reference's two-column navigation: the
-             category rail is quiet, square and marked by a three-pixel bar. -->
+        <!-- Settings category rail: same ink-dot language as the main
+             sidebar, so selection reads identically across the app. -->
         <Style Selector="Button.settingsCategory">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="38" />
+            <Setter Property="Height" Value="34" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource SidebarIndicatorBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{TemplateBinding Background}">
-                        <Grid ColumnDefinitions="3,*,Auto">
-                            <Rectangle Width="3"
-                                       Height="18"
-                                       Fill="{TemplateBinding BorderBrush}"
-                                       VerticalAlignment="Center" />
-                            <ContentPresenter Grid.Column="1"
-                                              Margin="14,0,8,0"
+                    <Border Background="{TemplateBinding Background}" CornerRadius="6">
+                        <Border.Transitions>
+                            <Transitions>
+                                <BrushTransition Property="Background" Duration="0:0:0.12" />
+                            </Transitions>
+                        </Border.Transitions>
+                        <Grid ColumnDefinitions="4,7,*">
+                            <Ellipse Width="4"
+                                     Height="4"
+                                     Fill="{TemplateBinding BorderBrush}"
+                                     VerticalAlignment="Center" />
+                            <ContentPresenter Grid.Column="2"
                                               Content="{TemplateBinding Content}"
                                               Foreground="{TemplateBinding Foreground}"
                                               HorizontalAlignment="Stretch"
@@ -766,6 +788,49 @@
         </Style>
         <Style Selector="CheckBox:pointerover">
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <!-- Reader layout switches use an explicit monochrome template so
+             Fluent's blue system accent cannot leak into the checked state. -->
+        <Style Selector="CheckBox.readerLayoutCheck">
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Grid ColumnDefinitions="18,Auto" ColumnSpacing="8" MinHeight="22">
+                        <Border x:Name="ReaderLayoutCheckIndicator"
+                                Width="18"
+                                Height="18"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                VerticalAlignment="Center">
+                            <Path x:Name="ReaderLayoutCheckGlyph"
+                                  Data="M 3,8 L 7,12 L 15,4"
+                                  Stroke="{StaticResource PaperBrush}"
+                                  StrokeThickness="2"
+                                  IsVisible="False" />
+                        </Border>
+                        <ContentPresenter Grid.Column="1"
+                                          Content="{TemplateBinding Content}"
+                                          ContentTemplate="{TemplateBinding ContentTemplate}"
+                                          Foreground="{TemplateBinding Foreground}"
+                                          VerticalAlignment="Center" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="CheckBox.readerLayoutCheck:pointerover /template/ Border#ReaderLayoutCheckIndicator">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="CheckBox.readerLayoutCheck:checked /template/ Border#ReaderLayoutCheckIndicator">
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="CheckBox.readerLayoutCheck:checked /template/ Path#ReaderLayoutCheckGlyph">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
+        <Style Selector="CheckBox.readerLayoutCheck:disabled">
+            <Setter Property="Opacity" Value="0.45" />
         </Style>
         <Style Selector="ComboBox">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />

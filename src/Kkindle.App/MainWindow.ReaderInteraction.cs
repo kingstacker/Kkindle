@@ -382,7 +382,14 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         var settings = await _readerData.GetLayoutSettingsAsync(file.Id, cancellationToken);
-        _readerLayout = NormalizeReaderLayoutForPlatform(settings ?? new ReaderLayoutSettings());
+        var bookLayout = settings ?? _appSettings.DefaultReaderLayout;
+        // Typography and margins remain per-book, but writing direction is a
+        // global reader preference. Ignore stale per-book VerticalWriting
+        // values left by older builds.
+        _readerLayout = NormalizeReaderLayoutForPlatform(bookLayout with
+        {
+            VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting
+        });
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
@@ -456,8 +463,6 @@ public partial class MainWindow
         ReaderSearchResultList.IsVisible = false;
         ReaderInPageSearchBar.IsVisible = false;
         ReaderLayoutSettingsPopup.IsOpen = false;
-        ReaderHighlightButton.IsVisible = false;
-        ReaderAnnotateButton.IsVisible = false;
         HideReaderFootnotePopup();
         ReaderBookmarkCornerMarker.IsVisible = false;
         ReaderAiMessages.Clear();
@@ -559,6 +564,7 @@ public partial class MainWindow
                 BuildReaderFontStack(_readerLayout.FontFamily),
                 _readerLayout.VerticalWriting,
                 pagination,
+                _readerLayout.ParagraphIndent,
                 bundledFontUri);
         if (!pagination)
         {
@@ -637,7 +643,7 @@ public partial class MainWindow
         await host.InvokeScriptAsync(FitReaderCoverImageScript);
         if (pagination)
         {
-            await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+            await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
         }
         await WriteReaderLayoutDiagnosticsAsync("configure", host);
         await UpdateLinuxReaderTextFallbackAsync(cancellationToken, host);
@@ -656,7 +662,8 @@ public partial class MainWindow
                         ReaderPaginationScripts.CreateRestorePositionScript(
                             left,
                             top,
-                            pagination));
+                            pagination,
+                            _readerLayout.VerticalWriting));
                 }
                 else if (!string.IsNullOrWhiteSpace(progress.Fragment))
                 {
@@ -684,6 +691,7 @@ public partial class MainWindow
         string fontStack,
         bool vertical,
         bool pagination,
+        bool paragraphIndent,
         string? bundledFontUri)
     {
         var builder = new StringBuilder();
@@ -710,7 +718,18 @@ public partial class MainWindow
         // spacing between paragraphs do not drift apart.
         builder.Append($"\nbody :where(p, div, section, article, main, li, td, th, blockquote) {{ line-height: {Format(lineHeight)} !important; }}");
         builder.Append($"\nbody p, body div, body section, body article, body main, body li, body td, body th, body blockquote {{ line-height: {Format(lineHeight)} !important; }}");
-        if (!vertical)
+        if (vertical)
+        {
+            // Natural vertical-rl pagination can only keep a page boundary
+            // between complete glyph columns when every block advances on the
+            // same line grid. Publisher block margins, padding and fixed
+            // physical widths otherwise accumulate a fractional X offset and
+            // leave half a column visible under both page-edge masks.
+            // Headings remain bold and centered, but use the body glyph grid;
+            // their one-line block margins preserve title separation without
+            // shifting every following page boundary by a fractional column.
+        }
+        else
             builder.Append("\nbody :where(p, div, section, article, main, li, td, th, blockquote) { text-align: justify !important; text-justify: inter-character !important; }");
         builder.Append("\nbody pre, body code, body kbd, body samp { white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: break-all !important; line-break: anywhere !important; }");
         builder.Append("\nbody br { display: inline !important; }");
@@ -737,6 +756,13 @@ public partial class MainWindow
         // add a second independent margin between adjacent paragraphs: the
         // next paragraph starts on the next body line.
         builder.Append("\np { margin: 0 !important; }");
+        // EPUB styles frequently bake paragraph indentation into per-book
+        // classes. Make this reader setting authoritative in both horizontal
+        // and vertical writing; text-indent follows the logical inline start,
+        // so two em also means two glyphs from the top in vertical-rl.
+        builder.Append(paragraphIndent
+            ? "\nbody p { text-indent: 2em !important; }"
+            : "\nbody p { text-indent: 0 !important; }");
         builder.Append($"\nli, blockquote {{ font-size: 1rem !important; line-height: {Format(lineHeight)} !important; }}");
         // Chapter headings are a separate centered row. The rem margins are
         // deliberately larger than one body line, making the transition from
@@ -758,6 +784,11 @@ public partial class MainWindow
         builder.Append("\nhr { border: 0 !important; border-top: 1px solid #222222 !important; opacity: 0.24; margin: 2em 0 !important; }");
         builder.Append("\nruby { ruby-align: center !important; } rt { font-size: 0.5em !important; color: inherit !important; }");
         builder.Append("\n.kkindle-fragment-break { break-before: column !important; }");
+        // This must be the final layout override: the shared heading,
+        // blockquote and media rules above intentionally serve horizontal
+        // pagination too and otherwise reintroduce fractional block margins.
+        if (vertical)
+            builder.Append(ReaderPaginationScripts.VerticalTypographyGridCss);
         // Use the original TTF as a same-origin local resource. In particular,
         // do not turn the 33 MB font into a data URI on Linux: WebKitGTK can
         // report that face as loaded while still shaping the page with its
@@ -2402,8 +2433,6 @@ public partial class MainWindow
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
         ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
-        ReaderHighlightButton.IsVisible = false;
-        ReaderAnnotateButton.IsVisible = false;
     }
 
     private void ClearLinuxReaderTextFallbackVisualSelection()
@@ -2529,8 +2558,6 @@ public partial class MainWindow
         _selectedReaderAnnotation = null;
         ReaderDeleteAnnotationButton.IsEnabled = false;
         ReaderAnnotationSelectionText.Text = selectedText;
-        if (!OperatingSystem.IsLinux())
-            ReaderStatusText.Text = "已选中文字，可点击“划线”保存";
         return true;
     }
 
@@ -2638,8 +2665,6 @@ public partial class MainWindow
         _selectedReaderAnnotation = null;
         ReaderDeleteAnnotationButton.IsEnabled = false;
         ReaderAnnotationSelectionText.Text = selectedText;
-        if (!OperatingSystem.IsLinux())
-            ReaderStatusText.Text = "已选中文字，可点击“划线”保存";
         return true;
     }
 
@@ -3024,7 +3049,10 @@ public partial class MainWindow
         var width = Math.Max(1, ReaderLinuxTextFallbackOverlay.Bounds.Width);
         if (point.X < width / 3 || point.X > width * 2 / 3)
         {
-            var direction = point.X < width / 3 ? -1 : 1;
+            var onLeft = point.X < width / 3;
+            var direction = ReaderPaginationPolicy.GetClickDirection(
+                onLeft,
+                _readerLayout.VerticalWriting);
             e.Handled = true;
             HideReaderSelectionPopup();
             _ = ObserveReaderTaskAsync(TurnReaderPageAsync(direction));
@@ -3082,11 +3110,17 @@ public partial class MainWindow
                 return true;
             }
 
-            var direction = e.Key is Key.Left or Key.PageUp
-                ? -1
-                : e.Key is Key.Right or Key.PageDown
-                    ? 1
-                    : 0;
+            // Vertical writing mirrors the horizontal key map: left turns
+            // forward and right turns backward; PageUp/PageDown stay put.
+            var verticalFlip = !_readerIsPdf && _readerLayout.VerticalWriting;
+            var direction = e.Key switch
+            {
+                Key.Left => verticalFlip ? 1 : -1,
+                Key.PageUp => -1,
+                Key.Right => verticalFlip ? -1 : 1,
+                Key.PageDown => 1,
+                _ => 0
+            };
             if (direction != 0)
             {
                 e.Handled = true;
@@ -3920,6 +3954,8 @@ public partial class MainWindow
             var root = document.RootElement;
             var horizontal = _readerLayout.FlowMode == 1 || _readerLayout.VerticalWriting;
             var position = horizontal ? ReadDouble(root, "left") : ReadDouble(root, "top");
+            if (_readerLayout.VerticalWriting)
+                position = Math.Abs(position);
             var scrollWidth = ReadDouble(root, "scrollWidth");
             var scrollHeight = ReadDouble(root, "scrollHeight");
             var clientWidth = ReadDouble(root, "clientWidth");
@@ -3957,18 +3993,20 @@ public partial class MainWindow
     {
         cancellationToken.ThrowIfCancellationRequested();
         var horizontal = _readerLayout.FlowMode == 1 || _readerLayout.VerticalWriting;
+        var vertical = _readerLayout.VerticalWriting;
         var ratio = state.Ratio.ToString(CultureInfo.InvariantCulture);
         var script = $$"""
             (() => {
               const el = document.scrollingElement || document.documentElement;
               if (!el) return false;
               const horizontal = {{(horizontal ? "true" : "false")}};
+              const vertical = {{(vertical ? "true" : "false")}};
               const maximum = horizontal
                 ? Math.max(0, (el.scrollWidth || 0) - (el.clientWidth || 0))
                 : Math.max(0, (el.scrollHeight || 0) - (el.clientHeight || 0));
               const target = Math.max(0, Math.min(maximum, maximum * {{ratio}}));
               window.scrollTo(horizontal
-                ? { left: target, top: 0, behavior: 'instant' }
+                ? { left: vertical ? -target : target, top: 0, behavior: 'instant' }
                 : { left: 0, top: target, behavior: 'instant' });
               return true;
             })();
@@ -3977,7 +4015,7 @@ public partial class MainWindow
         {
             await host.InvokeScriptAsync(script);
             if (_readerLayout.FlowMode == 1)
-                await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+                await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
             await UpdateReaderScrollStateAsync(host);
         }
         catch
@@ -4226,7 +4264,7 @@ public partial class MainWindow
                     await host.InvokeScriptAsync(script);
                     await host.InvokeScriptAsync(FitReaderCoverImageScript);
                     if (_readerLayout.FlowMode == 1)
-                        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+                        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
                 }
                 catch
                 {
@@ -4849,11 +4887,13 @@ public partial class MainWindow
         var startOffset = Math.Max(0, annotation.StartOffset);
         var endOffset = Math.Max(startOffset, annotation.EndOffset);
         var pagination = _readerLayout.FlowMode == 1 ? "true" : "false";
+        var verticalWriting = _readerLayout.VerticalWriting ? "true" : "false";
         var script = $$"""
             (() => {
               const id = {{serializedId}};
               const quote = {{serializedQuote}};
               const pagination = {{pagination}};
+              const vertical = {{verticalWriting}};
               const ignored = node => {
                 const parent = node?.parentElement;
                 return !parent
@@ -4901,8 +4941,23 @@ public partial class MainWindow
                   || range.getBoundingClientRect?.();
                 if (!rect) return false;
                 if (pagination) {
-                  const step = {{ReaderPaginationScripts.PageStepExpression}};
+                  const bodyStyle = getComputedStyle(document.body);
+                  const step = vertical
+                    ? {{ReaderPaginationScripts.VerticalStepExpression}}
+                    : {{ReaderPaginationScripts.PageStepExpression}};
                   if (step <= 0) return false;
+                  if (vertical) {
+                    // Vertical-rl pagination scrolls a negative range; land on
+                    // the page owning the annotation via the live viewport delta.
+                    const padRight = parseFloat(bodyStyle.paddingRight) || 0;
+                    const rawMax = Math.max(0, (scroller.scrollWidth || 0) - (scroller.clientWidth || 0));
+                    const maximum = rawMax;
+                    const contentRight = scroller.clientWidth - padRight;
+                    const distance = Math.abs(scroller.scrollLeft || 0)
+                      + Math.max(0, contentRight - rect.right);
+                    window.scrollTo({ left: -(Math.min(maximum, Math.floor(distance / step) * step)), top: 0, behavior: 'instant' });
+                    return true;
+                  }
                   const absoluteLeft = rect.left + (scroller.scrollLeft || 0) + Math.max(0, rect.width) / 2;
                   const maximum = Math.max(0, (scroller.scrollWidth || 0) - (scroller.clientWidth || 0));
                   const target = Math.max(0, Math.min(maximum, Math.floor(Math.max(0, absoluteLeft) / step) * step));
@@ -4945,7 +5000,7 @@ public partial class MainWindow
                 if (string.Equals(result?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
                 {
                     if (_readerLayout.FlowMode == 1)
-                        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+                        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
                     return;
                 }
             }
@@ -5300,12 +5355,20 @@ public partial class MainWindow
               if ({{pagination}}) {
                 const scroller = document.scrollingElement || document.documentElement;
                 mark.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'instant' });
-                const step = {{ReaderPaginationScripts.PageStepExpression}};
+                const vertical = {{(_readerLayout.VerticalWriting ? "true" : "false")}};
+                const bodyStyle = getComputedStyle(document.body);
+                const step = vertical
+                  ? {{ReaderPaginationScripts.VerticalStepExpression}}
+                  : {{ReaderPaginationScripts.PageStepExpression}};
                 if (step > 0) {
+                  const trailing = parseFloat(bodyStyle.paddingRight) || 0;
                   const rawMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
-                  const trailing = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
-                  const max = Math.max(0, Math.min(rawMax, Math.round(Math.max(0, rawMax - trailing) / step) * step));
-                  window.scrollTo({ left: Math.max(0, Math.min(max, Math.round(scroller.scrollLeft / step) * step)), top: 0, behavior: 'instant' });
+                  const max = vertical
+                    ? rawMax
+                    : Math.max(0, Math.round(Math.max(0, rawMax - trailing) / step) * step);
+                  const distance = vertical ? Math.abs(scroller.scrollLeft || 0) : (scroller.scrollLeft || 0);
+                  const snapped = Math.min(max, Math.round(distance / step) * step);
+                  window.scrollTo({ left: vertical ? -snapped : snapped, top: 0, behavior: 'instant' });
                 }
               } else {
                 mark.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
@@ -5384,6 +5447,34 @@ public partial class MainWindow
         catch
         {
         }
+    }
+
+    private async Task SaveGlobalReaderVerticalWritingAsync(
+        bool verticalWriting,
+        CancellationToken cancellationToken)
+    {
+        _appSettings = AppSettings.Normalize(_appSettings with
+        {
+            DefaultReaderLayout = _appSettings.DefaultReaderLayout with
+            {
+                VerticalWriting = verticalWriting
+            }
+        });
+
+        // Keep the basic-settings switch in lockstep without scheduling a
+        // second competing settings write.
+        _suppressAppSettingsAutoSave = true;
+        try
+        {
+            if (DefaultVerticalWritingCheck is not null)
+                DefaultVerticalWritingCheck.IsChecked = verticalWriting;
+        }
+        finally
+        {
+            _suppressAppSettingsAutoSave = false;
+        }
+
+        await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
     }
 
     // ------------------------------------------------------------------
@@ -5810,6 +5901,14 @@ public partial class MainWindow
         _readerFootnoteHoverMissCount = 0;
     }
 
+    // Baseline reader status: the bridge and host navigation both restore it.
+    private void ResetReaderStatusText()
+    {
+        ReaderStatusText.Text = _readerIsPdf
+            ? $"PDF · {_readerPdfPages.Count} 页"
+            : string.Empty;
+    }
+
     private void HandleReaderBridgeMessage(string? body)
     {
         if (string.IsNullOrWhiteSpace(body)) return;
@@ -5821,9 +5920,7 @@ public partial class MainWindow
             switch (typeElement.GetString())
             {
                 case "ready":
-                    ReaderStatusText.Text = _readerIsPdf
-                        ? $"PDF · {_readerPdfPages.Count} 页"
-                        : string.Empty;
+                    ResetReaderStatusText();
                     break;
                 case "pdfPage":
                     if (_readerIsPdf && root.TryGetProperty("page", out var pdfPage)
@@ -5850,6 +5947,11 @@ public partial class MainWindow
                     _readerScrollPosition = horizontalScroll
                         ? ReadDouble(root, "left")
                         : ReadDouble(root, "top");
+                    // Vertical writing reports a negative scrollLeft range;
+                    // track the distance from the origin so progress, saved
+                    // positions and edge detection stay sign-agnostic.
+                    if (!_readerIsPdf && _readerLayout.VerticalWriting)
+                        _readerScrollPosition = Math.Abs(_readerScrollPosition);
                     _readerScrollWidth = ReadDouble(root, "scrollWidth");
                     _readerScrollHeight = ReadDouble(root, "scrollHeight");
                     _readerClientWidth = ReadDouble(root, "clientWidth");
@@ -5879,14 +5981,7 @@ public partial class MainWindow
                     {
                         _selectedReaderAnnotation = null;
                         ReaderDeleteAnnotationButton.IsEnabled = false;
-                        if (!OperatingSystem.IsLinux())
-                            ReaderStatusText.Text = "已选中文字，可点击“划线”保存";
                         ReaderAnnotationSelectionText.Text = _readerPendingSelection;
-                        if (!OperatingSystem.IsLinux())
-                        {
-                            ReaderHighlightButton.IsVisible = true;
-                            ReaderAnnotateButton.IsVisible = true;
-                        }
                         // The WebView bridge renders its own action bar above
                         // the native browser surface. Opening the Avalonia
                         // popup here as well creates two perfectly overlapping
@@ -5904,8 +5999,6 @@ public partial class MainWindow
                         _readerPendingSelectionPrefix = string.Empty;
                         _readerPendingSelectionSuffix = string.Empty;
                         ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
-                        ReaderHighlightButton.IsVisible = false;
-                        ReaderAnnotateButton.IsVisible = false;
                         HideReaderSelectionPopup();
                     }
                     break;
@@ -5929,6 +6022,20 @@ public partial class MainWindow
                         pageTurnDirection = Math.Sign(pageTurnDirection);
                         if (pageTurnDirection != 0)
                             _ = ObserveReaderTaskAsync(TurnReaderPageAsync(pageTurnDirection));
+                    }
+                    break;
+                case "pageClick":
+                    if (!_readerIsPdf && _readerLayout.FlowMode == 1
+                        && root.TryGetProperty("side", out var pageSide))
+                    {
+                        var side = pageSide.GetString();
+                        if (side is "left" or "right")
+                        {
+                            var clickTurnDirection = ReaderPaginationPolicy.GetClickDirection(
+                                side == "left",
+                                _readerLayout.VerticalWriting);
+                            _ = ObserveReaderTaskAsync(TurnReaderPageAsync(clickTurnDirection));
+                        }
                     }
                     break;
                 case "bookmarkToggle":
@@ -6054,15 +6161,22 @@ public partial class MainWindow
                                     TurnReaderPageAsync(chapterDirection, chapterOnly: true));
                                 break;
                             }
+                            // Vertical writing mirrors the horizontal page
+                            // order like classical Chinese books: left turns
+                            // forward and right turns backward. Up/down and
+                            // PageUp/PageDown keep their horizontal meaning.
+                            var verticalPageOrder = !_readerIsPdf && _readerLayout.VerticalWriting;
                             var direction = string.Equals(keyName, "ArrowLeft", StringComparison.Ordinal)
-                                || string.Equals(keyName, "ArrowUp", StringComparison.Ordinal)
-                                || string.Equals(keyName, "PageUp", StringComparison.Ordinal)
-                                ? -1
+                                ? (verticalPageOrder ? 1 : -1)
                                 : string.Equals(keyName, "ArrowRight", StringComparison.Ordinal)
-                                    || string.Equals(keyName, "ArrowDown", StringComparison.Ordinal)
-                                    || string.Equals(keyName, "PageDown", StringComparison.Ordinal)
-                                    ? 1
-                                    : 0;
+                                    ? (verticalPageOrder ? -1 : 1)
+                                    : string.Equals(keyName, "ArrowUp", StringComparison.Ordinal)
+                                        || string.Equals(keyName, "PageUp", StringComparison.Ordinal)
+                                        ? -1
+                                        : string.Equals(keyName, "ArrowDown", StringComparison.Ordinal)
+                                            || string.Equals(keyName, "PageDown", StringComparison.Ordinal)
+                                            ? 1
+                                            : 0;
                             if (direction != 0)
                                 _ = ObserveReaderTaskAsync(TurnReaderPageAsync(direction));
                         }
@@ -6229,8 +6343,6 @@ public partial class MainWindow
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
         ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
-        ReaderHighlightButton.IsVisible = false;
-        ReaderAnnotateButton.IsVisible = false;
         if (!_readerIsPdf && CurrentReaderHost is { } host)
             _ = ClearCurrentReaderSelectionAsync(host);
     }
@@ -6672,7 +6784,9 @@ public partial class MainWindow
           const el = document.scrollingElement || document.documentElement;
           if (!el) return false;
           const horizontal = {{(vertical ? "true" : "false")}};
-          const position = horizontal ? el.scrollLeft : el.scrollTop;
+          // Vertical writing anchors scroll at the right edge with a negative
+          // scrollLeft range; measure and advance by distance from the origin.
+          const position = horizontal ? Math.abs(el.scrollLeft || 0) : el.scrollTop;
           const viewport = horizontal ? el.clientWidth : el.clientHeight;
           const extent = horizontal ? el.scrollWidth : el.scrollHeight;
           const sign = {{(direction < 0 ? -1 : 1)}};
@@ -6680,7 +6794,7 @@ public partial class MainWindow
           if (sign > 0 && position + viewport >= extent - 4) return false;
           const delta = sign * 72;
           window.scrollBy(horizontal
-            ? { left: delta, top: 0, behavior: 'smooth' }
+            ? { left: vertical ? -delta : delta, top: 0, behavior: 'smooth' }
             : { left: 0, top: delta, behavior: 'smooth' });
           return true;
         })();
@@ -6886,7 +7000,7 @@ public partial class MainWindow
             // turn and then animated the chapter swap, producing two different
             // beats for what should feel like one continuous page turn.
             var canTurnResult = await host.InvokeScriptAsync(
-                ReaderPaginationScripts.CreateCanTurnScript(direction));
+                ReaderPaginationScripts.CreateCanTurnScript(direction, _readerLayout.VerticalWriting));
             var canTurnWithinChapter = string.Equals(
                 canTurnResult?.Trim(),
                 "true",
@@ -6926,7 +7040,10 @@ public partial class MainWindow
             // smooth scroll here can still be mid-flight when alignment runs,
             // making the next click finish the previous turn.
             () => host.InvokeScriptAsync(
-                ReaderPaginationScripts.CreateTurnScript(direction, smooth: false)),
+                ReaderPaginationScripts.CreateTurnScript(
+                    direction,
+                    smooth: false,
+                    _readerLayout.VerticalWriting)),
             ReaderToken);
     }
 
@@ -6959,6 +7076,13 @@ public partial class MainWindow
         if (animation == ReaderAnimationNone)
             return await changeContentAsync();
 
+        // Logical navigation is shared by both writing modes. Only the visual
+        // X direction mirrors in vertical-rl, including in-chapter turns,
+        // chapter swaps and every directional transition fallback.
+        var visualDirection = ReaderPaginationPolicy.GetVisualTurnDirection(
+            direction,
+            !_readerIsPdf && _readerLayout.VerticalWriting);
+
         if (animation is ReaderAnimationSlide or ReaderAnimationWave)
         {
             var snapshot = outgoingHost is IReaderPageSnapshotProvider provider
@@ -6971,7 +7095,7 @@ public partial class MainWindow
                     var waveResult = await TryRunReaderWaveTransitionAsync(
                         outgoingHost,
                         incomingHost,
-                        direction,
+                        visualDirection,
                         snapshot,
                         changeContentAsync,
                         cancellationToken);
@@ -6986,7 +7110,7 @@ public partial class MainWindow
                     var slideResult = await TryRunReaderSlideTransitionAsync(
                         outgoingHost,
                         incomingHost,
-                        direction,
+                        visualDirection,
                         snapshot,
                         changeContentAsync,
                         cancellationToken);
@@ -7006,7 +7130,7 @@ public partial class MainWindow
             {
                 var viewTransition = await TryRunReaderViewTransitionAsync(
                     incomingHost,
-                    direction,
+                    visualDirection,
                     animation,
                     changeContentAsync,
                     cancellationToken);
@@ -7090,7 +7214,9 @@ public partial class MainWindow
     private const int ReaderTransitionOutDurationMs = 300;
     private const int ReaderTransitionInDurationMs = 360;
     private const int ReaderSlideDurationMs = 430;
-    private const int ReaderWaveDurationMs = 420;
+    // 墨水屏刷新波前传播时长（普通文本翻页约 200~250ms）；残影在波形结束后
+    // 还要保持并消退，因此覆盖层需要多停留 ReaderWaveScripts.GhostTailMs。
+    private const int ReaderWaveDurationMs = 230;
 
     private async Task<(bool Succeeded, T? Result)> TryRunReaderViewTransitionAsync<T>(
         IReaderHost host,
@@ -7196,7 +7322,7 @@ public partial class MainWindow
                 return (true, result);
             }
 
-            await Task.Delay(ReaderWaveDurationMs + 80, cancellationToken);
+            await Task.Delay(ReaderWaveDurationMs + ReaderWaveScripts.GhostTailMs + 60, cancellationToken);
             return (true, result);
         }
         finally
@@ -7419,6 +7545,13 @@ public partial class MainWindow
             ReaderStatusText.Text = "PDF 使用页面模式，可用底部进度条或左右按钮翻页。";
             return;
         }
+        if (_readerLayout.VerticalWriting
+            && !string.Equals(tag, "single", StringComparison.Ordinal))
+        {
+            SyncReaderFlowMenu();
+            ShowReaderTransientStatus("竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。");
+            return;
+        }
         var flowMode = tag switch
         {
             "scroll" => 0,
@@ -7432,7 +7565,6 @@ public partial class MainWindow
             TwoPageMode = twoPage
         });
         SyncReaderFlowMenu();
-        ReaderFlowButton.Content = _readerLayout.FlowMode == 0 ? "滚动" : _readerLayout.TwoPageMode ? "双栏" : "单页";
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
         await SaveReaderLayoutAsync(CancellationToken.None);
         ShowReaderTransientStatus(
@@ -7444,9 +7576,15 @@ public partial class MainWindow
         if (ReaderScrollModeItem is null || ReaderSinglePageModeItem is null || ReaderTwoPageModeItem is null) return;
         var flowMode = _readerLayout.FlowMode;
         var twoPage = _readerLayout.TwoPageMode;
+        var vertical = _readerLayout.VerticalWriting;
         ReaderScrollModeItem.IsChecked = flowMode == 0;
         ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage;
         ReaderTwoPageModeItem.IsChecked = flowMode == 1 && twoPage;
+        ReaderScrollModeItem.IsEnabled = !vertical;
+        ReaderTwoPageModeItem.IsEnabled = !vertical;
+        ReaderSinglePageModeItem.IsEnabled = true;
+        if (ReaderFlowButton is not null)
+            ReaderFlowButton.Content = flowMode == 0 ? "滚动" : twoPage ? "双栏" : "单页";
     }
 
     private void ReaderZenMenuItem_Click(object? sender, RoutedEventArgs e)
@@ -7536,21 +7674,6 @@ public partial class MainWindow
             _readerIsPdf ? 34 : 12,
             2,
             _readerZenMode ? 0 : 10);
-    }
-
-    private void ReaderAnnotateButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (_readerZenMode) ExitReaderZenMode();
-        ShowReaderNotesTab();
-        _selectedReaderAnnotation = null;
-        ReaderDeleteAnnotationButton.IsEnabled = false;
-        ReaderAnnotationNoteBox.Text = string.Empty;
-        ReaderAnnotationNoteBox.Focus();
-    }
-
-    private async void ReaderHighlightButton_Click(object? sender, RoutedEventArgs e)
-    {
-        await SaveReaderAnnotationAsync(string.Empty, preserveExistingNote: true);
     }
 
     private async void ToggleReaderZenMode()
@@ -8212,14 +8335,18 @@ public partial class MainWindow
         if (_readerLayout.FlowMode == 1)
         {
             // Paginated WebView content is snapped to one viewport per page.
-            // The rounded maximum mirrors ReaderPaginationScripts and avoids
-            // counting the trailing layout inset as an extra page.
+            // Natural vertical flow may end with a partial viewport, whereas
+            // horizontal multicol extends to a rounded logical boundary.
             var maximum = Math.Max(0, extent - viewport);
-            var viewCount = Math.Max(1, (int)Math.Round(maximum / viewport) + 1);
-            var currentView = Math.Clamp(
-                (int)Math.Round(position / viewport) + 1,
-                1,
-                viewCount);
+            var viewCount = _readerLayout.VerticalWriting
+                ? Math.Max(1, (int)Math.Ceiling(extent / viewport))
+                : Math.Max(1, (int)Math.Round(maximum / viewport) + 1);
+            var currentView = _readerLayout.VerticalWriting && position >= maximum - 4
+                ? viewCount
+                : Math.Clamp(
+                    (int)Math.Round(position / viewport) + 1,
+                    1,
+                    viewCount);
             var pagesPerView = _readerLayout.TwoPageMode ? 2 : 1;
             return (
                 Math.Clamp((currentView - 1) * pagesPerView + 1, 1, viewCount * pagesPerView),

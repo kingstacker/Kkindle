@@ -39,6 +39,19 @@ public static class ReaderPaginationDefaults
 
 public static class ReaderPaginationPolicy
 {
+    // Horizontal books keep the established click zones. Only vertical-rl
+    // books mirror them so the left edge advances in classical book order.
+    public static int GetClickDirection(bool onLeft, bool verticalWriting) =>
+        onLeft != verticalWriting ? -1 : 1;
+
+    // Navigation stays logical (+1 next, -1 previous), while a vertical-rl
+    // book presents that turn in the opposite physical X direction.
+    public static int GetVisualTurnDirection(int navigationDirection, bool verticalWriting)
+    {
+        var normalized = Math.Sign(navigationDirection);
+        return verticalWriting ? -normalized : normalized;
+    }
+
     public static double SnapScrollLeft(
         double scrollLeft,
         double clientWidth,

@@ -253,7 +253,13 @@
                                             Click="ShowAllBooksButton_Click">
                                         <Grid HorizontalAlignment="Stretch">
                                             <TextBlock Text="电脑书库" VerticalAlignment="Center" />
-                                            <TextBlock x:Name="SidebarCountText" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <Border HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    CornerRadius="9"
+                                                    Background="#10000000"
+                                                    Padding="6,1">
+                                                <TextBlock x:Name="SidebarCountText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextAlignment="Center" />
+                                            </Border>
                                         </Grid>
                                     </Button>
                                     <Button x:Name="KindleBooksButton"
@@ -262,7 +268,13 @@
                                             Click="KindleBooksButton_Click">
                                         <Grid HorizontalAlignment="Stretch">
                                             <TextBlock Text="Kindle书库" VerticalAlignment="Center" />
-                                            <TextBlock x:Name="DeviceBookCountText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <Border HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    CornerRadius="9"
+                                                    Background="#10000000"
+                                                    Padding="6,1">
+                                                <TextBlock x:Name="DeviceBookCountText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextAlignment="Center" />
+                                            </Border>
                                         </Grid>
                                     </Button>
                                     <Button x:Name="ZLibraryBooksButton"
@@ -1524,7 +1536,7 @@
                  from editable application settings. -->
             <Grid x:Name="ReadingDashboardPage"
                   Grid.Column="1"
-                  Margin="30,24,30,18"
+                  Margin="30,48,30,18"
                   IsVisible="False"
                   RowDefinitions="Auto,*">
                   <Grid.Transitions>
@@ -1534,28 +1546,12 @@
                   </Grid.Transitions>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
                     <StackPanel Spacing="3">
-                        <StackPanel Orientation="Horizontal" Spacing="9">
-                            <Border Background="{StaticResource InkBrush}" Padding="7,3" VerticalAlignment="Center">
-                                <TextBlock Text="统计" Foreground="{StaticResource PaperBrush}" FontSize="11" FontWeight="Bold" />
-                            </Border>
-                            <TextBlock Text="阅读数据" FontSize="28" FontWeight="Bold" />
-                        </StackPanel>
-                        <TextBlock x:Name="ReadingDashboardSummaryText"
-                                   Text="已开始 0 本 · 已读完 0 本 · 累计 0.0 小时"
-                                   FontSize="11"
+                        <TextBlock Text="阅读数据" FontSize="28" FontWeight="Bold" />
+                        <TextBlock x:Name="DashboardStatusText"
+                                   FontSize="12"
                                    Foreground="{StaticResource MutedInkBrush}"
-                                   TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReadingDashboardDetailText"
-                                   Text="平均进度 0% · 书签 0 条 · 批注 0 条"
-                                   FontSize="11"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   TextWrapping="Wrap" />
-                        <StackPanel IsVisible="False">
-                            <TextBlock x:Name="ReadingDashboardStatusText" />
-                            <TextBlock x:Name="DashboardAverageProgressText" />
-                            <TextBlock x:Name="DashboardAnnotationsText" />
-                            <TextBlock x:Name="DashboardRecentText" />
-                        </StackPanel>
+                                   TextWrapping="Wrap"
+                                   IsVisible="False" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
                         <Button Content="刷新统计" Click="RefreshReadingDashboardButton_Click" />
@@ -1564,37 +1560,45 @@
                 </Grid>
                 <ScrollViewer Grid.Row="1" Margin="0,20,0,0" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="16">
-                        <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="12">
-                            <Border Classes="flatMetric" Padding="14">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="累计阅读" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
-                                    <TextBlock x:Name="DashboardTotalTimeText" Text="0 秒" FontSize="24" FontWeight="Bold" />
+                        <Grid ColumnDefinitions="*,*,*,*,*" ColumnSpacing="12">
+                            <Border Classes="flatMetric" Padding="14,12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="累计阅读" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
+                                    <TextBlock x:Name="DashboardTotalTimeText" Text="0" FontSize="22" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="DashboardDailyAverageText" Text="近 7 天日均 —" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Column="1" Classes="flatMetric" Padding="14">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="已开始" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
-                                    <TextBlock x:Name="DashboardBooksStartedText" Text="0 本" FontSize="24" FontWeight="Bold" />
+                            <Border Grid.Column="1" Classes="flatMetric" Padding="14,12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="连续阅读" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
+                                    <TextBlock x:Name="DashboardStreakText" Text="0 天" FontSize="22" FontWeight="SemiBold" />
+                                    <TextBlock Text="近 14 天内连续" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Column="2" Classes="flatMetric" Padding="14">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="已读完" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
-                                    <TextBlock x:Name="DashboardBooksFinishedText" Text="0 本" FontSize="24" FontWeight="Bold" />
+                            <Border Grid.Column="2" Classes="flatMetric" Padding="14,12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="已开始" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
+                                    <TextBlock x:Name="DashboardBooksStartedText" Text="0 本" FontSize="22" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="DashboardAverageProgressText" Text="平均进度 —" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Column="3" Classes="flatMetric" Padding="14">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="书签 / 批注" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
-                                    <TextBlock x:Name="DashboardBookmarksText" Text="0 / 0" FontSize="24" FontWeight="Bold" />
+                            <Border Grid.Column="3" Classes="flatMetric" Padding="14,12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="已读完" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
+                                    <TextBlock x:Name="DashboardBooksFinishedText" Text="0 本" FontSize="22" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="4" Classes="flatMetric" Padding="14,12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="书签 / 批注" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
+                                    <TextBlock x:Name="DashboardBookmarksText" Text="0 / 0" FontSize="22" FontWeight="SemiBold" />
                                 </StackPanel>
                             </Border>
                         </Grid>
                         <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="16">
-                            <Border Classes="flatPanel" BorderThickness="1,0,0,0" Padding="14">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="近 14 天阅读时长" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="每天有效阅读分钟数" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
+                            <Border Classes="flatPanel" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="近 14 天阅读时长" FontSize="14" FontWeight="SemiBold" />
                                     <ItemsControl ItemsSource="{Binding DashboardDays}" AutomationProperties.Name="近十四天每天阅读时长柱状图">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
@@ -1603,8 +1607,13 @@
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardDayViewModel">
-                                                <Grid Width="52" Height="190" RowDefinitions="*,Auto,Auto" Margin="0,0,5,0">
-                                                    <Border VerticalAlignment="Bottom" Height="{Binding BarHeight}" Background="{StaticResource InkBrush}" ToolTip.Tip="{Binding TimeLabel}" />
+                                                <Grid Width="30" Height="170" RowDefinitions="*,Auto,Auto" Margin="0,0,4,0">
+                                                    <Border VerticalAlignment="Bottom"
+                                                            Height="{Binding BarHeight}"
+                                                            CornerRadius="2"
+                                                            Opacity="{Binding BarOpacity}"
+                                                            Background="{StaticResource InkBrush}"
+                                                            ToolTip.Tip="{Binding TimeLabel}" />
                                                     <TextBlock Grid.Row="1" Text="{Binding TimeLabel}" FontSize="9" HorizontalAlignment="Center" Margin="0,4,0,0" />
                                                     <TextBlock Grid.Row="2" Text="{Binding DateLabel}" FontSize="9" Foreground="{StaticResource MutedInkBrush}" HorizontalAlignment="Center" />
                                                 </Grid>
@@ -1613,16 +1622,15 @@
                                     </ItemsControl>
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Column="1" Classes="flatPanel" BorderThickness="1,0,0,0" Padding="14">
+                            <Border Grid.Column="1" Classes="flatPanel" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="单本阅读时长" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="累计阅读时长最高的书籍" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
+                                    <TextBlock Text="单本阅读时长" FontSize="14" FontWeight="SemiBold" />
                                     <ItemsControl ItemsSource="{Binding DashboardBookTimes}" AutomationProperties.Name="单本书累计阅读时长排行">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardBarViewModel">
-                                                <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8" Margin="0,3" ToolTip.Tip="{Binding ValueLabel}">
-                                                    <TextBlock Text="{Binding Label}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                                    <Border Grid.Column="1" Width="{Binding BarWidth}" Height="12" Background="{StaticResource InkBrush}" HorizontalAlignment="Left" />
+                                                <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8" Margin="0,4" ToolTip.Tip="{Binding ValueLabel}">
+                                                    <TextBlock Text="{Binding Label}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                    <Border Grid.Column="1" Width="{Binding BarWidth}" Height="10" CornerRadius="2" Background="{StaticResource InkBrush}" HorizontalAlignment="Left" />
                                                     <TextBlock Grid.Column="2" Text="{Binding ValueLabel}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </DataTemplate>
@@ -1630,16 +1638,15 @@
                                     </ItemsControl>
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Row="1" Classes="flatPanel" BorderThickness="1,0,0,0" Padding="14">
+                            <Border Grid.Row="1" Classes="flatPanel" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="阅读进度分布" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="按当前阅读百分比分组" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
+                                    <TextBlock Text="阅读进度分布" FontSize="14" FontWeight="SemiBold" />
                                     <ItemsControl ItemsSource="{Binding DashboardProgressBuckets}" AutomationProperties.Name="阅读进度区间分布柱状图">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardBarViewModel">
-                                                <Grid ColumnDefinitions="70,*,Auto" ColumnSpacing="8" Margin="0,3" ToolTip.Tip="{Binding ValueLabel}">
-                                                    <TextBlock Text="{Binding Label}" FontSize="10" VerticalAlignment="Center" />
-                                                    <Border Grid.Column="1" Width="{Binding BarWidth}" Height="12" Background="{StaticResource InkBrush}" HorizontalAlignment="Left" />
+                                                <Grid ColumnDefinitions="70,*,Auto" ColumnSpacing="8" Margin="0,4" ToolTip.Tip="{Binding ValueLabel}">
+                                                    <TextBlock Text="{Binding Label}" FontSize="11" VerticalAlignment="Center" />
+                                                    <Border Grid.Column="1" Width="{Binding BarWidth}" Height="10" CornerRadius="2" Background="{StaticResource InkBrush}" HorizontalAlignment="Left" />
                                                     <TextBlock Grid.Column="2" Text="{Binding ValueLabel}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </DataTemplate>
@@ -1647,52 +1654,42 @@
                                     </ItemsControl>
                                 </StackPanel>
                             </Border>
-                            <Border Grid.Row="1" Grid.Column="1" Classes="flatPanel" BorderThickness="1,0,0,0" Padding="14">
+                            <Border Grid.Row="1" Grid.Column="1" Classes="flatPanel" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="阅读状态分布" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="阅读中与已完成书籍数量" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
-                                    <ItemsControl ItemsSource="{Binding DashboardReadingStatuses}" AutomationProperties.Name="阅读中与已完成书籍分布柱状图">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="local:Stage3DashboardBarViewModel">
-                                                <Grid ColumnDefinitions="70,*,Auto" ColumnSpacing="8" Margin="0,3" ToolTip.Tip="{Binding ValueLabel}">
-                                                    <TextBlock Text="{Binding Label}" FontSize="10" VerticalAlignment="Center" />
-                                                    <Border Grid.Column="1" Width="{Binding BarWidth}" Height="12" Background="{StaticResource InkBrush}" HorizontalAlignment="Left" />
-                                                    <TextBlock Grid.Column="2" Text="{Binding ValueLabel}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                    <TextBlock Text="最近阅读" FontSize="14" FontWeight="SemiBold" />
+                                    <ScrollViewer MaxHeight="220"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  AutomationProperties.Name="最近阅读记录">
+                                        <ItemsControl ItemsSource="{Binding DashboardRecentItems}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="local:Stage3DashboardRecentViewModel">
+                                                    <Border Padding="0,8"
+                                                            BorderBrush="{StaticResource HairlineBrush}"
+                                                            BorderThickness="0,0,0,1">
+                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                            <StackPanel Spacing="2">
+                                                                <TextBlock Text="{Binding Title}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding UpdatedLabel}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding DurationLabel}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
+                                                                <TextBlock Text="{Binding ProgressLabel}" FontSize="12" VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <TextBlock x:Name="DashboardRecentEmptyText"
+                                               Text="还没有阅读记录。打开一本 EPUB 后，这里会显示最近进度。"
+                                               FontSize="11"
+                                               Foreground="{StaticResource MutedInkBrush}"
+                                               TextWrapping="Wrap"
+                                               IsVisible="False" />
                                 </StackPanel>
                             </Border>
                         </Grid>
-                        <Border Classes="flatPanel" BorderThickness="1,0,0,0" Padding="14">
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="最近阅读" FontSize="16" FontWeight="SemiBold" />
-                                <ScrollViewer MaxHeight="220"
-                                              VerticalScrollBarVisibility="Auto"
-                                              AutomationProperties.Name="最近阅读记录">
-                                    <ItemsControl ItemsSource="{Binding DashboardRecentItems}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="local:Stage3DashboardRecentViewModel">
-                                                <Border Padding="0,8"
-                                                        BorderBrush="{StaticResource HairlineBrush}"
-                                                        BorderThickness="0,0,0,1">
-                                                    <TextBlock Text="{Binding Display}"
-                                                               FontSize="11"
-                                                               TextWrapping="Wrap" />
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </ScrollViewer>
-                                <TextBlock x:Name="DashboardRecentEmptyText"
-                                           Text="还没有阅读记录。打开一本 EPUB 后，这里会显示最近进度。"
-                                           FontSize="11"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           TextWrapping="Wrap"
-                                           IsVisible="False" />
-                            </StackPanel>
-                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
@@ -1988,30 +1985,26 @@
 
                 <Grid Grid.Row="1" Margin="0,28,0,0" RowDefinitions="*,Auto" ColumnDefinitions="168,*" ColumnSpacing="26">
                     <StackPanel Grid.RowSpan="2" Spacing="2">
-                        <TextBlock Text="分类"
-                                   FontSize="10"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   Margin="2,0,0,6" />
                         <StackPanel x:Name="SettingsCategoryButtons" Spacing="2">
-                            <Button x:Name="SettingsGeneralButton"
-                                    Classes="settingsCategory active"
-                                    Content="常规"
-                                    Tag="General"
-                                    Click="SettingsCategoryButton_Click" />
                             <Button x:Name="SettingsLibraryButton"
-                                    Classes="settingsCategory"
+                                    Classes="settingsCategory active"
                                     Content="书库"
                                     Tag="Library"
-                                    Click="SettingsCategoryButton_Click" />
-                            <Button x:Name="SettingsKindleButton"
-                                    Classes="settingsCategory"
-                                    Content="Kindle"
-                                    Tag="Kindle"
                                     Click="SettingsCategoryButton_Click" />
                             <Button x:Name="SettingsReadingButton"
                                     Classes="settingsCategory"
                                     Content="阅读"
                                     Tag="Reading"
+                                    Click="SettingsCategoryButton_Click" />
+                            <Button x:Name="SettingsCalibreButton"
+                                    Classes="settingsCategory"
+                                    Content="Calibre"
+                                    Tag="Calibre"
+                                    Click="SettingsCategoryButton_Click" />
+                            <Button x:Name="SettingsKindleButton"
+                                    Classes="settingsCategory"
+                                    Content="Kindle"
+                                    Tag="Kindle"
                                     Click="SettingsCategoryButton_Click" />
                             <Button x:Name="SettingsBackupButton"
                                     Classes="settingsCategory"
@@ -2033,7 +2026,7 @@
                                Margin="0,20,0,0"
                                HorizontalAlignment="Left"
                                VerticalAlignment="Top"
-                               Fill="{StaticResource InkBrush}"
+                               Fill="{StaticResource HairlineBrush}"
                                IsHitTestVisible="False"
                                ZIndex="1" />
 
@@ -2043,43 +2036,6 @@
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                         <StackPanel Spacing="16">
-                <Border x:Name="SettingsGeneralSection"
-                        Classes="flatPanel"
-                        BorderThickness="0"
-                        Padding="18,18,18,32"
-                        Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="14">
-                                    <TextBlock Text="常规" FontSize="18" FontWeight="SemiBold" />
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="默认打开格式" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
-                                        <ComboBox x:Name="PreferredOpenFormatBox" SelectedIndex="0">
-                                            <ComboBoxItem Content="EPUB" Tag="epub" />
-                                            <ComboBoxItem Content="PDF" Tag="pdf" />
-                                            <ComboBoxItem Content="AZW3" Tag="azw3" />
-                                            <ComboBoxItem Content="MOBI（转换为 EPUB）" Tag="mobi" />
-                                        </ComboBox>
-                                    </StackPanel>
-                                    <StackPanel Spacing="28" Margin="0,11,0,0">
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="启用 AI 阅读助手" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AiEnabledCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="启用阅读器内的 AI 对话与解释" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="允许网络功能" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="NetworkEnabledCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="关闭后豆瓣匹配、Z-Library、邮件发送与工具下载安装等联网功能不可用" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="自动检查应用更新" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AutoUpdateCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="启动后自动检查 GitHub Releases 中的稳定版本" />
-                                        </Grid>
-                                    </StackPanel>
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="False">
-                                        <TextBlock Text="笔记批注默认收起" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <ToggleSwitch x:Name="ReadingMaterialsCollapsedByDefaultCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" />
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
                 <Border x:Name="SettingsLibrarySection"
                         Classes="flatPanel"
                         BorderThickness="0"
@@ -2088,65 +2044,84 @@
                         Background="{StaticResource PaperBrush}">
                                 <StackPanel Spacing="14">
                                     <TextBlock Text="书库" FontSize="18" FontWeight="SemiBold" />
-                                    <StackPanel Spacing="5">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="Calibre ebook-convert 路径" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
-                                            <Ellipse x:Name="CalibreDetectionStatusDot"
-                                                     Width="7"
-                                                     Height="7"
-                                                     VerticalAlignment="Center"
-                                                     Fill="#D6A100"
-                                                     ToolTip.Tip="未检测到 Calibre"
-                                                     AutomationProperties.Name="未检测到 Calibre" />
-                                        </StackPanel>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                            <TextBox x:Name="CalibrePathBox" PlaceholderText="留空时自动查找" />
-                                            <Button Grid.Column="1" Content="浏览" Classes="quiet" Click="BrowseCalibreButton_Click" />
+                                    <StackPanel Spacing="15">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock Text="允许网络功能" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="NetworkEnabledCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="关闭后豆瓣匹配、Z-Library、邮件发送与工具下载安装等联网功能不可用" />
                                         </Grid>
-                                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                                            <Button x:Name="InstallCalibreButton"
-                                                    Content="下载/安装 Calibre"
-                                                    Classes="quiet"
-                                                    Click="InstallCalibreButton_Click" />
-                                            <Button x:Name="InstallKfxInputButton"
-                                                    Content="安装 KFX Input"
-                                                    Classes="quiet"
-                                                    Click="InstallKfxInputButton_Click" />
-                                        </StackPanel>
-                                        <ProgressBar x:Name="CalibreSetupProgressBar"
-                                                     Height="3"
-                                                     Minimum="0"
-                                                     Maximum="100"
-                                                     IsVisible="False" />
-                                        <TextBlock x:Name="CalibreSetupStatusText"
-                                                   FontSize="11"
-                                                   Foreground="{StaticResource MutedInkBrush}"
-                                                   TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <StackPanel Spacing="28" Margin="0,11,0,0">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="导入时自动豆瓣匹配" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AutoDoubanMatchCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="导入完成后自动按书名和作者在豆瓣搜索，置信度高的直接补全评分、简介与封面" />
+                                            <ToggleSwitch x:Name="AutoDoubanMatchCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="导入完成后自动按书名和作者在豆瓣搜索，置信度高的直接补全评分、简介与封面" />
                                         </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="导入后补齐 EPUB 与 AZW3" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="导入后自动为缺失的格式生成 EPUB 与 AZW3 文件" />
+                                            <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="导入后自动为缺失的格式生成 EPUB 与 AZW3 文件" />
                                         </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="收藏夹互斥" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" />
+                                            <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" Grid.Column="1" VerticalAlignment="Center" />
                                         </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="比较 Kindle 与电脑书库" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="CompareKindleLibraryCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="在书卡角标显示书籍在电脑与 Kindle 上的分布" />
+                                            <ToggleSwitch x:Name="CompareKindleLibraryCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="在书卡角标显示书籍在电脑与 Kindle 上的分布" />
                                         </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="网格画廊显示" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="GridGalleryDisplayCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="网格只显示封面，隐藏标题与作者文字" />
+                                            <ToggleSwitch x:Name="GridGalleryDisplayCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="网格只显示封面，隐藏标题与作者文字" />
                                         </Grid>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
+
+                <Border x:Name="SettingsCalibreSection"
+                        Classes="flatPanel"
+                        BorderThickness="0"
+                        IsVisible="False"
+                        Padding="18,18,18,32"
+                        Background="{StaticResource PaperBrush}">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Calibre" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="ebook-convert 用于导入时的格式转换与 Kindle 词典导入；路径留空时自动查找系统中已安装的 Calibre。"
+                                   FontSize="12"
+                                   Foreground="{StaticResource MutedInkBrush}"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Spacing="5">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="ebook-convert 路径" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
+                                <Ellipse x:Name="CalibreDetectionStatusDot"
+                                         Width="7"
+                                         Height="7"
+                                         VerticalAlignment="Center"
+                                         Fill="#D6A100"
+                                         ToolTip.Tip="未检测到 Calibre"
+                                         AutomationProperties.Name="未检测到 Calibre" />
+                            </StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox x:Name="CalibrePathBox" PlaceholderText="留空时自动查找" />
+                                <Button Grid.Column="1" Content="浏览" Classes="quiet" Click="BrowseCalibreButton_Click" />
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                <Button x:Name="InstallCalibreButton"
+                                        Content="下载/安装 Calibre"
+                                        Classes="quiet"
+                                        Click="InstallCalibreButton_Click" />
+                                <Button x:Name="InstallKfxInputButton"
+                                        Content="安装 KFX Input"
+                                        Classes="quiet"
+                                        Click="InstallKfxInputButton_Click" />
+                            </StackPanel>
+                            <ProgressBar x:Name="CalibreSetupProgressBar"
+                                         Height="3"
+                                         Minimum="0"
+                                         Maximum="100"
+                                         IsVisible="False" />
+                            <TextBlock x:Name="CalibreSetupStatusText"
+                                       FontSize="11"
+                                       Foreground="{StaticResource MutedInkBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
 
                 <Border x:Name="SettingsKindleSection"
                         Classes="flatPanel"
@@ -2158,24 +2133,8 @@
                                     <TextBlock Text="Kindle" FontSize="18" FontWeight="SemiBold" />
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,11,0,0">
                                         <TextBlock Text="发现 Kindle 后自动连接" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <ToggleSwitch x:Name="AutoConnectDeviceCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="开启后检测到 Kindle 自动连接；关闭时每次询问" />
+                                        <ToggleSwitch x:Name="AutoConnectDeviceCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="开启后检测到 Kindle 自动连接；关闭时每次询问" />
                                     </Grid>
-                                    <Rectangle Height="1" Margin="0,9,0,0" Fill="{StaticResource HairlineBrush}" />
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="邮件与账号" FontSize="13" FontWeight="SemiBold" />
-                                        <Button Content="Kindle 邮箱设置"
-                                                Classes="quiet"
-                                                HorizontalAlignment="Left"
-                                                Click="KindleEmailSettingsButton_Click" />
-                                        <Button Content="Z-Library 账号设置"
-                                                Classes="quiet"
-                                                HorizontalAlignment="Left"
-                                                Click="ZLibraryAccountButton_Click" />
-                                        <Button Content="AI 助手设置"
-                                                Classes="quiet"
-                                                HorizontalAlignment="Left"
-                                                Click="ReaderAiSettingsButton_Click" />
-                                    </StackPanel>
                                 </StackPanel>
                             </Border>
 
@@ -2185,54 +2144,34 @@
                         IsVisible="False"
                         Padding="18"
                         Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="28">
+                                <StackPanel Spacing="16">
                                     <StackPanel Spacing="5">
-                                        <TextBlock Text="默认阅读排版" FontSize="18" FontWeight="SemiBold" />
-                                        <TextBlock Text="这些设置会作为新打开书籍的默认排版，单本书仍可在阅读器中单独调整。"
-                                                   FontSize="11"
-                                                   Foreground="{StaticResource MutedInkBrush}"
-                                                   TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="10">
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Text="字号比例" FontSize="11" />
-                                            <NumericUpDown x:Name="DefaultFontScaleBox" Minimum="0.8" Maximum="1.8" Increment="0.1" Value="1" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Spacing="4">
-                                            <TextBlock Text="行高" FontSize="11" />
-                                            <NumericUpDown x:Name="DefaultLineHeightBox" Minimum="1.3" Maximum="2.6" Increment="0.05" Value="1.7" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" Spacing="4">
-                                            <TextBlock Text="正文宽度" FontSize="11" />
-                                            <NumericUpDown x:Name="DefaultMaxWidthBox" Minimum="480" Maximum="3840" Increment="20" Value="760" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="3" Spacing="4">
-                                            <TextBlock Text="页边距" FontSize="11" />
-                                            <NumericUpDown x:Name="DefaultBodyPaddingBox" Minimum="24" Maximum="160" Increment="8" Value="48" />
-                                        </StackPanel>
-                                    </Grid>
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="默认正文字体" FontSize="11" />
-                                        <ComboBox x:Name="DefaultFontFamilyBox" SelectedIndex="0">
-                                            <ComboBoxItem Content="京华老宋体" Tag="京华老宋体" />
-                                            <ComboBoxItem Content="微软雅黑 Microsoft YaHei UI" Tag="Microsoft YaHei UI" />
-                                            <ComboBoxItem Content="宋体 SimSun" Tag="SimSun" />
-                                            <ComboBoxItem Content="黑体 SimHei" Tag="SimHei" />
-                                            <ComboBoxItem Content="楷体 KaiTi" Tag="KaiTi" />
-                                            <ComboBoxItem Content="等线 DengXian" Tag="DengXian" />
-                                            <ComboBoxItem Content="思源宋体 / Noto Serif CJK" Tag="Source Han Serif SC, Noto Serif CJK SC" />
+                                        <TextBlock Text="默认打开格式" FontSize="12" Foreground="{StaticResource MutedInkBrush}" />
+                                        <ComboBox x:Name="PreferredOpenFormatBox" SelectedIndex="0" MaxWidth="360" HorizontalAlignment="Left">
+                                            <ComboBoxItem Content="EPUB" Tag="epub" />
+                                            <ComboBoxItem Content="PDF" Tag="pdf" />
+                                            <ComboBoxItem Content="AZW3" Tag="azw3" />
+                                            <ComboBoxItem Content="MOBI（转换为 EPUB）" Tag="mobi" />
                                         </ComboBox>
                                     </StackPanel>
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="新书默认使用竖排" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="DefaultVerticalWritingCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" />
+                                        <TextBlock Text="竖排模式（全局）" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="DefaultVerticalWritingCheck" Grid.Column="1" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <TextBlock Text="启用 AI 阅读助手" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                        <ToggleSwitch x:Name="AiEnabledCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="启用阅读器内的 AI 对话与解释" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="False">
+                                        <TextBlock Text="笔记批注默认收起" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                        <ToggleSwitch x:Name="ReadingMaterialsCollapsedByDefaultCheck" Grid.Column="1" VerticalAlignment="Center" />
                                     </Grid>
                             <Border x:Name="LocalResourcesSettingsSection"
                                     Classes="flatSubsection"
                                     Margin="0,11,0,0"
-                                    Padding="14">
+                                    Padding="0,12,0,0">
                                         <StackPanel Spacing="10">
-                                            <TextBlock Text="Kreader 本地字体" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="本地字体" FontSize="16" FontWeight="SemiBold" />
                                             <TextBlock Text="导入 TTF、OTF、WOFF 或 WOFF2 字体，导入后可作为每本书的阅读排版设置中选择。请自行确认字体许可。"
                                                        FontSize="11"
                                                        Foreground="{StaticResource MutedInkBrush}"
@@ -2254,9 +2193,9 @@
                                     </Border>
                             <Border x:Name="DictionaryManagementSection"
                                     Classes="flatSubsection"
-                                    Padding="14">
+                                    Padding="0,12,0,0">
                                         <StackPanel Spacing="10">
-                                            <TextBlock Text="Kreader 本地词典" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="本地词典" FontSize="16" FontWeight="SemiBold" />
                                             <TextBlock Text="支持 MDX、Kindle 词典（AZW/AZW3/MOBI/KFX）及 UTF-8 文本词典。Kindle 词典导入需要 Calibre，受 DRM 保护的词典无法导入。"
                                                        FontSize="11"
                                                        Foreground="{StaticResource MutedInkBrush}"
@@ -2300,7 +2239,7 @@
                                                TextWrapping="Wrap" />
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                         <TextBlock Text="启动时自动备份（每日）" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="AutoBackupCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="启动时若距上次备份超过 20 小时则自动生成备份" />
+                                        <ToggleSwitch x:Name="AutoBackupCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="启动时若距上次备份超过 20 小时则自动生成备份" />
                                     </Grid>
                                     <Grid ColumnDefinitions="*,160" ColumnSpacing="12">
                                         <TextBlock Text="自动备份保留数量" FontSize="13" VerticalAlignment="Center" />
@@ -2357,6 +2296,10 @@
                                                    Text="版本未知"
                                                    FontSize="12"
                                                    Foreground="{StaticResource MutedInkBrush}" />
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock Text="自动检查应用更新" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="AutoUpdateCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="启动后自动检查 GitHub Releases 中的稳定版本" />
+                                        </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock x:Name="AboutUpdateStatusText"
                                                        Text="尚未检查更新"
@@ -2980,15 +2923,26 @@
                         BorderThickness="1"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
-                    <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="12">
+                    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12">
                         <TextBlock Text="选择豆瓣条目" FontSize="19" FontWeight="SemiBold" />
                         <TextBlock Grid.Row="1"
-                                   Text="请选择与当前书籍匹配的结果，可根据封面与出版信息确认。"
+                                   Text="请选择与当前书籍匹配的结果；没有合适的条目时，可修改关键词后重新搜索。"
                                    FontSize="11"
                                    Foreground="{StaticResource MutedInkBrush}"
                                    TextWrapping="Wrap" />
+                        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox x:Name="DoubanSearchBox"
+                                     PlaceholderText="书名 / 作者关键词"
+                                     KeyDown="DoubanSearchBox_KeyDown" />
+                            <Button x:Name="DoubanResearchButton"
+                                    Grid.Column="1"
+                                    Content="搜索"
+                                    MinWidth="72"
+                                    Padding="13,7"
+                                    Click="DoubanResearchButton_Click" />
+                        </Grid>
                         <ListBox x:Name="DoubanCandidateList"
-                                 Grid.Row="2"
+                                 Grid.Row="3"
                                  ItemsSource="{Binding DoubanCandidates}"
                                  SelectionChanged="DoubanCandidateList_SelectionChanged"
                                  DoubleTapped="DoubanCandidateList_DoubleTapped"
@@ -3047,7 +3001,7 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
-                        <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                        <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
                             <Button Grid.Column="1"
                                     Content="取消"
                                     Classes="quiet"
@@ -3793,19 +3747,6 @@
                                         </MenuFlyout>
                                     </Button.Flyout>
                                 </Button>
-                                <Rectangle Width="1" Height="20" Margin="12,0" Fill="#E2E2DE" VerticalAlignment="Center" />
-                                <Button x:Name="ReaderHighlightButton"
-                                        Classes="readerHeader"
-                                        Content="划线"
-                                        IsVisible="False"
-                                        ToolTip.Tip="为正文中选中的文字添加划线"
-                                        Click="ReaderHighlightButton_Click" />
-                                <Button x:Name="ReaderAnnotateButton"
-                                        Classes="readerHeader"
-                                        Content="批注"
-                                        IsVisible="False"
-                                        ToolTip.Tip="为正文中选中的文字添加笔记"
-                                        Click="ReaderAnnotateButton_Click" />
                                 <Button x:Name="ReaderBookmarkButton"
                                         Classes="readerHeader"
                                         Content="书签"
@@ -4438,7 +4379,8 @@
                 </Grid>
             </Border>
 
-            <!-- Reading layout settings (per book). A native popup is required:
+            <!-- Reading layout settings. Typography remains per book while
+                 the vertical-writing switch is global. A native popup is required:
                  the WebView2 HWND island covers ordinary Avalonia overlays. -->
             <Popup x:Name="ReaderLayoutSettingsPopup"
                    IsOpen="False"
@@ -4459,7 +4401,7 @@
                         <Grid RowDefinitions="Auto,Auto">
                             <StackPanel Margin="22,20" Spacing="12">
                                 <TextBlock Text="阅读排版设置" FontSize="20" FontWeight="SemiBold" />
-                                <TextBlock Text="这些设置只对当前这本书生效，并在下次打开时自动恢复。"
+                                <TextBlock Text="字号、行高、宽度、边距、字体和段首缩进对当前书生效；竖排开关对所有书生效。"
                                            FontSize="11"
                                            Foreground="#666666"
                                            TextWrapping="Wrap" />
@@ -4542,9 +4484,15 @@
                                     </ComboBox>
                                 </StackPanel>
                                 <CheckBox x:Name="ReaderVerticalWritingCheck"
-                                          Content="竖排排版（滚动与分页模式）"
+                                          Classes="readerLayoutCheck"
+                                          Content="竖排排版（全局，仅支持单页）"
                                           FontSize="12"
                                           IsCheckedChanged="ReaderVerticalWritingCheck_IsCheckedChanged" />
+                                <CheckBox x:Name="ReaderParagraphIndentCheck"
+                                          Classes="readerLayoutCheck"
+                                          Content="正文段落起始缩进两个字"
+                                          FontSize="12"
+                                          IsCheckedChanged="ReaderParagraphIndentCheck_IsCheckedChanged" />
                                 <TextBlock x:Name="ReaderLayoutSettingsStatusText"
                                            FontSize="10"
                                            Foreground="{StaticResource MutedInkBrush}"

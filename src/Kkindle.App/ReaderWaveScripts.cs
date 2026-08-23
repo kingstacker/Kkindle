@@ -2,12 +2,19 @@ using System.Globalization;
 
 namespace Kkindle;
 
-// Builds native View Transition animations for in-document turns and captured
+// Builds the modern-Kindle e-ink refresh for in-document turns and captured
 // page overlays for chapter transitions. Neither path transforms the live EPUB
-// body, so animation cannot alter the multicolumn scroll extent.
+// body, so animation cannot alter the multicolumn scroll extent: old and new
+// page stay put geometrically and a horizontal refresh wave replaces content.
 internal static class ReaderWaveScripts
 {
-    public const int TotalDurationMs = 420;
+    // 波前传播时长（普通文本翻页约 200~250ms）。
+    public const int TotalDurationMs = 230;
+
+    // 残影保持到波形结束后再完全消退所需的尾部时长。
+    public const int GhostTailMs = 320;
+
+    private const string WaveEase = "cubic-bezier(.3,.08,.35,.96)";
 
     public static string CreateWaveOverlayScript(
         string dataUrl,
@@ -17,16 +24,47 @@ internal static class ReaderWaveScripts
         int totalDurationMs = TotalDurationMs,
         bool startPaused = false)
     {
-        var totalDuration = Math.Clamp(totalDurationMs, 240, 2000);
+        var totalDuration = Math.Clamp(totalDurationMs, 160, 2000);
         var w = Format(width);
         var h = Format(height);
-        var old0 = CreateRefreshClip(0, forward);
-        var old1 = CreateRefreshClip(.14, forward);
-        var old2 = CreateRefreshClip(.56, forward);
-        var old3 = CreateRefreshClip(.88, forward);
-        var old4 = CreateRefreshClip(1, forward);
-        var frontStart = forward ? width - 18 : -22;
-        var frontEnd = forward ? -22 : width - 18;
+        var playState = startPaused ? "paused" : "running";
+        // 残影强度 1%~3%，默认 2.2%；波形结束后短暂保持再消退。
+        var ghostOpacity = "0.022";
+        var ghostFadeMs = 260.ToString(CultureInfo.InvariantCulture);
+        var colorSettleMs = 360.ToString(CultureInfo.InvariantCulture);
+        // 前沿条带宽度取屏宽的 12.5%，落在真实设备 10%~15% 的范围内。
+        var bandWidth = Math.Clamp(width * 0.125, 24, Math.Max(24, width * 0.15));
+        var halfBand = bandWidth / 2;
+        var blurRadius = Math.Max(3, bandWidth * 0.055);
+        var trailWidth = bandWidth * 2.1;
+        var trailBlur = Math.Max(6, bandWidth * 0.16);
+        var trailLag = bandWidth * 0.42;
+        // 前进翻页时新页从右缘向左缘刷新（墨水刷新与阅读流向相反），后退翻页相反。
+        var bandStart = forward ? width + halfBand : -halfBand;
+        var bandEnd = forward ? -halfBand : width + halfBand;
+        // 拖尾带落后于前沿：行进向左时拖尾在右，反之亦然。
+        var trailStart = bandStart + (forward ? trailLag : -trailLag);
+        var trailEnd = bandEnd + (forward ? trailLag : -trailLag);
+
+        // 软边缘遮罩：把 2.5 倍宽的黑白渐变蒙版用 mask-position 滑过页面，
+        // 渐变里长度等于条带宽度的过渡区就是刷新前沿——旧页与新页之间没有
+        // 硬边界，也不存在整体位移。蒙版滑动与条带位移使用同一时长与缓动，
+        // 因此前沿全程锁步。墨水迁移感由滞后于前沿的拖尾带表现。
+        const double maskScale = 2.5;
+        var bandFraction = bandWidth / width;
+        var ramp0 = 0.5 - bandFraction / (2 * maskScale);
+        var ramp1 = 0.5 + bandFraction / (2 * maskScale);
+        var posLeading = Format(ramp1 * maskScale / (maskScale - 1) * 100);
+        var posTrailing = Format((ramp0 * maskScale - 1) / (maskScale - 1) * 100);
+        var posFrom = forward ? posTrailing : posLeading;
+        var posTo = forward ? posLeading : posTrailing;
+        var maskAngle = forward ? "270deg" : "90deg";
+        var maskStops =
+            $"transparent 0%, transparent {Format(ramp0 * 100)}%, #000 {Format(ramp1 * 100)}%, #000 100%";
+        // 拖尾带的暗侧朝向前沿行进方向。
+        var trailGradient = forward
+            ? "linear-gradient(270deg, rgba(0,0,0,0) 0%, rgba(72,72,72,.18) 52%, rgba(48,48,48,.28) 80%, rgba(30,30,30,.32) 100%)"
+            : "linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(72,72,72,.18) 52%, rgba(48,48,48,.28) 80%, rgba(30,30,30,.32) 100%)";
         return $$"""
             (() => {
               try {
@@ -41,37 +79,100 @@ internal static class ReaderWaveScripts
                 style.id = 'kk-wave-style';
                 style.textContent = `
                   #kk-wave { position: fixed; inset: 0; width: 100%; height: 100%;
-                              overflow: hidden; pointer-events: none; z-index: 2147483000;
-                              background: transparent; }
-                  #kk-wave-image { position: absolute; inset: 0;
-                                   width: ${W}px !important; height: ${H}px !important;
-                                   max-width: none !important; max-height: none !important;
-                                   margin: 0 !important; padding: 0 !important; }
-                  #kk-wave-image { will-change: clip-path, filter;
-                                   animation: kk-kindle-refresh-old {{totalDuration}}ms cubic-bezier(.22,.62,.28,1) both;
-                                   animation-play-state: {{(startPaused ? "paused" : "running")}}; }
-                  @keyframes kk-kindle-refresh-old {
-                    0%   { clip-path: {{old0}}; filter: none; }
-                    18%  { clip-path: {{old1}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
-                    54%  { clip-path: {{old2}}; filter: grayscale(.2) brightness(1.01) contrast(.975); }
-                    82%  { clip-path: {{old3}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
-                    100% { clip-path: {{old4}}; filter: none; }
+                             overflow: hidden; pointer-events: none; z-index: 2147483000;
+                             background: transparent; }
+                  #kk-wave canvas { position: absolute; inset: 0;
+                                    width: ${W}px !important; height: ${H}px !important;
+                                    max-width: none !important; max-height: none !important;
+                                    margin: 0 !important; padding: 0 !important; }
+                  #kk-wave-image { will-change: mask-position;
+                                   -webkit-mask-image: linear-gradient({{maskAngle}}, {{maskStops}});
+                                   -webkit-mask-size: 250% 100%;
+                                   -webkit-mask-repeat: no-repeat;
+                                   -webkit-mask-position: {{posFrom}}% 0;
+                                   mask-image: linear-gradient({{maskAngle}}, {{maskStops}});
+                                   mask-size: 250% 100%;
+                                   mask-repeat: no-repeat;
+                                   mask-position: {{posFrom}}% 0;
+                                   animation: kk-eink-wave-old {{totalDuration}}ms {{WaveEase}} both;
+                                   animation-play-state: {{playState}}; }
+                  @keyframes kk-eink-wave-old {
+                    0%   { -webkit-mask-position: {{posFrom}}% 0; mask-position: {{posFrom}}% 0; }
+                    100% { -webkit-mask-position: {{posTo}}% 0; mask-position: {{posTo}}% 0; }
                   }
-                  #kk-wave-front { position: absolute; left: 0; top: 0;
-                                   width: 40px; height: 100%; opacity: 0;
+                  #kk-wave-ghost { opacity: 0;
+                                   animation: kk-eink-ghost-hold {{totalDuration}}ms linear both,
+                                              kk-eink-ghost-fade {{ghostFadeMs}}ms linear {{totalDuration}}ms forwards;
+                                   animation-play-state: {{playState}}; }
+                  @keyframes kk-eink-ghost-hold {
+                    0%, 58% { opacity: 0; }
+                    76%, 100% { opacity: {{ghostOpacity}}; }
+                  }
+                  @keyframes kk-eink-ghost-fade {
+                    0% { opacity: {{ghostOpacity}}; }
+                    100% { opacity: 0; }
+                  }
+                  #kk-wave-trail { position: absolute; top: 0; height: 100%;
+                                   width: {{Format(trailWidth)}}px;
+                                   opacity: .1; mix-blend-mode: multiply;
+                                   filter: blur({{Format(trailBlur)}}px);
+                                   will-change: transform, opacity;
+                                   background: {{trailGradient}};
+                                   transform: translate3d({{Format(trailStart)}}px,0,0);
+                                   animation: kk-eink-trail-move {{totalDuration}}ms {{WaveEase}} both,
+                                              kk-eink-jitter 130ms steps(2, jump-none) infinite;
+                                   animation-play-state: {{playState}}; }
+                  @keyframes kk-eink-trail-move {
+                    0%   { transform: translate3d({{Format(trailStart)}}px,0,0); }
+                    100% { transform: translate3d({{Format(trailEnd)}}px,0,0); }
+                  }
+                  #kk-wave-front { position: absolute; top: 0; height: 100%;
+                                   width: {{Format(bandWidth)}}px;
+                                   opacity: .95; mix-blend-mode: multiply;
+                                   filter: blur({{Format(blurRadius)}}px);
                                    will-change: transform, opacity;
                                    background: linear-gradient(90deg,
-                                     transparent 0%, rgba(70,70,70,.025) 22%,
-                                     rgba(255,255,255,.62) 48%, rgba(92,92,92,.035) 72%,
-                                     transparent 100%);
-                                   transform: translate3d({{Format(frontStart)}}px,0,0);
-                                   animation: kk-kindle-refresh-front {{totalDuration}}ms cubic-bezier(.22,.62,.28,1) both;
-                                   animation-play-state: {{(startPaused ? "paused" : "running")}}; }
-                  @keyframes kk-kindle-refresh-front {
-                    0%   { opacity: 0; transform: translate3d({{Format(frontStart)}}px,0,0); }
-                    8%   { opacity: .76; }
-                    88%  { opacity: .64; }
-                    100% { opacity: 0; transform: translate3d({{Format(frontEnd)}}px,0,0); }
+                                     rgba(0,0,0,0) 0%, rgba(64,64,64,.17) 26%,
+                                     rgba(44,44,44,.30) 46%, rgba(36,36,36,.34) 54%,
+                                     rgba(70,70,70,.18) 74%, rgba(0,0,0,0) 100%);
+                                   transform: translate3d({{Format(bandStart)}}px,0,0);
+                                   animation: kk-eink-band-move {{totalDuration}}ms {{WaveEase}} both,
+                                              kk-eink-jitter 110ms steps(2, jump-none) infinite;
+                                   animation-play-state: {{playState}}; }
+                  @keyframes kk-eink-band-move {
+                    0%   { transform: translate3d({{Format(bandStart)}}px,0,0); }
+                    100% { transform: translate3d({{Format(bandEnd)}}px,0,0); }
+                  }
+                  @keyframes kk-eink-jitter {
+                    0%   { opacity: .86; }
+                    33%  { opacity: 1; }
+                    66%  { opacity: .82; }
+                    100% { opacity: .95; }
+                  }
+                  #kk-wave-front::after { content: ''; position: absolute; inset: 0; opacity: .45;
+                                          background: repeating-linear-gradient(90deg,
+                                            rgba(255,255,255,.05) 0px, rgba(255,255,255,.05) 2px,
+                                            rgba(0,0,0,.06) 2px, rgba(0,0,0,.06) 4px);
+                                          background-size: 8px 100%;
+                                          animation: kk-eink-noise 96ms steps(2, jump-none) infinite alternate; }
+                  @keyframes kk-eink-noise {
+                    0%   { background-position: 0 0; }
+                    100% { background-position: -8px 0; }
+                  }
+                  #kk-wave-color { position: absolute; inset: 0;
+                                   will-change: backdrop-filter, background-color;
+                                   animation: kk-eink-color-settle {{colorSettleMs}}ms linear both,
+                                              kk-eink-color-tint {{colorSettleMs}}ms linear both;
+                                   animation-play-state: {{playState}}; }
+                  @keyframes kk-eink-color-settle {
+                    0%   { backdrop-filter: saturate(.62) hue-rotate(6deg) contrast(1.02); }
+                    30%  { backdrop-filter: saturate(.74) hue-rotate(-4deg) contrast(1.01); }
+                    64%  { backdrop-filter: saturate(.9) hue-rotate(2deg) contrast(1); }
+                    100% { backdrop-filter: saturate(1) hue-rotate(0deg) contrast(1); }
+                  }
+                  @keyframes kk-eink-color-tint {
+                    0%   { background-color: rgba(118,118,118,.12); }
+                    100% { background-color: rgba(118,118,118,0); }
                   }
                 `;
                 document.head.appendChild(style);
@@ -81,18 +182,17 @@ internal static class ReaderWaveScripts
                 const canvas = document.createElement('canvas');
                 canvas.id = 'kk-wave-image';
                 canvas.dataset.kkReady = 'false';
+                const ghost = document.createElement('canvas');
+                ghost.id = 'kk-wave-ghost';
                 container.appendChild(canvas);
-                const front = document.createElement('div');
-                front.id = 'kk-wave-front';
-                container.appendChild(front);
-
+                container.appendChild(ghost);
                 root.appendChild(container);
                 window.__kkindleStartWaveOverlay = () => {
                   canvas.dataset.kkStartRequested = 'true';
                   if (canvas.dataset.kkReady !== 'true') return true;
-                  container.querySelectorAll('#kk-wave-image, #kk-wave-front').forEach(node => {
+                  for (const node of container.children) {
                     node.style.animationPlayState = 'running';
-                  });
+                  }
                   return true;
                 };
                 const encoded = DATA.slice(DATA.indexOf(',') + 1);
@@ -100,9 +200,37 @@ internal static class ReaderWaveScripts
                 const bytes = new Uint8Array(raw.length);
                 for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
                 createImageBitmap(new Blob([bytes], { type: 'image/png' })).then(bitmap => {
+                  const context = canvas.getContext('2d', { alpha: false });
                   canvas.width = bitmap.width;
                   canvas.height = bitmap.height;
-                  canvas.getContext('2d', { alpha: false }).drawImage(bitmap, 0, 0);
+                  context.drawImage(bitmap, 0, 0);
+                  const ghostContext = ghost.getContext('2d', { alpha: false });
+                  ghost.width = bitmap.width;
+                  ghost.height = bitmap.height;
+                  ghostContext.drawImage(bitmap, 0, 0);
+                  try {
+                    // 彩色内容（Colorsoft 类）需要短暂低饱和度与颜色稳定过程；
+                    // 对快照降采样估计色度，纯文本页面不会触发。
+                    const sw = 48;
+                    const sh = Math.max(8, Math.round(48 * bitmap.height / bitmap.width));
+                    const sample = document.createElement('canvas');
+                    sample.width = sw;
+                    sample.height = sh;
+                    const sampleContext = sample.getContext('2d', { willReadFrequently: true });
+                    sampleContext.drawImage(bitmap, 0, 0, sw, sh);
+                    const pixels = sampleContext.getImageData(0, 0, sw, sh).data;
+                    let chromaSum = 0;
+                    for (let i = 0; i < pixels.length; i += 4) {
+                      chromaSum += Math.max(pixels[i], pixels[i + 1], pixels[i + 2])
+                                 - Math.min(pixels[i], pixels[i + 1], pixels[i + 2]);
+                    }
+                    const chroma = chromaSum / (pixels.length / 4 * 255);
+                    if (chroma > 0.045) {
+                      const colorVeil = document.createElement('div');
+                      colorVeil.id = 'kk-wave-color';
+                      container.prepend(colorVeil);
+                    }
+                  } catch (_) {}
                   bitmap.close();
                   canvas.dataset.kkReady = 'true';
                   if (canvas.dataset.kkStartRequested === 'true') {
@@ -305,25 +433,19 @@ internal static class ReaderWaveScripts
         var slideTarget = forward ? "-100%" : "100%";
         var slideShadow = forward ? "-22px" : "22px";
         var refresh0 = CreateRefreshClip(0, forward);
-        var refresh1 = CreateRefreshClip(.14, forward);
-        var refresh2 = CreateRefreshClip(.56, forward);
-        var refresh3 = CreateRefreshClip(.88, forward);
         var refresh4 = CreateRefreshClip(1, forward);
         var animationCss = wave
             ? $$"""
               ::view-transition-old(root) {
                 z-index: 2; mix-blend-mode: normal;
-                animation: kk-kindle-refresh-old {{duration}}ms cubic-bezier(.22,.62,.28,1) both;
+                animation: kk-eink-vt-old {{duration}}ms cubic-bezier(.3,.08,.35,.96) both;
               }
               ::view-transition-new(root) {
                 z-index: 1; mix-blend-mode: normal; animation: none;
               }
-              @keyframes kk-kindle-refresh-old {
-                0% { clip-path: {{refresh0}}; filter: none; }
-                18% { clip-path: {{refresh1}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
-                54% { clip-path: {{refresh2}}; filter: grayscale(.2) brightness(1.01) contrast(.975); }
-                82% { clip-path: {{refresh3}}; filter: grayscale(.12) brightness(1.005) contrast(.99); }
-                100% { clip-path: {{refresh4}}; filter: none; }
+              @keyframes kk-eink-vt-old {
+                0% { clip-path: {{refresh0}}; }
+                100% { clip-path: {{refresh4}}; }
               }
               """
             : $$"""
@@ -387,6 +509,7 @@ internal static class ReaderWaveScripts
     {
         progress = Math.Clamp(progress, 0, 1);
         var inset = Format(progress * 100);
+        // 前进翻页从右缘开始刷新：右内缩随进度增长；后退翻页镜像。
         return forward
             ? $"inset(0 {inset}% 0 0)"
             : $"inset(0 0 0 {inset}%)";

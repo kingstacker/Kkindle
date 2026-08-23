@@ -508,13 +508,17 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var horizontal = _readerLayout.FlowMode == 1 || _readerLayout.VerticalWriting;
+        // Vertical writing paginates along the X axis in both flow modes, but
+        // its scroll range is negative; only horizontal pagination uses the
+        // positive X axis, and everything else scrolls vertically.
+        var vertical = _readerLayout.VerticalWriting;
+        var horizontal = !vertical && _readerLayout.FlowMode == 1;
         if (!moveToEnd)
             await host.InvokeScriptAsync(ReaderNavigationScripts.NormalizeChapterStart);
         await host.InvokeScriptAsync(
-            ReaderPaginationScripts.CreateChapterBoundaryScript(moveToEnd, horizontal));
+            ReaderPaginationScripts.CreateChapterBoundaryScript(moveToEnd, horizontal, vertical));
         if (_readerLayout.FlowMode == 1)
-            await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+            await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
         await UpdateReaderScrollStateAsync(host);
     }
 
@@ -684,9 +688,7 @@ public partial class MainWindow
             ReaderStatusText.Text = "当前章节加载失败。";
             return;
         }
-        ReaderStatusText.Text = _readerIsPdf
-            ? $"PDF · {_readerPdfPages.Count} 页"
-            : string.Empty;
+        ResetReaderStatusText();
     }
 
     private void ReaderHost_WebMessageReceived(
@@ -740,8 +742,6 @@ public partial class MainWindow
         StopReaderFootnoteHoverPoll();
         _readerFootnoteHoverSequence++;
         HideReaderFootnotePopup();
-        ReaderHighlightButton.IsVisible = false;
-        ReaderAnnotateButton.IsVisible = false;
         _readerBookmarkIndicatorSequence++;
         ReaderBookmarkCornerMarker.IsVisible = false;
         ReaderTocCompactPanel.IsVisible = false;

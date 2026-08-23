@@ -156,6 +156,72 @@ public sealed class EpubReaderTests
     }
 
     [Fact]
+    public async Task ReplacesDuplicateChapterTitlesWithBodyDerivedOnes()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "front-matter.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                      <rootfiles><rootfile full-path="content.opf" /></rootfiles>
+                    </container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "content.opf", """
+                    <package xmlns="http://www.idpf.org/2007/opf">
+                      <manifest>
+                        <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" />
+                        <item id="bio" href="bio.xhtml" media-type="application/xhtml+xml" />
+                        <item id="dedication" href="dedication.xhtml" media-type="application/xhtml+xml" />
+                        <item id="preface" href="preface.xhtml" media-type="application/xhtml+xml" />
+                        <item id="note" href="note.xhtml" media-type="application/xhtml+xml" />
+                      </manifest>
+                      <spine>
+                        <itemref idref="cover" /><itemref idref="bio" /><itemref idref="dedication" />
+                        <itemref idref="preface" /><itemref idref="note" />
+                      </spine>
+                    </package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "cover.xhtml", "<html><head><title>Cover</title></head><body /></html>");
+                // Calibre conversions repeat the book-level <title> on every
+                // split file; only the first body line tells them apart.
+                TestHelpers.AddZipEntry(archive, "bio.xhtml", """
+                    <html><head><title>冰与火之歌</title></head><body>
+                      <p><span class="bold">作者介绍</span></p>
+                      <p>乔治 R·R·马丁，1948年出生于美国。</p>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "dedication.xhtml", """
+                    <html><head><title>冰与火之歌</title></head><body>
+                      <p> </p>
+                      <p>本书献给马林达</p>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "preface.xhtml", """
+                    <html><head><title>冰与火之歌</title></head><body>
+                      <p>2011年注定是冰与火之歌的大年。在这一年HBO将这部小说改编为电视剧集并大获成功。</p>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "note.xhtml", """
+                    <html><head><title>自序</title></head><body><p>随便写写</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('9', 64));
+
+            Assert.Equal(
+                ["封面", "作者介绍", "本书献给马林达", "2011年注定是冰与火之歌的大年。在这一…", "自序"],
+                document.ChapterTitles);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task PrefersRoleMarkedTocOverEarlierLandmarksNavigation()
     {
         var root = TestHelpers.CreateTempDirectory();
@@ -592,18 +658,18 @@ public sealed class EpubReaderTests
             Assert.Contains("pagePointerDown", bridge, StringComparison.Ordinal);
             Assert.Contains("document.addEventListener(\"pointerup\"", bridge, StringComparison.Ordinal);
             Assert.Contains("requestAnimationFrame?.(() =>", bridge, StringComparison.Ordinal);
-            Assert.Contains("const direction = x < width / 3 ? -1 : 1", bridge, StringComparison.Ordinal);
-            Assert.Contains("send({ type: \"page\", direction });", bridge, StringComparison.Ordinal);
+            Assert.Contains("send({ type: \"pageClick\", side: onLeft ? \"left\" : \"right\" });", bridge, StringComparison.Ordinal);
+            Assert.DoesNotContain("const direction = onLeft", bridge, StringComparison.Ordinal);
             Assert.DoesNotContain("turnPaginatedPage", bridge, StringComparison.Ordinal);
-            var pointerDirectionIndex = bridge.IndexOf(
-                "const direction = x < width / 3 ? -1 : 1",
+            var pointerSideIndex = bridge.IndexOf(
+                "const onLeft = x < width / 3",
                 StringComparison.Ordinal);
             var pointerSendIndex = bridge.IndexOf(
-                "send({ type: \"page\", direction });",
-                pointerDirectionIndex,
+                "send({ type: \"pageClick\", side: onLeft ? \"left\" : \"right\" });",
+                pointerSideIndex,
                 StringComparison.Ordinal);
-            Assert.InRange(pointerSendIndex - pointerDirectionIndex, 1, 160);
-            Assert.EndsWith("\n47", markerText, StringComparison.Ordinal);
+            Assert.InRange(pointerSendIndex - pointerSideIndex, 1, 360);
+            Assert.EndsWith("\n48", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

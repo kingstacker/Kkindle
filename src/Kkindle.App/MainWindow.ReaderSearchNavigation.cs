@@ -213,18 +213,10 @@ public partial class MainWindow
               if (!mark) mark = createMark(target);
 
               if ({{pagination}}) {
-                const rects = mark.getClientRects ? Array.from(mark.getClientRects()) : [];
-                const rect = rects.find(item => item.width > 0 || item.height > 0)
-                  || mark.getBoundingClientRect();
-                if (step > 0 && rect && Number.isFinite(rect.left)) {
-                  const absoluteLeft = rect.left + scroller.scrollLeft + Math.max(0, rect.width) / 2;
-                  const rawMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
-                  const targetPage = Math.floor(Math.max(0, absoluteLeft) / step) * step;
-                  const targetLeft = Math.max(0, Math.min(rawMax, targetPage));
-                  window.scrollTo({ left: targetLeft, top: 0, behavior: 'instant' });
-                } else {
-                  mark.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-                }
+                // scrollIntoView handles both the positive horizontal range
+                // and vertical-rl's negative one natively; the host snaps the
+                // result to the owning page boundary right after this script.
+                mark.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'instant' });
               } else {
                 mark.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
               }
@@ -238,7 +230,7 @@ public partial class MainWindow
         {
             await host.InvokeScriptAsync(script);
             if (_readerLayout.FlowMode == 1)
-                await host.InvokeScriptAsync(ReaderPaginationScripts.Snap);
+                await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
         }
         catch
         {

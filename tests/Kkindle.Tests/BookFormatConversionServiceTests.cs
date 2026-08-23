@@ -22,6 +22,44 @@ public sealed class BookFormatConversionServiceTests
     }
 
     [Fact]
+    public void ExistingCoverPathIsPassedToCalibre()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        var cover = Path.Combine(root, "cover.jpg");
+        File.WriteAllBytes(cover, [0xFF, 0xD8, 0xFF]);
+        try
+        {
+            var startInfo = new ProcessStartInfo();
+
+            BookFormatConversionService.AddMetadataArguments(
+                startInfo,
+                new FormatConversionMetadata("三体", "刘慈欣", cover));
+
+            Assert.Equal(
+                ["--title", "三体", "--authors", "刘慈欣", "--cover", cover],
+                startInfo.ArgumentList);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void MissingCoverPathIsIgnored()
+    {
+        var startInfo = new ProcessStartInfo();
+
+        BookFormatConversionService.AddMetadataArguments(
+            startInfo,
+            new FormatConversionMetadata("三体", "刘慈欣", "Z:/not-exist/cover.jpg"));
+
+        Assert.Equal(
+            ["--title", "三体", "--authors", "刘慈欣"],
+            startInfo.ArgumentList);
+    }
+
+    [Fact]
     public async Task ThrowsWhenSourceBookDoesNotExist()
     {
         var root = TestHelpers.CreateTempDirectory();
