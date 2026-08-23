@@ -25,8 +25,24 @@ internal static class Program
             e.SetObserved();
         };
 
-        BuildAvaloniaApp()
-            .StartWithClassicDesktopLifetime(args);
+        // Single instance: a second launch brings the running window back
+        // (even from the tray) instead of starting another copy of the app.
+        if (!SingleInstanceGuard.TryAcquire(out var singleInstanceMutex))
+        {
+            SingleInstanceGuard.ActivateExistingInstance();
+            singleInstanceMutex.Dispose();
+            return;
+        }
+
+        try
+        {
+            BuildAvaloniaApp()
+                .StartWithClassicDesktopLifetime(args);
+        }
+        finally
+        {
+            singleInstanceMutex.Dispose();
+        }
     }
 
     private static void WriteCrashLog(string kind, Exception? exception)

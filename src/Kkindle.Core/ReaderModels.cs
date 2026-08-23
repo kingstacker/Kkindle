@@ -117,7 +117,10 @@ public static class ReaderLayoutDefaults
     public const double MinLineHeight = 1.3;
     public const double MaxLineHeight = 2.6;
     public const double MinMaxWidth = 480;
-    public const double MaxMaxWidth = 1200;
+    // 3840 covers a full-width column on an unscaled 4K panel; the reader
+    // clamps the effective width to the viewport anyway, so larger monitors
+    // simply get more headroom.
+    public const double MaxMaxWidth = 3840;
     public const double MinBodyPadding = 24;
     public const double MaxBodyPadding = 160;
 

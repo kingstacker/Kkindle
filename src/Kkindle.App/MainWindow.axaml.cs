@@ -164,6 +164,7 @@ public partial class MainWindow : Window
 
         InitializeComponent();
         ApplyApplicationIcon();
+        InitializeTrayIcon();
         // Linux file managers can mark external drag events handled on the
         // first child under the pointer. Observe the bubbled event even then,
         // at the top-level window that owns the native XDND target.
@@ -444,12 +445,21 @@ public partial class MainWindow : Window
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == WindowStateProperty
-            && MaximizeWindowGlyph is not null
-            && MaximizeWindowButton is not null)
+        if (change.Property == WindowStateProperty)
         {
-            UpdateMaximizeGlyph();
-            UpdateWindowShadowMargin();
+            if (change.NewValue is WindowState newState
+                && newState == WindowState.Minimized)
+            {
+                // Minimize parks the single instance in the tray instead of
+                // leaving a taskbar button; the tray click brings it back.
+                Hide();
+            }
+            if (MaximizeWindowGlyph is not null
+                && MaximizeWindowButton is not null)
+            {
+                UpdateMaximizeGlyph();
+                UpdateWindowShadowMargin();
+            }
         }
     }
 
@@ -717,17 +727,30 @@ public partial class MainWindow : Window
         CollectionHeader.IsVisible = mode is LibraryViewMode.Grid or LibraryViewMode.List
             && ViewModel.CollectionFilterId is not null;
         CreateCollectionButton.IsVisible = mode == LibraryViewMode.Collections;
-        LibraryViewGridItem.IsChecked = mode == LibraryViewMode.Grid;
-        LibraryViewListItem.IsChecked = mode == LibraryViewMode.List;
-        LibraryViewCollectionsItem.IsChecked = mode == LibraryViewMode.Collections;
         LibraryViewToggleIcon.Data = Geometry.Parse(mode switch
         {
             LibraryViewMode.List => LibraryListGlyphData,
             LibraryViewMode.Collections => LibraryCollectionsGlyphData,
             _ => LibraryGridGlyphData
         });
+        ToolTip.SetTip(LibraryViewToggleButton, $"当前：{DescribeLibraryViewMode(mode)}，点击切换到{DescribeLibraryViewMode(NextLibraryViewMode(mode))}");
         UpdateLibraryUi();
     }
+
+    // The view button cycles through the modes in display order.
+    private static LibraryViewMode NextLibraryViewMode(LibraryViewMode mode) => mode switch
+    {
+        LibraryViewMode.Grid => LibraryViewMode.List,
+        LibraryViewMode.List => LibraryViewMode.Collections,
+        _ => LibraryViewMode.Grid
+    };
+
+    private static string DescribeLibraryViewMode(LibraryViewMode mode) => mode switch
+    {
+        LibraryViewMode.Grid => "网格视图",
+        LibraryViewMode.List => "列表视图",
+        _ => "收藏夹视图"
+    };
 
     private void SelectBook(BookCardViewModel card)
     {
@@ -1124,7 +1147,9 @@ public partial class MainWindow : Window
         {
             var toggle = new ToggleSwitch
             {
-                IsChecked = true,
+                // Start consistent with the global "导入后补齐 EPUB 与 AZW3"
+                // preference; each row can still be overridden individually.
+                IsChecked = _appSettings.AutoGenerateEpubAndAzw3OnImport,
                 OnContent = "补齐",
                 OffContent = "仅导入"
             };
@@ -1900,7 +1925,11 @@ public partial class MainWindow : Window
         CancellationToken cancellationToken = default,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? requestedFormatsBySourcePath = null)
     {
-        if (!_appSettings.AutoGenerateEpubAndAzw3OnImport)
+        // The global setting gates flows without an explicit per-file choice;
+        // the folder-import dialog always decides explicitly, so its toggles
+        // stay authoritative even when the global preference is off.
+        if (!_appSettings.AutoGenerateEpubAndAzw3OnImport
+            && requestedFormatsBySourcePath is null)
             return new AutomaticReaderFormatGenerationResult(0, []);
 
         var books = importResult.Items
@@ -2633,27 +2662,16 @@ public partial class MainWindow : Window
         FilterPanel.IsVisible = !FilterPanel.IsVisible;
     }
 
-    private void LibraryViewMenuItem_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void LibraryViewToggleButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (sender is not MenuItem { Tag: string tag }) return;
-        switch (tag)
+        var next = NextLibraryViewMode(_libraryViewMode);
+        if (next == LibraryViewMode.Collections && ViewModel.CollectionFilterId is not null)
         {
-            case "List":
-                SetLibraryViewMode(LibraryViewMode.List);
-                break;
-            case "Collections":
-                if (ViewModel.CollectionFilterId is not null)
-                {
-                    ViewModel.CollectionFilterId = null;
-                    ViewModel.CollectionFilterName = null;
-                    ViewModel.RefreshView();
-                }
-                SetLibraryViewMode(LibraryViewMode.Collections);
-                break;
-            default:
-                SetLibraryViewMode(LibraryViewMode.Grid);
-                break;
+            ViewModel.CollectionFilterId = null;
+            ViewModel.CollectionFilterName = null;
+            ViewModel.RefreshView();
         }
+        SetLibraryViewMode(next);
     }
 
     private void BackToCollectionsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

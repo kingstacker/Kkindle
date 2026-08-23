@@ -32,6 +32,9 @@ public sealed class ProductivityFeatureTests
                 AutoUpdateCheckEnabled = false,
                 AutoConnectDevice = true,
                 CompareKindleLibraryEnabled = false,
+                LastAutoUpdateCheckAt = new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)),
+                PendingUpdateVersion = "1.2.3",
+                PendingUpdateReleaseNotes = "修复阅读器翻页问题",
                 DefaultReaderLayout = new ReaderLayoutSettings(FontScale: 9, LineHeight: -1)
             });
 
@@ -45,6 +48,14 @@ public sealed class ProductivityFeatureTests
             Assert.False(restored.AutoUpdateCheckEnabled);
             Assert.True(restored.AutoConnectDevice);
             Assert.False(restored.CompareKindleLibraryEnabled);
+            Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)), restored.LastAutoUpdateCheckAt);
+            Assert.Equal("1.2.3", restored.PendingUpdateVersion);
+            Assert.Equal("修复阅读器翻页问题", restored.PendingUpdateReleaseNotes);
+
+            // Defaults start clean; a fresh install has never checked for updates.
+            var freshSettings = new AppSettings();
+            Assert.Null(freshSettings.LastAutoUpdateCheckAt);
+            Assert.Null(freshSettings.PendingUpdateVersion);
             Assert.InRange(restored.DefaultReaderLayout.FontScale, 0.75, 2.0);
             Assert.InRange(restored.DefaultReaderLayout.LineHeight, 1.2, 2.8);
 

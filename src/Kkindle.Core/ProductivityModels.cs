@@ -26,6 +26,17 @@ public sealed record AppSettings
     public bool AiEnabled { get; init; } = true;
     public bool NetworkEnabled { get; init; } = true;
     public bool AutoUpdateCheckEnabled { get; init; } = true;
+
+    // Update checks run at most once per calendar day; the timestamp and the
+    // discovered update summary persist so the title-bar badge survives restarts
+    // without extra network calls.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DateTimeOffset? LastAutoUpdateCheckAt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PendingUpdateVersion { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PendingUpdateReleaseNotes { get; init; }
+
     public bool AutoDoubanMatchOnImport { get; init; }
     public bool AutoConnectDevice { get; init; } = true;
     public bool CompareKindleLibraryEnabled { get; init; } = true;

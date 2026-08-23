@@ -82,7 +82,12 @@ public partial class MainWindow
     private bool _suppressAppSettingsAutoSave;
     private bool _appSettingsAutoSaveConfigured;
     private CancellationTokenSource? _appSettingsAutoSaveCancellation;
-    private int _settingsSavedStatusSequence;
+    private int _settingsCapsuleSequence;
+    // Template application and first layout can make NumericUpDown/ComboBox
+    // re-fire change events right after the auto-save handlers are attached.
+    // Until startup has fully settled, those saves persist silently instead of
+    // popping the “设置已保存” capsule.
+    private bool _appSettingsStartupSettled;
     private bool _calibreSetupBusy;
     private CancellationTokenSource? _calibreDetectionCancellation;
 
@@ -332,6 +337,15 @@ public partial class MainWindow
         _stage3Ready = true;
         await RunAutoBackupIfNeededAsync(cancellationToken);
         await RefreshDevicesAsync(scanBooks: false, cancellationToken);
+
+        // Let any pending layout/template work run to completion, then drop a
+        // debounce that was only triggered by startup-time control events —
+        // it must not surface the “设置已保存” capsule.
+        await Dispatcher.UIThread.InvokeAsync(() => { });
+        _appSettingsAutoSaveCancellation?.Cancel();
+        _appSettingsAutoSaveCancellation?.Dispose();
+        _appSettingsAutoSaveCancellation = null;
+        _appSettingsStartupSettled = true;
     }
 
     private void ShowLibraryPage()
@@ -826,18 +840,17 @@ public partial class MainWindow
         _deviceGridView = gridView;
         DeviceBookGridScroll.IsVisible = gridView;
         DeviceBookListScroll.IsVisible = !gridView;
-        DeviceViewGridItem.IsChecked = gridView;
-        DeviceViewListItem.IsChecked = !gridView;
         DeviceViewToggleIcon.Data = Geometry.Parse(gridView
             ? LibraryGridGlyphData
             : LibraryListGlyphData);
+        ToolTip.SetTip(DeviceViewToggleButton, gridView
+            ? "当前：网格视图，点击切换到列表视图"
+            : "当前：列表视图，点击切换到网格视图");
     }
 
-    private void DeviceViewMenuItem_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem { Tag: string tag })
-            SetDeviceBookView(tag == "List" ? false : true);
-    }
+    // The view button cycles 网格 ↔ 列表, matching the library view button.
+    private void DeviceViewToggleButton_Click(object? sender, RoutedEventArgs e) =>
+        SetDeviceBookView(!_deviceGridView);
 
     private void DeviceBookSearchBox_TextChanged(object? sender, TextChangedEventArgs e)
     {
@@ -3269,23 +3282,35 @@ public partial class MainWindow
             TaskScheduler.Default);
     }
 
-    // "设置已保存" feedback appears for both the save button and the real-time
-    // auto-save, then auto-clears after a short moment.
-    private void ShowSettingsSavedStatus()
+    // "设置已保存" feedback appears after every auto-save, then hides itself.
+    private void ShowSettingsSavedStatus() => ShowSettingsCapsule("设置已保存", 1000, success: true);
+
+    // Bottom-center capsule: the single feedback surface for settings actions.
+    // Routine saves show for one second with a check glyph; error notices stay
+    // a little longer and appear without it. The capsule rises into place and
+    // sinks away again; a newer call supersedes any pending hide of an older one.
+    private void ShowSettingsCapsule(string message, int visibleMilliseconds, bool success = false)
     {
-        ApplicationSettingsStatusText.Text = "设置已保存";
-        var sequence = ++_settingsSavedStatusSequence;
-        _ = Task.Delay(2000).ContinueWith(
+        var sequence = ++_settingsCapsuleSequence;
+        SettingsSavedCapsuleText.Text = message;
+        SettingsCapsuleCheckIcon.IsVisible = success;
+        SettingsSavedCapsule.RenderTransform =
+            Avalonia.Media.Transformation.TransformOperations.Parse("translateY(0px)");
+        SettingsSavedCapsule.IsVisible = true;
+        SettingsSavedCapsule.Opacity = 1;
+        _ = Task.Delay(visibleMilliseconds).ContinueWith(
             _ => Dispatcher.UIThread.Post(() =>
             {
-                if (sequence == _settingsSavedStatusSequence
-                    && string.Equals(
-                        ApplicationSettingsStatusText.Text,
-                        "设置已保存",
-                        StringComparison.Ordinal))
-                {
-                    ApplicationSettingsStatusText.Text = string.Empty;
-                }
+                if (sequence != _settingsCapsuleSequence) return;
+                SettingsSavedCapsule.Opacity = 0;
+                SettingsSavedCapsule.RenderTransform =
+                    Avalonia.Media.Transformation.TransformOperations.Parse("translateY(12px)");
+                _ = Task.Delay(260).ContinueWith(
+                    __ => Dispatcher.UIThread.Post(() =>
+                    {
+                        if (sequence == _settingsCapsuleSequence)
+                            SettingsSavedCapsule.IsVisible = false;
+                    }));
             }),
             TaskScheduler.Default);
     }
@@ -3502,11 +3527,20 @@ public partial class MainWindow
             _paths.EnsureDirectories();
             Process.Start(new ProcessStartInfo { FileName = _paths.Data, UseShellExecute = true });
         }
-        catch (Exception exception) { ApplicationSettingsStatusText.Text = $"无法打开数据目录：{exception.Message}"; }
+        catch (Exception exception) { ShowSettingsCapsule($"无法打开数据目录：{exception.Message}", 4000); }
     }
 
-    private async void SaveApplicationSettingsButton_Click(object? sender, RoutedEventArgs e) =>
-        await SaveAppSettingsCoreAsync();
+    private void KindleEmailGuideLink_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://bookfere.com/post/3.html") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            ShowSettingsCapsule($"无法打开链接：{exception.Message}", 4000);
+        }
+    }
 
     private async Task SaveAppSettingsCoreAsync()
     {
@@ -3551,21 +3585,22 @@ public partial class MainWindow
                 group.IsExpanded = !_appSettings.ReadingMaterialsCollapsedByDefault;
             UpdateLibraryUi();
             SettingsStatusText.Text = "管理本地数据、阅读偏好与设备设置。";
-            ShowSettingsSavedStatus();
+            if (_appSettingsStartupSettled)
+                ShowSettingsSavedStatus();
             if (autoConnectChanged && _appSettings.AutoConnectDevice)
             {
                 _ignoredDeviceId = null;
                 await RefreshDevicesAsync(scanBooks: DevicePage.IsVisible, _lifetimeCancellation.Token);
             }
         }
-        catch (Exception exception) { ApplicationSettingsStatusText.Text = $"保存失败：{exception.Message}"; }
+        catch (Exception exception) { ShowSettingsCapsule($"保存失败：{exception.Message}", 4000); }
     }
 
     private async void MigrateDataDirectoryButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_readerDocument is not null || _readerIsPdf)
         {
-            ApplicationSettingsStatusText.Text = "请先关闭阅读器，再迁移数据目录。";
+            ShowSettingsCapsule("请先关闭阅读器，再迁移数据目录。", 4000);
             await ShowMessageAsync("请先返回书库", "迁移数据目录前请关闭阅读器。");
             return;
         }
@@ -3582,7 +3617,7 @@ public partial class MainWindow
         targetRoot = Path.GetFullPath(targetRoot);
         if (string.Equals(targetRoot, Path.GetFullPath(_paths.Root), StringComparison.OrdinalIgnoreCase))
         {
-            ApplicationSettingsStatusText.Text = "所选目录已经是当前数据根目录。";
+            ShowSettingsCapsule("所选目录已经是当前数据根目录。", 4000);
             return;
         }
 
@@ -3591,11 +3626,11 @@ public partial class MainWindow
             var migrationBackup = AppRootConfiguration.MigrationBackupPath(targetRoot);
             await _backupService.ExportAsync(migrationBackup, _lifetimeCancellation.Token);
             AppRootConfiguration.Save(_rootConfigurationDirectory, targetRoot);
-            ApplicationSettingsStatusText.Text = "迁移包已准备；重启 Kkindle 后自动完成迁移。";
+            ShowSettingsCapsule("迁移包已准备；重启 Kkindle 后自动完成迁移。", 4000);
         }
         catch (Exception exception)
         {
-            ApplicationSettingsStatusText.Text = $"迁移准备失败：{exception.Message}";
+            ShowSettingsCapsule($"迁移准备失败：{exception.Message}", 4000);
         }
     }
 
@@ -3666,7 +3701,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            ApplicationSettingsStatusText.Text = $"自动备份失败：{exception.Message}";
+            ShowSettingsCapsule($"自动备份失败：{exception.Message}", 4000);
         }
         finally
         {

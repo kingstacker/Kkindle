@@ -198,9 +198,26 @@
                                        VerticalAlignment="Center" />
                         </Border>
                         <StackPanel VerticalAlignment="Center" Spacing="0">
-                            <TextBlock Text="Kkindle"
-                                       FontSize="18"
-                                       FontWeight="Bold" />
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <TextBlock Text="Kkindle"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                                <!-- Update-available badge: a small amber dot beside the
+                                     app title. Hovering shows the release notes; clicking
+                                     offers to download and install the new version. -->
+                                <Button x:Name="UpdateBadgeButton"
+                                        IsVisible="False"
+                                        Click="UpdateBadgeButton_Click"
+                                        Cursor="Hand"
+                                        Padding="3"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        VerticalAlignment="Center"
+                                        Focusable="False">
+                                    <Ellipse Width="8" Height="8" Fill="#E0A100" />
+                                </Button>
+                            </StackPanel>
                             <TextBlock Text="个人电子书架"
                                        FontSize="11"
                                        Foreground="{StaticResource MutedInkBrush}" />
@@ -472,27 +489,14 @@
                                   UseLayoutRounding="True"
                                   Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
                         </Button>
+                        <!-- One click cycles 网格 → 列表 → 收藏夹; the glyph
+                             mirrors the active view and the tooltip names what
+                             the next click switches to. -->
                         <Button x:Name="LibraryViewToggleButton"
                                 Classes="icon"
-                                ToolTip.Tip="网格 / 列表 / 收藏夹视图"
+                                ToolTip.Tip="切换到列表视图"
+                                Click="LibraryViewToggleButton_Click"
                                 AutomationProperties.Name="切换视图">
-                            <Button.Flyout>
-                                <MenuFlyout>
-                                    <MenuItem x:Name="LibraryViewGridItem"
-                                              Header="网格视图"
-                                              IsChecked="True"
-                                              Tag="Grid"
-                                              Click="LibraryViewMenuItem_Click" />
-                                    <MenuItem x:Name="LibraryViewListItem"
-                                              Header="列表视图"
-                                              Tag="List"
-                                              Click="LibraryViewMenuItem_Click" />
-                                    <MenuItem x:Name="LibraryViewCollectionsItem"
-                                              Header="收藏夹视图"
-                                              Tag="Collections"
-                                              Click="LibraryViewMenuItem_Click" />
-                                </MenuFlyout>
-                            </Button.Flyout>
                             <Path x:Name="LibraryViewToggleIcon"
                                   Classes="libraryGlyph"
                                   Data="M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z" />
@@ -1064,13 +1068,9 @@
                         <Button x:Name="DeviceBookFilterButton" Classes="icon" ToolTip.Tip="显示或隐藏筛选条件" Click="DeviceBookFilterButton_Click" AutomationProperties.Name="筛选">
                             <Path Classes="libraryGlyph" UseLayoutRounding="True" Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
                         </Button>
-                        <Button x:Name="DeviceViewToggleButton" Classes="icon" ToolTip.Tip="网格 / 列表视图" AutomationProperties.Name="切换视图">
-                            <Button.Flyout>
-                                <MenuFlyout>
-                                    <MenuItem x:Name="DeviceViewGridItem" Header="网格视图" IsChecked="True" Tag="Grid" Click="DeviceViewMenuItem_Click" />
-                                    <MenuItem x:Name="DeviceViewListItem" Header="列表视图" Tag="List" Click="DeviceViewMenuItem_Click" />
-                                </MenuFlyout>
-                            </Button.Flyout>
+                        <!-- One click cycles 网格 ↔ 列表; the glyph mirrors the
+                             active view and the tooltip names the next one. -->
+                        <Button x:Name="DeviceViewToggleButton" Classes="icon" ToolTip.Tip="当前：网格视图，点击切换到列表视图" AutomationProperties.Name="切换视图" Click="DeviceViewToggleButton_Click">
                             <Path x:Name="DeviceViewToggleIcon" Classes="libraryGlyph" Data="M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z" />
                         </Button>
                         <Button Classes="icon" ToolTip.Tip="刷新设备书库" AutomationProperties.Name="刷新设备书库" Click="RefreshDevicesButton_Click">
@@ -2072,14 +2072,6 @@
                                             <TextBlock Text="自动检查应用更新" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             <ToggleSwitch x:Name="AutoUpdateCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="启动后自动检查 GitHub Releases 中的稳定版本" />
                                         </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="导入时自动豆瓣匹配" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AutoDoubanMatchCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="导入完成后自动按书名和作者在豆瓣搜索，置信度高的直接补全评分、简介与封面" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="收藏夹互斥" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" />
-                                        </Grid>
                                     </StackPanel>
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="False">
                                         <TextBlock Text="笔记批注默认收起" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
@@ -2133,8 +2125,16 @@
                                     </StackPanel>
                                     <StackPanel Spacing="28" Margin="0,11,0,0">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock Text="导入时自动豆瓣匹配" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="AutoDoubanMatchCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="导入完成后自动按书名和作者在豆瓣搜索，置信度高的直接补全评分、简介与封面" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="导入后补齐 EPUB 与 AZW3" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" ToolTip.Tip="导入后自动为缺失的格式生成 EPUB 与 AZW3 文件" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock Text="收藏夹互斥" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" Grid.Column="1" OnContent="开" OffContent="关" VerticalAlignment="Center" />
                                         </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock Text="比较 Kindle 与电脑书库" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
@@ -2204,7 +2204,7 @@
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" Spacing="4">
                                             <TextBlock Text="正文宽度" FontSize="11" />
-                                            <NumericUpDown x:Name="DefaultMaxWidthBox" Minimum="480" Maximum="1200" Increment="20" Value="760" />
+                                            <NumericUpDown x:Name="DefaultMaxWidthBox" Minimum="480" Maximum="3840" Increment="20" Value="760" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="3" Spacing="4">
                                             <TextBlock Text="页边距" FontSize="11" />
@@ -2405,21 +2405,6 @@
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
-                    <Grid Grid.Row="1"
-                          Grid.Column="1"
-                          Margin="0,14,0,0"
-                          ColumnDefinitions="*,Auto"
-                          ColumnSpacing="12">
-                        <TextBlock x:Name="ApplicationSettingsStatusText"
-                                   FontSize="11"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   VerticalAlignment="Center"
-                                   TextWrapping="Wrap" />
-                        <Button Grid.Column="1"
-                                Content="保存应用设置"
-                                ToolTip.Tip="保存所有设置页中的选项和默认阅读排版设置（修改后也会自动保存）"
-                                Click="SaveApplicationSettingsButton_Click" />
-                    </Grid>
                 </Grid>
             </Grid>
 
@@ -2433,19 +2418,8 @@
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
                 <Grid RowDefinitions="Auto,*,Auto">
-                    <Grid Margin="20,50,10,12">
+                    <Grid Margin="20,50,20,12">
                         <TextBlock Text="Kindle 邮箱设置" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,0" />
-                        <Button Width="32"
-                                Height="32"
-                                Padding="0"
-                                Classes="quiet"
-                                HorizontalAlignment="Right"
-                                Click="KindleEmailSettingsCancelButton_Click"
-                                AutomationProperties.Name="关闭 Kindle 邮箱设置">
-                            <Path Data="M 4,4 L 16,16 M 16,4 L 4,16"
-                                  Stroke="{StaticResource InkBrush}"
-                                  StrokeThickness="1.5" />
-                        </Button>
                     </Grid>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="20,16,20,14" Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
@@ -2453,6 +2427,18 @@
                                        FontSize="11"
                                        Foreground="{StaticResource MutedInkBrush}"
                                        TextWrapping="Wrap" />
+                            <Button Padding="0"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Cursor="Hand"
+                                    HorizontalAlignment="Left"
+                                    Focusable="False"
+                                    Click="KindleEmailGuideLink_Click">
+                                <TextBlock FontSize="11"
+                                           Foreground="{StaticResource InkBrush}"
+                                           TextDecorations="Underline"
+                                           Text="配置说明参考：书伴《Kindle 邮箱推送设置》" />
+                            </Button>
                             <StackPanel Spacing="5">
                                 <TextBlock Text="Kindle 收件邮箱" FontSize="11" />
                                 <TextBox x:Name="KindleEmailRecipientBox" PlaceholderText="例如 name@kindle.com" />
@@ -2504,19 +2490,8 @@
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
                 <Grid RowDefinitions="Auto,*,Auto">
-                    <Grid Margin="20,50,10,12">
+                    <Grid Margin="20,50,20,12">
                         <TextBlock Text="Z-Library 账号设置" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        <Button Width="32"
-                                Height="32"
-                                Padding="0"
-                                Classes="quiet"
-                                HorizontalAlignment="Right"
-                                Click="ZLibraryAccountCancelButton_Click"
-                                AutomationProperties.Name="关闭 Z-Library 账号设置">
-                            <Path Data="M 4,4 L 16,16 M 16,4 L 4,16"
-                                  Stroke="{StaticResource InkBrush}"
-                                  StrokeThickness="1.5" />
-                        </Button>
                     </Grid>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="20,16,20,14" Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
@@ -2564,19 +2539,8 @@
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
                 <Grid RowDefinitions="Auto,*,Auto">
-                    <Grid Margin="20,50,10,12">
+                    <Grid Margin="20,50,20,12">
                         <TextBlock Text="AI 助手设置" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        <Button Width="32"
-                                Height="32"
-                                Padding="0"
-                                Classes="quiet"
-                                HorizontalAlignment="Right"
-                                Click="MainReaderAiSettingsCancelButton_Click"
-                                AutomationProperties.Name="关闭 AI 助手设置">
-                            <Path Data="M 4,4 L 16,16 M 16,4 L 4,16"
-                                  Stroke="{StaticResource InkBrush}"
-                                  StrokeThickness="1.5" />
-                        </Button>
                     </Grid>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="20,16,20,14" Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
@@ -2772,6 +2736,48 @@
                                  Height="5"
                                  Background="{StaticResource PaperBrush}"
                                  IsVisible="False" />
+                </StackPanel>
+            </Border>
+
+            <!-- Settings feedback capsule: a bottom-center pill for auto-save
+                 confirmations ("设置已保存", 1 s) and longer-lived settings
+                 notices. It rises into place, then sinks away after a delay;
+                 the check glyph only appears for success messages. -->
+            <Border x:Name="SettingsSavedCapsule"
+                    Grid.ColumnSpan="3"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,34"
+                    Padding="20,9"
+                    CornerRadius="999"
+                    Background="{StaticResource InkBrush}"
+                    BoxShadow="0 6 18 0 #26000000"
+                    RenderTransform="translateY(12px)"
+                    IsVisible="False"
+                    Opacity="0"
+                    ZIndex="95"
+                    IsHitTestVisible="False">
+                <Border.Transitions>
+                    <Transitions>
+                        <DoubleTransition Property="Opacity" Duration="0:0:0.18" />
+                        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.24" Easing="CubicEaseOut" />
+                    </Transitions>
+                </Border.Transitions>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Path x:Name="SettingsCapsuleCheckIcon"
+                          Data="M 1,5.5 L 4.5,9 L 11,1.5"
+                          Stroke="{StaticResource PaperBrush}"
+                          StrokeThickness="2"
+                          Width="12"
+                          Height="11"
+                          Stretch="None"
+                          VerticalAlignment="Center" />
+                    <TextBlock x:Name="SettingsSavedCapsuleText"
+                               Foreground="{StaticResource PaperBrush}"
+                               FontSize="12"
+                               MaxWidth="460"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
@@ -4494,7 +4500,7 @@
                                         <TextBlock Text="正文最大宽度" FontSize="11" VerticalAlignment="Center" />
                                         <TextBlock x:Name="ReaderMaxWidthValueText" Grid.Column="1" FontSize="11" Foreground="#5A5A5A" />
                                     </Grid>
-                                    <Slider x:Name="ReaderMaxWidthSlider" Minimum="480" Maximum="1200" TickFrequency="20" IsSnapToTickEnabled="True" Value="800" ValueChanged="ReaderLayoutSettingChanged">
+                                    <Slider x:Name="ReaderMaxWidthSlider" Minimum="480" Maximum="3840" TickFrequency="20" IsSnapToTickEnabled="True" Value="800" ValueChanged="ReaderLayoutSettingChanged">
                                         <Slider.Resources>
                                             <SolidColorBrush x:Key="SliderTrackValueFill" Color="#30302E" />
                                             <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#111111" />
