@@ -1561,8 +1561,8 @@ public partial class MainWindow
                 _readerLayout.VerticalWriting,
                 CancellationToken.None);
             ReaderLayoutSettingsStatusText.Text = _readerLayout.VerticalWriting
-                ? "竖排已全局开启；竖排仅支持单页阅读。"
-                : "竖排已全局关闭；现在可选择滚动、单页或双栏。";
+                ? "竖排已全局开启；段首缩进也对所有书生效，竖排仅支持单页阅读。"
+                : "竖排已全局关闭；段首缩进仍对所有书生效，现在可选择滚动、单页或双栏。";
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
         {
@@ -1584,10 +1584,10 @@ public partial class MainWindow
     {
         var (flowMode, twoPageMode) = GetSelectedReaderFlowMode();
         ReaderLayoutSettingsStatusText.Text = ReaderVerticalWritingCheck.IsChecked == true
-            ? "竖排是全局设置，并固定使用单页阅读。"
+            ? "竖排和段首缩进是全局设置；竖排固定使用单页阅读。"
             : twoPageMode && flowMode != 1
             ? "双页仅用于分页模式；当前模式下暂不生效。"
-            : "设置立即生效，并保存在本机。";
+            : "设置立即生效；段首缩进为全局设置，其他排版参数按书保存。";
     }
 
     private void ScheduleReaderLayoutApply()
@@ -1610,6 +1610,9 @@ public partial class MainWindow
                     UpdateReaderZoomLabel();
                     await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
                     await SaveReaderLayoutAsync(CancellationToken.None);
+                    await SaveGlobalReaderParagraphIndentAsync(
+                        _readerLayout.ParagraphIndent,
+                        CancellationToken.None);
                 }
                 catch
                 {
@@ -1660,6 +1663,9 @@ public partial class MainWindow
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
         await SaveReaderLayoutAsync(CancellationToken.None);
         await SaveGlobalReaderVerticalWritingAsync(false, CancellationToken.None);
+        await SaveGlobalReaderParagraphIndentAsync(
+            _readerLayout.ParagraphIndent,
+            CancellationToken.None);
         ReaderLayoutSettingsStatusText.Text = "已恢复默认排版。";
     }
 
@@ -1720,6 +1726,7 @@ public partial class MainWindow
         ReaderAssistantPanel.IsVisible = visible;
         ReaderRoot.ColumnDefinitions[2].Width = visible ? new GridLength(360) : new GridLength(0);
         ScheduleLinuxReaderTextFallbackReflow();
+        ScheduleReaderRelayout();
     }
 
 }

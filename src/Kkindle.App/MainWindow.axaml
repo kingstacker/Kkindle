@@ -4401,7 +4401,7 @@
                         <Grid RowDefinitions="Auto,Auto">
                             <StackPanel Margin="22,20" Spacing="12">
                                 <TextBlock Text="阅读排版设置" FontSize="20" FontWeight="SemiBold" />
-                                <TextBlock Text="字号、行高、宽度、边距、字体和段首缩进对当前书生效；竖排开关对所有书生效。"
+                                <TextBlock Text="字号、行高、宽度、边距和字体按当前书保存；竖排和段首缩进对所有书生效。"
                                            FontSize="11"
                                            Foreground="#666666"
                                            TextWrapping="Wrap" />
@@ -4490,7 +4490,7 @@
                                           IsCheckedChanged="ReaderVerticalWritingCheck_IsCheckedChanged" />
                                 <CheckBox x:Name="ReaderParagraphIndentCheck"
                                           Classes="readerLayoutCheck"
-                                          Content="正文段落起始缩进两个字"
+                                          Content="正文段落起始缩进两个字（全局）"
                                           FontSize="12"
                                           IsCheckedChanged="ReaderParagraphIndentCheck_IsCheckedChanged" />
                                 <TextBlock x:Name="ReaderLayoutSettingsStatusText"

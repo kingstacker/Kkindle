@@ -132,7 +132,7 @@ public sealed class ReaderPaginationScriptTests
         if (pagination)
         {
             Assert.Contains("const requestedRaw = 1234", script, StringComparison.Ordinal);
-            Assert.Contains("const pageIndex = Math.round(requested / step)", script, StringComparison.Ordinal);
+            Assert.Contains("const rawPageIndex = Math.round(requested / step)", script, StringComparison.Ordinal);
             Assert.Contains("left: vertical ? -target : target, top: 0", script, StringComparison.Ordinal);
             Assert.DoesNotContain("left: 1234", script, StringComparison.Ordinal);
         }
@@ -199,10 +199,12 @@ public sealed class ReaderPaginationScriptTests
             "left: vertical ? -target : target",
             turn,
             StringComparison.Ordinal);
+        Assert.Contains("if (vertical) requestAnimationFrame", turn, StringComparison.Ordinal);
         Assert.Contains(
             "left: vertical ? -target : target",
             snap,
             StringComparison.Ordinal);
+        Assert.Contains("if (vertical) requestAnimationFrame", snap, StringComparison.Ordinal);
         Assert.Contains("Math.abs(requestedRaw)", restore, StringComparison.Ordinal);
 
         // Natural vertical flow can finish on a partial page, so its real
@@ -240,6 +242,7 @@ public sealed class ReaderPaginationScriptTests
 
         Assert.Contains("width: 100%; height: 100%; overflow: hidden !important", paginated, StringComparison.Ordinal);
         Assert.Contains("writing-mode: vertical-rl !important", paginated, StringComparison.Ordinal);
+        Assert.Contains("text-orientation: mixed !important", paginated, StringComparison.Ordinal);
         Assert.Contains("width: max-content !important", paginated, StringComparison.Ordinal);
         Assert.Contains("min-width: 100% !important", paginated, StringComparison.Ordinal);
         Assert.Contains("column-width: auto !important", paginated, StringComparison.Ordinal);
@@ -263,6 +266,21 @@ public sealed class ReaderPaginationScriptTests
     }
 
     [Fact]
+    public void PaginationRestoreUsesChapterRatioWhenViewportStepChanged()
+    {
+        var script = ReaderPaginationScripts.CreateRestorePositionScript(
+            left: 3110.4,
+            top: 0,
+            pagination: true,
+            vertical: true,
+            chapterRatio: 0.5);
+
+        Assert.Contains("const ratio = 0.5", script, StringComparison.Ordinal);
+        Assert.Contains("const rawIsAligned", script, StringComparison.Ordinal);
+        Assert.Contains("Math.round((max * ratio) / step)", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void VerticalScriptsUseTheLiveViewportMinusPageMargins()
     {
         var scripts = new[]
@@ -279,11 +297,71 @@ public sealed class ReaderPaginationScriptTests
                 "viewport - sides",
                 script,
                 StringComparison.Ordinal);
-            Assert.Contains("Math.floor(available / line) * line", script, StringComparison.Ordinal);
+            Assert.Contains("Math.ceil(available / line) * line", script, StringComparison.Ordinal);
             Assert.Contains("--kkindle-vertical-page-step", script, StringComparison.Ordinal);
+            Assert.Contains("--kkindle-vertical-viewport-width", script, StringComparison.Ordinal);
+            Assert.Contains("--kkindle-vertical-origin-shift", script, StringComparison.Ordinal);
+            Assert.Contains("--kkindle-vertical-content-shift", script, StringComparison.Ordinal);
+            Assert.Contains(
+                "const originShift = (viewport - baseLeft - baseRight) / 2",
+                script,
+                StringComparison.Ordinal);
+            Assert.Contains("const safeLeft = baseLeft + originShift", script, StringComparison.Ordinal);
+            Assert.Contains("const safeRight = baseRight + originShift", script, StringComparison.Ordinal);
+            Assert.Contains("rect.left + candidate", script, StringComparison.Ordinal);
+            Assert.Contains("window.__kkindleVerticalContentShift", script, StringComparison.Ordinal);
+            Assert.Contains("--kkindle-vertical-safe-left", script, StringComparison.Ordinal);
+            Assert.Contains("--kkindle-vertical-safe-right", script, StringComparison.Ordinal);
+            Assert.Contains("const maskRects = visibleRects.map", script, StringComparison.Ordinal);
+            Assert.Contains("rect.right + clearance", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("window.__kkindleVerticalGapShift", script, StringComparison.Ordinal);
+            Assert.Contains("--kkindle-vertical-trailing-extent", script, StringComparison.Ordinal);
+            Assert.Contains("alignedMax - naturalMax", script, StringComparison.Ordinal);
+            Assert.Contains("window.__kkindleVerticalTrailingKey", script, StringComparison.Ordinal);
+            Assert.Contains("window.__kkindleVerticalTrailingExtent", script, StringComparison.Ordinal);
+            Assert.Contains(
+                "const pageIndex = Math.round(Math.abs(root.scrollLeft || 0) / resolvedStep)",
+                script,
+                StringComparison.Ordinal);
+            Assert.Contains("document.createRange()", script, StringComparison.Ordinal);
+            Assert.Contains("nodeRange.selectNodeContents(node)", script, StringComparison.Ordinal);
+            Assert.Contains("if (!nodeIsVisible) continue", script, StringComparison.Ordinal);
             Assert.DoesNotContain(".columnWidth", script, StringComparison.Ordinal);
             Assert.DoesNotContain(".columnGap", script, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void VerticalMasksUseTheSameClientViewportAsThePageStep()
+    {
+        var css = ReaderPaginationScripts.CreateFlowCss(pagination: true, vertical: true);
+
+        Assert.Contains("--kkindle-vertical-viewport-width: 100%", css, StringComparison.Ordinal);
+        Assert.Contains("--kkindle-vertical-origin-shift: 0px", css, StringComparison.Ordinal);
+        Assert.Contains("--kkindle-vertical-content-shift: 0px", css, StringComparison.Ordinal);
+        Assert.Contains("--kkindle-vertical-trailing-extent: 0px", css, StringComparison.Ordinal);
+        Assert.Contains("--kkindle-vertical-safe-left: 0px", css, StringComparison.Ordinal);
+        Assert.Contains("--kkindle-vertical-safe-right: 100000px", css, StringComparison.Ordinal);
+        Assert.Contains(
+            "calc(var(--kkindle-vertical-page-side) - var(--kkindle-vertical-content-shift))",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "calc(var(--kkindle-vertical-page-side) + var(--kkindle-vertical-content-shift) + var(--kkindle-vertical-trailing-extent))",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-step)",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "left: min(calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-side) + var(--kkindle-vertical-origin-shift)), var(--kkindle-vertical-safe-right))",
+            css,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "width: calc(100vw - var(--kkindle-vertical-page-step)",
+            css,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -304,10 +382,21 @@ public sealed class ReaderPaginationScriptTests
     {
         var css = ReaderPaginationScripts.VerticalTypographyGridCss;
 
+        Assert.Contains(":has(> :where(p, div, section, article, main", css, StringComparison.Ordinal);
+        Assert.Contains("display: contents !important", css, StringComparison.Ordinal);
+        Assert.Contains(
+            ":not(#kkindle-selection-bar, #kkindle-selection-bar *)",
+            css,
+            StringComparison.Ordinal);
         Assert.Contains("margin-block: 0 !important", css, StringComparison.Ordinal);
         Assert.Contains("padding-block: 0 !important", css, StringComparison.Ordinal);
         Assert.Contains("block-size: auto !important", css, StringComparison.Ordinal);
         Assert.Contains("margin-block: 1lh !important", css, StringComparison.Ordinal);
         Assert.Contains("font-size: 1rem !important", css, StringComparison.Ordinal);
+        Assert.Contains(".kkindle-chapter-heading", css, StringComparison.Ordinal);
+        Assert.Contains("text-align: center !important", css, StringComparison.Ordinal);
+        Assert.Contains("text-indent: 0 !important", css, StringComparison.Ordinal);
+        Assert.Contains("body :where(sup, sub)", css, StringComparison.Ordinal);
+        Assert.Contains("line-height: 0 !important; vertical-align: baseline !important", css, StringComparison.Ordinal);
     }
 }

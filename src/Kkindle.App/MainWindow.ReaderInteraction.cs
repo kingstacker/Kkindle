@@ -383,12 +383,14 @@ public partial class MainWindow
     {
         var settings = await _readerData.GetLayoutSettingsAsync(file.Id, cancellationToken);
         var bookLayout = settings ?? _appSettings.DefaultReaderLayout;
-        // Typography and margins remain per-book, but writing direction is a
-        // global reader preference. Ignore stale per-book VerticalWriting
-        // values left by older builds.
+        // Typography and margins remain per-book, but writing direction and
+        // paragraph indentation are global reader preferences. Ignore stale
+        // per-book values left by older builds so opening another book cannot
+        // silently change either global option.
         _readerLayout = NormalizeReaderLayoutForPlatform(bookLayout with
         {
-            VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting
+            VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting,
+            ParagraphIndent = _appSettings.DefaultReaderLayout.ParagraphIndent
         });
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
@@ -540,7 +542,6 @@ public partial class MainWindow
             && pendingProgress.ChapterIndex == _readerChapterIndex)
         {
             restoredProgress = pendingProgress;
-            _readerRestoredProgress = null;
         }
 
         // PDF renders inside WebView2's built-in viewer: there is no document
@@ -618,6 +619,41 @@ public partial class MainWindow
                 if (contentHeight > 0)
                   root.style.setProperty('--kkindle-page-content-h', contentHeight + 'px');
 
+                // EPUB2/Calibre books frequently use a plain first paragraph
+                // for the chapter title. Mark only the first meaningful text
+                // block, and only when its semantics or computed typography
+                // identify it as a heading. Horizontal layout keeps the
+                // publisher styling; vertical layout applies the shared title
+                // grid rule so assistant/TOC resizing cannot clip it.
+                body.querySelectorAll('.kkindle-chapter-heading').forEach(element =>
+                  element.classList.remove('kkindle-chapter-heading'));
+                if (window.__kkindleReaderVertical === true) {
+                  const bodyFontSize = parseFloat(getComputedStyle(body).fontSize) || 16;
+                  const blocks = Array.from(body.children).slice(0, 12);
+                  for (const element of blocks) {
+                    const text = (element.innerText || element.textContent || '')
+                      .replace(/\s+/g, ' ')
+                      .trim();
+                    if (!text) continue;
+                    const tag = element.tagName.toLowerCase();
+                    const semanticHeading = /^h[1-6]$/.test(tag);
+                    const emphasized = !!element.querySelector(
+                      'strong, b, [class~="bold"], [class*="title" i], [class*="heading" i]');
+                    const ownStyle = getComputedStyle(element);
+                    let largestFontSize = parseFloat(ownStyle.fontSize) || bodyFontSize;
+                    element.querySelectorAll('span, strong, b, em').forEach(descendant => {
+                      largestFontSize = Math.max(
+                        largestFontSize,
+                        parseFloat(getComputedStyle(descendant).fontSize) || 0);
+                    });
+                    const typographicHeading = largestFontSize >= bodyFontSize * 1.2;
+                    if (text.length <= 80
+                        && (semanticHeading || emphasized || typographicHeading))
+                      element.classList.add('kkindle-chapter-heading');
+                    break;
+                  }
+                }
+
                 // Some EPUB converters put every source line in a paragraph
                 // behind a <br>. That is a physical line break, not a
                 // paragraph boundary, and it makes a reflowable paragraph
@@ -653,28 +689,55 @@ public partial class MainWindow
             if (restoredProgress is { } progress
                 && progress.ChapterIndex == _readerChapterIndex)
             {
+                var restored = false;
                 if (progress.ScrollPosition > 0)
                 {
                     var horizontal = pagination || _readerLayout.VerticalWriting;
                     var left = horizontal ? progress.ScrollPosition : 0;
                     var top = horizontal ? 0 : progress.ScrollPosition;
-                    await host.InvokeScriptAsync(
+                    double? chapterRatio = null;
+                    if (_readerDocument is { Chapters.Count: > 0 } document)
+                    {
+                        var ratio = (progress.ProgressPercent * document.Chapters.Count / 100d)
+                            - progress.ChapterIndex;
+                        if (double.IsFinite(ratio) && ratio >= -0.02 && ratio <= 1.02)
+                            chapterRatio = Math.Clamp(ratio, 0, 1);
+                    }
+                    var restoreResult = await host.InvokeScriptAsync(
                         ReaderPaginationScripts.CreateRestorePositionScript(
                             left,
                             top,
                             pagination,
-                            _readerLayout.VerticalWriting));
+                            _readerLayout.VerticalWriting,
+                            chapterRatio));
+                    restored = string.Equals(
+                        restoreResult?.Trim().Trim('"'),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase);
                 }
                 else if (!string.IsNullOrWhiteSpace(progress.Fragment))
                 {
                     var fragment = EscapeJavaScriptSingleQuoted(
                         DecodeReaderFragment(progress.Fragment) ?? string.Empty);
-                    await host.InvokeScriptAsync(ReaderNavigationScripts.CreateFragmentScroll(
+                    var restoreResult = await host.InvokeScriptAsync(ReaderNavigationScripts.CreateFragmentScroll(
                         fragment,
                         _readerLayout.FlowMode,
                         _readerLayout.VerticalWriting,
                         _readerLayout.TwoPageMode));
+                    restored = string.Equals(
+                        restoreResult?.Trim().Trim('"'),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase);
                 }
+                else
+                    restored = true;
+
+                // Keep the breakpoint pending when the DOM was not ready.
+                // A later configuration pass may retry it; consuming it before
+                // a successful scroll lets the opening save overwrite the
+                // database with the chapter start.
+                if (restored && ReferenceEquals(_readerRestoredProgress, progress))
+                    _readerRestoredProgress = null;
             }
             await ApplySavedAnnotationsAsync(host, cancellationToken);
         }
@@ -699,13 +762,13 @@ public partial class MainWindow
         builder.Append("\nhtml, body { background: #FFFFFF !important; color: #111111 !important; border: 0 !important; outline: 0 !important; box-shadow: none !important; }");
         if (OperatingSystem.IsLinux())
             builder.Append("\nhtml, body { visibility: visible !important; opacity: 1 !important; }");
-        builder.Append($"\nbody {{ font-size: 1rem !important; line-height: {Format(lineHeight)} !important; font-family: {fontStack} !important; letter-spacing: 0.012em !important; overflow-wrap: anywhere !important; box-sizing: border-box; line-break: anywhere !important; word-break: break-all !important; }}");
-        // Keep every character available as a wrapping opportunity. EPUBs
-        // frequently carry restrictive word-breaking rules on individual
-        // elements, which can move a token wholesale to the next line and
-        // leave visible space at the end of the current line. Preformatted
-        // content keeps its own whitespace semantics below.
-        builder.Append("\nbody :where(p, div, span, section, article, main, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, a, em, strong, b, i, ruby, rt) { visibility: visible !important; opacity: 1 !important; color: #111111 !important; -webkit-text-fill-color: #111111 !important; font-family: inherit !important; overflow-wrap: anywhere !important; word-break: break-all !important; white-space: normal !important; line-break: anywhere !important; }");
+        builder.Append($"\nbody {{ font-size: 1rem !important; line-height: {Format(lineHeight)} !important; font-family: {fontStack} !important; letter-spacing: 0.012em !important; box-sizing: border-box; }}");
+        // Horizontal and vertical body text share the same logical Chinese
+        // punctuation prohibitions. In vertical-rl, line-start/line-end map to
+        // the top/bottom of the glyph column; text-orientation:mixed and the
+        // font's vertical OpenType forms continue to determine glyph shape.
+        builder.Append('\n').Append(ReaderAppearanceScripts.StandardLineBreakingCss);
+        builder.Append("\nbody :where(p, div, span, section, article, main, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, a, em, strong, b, i, ruby, rt) { visibility: visible !important; opacity: 1 !important; color: #111111 !important; -webkit-text-fill-color: #111111 !important; font-family: inherit !important; white-space: normal !important; }");
         // Some older WebKit builds do not apply :where() consistently to
         // EPUB descendants. Keep a plain descendant selector as the final
         // authority. EPUB stylesheets often use class rules such as
@@ -731,7 +794,7 @@ public partial class MainWindow
         }
         else
             builder.Append("\nbody :where(p, div, section, article, main, li, td, th, blockquote) { text-align: justify !important; text-justify: inter-character !important; }");
-        builder.Append("\nbody pre, body code, body kbd, body samp { white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: break-all !important; line-break: anywhere !important; }");
+        builder.Append("\nbody pre, body code, body kbd, body samp { white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: normal !important; line-break: strict !important; -webkit-line-break: strict !important; -epub-line-break: strict !important; }");
         builder.Append("\nbody br { display: inline !important; }");
         // Hide note definitions in the document itself. Some EPUBs use the
         // standard aside/epub:type form, while others use a target id such as
@@ -4283,6 +4346,17 @@ public partial class MainWindow
             }
             if (ReferenceEquals(CurrentReaderHost, capturedHost))
             {
+                // Restore can change the visible page and therefore the
+                // glyph-phase sample. Re-run the vertical calibration against
+                // the final side-panel width before publishing diagnostics or
+                // allowing the next user page turn.
+                if (_readerLayout.FlowMode == 1 && _readerLayout.VerticalWriting)
+                {
+                    await capturedHost.InvokeScriptAsync(
+                        ReaderPaginationScripts.VerticalStepExpression);
+                    await capturedHost.InvokeScriptAsync(
+                        ReaderPaginationScripts.Snap(vertical: true));
+                }
                 await UpdateReaderScrollStateAsync(capturedHost);
                 PrimeReaderContinuousEdgeTracking();
                 UpdateReaderToolbar();
@@ -4372,6 +4446,75 @@ public partial class MainWindow
                     sans: measureFont('sans-serif')
                   };
                   fontProbe.remove();
+                  const vertical = bodyStyle.writingMode === 'vertical-rl';
+                  let verticalGeometry = null;
+                  if (vertical) {
+                    const viewport = el.clientWidth || root.clientWidth || window.innerWidth || 0;
+                    const verticalPageStep = parseFloat(
+                      rootStyle.getPropertyValue('--kkindle-vertical-page-step')) || 0;
+                    const originShift = parseFloat(
+                      rootStyle.getPropertyValue('--kkindle-vertical-origin-shift')) || 0;
+                    const trailingExtent = parseFloat(
+                      rootStyle.getPropertyValue('--kkindle-vertical-trailing-extent')) || 0;
+                    const leftSide = Math.max(0, (parseFloat(bodyStyle.paddingLeft) || 0) - trailingExtent);
+                    const rightSide = parseFloat(bodyStyle.paddingRight) || 0;
+                    const baseSide = (leftSide + rightSide) / 2;
+                    const safeLeft = viewport - verticalPageStep - baseSide + originShift;
+                    const safeRight = viewport - baseSide + originShift;
+                    const tolerance = 0.75;
+                    const partialGlyphs = [];
+                    let glyphCount = 0;
+                    let inspectedCharacters = 0;
+                    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+                    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                      const parent = node.parentElement;
+                      if (!parent || parent.closest('#kkindle-selection-bar, script, style, noscript')) continue;
+                      const text = node.nodeValue || '';
+                      const nodeRange = document.createRange();
+                      nodeRange.selectNodeContents(node);
+                      const nodeIsVisible = Array.from(nodeRange.getClientRects()).some(rect =>
+                        rect.bottom > 0 && rect.top < el.clientHeight
+                        && rect.right > safeLeft - 48 && rect.left < safeRight + 48);
+                      if (!nodeIsVisible) continue;
+                      for (let index = 0; index < text.length && inspectedCharacters < 12000; index++) {
+                        inspectedCharacters++;
+                        if (/\s/.test(text[index])) continue;
+                        const range = document.createRange();
+                        range.setStart(node, index);
+                        range.setEnd(node, index + 1);
+                        for (const rect of range.getClientRects()) {
+                          if (rect.bottom <= 0 || rect.top >= el.clientHeight) continue;
+                          if (rect.right <= safeLeft + tolerance || rect.left >= safeRight - tolerance) continue;
+                          glyphCount++;
+                          if (rect.left < safeLeft - tolerance || rect.right > safeRight + tolerance) {
+                            partialGlyphs.push({
+                              glyph: text[index],
+                              left: rect.left,
+                              right: rect.right,
+                              top: rect.top,
+                              bottom: rect.bottom
+                            });
+                          }
+                        }
+                      }
+                      if (inspectedCharacters >= 12000) break;
+                    }
+                    verticalGeometry = {
+                      viewport,
+                      pageStep: verticalPageStep,
+                      originShift,
+                      safeLeft,
+                      safeRight,
+                      leftMargin: safeLeft,
+                      rightMargin: viewport - safeRight,
+                      marginDelta: Math.abs(safeLeft - (viewport - safeRight)),
+                      lineHeight: parseFloat(bodyStyle.lineHeight) || 0,
+                      glyphCount,
+                      inspectedCharacters,
+                      partialGlyphCount: partialGlyphs.length,
+                      partialGlyphs: partialGlyphs.slice(0, 12)
+                    };
+                  }
                   return JSON.stringify({
                     innerWidth: window.innerWidth || 0,
                     visualWidth: window.visualViewport?.width || 0,
@@ -4383,6 +4526,8 @@ public partial class MainWindow
                     scrollLeft: el.scrollLeft || 0,
                     scrollTop: el.scrollTop || 0,
                     pageStep: el.clientWidth || root.clientWidth || 0,
+                    vertical,
+                    verticalGeometry,
                     columnCount: bodyStyle.columnCount,
                     columnWidth: bodyStyle.columnWidth,
                     columnGap: bodyStyle.columnGap,
@@ -5438,7 +5583,11 @@ public partial class MainWindow
             await _readerData.SaveLayoutSettingsAsync(
                 _readerBookCard.Book.Id,
                 _readerBookFile.Id,
-                NormalizeReaderLayoutForPlatform(_readerLayout),
+                NormalizeReaderLayoutForPlatform(_readerLayout with
+                {
+                    VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting,
+                    ParagraphIndent = _appSettings.DefaultReaderLayout.ParagraphIndent
+                }),
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -5473,6 +5622,21 @@ public partial class MainWindow
         {
             _suppressAppSettingsAutoSave = false;
         }
+
+        await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
+    }
+
+    private async Task SaveGlobalReaderParagraphIndentAsync(
+        bool paragraphIndent,
+        CancellationToken cancellationToken)
+    {
+        _appSettings = AppSettings.Normalize(_appSettings with
+        {
+            DefaultReaderLayout = _appSettings.DefaultReaderLayout with
+            {
+                ParagraphIndent = paragraphIndent
+            }
+        });
 
         await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
     }

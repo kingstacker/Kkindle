@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "48";
+    private const string ExtractionFormatVersion = "49";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -225,6 +225,9 @@ public sealed class EpubReaderPreparationService
               styleElement.textContent = `
                 #kkindle-selection-bar, #kkindle-selection-bar * {
                   box-sizing: border-box; margin: 0; padding: 0;
+                  writing-mode: horizontal-tb !important;
+                  text-orientation: mixed !important;
+                  direction: ltr;
                 }
                 #kkindle-selection-bar {
                   position: fixed; display: none; z-index: 2147483647;

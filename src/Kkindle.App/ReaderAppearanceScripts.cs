@@ -2,6 +2,24 @@ namespace Kkindle;
 
 internal static class ReaderAppearanceScripts
 {
+    // Use the Unicode/CSS line-breaking model for both horizontal and
+    // vertical text. `strict` keeps closing punctuation with the preceding
+    // character and opening punctuation with the following character; the
+    // EPUB/WebKit-prefixed forms keep the same policy on older reading hosts.
+    // Long preformatted tokens receive a narrowly-scoped emergency wrap in
+    // BuildReaderAppearanceCss instead of disabling punctuation rules for the
+    // entire book.
+    public const string StandardLineBreakingCss = """
+        body,
+        body * {
+          line-break: strict !important;
+          -webkit-line-break: strict !important;
+          -epub-line-break: strict !important;
+          word-break: normal !important;
+          overflow-wrap: normal !important;
+        }
+        """;
+
     // WebView2 uses Chromium scrollbars, so mirror the native reader scrollbar
     // resources with the same 10px monochrome geometry.
     public const string MonochromeScrollbarCss = """

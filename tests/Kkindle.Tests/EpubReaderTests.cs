@@ -638,6 +638,8 @@ public sealed class EpubReaderTests
             Assert.Contains("荧光标记（黑白反色）  ▰", bridge, StringComparison.Ordinal);
             Assert.Contains(".kk-sel-styles.above", bridge, StringComparison.Ordinal);
             Assert.Contains("display: inline-flex; align-items: center; justify-content: center", bridge, StringComparison.Ordinal);
+            Assert.Contains("writing-mode: horizontal-tb !important", bridge, StringComparison.Ordinal);
+            Assert.Contains("text-orientation: mixed !important", bridge, StringComparison.Ordinal);
             Assert.Contains("selectionBar.style.display = 'flex'", bridge, StringComparison.Ordinal);
             Assert.Contains("dismissedSelectionText", bridge, StringComparison.Ordinal);
             Assert.Contains("highlightButton.addEventListener('mouseenter', openStyles)", bridge, StringComparison.Ordinal);
@@ -669,7 +671,7 @@ public sealed class EpubReaderTests
                 pointerSideIndex,
                 StringComparison.Ordinal);
             Assert.InRange(pointerSendIndex - pointerSideIndex, 1, 360);
-            Assert.EndsWith("\n48", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n49", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

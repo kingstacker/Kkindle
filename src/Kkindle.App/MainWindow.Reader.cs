@@ -97,7 +97,12 @@ public partial class MainWindow
             SetReaderHostLayer(revealActiveHost: !OperatingSystem.IsWindows());
 
             var target = new Uri(document.Chapters[_readerChapterIndex]);
-            if (!string.IsNullOrWhiteSpace(_readerCurrentFragment))
+            // A fragment identifies a section, not the precise page inside
+            // that section. When a pixel breakpoint exists, navigating the
+            // URL with its old chapter anchor can asynchronously pull the
+            // WebView back to the chapter start after the breakpoint restore.
+            if ((_readerRestoredProgress?.ScrollPosition ?? 0) <= 0
+                && !string.IsNullOrWhiteSpace(_readerCurrentFragment))
             {
                 target = new Uri(
                     target.AbsoluteUri
@@ -120,7 +125,10 @@ public partial class MainWindow
             PrimeReaderContinuousEdgeTracking();
 
             await UpdateReaderBookmarkIndicatorAsync();
-            await SaveReaderProgressAsync(sessionToken);
+            // Do not replace a breakpoint with the chapter origin when its
+            // first restore attempt reported that the DOM was not ready.
+            if (_readerRestoredProgress is null)
+                await SaveReaderProgressAsync(sessionToken);
             _ = PreloadNextReaderChapterAsync(sessionToken);
         }
         catch (OperationCanceledException) when (sessionToken.IsCancellationRequested)
@@ -704,7 +712,29 @@ public partial class MainWindow
         if (Interlocked.Exchange(ref _readerCloseInProgress, 1) != 0) return;
         try
         {
-        await SaveReaderProgressAsync(CancellationToken.None);
+        // Return-to-bookshelf is the authoritative checkpoint. Wait for a
+        // page turn and any side-panel reflow to settle, then read the native
+        // WebView position directly instead of trusting the last asynchronous
+        // bridge scroll event (which can still contain the chapter origin).
+        await _readerPageTurnGate.WaitAsync();
+        try
+        {
+            await _readerLayoutGate.WaitAsync();
+            try
+            {
+                if (!_readerIsPdf && CurrentReaderHost is { } currentHost)
+                    await UpdateReaderScrollStateAsync(currentHost);
+            }
+            finally
+            {
+                _readerLayoutGate.Release();
+            }
+            await SaveReaderProgressAsync(CancellationToken.None);
+        }
+        finally
+        {
+            _readerPageTurnGate.Release();
+        }
         await SaveReaderLayoutAsync(CancellationToken.None);
         StopReaderStatsTimer();
         // Reading time is accounted by the active-seconds flush (the stats

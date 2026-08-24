@@ -27,23 +27,67 @@ public partial class MainWindow
 
             Width = 1180;
             Height = 820;
+            if (double.TryParse(
+                    Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_WIDTH"),
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var requestedWidth))
+            {
+                Width = Math.Clamp(requestedWidth, 900, 1800);
+            }
+            if (double.TryParse(
+                    Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_HEIGHT"),
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var requestedHeight))
+            {
+                Height = Math.Clamp(requestedHeight, 650, 1200);
+            }
             WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen;
             await Task.Delay(500);
 
-            var assetRoot = Path.Combine(Path.GetTempPath(), "KkindleKreaderValidation", Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(assetRoot);
-            var epubPath = Path.Combine(assetRoot, "linux-kreader-validation.epub");
-            CreateKreaderValidationEpub(epubPath);
+            var externalEpubPath = Environment.GetEnvironmentVariable(
+                "KKINDLE_KREADER_VALIDATE_EPUB");
+            if (!string.IsNullOrWhiteSpace(externalEpubPath))
+            {
+                externalEpubPath = Path.GetFullPath(externalEpubPath);
+                Require(File.Exists(externalEpubPath), "external validation EPUB does not exist");
+                var externalImport = await ViewModel.ImportAsync(
+                    [externalEpubPath],
+                    cancellationToken: _lifetimeCancellation.Token);
+                Require(
+                    externalImport.FailureCount == 0,
+                    $"external import failed: {string.Join("; ", externalImport.Items.Select(item => item.Message))}");
+                var expectedTitle = Path.GetFileNameWithoutExtension(externalEpubPath);
+                var importedBookId = externalImport.Items
+                    .FirstOrDefault(item => item.Succeeded)?.Book?.Id;
+                var externalCard = ViewModel.Books.First(card =>
+                    (importedBookId is not null && card.Book.Id == importedBookId)
+                    || card.Title.Contains(expectedTitle, StringComparison.OrdinalIgnoreCase)
+                    || expectedTitle.Contains(card.Title, StringComparison.OrdinalIgnoreCase));
+                var externalFile = externalCard.Book.Files.First(file =>
+                    file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
+                await log.WriteLineAsync("PASS import external EPUB " + externalCard.Title);
+                await OpenBookAsync(externalCard, externalFile);
+                await ValidateExternalVerticalEpubAsync(log);
+                await CloseReaderAsync();
+                await log.WriteLineAsync("PASS external EPUB vertical validation completed");
+            }
+            else
+            {
+                var assetRoot = Path.Combine(Path.GetTempPath(), "KkindleKreaderValidation", Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(assetRoot);
+                var epubPath = Path.Combine(assetRoot, "linux-kreader-validation.epub");
+                CreateKreaderValidationEpub(epubPath);
 
-            var importResult = await ViewModel.ImportAsync([epubPath], cancellationToken: _lifetimeCancellation.Token);
-            Require(importResult.FailureCount == 0, $"import failed: {string.Join("; ", importResult.Items.Select(item => item.Message))}");
-            await log.WriteLineAsync("PASS import EPUB");
+                var importResult = await ViewModel.ImportAsync([epubPath], cancellationToken: _lifetimeCancellation.Token);
+                Require(importResult.FailureCount == 0, $"import failed: {string.Join("; ", importResult.Items.Select(item => item.Message))}");
+                await log.WriteLineAsync("PASS import EPUB");
 
-            var epubCard = ViewModel.Books.First(card => card.Title.Contains("Linux Kreader Validation", StringComparison.OrdinalIgnoreCase));
-            var epubFile = epubCard.Book.Files.First(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
-            await OpenBookAsync(epubCard, epubFile);
-            await ValidateCurrentEpubReaderAsync(log);
-            await CloseReaderAsync();
+                var epubCard = ViewModel.Books.First(card => card.Title.Contains("Linux Kreader Validation", StringComparison.OrdinalIgnoreCase));
+                var epubFile = epubCard.Book.Files.First(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
+                await OpenBookAsync(epubCard, epubFile);
+                await ValidateCurrentEpubReaderAsync(log);
+                await CloseReaderAsync();
+            }
 
             await log.WriteLineAsync("PASS Kreader Linux validation completed");
         }
@@ -127,6 +171,45 @@ public partial class MainWindow
         await log.WriteLineAsync(
             $"DEBUG surface paged: activeSlot={ReaderActiveHostSlot.IsVisible} overlay={ReaderLinuxTextFallbackOverlay.IsVisible}");
 
+        await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: true);
+        var verticalHost = CurrentReaderHost
+            ?? throw new InvalidOperationException("vertical reader host missing");
+        await verticalHost.InvokeScriptAsync(
+            ReaderPaginationScripts.CreateChapterBoundaryScript(
+                moveToEnd: false,
+                horizontal: true,
+                vertical: true));
+        await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+        var verticalFirstPage = await ReadKreaderDomMetricsAsync(verticalHost);
+        Require(verticalFirstPage.GetProperty("vertical").GetBoolean(), "vertical writing flag not applied");
+        Require(
+            verticalFirstPage.GetProperty("writingMode").GetString() == "vertical-rl",
+            "vertical-rl writing mode not applied");
+        Require(
+            verticalFirstPage.GetProperty("scrollWidth").GetDouble()
+                > verticalFirstPage.GetProperty("clientWidth").GetDouble(),
+            "vertical pagination has no horizontal extent");
+        var verticalFirstEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
+        Require(
+            verticalFirstEdge.GetProperty("partialGlyphCount").GetInt32() == 0,
+            "vertical first page clips a glyph column at the page edge: " + verticalFirstEdge);
+
+        var verticalOffsetBeforeTurn = verticalFirstPage.GetProperty("scrollLeft").GetDouble();
+        await TurnReaderPageAsync(1);
+        await Task.Delay(250, ReaderToken);
+        var verticalSecondPage = await ReadKreaderDomMetricsAsync(verticalHost);
+        Require(
+            verticalSecondPage.GetProperty("scrollLeft").GetDouble() < verticalOffsetBeforeTurn - 1,
+            "vertical page turn did not advance through Chromium's negative scroll range");
+        var verticalSecondEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
+        Require(
+            verticalSecondEdge.GetProperty("partialGlyphCount").GetInt32() == 0,
+            "vertical second page clips a glyph column at the page edge: " + verticalSecondEdge);
+        await log.WriteLineAsync("PASS EPUB vertical pagination keeps complete glyph columns on both page edges");
+        await log.WriteLineAsync("DEBUG vertical first page " + verticalFirstEdge);
+        await log.WriteLineAsync("DEBUG vertical second page " + verticalSecondEdge);
+        await PauseKreaderValidationAtVerticalPageAsync(log);
+
         await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: true);
         var twoPage = await ReadKreaderDomMetricsAsync(host);
         Require(twoPage.GetProperty("twoPage").GetBoolean(), "two-page mode not applied");
@@ -180,6 +263,374 @@ public partial class MainWindow
         var aiSources = await _readerData.SearchBookAsync(_readerBookCard.Book.Id, "AI context linux", 10, ReaderToken, exactPhraseOnly: true);
         Require(aiSources.Count > 0, "EPUB AI/search context index found no chunks");
         await log.WriteLineAsync("PASS EPUB in-page search, whole-book search, AI context index");
+    }
+
+    private async Task ValidateExternalVerticalEpubAsync(TextWriter log)
+    {
+        Require(!_readerIsPdf, "external EPUB reader did not open as EPUB");
+        var originalGlobalVerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting;
+        var host = CurrentReaderHost
+            ?? throw new InvalidOperationException("external EPUB reader host missing");
+        await WaitForKreaderDocumentAsync(host);
+
+        var targetChapter = 5;
+        if (int.TryParse(
+                Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_CHAPTER"),
+                out var requestedChapter))
+        {
+            targetChapter = Math.Max(0, requestedChapter);
+        }
+        while (_readerChapterIndex < targetChapter)
+            await MoveReaderChapterAsync(1);
+        while (_readerChapterIndex > targetChapter)
+            await MoveReaderChapterAsync(-1);
+
+        await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: false);
+        var horizontalHost = CurrentReaderHost
+            ?? throw new InvalidOperationException("external horizontal reader host missing");
+        var horizontalSelectionBar = await ShowAndReadKreaderSelectionBarAsync(horizontalHost);
+        Require(
+            horizontalSelectionBar.GetProperty("writingMode").GetString() == "horizontal-tb",
+            "horizontal selection bar is not horizontal");
+        await ClearKreaderValidationSelectionAsync(horizontalHost);
+
+        await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: true);
+        var verticalHost = CurrentReaderHost
+            ?? throw new InvalidOperationException("external vertical reader host missing");
+        await verticalHost.InvokeScriptAsync(
+            ReaderPaginationScripts.CreateChapterBoundaryScript(
+                moveToEnd: false,
+                horizontal: true,
+                vertical: true));
+        await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+
+        var validateAssistantLayout = string.Equals(
+            Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_ASSISTANT"),
+            "1",
+            StringComparison.Ordinal);
+        if (validateAssistantLayout)
+        {
+            SetReaderTocMinimal(true);
+            await Task.Delay(350, ReaderToken);
+            Require(_readerTocMinimal, "external EPUB minimal TOC was not enabled");
+            Require(ReaderTocCompactPanel.IsVisible, "external EPUB minimal TOC rail is hidden");
+            await log.WriteLineAsync("PASS external EPUB minimal TOC layout enabled");
+        }
+
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_MAXIMIZE"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            var normalMetrics = await ReadKreaderDomMetricsAsync(verticalHost);
+            var normalWidth = normalMetrics.GetProperty("clientWidth").GetDouble();
+            WindowState = Avalonia.Controls.WindowState.Maximized;
+            await Task.Delay(1200, ReaderToken);
+            _ = await WaitForReaderViewportToMatchHostAsync(verticalHost, ReaderToken);
+            await Task.Delay(300, ReaderToken);
+            await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+            await Task.Delay(150, ReaderToken);
+            var maximizedMetrics = await ReadKreaderDomMetricsAsync(verticalHost);
+            var maximizedWidth = maximizedMetrics.GetProperty("clientWidth").GetDouble();
+            Require(
+                maximizedWidth > normalWidth + 100,
+                $"external EPUB maximize did not enlarge viewport: normal={normalWidth:F1}, maximized={maximizedWidth:F1}");
+            await log.WriteLineAsync(
+                $"PASS external EPUB runtime maximize resized viewport {normalWidth:F1}px -> {maximizedWidth:F1}px");
+        }
+
+        if (validateAssistantLayout)
+        {
+            var beforeAssistant = await ReadKreaderDomMetricsAsync(verticalHost);
+            var beforeAssistantWidth = beforeAssistant.GetProperty("clientWidth").GetDouble();
+            ReaderAssistantToggleButton_Click(null, new Avalonia.Interactivity.RoutedEventArgs());
+            await Task.Delay(900, ReaderToken);
+            _ = await WaitForReaderViewportToMatchHostAsync(verticalHost, ReaderToken);
+            await Task.Delay(300, ReaderToken);
+            await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.VerticalStepExpression);
+            await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+            await Task.Delay(150, ReaderToken);
+            var afterAssistant = await ReadKreaderDomMetricsAsync(verticalHost);
+            var afterAssistantWidth = afterAssistant.GetProperty("clientWidth").GetDouble();
+            Require(ReaderAssistantPanel.IsVisible, "external EPUB AI assistant panel did not open");
+            Require(_readerTocMinimal, "opening AI assistant disabled minimal TOC");
+            Require(
+                afterAssistantWidth < beforeAssistantWidth - 250,
+                $"external EPUB AI assistant did not narrow viewport: before={beforeAssistantWidth:F1}, after={afterAssistantWidth:F1}");
+            await log.WriteLineAsync(
+                $"PASS external EPUB minimal TOC + AI assistant resized viewport {beforeAssistantWidth:F1}px -> {afterAssistantWidth:F1}px");
+        }
+
+        var firstPage = await ReadKreaderDomMetricsAsync(verticalHost);
+        var firstEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
+        Require(firstPage.GetProperty("vertical").GetBoolean(), "external vertical flag not applied");
+        Require(
+            firstPage.GetProperty("writingMode").GetString() == "vertical-rl",
+            "external vertical-rl writing mode not applied");
+        Require(
+            firstEdge.GetProperty("partialGlyphCount").GetInt32() == 0,
+            "external EPUB first page clips glyphs: " + firstEdge);
+        Require(
+            firstEdge.GetProperty("marginDelta").GetDouble() <= 0.1,
+            "external EPUB first page margins are asymmetric: " + firstEdge);
+        var verticalSelectionBar = await ShowAndReadKreaderSelectionBarAsync(verticalHost);
+        Require(
+            verticalSelectionBar.GetProperty("writingMode").GetString() == "horizontal-tb",
+            "vertical selection bar inherited vertical writing mode: " + verticalSelectionBar);
+        Require(
+            verticalSelectionBar.GetProperty("signature").GetString()
+                == horizontalSelectionBar.GetProperty("signature").GetString(),
+            "vertical selection bar differs from horizontal: horizontal="
+            + horizontalSelectionBar + "; vertical=" + verticalSelectionBar);
+        await log.WriteLineAsync("PASS external EPUB first vertical page has no clipped glyphs");
+        await log.WriteLineAsync("DEBUG external vertical first page " + firstEdge);
+        await log.WriteLineAsync("PASS vertical selection bar matches horizontal selection bar");
+        await log.WriteLineAsync("DEBUG horizontal selection bar " + horizontalSelectionBar);
+        await log.WriteLineAsync("DEBUG vertical selection bar " + verticalSelectionBar);
+        await ClearKreaderValidationSelectionAsync(verticalHost);
+
+        var viewport = firstEdge.GetProperty("viewport").GetDouble();
+        var pageStep = firstEdge.GetProperty("pageStep").GetDouble();
+        var scrollWidth = firstEdge.GetProperty("scrollWidth").GetDouble();
+        var rawMax = Math.Max(0, scrollWidth - viewport);
+        var rawPageIndex = pageStep > 0 ? rawMax / pageStep : 0;
+        var roundedPageIndex = Math.Round(rawPageIndex);
+        var lastPageIndex = pageStep > 0
+            ? Math.Max(
+                0,
+                Math.Abs(rawMax - (roundedPageIndex * pageStep)) <= 4
+                    ? (int)roundedPageIndex
+                    : (int)Math.Ceiling(rawPageIndex))
+            : 0;
+        var screenshotPageIndex = Math.Max(0, lastPageIndex - 1);
+        if (int.TryParse(
+                Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_VERTICAL_SCREENSHOT_PAGE"),
+                out var requestedScreenshotPage))
+        {
+            screenshotPageIndex = Math.Clamp(requestedScreenshotPage, 0, lastPageIndex);
+        }
+        var maxScrollError = 0d;
+        for (var pageIndex = 0; pageIndex <= lastPageIndex; pageIndex++)
+        {
+            var target = Math.Min(rawMax, pageIndex * pageStep);
+            var targetText = target.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await verticalHost.InvokeScriptAsync($$"""
+                (() => {
+                  const el = document.scrollingElement || document.documentElement;
+                  window.scrollTo({ left: -{{targetText}}, top: 0, behavior: 'instant' });
+                })();
+                """);
+            await Task.Delay(60, ReaderToken);
+            await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.VerticalStepExpression);
+            await Task.Delay(40, ReaderToken);
+            var pageMetrics = await ReadKreaderDomMetricsAsync(verticalHost);
+            var edge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
+            var actual = Math.Abs(pageMetrics.GetProperty("scrollLeft").GetDouble());
+            maxScrollError = Math.Max(maxScrollError, Math.Abs(actual - target));
+            Require(
+                edge.GetProperty("glyphCount").GetInt32() > 0,
+                $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1} diagnostic inspected no visible glyphs: " + edge);
+            Require(
+                edge.GetProperty("partialGlyphCount").GetInt32() == 0,
+                $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1} clips glyphs: " + edge);
+            Require(
+                edge.GetProperty("marginDelta").GetDouble() <= 0.1,
+                $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1} margins are asymmetric: " + edge);
+            await log.WriteLineAsync(
+                $"PASS external vertical page {pageIndex + 1}/{lastPageIndex + 1} "
+                + $"scrollLeft={actual:F3} partialGlyphs=0 marginDelta={edge.GetProperty("marginDelta").GetDouble():F3}");
+            if (pageIndex == screenshotPageIndex)
+                await PauseKreaderValidationAtVerticalPageAsync(log);
+        }
+        await log.WriteLineAsync(
+            $"PASS external EPUB all {lastPageIndex + 1} vertical pages have no clipped glyphs; maxScrollError={maxScrollError:F3}px");
+
+        await verticalHost.InvokeScriptAsync(
+            ReaderPaginationScripts.CreateChapterBoundaryScript(
+                moveToEnd: false,
+                horizontal: true,
+                vertical: true));
+        await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+        await Task.Delay(100, ReaderToken);
+        for (var pageIndex = 0; pageIndex <= lastPageIndex; pageIndex++)
+        {
+            var edge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
+            Require(
+                edge.GetProperty("glyphCount").GetInt32() > 0,
+                $"actual page turn {pageIndex + 1}/{lastPageIndex + 1} inspected no visible glyphs: " + edge);
+            Require(
+                edge.GetProperty("partialGlyphCount").GetInt32() == 0,
+                $"actual page turn {pageIndex + 1}/{lastPageIndex + 1} clips glyphs: " + edge);
+            Require(
+                edge.GetProperty("marginDelta").GetDouble() <= 0.1,
+                $"actual page turn {pageIndex + 1}/{lastPageIndex + 1} margins are asymmetric: " + edge);
+            if (pageIndex < lastPageIndex)
+            {
+                await TurnReaderPageAsync(1);
+                await Task.Delay(100, ReaderToken);
+            }
+        }
+        await log.WriteLineAsync(
+            $"PASS application page-turn path keeps all {lastPageIndex + 1} vertical pages unclipped and symmetric");
+
+        // Exercise the real bookshelf checkpoint, not just the restore script
+        // in isolation. Return to the normal full-TOC width so reopening uses
+        // the same viewport, turn to an interior page, close immediately, and
+        // verify that opening the same BookFile lands on that exact page.
+        if (validateAssistantLayout && ReaderAssistantPanel.IsVisible)
+            ReaderAssistantToggleButton_Click(null, new Avalonia.Interactivity.RoutedEventArgs());
+        SetReaderTocMinimal(false);
+        await Task.Delay(900, ReaderToken);
+        _ = await WaitForReaderViewportToMatchHostAsync(verticalHost, ReaderToken);
+        await verticalHost.InvokeScriptAsync(
+            ReaderPaginationScripts.CreateChapterBoundaryScript(
+                moveToEnd: false,
+                horizontal: true,
+                vertical: true));
+        await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+        var expectedPageIndex = Math.Min(2, lastPageIndex);
+        for (var pageIndex = 0; pageIndex < expectedPageIndex; pageIndex++)
+            await TurnReaderPageAsync(1);
+
+        var beforeBookshelf = await ReadKreaderDomMetricsAsync(verticalHost);
+        var beforeStepText = beforeBookshelf.GetProperty("verticalPageStep").GetString();
+        Require(
+            double.TryParse(
+                beforeStepText?.Trim().TrimEnd('p', 'x'),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var beforeStep)
+            && beforeStep > 0,
+            "bookshelf restore validation has no vertical page step: " + beforeBookshelf);
+        var beforePosition = Math.Abs(beforeBookshelf.GetProperty("scrollLeft").GetDouble());
+        var beforePageIndex = (int)Math.Round(beforePosition / beforeStep);
+        Require(
+            beforePageIndex == expectedPageIndex,
+            $"bookshelf restore setup reached page {beforePageIndex + 1}, expected {expectedPageIndex + 1}");
+
+        var reopenCard = _readerBookCard
+            ?? throw new InvalidOperationException("bookshelf restore validation book card missing");
+        var reopenFile = _readerBookFile
+            ?? throw new InvalidOperationException("bookshelf restore validation book file missing");
+        var expectedChapterIndex = _readerChapterIndex;
+        // Reopening a book intentionally follows the persisted global writing
+        // direction. Mirror the real vertical-mode setting path before testing
+        // the bookshelf round trip so the assertion compares like-for-like pages.
+        await SaveGlobalReaderVerticalWritingAsync(true, CancellationToken.None);
+        await CloseReaderAsync();
+        await OpenBookAsync(reopenCard, reopenFile, restoreProgress: true);
+        var reopenedHost = CurrentReaderHost
+            ?? throw new InvalidOperationException("bookshelf restore validation reopened host missing");
+        await WaitForKreaderDocumentAsync(reopenedHost);
+        await Task.Delay(500, ReaderToken);
+        var afterBookshelf = await ReadKreaderDomMetricsAsync(reopenedHost);
+        await SaveGlobalReaderVerticalWritingAsync(originalGlobalVerticalWriting, CancellationToken.None);
+        var afterStepText = afterBookshelf.GetProperty("verticalPageStep").GetString();
+        Require(
+            double.TryParse(
+                afterStepText?.Trim().TrimEnd('p', 'x'),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var afterStep)
+            && afterStep > 0,
+            "reopened reader has no vertical page step: " + afterBookshelf);
+        var afterPosition = Math.Abs(afterBookshelf.GetProperty("scrollLeft").GetDouble());
+        var afterPageIndex = (int)Math.Round(afterPosition / afterStep);
+        Require(
+            _readerChapterIndex == expectedChapterIndex,
+            $"bookshelf restore changed chapter {_readerChapterIndex}, expected {expectedChapterIndex}");
+        Require(
+            afterPageIndex == expectedPageIndex,
+            $"bookshelf restore returned to page {afterPageIndex + 1}, expected {expectedPageIndex + 1}; before={beforeBookshelf}; after={afterBookshelf}");
+        await log.WriteLineAsync(
+            $"PASS return to bookshelf restored exact vertical page {afterPageIndex + 1}/{lastPageIndex + 1} "
+            + $"in chapter {expectedChapterIndex}; before={beforePosition:F3}px after={afterPosition:F3}px");
+    }
+
+    private static async Task<JsonElement> ShowAndReadKreaderSelectionBarAsync(IReaderHost host)
+    {
+        var selected = DecodeReaderScriptString(await host.InvokeScriptAsync("""
+            (() => {
+              const selection = window.getSelection?.();
+              if (!selection || !document.body) return '';
+              selection.removeAllRanges();
+              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+              for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                const parent = node.parentElement;
+                if (!parent || parent.closest('#kkindle-selection-bar, script, style, noscript')) continue;
+                const text = node.nodeValue || '';
+                const start = text.search(/\S/);
+                if (start < 0) continue;
+                const probe = document.createRange();
+                probe.setStart(node, start);
+                probe.setEnd(node, Math.min(text.length, start + 1));
+                const rect = probe.getBoundingClientRect();
+                if (rect.bottom <= 0 || rect.top >= window.innerHeight
+                    || rect.right <= 0 || rect.left >= window.innerWidth) continue;
+                const range = document.createRange();
+                range.setStart(node, start);
+                range.setEnd(node, Math.min(text.length, start + 6));
+                selection.addRange(range);
+                return selection.toString();
+              }
+              return '';
+            })();
+            """));
+        Require(!string.IsNullOrWhiteSpace(selected), "could not create visible reader selection");
+        await Task.Delay(250);
+
+        var result = await host.InvokeScriptAsync("""
+            (() => {
+              const bar = document.getElementById('kkindle-selection-bar');
+              const firstButton = bar?.querySelector('button');
+              if (!bar || !firstButton) return null;
+              const style = getComputedStyle(bar);
+              const buttonStyle = getComputedStyle(firstButton);
+              const rect = bar.getBoundingClientRect();
+              const buttonRect = firstButton.getBoundingClientRect();
+              const signature = [
+                style.display,
+                style.writingMode,
+                style.textOrientation,
+                style.direction,
+                style.paddingTop,
+                style.paddingRight,
+                style.paddingBottom,
+                style.paddingLeft,
+                rect.width.toFixed(2),
+                rect.height.toFixed(2),
+                bar.querySelectorAll(':scope > button').length,
+                bar.querySelectorAll('.kk-sel-sep').length,
+                buttonStyle.display,
+                buttonStyle.fontFamily,
+                buttonStyle.fontSize,
+                buttonStyle.lineHeight,
+                buttonRect.width.toFixed(2),
+                buttonRect.height.toFixed(2)
+              ].join('|');
+              return JSON.stringify({
+                display: style.display,
+                writingMode: style.writingMode,
+                textOrientation: style.textOrientation,
+                direction: style.direction,
+                width: rect.width,
+                height: rect.height,
+                buttonCount: bar.querySelectorAll('button').length,
+                signature
+              });
+            })();
+            """);
+        var raw = DecodeReaderScriptString(result) ?? result;
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new InvalidOperationException("selection bar metric script returned empty result.");
+        using var document = JsonDocument.Parse(raw);
+        return document.RootElement.Clone();
+    }
+
+    private static async Task ClearKreaderValidationSelectionAsync(IReaderHost host)
+    {
+        await host.InvokeScriptAsync("window.getSelection?.()?.removeAllRanges();");
+        await Task.Delay(100);
     }
 
     private async Task ValidateWindowsFootnoteHoverAndClickAsync(IReaderHost host, TextWriter log)
@@ -454,13 +905,13 @@ public partial class MainWindow
         return string.Equals(value, "open", StringComparison.Ordinal);
     }
 
-    private async Task SetKreaderValidationLayoutAsync(int flowMode, bool twoPage)
+    private async Task SetKreaderValidationLayoutAsync(int flowMode, bool twoPage, bool vertical = false)
     {
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with
         {
             FlowMode = flowMode,
             TwoPageMode = twoPage,
-            VerticalWriting = false
+            VerticalWriting = vertical
         });
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
         await Task.Delay(250, ReaderToken);
@@ -478,6 +929,22 @@ public partial class MainWindow
 
         milliseconds = Math.Clamp(milliseconds, 1, 30_000);
         await log.WriteLineAsync($"DEBUG pausing on initial EPUB page for {milliseconds} ms");
+        await Task.Delay(milliseconds);
+    }
+
+    private static async Task PauseKreaderValidationAtVerticalPageAsync(TextWriter log)
+    {
+        if (!int.TryParse(
+                Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_VERTICAL_PAUSE_MS"),
+                out var milliseconds)
+            || milliseconds <= 0)
+        {
+            return;
+        }
+
+        milliseconds = Math.Clamp(milliseconds, 1, 30_000);
+        await log.WriteLineAsync($"SCREENSHOT_READY vertical page; pausing for {milliseconds} ms");
+        await log.FlushAsync();
         await Task.Delay(milliseconds);
     }
 
@@ -511,12 +978,16 @@ public partial class MainWindow
                 text: (body?.innerText || body?.textContent || '').slice(0, 4000),
                 flowMode: Number(window.__kkindleReaderFlowMode || 0),
                 twoPage: window.__kkindleReaderTwoPage === true,
+                vertical: window.__kkindleReaderVertical === true,
                 bodyDisplay: style?.display || '',
                 bodyVisibility: style?.visibility || '',
                 bodyOpacity: style?.opacity || '',
                 columnCount: style?.columnCount || '',
                 columnWidth: style?.columnWidth || '',
                 columnGap: style?.columnGap || '',
+                writingMode: style?.writingMode || '',
+                lineHeight: style?.lineHeight || '',
+                verticalPageStep: getComputedStyle(root).getPropertyValue('--kkindle-vertical-page-step'),
                 clientWidth: el?.clientWidth || 0,
                 clientHeight: el?.clientHeight || 0,
                 scrollWidth: el?.scrollWidth || 0,
@@ -533,6 +1004,122 @@ public partial class MainWindow
         var raw = DecodeReaderScriptString(result) ?? result;
         if (string.IsNullOrWhiteSpace(raw))
             throw new InvalidOperationException("Kreader metric script returned empty result.");
+        using var document = JsonDocument.Parse(raw);
+        return document.RootElement.Clone();
+    }
+
+    private async Task<JsonElement> ReadKreaderVerticalEdgeDiagnosticsAsync(IReaderHost host)
+    {
+        var result = await host.InvokeScriptAsync(
+            """
+            (() => {
+              const root = document.documentElement;
+              const body = document.body;
+              const el = document.scrollingElement || root;
+              if (!root || !body || !el) return null;
+              const bodyStyle = getComputedStyle(body);
+              const rootStyle = getComputedStyle(root);
+              const viewport = el.clientWidth || root.clientWidth || window.innerWidth || 0;
+              const pageStep = parseFloat(rootStyle.getPropertyValue('--kkindle-vertical-page-step')) || 0;
+              const originShift = parseFloat(rootStyle.getPropertyValue('--kkindle-vertical-origin-shift')) || 0;
+              const contentShift = parseFloat(rootStyle.getPropertyValue('--kkindle-vertical-content-shift')) || 0;
+              const trailingExtent = parseFloat(
+                rootStyle.getPropertyValue('--kkindle-vertical-trailing-extent')) || 0;
+              const leftSide = Math.max(0, (parseFloat(bodyStyle.paddingLeft) || 0) - trailingExtent);
+              const rightSide = parseFloat(bodyStyle.paddingRight) || 0;
+              const baseSide = (leftSide + rightSide) / 2;
+              const baseLeft = viewport - pageStep - baseSide;
+              const baseRight = viewport - baseSide;
+              const nominalSafeLeft = baseLeft + originShift;
+              const nominalSafeRight = baseRight + originShift;
+              const parsedSafeLeft = parseFloat(
+                rootStyle.getPropertyValue('--kkindle-vertical-safe-left'));
+              const parsedSafeRight = parseFloat(
+                rootStyle.getPropertyValue('--kkindle-vertical-safe-right'));
+              const safeLeft = Number.isFinite(parsedSafeLeft)
+                ? Math.max(nominalSafeLeft, parsedSafeLeft)
+                : nominalSafeLeft;
+              const safeRight = Number.isFinite(parsedSafeRight)
+                ? Math.min(nominalSafeRight, parsedSafeRight)
+                : nominalSafeRight;
+              const tolerance = 0.75;
+              const partialGlyphs = [];
+              let glyphCount = 0;
+              let inspectedCharacters = 0;
+              let minGlyphLeft = Number.POSITIVE_INFINITY;
+              let maxGlyphRight = Number.NEGATIVE_INFINITY;
+              const columnLefts = [];
+              const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+              for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                const parent = node.parentElement;
+                if (!parent || parent.closest('#kkindle-selection-bar, script, style, noscript')) continue;
+                const text = node.nodeValue || '';
+                const nodeRange = document.createRange();
+                nodeRange.selectNodeContents(node);
+                const nodeIsVisible = Array.from(nodeRange.getClientRects()).some(rect =>
+                  rect.bottom > 0 && rect.top < el.clientHeight
+                  && rect.right > safeLeft - 48 && rect.left < safeRight + 48);
+                if (!nodeIsVisible) continue;
+                for (let index = 0; index < text.length && inspectedCharacters < 12000; index++) {
+                  inspectedCharacters++;
+                  if (/\s/.test(text[index])) continue;
+                  const range = document.createRange();
+                  range.setStart(node, index);
+                  range.setEnd(node, index + 1);
+                  for (const rect of range.getClientRects()) {
+                    if (rect.bottom <= 0 || rect.top >= el.clientHeight) continue;
+                    if (rect.right <= safeLeft + tolerance || rect.left >= safeRight - tolerance) continue;
+                    glyphCount++;
+                    minGlyphLeft = Math.min(minGlyphLeft, rect.left);
+                    maxGlyphRight = Math.max(maxGlyphRight, rect.right);
+                    if (!columnLefts.some(value => Math.abs(value - rect.left) < 0.5))
+                      columnLefts.push(rect.left);
+                    if (rect.left < safeLeft - tolerance || rect.right > safeRight + tolerance) {
+                      partialGlyphs.push({
+                        glyph: text[index],
+                        left: rect.left,
+                        right: rect.right,
+                        top: rect.top,
+                        bottom: rect.bottom
+                      });
+                    }
+                  }
+                }
+                if (inspectedCharacters >= 12000) break;
+              }
+              return JSON.stringify({
+                viewport,
+                scrollLeft: el.scrollLeft || 0,
+                scrollWidth: el.scrollWidth || 0,
+                pageStep,
+                originShift,
+                contentShift,
+                safeLeft,
+                safeRight,
+                nominalSafeLeft,
+                nominalSafeRight,
+                leftMargin: safeLeft,
+                rightMargin: viewport - safeRight,
+                marginDelta: Math.abs(nominalSafeLeft - (viewport - nominalSafeRight)),
+                maskMarginDelta: Math.abs(safeLeft - (viewport - safeRight)),
+                lineHeight: parseFloat(bodyStyle.lineHeight) || 0,
+                paddingLeft: parseFloat(bodyStyle.paddingLeft) || 0,
+                paddingRight: parseFloat(bodyStyle.paddingRight) || 0,
+                pageIndex: pageStep > 0 ? Math.round(Math.abs(el.scrollLeft || 0) / pageStep) : 0,
+                minGlyphLeft: Number.isFinite(minGlyphLeft) ? minGlyphLeft : null,
+                maxGlyphRight: Number.isFinite(maxGlyphRight) ? maxGlyphRight : null,
+                columnCount: columnLefts.length,
+                columnLefts: columnLefts.sort((a, b) => a - b).slice(0, 80),
+                glyphCount,
+                inspectedCharacters,
+                partialGlyphCount: partialGlyphs.length,
+                partialGlyphs: partialGlyphs.slice(0, 12)
+              });
+            })();
+            """);
+        var raw = DecodeReaderScriptString(result) ?? result;
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new InvalidOperationException("Kreader vertical edge diagnostic returned empty result.");
         using var document = JsonDocument.Parse(raw);
         return document.RootElement.Clone();
     }
@@ -651,7 +1238,8 @@ public partial class MainWindow
             builder.Append("<p>Linux validation paragraph ")
                 .Append((first + i).ToString("000"))
                 .Append(" keeps enough text for pagination, scrolling, search-token-linux, and AI context linux validation inside WPE WebKit. ")
-                .Append("The sentence repeats to create measurable layout width and height on Linux desktop.</p>");
+                .Append("The sentence repeats to create measurable layout width and height on Linux desktop. ")
+                .Append("竖排正文验证：天地玄黄，宇宙洪荒；日月盈昃，辰宿列张。标点必须留在完整字列内，不能在页面两侧被裁切。</p>");
         }
         builder.AppendLine("</body></html>");
         return builder.ToString();

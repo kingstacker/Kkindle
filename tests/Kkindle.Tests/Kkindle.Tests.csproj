@@ -11,6 +11,7 @@
     <ProjectReference Include="..\..\src\Kkindle.Core\Kkindle.Core.csproj" />
     <ProjectReference Include="..\..\src\Kkindle.Infrastructure\Kkindle.Infrastructure.csproj" />
     <Compile Include="..\..\src\Kkindle.App\ReaderPaginationScripts.cs" Link="ReaderPaginationScripts.cs" />
+    <Compile Include="..\..\src\Kkindle.App\ReaderAppearanceScripts.cs" Link="ReaderAppearanceScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderNavigationScripts.cs" Link="ReaderNavigationScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderWaveScripts.cs" Link="ReaderWaveScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackTitleLinePolicy.cs" Link="ReaderLinuxTextFallbackTitleLinePolicy.cs" />

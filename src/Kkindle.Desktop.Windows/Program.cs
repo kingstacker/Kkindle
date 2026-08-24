@@ -27,11 +27,26 @@ internal static class Program
 
         // Single instance: a second launch brings the running window back
         // (even from the tray) instead of starting another copy of the app.
-        if (!SingleInstanceGuard.TryAcquire(out var singleInstanceMutex))
+        // The DEBUG validation process is deliberately isolated so it can
+        // exercise resize/maximize regressions while the user's app stays open.
+#if DEBUG
+        var isolateValidation = string.Equals(
+            Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE"),
+            "1",
+            StringComparison.Ordinal);
+#else
+        const bool isolateValidation = false;
+#endif
+        Mutex? singleInstanceMutex = null;
+        if (!isolateValidation)
         {
-            SingleInstanceGuard.ActivateExistingInstance();
-            singleInstanceMutex.Dispose();
-            return;
+            if (!SingleInstanceGuard.TryAcquire(out var acquiredMutex))
+            {
+                SingleInstanceGuard.ActivateExistingInstance();
+                acquiredMutex.Dispose();
+                return;
+            }
+            singleInstanceMutex = acquiredMutex;
         }
 
         try
@@ -41,7 +56,7 @@ internal static class Program
         }
         finally
         {
-            singleInstanceMutex.Dispose();
+            singleInstanceMutex?.Dispose();
         }
     }
 
