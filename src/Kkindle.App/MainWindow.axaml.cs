@@ -207,6 +207,22 @@ public partial class MainWindow : Window
             ReaderRoot_SelectionDismissPointerPressed,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
+        // The vertical fallback page manages its own drag selection and
+        // footnote taps; surface them through the shared reader popups.
+        ReaderLinuxTextFallbackPageVertical.SelectionCommitted += (_, _) =>
+            SyncLinuxReaderTextFallbackSelectionState();
+        ReaderLinuxTextFallbackPageVertical.FootnoteActivated += (_, payload) =>
+        {
+            _readerLinuxVerticalFootnoteHandledRelease = true;
+            _ = ObserveReaderTaskAsync(HandleReaderFootnoteHoverAsync(
+                payload.Href,
+                isFootnote: true,
+                ReaderLinuxTextFallbackPageVertical.TranslatePoint(
+                    payload.Position,
+                    ReaderWebViewHost)));
+        };
+        ReaderLinuxTextFallbackPageVertical.FootnoteDismissed += (_, _) =>
+            HideReaderFootnotePopup();
         BookGrid.ItemsPanel = new FuncTemplate<Panel?>(() =>
         {
             _bookGridPanel = new AnimatedWrapPanel

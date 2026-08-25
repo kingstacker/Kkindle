@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "49";
+    private const string ExtractionFormatVersion = "56";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -49,6 +49,72 @@ public sealed class EpubReaderPreparationService
               }
             } catch (_) { }
           };
+
+          // Mark short numeric runs while the XHTML is still entering the
+          // document. The reader later supplies the vertical-writing CSS, but
+          // WebKitGTK can retain the first painted text run when the DOM is
+          // rewritten only after NavigationCompleted. Keeping the markup
+          // stable from DOMContentLoaded makes the CSS pass deterministic.
+          const prepareVerticalInlineRuns = () => {
+            const body = document.body;
+            if (!body) return false;
+
+            const numericTokenPattern = /[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*/g;
+            const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+            const textNodes = [];
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              const parent = node.parentElement;
+              if (!parent
+                  || parent.closest('#kkindle-selection-bar, script, style, noscript, ruby, rt, [data-kkindle-vertical-run="1"]')
+                  || !/[0-9]/.test(node.nodeValue || ''))
+                continue;
+              textNodes.push(node);
+            }
+
+            for (const node of textNodes) {
+              const value = node.nodeValue || '';
+              const fragment = document.createDocumentFragment();
+              let cursor = 0;
+              let wrapped = false;
+              numericTokenPattern.lastIndex = 0;
+              for (let match = numericTokenPattern.exec(value);
+                   match;
+                   match = numericTokenPattern.exec(value)) {
+                const token = match[0];
+                const start = match.index;
+                const before = value[start - 1] || '';
+                const after = value[start + token.length] || '';
+                const digitCount = (token.match(/[0-9]/g) || []).length;
+                const adjacentLatin = /[A-Za-z]/.test(before) || /[A-Za-z]/.test(after);
+                if (adjacentLatin || digitCount === 0)
+                  continue;
+
+                const pureDigits = /^[0-9]+$/.test(token);
+                const className = pureDigits
+                    ? (token.length === 1
+                        ? 'kkindle-vertical-digit'
+                        : token.length <= 4 ? 'kkindle-tcy' : null)
+                    : token.length <= 4 ? 'kkindle-tcy-all' : null;
+                if (!className) continue;
+
+                if (start > cursor)
+                  fragment.appendChild(document.createTextNode(value.slice(cursor, start)));
+                const span = document.createElement('span');
+                span.className = className;
+                span.dataset.kkindleVerticalRun = '1';
+                span.textContent = token;
+                fragment.appendChild(span);
+                cursor = start + token.length;
+                wrapped = true;
+              }
+              if (!wrapped) continue;
+              if (cursor < value.length)
+                fragment.appendChild(document.createTextNode(value.slice(cursor)));
+              node.parentNode?.replaceChild(fragment, node);
+            }
+            return true;
+          };
+          window.__kkindlePrepareVerticalInlineRuns = prepareVerticalInlineRuns;
 
           const reportScroll = () => {
             const element = document.scrollingElement || document.documentElement;
@@ -814,6 +880,7 @@ public sealed class EpubReaderPreparationService
           }, { passive: true });
 
           const ready = () => {
+            prepareVerticalInlineRuns();
             installSelectionBar();
             installBookmarkCorner();
             send({ type: "ready" });
@@ -833,6 +900,9 @@ public sealed class EpubReaderPreparationService
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex HtmlNamedEntityPattern = new(
         "&[A-Za-z][A-Za-z0-9]+;",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex VerticalNumericTokenPattern = new(
+        """[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*""",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly AppPaths _paths;
 
@@ -1205,6 +1275,18 @@ public sealed class EpubReaderPreparationService
         try
         {
             var document = await LoadXmlAsync(chapterPath, cancellationToken);
+            var blockPreview = document
+                .Descendants()
+                .Where(element =>
+                    IsBodyPreviewElement(element)
+                    && element.Name.LocalName is
+                        "p" or "div" or "section" or "article" or "li"
+                        or "blockquote" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6")
+                .Select(element => NormalizeTitle(element.Value))
+                .FirstOrDefault(value => value.Length > 0);
+            if (!string.IsNullOrWhiteSpace(blockPreview))
+                return blockPreview;
+
             return document
                 .DescendantNodes()
                 .OfType<XText>()
@@ -1441,6 +1523,12 @@ public sealed class EpubReaderPreparationService
                 element.Value = SanitizeCss(styleText, path, cacheRoot);
         }
 
+        // Mark the short numeric runs in the serialized XHTML itself. The
+        // bridge repeats this defensively for dynamically inserted content,
+        // but source-level spans are present during the first native WebKit
+        // paint and therefore avoid the stale-surface path entirely.
+        MarkVerticalNumericRuns(root, namespaceName);
+
         var head = root.Elements().FirstOrDefault(element => element.Name.LocalName == "head");
         if (head is null)
         {
@@ -1477,6 +1565,65 @@ public sealed class EpubReaderPreparationService
                 " "));
 
         await WriteXmlAsync(document, path, cancellationToken);
+    }
+
+    private static void MarkVerticalNumericRuns(XElement root, XNamespace namespaceName)
+    {
+        var body = root.Descendants().FirstOrDefault(element =>
+            element.Name.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase));
+        if (body is null) return;
+
+        var textNodes = body
+            .DescendantNodes()
+            .OfType<XText>()
+            .Where(node => node.Ancestors().All(element =>
+                element.Name.LocalName is not ("script" or "style" or "noscript" or "ruby" or "rt")))
+            .ToArray();
+
+        foreach (var textNode in textNodes)
+        {
+            var value = textNode.Value;
+            if (!value.Any(char.IsAsciiDigit)) continue;
+
+            var replacements = new List<object>();
+            var cursor = 0;
+            var wrapped = false;
+            foreach (Match match in VerticalNumericTokenPattern.Matches(value))
+            {
+                var token = match.Value;
+                var before = match.Index > 0 ? value[match.Index - 1] : '\0';
+                var afterIndex = match.Index + match.Length;
+                var after = afterIndex < value.Length ? value[afterIndex] : '\0';
+                var digitCount = token.Count(char.IsAsciiDigit);
+                var adjacentLatin = (before != '\0' && char.IsAsciiLetter(before))
+                    || (after != '\0' && char.IsAsciiLetter(after));
+                if (adjacentLatin || digitCount == 0) continue;
+
+                var pureDigits = token.All(char.IsAsciiDigit);
+                var className = pureDigits
+                    ? token.Length == 1
+                        ? "kkindle-vertical-digit"
+                        : token.Length <= 4 ? "kkindle-tcy" : null
+                    : token.Length <= 4 ? "kkindle-tcy-all" : null;
+                if (className is null) continue;
+
+                if (match.Index > cursor)
+                    replacements.Add(new XText(value[cursor..match.Index]));
+                replacements.Add(
+                    new XElement(
+                        namespaceName + "span",
+                        new XAttribute("class", className),
+                        new XAttribute("data-kkindle-vertical-run", "1"),
+                        token));
+                cursor = afterIndex;
+                wrapped = true;
+            }
+
+            if (!wrapped) continue;
+            if (cursor < value.Length)
+                replacements.Add(new XText(value[cursor..]));
+            textNode.ReplaceWith(replacements.ToArray());
+        }
     }
 
     private static bool IsFootnoteReference(XElement element)

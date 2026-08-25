@@ -44,17 +44,84 @@ public partial class MainWindow
     private const int ReaderAnimationWave = 3;
     private const double ReaderZenActivationWidth = 380;
     private const double ReaderZenActivationHeight = 64;
-    // The Linux reader renders the real EPUB in WebKitGTK, exactly like the
-    // WinUI reader does in WebView2: covers and images, the selection action
-    // bar, footnote popovers and the injected page-turn/keyboard handling all
-    // live in that document. This plain-text surface is only a recovery path
-    // for runtimes where the webview cannot paint at all, so it stays off
-    // unless it is asked for explicitly.
-    private static readonly bool UseLinuxPlainTextRecoveryFallback =
-        string.Equals(
-            Environment.GetEnvironmentVariable("KKINDLE_LINUX_TEXT_RECOVERY"),
-            "1",
-            StringComparison.Ordinal);
+    // The Linux reader must render the real EPUB in WebKitGTK, exactly like
+    // the Windows reader does in WebView2: covers and images, the selection
+    // action bar, footnote popovers and the injected page-turn/keyboard
+    // handling all live in that document. Keep the old Avalonia text surface
+    // in the source for diagnostics and regression tests, but never select it
+    // as a production reader surface.
+    private static readonly bool UseLinuxPlainTextRecoveryFallback = false;
+
+    private const string PrepareVerticalInlineRunsScript = """
+        (() => {
+          if (typeof window.__kkindlePrepareVerticalInlineRuns === 'function')
+            return window.__kkindlePrepareVerticalInlineRuns();
+
+          const prepare = () => {
+            const body = document.body;
+            if (!body || window.__kkindleReaderVertical !== true) return false;
+
+            const numericTokenPattern = /[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*/g;
+            const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+            const textNodes = [];
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              const parent = node.parentElement;
+              if (!parent
+                  || parent.closest('#kkindle-selection-bar, script, style, noscript, ruby, rt, [data-kkindle-vertical-run="1"]')
+                  || !/[0-9]/.test(node.nodeValue || ''))
+                continue;
+              textNodes.push(node);
+            }
+
+            for (const node of textNodes) {
+              const value = node.nodeValue || '';
+              const fragment = document.createDocumentFragment();
+              let cursor = 0;
+              let wrapped = false;
+              numericTokenPattern.lastIndex = 0;
+              for (let match = numericTokenPattern.exec(value);
+                   match;
+                   match = numericTokenPattern.exec(value)) {
+                const token = match[0];
+                const start = match.index;
+                const before = value[start - 1] || '';
+                const after = value[start + token.length] || '';
+                const digitCount = (token.match(/[0-9]/g) || []).length;
+                const adjacentLatin = /[A-Za-z]/.test(before) || /[A-Za-z]/.test(after);
+                if (adjacentLatin || digitCount === 0)
+                  continue;
+
+                const pureDigits = /^[0-9]+$/.test(token);
+                const className = pureDigits
+                    ? (token.length === 1
+                        ? 'kkindle-vertical-digit'
+                        : token.length <= 4 ? 'kkindle-tcy' : null)
+                    : token.length <= 4 ? 'kkindle-tcy-all' : null;
+                if (!className) continue;
+
+                if (start > cursor)
+                  fragment.appendChild(document.createTextNode(value.slice(cursor, start)));
+                const span = document.createElement('span');
+                span.className = className;
+                span.dataset.kkindleVerticalRun = '1';
+                span.textContent = token;
+                fragment.appendChild(span);
+                cursor = start + token.length;
+                wrapped = true;
+              }
+              if (!wrapped) continue;
+              if (cursor < value.length)
+                fragment.appendChild(document.createTextNode(value.slice(cursor)));
+              node.parentNode?.replaceChild(fragment, node);
+            }
+            return true;
+          };
+
+          if (document.body) return prepare();
+          document.addEventListener('DOMContentLoaded', prepare, { once: true });
+          return true;
+        })();
+        """;
 
     private ReaderLayoutSettings _readerLayout = NormalizeReaderLayoutForPlatform(new ReaderLayoutSettings());
     private int _readerPageAnimation = ReaderAnimationFade;
@@ -88,6 +155,7 @@ public partial class MainWindow
     private bool _readerLinuxTextFallbackPointerPressed;
     private bool _readerLinuxTextFallbackSelectionAtPointerPress;
     private bool _readerLinuxTextFallbackSelectionDismissPress;
+    private bool _readerLinuxVerticalFootnoteHandledRelease;
     private int _readerLinuxTextFallbackSelectionSyncSequence;
     private Point _readerLinuxTextFallbackPointerStart;
     private Vector _readerLinuxTextFallbackSelectionScrollOffset;
@@ -354,7 +422,8 @@ public partial class MainWindow
         IReadOnlyList<ReaderLinuxTextFallbackFootnote>? Footnotes = null,
         int ChapterTitleStart = -1,
         int ChapterTitleLength = 0,
-        int PaginationOffset = 0)
+        int PaginationOffset = 0,
+        bool StartsParagraph = false)
     {
         public IReadOnlyList<ReaderLinuxTextFallbackFootnote> InlineFootnotes { get; } =
             Footnotes ?? [];
@@ -670,12 +739,44 @@ public partial class MainWindow
                     return;
                   br.replaceWith(document.createTextNode(' '));
                 });
+
+                // Fixed html pseudo-elements are not consistently painted
+                // above body content by WebKitGTK. Keep the edge masks as
+                // real document nodes so a partial vertical glyph can never
+                // leak into the reader chrome. They are empty and excluded
+                // from text selection, diagnostics and hit testing.
+                const edgeMaskIds = [
+                  'kkindle-vertical-edge-mask-left',
+                  'kkindle-vertical-edge-mask-right'
+                ];
+                const useLinuxVerticalEdgeMasks = {{(OperatingSystem.IsLinux() ? "true" : "false")}};
+                if (useLinuxVerticalEdgeMasks && window.__kkindleReaderVertical === true) {
+                  for (const id of edgeMaskIds) {
+                    let mask = document.getElementById(id);
+                    if (!mask) {
+                      mask = document.createElement('div');
+                      mask.id = id;
+                      mask.setAttribute('aria-hidden', 'true');
+                      mask.dataset.kkindleReaderChrome = '1';
+                      mask.tabIndex = -1;
+                      body.appendChild(mask);
+                    }
+                  }
+                } else {
+                  for (const id of edgeMaskIds)
+                    document.getElementById(id)?.remove();
+                }
+
               }
               return true;
             })();
-            """;
+        """;
         await host.InvokeScriptAsync(script);
         await WaitForReaderFontsAsync(host, cancellationToken);
+        if (_readerLayout.VerticalWriting)
+        {
+            await host.InvokeScriptAsync(PrepareVerticalInlineRunsScript);
+        }
         await host.InvokeScriptAsync(FitReaderCoverImageScript);
         if (pagination)
         {
@@ -783,6 +884,7 @@ public partial class MainWindow
         builder.Append($"\nbody p, body div, body section, body article, body main, body li, body td, body th, body blockquote {{ line-height: {Format(lineHeight)} !important; }}");
         if (vertical)
         {
+            builder.Append('\n').Append(ReaderAppearanceScripts.VerticalPublicationTypographyCss);
             // Natural vertical-rl pagination can only keep a page boundary
             // between complete glyph columns when every block advances on the
             // same line grid. Publisher block margins, padding and fixed
@@ -823,9 +925,13 @@ public partial class MainWindow
         // classes. Make this reader setting authoritative in both horizontal
         // and vertical writing; text-indent follows the logical inline start,
         // so two em also means two glyphs from the top in vertical-rl.
+        // Most EPUBs use p, but a number of older Chinese books put the body
+        // copy in div/section containers and apply text-indent there. Reset
+        // every common block when the reader switch is off; otherwise a
+        // publisher class can keep a visible indent even though p is reset.
         builder.Append(paragraphIndent
-            ? "\nbody p { text-indent: 2em !important; }"
-            : "\nbody p { text-indent: 0 !important; }");
+            ? "\nbody p, body li, body dd, body blockquote { text-indent: 2em !important; }"
+            : "\nbody p, body div, body section, body article, body main, body li, body dd, body dt, body td, body th, body blockquote { text-indent: 0 !important; }");
         builder.Append($"\nli, blockquote {{ font-size: 1rem !important; line-height: {Format(lineHeight)} !important; }}");
         // Chapter headings are a separate centered row. The rem margins are
         // deliberately larger than one body line, making the transition from
@@ -1155,10 +1261,10 @@ public partial class MainWindow
         CancellationToken cancellationToken,
         IReaderHost? host = null)
     {
-        // Avalonia's experimental GTK offscreen adapter renders a black frame
-        // on the WebKitGTK runtime available on Ubuntu 22.04. Keep this
-        // readable surface enabled until a production renderer is available.
-        // It may be disabled explicitly only for renderer diagnostics.
+        // The native WebKit surface is authoritative for every Linux reading
+        // mode, including vertical writing. The old Avalonia text surface is
+        // intentionally kept unreachable so Linux uses the same HTML/CSS
+        // layout engine for horizontal and vertical EPUB content.
         if (!UseLinuxPlainTextRecoveryFallback)
         {
             HideLinuxReaderTextFallback();
@@ -1184,10 +1290,8 @@ public partial class MainWindow
             return;
         }
 
-        // WebKitGTK can report a fully visible DOM while its native surface
-        // paints a blank page for real EPUBs. On this Linux runtime the
-        // Avalonia reading layer is therefore the dependable visible surface;
-        // retain the WebView behind it for parsing, navigation and features.
+        // This branch is retained only for diagnostics and historical tests;
+        // the production reader never enters it and always shows WebKit.
 
         var targetTitle = _readerLinuxTextFallbackTargetTitle
             ?? GetReaderChapterDisplayName(_readerChapterIndex);
@@ -1285,6 +1389,11 @@ public partial class MainWindow
         ReaderLinuxTextFallbackPageFootnoteRight.Content = string.Empty;
         ReaderLinuxTextFallbackPageFootnoteRight.Tag = null;
         ReaderLinuxTextFallbackPageFootnoteRight.IsVisible = false;
+        ReaderLinuxTextFallbackPageVertical.FootnoteHrefResolver = null;
+        ReaderLinuxTextFallbackPageVertical.Text = string.Empty;
+        ReaderLinuxTextFallbackPageVertical.SelectionStart = 0;
+        ReaderLinuxTextFallbackPageVertical.SelectionEnd = 0;
+        ReaderLinuxTextFallbackPageVertical.IsVisible = false;
         _readerLinuxTextFallbackText = string.Empty;
         _readerLinuxTextFallbackPages.Clear();
         _readerLinuxTextFallbackPageItems.Clear();
@@ -1510,11 +1619,41 @@ public partial class MainWindow
         var lineHeight = Math.Max(fontSize + 2, fontSize * _readerLayout.LineHeight);
         var overlayWidth = Math.Max(320, ReaderLinuxTextFallbackOverlay.Bounds.Width);
         var overlayHeight = Math.Max(320, ReaderLinuxTextFallbackOverlay.Bounds.Height);
+        // Use the already-arranged paged surface when it is available. The
+        // overlay can retain its previous width for a compositor frame while
+        // the TOC opens/closes; using that stale width lets a centered page
+        // extend into the TOC column before the next reflow pass.
+        var availableContentWidth = Math.Max(1, overlayWidth - 48);
+        // In vertical mode the page control is centered inside this grid and
+        // its explicit Width is assigned below. Reading the grid's current
+        // Bounds.Width here feeds the previous page width back into the next
+        // pagination pass, so a narrow page keeps shrinking and leaves a
+        // large unused area beside the text. Use the actual viewport width
+        // for vertical pages; the horizontal path can still reuse the
+        // arranged width for two-page spreads.
+        var arrangedContentWidth = _readerLayout.VerticalWriting
+            ? availableContentWidth
+            : ReaderLinuxTextFallbackPagedContent.Bounds.Width;
+        if (!double.IsFinite(arrangedContentWidth) || arrangedContentWidth <= 0)
+            arrangedContentWidth = availableContentWidth;
+        arrangedContentWidth = Math.Clamp(
+            arrangedContentWidth,
+            1,
+            availableContentWidth);
         var pageWidth = _readerLayout.TwoPageMode
-            ? Math.Max(180, (overlayWidth - 24 - 24 - 28) / 2)
-            : Math.Max(240, Math.Min(_readerLayout.MaxWidth, overlayWidth - 48));
+            ? Math.Max(1, (arrangedContentWidth - 28) / 2)
+            : Math.Max(1, Math.Min(_readerLayout.MaxWidth, arrangedContentWidth));
         var pageHeight = Math.Max(180, overlayHeight - 36);
         var linesPerPage = Math.Max(4, (int)Math.Floor(pageHeight / lineHeight));
+        // Vertical writing paginates on the same column grid the drawing
+        // surface uses, so a page boundary always lands on a column start.
+        var verticalGrid = _readerLayout.VerticalWriting
+            ? ReaderLinuxTextFallbackVerticalPage.ComputeGrid(
+                pageWidth,
+                pageHeight,
+                fontSize,
+                lineHeight)
+            : default;
         // Use the real Avalonia text formatter for the visible fallback pages
         // so the split point is the same one used by the wrapping control.
         _readerLinuxTextFallbackPages.Clear();
@@ -1533,20 +1672,35 @@ public partial class MainWindow
             if (textBuilder.Length == 0) return;
 
             var mixedText = textBuilder.ToString();
-            var measuredPages = new List<(string Text, int Start)>();
+            var measuredPages = new List<(string Text, int Start, bool StartsParagraph)>();
 
             void AddMeasuredPages(string segment, int segmentStart)
             {
                 if (string.IsNullOrWhiteSpace(segment)) return;
-                var segmentPages = PaginateReaderPlainTextWithMeasuredLayout(
-                    segment,
-                    pageWidth,
-                    linesPerPage,
-                    fontSize,
-                    lineHeight,
-                    ReaderLinuxTextFallbackPageLeft.FontFamily);
+                List<string> segmentPageTexts;
+                if (_readerLayout.VerticalWriting)
+                {
+                    var startsWithParagraph = segmentStart == 0
+                        || (segmentStart > 0 && mixedText[segmentStart - 1] == '\n');
+                    segmentPageTexts = ReaderLinuxVerticalPagingPolicy.Paginate(
+                        segment,
+                        verticalGrid.CharsPerColumn,
+                        verticalGrid.ColumnsPerPage,
+                        _readerLayout.ParagraphIndent,
+                        startsWithParagraph).Select(page => page.Text).ToList();
+                }
+                else
+                {
+                    segmentPageTexts = PaginateReaderPlainTextWithMeasuredLayout(
+                        segment,
+                        pageWidth,
+                        linesPerPage,
+                        fontSize,
+                        lineHeight,
+                        ReaderLinuxTextFallbackPageLeft.FontFamily);
+                }
                 var searchOffset = 0;
-                foreach (var segmentPage in segmentPages)
+                foreach (var segmentPage in segmentPageTexts)
                 {
                     var start = segment.IndexOf(
                         segmentPage,
@@ -1554,7 +1708,11 @@ public partial class MainWindow
                         StringComparison.Ordinal);
                     if (start < 0)
                         start = searchOffset;
-                    measuredPages.Add((segmentPage, segmentStart + Math.Max(0, start)));
+                    var absoluteStart = segmentStart + Math.Max(0, start);
+                    measuredPages.Add((
+                        segmentPage,
+                        absoluteStart,
+                        absoluteStart == 0 || mixedText[absoluteStart - 1] == '\n'));
                     searchOffset = Math.Clamp(start + segmentPage.Length, 0, segment.Length);
                 }
             }
@@ -1610,7 +1768,8 @@ public partial class MainWindow
                     notesOnPage,
                     localTitleStart,
                     localTitleLength,
-                    paginationStreamOffset + Math.Max(0, pageStart)));
+                    paginationStreamOffset + Math.Max(0, pageStart),
+                    measuredPage.StartsParagraph));
             }
 
             paginationStreamOffset += mixedText.Length + 1;
@@ -1673,28 +1832,57 @@ public partial class MainWindow
 
         if (_readerLinuxTextFallbackPageItems.Count == 0)
         {
-            _readerLinuxTextFallbackPages = PaginateReaderPlainTextWithMeasuredLayout(
-                _readerLinuxTextFallbackText,
-                pageWidth,
-                linesPerPage,
-                fontSize,
-                lineHeight,
-                ReaderLinuxTextFallbackPageLeft.FontFamily);
-            foreach (var page in _readerLinuxTextFallbackPages)
+            var fallbackMeasuredPages = new List<(string Text, int Start)>();
+            if (_readerLayout.VerticalWriting)
             {
-                var pageStart = _readerLinuxTextFallbackText.IndexOf(
-                    page,
-                    Math.Clamp(paginationStreamOffset, 0, _readerLinuxTextFallbackText.Length),
-                    StringComparison.Ordinal);
-                if (pageStart < 0)
-                    pageStart = paginationStreamOffset;
+                fallbackMeasuredPages.AddRange(
+                    ReaderLinuxVerticalPagingPolicy.Paginate(
+                        _readerLinuxTextFallbackText,
+                        verticalGrid.CharsPerColumn,
+                        verticalGrid.ColumnsPerPage,
+                        _readerLayout.ParagraphIndent));
+            }
+            else
+            {
+                var searchOffset = Math.Clamp(
+                    paginationStreamOffset,
+                    0,
+                    _readerLinuxTextFallbackText.Length);
+                foreach (var pageText in PaginateReaderPlainTextWithMeasuredLayout(
+                    _readerLinuxTextFallbackText,
+                    pageWidth,
+                    linesPerPage,
+                    fontSize,
+                    lineHeight,
+                    ReaderLinuxTextFallbackPageLeft.FontFamily))
+                {
+                    var start = _readerLinuxTextFallbackText.IndexOf(
+                        pageText,
+                        searchOffset,
+                        StringComparison.Ordinal);
+                    if (start < 0) start = searchOffset;
+                    fallbackMeasuredPages.Add((pageText, start));
+                    searchOffset = Math.Clamp(
+                        start + pageText.Length,
+                        0,
+                        _readerLinuxTextFallbackText.Length);
+                }
+            }
+
+            _readerLinuxTextFallbackPages = fallbackMeasuredPages
+                .Select(page => page.Text)
+                .ToList();
+            foreach (var page in fallbackMeasuredPages)
+            {
                 _readerLinuxTextFallbackPageItems.Add(new ReaderLinuxTextFallbackPageItem(
-                    page,
+                    page.Text,
                     0,
                     null,
-                    PaginationOffset: Math.Max(0, pageStart)));
+                    PaginationOffset: Math.Max(0, page.Start),
+                    StartsParagraph: page.Start == 0
+                        || (page.Start > 0 && _readerLinuxTextFallbackText[page.Start - 1] == '\n')));
                 paginationStreamOffset = Math.Clamp(
-                    pageStart + page.Length,
+                    page.Start + page.Text.Length,
                     0,
                     _readerLinuxTextFallbackText.Length);
             }
@@ -1732,6 +1920,17 @@ public partial class MainWindow
         ReaderLinuxTextFallbackPageRight.Height = pageHeight;
         ReaderLinuxTextFallbackPageRight.MinHeight = pageHeight;
         ReaderLinuxTextFallbackPageRight.MaxHeight = pageHeight;
+        if (_readerLayout.VerticalWriting)
+        {
+            // Vertical pages draw on the same rectangle the paginator used.
+            // A fixed size keeps the column grid identical across renders.
+            ReaderLinuxTextFallbackPageVertical.Width = pageWidth;
+            ReaderLinuxTextFallbackPageVertical.MinWidth = pageWidth;
+            ReaderLinuxTextFallbackPageVertical.MaxWidth = pageWidth;
+            ReaderLinuxTextFallbackPageVertical.Height = pageHeight;
+            ReaderLinuxTextFallbackPageVertical.MinHeight = pageHeight;
+            ReaderLinuxTextFallbackPageVertical.MaxHeight = pageHeight;
+        }
         RenderLinuxReaderTextFallbackPage();
     }
 
@@ -1757,8 +1956,119 @@ public partial class MainWindow
         return null;
     }
 
+    // Vertical writing replaces the selectable text slots with the custom
+    // drawing page. Single-page only — ReaderLayoutDefaults.Normalize forces
+    // vertical into FlowMode 1 with two-page spreads disabled.
+    private void RenderLinuxReaderTextFallbackVerticalPage()
+    {
+        var control = ReaderLinuxTextFallbackPageVertical;
+        var fontSize = Math.Max(10, 16d * _readerLayout.FontScale);
+        control.FontSize = fontSize;
+        control.LineHeight = Math.Max(fontSize + 2, fontSize * _readerLayout.LineHeight);
+
+        void HideHorizontalSlots()
+        {
+            ReaderLinuxTextFallbackPageLeft.Inlines?.Clear();
+            ReaderLinuxTextFallbackPageLeft.Text = string.Empty;
+            ReaderLinuxTextFallbackPageLeft.IsVisible = false;
+            ReaderLinuxTextFallbackPageRight.Inlines?.Clear();
+            ReaderLinuxTextFallbackPageRight.Text = string.Empty;
+            ReaderLinuxTextFallbackPageRight.IsVisible = false;
+            ReaderLinuxTextFallbackPageFootnoteLeft.Content = string.Empty;
+            ReaderLinuxTextFallbackPageFootnoteLeft.IsVisible = false;
+            ReaderLinuxTextFallbackPageFootnoteRight.Content = string.Empty;
+            ReaderLinuxTextFallbackPageFootnoteRight.IsVisible = false;
+            ClearLinuxReaderTextFallbackSelectionState();
+        }
+
+        var pageCount = GetLinuxReaderTextFallbackPageCount();
+        if (pageCount == 0 || _readerLinuxTextFallbackPageItems.Count == 0)
+        {
+            HideHorizontalSlots();
+            control.FootnoteHrefResolver = null;
+            control.Text = string.Empty;
+            control.IsVisible = false;
+            ReaderLinuxTextFallbackPageImageLeft.Source = null;
+            ReaderLinuxTextFallbackPageImageLeft.IsVisible = false;
+            return;
+        }
+
+        _readerLinuxTextFallbackPageIndex = Math.Clamp(
+            _readerLinuxTextFallbackPageIndex,
+            0,
+            Math.Max(0, pageCount - 1));
+        var item = _readerLinuxTextFallbackPageItems[_readerLinuxTextFallbackPageIndex];
+        if (item.Image is { } image)
+        {
+            // Image pages keep the shared slot; rotating covers is wrong.
+            var (slotMaxWidth, slotMaxHeight) =
+                GetLinuxReaderTextFallbackPagedImageBounds(ReaderLinuxTextFallbackPageLeft);
+            ReaderLinuxTextFallbackPageImageLeft.Source = image.Source;
+            ReaderLinuxTextFallbackPageImageLeft.MaxWidth =
+                Math.Min(image.MaxWidth, slotMaxWidth);
+            ReaderLinuxTextFallbackPageImageLeft.MaxHeight =
+                Math.Min(image.MaxHeight, slotMaxHeight);
+            ReaderLinuxTextFallbackPageImageLeft.IsVisible = true;
+            control.FootnoteHrefResolver = null;
+            control.Text = string.Empty;
+            control.IsVisible = false;
+            return;
+        }
+
+        ReaderLinuxTextFallbackPageImageLeft.Source = null;
+        ReaderLinuxTextFallbackPageImageLeft.IsVisible = false;
+        ReaderLinuxTextFallbackPageLeft.IsVisible = false;
+        ReaderLinuxTextFallbackPageRight.IsVisible = false;
+
+        var titleStart = item.ChapterTitleStart;
+        var titleLength = item.ChapterTitleLength;
+        var isFirstTextPage = !_readerLinuxTextFallbackPageItems
+            .Take(_readerLinuxTextFallbackPageIndex)
+            .Any(other => !other.IsImage && !string.IsNullOrWhiteSpace(other.Text));
+        if ((titleStart < 0 || titleLength <= 0)
+            && isFirstTextPage
+            && ReaderLinuxTextFallbackTitleLinePolicy.TryFindLeadingTitleRange(
+                item.Text,
+                NormalizeReaderPlainTextLine(
+                    _readerLinuxTextFallbackTargetTitle
+                    ?? GetReaderChapterDisplayName(_readerChapterIndex)),
+                out var recoveredStart,
+                out var recoveredLength))
+        {
+            titleStart = recoveredStart;
+            titleLength = recoveredLength;
+        }
+
+        control.FootnoteHrefResolver = index =>
+            index >= 0 && index < item.InlineFootnotes.Count
+                ? item.InlineFootnotes[index].Href
+                : null;
+        control.SelectionStart = 0;
+        control.SelectionEnd = 0;
+        control.Text = item.Text;
+        control.ChapterTitleStart = titleStart;
+        control.ChapterTitleLength = titleLength;
+        control.ParagraphIndent = _readerLayout.ParagraphIndent;
+        // A chapter heading is centered as its own visual unit and must not
+        // consume the body paragraph's two-row indent. The first body page
+        // after the heading is marked by the newline inside the page text.
+        control.StartsParagraph = item.StartsParagraph
+            && !(titleStart == 0 && titleLength > 0);
+        control.AnnotationRanges = GetLinuxReaderTextFallbackAnnotationRanges(
+            item.PaginationOffset,
+            item.Text.Length);
+        control.IsVisible = true;
+    }
+
     private void RenderLinuxReaderTextFallbackPage()
     {
+        if (_readerLayout.VerticalWriting)
+        {
+            RenderLinuxReaderTextFallbackVerticalPage();
+            return;
+        }
+
+        ReaderLinuxTextFallbackPageVertical.IsVisible = false;
         var pageCount = GetLinuxReaderTextFallbackPageCount();
         if (pageCount == 0)
         {
@@ -2513,6 +2823,7 @@ public partial class MainWindow
 
         foreach (var block in blocks)
             block.ClearSelection();
+        ReaderLinuxTextFallbackPageVertical.ClearSelection();
     }
 
     private bool HasLinuxReaderTextFallbackSelection()
@@ -2533,7 +2844,10 @@ public partial class MainWindow
                 .GetVisualDescendants()
                 .OfType<SelectableTextBlock>())
             .Distinct()
-            .Any(block => block.SelectionStart != block.SelectionEnd);
+            .Any(block => block.SelectionStart != block.SelectionEnd)
+            || (ReaderLinuxTextFallbackPageVertical.IsVisible
+                && ReaderLinuxTextFallbackPageVertical.SelectionStart
+                    != ReaderLinuxTextFallbackPageVertical.SelectionEnd);
     }
 
     private void SyncLinuxReaderTextFallbackSelectionState(Point? placementPoint = null, double? selectionBottom = null)
@@ -2544,6 +2858,16 @@ public partial class MainWindow
         if (_readerLayout.FlowMode == 0)
         {
             ClearLinuxReaderTextFallbackSelectionState();
+            return;
+        }
+
+        if (ReaderLinuxTextFallbackPageVertical.IsVisible
+            && TrySyncLinuxReaderTextFallbackSelectionFromVertical())
+        {
+            var anchor = GetVerticalReaderSelectionAnchorRect();
+            ShowReaderSelectionPopup(
+                anchor?.Position ?? placementPoint,
+                anchor?.Bottom ?? selectionBottom);
             return;
         }
 
@@ -2729,6 +3053,64 @@ public partial class MainWindow
         ReaderDeleteAnnotationButton.IsEnabled = false;
         ReaderAnnotationSelectionText.Text = selectedText;
         return true;
+    }
+
+    // Vertical pages keep selection state on the custom drawing control; the
+    // offsets map onto the raw page text exactly like the horizontal slots.
+    private bool TrySyncLinuxReaderTextFallbackSelectionFromVertical()
+    {
+        var control = ReaderLinuxTextFallbackPageVertical;
+        var selectedText = control.SelectedText?.Trim();
+        if (string.IsNullOrWhiteSpace(selectedText))
+            return false;
+
+        var pageIndex = _readerLinuxTextFallbackPageIndex;
+        if (pageIndex < 0 || pageIndex >= _readerLinuxTextFallbackPageItems.Count)
+            return false;
+        var item = _readerLinuxTextFallbackPageItems[pageIndex];
+        if (item.IsImage)
+            return false;
+
+        var pageText = item.Text;
+        var start = Math.Min(control.SelectionStart, control.SelectionEnd);
+        var end = Math.Max(control.SelectionStart, control.SelectionEnd);
+        start = Math.Clamp(start, 0, pageText.Length);
+        end = Math.Clamp(end, 0, pageText.Length);
+
+        _readerPendingSelection = selectedText;
+        _readerPendingSelectionStartOffset = item.PaginationOffset + start;
+        _readerPendingSelectionEndOffset = item.PaginationOffset + end;
+        _readerPendingSelectionPrefix = pageText[..start];
+        _readerPendingSelectionSuffix = end < pageText.Length ? pageText[end..] : string.Empty;
+        _selectedReaderAnnotation = null;
+        ReaderDeleteAnnotationButton.IsEnabled = false;
+        ReaderAnnotationSelectionText.Text = selectedText;
+        return true;
+    }
+
+    private Rect? GetVerticalReaderSelectionAnchorRect()
+    {
+        try
+        {
+            var control = ReaderLinuxTextFallbackPageVertical;
+            var start = Math.Max(0, Math.Min(control.SelectionStart, control.SelectionEnd));
+            var end = Math.Max(0, Math.Max(control.SelectionStart, control.SelectionEnd));
+            if (end <= start
+                || control.GetRangeAnchorRect(start, end) is not { } localRect)
+            {
+                return null;
+            }
+
+            var topLeft = control.TranslatePoint(localRect.TopLeft, ReaderWebViewHost);
+            var bottomRight = control.TranslatePoint(localRect.BottomRight, ReaderWebViewHost);
+            return topLeft is { } topPoint && bottomRight is { } bottomPoint
+                ? new Rect(topPoint, bottomPoint)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private bool TrySyncLinuxReaderTextFallbackSelectionFromVisual(
@@ -3056,6 +3438,16 @@ public partial class MainWindow
         if ((FindReaderFootnoteButton(e.Source as Visual)
                 ?? FindReaderFootnoteButtonAt(point)) is not null)
         {
+            _readerLinuxTextFallbackPointerPressed = false;
+            ReleaseLinuxTextFallbackSelectionScrollLock();
+            e.Handled = true;
+            return;
+        }
+        if (_readerLayout.VerticalWriting && _readerLinuxVerticalFootnoteHandledRelease)
+        {
+            // The vertical page already popped its footnote on release; do not
+            // let the same tap also register as an edge click-turn.
+            _readerLinuxVerticalFootnoteHandledRelease = false;
             _readerLinuxTextFallbackPointerPressed = false;
             ReleaseLinuxTextFallbackSelectionScrollLock();
             e.Handled = true;
@@ -4104,6 +4496,20 @@ public partial class MainWindow
                 .Distinct()
                 .ToArray();
             await Task.WhenAll(hosts.Select(host => ConfigureReaderHostAsync(host, cancellationToken)));
+            if (IsLinuxReaderTextFallbackActive())
+            {
+                // The visible Linux vertical surface is Avalonia-owned, so
+                // changing the CSS on the hidden WebView is not enough. Reuse
+                // the current pagination anchor and rebuild the custom page
+                // with the new indent policy immediately.
+                var fallbackAnchor = _readerLayout.FlowMode == 1
+                    ? CaptureLinuxReaderTextFallbackPageAnchor()
+                    : null;
+                if (_readerLayout.FlowMode == 1)
+                    RebuildLinuxReaderTextFallbackPages(fallbackAnchor);
+                else
+                    UpdateLinuxReaderTextFallbackMode();
+            }
             if (scrollState is not null
                 && currentHost is not null
                 && ReferenceEquals(CurrentReaderHost, currentHost))
@@ -4604,7 +5010,8 @@ public partial class MainWindow
         if (!ReaderNavigationLocationPolicy.UsesRestorePosition(intent))
             _readerRestoredProgress = null;
         ResetReaderContinuousEdgeTracking();
-        var linuxFallbackStartsAtTarget = OperatingSystem.IsLinux()
+        var linuxFallbackStartsAtTarget = UseLinuxPlainTextRecoveryFallback
+            && OperatingSystem.IsLinux()
             && !_readerIsPdf
             && intent is ReaderNavigationIntent.Toc or ReaderNavigationIntent.Progress;
         var linuxFallbackMovesToTargetEnd = linuxFallbackStartsAtTarget
@@ -6979,9 +7386,19 @@ public partial class MainWindow
             var targetPage = _readerLinuxTextFallbackPageIndex + direction * spreadSize;
             if (targetPage >= 0 && targetPage <= maximum)
             {
-                _readerLinuxTextFallbackPageIndex = targetPage;
-                RenderLinuxReaderTextFallbackPage();
-                SyncLinuxReaderTextFallbackPagedState(saveProgress: true);
+                await RunLinuxReaderFallbackContentTransitionAsync<int>(
+                    ReaderPaginationPolicy.GetVisualTurnDirection(
+                        direction,
+                        _readerLayout.VerticalWriting),
+                    _readerPageAnimation,
+                    () =>
+                    {
+                        _readerLinuxTextFallbackPageIndex = targetPage;
+                        RenderLinuxReaderTextFallbackPage();
+                        SyncLinuxReaderTextFallbackPagedState(saveProgress: true);
+                        return Task.FromResult(0);
+                    },
+                    ReaderToken);
                 return;
             }
 
@@ -7229,14 +7646,21 @@ public partial class MainWindow
         // change, including chapter/TOC jumps in continuous mode. A chapter
         // boundary is still a full-screen turn from the reader's point of
         // view, so it must not silently drop the user's animation choice.
-        // WebKitGTK/WPE can expose a blank compositor frame while opacity is
-        // animated on a horizontally overflowing multicolumn document. Page
-        // turns are already instantaneous DOM scrolls, so Linux keeps that
-        // deterministic path instead of fading the browser surface.
-        var animation = animate
-            && !OperatingSystem.IsLinux()
-            ? _readerPageAnimation
-            : ReaderAnimationNone;
+        if (UseLinuxPlainTextRecoveryFallback && OperatingSystem.IsLinux())
+        {
+            // Retained only for the disabled diagnostic fallback mode. The
+            // production Linux reader follows the native WebKit transition
+            // path below.
+            return await RunLinuxReaderFallbackContentTransitionAsync(
+                ReaderPaginationPolicy.GetVisualTurnDirection(
+                    direction,
+                    !_readerIsPdf && _readerLayout.VerticalWriting),
+                animate ? _readerPageAnimation : ReaderAnimationNone,
+                changeContentAsync,
+                cancellationToken);
+        }
+
+        var animation = animate ? _readerPageAnimation : ReaderAnimationNone;
         if (animation == ReaderAnimationNone)
             return await changeContentAsync();
 
@@ -7318,6 +7742,50 @@ public partial class MainWindow
             cancellationToken);
         await UpdateReaderScrollStateAsync(incomingHost);
         return result;
+    }
+
+    private ReaderLinuxFallbackTransitionSurface? BuildLinuxReaderFallbackTransitionSurface()
+    {
+        if (!IsLinuxReaderTextFallbackActive())
+            return null;
+        var bounds = ReaderLinuxTextFallbackContent.Bounds;
+        if (bounds.Width < 32 || bounds.Height < 32)
+            return null;
+        return new ReaderLinuxFallbackTransitionSurface(
+            ReaderLinuxTextFallbackContent,
+            ReaderLinuxTextFallbackTransitionSnapshot,
+            ReaderLinuxTextFallbackTransitionGhost,
+            ReaderLinuxTextFallbackTransitionTrail,
+            ReaderLinuxTextFallbackTransitionFront,
+            ReaderLinuxTextFallbackTransitionEdge,
+            ReaderLinuxTextFallbackOverlay.Background);
+    }
+
+    /// <summary>
+    /// Linux counterpart of the WebView transition pipeline: plays the
+    /// selected animation over the native fallback surface while the content
+    /// change renders underneath. Falls back to an instant switch whenever
+    /// the fallback layer is inactive or a snapshot cannot be captured.
+    /// </summary>
+    private async Task<T> RunLinuxReaderFallbackContentTransitionAsync<T>(
+        int visualDirection,
+        int animation,
+        Func<Task<T>> changeContentAsync,
+        CancellationToken cancellationToken)
+    {
+        if (animation == ReaderAnimationNone)
+            return await changeContentAsync();
+
+        var surface = BuildLinuxReaderFallbackTransitionSurface();
+        if (surface is null)
+            return await changeContentAsync();
+
+        return await ReaderLinuxFallbackTransitionPlayer.RunAsync(
+            surface,
+            animation,
+            visualDirection,
+            changeContentAsync,
+            cancellationToken);
     }
 
     private async Task<T> RunReaderFadeTransitionAsync<T>(

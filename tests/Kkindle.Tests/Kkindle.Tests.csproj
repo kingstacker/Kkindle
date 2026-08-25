@@ -16,6 +16,8 @@
     <Compile Include="..\..\src\Kkindle.App\ReaderWaveScripts.cs" Link="ReaderWaveScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackTitleLinePolicy.cs" Link="ReaderLinuxTextFallbackTitleLinePolicy.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackPagingPolicy.cs" Link="ReaderLinuxTextFallbackPagingPolicy.cs" />
+    <Compile Include="..\..\src\Kkindle.App\ReaderLinuxVerticalPagingPolicy.cs" Link="ReaderLinuxVerticalPagingPolicy.cs" />
+    <Compile Include="..\..\src\Kkindle.App\ReaderLinuxVerticalTextUnits.cs" Link="ReaderLinuxVerticalTextUnits.cs" />
     <Compile Include="..\..\src\Kkindle.App\LibraryDropImportPolicy.cs" Link="LibraryDropImportPolicy.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReadingMaterialCoverMatcher.cs" Link="ReadingMaterialCoverMatcher.cs" />
     <PackageReference Include="Avalonia" Version="12.1.1" />

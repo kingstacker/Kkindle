@@ -173,6 +173,18 @@ internal static class ReaderPaginationScripts
         + "   document.documentElement.style.setProperty('--kkindle-vertical-safe-left', safeLeft + 'px');"
         + "   document.documentElement.style.setProperty('--kkindle-vertical-safe-right', safeRight + 'px');"
         + "  }"
+        // Keep the real WebKit edge-mask nodes in the same calibrated phase as
+        // the CSS variables. Inline geometry is intentional here: WebKitGTK
+        // can retain the first computed value of a max()/min() pseudo-element
+        // while a negative vertical scroll page is settling.
+        + "  const leftMask = document.getElementById('kkindle-vertical-edge-mask-left');"
+        + "  const rightMask = document.getElementById('kkindle-vertical-edge-mask-right');"
+        + "  if (leftMask && rightMask) {"
+        + "   const finalLeft = maskLeft < maskRight ? maskLeft : safeLeft;"
+        + "   const finalRight = maskLeft < maskRight ? maskRight : safeRight;"
+        + "   leftMask.style.setProperty('width', Math.max(0, finalLeft) + 'px', 'important');"
+        + "   rightMask.style.setProperty('left', Math.max(0, Math.min(viewport, finalRight)) + 'px', 'important');"
+        + "  }"
         + " }"
         // Keep the visible window centered. Calibrate the rendered content
         // directly against those final safe edges. Using the uncentered base
@@ -252,6 +264,11 @@ internal static class ReaderPaginationScripts
             // max-content block size then grows naturally toward the left as
             // the book adds vertical lines and paragraphs. The root exposes
             // that block overflow as a negative scrollLeft range.
+            var linuxVerticalEdgeMaskCss = OperatingSystem.IsLinux()
+                ? " #kkindle-vertical-edge-mask-left, #kkindle-vertical-edge-mask-right { position: fixed !important; display: block !important; z-index: 2147483647 !important; pointer-events: none !important; background: #FFFFFF !important; writing-mode: horizontal-tb !important; margin: 0 !important; padding: 0 !important; border: 0 !important; opacity: 1 !important; }"
+                    + " #kkindle-vertical-edge-mask-left { left: 0 !important; top: 0 !important; bottom: 0 !important; width: max(calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-step) - var(--kkindle-vertical-page-side) + var(--kkindle-vertical-origin-shift)), var(--kkindle-vertical-safe-left)) !important; }"
+                    + " #kkindle-vertical-edge-mask-right { left: min(calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-side) + var(--kkindle-vertical-origin-shift)), var(--kkindle-vertical-safe-right)) !important; right: 0 !important; top: 0 !important; bottom: 0 !important; }"
+                : string.Empty;
             return $"html {{ --kkindle-vertical-viewport-width: 100%; --kkindle-vertical-page-side: {responsiveSidePadding}; --kkindle-vertical-page-top: {topPadding}px; --kkindle-vertical-page-bottom: {bottomPadding}px; --kkindle-vertical-page-step: calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-side) - var(--kkindle-vertical-page-side)); --kkindle-vertical-origin-shift: 0px; --kkindle-vertical-content-shift: 0px; --kkindle-vertical-trailing-extent: 0px; --kkindle-vertical-safe-left: 0px; --kkindle-vertical-safe-right: 100000px; width: 100%; height: 100%; overflow: hidden !important; writing-mode: vertical-rl !important; text-orientation: mixed !important; }}"
                 + $" body {{ width: max-content !important; min-width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; overflow: visible !important;"
                 + $" padding: var(--kkindle-vertical-page-top) calc(var(--kkindle-vertical-page-side) - var(--kkindle-vertical-content-shift)) var(--kkindle-vertical-page-bottom) calc(var(--kkindle-vertical-page-side) + var(--kkindle-vertical-content-shift) + var(--kkindle-vertical-trailing-extent)) !important; box-sizing: border-box !important;"
@@ -266,7 +283,12 @@ internal static class ReaderPaginationScripts
                 + $" html::before {{ left: 0 !important; top: 0 !important; bottom: 0 !important; width: max(calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-step) - var(--kkindle-vertical-page-side) + var(--kkindle-vertical-origin-shift)), var(--kkindle-vertical-safe-left)) !important; }}"
                 + $" html::after {{ left: min(calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-side) + var(--kkindle-vertical-origin-shift)), var(--kkindle-vertical-safe-right)) !important; right: 0 !important; top: 0 !important; bottom: 0 !important; }}"
                 + $" body::before {{ left: 0 !important; right: 0 !important; top: 0 !important; height: var(--kkindle-vertical-page-top) !important; }}"
-                + $" body::after {{ left: 0 !important; right: 0 !important; bottom: 0 !important; height: var(--kkindle-vertical-page-bottom) !important; }}";
+                + $" body::after {{ left: 0 !important; right: 0 !important; bottom: 0 !important; height: var(--kkindle-vertical-page-bottom) !important; }}"
+                // WebKitGTK can paint an html pseudo-element below the body
+                // stacking context. Real fixed elements are used for the
+                // horizontal edge masks; the host creates them once after
+                // the document style is installed.
+                + linuxVerticalEdgeMaskCss;
         }
         if (OperatingSystem.IsLinux())
         {

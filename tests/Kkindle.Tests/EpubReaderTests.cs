@@ -671,7 +671,7 @@ public sealed class EpubReaderTests
                 pointerSideIndex,
                 StringComparison.Ordinal);
             Assert.InRange(pointerSendIndex - pointerSideIndex, 1, 360);
-            Assert.EndsWith("\n49", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n56", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

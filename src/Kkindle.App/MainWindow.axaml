@@ -3252,7 +3252,8 @@
             <Border x:Name="ReaderTocPanel"
                     Grid.Column="0"
                     Margin="0,38,0,0"
-                    Background="#FFFFFF">
+                    Background="#FFFFFF"
+                    ZIndex="10">
                 <Border.Resources>
                     <!-- Softer, quieter scrollbar for the TOC so the side
                          panel stays out of the reading flow (WinUI values). -->
@@ -3521,6 +3522,7 @@
                     Background="{StaticResource PaperBrush}"
                     BorderBrush="#D8D8D4"
                     BorderThickness="0,0,1,0"
+                    ZIndex="10"
                     Loaded="ReaderTocCompactPanel_Loaded"
                     IsVisible="False">
                 <Grid RowDefinitions="52,*,50">
@@ -3622,7 +3624,8 @@
             <Grid x:Name="ReaderContentPanel"
                   Grid.Column="1"
                   Margin="0,38,0,0"
-                  Background="{StaticResource PaperBrush}">
+                  Background="{StaticResource PaperBrush}"
+                  ClipToBounds="True">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="52" />
                     <RowDefinition Height="*" />
@@ -3780,6 +3783,7 @@
                     <Border x:Name="ReaderLinuxTextFallbackOverlay"
                             Margin="0,12,2,10"
                             Background="{StaticResource PaperBrush}"
+                            ClipToBounds="True"
                             IsVisible="False"
                             Focusable="True"
                             Tapped="ReaderLinuxTextFallback_Tapped"
@@ -3887,8 +3891,49 @@
                                             IsVisible="False"
                                             PointerEntered="ReaderLinuxTextFallbackFootnoteButton_PointerEntered"
                                             PointerExited="ReaderLinuxTextFallbackFootnoteButton_PointerExited" />
+                                    <!-- Vertical writing renders through a custom
+                                         drawing surface: Avalonia's text stack has no
+                                         vertical layout. Single page only — the
+                                         layout defaults force vertical into paged
+                                         single-page mode on every platform. -->
+                                    <local:ReaderLinuxTextFallbackVerticalPage x:Name="ReaderLinuxTextFallbackPageVertical"
+                                                        Grid.Column="0"
+                                                        FontFamily="{StaticResource DefaultAppFontFamily}"
+                                                        Foreground="{StaticResource InkBrush}"
+                                                        InvertedSelectionBackground="{StaticResource InkBrush}"
+                                                        InvertedSelectionForeground="{StaticResource PaperBrush}"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="False" />
                                 </Grid>
                             </Border>
+                            <!-- Native page-turn transition overlay for the
+                                 fallback reader. The captured old-page snapshot
+                                 sits above the live content while fade, slide or
+                                 e-ink wave animations reveal the new page; the
+                                 band/edge rectangles are driven by
+                                 ReaderLinuxFallbackTransitionPlayer. -->
+                            <Panel x:Name="ReaderLinuxTextFallbackTransitionLayer"
+                                   IsVisible="True"
+                                   IsHitTestVisible="False"
+                                   ClipToBounds="True">
+                                <Image x:Name="ReaderLinuxTextFallbackTransitionGhost"
+                                       IsHitTestVisible="False"
+                                       IsVisible="False" />
+                                <Image x:Name="ReaderLinuxTextFallbackTransitionSnapshot"
+                                       IsHitTestVisible="False"
+                                       IsVisible="False" />
+                                <Rectangle x:Name="ReaderLinuxTextFallbackTransitionTrail"
+                                           IsHitTestVisible="False"
+                                           IsVisible="False" />
+                                <Rectangle x:Name="ReaderLinuxTextFallbackTransitionFront"
+                                           IsHitTestVisible="False"
+                                           IsVisible="False" />
+                                <Rectangle x:Name="ReaderLinuxTextFallbackTransitionEdge"
+                                           IsHitTestVisible="False"
+                                           IsVisible="False"
+                                           Fill="#22000000" />
+                            </Panel>
                         </Grid>
                     </Border>
 

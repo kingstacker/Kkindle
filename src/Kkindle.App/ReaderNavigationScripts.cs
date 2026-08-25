@@ -296,9 +296,20 @@ internal static class ReaderNavigationScripts
             const step = {{ReaderPaginationScripts.VerticalStepExpression}};
             const rawMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
             const max = rawMax;
-            const contentRight = scroller.clientWidth - padRight;
+            // The vertical paginator reserves a line-grid safe edge that is
+            // slightly different from the body's physical padding after
+            // WebKit rounds the font metrics. Use the same calibrated edge as
+            // the masks; otherwise an anchor exactly on a page boundary is
+            // classified into the preceding page and rendered at its left
+            // edge instead of the new page's right edge.
+            const calibratedRight = {{(OperatingSystem.IsLinux()
+              ? "parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--kkindle-vertical-safe-right')) || 0"
+              : "0")}};
+            const contentRight = calibratedRight > 0
+              ? calibratedRight
+              : scroller.clientWidth - padRight;
             const distance = Math.abs(scroller.scrollLeft || 0)
-              + Math.max(0, contentRight - rect.right);
+              + contentRight - rect.right;
             const pageIndex = step > 0
               ? Math.max(0, Math.floor(distance / step + 1e-6))
               : 0;

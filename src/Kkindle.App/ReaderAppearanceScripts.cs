@@ -20,6 +20,60 @@ internal static class ReaderAppearanceScripts
         }
         """;
 
+    // Publication-style vertical typography. The browser remains responsible
+    // for Unicode vertical orientation and OpenType shaping; these rules make
+    // that contract explicit and add the standard horizontal-in-vertical
+    // treatment used for short numeric runs.
+    public const string VerticalPublicationTypographyCss = """
+        body,
+        body * {
+          text-orientation: mixed !important;
+          font-kerning: normal !important;
+          font-variant-numeric: tabular-nums lining-nums !important;
+          font-feature-settings: "kern" 1, "vert" 1, "vrt2" 1 !important;
+        }
+        body {
+          text-combine-upright: digits 4 !important;
+          -webkit-text-combine-upright: digits 4 !important;
+          -epub-text-combine: horizontal !important;
+          line-break: strict !important;
+          -webkit-line-break: strict !important;
+          -epub-line-break: strict !important;
+          word-break: normal !important;
+          overflow-wrap: normal !important;
+        }
+        body .kkindle-tcy {
+          text-combine-upright: all !important;
+          -webkit-text-combine: horizontal !important;
+          display: inline !important;
+          white-space: nowrap !important;
+        }
+        body .kkindle-tcy-all {
+          text-combine-upright: all !important;
+          -webkit-text-combine: horizontal !important;
+          display: inline !important;
+          white-space: nowrap !important;
+        }
+        body .kkindle-vertical-digit {
+          text-combine-upright: none !important;
+          -webkit-text-combine-upright: none !important;
+          -webkit-text-combine: none !important;
+          text-orientation: upright !important;
+          white-space: nowrap !important;
+          line-height: 1 !important;
+          vertical-align: baseline !important;
+        }
+        body :where(ruby) {
+          ruby-position: over !important;
+          ruby-align: center !important;
+        }
+        body :where(rt) {
+          text-orientation: mixed !important;
+          white-space: nowrap !important;
+          line-height: 1 !important;
+        }
+        """;
+
     // WebView2 uses Chromium scrollbars, so mirror the native reader scrollbar
     // resources with the same 10px monochrome geometry.
     public const string MonochromeScrollbarCss = """

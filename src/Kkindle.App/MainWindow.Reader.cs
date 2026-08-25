@@ -422,12 +422,15 @@ public partial class MainWindow
             return;
         }
 
-        var moveLinuxFallbackToEnd = OperatingSystem.IsLinux()
+        var moveLinuxFallbackToEnd = UseLinuxPlainTextRecoveryFallback
+            && OperatingSystem.IsLinux()
             && !_readerIsPdf
             && offset < 0
             && !startAtChapterTitle;
         _readerLinuxTextFallbackTargetTitle = null;
-        if (OperatingSystem.IsLinux() && !_readerIsPdf)
+        if (UseLinuxPlainTextRecoveryFallback
+            && OperatingSystem.IsLinux()
+            && !_readerIsPdf)
         {
             _readerScrollPosition = offset < 0 ? -1 : 0;
             _readerLinuxTextFallbackMoveToChapterEnd = moveLinuxFallbackToEnd;
