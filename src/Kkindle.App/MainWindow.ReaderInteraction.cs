@@ -61,6 +61,9 @@ public partial class MainWindow
             const body = document.body;
             if (!body || window.__kkindleReaderVertical !== true) return false;
 
+            body.querySelectorAll('span.kkindle-vertical-digit[data-kkindle-vertical-run="1"]')
+              .forEach(span => span.replaceWith(...Array.from(span.childNodes)));
+
             const numericTokenPattern = /[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*/g;
             const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
             const textNodes = [];
@@ -93,9 +96,7 @@ public partial class MainWindow
 
                 const pureDigits = /^[0-9]+$/.test(token);
                 const className = pureDigits
-                    ? (token.length === 1
-                        ? 'kkindle-vertical-digit'
-                        : token.length <= 4 ? 'kkindle-tcy' : null)
+                    ? token.length >= 2 && token.length <= 4 ? 'kkindle-tcy' : null
                     : token.length <= 4 ? 'kkindle-tcy-all' : null;
                 if (!className) continue;
 

@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "56";
+    private const string ExtractionFormatVersion = "57";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -55,9 +55,18 @@ public sealed class EpubReaderPreparationService
           // WebKitGTK can retain the first painted text run when the DOM is
           // rewritten only after NavigationCompleted. Keeping the markup
           // stable from DOMContentLoaded makes the CSS pass deterministic.
+          // Single digits deliberately stay in the surrounding text run:
+          // WebKitGTK gives an isolated upright one-digit span a different
+          // baseline, which can paint it over the neighboring CJK glyph.
           const prepareVerticalInlineRuns = () => {
             const body = document.body;
             if (!body) return false;
+
+            // Caches created before extraction format 57 may still contain
+            // the old one-digit wrappers. Unwrap them before re-scanning so
+            // a live document can recover without a second navigation.
+            body.querySelectorAll('span.kkindle-vertical-digit[data-kkindle-vertical-run="1"]')
+              .forEach(span => span.replaceWith(...Array.from(span.childNodes)));
 
             const numericTokenPattern = /[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*/g;
             const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
@@ -91,9 +100,7 @@ public sealed class EpubReaderPreparationService
 
                 const pureDigits = /^[0-9]+$/.test(token);
                 const className = pureDigits
-                    ? (token.length === 1
-                        ? 'kkindle-vertical-digit'
-                        : token.length <= 4 ? 'kkindle-tcy' : null)
+                    ? token.length >= 2 && token.length <= 4 ? 'kkindle-tcy' : null
                     : token.length <= 4 ? 'kkindle-tcy-all' : null;
                 if (!className) continue;
 
@@ -1523,10 +1530,11 @@ public sealed class EpubReaderPreparationService
                 element.Value = SanitizeCss(styleText, path, cacheRoot);
         }
 
-        // Mark the short numeric runs in the serialized XHTML itself. The
-        // bridge repeats this defensively for dynamically inserted content,
-        // but source-level spans are present during the first native WebKit
-        // paint and therefore avoid the stale-surface path entirely.
+        // Mark only short multi-digit runs in the serialized XHTML itself.
+        // Single digits remain in the surrounding text run because an
+        // isolated upright span gets a different WebKitGTK baseline and can
+        // overlap the neighboring CJK glyph. The bridge repeats this
+        // defensively for dynamically inserted content.
         MarkVerticalNumericRuns(root, namespaceName);
 
         var head = root.Elements().FirstOrDefault(element => element.Name.LocalName == "head");
@@ -1601,9 +1609,7 @@ public sealed class EpubReaderPreparationService
 
                 var pureDigits = token.All(char.IsAsciiDigit);
                 var className = pureDigits
-                    ? token.Length == 1
-                        ? "kkindle-vertical-digit"
-                        : token.Length <= 4 ? "kkindle-tcy" : null
+                    ? token.Length is >= 2 and <= 4 ? "kkindle-tcy" : null
                     : token.Length <= 4 ? "kkindle-tcy-all" : null;
                 if (className is null) continue;
 

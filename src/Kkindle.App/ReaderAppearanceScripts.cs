@@ -54,15 +54,6 @@ internal static class ReaderAppearanceScripts
           display: inline !important;
           white-space: nowrap !important;
         }
-        body .kkindle-vertical-digit {
-          text-combine-upright: none !important;
-          -webkit-text-combine-upright: none !important;
-          -webkit-text-combine: none !important;
-          text-orientation: upright !important;
-          white-space: nowrap !important;
-          line-height: 1 !important;
-          vertical-align: baseline !important;
-        }
         body :where(ruby) {
           ruby-position: over !important;
           ruby-align: center !important;

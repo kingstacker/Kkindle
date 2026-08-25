@@ -46,6 +46,42 @@ public sealed class EpubReaderTests
     }
 
     [Fact]
+    public async Task KeepsSingleDigitsInTextRunsAndMarksOnlyShortMultiDigitRuns()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "vertical-numbers.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="OEBPS/content.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/content.opf", """
+                    <package><manifest>
+                      <item id="one" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                    </manifest><spine><itemref idref="one" /></spine></package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/chapter.xhtml", """
+                    <html><body><p>数字1和12以及2–3，A1。</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('7', 64));
+
+            var html = await File.ReadAllTextAsync(document.Chapters[0]);
+            Assert.DoesNotContain("kkindle-vertical-digit", html, StringComparison.Ordinal);
+            Assert.Contains("class=\"kkindle-tcy\" data-kkindle-vertical-run=\"1\">12</span>", html, StringComparison.Ordinal);
+            Assert.Contains("class=\"kkindle-tcy-all\" data-kkindle-vertical-run=\"1\">2–3</span>", html, StringComparison.Ordinal);
+            Assert.Contains("A1", html, StringComparison.Ordinal);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task ReadsEpub3NavigationAndFragmentTargets()
     {
         var root = TestHelpers.CreateTempDirectory();
@@ -671,7 +707,7 @@ public sealed class EpubReaderTests
                 pointerSideIndex,
                 StringComparison.Ordinal);
             Assert.InRange(pointerSendIndex - pointerSideIndex, 1, 360);
-            Assert.EndsWith("\n56", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n57", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }
