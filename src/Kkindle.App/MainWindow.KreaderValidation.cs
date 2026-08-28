@@ -433,16 +433,39 @@ public partial class MainWindow
             firstEdge,
             "external EPUB first page",
             requireTopAlignedColumns: false);
-        Require(
-            numberGeometry.GetProperty("preparedVersion").GetString() == "publication-native-1"
-            && numberGeometry.GetProperty("tcyCount").GetInt32() == 0
-            && numberGeometry.GetProperty("nativeDigitRunCount").GetInt32() == 0
-            && numberGeometry.GetProperty("nativeFootnoteCount").GetInt32() == 0
-            && numberGeometry.GetProperty("syntheticNativeDigitLayoutCount").GetInt32() == 0
-            && numberGeometry.GetProperty("legacyWrapperCount").GetInt32() == 0
-            && numberGeometry.GetProperty("syntheticLayoutCount").GetInt32() == 0
-            && numberGeometry.GetProperty("boundaryOverlapCount").GetInt32() == 0,
-            "external EPUB native vertical inline invariants failed: " + numberGeometry);
+        // A publication that marks its own text-combine runs prepares as
+        // publication-native-1 and must contain zero reader-generated inline
+        // layout. A book with unmarked digits and punctuation (the common
+        // case) prepares as publication-native-compat-1 with compatibility
+        // cells; both are valid, so assert the invariants each version owns.
+        var externalPreparedVersion = numberGeometry.GetProperty("preparedVersion").GetString();
+        if (externalPreparedVersion == "publication-native-1")
+        {
+            Require(
+                numberGeometry.GetProperty("tcyCount").GetInt32() == 0
+                && numberGeometry.GetProperty("nativeDigitRunCount").GetInt32() == 0
+                && numberGeometry.GetProperty("nativeFootnoteCount").GetInt32() == 0
+                && numberGeometry.GetProperty("syntheticNativeDigitLayoutCount").GetInt32() == 0
+                && numberGeometry.GetProperty("legacyWrapperCount").GetInt32() == 0
+                && numberGeometry.GetProperty("syntheticLayoutCount").GetInt32() == 0
+                && numberGeometry.GetProperty("boundaryOverlapCount").GetInt32() == 0,
+                "external EPUB native vertical inline invariants failed: " + numberGeometry);
+        }
+        else
+        {
+            Require(
+                externalPreparedVersion == "publication-native-compat-1"
+                && numberGeometry.GetProperty("linuxNumberRunCount").GetInt32() > 0
+                && numberGeometry.GetProperty("linuxSingleCount").GetInt32() > 0
+                && numberGeometry.GetProperty("linuxTcyCount").GetInt32() > 0
+                && numberGeometry.GetProperty("cjkNumberSpacingErrorCount").GetInt32() == 0
+                && numberGeometry.GetProperty("linuxNumericStyleErrorCount").GetInt32() == 0
+                && numberGeometry.GetProperty("syntheticLinuxNumberLayoutCount").GetInt32() == 0
+                && numberGeometry.GetProperty("legacyWrapperCount").GetInt32() == 0
+                && numberGeometry.GetProperty("syntheticLayoutCount").GetInt32() == 0
+                && numberGeometry.GetProperty("boundaryOverlapCount").GetInt32() == 0,
+                "external EPUB compat vertical inline invariants failed: " + numberGeometry);
+        }
         var verticalSelectionBar = await ShowAndReadKreaderSelectionBarAsync(verticalHost);
         Require(
             verticalSelectionBar.GetProperty("writingMode").GetString() == "horizontal-tb",
@@ -501,7 +524,12 @@ public partial class MainWindow
             var actual = Math.Abs(pageMetrics.GetProperty("scrollLeft").GetDouble());
             maxScrollError = Math.Max(maxScrollError, Math.Abs(actual - target));
             if (pageIndex == screenshotPageIndex)
+            {
+                await SaveKreaderValidationSnapshotAsync(
+                    log,
+                    $"external-vertical-page-{screenshotPageIndex + 1}");
                 await PauseKreaderValidationAtVerticalPageAsync(log);
+            }
             Require(
                 edge.GetProperty("glyphCount").GetInt32() > 0
                 || edge.GetProperty("visibleMediaCount").GetInt32() > 0,

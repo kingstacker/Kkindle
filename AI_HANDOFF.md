@@ -13,7 +13,7 @@
 - 当前开发版本为 0.6.0-dev.6，统一定义在 Directory.Build.props。关于页通过程序集 AssemblyInformationalVersion 显示版本，不再维护 UI 硬编码版本号。
 - 当前工作分支为 `master`，已合并 `origin/codex/fix-calibre-output-profile`，远程为 git@github.com:kingstacker/Kkindle.git。
 - 当前 `global.json` 固定 .NET SDK 10.0.400；Avalonia 主包和桌面包为 12.1.1，Avalonia.Controls.WebView 为 12.1.0。
-- 2026-08-28 验证结果：.NET 10 全解决方案构建 0 警告、0 错误；可移植测试 324 项全部通过。Linux 真机 Kreader 验证 harness（`KKINDLE_KREADER_VALIDATE=1`）三连通过：分页竖排首页占满正文区、原生 WebKit 页面快照、API/点击区/滚轮/滑动/墨水动画翻页、批注、搜索全部断言通过；动画探针（`KKINDLE_ANIMATION_PROBE=1`）确认 slide/wave 覆盖层在 Linux 真实渲染。
+- 2026-08-28 验证结果：.NET 10 全解决方案构建 0 警告、0 错误；可移植测试 324 项全部通过。Linux 真机 Kreader 验证 harness（`KKINDLE_KREADER_VALIDATE=1`）三连通过：分页竖排首页占满正文区、原生 WebKit 页面快照、API/点击区/滚轮/滑动/墨水动画翻页、批注、搜索全部断言通过；动画探针（`KKINDLE_ANIMATION_PROBE=1`）确认 slide/wave 覆盖层在 Linux 真实渲染。外部 EPUB 路径（`KKINDLE_KREADER_VALIDATE_EPUB`）现已在 Linux 执行完整分页竖排扫描（逐页无裁切、页步精确、书架往返恢复），合成中文长编 8 章实测通过，含 `KKINDLE_KREADER_VALIDATE_MAXIMIZE=1` 与 `KKINDLE_KREADER_VALIDATE_ASSISTANT=1` 的视口重校准路径；内联版本断言按 `publication-native-1` 与 `publication-native-compat-1` 分支接受。
 - Linux Debug 入口为 `src/Kkindle.Desktop.Linux/bin/Debug/net10.0/Kkindle`。调试产物不提交 Git；运行时必须保留同目录的 DLL、PDB、WebView 和资源文件，不能只复制入口文件。
 - Linux 真实桌面启动和 Calibre 转换已验收；Windows/macOS 真实桌面、真实 Kindle 设备和 macOS 签名/公证仍未完整验收。
 
