@@ -221,7 +221,7 @@ public partial class MainWindow
 
         if (OperatingSystem.IsLinux())
         {
-            await ValidateLinuxContinuousVerticalFlowAsync(log);
+            await ValidateLinuxPaginatedVerticalFlowAsync(log);
         }
         else
         {
@@ -336,12 +336,10 @@ public partial class MainWindow
         while (_readerChapterIndex > targetChapter)
             await MoveReaderChapterAsync(-1);
 
-        if (OperatingSystem.IsLinux())
-        {
-            await ValidateLinuxContinuousVerticalFlowAsync(log);
-            return;
-        }
-
+        // Linux now shares the full paginated vertical sweep below: edge
+        // masks, every page of the chapter, application page turns and the
+        // bookshelf checkpoint are validated on WebKitGTK exactly like on
+        // WebView2.
         await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: false);
         var horizontalHost = CurrentReaderHost
             ?? throw new InvalidOperationException("external horizontal reader host missing");
@@ -666,15 +664,15 @@ public partial class MainWindow
         await SweepExternalVerticalChaptersAsync(log, expectedChapterIndex);
     }
 
-    private async Task ValidateLinuxContinuousVerticalFlowAsync(TextWriter log)
+    private async Task ValidateLinuxPaginatedVerticalFlowAsync(TextWriter log)
     {
         await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: true);
         var host = CurrentReaderHost
-            ?? throw new InvalidOperationException("Linux continuous vertical reader host missing");
+            ?? throw new InvalidOperationException("Linux paginated vertical reader host missing");
         await Task.Delay(150, ReaderToken);
         var initial = await ReadKreaderDomMetricsAsync(host);
-        Require(_readerLayout.FlowMode == 0, "Linux vertical layout did not normalize to continuous flow");
-        Require(initial.GetProperty("flowMode").GetInt32() == 0, "Linux vertical DOM flow mode is not continuous");
+        Require(_readerLayout.FlowMode == 1, "Linux vertical layout did not stay paginated");
+        Require(initial.GetProperty("flowMode").GetInt32() == 1, "Linux vertical DOM flow mode is not paginated");
         Require(initial.GetProperty("vertical").GetBoolean(), "Linux vertical writing flag not applied");
         Require(initial.GetProperty("writingMode").GetString() == "vertical-rl", "Linux vertical writing mode not applied");
         var verticalText = initial.GetProperty("text").GetString() ?? string.Empty;
@@ -692,7 +690,7 @@ public partial class MainWindow
             "Linux vertical punctuation fixture is incomplete");
         Require(
             initial.GetProperty("scrollWidth").GetDouble() > initial.GetProperty("clientWidth").GetDouble(),
-            "Linux continuous vertical flow has no horizontal extent");
+            "Linux paginated vertical flow has no horizontal extent");
 
         var chromeResult = await host.InvokeScriptAsync("""
             (() => JSON.stringify({
@@ -723,40 +721,23 @@ public partial class MainWindow
             }))();
             """);
         var chromeJson = DecodeReaderScriptString(chromeResult ?? string.Empty);
-        Require(!string.IsNullOrWhiteSpace(chromeJson), "Linux continuous vertical chrome diagnostics returned no data");
+        Require(!string.IsNullOrWhiteSpace(chromeJson), "Linux paginated vertical chrome diagnostics returned no data");
         using var chromeDocument = JsonDocument.Parse(chromeJson!);
-        Require(chromeDocument.RootElement.GetProperty("masks").GetInt32() == 0, "Linux continuous vertical flow still has page masks");
-        Require(string.IsNullOrEmpty(chromeDocument.RootElement.GetProperty("pageStep").GetString()), "Linux continuous vertical flow still publishes a page step");
+        Require(
+            chromeDocument.RootElement.GetProperty("masks").GetInt32() == 2,
+            "Linux paginated vertical flow is missing its two edge masks: " + chromeDocument.RootElement);
+        Require(
+            !string.IsNullOrWhiteSpace(chromeDocument.RootElement.GetProperty("pageStep").GetString()),
+            "Linux paginated vertical flow did not publish a page step: " + chromeDocument.RootElement);
         var flowGuards = chromeDocument.RootElement
             .GetProperty("flowGuards")
             .EnumerateArray()
             .ToArray();
         Require(
             flowGuards.Length == 4
-            && flowGuards.All(guard => guard.ValueKind == JsonValueKind.Array),
-            "Linux continuous vertical flow is missing a physical safe-boundary guard: "
+            && flowGuards.All(guard => guard.ValueKind == JsonValueKind.Null),
+            "Linux paginated vertical flow still shows continuous-flow guards: "
             + chromeDocument.RootElement);
-        var clientWidth = chromeDocument.RootElement.GetProperty("clientWidth").GetDouble();
-        var clientHeight = chromeDocument.RootElement.GetProperty("clientHeight").GetDouble();
-        var minimumInset = Math.Max(1, _readerLayout.BodyPadding - 0.75);
-        var leftGuard = flowGuards[0].EnumerateArray().Select(value => value.GetDouble()).ToArray();
-        var rightGuard = flowGuards[1].EnumerateArray().Select(value => value.GetDouble()).ToArray();
-        var topGuard = flowGuards[2].EnumerateArray().Select(value => value.GetDouble()).ToArray();
-        var bottomGuard = flowGuards[3].EnumerateArray().Select(value => value.GetDouble()).ToArray();
-        Require(
-            leftGuard[0] >= -0.01
-            && leftGuard[2] >= minimumInset
-            && clientWidth - rightGuard[0] >= minimumInset
-            && topGuard[1] >= -0.01
-            && topGuard[3] >= minimumInset
-            && bottomGuard[1] >= topGuard[3]
-            && bottomGuard[3] <= clientHeight + 0.01,
-            "Linux continuous vertical flow has an invalid four-edge complete-glyph guard: "
-            + chromeDocument.RootElement);
-        Require(
-            !string.IsNullOrWhiteSpace(
-                chromeDocument.RootElement.GetProperty("safeBoundary").GetString()),
-            "Linux continuous vertical flow did not publish its resolved safe boundary");
         Require(
             chromeDocument.RootElement.GetProperty("publicationTcy").GetString() is "all" or "horizontal",
             "Linux vertical flow overrode publication-authored tate-chu-yoko");
@@ -783,18 +764,140 @@ public partial class MainWindow
             && inline.GetProperty("legacyWrapperCount").GetInt32() == 0
             && inline.GetProperty("syntheticLayoutCount").GetInt32() == 0
             && inline.GetProperty("boundaryOverlapCount").GetInt32() == 0,
-            "Linux continuous vertical flow contains reader-generated inline layout: " + inline);
+            "Linux paginated vertical flow contains reader-generated inline layout: " + inline);
+
+        // The layout switch restored the scroll state captured in the earlier
+        // horizontal phase, so land on the chapter's first page before making
+        // page-geometry assertions.
+        await host.InvokeScriptAsync(
+            ReaderPaginationScripts.CreateChapterBoundaryScript(
+                moveToEnd: false,
+                horizontal: true,
+                vertical: true));
+        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+        await Task.Delay(200, ReaderToken);
+
+        // The paginated page must fill the full content band between the page
+        // masks: every glyph inside the safe area, none clipped by an edge,
+        // and a resolved whole-line page step.
+        var firstEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(host);
+        await SaveKreaderValidationSnapshotAsync(log, "vertical-first-page");
+        Require(
+            firstEdge.GetProperty("glyphCount").GetInt32() > 0,
+            "Linux paginated vertical first page has no visible text: " + firstEdge);
+        Require(
+            firstEdge.GetProperty("partialGlyphCount").GetInt32() == 0,
+            "Linux paginated vertical first page clips glyphs: " + firstEdge);
+        Require(
+            firstEdge.GetProperty("marginDelta").GetDouble() <= 0.5,
+            "Linux paginated vertical first page margins are asymmetric: " + firstEdge);
+        RequireKreaderVerticalFlowInvariants(
+            firstEdge,
+            "Linux paginated vertical first page",
+            requireTopAlignedColumns: true);
+        var pageStep = firstEdge.GetProperty("pageStep").GetDouble();
+        Require(pageStep > 1, "Linux paginated vertical page step was not resolved: " + firstEdge);
+        await log.WriteLineAsync(
+            $"PASS Linux paginated vertical first page fills the content band; step={pageStep:F2}px partialGlyphs=0");
+
+        // The slide/wave transition pipeline needs a frozen bitmap of the
+        // outgoing page. Windows captures one with GDI; Linux must render it
+        // through the native WebKit snapshot API.
+        var snapshot = CurrentReaderHost is IReaderPageSnapshotProvider snapshotProvider
+            ? await snapshotProvider.CaptureVisiblePageAsync(ReaderToken)
+            : null;
+        Require(
+            snapshot is { Length: > 4 }
+            && snapshot[0] == 0x89 && snapshot[1] == 0x50
+            && snapshot[2] == 0x4E && snapshot[3] == 0x47,
+            $"Linux WebKit did not render a visible-page snapshot for slide/wave transitions (bytes={snapshot?.Length ?? 0})");
+        await log.WriteLineAsync($"PASS Linux WebKit visible-page snapshot ({snapshot!.Length} bytes)");
+
+        var firstScroll = Math.Abs(firstEdge.GetProperty("scrollLeft").GetDouble());
+        await TurnReaderPageAsync(1);
+        await Task.Delay(400, ReaderToken);
+        var paged = await ReadKreaderDomMetricsAsync(host);
+        var secondScroll = Math.Abs(paged.GetProperty("scrollLeft").GetDouble());
+        Require(
+            Math.Abs(secondScroll - (firstScroll + pageStep)) <= 1.5,
+            $"Linux paginated vertical API page turn moved {firstScroll:F2} -> {secondScroll:F2}, expected one step of {pageStep:F2}");
+
+        // Click zones mirror in vertical-rl: the left third advances in
+        // classical reading order and the right third goes back.
+        await ClearKreaderValidationSelectionAsync(host);
+        var clickProbe = await host.InvokeScriptAsync("""
+            (() => JSON.stringify({
+              flowMode: window.__kkindleReaderFlowMode,
+              vertical: window.__kkindleReaderVertical,
+              barDisplay: document.getElementById('kkindle-selection-bar')?.style.display || '',
+              hasSelection: !!(window.getSelection?.() && !window.getSelection().isCollapsed),
+              zoneTarget: (() => {
+                const width = window.innerWidth || 0;
+                const height = window.innerHeight || 0;
+                const el = width > 0 && height > 0
+                  ? document.elementFromPoint(width * 0.16, height / 2)
+                  : null;
+                if (!el) return 'none';
+                return el.tagName + '|' + String(el.className || '').slice(0, 60);
+              })()
+            }))();
+            """);
+        await log.WriteLineAsync(
+            "DEBUG click zone probe " + DecodeReaderScriptString(clickProbe ?? string.Empty));
+        await ClickReaderPageZoneAsync(host, leftZone: true);
+        await Task.Delay(900, ReaderToken);
+        var clickedForward = await ReadKreaderDomMetricsAsync(host);
+        Require(
+            Math.Abs(Math.Abs(clickedForward.GetProperty("scrollLeft").GetDouble()) - (secondScroll + pageStep)) <= 1.5,
+            "a vertical click on the left third did not advance one page: " + clickedForward);
+
+        await ClickReaderPageZoneAsync(host, leftZone: false);
+        var clickedBackTrail = await PollReaderScrollTrailAsync(host, samples: 14);
+        var clickedBack = await ReadKreaderDomMetricsAsync(host);
+        await log.WriteLineAsync("DEBUG right-click scroll trail " + clickedBackTrail);
+        Require(
+            Math.Abs(Math.Abs(clickedBack.GetProperty("scrollLeft").GetDouble()) - secondScroll) <= 1.5,
+            "a vertical click on the right third did not go back one page: " + clickedBack);
 
         await host.InvokeScriptAsync("""
             (() => {
-              const el = document.scrollingElement || document.documentElement;
-              const max = Math.max(0, el.scrollWidth - el.clientWidth);
-              window.scrollTo({ left: -Math.min(max, Math.max(96, el.clientWidth / 2)), top: 0, behavior: 'instant' });
+              document.dispatchEvent(new WheelEvent('wheel', {
+                bubbles: true, cancelable: true, deltaY: 120 }));
+              return true;
             })();
             """);
-        await Task.Delay(100, ReaderToken);
-        var scrolled = await ReadKreaderDomMetricsAsync(host);
-        Require(scrolled.GetProperty("scrollLeft").GetDouble() < -1, "Linux continuous vertical flow did not enter the negative X range");
+        var wheeledTrail = await PollReaderScrollTrailAsync(host, samples: 14);
+        var wheeled = await ReadKreaderDomMetricsAsync(host);
+        await log.WriteLineAsync("DEBUG wheel scroll trail " + wheeledTrail);
+        Require(
+            Math.Abs(Math.Abs(wheeled.GetProperty("scrollLeft").GetDouble()) - (secondScroll + pageStep)) <= 1.5,
+            "a forward wheel gesture did not advance one vertical page: " + wheeled);
+
+        var previousAnimation = _readerPageAnimation;
+        try
+        {
+            _readerPageAnimation = ReaderAnimationSlide;
+            await TurnReaderPageAsync(1);
+            await Task.Delay(900, ReaderToken);
+            var slid = await ReadKreaderDomMetricsAsync(host);
+            Require(
+                Math.Abs(Math.Abs(slid.GetProperty("scrollLeft").GetDouble()) - (secondScroll + 2 * pageStep)) <= 2,
+                "a slide-animated vertical page turn did not land on the next page: " + slid);
+
+            _readerPageAnimation = ReaderAnimationWave;
+            await TurnReaderPageAsync(1);
+            await Task.Delay(900, ReaderToken);
+            var waved = await ReadKreaderDomMetricsAsync(host);
+            Require(
+                Math.Abs(Math.Abs(waved.GetProperty("scrollLeft").GetDouble()) - (secondScroll + 3 * pageStep)) <= 2,
+                "a wave-animated vertical page turn did not land on the next page: " + waved);
+        }
+        finally
+        {
+            _readerPageAnimation = previousAnimation;
+        }
+        await log.WriteLineAsync(
+            "PASS vertical page turns via API, mirrored click zones, wheel gestures and slide/wave animations");
 
         var selectionBar = await ShowAndReadKreaderSelectionBarAsync(host);
         Require(selectionBar.GetProperty("writingMode").GetString() == "horizontal-tb", "vertical selection bar inherited vertical writing mode");
@@ -867,8 +970,101 @@ public partial class MainWindow
             && fixtureSpacing.GetProperty("verticalCenteredMarkCenterErrorCount").GetInt32() == 0,
             "dash or ellipsis is not rotated vertically around its cell centre: " + fixtureSpacing);
         await log.WriteLineAsync("DEBUG vertical fixture spacing " + fixtureSpacing);
-        await log.WriteLineAsync("PASS Linux native continuous vertical flow, negative X scrolling, unsplit text and four-edge safe boundaries");
+        // The fixture probe scrolled to the sample instead of a page boundary;
+        // restore the paginated grid before the pause so the screenshot shows
+        // a real reader page.
+        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+        await log.WriteLineAsync(
+            "PASS Linux paginated vertical flow: full-band pages, exact page steps, unsplit inline runs and mirrored click zones");
         await PauseKreaderValidationAtVerticalPageAsync(log);
+    }
+
+    /// <summary>
+    /// Samples the reader scroll position every 150 ms so an interaction test
+    /// can tell "turned late" from "never turned".
+    /// </summary>
+    private async Task<string> PollReaderScrollTrailAsync(IReaderHost host, int samples)
+    {
+        var trail = new List<string>();
+        for (var index = 0; index < samples; index++)
+        {
+            await Task.Delay(150, ReaderToken);
+            var metrics = await ReadKreaderDomMetricsAsync(host);
+            if (metrics.TryGetProperty("scrollLeft", out var scrollLeft))
+                trail.Add(scrollLeft.GetDouble().ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return string.Join(",", trail);
+    }
+
+    private async Task SaveKreaderValidationSnapshotAsync(TextWriter log, string name)
+    {
+        if (Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_SHOT_DIR")
+                is not { Length: > 0 } shotDir
+            || CurrentReaderHost is not IReaderPageSnapshotProvider provider)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(shotDir);
+            var png = await provider.CaptureVisiblePageAsync(ReaderToken);
+            if (png is { Length: > 0 })
+            {
+                var path = Path.Combine(shotDir, $"{name}-{DateTime.Now:HHmmss-fff}.png");
+                await File.WriteAllBytesAsync(path, png);
+                await log.WriteLineAsync($"DEBUG snapshot {name} -> {path} ({png.Length} bytes)");
+            }
+            else
+            {
+                await log.WriteLineAsync($"DEBUG snapshot {name} unavailable");
+            }
+        }
+        catch (Exception exception)
+        {
+            await log.WriteLineAsync($"DEBUG snapshot {name} failed: {exception.Message}");
+        }
+    }
+
+    private static async Task ClickReaderPageZoneAsync(IReaderHost host, bool leftZone)
+    {
+        await host.InvokeScriptAsync($$"""
+            (() => {
+              const width = window.innerWidth || document.documentElement.clientWidth || 0;
+              const height = window.innerHeight || document.documentElement.clientHeight || 0;
+              if (width <= 0 || height <= 0) return false;
+              const x = {{(leftZone ? "width * 0.16" : "width * 0.84")}};
+              const isPageTurnTarget = element =>
+                element instanceof Element
+                && !element.closest('a, button, input, textarea, select, option, label, #kkindle-selection-bar');
+              // A footnote anchor at the probe point swallows the click like a
+              // real reader tap; scan a few heights so the synthetic press
+              // lands on plain prose like the common case does.
+              let point = null;
+              for (const fraction of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+                const y = height * fraction;
+                if (isPageTurnTarget(document.elementFromPoint(x, y))) {
+                  point = { x, y };
+                  break;
+                }
+              }
+              if (point === null) point = { x, y: height / 2 };
+              const selection = window.getSelection?.();
+              if (selection && !selection.isCollapsed) selection.removeAllRanges();
+              const init = {
+                bubbles: true, cancelable: true, composed: true,
+                pointerId: 7, isPrimary: true, button: 0,
+                clientX: point.x, clientY: point.y
+              };
+              // The bridge listeners live on the capture phase of document,
+              // so dispatching on body reaches them with a guaranteed valid
+              // page-turn target even if the zone probe timed out.
+              document.body.dispatchEvent(new PointerEvent('pointerdown', init));
+              document.body.dispatchEvent(new PointerEvent('pointerup', init));
+              return true;
+            })();
+            """);
     }
 
     private async Task<JsonElement> ReadVerticalFixtureSpacingAsync(IReaderHost host)
@@ -2001,6 +2197,8 @@ public partial class MainWindow
               let glyphCount = 0;
               let overflowTopCount = 0;
               let overflowBottomCount = 0;
+              let hangingPunctuationCount = 0;
+              const hangingGlyphs = [];
               let inspectedCharacters = 0;
               let minGlyphLeft = Number.POSITIVE_INFINITY;
               let maxGlyphRight = Number.NEGATIVE_INFINITY;
@@ -2045,15 +2243,44 @@ public partial class MainWindow
                       band.top = Math.min(band.top, rect.top);
                       band.bottom = Math.max(band.bottom, rect.bottom);
                     }
+                    // Kinsoku lets a column's final closing mark (or an
+                    // interval dot at the top edge) hang into the page margin
+                    // instead of starting the next column. That overhang is
+                    // correct vertical typography — the continuous-flow model
+                    // deliberately kept those glyphs visible — so classify a
+                    // small punctuation overhang as a hang, not an overflow.
+                    // Letters, digits and deep non-punctuation intrusions are
+                    // still real overflows: an atomic sideways run escaped
+                    // the page band.
+                    const hangAllowance = Math.max(6, bodyFontSize * 1.3);
+                    const isHangPunctuation = character =>
+                      /[.,:;!?、。，．：；？！…—―·‥〉》」』）〕］｝〟’”~～﹀﹂﹄〕〗〙〛@#%&*_+=]/.test(character);
                     if (rect.top < contentTop - bandTolerance
                         || rect.bottom > contentBottom + bandTolerance) {
-                      if (rect.top < contentTop - bandTolerance) overflowTopCount++;
-                      if (rect.bottom > contentBottom + bandTolerance) overflowBottomCount++;
-                      if (overflowGlyphs.length < 12) {
+                      const hangsTop = rect.top < contentTop - bandTolerance
+                        && contentTop - rect.top <= hangAllowance
+                        && isHangPunctuation(text[index]);
+                      const hangsBottom = rect.bottom > contentBottom + bandTolerance
+                        && rect.bottom - contentBottom <= hangAllowance
+                        && isHangPunctuation(text[index]);
+                      if (rect.top < contentTop - bandTolerance) {
+                        if (hangsTop) hangingPunctuationCount++; else overflowTopCount++;
+                      }
+                      if (rect.bottom > contentBottom + bandTolerance) {
+                        if (hangsBottom) hangingPunctuationCount++; else overflowBottomCount++;
+                      }
+                      if (!hangsTop && !hangsBottom && overflowGlyphs.length < 12) {
                         overflowGlyphs.push({
                           glyph: text[index],
                           left: rect.left,
                           right: rect.right,
+                          top: rect.top,
+                          bottom: rect.bottom
+                        });
+                      }
+                      if ((hangsTop || hangsBottom) && hangingGlyphs.length < 12) {
+                        hangingGlyphs.push({
+                          glyph: text[index],
                           top: rect.top,
                           bottom: rect.bottom
                         });
@@ -2141,6 +2368,8 @@ public partial class MainWindow
                 blockDirection,
                 overflowTopCount,
                 overflowBottomCount,
+                hangingPunctuationCount,
+                hangingGlyphs,
                 overflowGlyphs,
                 bottomAlignedColumnCount,
                 bottomAlignedColumns,

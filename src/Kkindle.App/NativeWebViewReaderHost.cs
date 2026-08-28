@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using Kkindle.Core;
 using System.Runtime.InteropServices;
 using SkiaSharp;
@@ -20,6 +21,9 @@ public sealed class NativeWebViewReaderHost : IReaderHost, IReaderHtmlHost, IRea
         TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _disposed;
     private Uri? _logicalSource;
+    // Native WebKitWebView* for the Linux WPE/WebKitGTK adapter, captured
+    // once the adapter is created. Zero means no snapshot capability.
+    private IntPtr _linuxWebKitView;
 
     public NativeWebViewReaderHost(Action<IntPtr>? configureWindowsWebView2 = null)
     {
@@ -75,27 +79,68 @@ public sealed class NativeWebViewReaderHost : IReaderHost, IReaderHtmlHost, IRea
             return Task.FromResult<byte[]?>(null);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!OperatingSystem.IsWindows())
-            return Task.FromResult<byte[]?>(null);
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                var topLeft = _view.PointToScreen(new Avalonia.Point(0, 0));
+                var scaling = TopLevel.GetTopLevel(_view)?.RenderScaling ?? 1d;
+                var width = Math.Max(1, (int)Math.Ceiling(_view.Bounds.Width * scaling));
+                var height = Math.Max(1, (int)Math.Ceiling(_view.Bounds.Height * scaling));
+                var snapshot = CaptureScreenRectangle(topLeft.X, topLeft.Y, width, height);
+                return Task.FromResult<byte[]?>(snapshot);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return Task.FromResult<byte[]?>(null);
+            }
+        }
+
+        if (OperatingSystem.IsLinux())
+            return CaptureLinuxWebKitPageAsync();
+
+        return Task.FromResult<byte[]?>(null);
+    }
+
+    /// <summary>
+    /// Renders the Linux WebKit view's visible page into a PNG through the
+    /// native snapshot API. The adapter's platform handle is captured when
+    /// the native view is created; a missing handle, library or symbol simply
+    /// disables the bitmap transitions and the pipeline degrades to fade.
+    /// </summary>
+    private async Task<byte[]?> CaptureLinuxWebKitPageAsync()
+    {
+        var view = _linuxWebKitView;
+        if (view == IntPtr.Zero || LinuxWebKitSnapshotLibrary.Instance is null)
+            return null;
 
         try
         {
-            var topLeft = _view.PointToScreen(new Avalonia.Point(0, 0));
-            var scaling = TopLevel.GetTopLevel(_view)?.RenderScaling ?? 1d;
-            var width = Math.Max(1, (int)Math.Ceiling(_view.Bounds.Width * scaling));
-            var height = Math.Max(1, (int)Math.Ceiling(_view.Bounds.Height * scaling));
-            var snapshot = CaptureScreenRectangle(topLeft.X, topLeft.Y, width, height);
-            return Task.FromResult<byte[]?>(snapshot);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
+            // webkit_web_view_get_snapshot must run on the thread owning the
+            // view. Transitions run on the UI thread; keep that guarantee
+            // explicit in case a future caller resumes on a worker thread.
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                return await Dispatcher.UIThread.InvokeAsync(
+                        (Func<Task<byte[]?>>)(() =>
+                            LinuxWebKitPageSnapshotRequest.StartAsync(view, LinuxSnapshotTimeout)))
+                    .ConfigureAwait(true);
+            }
+
+            return await LinuxWebKitPageSnapshotRequest.StartAsync(view, LinuxSnapshotTimeout)
+                .ConfigureAwait(true);
         }
         catch
         {
-            return Task.FromResult<byte[]?>(null);
+            return null;
         }
     }
+
+    private static readonly TimeSpan LinuxSnapshotTimeout = TimeSpan.FromMilliseconds(600);
 
     private static byte[]? CaptureScreenRectangle(int x, int y, int width, int height)
     {
@@ -263,6 +308,23 @@ public sealed class NativeWebViewReaderHost : IReaderHost, IReaderHtmlHost, IRea
         {
             try { _configureWindowsWebView2(platformHandle.CoreWebView2); }
             catch { }
+        }
+        if (OperatingSystem.IsLinux()
+            && e.TryGetPlatformHandle() is { } linuxHandle)
+        {
+            try
+            {
+                _linuxWebKitView = linuxHandle switch
+                {
+                    ILinuxWpePlatformHandle wpe => wpe.WebKitWebView,
+                    IGtkWebViewPlatformHandle gtk => gtk.WebKitWebView,
+                    _ => IntPtr.Zero
+                };
+            }
+            catch
+            {
+                _linuxWebKitView = IntPtr.Zero;
+            }
         }
         _ready.TrySetResult(null);
     }

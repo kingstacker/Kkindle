@@ -7,16 +7,6 @@ internal static class ReaderPlatformLayoutPolicy
     private const double MinimumVerticalPageContentWidth = 240;
     private const double MinimumVerticalPageContentHeight = 180;
 
-    public static ReaderLayoutSettings Normalize(
-        ReaderLayoutSettings settings,
-        bool preferContinuousVerticalFlow)
-    {
-        var normalized = ReaderLayoutDefaults.Normalize(settings);
-        return preferContinuousVerticalFlow && normalized.VerticalWriting
-            ? normalized with { FlowMode = 0, TwoPageMode = false }
-            : normalized;
-    }
-
     /// <summary>
     /// Resolves the physical blank boundary around the Linux fallback page.
     /// The requested book inset is preserved whenever the viewport can hold it;

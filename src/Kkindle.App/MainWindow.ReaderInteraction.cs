@@ -1342,12 +1342,12 @@ public partial class MainWindow
 
     private static ReaderLayoutSettings NormalizeReaderLayoutForPlatform(ReaderLayoutSettings settings)
     {
-        // WebKitGTK's native vertical flow is stable when it remains continuous.
-        // Exact viewport pagination requires glyph probes and edge masks whose
-        // geometry changes with fonts, DPI and native side-panel resizing.
-        return ReaderPlatformLayoutPolicy.Normalize(
-            settings,
-            preferContinuousVerticalFlow: OperatingSystem.IsLinux());
+        // Vertical writing is a paginated layout on every platform, including
+        // Linux WebKitGTK. The vertical page step, edge masks and glyph-phase
+        // probes are calibrated per viewport by VerticalStepExpression, so
+        // fonts, DPI and native side-panel resizing re-resolve the geometry
+        // instead of being hard platform limitations.
+        return ReaderLayoutDefaults.Normalize(settings);
     }
 
     public ObservableCollection<ReaderBookmark> ReaderBookmarks { get; } = [];
@@ -8525,8 +8525,13 @@ public partial class MainWindow
 
         var navigation = direction * (chapterOnly ? 2 : 1);
         Interlocked.Exchange(ref _readerPendingKeyboardNavigation, navigation);
-        while (await _readerPageTurnGate.WaitAsync(0))
+        while (true)
         {
+            // Park until the gate is free instead of dropping the request: a
+            // click or wheel notch that arrives while a page-turn animation
+            // is still playing must still turn once the animation settles,
+            // exactly like the user expects from rapid paging.
+            await _readerPageTurnGate.WaitAsync(ReaderToken);
             try
             {
                 while ((navigation = Interlocked.Exchange(
@@ -8543,10 +8548,9 @@ public partial class MainWindow
                 _readerPageTurnGate.Release();
             }
 
-            // If input arrived between the last exchange and Release, reacquire
-            // and drain it here. If another caller won the gate, that caller is
-            // now the sole consumer. This keeps rapid key-repeat non-recursive
-            // and bounds the backlog to one latest direction.
+            // A newer input may have parked while this drain ran. Reacquire
+            // and honor it; the shared pending slot bounds the backlog to one
+            // latest direction.
             if (Volatile.Read(ref _readerPendingKeyboardNavigation) == 0)
                 return;
         }
@@ -9183,14 +9187,12 @@ public partial class MainWindow
             ReaderStatusText.Text = "PDF 使用页面模式，可用底部进度条或左右按钮翻页。";
             return;
         }
-        var requiredVerticalMode = OperatingSystem.IsLinux() ? "scroll" : "single";
+        var requiredVerticalMode = "single";
         if (_readerLayout.VerticalWriting
             && !string.Equals(tag, requiredVerticalMode, StringComparison.Ordinal))
         {
             SyncReaderFlowMenu();
-            ShowReaderTransientStatus(OperatingSystem.IsLinux()
-                ? "Linux 竖排固定使用连续滚动，以保证 WebKit 排版稳定。"
-                : "竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。");
+            ShowReaderTransientStatus("竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。");
             return;
         }
         var flowMode = tag switch
@@ -9218,13 +9220,12 @@ public partial class MainWindow
         var flowMode = _readerLayout.FlowMode;
         var twoPage = _readerLayout.TwoPageMode;
         var vertical = _readerLayout.VerticalWriting;
-        var continuousVertical = vertical && OperatingSystem.IsLinux();
         ReaderScrollModeItem.IsChecked = flowMode == 0;
         ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage;
         ReaderTwoPageModeItem.IsChecked = flowMode == 1 && twoPage;
-        ReaderScrollModeItem.IsEnabled = !vertical || continuousVertical;
+        ReaderScrollModeItem.IsEnabled = !vertical;
         ReaderTwoPageModeItem.IsEnabled = !vertical;
-        ReaderSinglePageModeItem.IsEnabled = !continuousVertical;
+        ReaderSinglePageModeItem.IsEnabled = true;
         if (ReaderFlowButton is not null)
             ReaderFlowButton.Content = flowMode == 0 ? "滚动" : twoPage ? "双栏" : "单页";
     }

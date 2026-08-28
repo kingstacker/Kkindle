@@ -5,33 +5,17 @@ namespace Kkindle.Tests;
 public sealed class ReaderPlatformLayoutPolicyTests
 {
     [Fact]
-    public void LinuxStableVerticalFlowUsesContinuousSinglePageLayout()
+    public void VerticalWritingIsPaginatedOnEveryPlatform()
     {
-        var settings = new ReaderLayoutSettings(
-            FlowMode: 1,
-            VerticalWriting: true,
-            TwoPageMode: true);
-
-        var normalized = ReaderPlatformLayoutPolicy.Normalize(
-            settings,
-            preferContinuousVerticalFlow: true);
-
-        Assert.True(normalized.VerticalWriting);
-        Assert.Equal(0, normalized.FlowMode);
-        Assert.False(normalized.TwoPageMode);
-    }
-
-    [Fact]
-    public void OtherPlatformsKeepVerticalPaginationPolicy()
-    {
+        // Linux used to force vertical writing back onto a continuous flow;
+        // the calibrated edge masks and glyph-phase probes now paginate it
+        // like every other platform, so the layout defaults decide.
         var settings = new ReaderLayoutSettings(
             FlowMode: 0,
             VerticalWriting: true,
             TwoPageMode: true);
 
-        var normalized = ReaderPlatformLayoutPolicy.Normalize(
-            settings,
-            preferContinuousVerticalFlow: false);
+        var normalized = ReaderLayoutDefaults.Normalize(settings);
 
         Assert.True(normalized.VerticalWriting);
         Assert.Equal(1, normalized.FlowMode);

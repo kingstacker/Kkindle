@@ -2,7 +2,7 @@
 
 > 供后续 AI 和开发者快速接手。本文只记录当前有效状态，不保留已完成的迁移流水账。
 >
-> 更新时间：2026-08-22
+> 更新时间：2026-08-28
 >
 > 本次验证目录：/home/stacker/work_pro/Kkindle
 
@@ -13,7 +13,7 @@
 - 当前开发版本为 0.6.0-dev.6，统一定义在 Directory.Build.props。关于页通过程序集 AssemblyInformationalVersion 显示版本，不再维护 UI 硬编码版本号。
 - 当前工作分支为 `master`，已合并 `origin/codex/fix-calibre-output-profile`，远程为 git@github.com:kingstacker/Kkindle.git。
 - 当前 `global.json` 固定 .NET SDK 10.0.400；Avalonia 主包和桌面包为 12.1.1，Avalonia.Controls.WebView 为 12.1.0。
-- 2026-08-22 验证结果：.NET 10 全解决方案构建 0 警告、0 错误；Windows、可移植及平台公共测试共 276 项全部通过。Linux Debug 版此前已实际通过 EPUB→AZW3 转换，书库中两本测试书均显示 `AZW3 · EPUB`。
+- 2026-08-28 验证结果：.NET 10 全解决方案构建 0 警告、0 错误；可移植测试 324 项全部通过。Linux 真机 Kreader 验证 harness（`KKINDLE_KREADER_VALIDATE=1`）三连通过：分页竖排首页占满正文区、原生 WebKit 页面快照、API/点击区/滚轮/滑动/墨水动画翻页、批注、搜索全部断言通过；动画探针（`KKINDLE_ANIMATION_PROBE=1`）确认 slide/wave 覆盖层在 Linux 真实渲染。
 - Linux Debug 入口为 `src/Kkindle.Desktop.Linux/bin/Debug/net10.0/Kkindle`。调试产物不提交 Git；运行时必须保留同目录的 DLL、PDB、WebView 和资源文件，不能只复制入口文件。
 - Linux 真实桌面启动和 Calibre 转换已验收；Windows/macOS 真实桌面、真实 Kindle 设备和 macOS 签名/公证仍未完整验收。
 
@@ -47,7 +47,7 @@
 - 本地书库支持 EPUB、PDF、MOBI、AZW3 导入，SHA-256 去重，同书多格式合并，元数据/封面编辑、搜索筛选、收藏和分类。
 - Linux 文件管理器拖放支持 `text/uri-list` 与 GNOME 文件拖放格式；拖入文件夹会递归收集 EPUB、PDF、MOBI、AZW3，并去重后导入。
 - Kreader 支持 EPUB、PDF 和 AZW3 临时转 EPUB；包括分页、双栏、滚动、书签、搜索、划线批注、脚注、AI、阅读统计、禅模式及进度恢复。
-- Linux 竖排固定使用 WebKitGTK 原生连续横向滚动：按 Apple Books 的流式竖排模型在内容根级注入 `writing-mode: vertical-rl`、`text-orientation: mixed` 和 `direction: ltr`，保留 EPUB 原始文本节点及出版物自带的 `text-combine`，不拆英文、脚注或 ASCII 标点。正文的字符与词间距使用字体/WebKit 的原生 advance，不人为拉伸 CJK 标点或侧排英文；直排横书内部保持零 tracking。由于 WebKitGTK 配合部分中文字体会让数字和相邻汉字共用绘制起点，未被出版物标记的纯数字按固定规则兼容：1 位正立占一格、2 位直排横书占一格、3 位及以上逐位正立竖排，每格提供完整 `1em` 排版占位且不使用定位或变换；所有兼容字格使用统一的 `vertical-align: baseline`、零外边距/内边距和居中内字形，括号统一使用 Unicode 竖排字形，避免前后边距及物理中心线不一致。验证 EPUB 覆盖 DNA、FPGA、CPU、AI、完整中文标点和 ASCII 标点串，并测量同列无空格单元的 advance 边界与汉字/英文/数字/标点中心线。连续竖排不启用分页字形扫描，而是按完整字列/字格校准滚动位置，并用四个内容感知护栏在每个滚动视口保留用户设定的上下左右留白；护栏只扩展到相邻字形间隙，不裁半个汉字。鼠标滚轮会转换为 WebKit 的负 X 轴字列滚动，目录、搜索、批注和进度恢复使用同一坐标系；提取缓存格式为 68。调试版设置 `KKINDLE_VERTICAL_DEBUG_BOXES=1` 时会显示外层字格、内层字形和原生字符 Range 外框。
+- Linux 竖排与其他平台一样使用分页单页布局：内容根级注入 `writing-mode: vertical-rl`、`text-orientation: mixed` 和 `direction: ltr`，保留 EPUB 原始文本节点及出版物自带的 `text-combine`，不拆英文、脚注或 ASCII 标点。正文的字符与词间距使用字体/WebKit 的原生 advance，不人为拉伸 CJK 标点或侧排英文。由于 WebKitGTK 配合部分中文字体会让数字和相邻汉字共用绘制起点，未被出版物标记的纯数字按固定规则兼容：1 位正立占一格、2 位直排横书占一格、3 位及以上逐位正立竖排，每格提供完整 `1em` 排版占位且不使用定位或变换；括号统一使用 Unicode 竖排字形。分页几何由 `VerticalStepExpression` 按视口实时校准：整字列页步长 + 字形探针把两侧遮罩对齐到真实列间隙，页面占满正文区且不裁半个汉字；左侧遮罩是真实 DOM 节点（WebKitGTK 对 html 伪元素的绘制顺序不可靠），列尾禁则悬挂标点（`。〉` 等）允许伸入上下页边距且保持可见。翻页沿负 X 轴整页步进：鼠标左/右三分之一点击区按竖排镜像（左=下一页）、滚轮 120 delta 累积翻页、`TurnReaderPageAsync` 的共享 pending 槽会把动画期间的后续输入排队而非丢弃。翻页动画三档全可用：淡入淡出走 JS opacity；左右滑动与电子墨水刷新通过 `LinuxWebKitSnapshotLibrary` P/Invoke `webkit_web_view_get_snapshot`（WPE/WebKitGTK 二选一，符号缺失时自动回退 fade）取旧页位图后走与 Windows 相同的覆盖层管线。目录、搜索、批注和进度恢复使用同一负 X 坐标系；提取缓存格式为 68。调试版设置 `KKINDLE_VERTICAL_DEBUG_BOXES=1` 时会显示外层字格、内层字形和原生字符 Range 外框。
 - Linux 文本回退阅读器支持跨页选择同步、批注范围渲染、划线样式、选择工具栏轻触关闭和分页/滚动交互；WebView 自带选择工具栏不再与 Avalonia 工具栏重复显示。
 - 极简目录使用细线矩形三横图标，收起/展开按钮与字体按钮视觉对齐。
 - 极简目录章节浮窗异步读取 EPUB 章节正文前 4 个非空行；按章节路径缓存，切换书籍时清空。PDF 只显示页码。
@@ -128,7 +128,7 @@
     dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj --no-restore
     dotnet build src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj --no-restore
 
-结果：237 项测试通过；Linux Debug 构建 0 警告、0 错误。2026-08-22 还通过 Debug UI 使用系统 `ebook-convert` 实际完成两本 EPUB→AZW3 转换，并额外验证了配置指向 `calibre` 主程序时的自动纠正。
+结果：324 项测试通过；Linux Debug 构建 0 警告、0 错误。2026-08-22 还通过 Debug UI 使用系统 `ebook-convert` 实际完成两本 EPUB→AZW3 转换，并额外验证了配置指向 `calibre` 主程序时的自动纠正。
 
 Windows 验证从临时目录执行绝对项目路径，以确保使用仓库锁定的 SDK：
 
@@ -163,7 +163,7 @@ robocopy 返回码 0 至 7 都表示成功。同步时必须保留目标目录�
 - Linux/macOS 的窗口、字体、WebKit 阅读器、PDF、挂载 Kindle、密钥环和安全弹出尚未真机验收。
 - MTP-only Kindle 只在 Windows 支持；Linux/macOS 只支持文件系统挂载设备。
 - PDF 使用平台 WebView 内置查看器，选择、缩放、点击区域翻页等能力受引擎限制。
-- Linux 竖排只支持连续滚动模式；Windows/macOS 仍保留原有单页竖排策略。
+- Linux 竖排已改为与其他平台一致的分页单页布局；连续竖排的边界护栏脚本保留但默认配置不再触达。
 - Kindle/KFX 字典和书籍不处理 DRM。
 - 当前 Windows 环境没有可用 WSL 发行版，因此只能编译 macOS 项目，不能在本机执行 bash -n scripts/build-macos-release.sh 或验证 .app 签名。
 - Windows/Linux/macOS Rebuild 可能报告 MainWindow.ReaderInteraction.cs 中两个 Linux 文本回退字段未使用的 CS0169 警告；当前不影响构建。

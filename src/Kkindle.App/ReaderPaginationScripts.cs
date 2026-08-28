@@ -459,9 +459,10 @@ internal static class ReaderPaginationScripts
         double horizontalPadding = ReaderPaginationDefaults.HorizontalPadding,
         double maxContentWidth = ReaderLayoutDefaults.DefaultMaxWidth)
     {
-        // Vertical writing never supports a two-page spread. Linux deliberately
-        // keeps it continuous; other platforms can still request the existing
-        // paginated geometry.
+        // Vertical writing never supports a two-page spread. Every platform
+        // uses the same paginated vertical geometry; Linux additionally relies
+        // on real edge-mask nodes because WebKitGTK can paint html
+        // pseudo-elements below the body stacking context.
         if (vertical) twoPage = false;
 
         var topPadding = Format(ReaderPaginationDefaults.TopPadding);
