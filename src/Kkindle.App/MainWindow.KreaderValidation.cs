@@ -1363,8 +1363,11 @@ public partial class MainWindow
               let singlePunctuationCenterErrorCount = 0;
               for (const span of singlePunctuation) {
                 const style = getComputedStyle(span);
+                // The cell shares the parent's vertical-rl flow (the
+                // orthogonal horizontal-tb cells collapsed WebKitGTK line
+                // boxes); center alignment along both axes is what matters.
                 if (style.display !== 'inline-grid'
-                    || style.writingMode !== 'horizontal-tb'
+                    || style.writingMode !== 'vertical-rl'
                     || style.alignItems !== 'center'
                     || style.justifyItems !== 'center')
                   singlePunctuationStyleErrorCount++;
@@ -2453,7 +2456,14 @@ public partial class MainWindow
                 const style = getComputedStyle(run);
                 const isTcy = run.classList.contains('kkindle-linux-vertical-tcy');
                 const isSingle = run.classList.contains('kkindle-linux-vertical-single');
-                if (style.writingMode !== 'horizontal-tb')
+                // Compatibility cells must share the parent's vertical-rl
+                // flow. The historical horizontal-tb cells were orthogonal
+                // atomic boxes and WebKitGTK sized their line box to the
+                // 1em cell, collapsing the column pitch and clipping the
+                // chapter — the geometric pitch guard in
+                // RequireKreaderVerticalFlowInvariants watches for a
+                // regression of that bug.
+                if (style.writingMode !== 'vertical-rl')
                   linuxNumericStyleErrorCount++;
                 if (style.position === 'absolute'
                     || (style.transform && style.transform !== 'none'))
@@ -2469,15 +2479,16 @@ public partial class MainWindow
               }
               for (const run of cjkSeparatedNumbers) {
                 const style = getComputedStyle(run);
+                // Only the inline axis (top/bottom in vertical-rl) must stay
+                // margin-free: a front or back gap at the Han→number boundary
+                // moves the number off the shared vertical rhythm. The block
+                // axis now carries the deliberate symmetric pitch margin that
+                // keeps the cell's line-box extent on the paragraph grid.
                 const margins = [
                   style.marginTop,
-                  style.marginRight,
                   style.marginBottom,
-                  style.marginLeft,
                   style.marginInlineStart,
-                  style.marginInlineEnd,
-                  style.marginBlockStart,
-                  style.marginBlockEnd
+                  style.marginInlineEnd
                 ].map(value => Math.abs(parseFloat(value) || 0));
                 if (margins.some(margin => margin > 1.05))
                   cjkNumberSpacingErrorCount++;
@@ -2971,6 +2982,33 @@ public partial class MainWindow
             && edge.GetProperty("overflowBottomCount").GetInt32() == 0,
             $"{context}: glyphs are painted outside the column band, so an atomic "
             + "sideways run overflows the page: " + edge);
+        // Column pitch regression guard. The WebKitGTK orthogonal-cell bug
+        // collapsed every line box to the 1em cell height: the visible
+        // signature is adjacent glyph columns pitched at roughly 0.55× the
+        // configured line height. Ink-band edges of centred cells and heading
+        // margins legitimately measure between 0.7× and 2× the grid, so only
+        // a pitch below 0.7× is a collapse.
+        var lineHeight = edge.GetProperty("lineHeight").GetDouble();
+        var columnLefts = edge.GetProperty("columnLefts").EnumerateArray()
+            .Select(value => value.GetDouble())
+            .ToArray();
+        if (lineHeight > 1 && columnLefts.Length > 2)
+        {
+            var collapsedPitches = 0;
+            double? worstPitch = null;
+            for (var index = 1; index < columnLefts.Length; index++)
+            {
+                var pitch = columnLefts[index] - columnLefts[index - 1];
+                if (pitch <= 0.5 || pitch >= lineHeight * 0.7) continue;
+                collapsedPitches++;
+                worstPitch = worstPitch is { } worst ? Math.Min(worst, pitch) : pitch;
+            }
+            Require(
+                collapsedPitches == 0,
+                $"{context}: {collapsedPitches} column pitches collapsed below the "
+                + $"{lineHeight:F1}px line grid (worst {worstPitch:F1}px) — the WebKitGTK "
+                + "orthogonal-cell line-box regression returned: " + edge);
+        }
         if (requireTopAlignedColumns)
         {
             Require(

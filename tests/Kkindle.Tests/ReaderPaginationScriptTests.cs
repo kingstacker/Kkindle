@@ -422,15 +422,19 @@ public sealed class ReaderPaginationScriptTests
     {
         var css = ReaderPaginationScripts.VerticalTypographyGridCss;
 
-        Assert.Contains(":has(> :where(p, div, section, article, main", css, StringComparison.Ordinal);
-        Assert.Contains("display: contents !important", css, StringComparison.Ordinal);
+        // Publisher wrappers stay real boxes whose block-size is reset onto
+        // the paragraph grid. Flattening them with display:contents tripped a
+        // WebKitGTK line-box bug: once orthogonal inline cells appeared in a
+        // flattened wrapper, every line box drifted downward by one cell and
+        // the rest of the chapter was clipped below the viewport.
+        Assert.DoesNotContain("display: contents !important", css, StringComparison.Ordinal);
+        Assert.Contains("block-size: auto !important", css, StringComparison.Ordinal);
         Assert.Contains(
             ":not(#kkindle-selection-bar, #kkindle-selection-bar *)",
             css,
             StringComparison.Ordinal);
         Assert.Contains("margin-block: 0 !important", css, StringComparison.Ordinal);
         Assert.Contains("padding-block: 0 !important", css, StringComparison.Ordinal);
-        Assert.Contains("block-size: auto !important", css, StringComparison.Ordinal);
         Assert.Contains("margin-block: 1lh !important", css, StringComparison.Ordinal);
         Assert.Contains("font-size: 1rem !important", css, StringComparison.Ordinal);
         Assert.Contains(".kkindle-chapter-heading", css, StringComparison.Ordinal);

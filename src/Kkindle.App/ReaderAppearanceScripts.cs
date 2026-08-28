@@ -84,8 +84,13 @@ internal static class ReaderAppearanceScripts
           grid-template-rows: minmax(0, 1fr) !important;
           align-items: center !important;
           justify-items: center !important;
-          writing-mode: horizontal-tb !important;
-          -webkit-writing-mode: horizontal-tb !important;
+          /* The cells must stay in the parent's vertical-rl flow. An earlier
+             revision forced horizontal-tb here, but orthogonal atomic boxes
+             make WebKitGTK size the whole line box to the 1em cell height
+             (dropping the paragraph strut): every column collapsed to one em
+             and dense chapters marched downward and clipped mid-sentence.
+             Same-flow inline grids restore the strut, and center alignment
+             keeps the glyph identical in both writing modes. */
           width: 1em !important;
           height: 1em !important;
           line-height: 1em !important;
@@ -95,6 +100,7 @@ internal static class ReaderAppearanceScripts
           white-space: nowrap !important;
           letter-spacing: 0 !important;
           margin: 0 !important;
+          margin-block: calc((var(--kkindle-vertical-line-pitch, 1.8em) - 1em) / 2) !important;
           padding: 0 !important;
           overflow: hidden !important;
         }
@@ -169,8 +175,6 @@ internal static class ReaderAppearanceScripts
           grid-template-columns: minmax(0, 1fr) !important;
           grid-template-rows: minmax(0, 1fr) !important;
           place-items: center !important;
-          writing-mode: horizontal-tb !important;
-          -webkit-writing-mode: horizontal-tb !important;
           width: 1em !important;
           height: 1em !important;
           line-height: 1em !important;
@@ -182,6 +186,7 @@ internal static class ReaderAppearanceScripts
           word-spacing: 0 !important;
           text-indent: 0 !important;
           margin: 0 !important;
+          margin-block: calc((var(--kkindle-vertical-line-pitch, 1.8em) - 1em) / 2) !important;
           padding: 0 !important;
         }
         body .kkindle-linux-vertical-tcy-inner {
@@ -205,11 +210,12 @@ internal static class ReaderAppearanceScripts
         }
         body .kkindle-linux-vertical-number {
           display: inline-flex !important;
-          flex-direction: column !important;
+          /* Stay in the parent's vertical-rl flow (see the cell note above):
+             the inline axis is vertical, so a row stacks the digit cells
+             from top to bottom inside the one-em column. */
+          flex-direction: row !important;
           align-items: center !important;
           justify-content: flex-start !important;
-          writing-mode: horizontal-tb !important;
-          -webkit-writing-mode: horizontal-tb !important;
           width: 1em !important;
           height: auto !important;
           line-height: 1em !important;
@@ -219,6 +225,7 @@ internal static class ReaderAppearanceScripts
           word-spacing: 0 !important;
           white-space: nowrap !important;
           margin: 0 !important;
+          margin-block: calc((var(--kkindle-vertical-line-pitch, 1.8em) - 1em) / 2) !important;
           padding: 0 !important;
           box-sizing: border-box !important;
         }
@@ -236,7 +243,7 @@ internal static class ReaderAppearanceScripts
           .kkindle-linux-vertical-single,
           .kkindle-linux-vertical-number,
           .kkindle-linux-vertical-tcy).kkindle-cjk-before-number {
-          margin: 0 !important;
+          margin-inline: 0 !important;
         }
         /* Keep the complete footnote marker, including its brackets, in one
            upright body-text cell. Only the marker ink is reduced; the outer
@@ -246,8 +253,6 @@ internal static class ReaderAppearanceScripts
           grid-template-columns: minmax(0, 1fr) !important;
           grid-template-rows: minmax(0, 1fr) !important;
           place-items: center !important;
-          writing-mode: horizontal-tb !important;
-          -webkit-writing-mode: horizontal-tb !important;
           width: 1em !important;
           height: 1em !important;
           line-height: 1em !important;
@@ -258,6 +263,7 @@ internal static class ReaderAppearanceScripts
           word-spacing: 0 !important;
           text-decoration: none !important;
           margin: 0 !important;
+          margin-block: calc((var(--kkindle-vertical-line-pitch, 1.8em) - 1em) / 2) !important;
           padding: 0 !important;
         }
         body .kkindle-linux-vertical-footnote-inner {
@@ -302,8 +308,6 @@ internal static class ReaderAppearanceScripts
           grid-template-rows: minmax(0, 1fr) !important;
           align-items: center !important;
           justify-items: center !important;
-          writing-mode: horizontal-tb !important;
-          -webkit-writing-mode: horizontal-tb !important;
           width: 1em !important;
           height: 1em !important;
           box-sizing: border-box !important;
@@ -313,6 +317,7 @@ internal static class ReaderAppearanceScripts
           white-space: nowrap !important;
           letter-spacing: 0 !important;
           margin: 0 !important;
+          margin-block: calc((var(--kkindle-vertical-line-pitch, 1.8em) - 1em) / 2) !important;
           padding: 0 !important;
           overflow: hidden !important;
         }

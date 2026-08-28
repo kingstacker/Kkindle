@@ -11,10 +11,13 @@ internal static class ReaderPaginationScripts
         // acquire their own fractional block-size (the real Knut chapter was
         // 16.3125px), shifting all following paragraph columns by half a line
         // even though each paragraph itself advances on the 34.56px grid.
-        // Flatten only structural wrappers that contain block children; divs
-        // that directly carry prose keep their paragraph boundary.
-        "\nbody :where(div, section, article, main):not(#kkindle-selection-bar, #kkindle-selection-bar *):has(> :where(p, div, section, article, main, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6)) { display: contents !important; }"
-        + "\nbody :where(p, div, section, article, main, ul, ol, li, blockquote, pre, table, thead, tbody, tr, td, th, h1, h2, h3, h4, h5, h6):not(#kkindle-selection-bar, #kkindle-selection-bar *) { margin-block: 0 !important; padding-block: 0 !important; border-block-width: 0 !important; block-size: auto !important; min-block-size: 0 !important; max-block-size: none !important; }"
+        // The block-size reset below neutralizes that drift while keeping the
+        // wrappers as real boxes: flattening them with display:contents used
+        // to trip a WebKitGTK line-box bug once orthogonal (horizontal-tb)
+        // compatibility cells appear in the same paragraph — every line box
+        // then drifts downward by one cell and the rest of the chapter is
+        // clipped below the viewport.
+        "\nbody :where(p, div, section, article, main, ul, ol, li, blockquote, pre, table, thead, tbody, tr, td, th, h1, h2, h3, h4, h5, h6):not(#kkindle-selection-bar, #kkindle-selection-bar *) { margin-block: 0 !important; padding-block: 0 !important; border-block-width: 0 !important; block-size: auto !important; min-block-size: 0 !important; max-block-size: none !important; }"
         + "\nbody :where(h1, h2, h3, h4, h5, h6):not(#kkindle-selection-bar, #kkindle-selection-bar *) { font-size: 1rem !important; line-height: inherit !important; margin-block: 1lh !important; padding-block: 0 !important; block-size: auto !important; min-block-size: 0 !important; max-block-size: none !important; }"
         // Calibre often serializes a chapter title as a plain first <p> with
         // nested large-font spans instead of a semantic heading. The host

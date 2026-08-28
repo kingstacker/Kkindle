@@ -1844,7 +1844,7 @@ public partial class MainWindow
         bool showVerticalDebugBoxes)
     {
         var builder = new StringBuilder();
-        builder.Append($"\nhtml {{ font-size: {Format(fontScale * 100)}% !important; text-rendering: optimizeLegibility; }}");
+        builder.Append($"\nhtml {{ font-size: {Format(fontScale * 100)}% !important; text-rendering: optimizeLegibility; --kkindle-vertical-line-pitch: {Format(lineHeight)}em; }}");
         builder.Append("\nhtml, body { background: #FFFFFF !important; color: #111111 !important; border: 0 !important; outline: 0 !important; box-shadow: none !important; }");
         if (OperatingSystem.IsLinux())
             builder.Append("\nhtml, body { visibility: visible !important; opacity: 1 !important; }");
@@ -5927,6 +5927,31 @@ public partial class MainWindow
                   return JSON.stringify({
                     innerWidth: window.innerWidth || 0,
                     visualWidth: window.visualViewport?.width || 0,
+                    rootFontSize: rootStyle.fontSize,
+                    bodyFontSize: bodyStyle.fontSize,
+                    blockFontSize: textStyle ? textStyle.fontSize : '',
+                    blockLineHeight: textStyle ? textStyle.lineHeight : '',
+                    blockTag: textNode ? (textNode.closest('p,div,li,blockquote,td,th')?.tagName || textNode.tagName) : '',
+                    paragraphCount: body.querySelectorAll('p').length,
+                    firstParagraphFontSize: (() => {
+                      const p = body.querySelector('p');
+                      return p ? getComputedStyle(p).fontSize + '/' + getComputedStyle(p).lineHeight : '';
+                    })(),
+                    compatCellCount: body.querySelectorAll(
+                      '.kkindle-linux-vertical-single, .kkindle-linux-vertical-tcy, '
+                        + '.kkindle-linux-vertical-number, .kkindle-linux-vertical-cjk, '
+                        + '.kkindle-linux-vertical-pair-punctuation, .kkindle-linux-vertical-single-punctuation, '
+                        + '.kkindle-linux-vertical-footnote').length,
+                    firstCellBox: (() => {
+                      const cell = body.querySelector(
+                        '.kkindle-linux-vertical-single, .kkindle-linux-vertical-pair-punctuation, '
+                          + '.kkindle-linux-vertical-cjk');
+                      if (!cell) return null;
+                      const style = getComputedStyle(cell);
+                      const rect = cell.getBoundingClientRect();
+                      return style.writingMode + ' ' + style.display + ' w' + rect.width.toFixed(1)
+                        + ' h' + rect.height.toFixed(1) + ' lh' + style.lineHeight;
+                    })(),
                     rootClientWidth: root.clientWidth || 0,
                     clientWidth: el.clientWidth || 0,
                     clientHeight: el.clientHeight || 0,
