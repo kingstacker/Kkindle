@@ -332,7 +332,17 @@ public partial class MainWindow
                     return false;
                 var loaded = await completion.Task.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken);
                 if (loaded)
+                {
+                    // The Linux WebView can finish navigation while Avalonia
+                    // is still assigning the final reader width. Configuring
+                    // and restoring against that transient narrow viewport
+                    // maps a correct saved pixel to the wrong vertical page,
+                    // then visibly jumps when the host expands. Keep the
+                    // document hidden until the native and DOM viewports agree.
+                    if (ReferenceEquals(host, CurrentReaderHost))
+                        _ = await WaitForReaderViewportToMatchHostAsync(host, cancellationToken);
                     await ConfigureReaderHostAsync(host, cancellationToken);
+                }
                 return loaded;
             }
             finally

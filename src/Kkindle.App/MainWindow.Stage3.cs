@@ -325,6 +325,7 @@ public partial class MainWindow
         await _readerData.InitializeAsync(cancellationToken);
         await _deviceModelStore.InitializeAsync(cancellationToken);
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
+        LoadReaderVerticalDebugBoxesSetting();
         await DetectCalibreAtStartupAsync(cancellationToken);
         _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
         _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
@@ -3734,6 +3735,7 @@ public partial class MainWindow
             await _library.InitializeAsync(_lifetimeCancellation.Token);
             await _readerData.InitializeAsync(_lifetimeCancellation.Token);
             _appSettings = await _appSettingsStore.LoadAsync(_lifetimeCancellation.Token);
+            LoadReaderVerticalDebugBoxesSetting();
             _readerAiSettings = result.AiSettings;
             _kindleEmailSettings = result.KindleEmailSettings;
             PopulateSettingsControls();

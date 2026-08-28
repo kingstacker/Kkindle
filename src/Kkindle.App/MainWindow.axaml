@@ -3837,7 +3837,7 @@
                             </ScrollViewer>
                             <Border x:Name="ReaderLinuxTextFallbackPagedRoot"
                                     IsVisible="False"
-                                    Padding="24,18">
+                                    Padding="24">
                                 <Grid x:Name="ReaderLinuxTextFallbackPagedContent"
                                       ColumnDefinitions="*,28,*">
                                     <Image x:Name="ReaderLinuxTextFallbackPageImageLeft"
@@ -4533,6 +4533,18 @@
                                           Content="竖排排版（全局，仅支持单页）"
                                           FontSize="12"
                                           IsCheckedChanged="ReaderVerticalWritingCheck_IsCheckedChanged" />
+                                <StackPanel x:Name="ReaderVerticalDebugBoxesPanel" Spacing="2">
+                                    <CheckBox x:Name="ReaderVerticalDebugBoxesCheck"
+                                              Classes="readerLayoutCheck"
+                                              Content="显示竖排调试外框"
+                                              FontSize="12"
+                                              IsCheckedChanged="ReaderVerticalDebugBoxesCheck_IsCheckedChanged" />
+                                    <TextBlock Margin="26,0,0,0"
+                                               Text="绿色为汉字格，红色为数字/标点兼容格，蓝色为内部字形框。"
+                                               FontSize="10"
+                                               Foreground="{StaticResource MutedInkBrush}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
                                 <CheckBox x:Name="ReaderParagraphIndentCheck"
                                           Classes="readerLayoutCheck"
                                           Content="正文段落起始缩进两个字（全局）"

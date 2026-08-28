@@ -154,15 +154,18 @@ internal static class ReaderPaginationScripts
         // mask outward when the current page has a wider glyph column crossing
         // that edge. A translation alone cannot solve pages that contain a
         // partial column at both edges; the mask must land in the next real
-        // inter-column gap or the user sees a clipped half-glyph.
+        // inter-column gap or the user sees a clipped half-glyph. The probe is
+        // deliberately one-sided: a sideways number whose ink pokes across the
+        // cut without straddling it to the tolerance still clips, and rendered
+        // rectangles can snap past the exact mathematical boundary.
         + "  let maskLeft = safeLeft;"
         + "  let maskRight = safeRight;"
         + "  const maskRects = visibleRects.map(rect => ({ left: rect.left + contentShift, right: rect.right + contentShift }));"
         + "  for (let pass = 0; pass < 4; pass++) {"
         + "   let changed = false;"
         + "   for (const rect of maskRects) {"
-        + "    if (rect.left < maskLeft - tolerance && rect.right > maskLeft + tolerance) { maskLeft = rect.right + clearance; changed = true; }"
-        + "    if (rect.left < maskRight - tolerance && rect.right > maskRight + tolerance) { maskRight = rect.left - clearance; changed = true; }"
+        + "    if (rect.left < maskLeft - tolerance && rect.right > maskLeft) { maskLeft = rect.right + clearance; changed = true; }"
+        + "    if (rect.right > maskRight + tolerance && rect.left < maskRight) { maskRight = rect.left - clearance; changed = true; }"
         + "   }"
         + "   if (!changed) break;"
         + "  }"
@@ -196,6 +199,259 @@ internal static class ReaderPaginationScripts
         + " return resolvedStep;"
         + " })()";
 
+    // Continuous vertical flow still needs a complete glyph column at each
+    // viewport edge. The native vertical-rl stream advances by the computed
+    // line-height, while the configured side padding is usually not an exact
+    // multiple of that advance. Center the nearest whole number of columns in
+    // the viewport so the final column cannot be cut by the WebView boundary.
+    public const string ContinuousVerticalBoundaryScript = """
+        (() => {
+          const root = document.scrollingElement || document.documentElement;
+          const body = document.body;
+          if (!root || !body || window.__kkindleReaderVertical !== true) return false;
+          const viewport = root.clientWidth
+            || document.documentElement.clientWidth
+            || window.innerWidth
+            || 0;
+          const viewportHeight = root.clientHeight
+            || document.documentElement.clientHeight
+            || window.innerHeight
+            || 0;
+          if (!(viewport > 0) || !(viewportHeight > 0)) return false;
+
+          // Re-read all four stylesheet insets on every layout pass. Otherwise
+          // an earlier calibration would override a newly selected book margin.
+          body.style.removeProperty('padding-left');
+          body.style.removeProperty('padding-right');
+          body.style.removeProperty('padding-top');
+          body.style.removeProperty('padding-bottom');
+          void body.offsetWidth;
+          const style = getComputedStyle(body);
+          const line = parseFloat(style.lineHeight)
+            || parseFloat(style.fontSize)
+            || 0;
+          const em = parseFloat(style.fontSize) || 0;
+          const configuredLeft = parseFloat(style.paddingLeft) || 0;
+          const configuredRight = parseFloat(style.paddingRight) || 0;
+          const configuredTop = parseFloat(style.paddingTop) || 0;
+          const configuredBottom = parseFloat(style.paddingBottom) || 0;
+          if (!(line > 0) || !(em > 0)) return false;
+
+          // Never round upward here: doing so can silently shrink a requested
+          // 24px page inset to only a few pixels at unlucky viewport widths.
+          // Floor leaves the configured blank boundary intact and distributes
+          // only the sub-column remainder between the two physical sides.
+          const available = Math.max(line, viewport - configuredLeft - configuredRight);
+          const columnCount = Math.max(1, Math.floor(available / line));
+          const blockRemainder = Math.max(0, available - columnCount * line);
+          const left = configuredLeft + blockRemainder / 2;
+          const right = configuredRight + blockRemainder / 2;
+
+          // The inline (top-to-bottom) band must also contain a whole number
+          // of CJK cells. Keep a small ink guard beyond the requested inset;
+          // Linux font geometry can overhang its nominal one-em cell by about
+          // one device-independent pixel, especially for bottom punctuation.
+          const inkGuard = Math.max(3, Math.min(4, em * 0.18));
+          const inlineAdvance = Math.max(em, line);
+          const inlineAvailable = Math.max(
+            inlineAdvance,
+            viewportHeight - configuredTop - configuredBottom - inkGuard * 2);
+          const rowCount = Math.max(1, Math.floor(inlineAvailable / inlineAdvance));
+          const inlineRemainder = Math.max(
+            0,
+            inlineAvailable - rowCount * inlineAdvance);
+          const top = configuredTop + inkGuard + inlineRemainder / 2;
+          const bottom = configuredBottom + inkGuard + inlineRemainder / 2;
+
+          body.style.setProperty('padding-left', left + 'px', 'important');
+          body.style.setProperty('padding-right', right + 'px', 'important');
+          body.style.setProperty('padding-top', top + 'px', 'important');
+          body.style.setProperty('padding-bottom', bottom + 'px', 'important');
+          void body.offsetWidth;
+
+          // vertical-rl ends at the physical left. Extend that trailing inset
+          // to a whole line pitch so the last reachable position uses the same
+          // grid phase and blank boundary as every intermediate position.
+          const naturalMax = Math.max(0, root.scrollWidth - viewport);
+          const alignedMax = naturalMax > 0
+            ? Math.ceil(Math.max(0, naturalMax - 0.5) / line) * line
+            : 0;
+          const trailing = Math.max(0, alignedMax - naturalMax);
+          body.style.setProperty('padding-left', (left + trailing) + 'px', 'important');
+          void body.offsetWidth;
+
+          // Body padding protects only the two ends of a continuous chapter.
+          // While the middle of that chapter is scrolled into view, real text
+          // columns can still occupy the physical margin area. Four fixed,
+          // content-aware guards preserve the requested blank boundary in
+          // every viewport. Their edges move outward to the next glyph gap,
+          // so a guard hides a complete column/cell instead of slicing ink.
+          const guardIds = [
+            'kkindle-vertical-flow-guard-left',
+            'kkindle-vertical-flow-guard-right',
+            'kkindle-vertical-flow-guard-top',
+            'kkindle-vertical-flow-guard-bottom'
+          ];
+          const guards = guardIds.map(id => {
+            let guard = document.getElementById(id);
+            if (!guard) {
+              guard = document.createElement('div');
+              guard.id = id;
+              guard.setAttribute('aria-hidden', 'true');
+              guard.dataset.kkindleReaderChrome = '1';
+              guard.tabIndex = -1;
+              body.appendChild(guard);
+            }
+            guard.style.cssText = [
+              'position:fixed!important', 'display:block!important',
+              'z-index:2147483647!important', 'pointer-events:none!important',
+              'background:#fff!important', 'margin:0!important',
+              'padding:0!important', 'border:0!important',
+              'writing-mode:horizontal-tb!important'
+            ].join(';');
+            return guard;
+          });
+
+          const updateGuards = () => {
+            if (window.__kkindleReaderVertical !== true) return false;
+            const width = root.clientWidth || viewport;
+            const height = root.clientHeight || viewportHeight;
+            let safeLeft = left;
+            let safeRight = width - right;
+            let safeTop = top;
+            let safeBottom = height - bottom;
+            const rects = [];
+            const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+            let inspected = 0;
+            for (let node = walker.nextNode(); node && inspected < 8000; node = walker.nextNode()) {
+              const parent = node.parentElement;
+              if (!parent || parent.closest(
+                    '#kkindle-selection-bar, #kkindle-vertical-debug-boxes, script, style, noscript, '
+                      + '[data-kkindle-reader-chrome="1"]'))
+                continue;
+              const nodeRange = document.createRange();
+              nodeRange.selectNodeContents(node);
+              const nodeIsVisible = Array.from(nodeRange.getClientRects()).some(rect =>
+                rect.right > 0 && rect.left < width
+                && rect.bottom > 0 && rect.top < height);
+              if (!nodeIsVisible) continue;
+              const text = node.nodeValue || '';
+              for (let index = 0; index < text.length && inspected < 8000; index++) {
+                inspected++;
+                if (/\s/.test(text[index])) continue;
+                const range = document.createRange();
+                range.setStart(node, index);
+                range.setEnd(node, index + 1);
+                for (const rect of range.getClientRects()) {
+                  if (rect.right <= 0 || rect.left >= width
+                      || rect.bottom <= 0 || rect.top >= height) continue;
+                  rects.push(rect);
+                }
+              }
+            }
+            const clearance = 1;
+            const requestedRight = width - right;
+            const requestedBottom = height - bottom;
+            for (const rect of rects) {
+              // Test every glyph against the original requested boundary.
+              // Comparing against the already-expanded guard would cascade
+              // through adjacent columns/cells and eventually cover the page.
+              if (rect.left < left && rect.right > 0)
+                safeLeft = Math.max(safeLeft, rect.right + clearance);
+              if (rect.right > requestedRight && rect.left < width)
+                safeRight = Math.min(safeRight, rect.left - clearance);
+              // Never solve an inline-edge crossing by covering the complete
+              // glyph. Every vertical column starts at this same top edge, so
+              // advancing the guard to rect.bottom removes the first visible
+              // character from every column. Retreat the guard toward the
+              // viewport edge instead and keep the whole glyph visible.
+              if (rect.top < top && rect.bottom > 0)
+                safeTop = Math.min(safeTop, Math.max(0, rect.top - clearance));
+              if (rect.bottom > requestedBottom && rect.top < height)
+                safeBottom = Math.max(
+                  safeBottom,
+                  Math.min(height, rect.bottom + clearance));
+            }
+            safeLeft = Math.max(left, Math.min(width - right - 1, safeLeft));
+            safeRight = Math.max(safeLeft + 1, Math.min(width - right, safeRight));
+            safeTop = Math.max(0, Math.min(top, safeTop));
+            safeBottom = Math.max(
+              Math.max(safeTop + 1, height - bottom),
+              Math.min(height, safeBottom));
+            guards[0].style.setProperty('left', '0', 'important');
+            guards[0].style.setProperty('top', '0', 'important');
+            guards[0].style.setProperty('bottom', '0', 'important');
+            guards[0].style.setProperty('width', safeLeft + 'px', 'important');
+            guards[1].style.setProperty('left', safeRight + 'px', 'important');
+            guards[1].style.setProperty('right', '0', 'important');
+            guards[1].style.setProperty('top', '0', 'important');
+            guards[1].style.setProperty('bottom', '0', 'important');
+            guards[2].style.setProperty('left', '0', 'important');
+            guards[2].style.setProperty('right', '0', 'important');
+            guards[2].style.setProperty('top', '0', 'important');
+            guards[2].style.setProperty('height', safeTop + 'px', 'important');
+            guards[3].style.setProperty('left', '0', 'important');
+            guards[3].style.setProperty('right', '0', 'important');
+            guards[3].style.setProperty('top', safeBottom + 'px', 'important');
+            guards[3].style.setProperty('bottom', '0', 'important');
+            document.documentElement.dataset.kkindleVerticalSafeBoundary = [
+              safeLeft.toFixed(2), safeRight.toFixed(2),
+              safeTop.toFixed(2), safeBottom.toFixed(2)
+            ].join('|');
+            return true;
+          };
+          window.__kkindleUpdateContinuousVerticalGuards = updateGuards;
+
+          const snapToGrid = () => {
+            if (window.__kkindleReaderVertical !== true) return false;
+            const maximum = Math.max(0, root.scrollWidth - root.clientWidth);
+            const distance = Math.abs(root.scrollLeft || 0);
+            const target = Math.max(0, Math.min(maximum, Math.round(distance / line) * line));
+            if (Math.abs(distance - target) > 0.35)
+              window.scrollTo({ left: -target, top: 0, behavior: 'instant' });
+            requestAnimationFrame(updateGuards);
+            return true;
+          };
+          window.__kkindleSnapContinuousVerticalBoundary = snapToGrid;
+          window.__kkindleScrollContinuousVerticalBy = delta => {
+            if (window.__kkindleReaderVertical !== true || !Number.isFinite(delta)) return false;
+            const maximum = Math.max(0, root.scrollWidth - root.clientWidth);
+            const current = Math.round(Math.abs(root.scrollLeft || 0) / line) * line;
+            const accumulated = Number(window.__kkindleVerticalWheelRemainder || 0) + delta;
+            const steps = accumulated < 0
+              ? Math.ceil(accumulated / line)
+              : Math.floor(accumulated / line);
+            window.__kkindleVerticalWheelRemainder = accumulated - steps * line;
+            if (steps === 0) return true;
+            const target = Math.max(0, Math.min(maximum, current + steps * line));
+            window.scrollTo({ left: -target, top: 0, behavior: 'instant' });
+            requestAnimationFrame(updateGuards);
+            return true;
+          };
+          if (window.__kkindleContinuousVerticalSnapBound !== true) {
+            window.__kkindleContinuousVerticalSnapBound = true;
+            let pending = 0;
+            window.addEventListener('scroll', () => {
+              if (window.__kkindleReaderVertical !== true) return;
+              if (pending) clearTimeout(pending);
+              pending = setTimeout(() => {
+                pending = 0;
+                window.__kkindleSnapContinuousVerticalBoundary?.();
+              }, 80);
+            }, { passive: true });
+          }
+          body.dataset.kkindleVerticalFlowBoundary = [
+            viewport.toFixed(2), viewportHeight.toFixed(2),
+            line.toFixed(2), em.toFixed(2),
+            left.toFixed(2), right.toFixed(2),
+            top.toFixed(2), bottom.toFixed(2), trailing.toFixed(2)
+          ].join('|');
+          snapToGrid();
+          requestAnimationFrame(updateGuards);
+          return true;
+        })();
+        """;
+
     public static string CreateFlowCss(
         bool pagination,
         bool vertical,
@@ -203,21 +459,10 @@ internal static class ReaderPaginationScripts
         double horizontalPadding = ReaderPaginationDefaults.HorizontalPadding,
         double maxContentWidth = ReaderLayoutDefaults.DefaultMaxWidth)
     {
-        // Vertical writing has one supported geometry: one paginated column
-        // per viewport. Defend this boundary even when a stale caller passes
-        // the old scroll/two-page combination.
-        if (vertical)
-        {
-            pagination = true;
-            twoPage = false;
-        }
-
-        if (!pagination)
-        {
-            return OperatingSystem.IsLinux()
-                ? "html { width: 100% !important; height: 100% !important; min-height: 0 !important; overflow-x: hidden !important; overflow-y: auto !important; writing-mode: horizontal-tb !important; } body { min-height: 100% !important; margin: 0 !important; overflow: visible !important; column-width: auto !important; column-count: auto !important; column-gap: normal !important; writing-mode: horizontal-tb !important; }"
-                : "html, body { min-height: 100%; overflow-x: hidden !important; } body { column-width: auto !important; column-count: auto !important; column-gap: normal !important; writing-mode: horizontal-tb !important; }";
-        }
+        // Vertical writing never supports a two-page spread. Linux deliberately
+        // keeps it continuous; other platforms can still request the existing
+        // paginated geometry.
+        if (vertical) twoPage = false;
 
         var topPadding = Format(ReaderPaginationDefaults.TopPadding);
         var safeHorizontalPadding = double.IsFinite(horizontalPadding)
@@ -235,6 +480,22 @@ internal static class ReaderPaginationScripts
         var horizontalPaddingCss = Format(safeHorizontalPadding);
         var maxContentWidthCss = Format(safeMaxContentWidth);
         var bottomPadding = Format(ReaderPaginationDefaults.BottomPadding);
+
+        if (!pagination)
+        {
+            if (vertical)
+            {
+                // Let WebKitGTK own the vertical line grid. The document grows
+                // naturally toward the left and the root exposes that extent as
+                // a negative scrollLeft range. There are no page masks, glyph
+                // probes, synthetic columns or snapped viewport boundaries.
+                return $"html {{ width: 100% !important; height: 100% !important; min-height: 0 !important; overflow-x: auto !important; overflow-y: hidden !important; overscroll-behavior-x: contain; writing-mode: vertical-rl !important; text-orientation: mixed !important; direction: ltr !important; }}"
+                    + $" body {{ width: max-content !important; min-width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; overflow: visible !important; padding: {topPadding}px {horizontalPaddingCss}px {bottomPadding}px {horizontalPaddingCss}px !important; box-sizing: border-box !important; writing-mode: vertical-rl !important; text-orientation: mixed !important; direction: ltr !important; column-width: auto !important; column-count: auto !important; column-gap: normal !important; max-width: none !important; max-height: 100% !important; }}";
+            }
+            return OperatingSystem.IsLinux()
+                ? "html { width: 100% !important; height: 100% !important; min-height: 0 !important; overflow-x: hidden !important; overflow-y: auto !important; writing-mode: horizontal-tb !important; } body { min-height: 100% !important; margin: 0 !important; overflow: visible !important; column-width: auto !important; column-count: auto !important; column-gap: normal !important; writing-mode: horizontal-tb !important; }"
+                : "html, body { min-height: 100%; overflow-x: hidden !important; } body { column-width: auto !important; column-count: auto !important; column-gap: normal !important; writing-mode: horizontal-tb !important; }";
+        }
         // The distance from one column start to the next must remain exactly
         // one viewport (or half a viewport in a two-page spread). Treat the
         // inter-column gap as the adjoining right + left page margins. Grow
@@ -269,10 +530,15 @@ internal static class ReaderPaginationScripts
                     + " #kkindle-vertical-edge-mask-left { left: 0 !important; top: 0 !important; bottom: 0 !important; width: max(calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-step) - var(--kkindle-vertical-page-side) + var(--kkindle-vertical-origin-shift)), var(--kkindle-vertical-safe-left)) !important; }"
                     + " #kkindle-vertical-edge-mask-right { left: min(calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-side) + var(--kkindle-vertical-origin-shift)), var(--kkindle-vertical-safe-right)) !important; right: 0 !important; top: 0 !important; bottom: 0 !important; }"
                 : string.Empty;
-            return $"html {{ --kkindle-vertical-viewport-width: 100%; --kkindle-vertical-page-side: {responsiveSidePadding}; --kkindle-vertical-page-top: {topPadding}px; --kkindle-vertical-page-bottom: {bottomPadding}px; --kkindle-vertical-page-step: calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-side) - var(--kkindle-vertical-page-side)); --kkindle-vertical-origin-shift: 0px; --kkindle-vertical-content-shift: 0px; --kkindle-vertical-trailing-extent: 0px; --kkindle-vertical-safe-left: 0px; --kkindle-vertical-safe-right: 100000px; width: 100%; height: 100%; overflow: hidden !important; writing-mode: vertical-rl !important; text-orientation: mixed !important; }}"
+            return $"html {{ --kkindle-vertical-viewport-width: 100%; --kkindle-vertical-page-side: {responsiveSidePadding}; --kkindle-vertical-page-top: {topPadding}px; --kkindle-vertical-page-bottom: {bottomPadding}px; --kkindle-vertical-page-step: calc(var(--kkindle-vertical-viewport-width) - var(--kkindle-vertical-page-side) - var(--kkindle-vertical-page-side)); --kkindle-vertical-origin-shift: 0px; --kkindle-vertical-content-shift: 0px; --kkindle-vertical-trailing-extent: 0px; --kkindle-vertical-safe-left: 0px; --kkindle-vertical-safe-right: 100000px; width: 100%; height: 100%; overflow: hidden !important; writing-mode: vertical-rl !important; text-orientation: mixed !important; direction: ltr !important; }}"
                 + $" body {{ width: max-content !important; min-width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; overflow: visible !important;"
                 + $" padding: var(--kkindle-vertical-page-top) calc(var(--kkindle-vertical-page-side) - var(--kkindle-vertical-content-shift)) var(--kkindle-vertical-page-bottom) calc(var(--kkindle-vertical-page-side) + var(--kkindle-vertical-content-shift) + var(--kkindle-vertical-trailing-extent)) !important; box-sizing: border-box !important;"
-                + $" writing-mode: vertical-rl !important; text-orientation: mixed !important;"
+                // `direction: ltr` is load-bearing, not decorative. vertical-rl
+                // already advances columns right-to-left; `direction` selects
+                // the inline axis instead, and rtl would align every partially
+                // filled line to the bottom of its column while leaving the
+                // scrollLeft range unchanged.
+                + $" writing-mode: vertical-rl !important; text-orientation: mixed !important; direction: ltr !important;"
                 + $" column-width: auto !important; column-gap: normal !important; column-fill: balance !important; column-count: auto !important;"
                 + $" max-width: none !important; max-height: 100% !important; }}"
                 // Natural vertical flow is continuous, so a viewport edge can

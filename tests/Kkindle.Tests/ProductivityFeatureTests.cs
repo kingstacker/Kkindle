@@ -32,6 +32,7 @@ public sealed class ProductivityFeatureTests
                 AutoUpdateCheckEnabled = false,
                 AutoConnectDevice = true,
                 CompareKindleLibraryEnabled = false,
+                ReaderVerticalDebugBoxesEnabled = true,
                 LastAutoUpdateCheckAt = new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)),
                 PendingUpdateVersion = "1.2.3",
                 PendingUpdateReleaseNotes = "修复阅读器翻页问题",
@@ -48,6 +49,7 @@ public sealed class ProductivityFeatureTests
             Assert.False(restored.AutoUpdateCheckEnabled);
             Assert.True(restored.AutoConnectDevice);
             Assert.False(restored.CompareKindleLibraryEnabled);
+            Assert.True(restored.ReaderVerticalDebugBoxesEnabled);
             Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)), restored.LastAutoUpdateCheckAt);
             Assert.Equal("1.2.3", restored.PendingUpdateVersion);
             Assert.Equal("修复阅读器翻页问题", restored.PendingUpdateReleaseNotes);

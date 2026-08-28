@@ -292,8 +292,10 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
             titleColumnStart = -1;
         }
 
-        foreach (var unit in ReaderLinuxVerticalTextUnits.Tokenize(text))
+        var units = ReaderLinuxVerticalTextUnits.Tokenize(text);
+        for (var index = 0; index < units.Count; index++)
         {
+            var unit = units[index];
             if (unit.IsLineBreak)
             {
                 CenterCompletedTitleColumn();
@@ -301,13 +303,6 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
                 columnIndex++;
                 paragraphIndentPending = ParagraphIndent;
                 continue;
-            }
-
-            if (rowIndex >= charsPerColumn)
-            {
-                CenterCompletedTitleColumn();
-                rowIndex = 0;
-                columnIndex++;
             }
 
             if (paragraphIndentPending)
@@ -321,6 +316,20 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
                     Math.Max(0, charsPerColumn - 1));
                 paragraphIndentPending = false;
             }
+
+            if (ReaderLinuxVerticalTextUnits.ShouldBreakBefore(
+                    units,
+                    text,
+                    index,
+                    rowIndex,
+                    charsPerColumn))
+            {
+                CenterCompletedTitleColumn();
+                rowIndex = 0;
+                columnIndex++;
+            }
+
+            var visualRows = ReaderLinuxVerticalTextUnits.GetVisualRows(unit, charsPerColumn);
 
             if (columnPitch * (columnIndex + 1) > Bounds.Width + 0.5) break;
 
@@ -336,13 +345,18 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
             {
                 Offset = unit.Offset,
                 Length = unit.Length,
-                Bounds = new Rect(bandLeft, rowIndex * charAdvance, Math.Max(1, columnPitch), charAdvance),
+                Bounds = new Rect(
+                    bandLeft,
+                    rowIndex * charAdvance,
+                    Math.Max(1, columnPitch),
+                    Math.Max(charAdvance, visualRows * charAdvance)),
                 Combined = unit.IsCombined,
-                Rotated = !unit.IsCombined && !IsVerticalUpright(character),
+                Rotated = unit.IsSidewaysRun
+                    || !unit.IsCombined && !IsVerticalUpright(character),
                 IsFootnote = isFootnoteMarker,
                 FootnoteIndex = isFootnoteMarker ? footnoteIndex++ : -1
             });
-            rowIndex++;
+            rowIndex += visualRows;
         }
 
         CenterCompletedTitleColumn();
@@ -425,6 +439,21 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
                     rotation: Math.PI / 2,
                     compressWidth: false);
             }
+            else if (IsPairedPunctuation(character))
+            {
+                // Horizontal fallback shaping has no OpenType vertical bracket
+                // form. Keep the bracket inside the same centred one-em cell
+                // as Han, digits and punctuation. A per-bracket Y offset makes
+                // the opening and closing margins visibly asymmetric.
+                DrawGlyphInCell(
+                    context,
+                    cell,
+                    glyph,
+                    brush,
+                    rotation: 0,
+                    compressWidth: false,
+                    maximumScale: 0.78);
+            }
             else
             {
                 DrawCenteredGlyph(context, cell, glyph, brush);
@@ -445,7 +474,8 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
         FormattedText glyph,
         IBrush brush,
         double rotation,
-        bool compressWidth)
+        bool compressWidth,
+        double maximumScale = 1)
     {
         if (glyph.BuildGeometry(new Point(0, 0)) is not { } geometry)
             return;
@@ -464,7 +494,7 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
             // A 90-degree rotation swaps the source width and height. Keep
             // the scale uniform so punctuation does not become distorted.
             var scale = Math.Min(
-                1d,
+                maximumScale,
                 Math.Min(
                     targetWidth / Math.Max(1, sourceBounds.Height),
                     targetHeight / Math.Max(1, sourceBounds.Width)));
@@ -473,13 +503,13 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
         }
         else if (compressWidth)
         {
-            scaleX = Math.Min(1d, targetWidth / Math.Max(1, sourceBounds.Width));
-            scaleY = Math.Min(1d, targetHeight / Math.Max(1, sourceBounds.Height));
+            scaleX = Math.Min(maximumScale, targetWidth / Math.Max(1, sourceBounds.Width));
+            scaleY = Math.Min(maximumScale, targetHeight / Math.Max(1, sourceBounds.Height));
         }
         else
         {
             var scale = Math.Min(
-                1d,
+                maximumScale,
                 Math.Min(
                     targetWidth / Math.Max(1, sourceBounds.Width),
                     targetHeight / Math.Max(1, sourceBounds.Height)));
@@ -503,6 +533,11 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
         FormattedText glyph,
         IBrush brush)
         => DrawGlyphInCell(context, cell, glyph, brush, rotation: 0, compressWidth: false);
+
+    private static bool IsPairedPunctuation(char character) => character is
+        '（' or '）' or '《' or '》' or '〈' or '〉' or '【' or '】'
+        or '〔' or '〕' or '［' or '］' or '｛' or '｝'
+        or '“' or '”' or '‘' or '’' or '「' or '」' or '『' or '』';
 
     private FormattedText CreateFormatted(string value, Typeface typeface, IBrush brush) => new(
         value,

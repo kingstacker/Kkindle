@@ -1480,6 +1480,9 @@ public partial class MainWindow
 
     private void ReaderLayoutSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
+        ReaderVerticalWritingCheck.Content = OperatingSystem.IsLinux()
+            ? "竖排排版（全局，连续滚动）"
+            : "竖排排版（全局，仅支持单页）";
         _suppressReaderLayoutChange = true;
         try
         {
@@ -1488,6 +1491,7 @@ public partial class MainWindow
             ReaderMaxWidthSlider.Value = _readerLayout.MaxWidth;
             ReaderBodyPaddingSlider.Value = _readerLayout.BodyPadding;
             ReaderVerticalWritingCheck.IsChecked = _readerLayout.VerticalWriting;
+            ReaderVerticalDebugBoxesCheck.IsChecked = _readerVerticalDebugBoxesEnabled;
             ReaderParagraphIndentCheck.IsChecked = _readerLayout.ParagraphIndent;
             SelectReaderFontFamily(_readerLayout.FontFamily);
             SelectReaderFlowMode(_readerLayout.FlowMode, _readerLayout.TwoPageMode);
@@ -1498,6 +1502,7 @@ public partial class MainWindow
             _suppressReaderLayoutChange = false;
         }
         UpdateReaderLayoutSliderLabels();
+        UpdateReaderVerticalDebugBoxesControlAvailability();
         UpdateReaderLayoutStatus();
         ReaderLayoutSettingsPopup.PlacementTarget = ReaderRoot;
         ReaderLayoutSettingsPopup.Placement = PlacementMode.AnchorAndGravity;
@@ -1522,6 +1527,7 @@ public partial class MainWindow
         && ReaderBodyPaddingSlider is not null
         && ReaderFontFamilyBox is not null
         && ReaderVerticalWritingCheck is not null
+        && ReaderVerticalDebugBoxesCheck is not null
         && ReaderParagraphIndentCheck is not null;
 
     private bool _suppressReaderLayoutChange;
@@ -1551,6 +1557,7 @@ public partial class MainWindow
 
         _readerLayout = NormalizeReaderLayoutForPlatform(ReadReaderLayoutFromControls());
         SyncReaderFlowMenu();
+        UpdateReaderVerticalDebugBoxesControlAvailability();
         UpdateReaderLayoutStatus();
         try
         {
@@ -1561,7 +1568,9 @@ public partial class MainWindow
                 _readerLayout.VerticalWriting,
                 CancellationToken.None);
             ReaderLayoutSettingsStatusText.Text = _readerLayout.VerticalWriting
-                ? "竖排已全局开启；段首缩进也对所有书生效，竖排仅支持单页阅读。"
+                ? OperatingSystem.IsLinux()
+                    ? "竖排已全局开启；Linux 使用原生连续滚动以保证排版稳定。"
+                    : "竖排已全局开启；段首缩进也对所有书生效，竖排仅支持单页阅读。"
                 : "竖排已全局关闭；段首缩进仍对所有书生效，现在可选择滚动、单页或双栏。";
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
@@ -1580,11 +1589,46 @@ public partial class MainWindow
         ScheduleReaderLayoutApply();
     }
 
+    private async void ReaderVerticalDebugBoxesCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
+        _readerVerticalDebugBoxesEnabled = ReaderVerticalDebugBoxesCheck.IsChecked == true;
+        _appSettings = AppSettings.Normalize(_appSettings with
+        {
+            ReaderVerticalDebugBoxesEnabled = _readerVerticalDebugBoxesEnabled
+        });
+        try
+        {
+            await ApplyReaderLayoutToHostsAsync(
+                _readerSessionCancellation?.Token ?? CancellationToken.None);
+            await _appSettingsStore.SaveAsync(_appSettings, CancellationToken.None);
+            ReaderLayoutSettingsStatusText.Text = _readerVerticalDebugBoxesEnabled
+                ? "竖排调试外框已显示，字号缩放时会随字格同步更新。"
+                : "竖排调试外框已关闭。";
+        }
+        catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
+        {
+        }
+        catch
+        {
+            ReaderLayoutSettingsStatusText.Text = "竖排调试外框切换失败，请重试。";
+        }
+    }
+
+    private void UpdateReaderVerticalDebugBoxesControlAvailability()
+    {
+        ReaderVerticalDebugBoxesPanel.IsVisible = OperatingSystem.IsLinux();
+        ReaderVerticalDebugBoxesCheck.IsEnabled = OperatingSystem.IsLinux()
+            && ReaderVerticalWritingCheck.IsChecked == true;
+    }
+
     private void UpdateReaderLayoutStatus()
     {
         var (flowMode, twoPageMode) = GetSelectedReaderFlowMode();
         ReaderLayoutSettingsStatusText.Text = ReaderVerticalWritingCheck.IsChecked == true
-            ? "竖排和段首缩进是全局设置；竖排固定使用单页阅读。"
+            ? OperatingSystem.IsLinux()
+                ? "竖排和段首缩进是全局设置；Linux 竖排固定使用原生连续滚动。"
+                : "竖排和段首缩进是全局设置；竖排固定使用单页阅读。"
             : twoPageMode && flowMode != 1
             ? "双页仅用于分页模式；当前模式下暂不生效。"
             : "设置立即生效；段首缩进为全局设置，其他排版参数按书保存。";

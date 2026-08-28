@@ -42,6 +42,8 @@ public sealed record AppSettings
     public bool CompareKindleLibraryEnabled { get; init; } = true;
     public bool GridGalleryDisplay { get; init; }
     public bool ReadingMaterialsCollapsedByDefault { get; init; } = true;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ReaderVerticalDebugBoxesEnabled { get; init; }
     public ReaderLayoutSettings DefaultReaderLayout { get; init; } = new();
 
     public static AppSettings Normalize(AppSettings? settings)

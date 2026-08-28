@@ -103,26 +103,181 @@ public sealed class ReaderLinuxVerticalPagingTests
     }
 
     [Fact]
-    public void ShortNumericRunsOccupyOneVerticalCell()
+    public void OnlyTwoDigitNumericRunsOccupyOneVerticalCell()
     {
-        var units = ReaderLinuxVerticalTextUnits.Tokenize("甲800乙1–4丙");
+        var units = ReaderLinuxVerticalTextUnits.Tokenize("甲12乙800丙1–4丁12345戊");
 
         Assert.Equal(
-            [(0, 1, false), (1, 3, true), (4, 1, false), (5, 3, true), (8, 1, false)],
-            units.Select(unit => (unit.Offset, unit.Length, unit.IsCombined)));
+            [
+                (0, 1, false, false),
+                (1, 2, true, false),
+                (3, 1, false, false),
+                (4, 3, false, true),
+                (7, 1, false, false),
+                (8, 3, false, true),
+                (11, 1, false, false),
+                (12, 5, false, true),
+                (17, 1, false, false)
+            ],
+            units.Select(unit => (unit.Offset, unit.Length, unit.IsCombined, unit.IsSidewaysRun)));
     }
 
     [Fact]
-    public void PaginationDoesNotSplitShortNumericRuns()
+    public void LatinWordsAndPhrasesAreSingleSidewaysRuns()
+    {
+        // The fallback renderer used to fall through to one rotated cell per
+        // Latin letter, so an English phrase looked nothing like the same text
+        // in the WebKit reader. Tokenizing matches the sanitizer: connectors
+        // hold a word together and a short ASCII gap merges neighbours into
+        // one phrase.
+        var units = ReaderLinuxVerticalTextUnits.Tokenize("他说don't go丙AT&T乙");
+
+        Assert.Equal(
+            [
+                (0, 1, false),
+                (1, 1, false),
+                (2, 8, true),
+                (10, 1, false),
+                (11, 4, true),
+                (15, 1, false)
+            ],
+            units.Select(unit => (unit.Offset, unit.Length, unit.IsSidewaysRun)));
+    }
+
+    [Fact]
+    public void DigitOnlyNeighboursNeverMergeIntoOnePhrase()
+    {
+        // "12, 34" must keep two tate-chu-yoko cells; merging would turn two
+        // upright squares into one long sideways run.
+        var units = ReaderLinuxVerticalTextUnits.Tokenize("甲12, 34乙");
+
+        Assert.Equal(
+            [
+                (0, 1, false, false),
+                (1, 2, true, false),
+                (3, 1, false, false),
+                (4, 1, false, false),
+                (5, 2, true, false),
+                (7, 1, false, false)
+            ],
+            units.Select(unit => (unit.Offset, unit.Length, unit.IsCombined, unit.IsSidewaysRun)));
+    }
+
+    [Fact]
+    public void SidewaysRunsConsumeTheirNaturalInlineExtentNotOneCellPerCharacter()
+    {
+        // A sideways run keeps horizontal metrics, so it is roughly half as
+        // long as its character count in CJK cells. Charging one full cell per
+        // character made the fallback break columns an order away from where
+        // the WebKit reader breaks them, and left a wide empty gap after every
+        // number.
+        var units = ReaderLinuxVerticalTextUnits.Tokenize("12345");
+        var run = Assert.Single(units);
+
+        Assert.True(run.IsSidewaysRun);
+        Assert.Equal(3, ReaderLinuxVerticalTextUnits.GetVisualRows(run, charsPerColumn: 20));
+        // Never longer than the column it has to live in.
+        Assert.Equal(2, ReaderLinuxVerticalTextUnits.GetVisualRows(run, charsPerColumn: 2));
+    }
+
+    [Fact]
+    public void PaginationDoesNotSplitTwoDigitRuns()
     {
         var pages = ReaderLinuxVerticalPagingPolicy.Paginate(
-            "甲800乙",
+            "甲12乙",
             charsPerColumn: 2,
             columnsPerPage: 1);
 
         Assert.Equal(2, pages.Count);
-        Assert.Equal("甲800", pages[0].Text);
+        Assert.Equal("甲12", pages[0].Text);
         Assert.Equal("乙", pages[1].Text);
+    }
+
+    [Fact]
+    public void PaginationDoesNotSplitLongNumericRuns()
+    {
+        var pages = ReaderLinuxVerticalPagingPolicy.Paginate(
+            "甲12345乙",
+            charsPerColumn: 3,
+            columnsPerPage: 1);
+
+        Assert.Equal(3, pages.Count);
+        Assert.Equal("甲", pages[0].Text);
+        Assert.Equal("12345", pages[1].Text);
+        Assert.Equal("乙", pages[2].Text);
+    }
+
+    [Fact]
+    public void ExactFitParagraphBreakDoesNotCreateAnEmptySpacerColumn()
+    {
+        var pages = ReaderLinuxVerticalPagingPolicy.Paginate(
+            "甲乙\n丙丁",
+            charsPerColumn: 2,
+            columnsPerPage: 1,
+            paragraphIndent: false);
+
+        Assert.Equal(2, pages.Count);
+        Assert.Equal(("甲乙", 0), pages[0]);
+        Assert.Equal(("丙丁", 3), pages[1]);
+    }
+
+    [Fact]
+    public void KinsokuKeepsOpeningAndClosingPunctuationWithTheirNeighbors()
+    {
+        var closing = ReaderLinuxVerticalPagingPolicy.Paginate(
+            "甲乙。丙",
+            charsPerColumn: 2,
+            columnsPerPage: 1,
+            paragraphIndent: false);
+        Assert.Equal("甲", closing[0].Text);
+        Assert.Equal("乙。", closing[1].Text);
+
+        var opening = ReaderLinuxVerticalPagingPolicy.Paginate(
+            "甲（乙",
+            charsPerColumn: 2,
+            columnsPerPage: 1,
+            paragraphIndent: false);
+        Assert.Equal("甲", opening[0].Text);
+        Assert.Equal("（乙", opening[1].Text);
+    }
+
+    [Fact]
+    public void KinsokuKeepsAWholeClosingClusterOutOfTheNextColumnTop()
+    {
+        // Checking only the single next unit let "」。" split: the bracket
+        // still fit the column, so the full stop was stranded alone at the top
+        // of the following one. The cluster has to be weighed as a whole.
+        var pages = ReaderLinuxVerticalPagingPolicy.Paginate(
+            "甲乙丙」。丁",
+            charsPerColumn: 4,
+            columnsPerPage: 1,
+            paragraphIndent: false);
+
+        Assert.Equal(2, pages.Count);
+        Assert.Equal("甲乙", pages[0].Text);
+        Assert.Equal("丙」。丁", pages[1].Text);
+    }
+
+    [Fact]
+    public void KinsokuAlsoAppliesToStandaloneAsciiPunctuation()
+    {
+        // ASCII punctuation is its own one-cell unit in the fallback, so the
+        // prohibition sets have to cover it as well as the CJK marks.
+        var closing = ReaderLinuxVerticalPagingPolicy.Paginate(
+            "甲乙?丙",
+            charsPerColumn: 2,
+            columnsPerPage: 1,
+            paragraphIndent: false);
+        Assert.Equal("甲", closing[0].Text);
+        Assert.Equal("乙?", closing[1].Text);
+
+        var opening = ReaderLinuxVerticalPagingPolicy.Paginate(
+            "甲(乙",
+            charsPerColumn: 2,
+            columnsPerPage: 1,
+            paragraphIndent: false);
+        Assert.Equal("甲", opening[0].Text);
+        Assert.Equal("(乙", opening[1].Text);
     }
 
     [Fact]

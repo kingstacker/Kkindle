@@ -46,7 +46,7 @@ public sealed class EpubReaderTests
     }
 
     [Fact]
-    public async Task KeepsSingleDigitsInTextRunsAndMarksOnlyShortMultiDigitRuns()
+    public async Task KeepsNativeVerticalTextRunsUnmodified()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -63,7 +63,7 @@ public sealed class EpubReaderTests
                     </manifest><spine><itemref idref="one" /></spine></package>
                     """);
                 TestHelpers.AddZipEntry(archive, "OEBPS/chapter.xhtml", """
-                    <html><body><p>数字1和12以及2–3，A1。</p></body></html>
+                    <html><body><p>数字1和12以及2–3，还有12345，20°C，COPYRIGHT ISBN A1，ASCII, punctuation!符号#结束。don't</p></body></html>
                     """);
             }
 
@@ -73,10 +73,67 @@ public sealed class EpubReaderTests
                 .PrepareAsync(epub, new string('7', 64));
 
             var html = await File.ReadAllTextAsync(document.Chapters[0]);
+            Assert.Contains("数字1和12以及2–3，还有12345，20°C，COPYRIGHT ISBN A1，ASCII, punctuation!符号#结束。don't", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("data-kkindle-vertical-run", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-cell-inner", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-tcy-inner", html, StringComparison.Ordinal);
             Assert.DoesNotContain("kkindle-vertical-digit", html, StringComparison.Ordinal);
-            Assert.Contains("class=\"kkindle-tcy\" data-kkindle-vertical-run=\"1\">12</span>", html, StringComparison.Ordinal);
-            Assert.Contains("class=\"kkindle-tcy-all\" data-kkindle-vertical-run=\"1\">2–3</span>", html, StringComparison.Ordinal);
-            Assert.Contains("A1", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-vertical-number", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-vertical-latin", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-vertical-punctuation", html, StringComparison.Ordinal);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task SanitizationKeepsCjkTextAroundWrappedVerticalRuns()
+    {
+        // A paragraph that mixes CJK prose with digits, Latin abbreviations
+        // and ASCII punctuation must survive extraction as one uninterrupted
+        // native shaping run with every character present.
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "mixed-paragraph.epub");
+            const string paragraph =
+                "Linux validation paragraph 001 includes COPYRIGHT, ISBN, A1, 单数字7，双位数12，"
+                + "三位数200，search-token-linux and AI context linux.竖排长数字12345678901234567890不能断开。";
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="EPUB/package.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/package.opf", """
+                    <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+                      <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                        <dc:identifier id="book-id">urn:uuid:mixed</dc:identifier>
+                        <dc:title>Mixed</dc:title>
+                        <dc:language>zh-CN</dc:language>
+                      </metadata>
+                      <manifest><item id="one" href="chapter.xhtml" media-type="application/xhtml+xml" /></manifest>
+                      <spine><itemref idref="one" /></spine></package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/chapter.xhtml",
+                    "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>t</title></head><body><p>"
+                    + paragraph + "</p></body></html>");
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('d', 64));
+
+            var html = await File.ReadAllTextAsync(document.Chapters[0]);
+            var bodyStart = html.IndexOf("<body", StringComparison.Ordinal);
+            var body = html[bodyStart..];
+            var plain = System.Text.RegularExpressions.Regex.Replace(body, "<[^>]+>", string.Empty);
+            Assert.Contains("单数字7", plain, StringComparison.Ordinal);
+            Assert.Contains("双位数12", plain, StringComparison.Ordinal);
+            Assert.Contains("三位数200", plain, StringComparison.Ordinal);
+            foreach (var expected in new[] { "COPYRIGHT", "ISBN", "A1", "竖排长数字", "不能断开。" })
+                Assert.Contains(expected, plain, StringComparison.Ordinal);
+            Assert.DoesNotContain("data-kkindle-vertical-run", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-vertical-latin", html, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }
@@ -440,6 +497,7 @@ public sealed class EpubReaderTests
             Assert.Contains("type: 'continuousEdge'", bridge, StringComparison.Ordinal);
             Assert.Contains("continuousWheelGestureGap", bridge, StringComparison.Ordinal);
             Assert.Contains("if (startsNewGesture)", bridge, StringComparison.Ordinal);
+            Assert.Contains("window.scrollBy({ left: -delta, top: 0", bridge, StringComparison.Ordinal);
             Assert.Contains("getContinuousScrollMetrics", bridge, StringComparison.Ordinal);
             Assert.Contains("body?.scrollHeight", bridge, StringComparison.Ordinal);
             Assert.Contains("position + viewport >= extent - 4", bridge, StringComparison.Ordinal);
@@ -519,8 +577,10 @@ public sealed class EpubReaderTests
                 .PrepareAsync(epub, new string('7', 64));
 
             var html = await File.ReadAllTextAsync(document.Chapters[0]);
-            Assert.Contains("first\u00a0second &amp; third©", html, StringComparison.Ordinal);
+            Assert.Contains("first\u00a0second &amp; third", html, StringComparison.Ordinal);
+            Assert.Contains("©", html, StringComparison.Ordinal);
             Assert.DoesNotContain("&nbsp;", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-vertical-latin", html, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }
@@ -666,6 +726,7 @@ public sealed class EpubReaderTests
             var markerText = await File.ReadAllTextAsync(marker);
 
             Assert.Contains("original chapter", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("kkindle-vertical-latin", html, StringComparison.Ordinal);
             Assert.DoesNotContain("stale transformed chapter", html, StringComparison.Ordinal);
             var bridge = await File.ReadAllTextAsync(Path.Combine(
                 Path.GetDirectoryName(rebuilt.Chapters[0])!,
@@ -707,7 +768,7 @@ public sealed class EpubReaderTests
                 pointerSideIndex,
                 StringComparison.Ordinal);
             Assert.InRange(pointerSendIndex - pointerSideIndex, 1, 360);
-            Assert.EndsWith("\n57", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n68", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

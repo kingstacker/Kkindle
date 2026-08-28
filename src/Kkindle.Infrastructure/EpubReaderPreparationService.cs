@@ -21,7 +21,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization or the injected bridge changes. Existing
     // reader caches otherwise keep the old JavaScript indefinitely.
-    private const string ExtractionFormatVersion = "57";
+    private const string ExtractionFormatVersion = "68";
     private const string ReaderBridgeFileName = ".kkindle-reader-bridge.js";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
@@ -32,6 +32,16 @@ public sealed class EpubReaderPreparationService
         (() => {
           if (window.__kkindleReaderBridgeInstalled) return;
           window.__kkindleReaderBridgeInstalled = true;
+
+          // The reader applies its writing mode and bundled font after
+          // navigation. Hide the document before the first native paint so the
+          // fallback-font/vertical-to-final-font
+          // transition cannot make the rightmost column visibly jump.
+          const readerRoot = document.documentElement;
+          if (readerRoot) {
+            readerRoot.style.setProperty('visibility', 'hidden', 'important');
+            readerRoot.style.setProperty('opacity', '0', 'important');
+          }
 
           const send = value => {
             try {
@@ -50,68 +60,151 @@ public sealed class EpubReaderPreparationService
             } catch (_) { }
           };
 
-          // Mark short numeric runs while the XHTML is still entering the
-          // document. The reader later supplies the vertical-writing CSS, but
-          // WebKitGTK can retain the first painted text run when the DOM is
-          // rewritten only after NavigationCompleted. Keeping the markup
-          // stable from DOMContentLoaded makes the CSS pass deterministic.
-          // Single digits deliberately stay in the surrounding text run:
-          // WebKitGTK gives an isolated upright one-digit span a different
-          // baseline, which can paint it over the neighboring CJK glyph.
+          // Old extraction formats inserted Kreader-specific spans around
+          // digits, Latin and punctuation. Remove them before first reveal;
+          // native WebKit vertical shaping requires the original text runs.
           const prepareVerticalInlineRuns = () => {
             const body = document.body;
             if (!body) return false;
+            if (body.dataset.kkindleVerticalInlinePrepared === '68') return true;
 
-            // Caches created before extraction format 57 may still contain
-            // the old one-digit wrappers. Unwrap them before re-scanning so
-            // a live document can recover without a second navigation.
-            body.querySelectorAll('span.kkindle-vertical-digit[data-kkindle-vertical-run="1"]')
-              .forEach(span => span.replaceWith(...Array.from(span.childNodes)));
+            // Caches created before extraction format 66 may still contain
+            // old run wrappers. Unwrap the complete run text before
+            // re-scanning so a live document can recover without a second
+            // navigation. This also removes any nested cell spans from an
+            // earlier pass.
+            body.querySelectorAll('span[data-kkindle-vertical-run="1"]')
+              .forEach(span => span.replaceWith(document.createTextNode(span.textContent || '')));
+            body.normalize();
+            body.dataset.kkindleVerticalInlinePrepared = '68';
+            return true;
 
-            const numericTokenPattern = /[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*/g;
+            // Keep these rules identical to MarkVerticalInlineRuns below and
+            // to the host's re-preparation script. Connectors keep a word
+            // whole ("don't", "AT&T", "well-known"); adjacent tokens separated
+            // by a short ASCII gap merge into one phrase when either side has
+            // a letter, so an English sentence is one sideways run rather than
+            // one rotated box per word. Digit-only neighbours never merge.
+            const verticalInlineTokenPattern = /[A-Za-z0-9]+(?:['’&.,:/+\-–—][A-Za-z0-9]+|%|°[CF])*/g;
+            const numericTokenPattern = /^[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*$/;
+            const verticalPunctuationCharacters = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+            const maxPhraseGap = 3;
             const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
             const textNodes = [];
             for (let node = walker.nextNode(); node; node = walker.nextNode()) {
               const parent = node.parentElement;
+              const value = node.nodeValue || '';
               if (!parent
                   || parent.closest('#kkindle-selection-bar, script, style, noscript, ruby, rt, [data-kkindle-vertical-run="1"]')
-                  || !/[0-9]/.test(node.nodeValue || ''))
+                  || (!/[0-9A-Za-z]/.test(value)
+                    && !Array.from(value).some(character => verticalPunctuationCharacters.includes(character))))
                 continue;
               textNodes.push(node);
             }
+
+            const canMerge = (value, left, right) => {
+              if (!/[A-Za-z]/.test(left.token) && !/[A-Za-z]/.test(right.token)) return false;
+              const gapStart = left.start + left.token.length;
+              const gapLength = right.start - gapStart;
+              if (gapLength < 1 || gapLength > maxPhraseGap) return false;
+              for (let index = gapStart; index < right.start; index++) {
+                const character = value[index];
+                if (character !== ' ' && character !== '\t'
+                    && !verticalPunctuationCharacters.includes(character))
+                  return false;
+              }
+              return true;
+            };
+
+            const classify = (token, merged) => {
+              const hasLatin = /[A-Za-z]/.test(token);
+              if (merged) return hasLatin ? 'kkindle-vertical-latin' : null;
+              const isNumericToken = numericTokenPattern.test(token);
+              const digitCount = (token.match(/[0-9]/g) || []).length;
+              if (!hasLatin && (!isNumericToken || digitCount === 0)) return null;
+              if (!isNumericToken) return 'kkindle-vertical-latin';
+              if (!/^[0-9]+$/.test(token)) return 'kkindle-vertical-number';
+              return token.length === 1
+                ? 'kkindle-vertical-digit'
+                : token.length === 2
+                ? 'kkindle-tcy'
+                : 'kkindle-vertical-number';
+            };
 
             for (const node of textNodes) {
               const value = node.nodeValue || '';
               const fragment = document.createDocumentFragment();
               let cursor = 0;
               let wrapped = false;
-              numericTokenPattern.lastIndex = 0;
-              for (let match = numericTokenPattern.exec(value);
+              const matches = [];
+              verticalInlineTokenPattern.lastIndex = 0;
+              for (let match = verticalInlineTokenPattern.exec(value);
                    match;
-                   match = numericTokenPattern.exec(value)) {
-                const token = match[0];
-                const start = match.index;
-                const before = value[start - 1] || '';
-                const after = value[start + token.length] || '';
-                const digitCount = (token.match(/[0-9]/g) || []).length;
-                const adjacentLatin = /[A-Za-z]/.test(before) || /[A-Za-z]/.test(after);
-                if (adjacentLatin || digitCount === 0)
-                  continue;
+                   match = verticalInlineTokenPattern.exec(value)) {
+                matches.push({ token: match[0], start: match.index });
+              }
 
-                const pureDigits = /^[0-9]+$/.test(token);
-                const className = pureDigits
-                    ? token.length >= 2 && token.length <= 4 ? 'kkindle-tcy' : null
-                    : token.length <= 4 ? 'kkindle-tcy-all' : null;
+              const runs = [];
+              for (let index = 0; index < matches.length;) {
+                let last = index;
+                while (last + 1 < matches.length
+                    && canMerge(value, matches[last], matches[last + 1]))
+                  last++;
+                const start = matches[index].start;
+                const end = matches[last].start + matches[last].token.length;
+                const token = value.slice(start, end);
+                const merged = last > index;
+                index = last + 1;
+                const className = classify(token, merged);
                 if (!className) continue;
+                runs.push({ start, length: end - start, token, className });
+              }
+
+              for (let index = 0; index < value.length; index++) {
+                if (!verticalPunctuationCharacters.includes(value[index])
+                    || runs.some(run => index >= run.start
+                      && index < run.start + run.length))
+                  continue;
+                runs.push({
+                  start: index,
+                  length: 1,
+                  token: value[index],
+                  className: 'kkindle-vertical-punctuation'
+                });
+              }
+
+              runs.sort((left, right) => left.start - right.start);
+              for (const run of runs) {
+                const { start, token, className } = run;
 
                 if (start > cursor)
                   fragment.appendChild(document.createTextNode(value.slice(cursor, start)));
                 const span = document.createElement('span');
                 span.className = className;
                 span.dataset.kkindleVerticalRun = '1';
-                span.textContent = token;
+                if (className === 'kkindle-tcy' || className === 'kkindle-tcy-all') {
+                  span.dataset.kkindleTcyLength = String(token.length);
+                  const inner = document.createElement('span');
+                  inner.className = 'kkindle-tcy-inner';
+                  inner.textContent = token;
+                  span.appendChild(inner);
+                } else if (
+                    className === 'kkindle-vertical-digit'
+                    || className === 'kkindle-vertical-punctuation') {
+                  // Single digits and isolated ASCII punctuation share the
+                  // tate-chu-yoko structure: a one-em outer cell plus an
+                  // absolutely centered inner box. Baseline positioning made
+                  // their ink drift with Linux font metrics and bleed across
+                  // the neighbouring CJK cell edge.
+                  const inner = document.createElement('span');
+                  inner.className = 'kkindle-cell-inner';
+                  inner.textContent = token;
+                  span.appendChild(inner);
+                } else {
+                  span.textContent = token;
+                }
                 fragment.appendChild(span);
-                cursor = start + token.length;
+                cursor = start + run.length;
                 wrapped = true;
               }
               if (!wrapped) continue;
@@ -119,6 +212,7 @@ public sealed class EpubReaderPreparationService
                 fragment.appendChild(document.createTextNode(value.slice(cursor)));
               node.parentNode?.replaceChild(fragment, node);
             }
+            body.dataset.kkindleVerticalInlinePrepared = '66';
             return true;
           };
           window.__kkindlePrepareVerticalInlineRuns = prepareVerticalInlineRuns;
@@ -810,22 +904,22 @@ public sealed class EpubReaderPreparationService
           }, true);
           // In paginated mode the vertical wheel advances pages exactly like
           // the WinUI reference's low-level mouse hook; the host accumulates
-          // the deltas. Continuous mode is left to native scrolling until a
-          // separate wheel gesture starts while the document is already at an
-          // edge. This keeps a fast wheel/trackpad gesture from scrolling to
-          // the edge and changing chapters in the same gesture.
+          // the deltas. Horizontal text keeps native continuous scrolling;
+          // vertical text translates wheel Y deltas into its negative X range.
+          // Chapter changes require a separate gesture that starts at an edge.
           let continuousWheelDirection = 0;
           let continuousWheelLastAt = 0;
           const continuousWheelGestureGap = 180;
           let paginatedWheelRemainder = 0;
           document.addEventListener("wheel", event => {
             if (window.__kkindleReaderFlowMode !== 1) {
-              const direction = Math.sign(event.deltaY || 0);
+              const delta = event.deltaY || event.deltaX || 0;
+              const direction = Math.sign(delta);
               if (direction === 0) return;
               const now = performance.now();
-              const startsNewGesture = continuousWheelLastAt > 0
-                && (direction !== continuousWheelDirection
-                  || now - continuousWheelLastAt >= continuousWheelGestureGap);
+              const startsNewGesture = continuousWheelLastAt <= 0
+                || direction !== continuousWheelDirection
+                || now - continuousWheelLastAt >= continuousWheelGestureGap;
               continuousWheelDirection = direction;
               continuousWheelLastAt = now;
               const horizontal = window.__kkindleReaderVertical === true;
@@ -837,6 +931,20 @@ public sealed class EpubReaderPreparationService
                 event.preventDefault();
                 if (startsNewGesture)
                   send({ type: 'continuousEdge', direction });
+                return;
+              }
+              // A normal vertical mouse wheel does not move WebKitGTK's
+              // negative horizontal overflow. Translate it explicitly while
+              // accumulating trackpad-sized deltas on the calibrated column
+              // grid. A resting viewport can therefore never expose a sliced
+              // glyph column at either physical edge.
+              if (horizontal) {
+                event.preventDefault();
+                if (typeof window.__kkindleScrollContinuousVerticalBy === 'function') {
+                  window.__kkindleScrollContinuousVerticalBy(delta);
+                  return;
+                }
+                window.scrollBy({ left: -delta, top: 0, behavior: 'auto' });
               }
               return;
             }
@@ -907,9 +1015,6 @@ public sealed class EpubReaderPreparationService
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex HtmlNamedEntityPattern = new(
         "&[A-Za-z][A-Za-z0-9]+;",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex VerticalNumericTokenPattern = new(
-        """[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*""",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly AppPaths _paths;
 
@@ -1530,12 +1635,11 @@ public sealed class EpubReaderPreparationService
                 element.Value = SanitizeCss(styleText, path, cacheRoot);
         }
 
-        // Mark only short multi-digit runs in the serialized XHTML itself.
-        // Single digits remain in the surrounding text run because an
-        // isolated upright span gets a different WebKitGTK baseline and can
-        // overlap the neighboring CJK glyph. The bridge repeats this
-        // defensively for dynamically inserted content.
-        MarkVerticalNumericRuns(root, namespaceName);
+        // Mark vertical inline units in the serialized XHTML itself. Single
+        // digits get an explicit upright cell so their glyph direction and
+        // baseline are independent of the surrounding mixed CJK text. The
+        // bridge repeats this defensively for dynamically inserted content.
+        MarkVerticalInlineRuns(root);
 
         var head = root.Elements().FirstOrDefault(element => element.Name.LocalName == "head");
         if (head is null)
@@ -1575,61 +1679,15 @@ public sealed class EpubReaderPreparationService
         await WriteXmlAsync(document, path, cancellationToken);
     }
 
-    private static void MarkVerticalNumericRuns(XElement root, XNamespace namespaceName)
+    private static void MarkVerticalInlineRuns(XElement root)
     {
         var body = root.Descendants().FirstOrDefault(element =>
             element.Name.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase));
         if (body is null) return;
-
-        var textNodes = body
-            .DescendantNodes()
-            .OfType<XText>()
-            .Where(node => node.Ancestors().All(element =>
-                element.Name.LocalName is not ("script" or "style" or "noscript" or "ruby" or "rt")))
-            .ToArray();
-
-        foreach (var textNode in textNodes)
-        {
-            var value = textNode.Value;
-            if (!value.Any(char.IsAsciiDigit)) continue;
-
-            var replacements = new List<object>();
-            var cursor = 0;
-            var wrapped = false;
-            foreach (Match match in VerticalNumericTokenPattern.Matches(value))
-            {
-                var token = match.Value;
-                var before = match.Index > 0 ? value[match.Index - 1] : '\0';
-                var afterIndex = match.Index + match.Length;
-                var after = afterIndex < value.Length ? value[afterIndex] : '\0';
-                var digitCount = token.Count(char.IsAsciiDigit);
-                var adjacentLatin = (before != '\0' && char.IsAsciiLetter(before))
-                    || (after != '\0' && char.IsAsciiLetter(after));
-                if (adjacentLatin || digitCount == 0) continue;
-
-                var pureDigits = token.All(char.IsAsciiDigit);
-                var className = pureDigits
-                    ? token.Length is >= 2 and <= 4 ? "kkindle-tcy" : null
-                    : token.Length <= 4 ? "kkindle-tcy-all" : null;
-                if (className is null) continue;
-
-                if (match.Index > cursor)
-                    replacements.Add(new XText(value[cursor..match.Index]));
-                replacements.Add(
-                    new XElement(
-                        namespaceName + "span",
-                        new XAttribute("class", className),
-                        new XAttribute("data-kkindle-vertical-run", "1"),
-                        token));
-                cursor = afterIndex;
-                wrapped = true;
-            }
-
-            if (!wrapped) continue;
-            if (cursor < value.Length)
-                replacements.Add(new XText(value[cursor..]));
-            textNode.ReplaceWith(replacements.ToArray());
-        }
+        // Preserve publication text nodes byte-for-byte. CSS Writing Modes
+        // needs the original adjacent characters to shape vertical CJK,
+        // punctuation, Latin and digits as a single native run.
+        body.SetAttributeValue("data-kkindle-vertical-inline-prepared", ExtractionFormatVersion);
     }
 
     private static bool IsFootnoteReference(XElement element)

@@ -260,9 +260,35 @@ public sealed class ReaderPaginationScriptTests
             twoPage: true);
 
         Assert.Contains("writing-mode: vertical-rl !important", staleScrollRequest, StringComparison.Ordinal);
-        Assert.Contains("column-width", staleScrollRequest, StringComparison.Ordinal);
+        Assert.Contains("overflow-x: auto !important", staleScrollRequest, StringComparison.Ordinal);
         Assert.Contains("column-count: auto !important", staleScrollRequest, StringComparison.Ordinal);
+        Assert.DoesNotContain("--kkindle-vertical-page-step", staleScrollRequest, StringComparison.Ordinal);
+        Assert.DoesNotContain("kkindle-vertical-edge-mask", staleScrollRequest, StringComparison.Ordinal);
+        Assert.DoesNotContain("html::before", staleScrollRequest, StringComparison.Ordinal);
         Assert.DoesNotContain("column-count: 2 !important", staleScrollRequest, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ContinuousVerticalBoundaryScriptSnapsSidePaddingToWholeColumns()
+    {
+        var script = ReaderPaginationScripts.ContinuousVerticalBoundaryScript;
+
+        Assert.Contains("body.style.removeProperty('padding-left')", script, StringComparison.Ordinal);
+        Assert.Contains("body.style.removeProperty('padding-right')", script, StringComparison.Ordinal);
+        Assert.Contains("Math.floor(available / line)", script, StringComparison.Ordinal);
+        Assert.Contains("body.style.setProperty('padding-left'", script, StringComparison.Ordinal);
+        Assert.Contains("body.style.setProperty('padding-right'", script, StringComparison.Ordinal);
+        Assert.Contains("body.style.setProperty('padding-top'", script, StringComparison.Ordinal);
+        Assert.Contains("body.style.setProperty('padding-bottom'", script, StringComparison.Ordinal);
+        Assert.Contains("Math.floor(inlineAvailable / inlineAdvance)", script, StringComparison.Ordinal);
+        Assert.Contains("__kkindleScrollContinuousVerticalBy", script, StringComparison.Ordinal);
+        Assert.Contains("Math.round(distance / line) * line", script, StringComparison.Ordinal);
+        Assert.Contains("kkindle-vertical-flow-guard-left", script, StringComparison.Ordinal);
+        Assert.Contains("kkindle-vertical-flow-guard-right", script, StringComparison.Ordinal);
+        Assert.Contains("kkindle-vertical-flow-guard-top", script, StringComparison.Ordinal);
+        Assert.Contains("kkindle-vertical-flow-guard-bottom", script, StringComparison.Ordinal);
+        Assert.Contains("__kkindleUpdateContinuousVerticalGuards", script, StringComparison.Ordinal);
+        Assert.Contains("kkindleVerticalFlowBoundary", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -375,6 +401,20 @@ public sealed class ReaderPaginationScriptTests
         Assert.Contains("Math.abs(scroller.scrollLeft || 0)", fragmentScript, StringComparison.Ordinal);
         Assert.Contains("contentRight - rect.right", fragmentScript, StringComparison.Ordinal);
         Assert.Contains("viewport - sides", fragmentScript, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ContinuousVerticalFragmentScrollUsesNegativeWebKitRange()
+    {
+        var fragmentScript = ReaderNavigationScripts.CreateFragmentScroll(
+            needle: "section",
+            flowMode: 0,
+            vertical: true);
+
+        Assert.Contains("const rawMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth)", fragmentScript, StringComparison.Ordinal);
+        Assert.Contains("const distance = Math.abs(scroller.scrollLeft || 0)", fragmentScript, StringComparison.Ordinal);
+        Assert.Contains("const target = Math.max(0, distance > rawMax ? rawMax : distance)", fragmentScript, StringComparison.Ordinal);
+        Assert.Contains("left: -target", fragmentScript, StringComparison.Ordinal);
     }
 
     [Fact]

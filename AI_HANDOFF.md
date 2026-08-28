@@ -47,6 +47,7 @@
 - 本地书库支持 EPUB、PDF、MOBI、AZW3 导入，SHA-256 去重，同书多格式合并，元数据/封面编辑、搜索筛选、收藏和分类。
 - Linux 文件管理器拖放支持 `text/uri-list` 与 GNOME 文件拖放格式；拖入文件夹会递归收集 EPUB、PDF、MOBI、AZW3，并去重后导入。
 - Kreader 支持 EPUB、PDF 和 AZW3 临时转 EPUB；包括分页、双栏、滚动、书签、搜索、划线批注、脚注、AI、阅读统计、禅模式及进度恢复。
+- Linux 竖排固定使用 WebKitGTK 原生连续横向滚动：按 Apple Books 的流式竖排模型在内容根级注入 `writing-mode: vertical-rl`、`text-orientation: mixed` 和 `direction: ltr`，保留 EPUB 原始文本节点及出版物自带的 `text-combine`，不拆英文、脚注或 ASCII 标点。正文的字符与词间距使用字体/WebKit 的原生 advance，不人为拉伸 CJK 标点或侧排英文；直排横书内部保持零 tracking。由于 WebKitGTK 配合部分中文字体会让数字和相邻汉字共用绘制起点，未被出版物标记的纯数字按固定规则兼容：1 位正立占一格、2 位直排横书占一格、3 位及以上逐位正立竖排，每格提供完整 `1em` 排版占位且不使用定位或变换；所有兼容字格使用统一的 `vertical-align: baseline`、零外边距/内边距和居中内字形，括号统一使用 Unicode 竖排字形，避免前后边距及物理中心线不一致。验证 EPUB 覆盖 DNA、FPGA、CPU、AI、完整中文标点和 ASCII 标点串，并测量同列无空格单元的 advance 边界与汉字/英文/数字/标点中心线。连续竖排不启用分页字形扫描，而是按完整字列/字格校准滚动位置，并用四个内容感知护栏在每个滚动视口保留用户设定的上下左右留白；护栏只扩展到相邻字形间隙，不裁半个汉字。鼠标滚轮会转换为 WebKit 的负 X 轴字列滚动，目录、搜索、批注和进度恢复使用同一坐标系；提取缓存格式为 68。调试版设置 `KKINDLE_VERTICAL_DEBUG_BOXES=1` 时会显示外层字格、内层字形和原生字符 Range 外框。
 - Linux 文本回退阅读器支持跨页选择同步、批注范围渲染、划线样式、选择工具栏轻触关闭和分页/滚动交互；WebView 自带选择工具栏不再与 Avalonia 工具栏重复显示。
 - 极简目录使用细线矩形三横图标，收起/展开按钮与字体按钮视觉对齐。
 - 极简目录章节浮窗异步读取 EPUB 章节正文前 4 个非空行；按章节路径缓存，切换书籍时清空。PDF 只显示页码。
@@ -162,7 +163,7 @@ robocopy 返回码 0 至 7 都表示成功。同步时必须保留目标目录�
 - Linux/macOS 的窗口、字体、WebKit 阅读器、PDF、挂载 Kindle、密钥环和安全弹出尚未真机验收。
 - MTP-only Kindle 只在 Windows 支持；Linux/macOS 只支持文件系统挂载设备。
 - PDF 使用平台 WebView 内置查看器，选择、缩放、点击区域翻页等能力受引擎限制。
-- 竖排只支持滚动模式。
+- Linux 竖排只支持连续滚动模式；Windows/macOS 仍保留原有单页竖排策略。
 - Kindle/KFX 字典和书籍不处理 DRM。
 - 当前 Windows 环境没有可用 WSL 发行版，因此只能编译 macOS 项目，不能在本机执行 bash -n scripts/build-macos-release.sh 或验证 .app 签名。
 - Windows/Linux/macOS Rebuild 可能报告 MainWindow.ReaderInteraction.cs 中两个 Linux 文本回退字段未使用的 CS0169 警告；当前不影响构建。

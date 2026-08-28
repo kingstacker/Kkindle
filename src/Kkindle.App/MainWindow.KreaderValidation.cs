@@ -57,14 +57,14 @@ public partial class MainWindow
                     externalImport.FailureCount == 0,
                     $"external import failed: {string.Join("; ", externalImport.Items.Select(item => item.Message))}");
                 var expectedTitle = Path.GetFileNameWithoutExtension(externalEpubPath);
-                var importedBookId = externalImport.Items
-                    .FirstOrDefault(item => item.Succeeded)?.Book?.Id;
-                var externalCard = ViewModel.Books.First(card =>
-                    (importedBookId is not null && card.Book.Id == importedBookId)
-                    || card.Title.Contains(expectedTitle, StringComparison.OrdinalIgnoreCase)
-                    || expectedTitle.Contains(card.Title, StringComparison.OrdinalIgnoreCase));
-                var externalFile = externalCard.Book.Files.First(file =>
-                    file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
+                var externalCard = await ResolveImportedValidationBookAsync(
+                    externalImport,
+                    externalEpubPath,
+                    titleHint: expectedTitle);
+                var externalFile = await ResolveImportedValidationFile(
+                    externalCard,
+                    externalEpubPath,
+                    log);
                 await log.WriteLineAsync("PASS import external EPUB " + externalCard.Title);
                 await OpenBookAsync(externalCard, externalFile);
                 await ValidateExternalVerticalEpubAsync(log);
@@ -82,8 +82,16 @@ public partial class MainWindow
                 Require(importResult.FailureCount == 0, $"import failed: {string.Join("; ", importResult.Items.Select(item => item.Message))}");
                 await log.WriteLineAsync("PASS import EPUB");
 
-                var epubCard = ViewModel.Books.First(card => card.Title.Contains("Linux Kreader Validation", StringComparison.OrdinalIgnoreCase));
-                var epubFile = epubCard.Book.Files.First(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
+                // Earlier validation runs may have merged an older fixture with
+                // the same metadata into this book card. Opening "the first
+                // EPUB of the matching title" would then validate a stale
+                // extraction instead of today's bytes, so resolve both the card
+                // and the file by the imported content hash.
+                var epubCard = await ResolveImportedValidationBookAsync(
+                    importResult,
+                    epubPath,
+                    titleHint: "Linux Kreader Validation Long Numbers");
+                var epubFile = await ResolveImportedValidationFile(epubCard, epubPath, log);
                 await OpenBookAsync(epubCard, epubFile);
                 await ValidateCurrentEpubReaderAsync(log);
                 await CloseReaderAsync();
@@ -103,6 +111,38 @@ public partial class MainWindow
         }
     }
 
+    private async Task<BookCardViewModel> ResolveImportedValidationBookAsync(
+        ImportBatchResult importResult,
+        string epubPath,
+        string titleHint)
+    {
+        var expectedSha = await ComputeValidationEpubShaAsync(epubPath);
+        var importedBookId = importResult.Items
+            .FirstOrDefault(item => item.Succeeded && item.Book is not null)?.Book?.Id;
+        return ViewModel.Books.FirstOrDefault(card =>
+                card.Book.Files.Any(file => file.Sha256.Equals(expectedSha, StringComparison.OrdinalIgnoreCase))
+                || (importedBookId is not null && card.Book.Id == importedBookId))
+            ?? ViewModel.Books.First(card => card.Title.Contains(titleHint, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<BookFile> ResolveImportedValidationFile(
+        BookCardViewModel card,
+        string epubPath,
+        TextWriter log)
+    {
+        var expectedSha = await ComputeValidationEpubShaAsync(epubPath);
+        var exact = card.Book.Files.FirstOrDefault(file =>
+            file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase)
+            && file.Sha256.Equals(expectedSha, StringComparison.OrdinalIgnoreCase));
+        if (exact is not null) return exact;
+        await log.WriteLineAsync(
+            "WARN no library file matches the imported hash; falling back to the first EPUB file");
+        return card.Book.Files.First(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static Task<string> ComputeValidationEpubShaAsync(string epubPath) =>
+        Task.FromResult(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(epubPath))));
+
     private async Task ValidateCurrentEpubReaderAsync(TextWriter log)
     {
         Require(!_readerIsPdf, "EPUB reader did not open as EPUB");
@@ -110,15 +150,23 @@ public partial class MainWindow
             ?? throw new InvalidOperationException("EPUB reader host missing");
         await WaitForKreaderDocumentAsync(host);
 
-        var initial = await ReadKreaderDomMetricsAsync(host);
+        var initial = await WaitForKreaderMetricsTextAsync(
+            host,
+            "Linux validation paragraph 001");
         Require(initial.GetProperty("ready").GetBoolean(), "EPUB bridge did not become ready");
         RequireReaderBodyVisible(initial, "initial render");
         RequireLinuxVisibleReaderSurface("initial render");
         Require(initial.GetProperty("text").GetString()?.Contains("Linux validation paragraph 001", StringComparison.Ordinal) == true, "EPUB text not rendered");
+        var legacyRunCount = await host.InvokeScriptAsync(
+            "document.querySelectorAll('span.kkindle-vertical-number, span.kkindle-vertical-digit, span.kkindle-vertical-latin, span.kkindle-vertical-punctuation').length");
+        Require(
+            int.TryParse(DecodeReaderScriptString(legacyRunCount ?? string.Empty), out var parsedLegacyRunCount)
+                && parsedLegacyRunCount == 0,
+            "legacy vertical wrappers still split the EPUB text runs");
         Require(initial.GetProperty("selectionBar").GetBoolean(), "selection action bar missing");
         Require(initial.GetProperty("bookmarkCorner").GetBoolean(), "bookmark corner missing");
         Require(initial.GetProperty("footnoteLinks").GetInt32() > 0, "footnote link not detected");
-        await log.WriteLineAsync("PASS EPUB initial render, bridge, footnote marker");
+        await log.WriteLineAsync("PASS EPUB initial render, bridge, unsplit native text runs, footnote marker");
         await ValidateWindowsFootnoteHoverAndClickAsync(host, log);
         await ValidateWindowsSelectionHighlightHoverAsync(host, log);
         await log.WriteLineAsync(
@@ -171,44 +219,47 @@ public partial class MainWindow
         await log.WriteLineAsync(
             $"DEBUG surface paged: activeSlot={ReaderActiveHostSlot.IsVisible} overlay={ReaderLinuxTextFallbackOverlay.IsVisible}");
 
-        await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: true);
-        var verticalHost = CurrentReaderHost
-            ?? throw new InvalidOperationException("vertical reader host missing");
-        await verticalHost.InvokeScriptAsync(
-            ReaderPaginationScripts.CreateChapterBoundaryScript(
-                moveToEnd: false,
-                horizontal: true,
-                vertical: true));
-        await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
-        var verticalFirstPage = await ReadKreaderDomMetricsAsync(verticalHost);
-        Require(verticalFirstPage.GetProperty("vertical").GetBoolean(), "vertical writing flag not applied");
-        Require(
-            verticalFirstPage.GetProperty("writingMode").GetString() == "vertical-rl",
-            "vertical-rl writing mode not applied");
-        Require(
-            verticalFirstPage.GetProperty("scrollWidth").GetDouble()
-                > verticalFirstPage.GetProperty("clientWidth").GetDouble(),
-            "vertical pagination has no horizontal extent");
-        var verticalFirstEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
-        Require(
-            verticalFirstEdge.GetProperty("partialGlyphCount").GetInt32() == 0,
-            "vertical first page clips a glyph column at the page edge: " + verticalFirstEdge);
-
-        var verticalOffsetBeforeTurn = verticalFirstPage.GetProperty("scrollLeft").GetDouble();
-        await TurnReaderPageAsync(1);
-        await Task.Delay(250, ReaderToken);
-        var verticalSecondPage = await ReadKreaderDomMetricsAsync(verticalHost);
-        Require(
-            verticalSecondPage.GetProperty("scrollLeft").GetDouble() < verticalOffsetBeforeTurn - 1,
-            "vertical page turn did not advance through Chromium's negative scroll range");
-        var verticalSecondEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
-        Require(
-            verticalSecondEdge.GetProperty("partialGlyphCount").GetInt32() == 0,
-            "vertical second page clips a glyph column at the page edge: " + verticalSecondEdge);
-        await log.WriteLineAsync("PASS EPUB vertical pagination keeps complete glyph columns on both page edges");
-        await log.WriteLineAsync("DEBUG vertical first page " + verticalFirstEdge);
-        await log.WriteLineAsync("DEBUG vertical second page " + verticalSecondEdge);
-        await PauseKreaderValidationAtVerticalPageAsync(log);
+        if (OperatingSystem.IsLinux())
+        {
+            await ValidateLinuxContinuousVerticalFlowAsync(log);
+        }
+        else
+        {
+            await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: true);
+            var verticalHost = CurrentReaderHost
+                ?? throw new InvalidOperationException("vertical reader host missing");
+            await verticalHost.InvokeScriptAsync(
+                ReaderPaginationScripts.CreateChapterBoundaryScript(
+                    moveToEnd: false,
+                    horizontal: true,
+                    vertical: true));
+            await verticalHost.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+            var verticalFirstPage = await ReadKreaderDomMetricsAsync(verticalHost);
+            Require(verticalFirstPage.GetProperty("vertical").GetBoolean(), "vertical writing flag not applied");
+            Require(
+                verticalFirstPage.GetProperty("writingMode").GetString() == "vertical-rl",
+                "vertical-rl writing mode not applied");
+            Require(
+                verticalFirstPage.GetProperty("scrollWidth").GetDouble()
+                    > verticalFirstPage.GetProperty("clientWidth").GetDouble(),
+                "vertical pagination has no horizontal extent");
+            var verticalFirstEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
+            Require(
+                verticalFirstEdge.GetProperty("partialGlyphCount").GetInt32() == 0,
+                "vertical first page clips a glyph column at the page edge: " + verticalFirstEdge);
+            RequireKreaderVerticalFlowInvariants(
+                verticalFirstEdge,
+                "vertical first page",
+                requireTopAlignedColumns: true);
+            var verticalOffsetBeforeTurn = verticalFirstPage.GetProperty("scrollLeft").GetDouble();
+            await TurnReaderPageAsync(1);
+            await Task.Delay(250, ReaderToken);
+            var verticalSecondPage = await ReadKreaderDomMetricsAsync(verticalHost);
+            Require(
+                verticalSecondPage.GetProperty("scrollLeft").GetDouble() < verticalOffsetBeforeTurn - 1,
+                "vertical page turn did not advance through the negative scroll range");
+            await log.WriteLineAsync("PASS EPUB vertical pagination keeps complete glyph columns on both page edges");
+        }
 
         await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: true);
         var twoPage = await ReadKreaderDomMetricsAsync(host);
@@ -284,6 +335,12 @@ public partial class MainWindow
             await MoveReaderChapterAsync(1);
         while (_readerChapterIndex > targetChapter)
             await MoveReaderChapterAsync(-1);
+
+        if (OperatingSystem.IsLinux())
+        {
+            await ValidateLinuxContinuousVerticalFlowAsync(log);
+            return;
+        }
 
         await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: false);
         var horizontalHost = CurrentReaderHost
@@ -363,6 +420,7 @@ public partial class MainWindow
 
         var firstPage = await ReadKreaderDomMetricsAsync(verticalHost);
         var firstEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
+        var numberGeometry = await ReadKreaderNativeVerticalInlineDiagnosticsAsync(verticalHost);
         Require(firstPage.GetProperty("vertical").GetBoolean(), "external vertical flag not applied");
         Require(
             firstPage.GetProperty("writingMode").GetString() == "vertical-rl",
@@ -373,16 +431,33 @@ public partial class MainWindow
         Require(
             firstEdge.GetProperty("marginDelta").GetDouble() <= 0.1,
             "external EPUB first page margins are asymmetric: " + firstEdge);
+        RequireKreaderVerticalFlowInvariants(
+            firstEdge,
+            "external EPUB first page",
+            requireTopAlignedColumns: false);
+        Require(
+            numberGeometry.GetProperty("preparedVersion").GetString() == "publication-native-1"
+            && numberGeometry.GetProperty("tcyCount").GetInt32() == 0
+            && numberGeometry.GetProperty("nativeDigitRunCount").GetInt32() == 0
+            && numberGeometry.GetProperty("nativeFootnoteCount").GetInt32() == 0
+            && numberGeometry.GetProperty("syntheticNativeDigitLayoutCount").GetInt32() == 0
+            && numberGeometry.GetProperty("legacyWrapperCount").GetInt32() == 0
+            && numberGeometry.GetProperty("syntheticLayoutCount").GetInt32() == 0
+            && numberGeometry.GetProperty("boundaryOverlapCount").GetInt32() == 0,
+            "external EPUB native vertical inline invariants failed: " + numberGeometry);
         var verticalSelectionBar = await ShowAndReadKreaderSelectionBarAsync(verticalHost);
         Require(
             verticalSelectionBar.GetProperty("writingMode").GetString() == "horizontal-tb",
             "vertical selection bar inherited vertical writing mode: " + verticalSelectionBar);
+        var horizontalSelectionBarSignature = NormalizeKreaderSelectionBarSignature(horizontalSelectionBar);
+        var verticalSelectionBarSignature = NormalizeKreaderSelectionBarSignature(verticalSelectionBar);
         Require(
-            verticalSelectionBar.GetProperty("signature").GetString()
-                == horizontalSelectionBar.GetProperty("signature").GetString(),
-            "vertical selection bar differs from horizontal: horizontal="
+            verticalSelectionBarSignature == horizontalSelectionBarSignature,
+            "vertical selection bar style differs from horizontal: horizontal="
             + horizontalSelectionBar + "; vertical=" + verticalSelectionBar);
         await log.WriteLineAsync("PASS external EPUB first vertical page has no clipped glyphs");
+        await log.WriteLineAsync("PASS external EPUB native CJK/Latin/digit/punctuation geometry");
+        await log.WriteLineAsync("DEBUG external native vertical inline geometry " + numberGeometry);
         await log.WriteLineAsync("DEBUG external vertical first page " + firstEdge);
         await log.WriteLineAsync("PASS vertical selection bar matches horizontal selection bar");
         await log.WriteLineAsync("DEBUG horizontal selection bar " + horizontalSelectionBar);
@@ -427,20 +502,52 @@ public partial class MainWindow
             var edge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
             var actual = Math.Abs(pageMetrics.GetProperty("scrollLeft").GetDouble());
             maxScrollError = Math.Max(maxScrollError, Math.Abs(actual - target));
+            if (pageIndex == screenshotPageIndex)
+                await PauseKreaderValidationAtVerticalPageAsync(log);
             Require(
-                edge.GetProperty("glyphCount").GetInt32() > 0,
-                $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1} diagnostic inspected no visible glyphs: " + edge);
+                edge.GetProperty("glyphCount").GetInt32() > 0
+                || edge.GetProperty("visibleMediaCount").GetInt32() > 0,
+                $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1} has neither visible text nor visible media: " + edge);
             Require(
                 edge.GetProperty("partialGlyphCount").GetInt32() == 0,
                 $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1} clips glyphs: " + edge);
             Require(
                 edge.GetProperty("marginDelta").GetDouble() <= 0.1,
                 $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1} margins are asymmetric: " + edge);
+            RequireKreaderVerticalFlowInvariants(
+                edge,
+                $"external EPUB page {pageIndex + 1}/{lastPageIndex + 1}",
+                requireTopAlignedColumns: false);
             await log.WriteLineAsync(
                 $"PASS external vertical page {pageIndex + 1}/{lastPageIndex + 1} "
-                + $"scrollLeft={actual:F3} partialGlyphs=0 marginDelta={edge.GetProperty("marginDelta").GetDouble():F3}");
+                + $"scrollLeft={actual:F3} partialGlyphs=0 marginDelta={edge.GetProperty("marginDelta").GetDouble():F3}"
+                + $" bottomAlignedColumns={edge.GetProperty("bottomAlignedColumnCount").GetInt32()}");
             if (pageIndex == screenshotPageIndex)
-                await PauseKreaderValidationAtVerticalPageAsync(log);
+            {
+                var digitDiag = await verticalHost.InvokeScriptAsync("""
+                    (() => {
+                      const spans = Array.from(document.querySelectorAll('span[data-kkindle-vertical-run="1"]')).slice(0, 40);
+                      const items = spans.map(s => {
+                        const cs = getComputedStyle(s);
+                        const r = s.getBoundingClientRect();
+                        return { t: s.textContent, cls: s.className,
+                          combine: cs.textCombineUpright || cs.webkitTextCombine || '',
+                          orient: cs.textOrientation || '', font: (cs.fontFamily || '').slice(0, 48),
+                          size: cs.fontSize, w: +r.width.toFixed(1), h: +r.height.toFixed(1) };
+                      });
+                      const fonts = Array.from(document.fonts).map(f => f.family + '|' + f.status);
+                      const probe = document.createElement('span');
+                      probe.className = 'kkindle-tcy';
+                      probe.textContent = '2026';
+                      probe.style.position = 'absolute'; probe.style.visibility = 'hidden';
+                      document.body.appendChild(probe);
+                      const probeCombine = getComputedStyle(probe).textCombineUpright || getComputedStyle(probe).webkitTextCombine || '';
+                      probe.remove();
+                      return JSON.stringify({ count: spans.length, items, fonts, probeCombine });
+                    })();
+                    """);
+                await log.WriteLineAsync("DEBUG digit diagnostics " + DecodeReaderScriptString(digitDiag ?? digitDiag));
+            }
         }
         await log.WriteLineAsync(
             $"PASS external EPUB all {lastPageIndex + 1} vertical pages have no clipped glyphs; maxScrollError={maxScrollError:F3}px");
@@ -456,14 +563,19 @@ public partial class MainWindow
         {
             var edge = await ReadKreaderVerticalEdgeDiagnosticsAsync(verticalHost);
             Require(
-                edge.GetProperty("glyphCount").GetInt32() > 0,
-                $"actual page turn {pageIndex + 1}/{lastPageIndex + 1} inspected no visible glyphs: " + edge);
+                edge.GetProperty("glyphCount").GetInt32() > 0
+                || edge.GetProperty("visibleMediaCount").GetInt32() > 0,
+                $"actual page turn {pageIndex + 1}/{lastPageIndex + 1} has neither visible text nor visible media: " + edge);
             Require(
                 edge.GetProperty("partialGlyphCount").GetInt32() == 0,
                 $"actual page turn {pageIndex + 1}/{lastPageIndex + 1} clips glyphs: " + edge);
             Require(
                 edge.GetProperty("marginDelta").GetDouble() <= 0.1,
                 $"actual page turn {pageIndex + 1}/{lastPageIndex + 1} margins are asymmetric: " + edge);
+            RequireKreaderVerticalFlowInvariants(
+                edge,
+                $"actual page turn {pageIndex + 1}/{lastPageIndex + 1}",
+                requireTopAlignedColumns: false);
             if (pageIndex < lastPageIndex)
             {
                 await TurnReaderPageAsync(1);
@@ -518,6 +630,11 @@ public partial class MainWindow
         // the bookshelf round trip so the assertion compares like-for-like pages.
         await SaveGlobalReaderVerticalWritingAsync(true, CancellationToken.None);
         await CloseReaderAsync();
+        var persistedProgress = await _readerData.GetProgressAsync(
+            reopenFile.Id,
+            CancellationToken.None);
+        await log.WriteLineAsync(
+            "DEBUG persisted bookshelf progress " + JsonSerializer.Serialize(persistedProgress));
         await OpenBookAsync(reopenCard, reopenFile, restoreProgress: true);
         var reopenedHost = CurrentReaderHost
             ?? throw new InvalidOperationException("bookshelf restore validation reopened host missing");
@@ -545,6 +662,792 @@ public partial class MainWindow
         await log.WriteLineAsync(
             $"PASS return to bookshelf restored exact vertical page {afterPageIndex + 1}/{lastPageIndex + 1} "
             + $"in chapter {expectedChapterIndex}; before={beforePosition:F3}px after={afterPosition:F3}px");
+
+        await SweepExternalVerticalChaptersAsync(log, expectedChapterIndex);
+    }
+
+    private async Task ValidateLinuxContinuousVerticalFlowAsync(TextWriter log)
+    {
+        await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false, vertical: true);
+        var host = CurrentReaderHost
+            ?? throw new InvalidOperationException("Linux continuous vertical reader host missing");
+        await Task.Delay(150, ReaderToken);
+        var initial = await ReadKreaderDomMetricsAsync(host);
+        Require(_readerLayout.FlowMode == 0, "Linux vertical layout did not normalize to continuous flow");
+        Require(initial.GetProperty("flowMode").GetInt32() == 0, "Linux vertical DOM flow mode is not continuous");
+        Require(initial.GetProperty("vertical").GetBoolean(), "Linux vertical writing flag not applied");
+        Require(initial.GetProperty("writingMode").GetString() == "vertical-rl", "Linux vertical writing mode not applied");
+        var verticalText = initial.GetProperty("text").GetString() ?? string.Empty;
+        Require(
+            verticalText.Contains("DNA", StringComparison.Ordinal)
+            && verticalText.Contains("FPGA", StringComparison.Ordinal),
+            "Linux vertical abbreviation fixture is missing DNA or FPGA");
+        const string requiredChinesePunctuation = "，。！？、；：“”‘’（）《》〈〉【】〔〕［］｛｝—…·";
+        const string requiredAsciiPunctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+        Require(
+            requiredChinesePunctuation.All(verticalText.Contains)
+            && requiredAsciiPunctuation.All(verticalText.Contains)
+            && verticalText.Contains("——", StringComparison.Ordinal)
+            && verticalText.Contains("……", StringComparison.Ordinal),
+            "Linux vertical punctuation fixture is incomplete");
+        Require(
+            initial.GetProperty("scrollWidth").GetDouble() > initial.GetProperty("clientWidth").GetDouble(),
+            "Linux continuous vertical flow has no horizontal extent");
+
+        var chromeResult = await host.InvokeScriptAsync("""
+            (() => JSON.stringify({
+              masks: document.querySelectorAll('#kkindle-vertical-edge-mask-left, #kkindle-vertical-edge-mask-right').length,
+              flowGuards: [
+                'kkindle-vertical-flow-guard-left',
+                'kkindle-vertical-flow-guard-right',
+                'kkindle-vertical-flow-guard-top',
+                'kkindle-vertical-flow-guard-bottom'
+              ].map(id => {
+                const node = document.getElementById(id);
+                if (!node) return null;
+                const rect = node.getBoundingClientRect();
+                return [rect.left, rect.top, rect.right, rect.bottom];
+              }),
+              safeBoundary: document.documentElement.dataset.kkindleVerticalSafeBoundary || '',
+              clientWidth: (document.scrollingElement || document.documentElement).clientWidth || 0,
+              clientHeight: (document.scrollingElement || document.documentElement).clientHeight || 0,
+              pageStep: getComputedStyle(document.documentElement).getPropertyValue('--kkindle-vertical-page-step').trim(),
+              publicationTcy: (() => {
+                const node = document.querySelector('.publication-tcy');
+                if (!node) return '';
+                const style = getComputedStyle(node);
+                return style.textCombineUpright || style.webkitTextCombine || '';
+              })(),
+              letterSpacing: getComputedStyle(document.body).letterSpacing,
+              wordSpacing: getComputedStyle(document.body).wordSpacing
+            }))();
+            """);
+        var chromeJson = DecodeReaderScriptString(chromeResult ?? string.Empty);
+        Require(!string.IsNullOrWhiteSpace(chromeJson), "Linux continuous vertical chrome diagnostics returned no data");
+        using var chromeDocument = JsonDocument.Parse(chromeJson!);
+        Require(chromeDocument.RootElement.GetProperty("masks").GetInt32() == 0, "Linux continuous vertical flow still has page masks");
+        Require(string.IsNullOrEmpty(chromeDocument.RootElement.GetProperty("pageStep").GetString()), "Linux continuous vertical flow still publishes a page step");
+        var flowGuards = chromeDocument.RootElement
+            .GetProperty("flowGuards")
+            .EnumerateArray()
+            .ToArray();
+        Require(
+            flowGuards.Length == 4
+            && flowGuards.All(guard => guard.ValueKind == JsonValueKind.Array),
+            "Linux continuous vertical flow is missing a physical safe-boundary guard: "
+            + chromeDocument.RootElement);
+        var clientWidth = chromeDocument.RootElement.GetProperty("clientWidth").GetDouble();
+        var clientHeight = chromeDocument.RootElement.GetProperty("clientHeight").GetDouble();
+        var minimumInset = Math.Max(1, _readerLayout.BodyPadding - 0.75);
+        var leftGuard = flowGuards[0].EnumerateArray().Select(value => value.GetDouble()).ToArray();
+        var rightGuard = flowGuards[1].EnumerateArray().Select(value => value.GetDouble()).ToArray();
+        var topGuard = flowGuards[2].EnumerateArray().Select(value => value.GetDouble()).ToArray();
+        var bottomGuard = flowGuards[3].EnumerateArray().Select(value => value.GetDouble()).ToArray();
+        Require(
+            leftGuard[0] >= -0.01
+            && leftGuard[2] >= minimumInset
+            && clientWidth - rightGuard[0] >= minimumInset
+            && topGuard[1] >= -0.01
+            && topGuard[3] >= minimumInset
+            && bottomGuard[1] >= topGuard[3]
+            && bottomGuard[3] <= clientHeight + 0.01,
+            "Linux continuous vertical flow has an invalid four-edge complete-glyph guard: "
+            + chromeDocument.RootElement);
+        Require(
+            !string.IsNullOrWhiteSpace(
+                chromeDocument.RootElement.GetProperty("safeBoundary").GetString()),
+            "Linux continuous vertical flow did not publish its resolved safe boundary");
+        Require(
+            chromeDocument.RootElement.GetProperty("publicationTcy").GetString() is "all" or "horizontal",
+            "Linux vertical flow overrode publication-authored tate-chu-yoko");
+        Require(
+            chromeDocument.RootElement.GetProperty("letterSpacing").GetString() is "normal" or "0px",
+            "Linux vertical flow overrides the font's native character advance");
+        Require(
+            chromeDocument.RootElement.GetProperty("wordSpacing").GetString() is "normal" or "0px",
+            "Linux vertical flow overrides native English word spacing");
+
+        var inline = await ReadKreaderNativeVerticalInlineDiagnosticsAsync(host);
+        Require(
+            inline.GetProperty("preparedVersion").GetString() == "publication-native-compat-1"
+            && inline.GetProperty("linuxNumberRunCount").GetInt32() > 0
+            && inline.GetProperty("linuxSingleCount").GetInt32() > 0
+            && inline.GetProperty("linuxTcyCount").GetInt32() > 0
+            && inline.GetProperty("cjkSeparatedNumberCount").GetInt32() > 0
+            && inline.GetProperty("cjkNumberSpacingErrorCount").GetInt32() == 0
+            && inline.GetProperty("linuxNumericStyleErrorCount").GetInt32() == 0
+            && inline.GetProperty("syntheticLinuxNumberLayoutCount").GetInt32() == 0
+            && inline.GetProperty("nativeDigitRunCount").GetInt32() == 0
+            && inline.GetProperty("nativeFootnoteCount").GetInt32() == 0
+            && inline.GetProperty("syntheticNativeDigitLayoutCount").GetInt32() == 0
+            && inline.GetProperty("legacyWrapperCount").GetInt32() == 0
+            && inline.GetProperty("syntheticLayoutCount").GetInt32() == 0
+            && inline.GetProperty("boundaryOverlapCount").GetInt32() == 0,
+            "Linux continuous vertical flow contains reader-generated inline layout: " + inline);
+
+        await host.InvokeScriptAsync("""
+            (() => {
+              const el = document.scrollingElement || document.documentElement;
+              const max = Math.max(0, el.scrollWidth - el.clientWidth);
+              window.scrollTo({ left: -Math.min(max, Math.max(96, el.clientWidth / 2)), top: 0, behavior: 'instant' });
+            })();
+            """);
+        await Task.Delay(100, ReaderToken);
+        var scrolled = await ReadKreaderDomMetricsAsync(host);
+        Require(scrolled.GetProperty("scrollLeft").GetDouble() < -1, "Linux continuous vertical flow did not enter the negative X range");
+
+        var selectionBar = await ShowAndReadKreaderSelectionBarAsync(host);
+        Require(selectionBar.GetProperty("writingMode").GetString() == "horizontal-tb", "vertical selection bar inherited vertical writing mode");
+        await ClearKreaderValidationSelectionAsync(host);
+        await host.InvokeScriptAsync("""
+            (() => {
+              const sample = document.querySelector('.vertical-fixture-sample');
+              sample?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+            })();
+            """);
+        await Task.Delay(250, ReaderToken);
+        var fixtureSpacing = await ReadVerticalFixtureSpacingAsync(host);
+        Require(
+            fixtureSpacing.GetProperty("adjacentOverlapCount").GetInt32() == 0,
+            "vertical fixture contains overlapping adjacent glyph advances: " + fixtureSpacing);
+        Require(
+            fixtureSpacing.GetProperty("cellOverlapCount").GetInt32() == 0,
+            "vertical fixture contains overlapping real character cells: " + fixtureSpacing);
+        Require(
+            fixtureSpacing.GetProperty("verticalCenterErrorCount").GetInt32() == 0,
+            "vertical fixture mixes inline units on different visual centre lines: " + fixtureSpacing);
+        Require(
+            fixtureSpacing.GetProperty("dnaFound").GetBoolean()
+            && fixtureSpacing.GetProperty("fpgaFound").GetBoolean(),
+            "vertical fixture spacing probe did not find DNA and FPGA: " + fixtureSpacing);
+        var numberBoundaryGaps = fixtureSpacing
+            .GetProperty("numberBoundaryGaps")
+            .EnumerateArray()
+            .ToArray();
+        Require(
+            // Only the currently visible column is measurable after the
+            // fixture is centered; the other examples may be in adjacent
+            // columns and their union rect is not a usable inline boundary.
+            numberBoundaryGaps.Length >= 1
+            && numberBoundaryGaps.All(gap => gap.GetProperty("gap").GetDouble() >= -1.05),
+            "vertical fixture number boundaries overlap: " + fixtureSpacing);
+        var fixtureFontSize = fixtureSpacing.GetProperty("footnoteFontSize").GetDouble();
+        var fixtureInlineAdvance = fixtureSpacing.GetProperty("footnoteInlineAdvance").GetDouble();
+        Require(
+            fixtureSpacing.GetProperty("footnoteFound").GetBoolean()
+            && fixtureSpacing.GetProperty("footnoteText").GetString() == "[12]"
+            && fixtureFontSize > 0
+            && fixtureInlineAdvance >= fixtureFontSize
+            && Math.Abs(fixtureSpacing.GetProperty("footnoteWidth").GetDouble() - fixtureFontSize) <= 1.1
+            && Math.Abs(fixtureSpacing.GetProperty("footnoteHeight").GetDouble() - fixtureInlineAdvance) <= 1.1
+            && fixtureSpacing.GetProperty("footnoteCenterDelta").GetDouble() <= 1.1,
+            "vertical footnote marker does not occupy exactly one body-text cell: " + fixtureSpacing);
+        Require(
+            fixtureSpacing.GetProperty("pairOpenCount").GetInt32() >= 9
+            && fixtureSpacing.GetProperty("pairCloseCount").GetInt32() >= 9
+            && fixtureSpacing.GetProperty("pairOpenJustifyItems").GetString() == "center"
+            && fixtureSpacing.GetProperty("pairCloseJustifyItems").GetString() == "center"
+            && fixtureSpacing.GetProperty("pairOpenCenterDelta").GetDouble() <= 1.1
+            && fixtureSpacing.GetProperty("pairCloseCenterDelta").GetDouble() <= 1.1,
+            "vertical paired punctuation is not centred in the same one-em cell: " + fixtureSpacing);
+        Require(
+            fixtureSpacing.GetProperty("singlePunctuationCount").GetInt32() >= 12
+            && fixtureSpacing.GetProperty("singlePunctuationStyleErrorCount").GetInt32() == 0
+            && fixtureSpacing.GetProperty("singlePunctuationCenterErrorCount").GetInt32() == 0
+            && fixtureSpacing.GetProperty("singleDigitCenterErrorCount").GetInt32() == 0,
+            "vertical single punctuation or digits are not centered in their CJK cells: " + fixtureSpacing);
+        Require(
+            fixtureSpacing.GetProperty("cjkCellCount").GetInt32() > 0
+            && fixtureSpacing.GetProperty("cjkCellSizeErrorCount").GetInt32() == 0
+            && fixtureSpacing.GetProperty("cjkGlyphCenterErrorCount").GetInt32() == 0,
+            "vertical Han glyphs are not centered in non-overlapping one-em cells: " + fixtureSpacing);
+        Require(
+            fixtureSpacing.GetProperty("verticalCenteredMarkCount").GetInt32() >= 4
+            && fixtureSpacing.GetProperty("verticalCenteredMarkRotationErrorCount").GetInt32() == 0
+            && fixtureSpacing.GetProperty("verticalCenteredMarkCenterErrorCount").GetInt32() == 0,
+            "dash or ellipsis is not rotated vertically around its cell centre: " + fixtureSpacing);
+        await log.WriteLineAsync("DEBUG vertical fixture spacing " + fixtureSpacing);
+        await log.WriteLineAsync("PASS Linux native continuous vertical flow, negative X scrolling, unsplit text and four-edge safe boundaries");
+        await PauseKreaderValidationAtVerticalPageAsync(log);
+    }
+
+    private async Task<JsonElement> ReadVerticalFixtureSpacingAsync(IReaderHost host)
+    {
+        var result = await host.InvokeScriptAsync("""
+            (() => {
+              const sample = document.querySelector('.vertical-fixture-sample');
+              if (!sample) return null;
+              const items = [];
+              const walker = document.createTreeWalker(sample, NodeFilter.SHOW_TEXT);
+              for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                const text = node.nodeValue || '';
+                if (node.parentElement?.closest(
+                    '.kkindle-linux-vertical-single, '
+                      + '.kkindle-linux-vertical-single-punctuation, '
+                      + '.kkindle-linux-vertical-tcy, '
+                      + '.kkindle-linux-vertical-number, '
+                      + '.kkindle-linux-vertical-cjk, '
+                      + '.kkindle-linux-vertical-pair-punctuation, '
+                      + '.kkindle-linux-vertical-footnote'))
+                  continue;
+                for (let index = 0; index < text.length; index++) {
+                  if (/\s/.test(text[index])) continue;
+                  const range = document.createRange();
+                  range.setStart(node, index);
+                  range.setEnd(node, index + 1);
+                  const rect = range.getBoundingClientRect();
+                  if (rect.width <= 0 || rect.height <= 0) continue;
+                  items.push({ text: text[index], top: rect.top, bottom: rect.bottom,
+                    left: rect.left, right: rect.right });
+                }
+              }
+              let adjacentOverlapCount = 0;
+              let maxOverlap = 0;
+              for (let index = 1; index < items.length; index++) {
+                const previous = items[index - 1];
+                const current = items[index];
+                const previousCenter = (previous.left + previous.right) / 2;
+                const currentCenter = (current.left + current.right) / 2;
+                if (Math.abs(previousCenter - currentCenter) > 2) continue;
+                const overlap = previous.bottom - current.top;
+                if (overlap <= 1.05) continue;
+                adjacentOverlapCount++;
+                maxOverlap = Math.max(maxOverlap, overlap);
+              }
+              const alignmentItems = [];
+              const alignmentWalker = document.createTreeWalker(
+                sample,
+                NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+              const generatedAlignmentSelector = [
+                '.kkindle-linux-vertical-single',
+                '.kkindle-linux-vertical-single-punctuation',
+                '.kkindle-linux-vertical-tcy',
+                '.kkindle-linux-vertical-number',
+                '.kkindle-linux-vertical-cjk',
+                '.kkindle-linux-vertical-pair-punctuation'
+              ].join(',');
+              const alignmentCategory = character => {
+                if (/[A-Za-z]/.test(character)) return 'latin';
+                if (/[0-9]/.test(character)) return 'digit';
+                if (/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~，。！？、；：“”‘’（）《》〈〉【】〔〕［］｛｝…—]/.test(character))
+                  return 'punctuation';
+                if (/[⺀-鿿豈-﫿]/.test(character)) return 'cjk';
+                return 'other';
+              };
+              for (let node = alignmentWalker.nextNode(); node; node = alignmentWalker.nextNode()) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                  if (!node.matches?.(generatedAlignmentSelector)) continue;
+                  const rect = node.getBoundingClientRect();
+                  if (rect.width > 0 && rect.height > 0)
+                    alignmentItems.push({
+                      category: node.matches(
+                        '.kkindle-linux-vertical-single-punctuation, '
+                          + '.kkindle-linux-vertical-pair-punctuation')
+                        ? 'punctuation'
+                        : node.matches('.kkindle-linux-vertical-cjk')
+                          ? 'cjk' : 'digit',
+                      text: node.textContent || '',
+                      rect
+                    });
+                  continue;
+                }
+                const parent = node.parentElement;
+                if (!parent || parent.closest(
+                    generatedAlignmentSelector + ', .kkindle-linux-vertical-footnote'))
+                  continue;
+                const value = node.nodeValue || '';
+                for (let index = 0; index < value.length; index++) {
+                  if (/\s/.test(value[index])) continue;
+                  const range = document.createRange();
+                  range.setStart(node, index);
+                  range.setEnd(node, index + 1);
+                  const rect = range.getBoundingClientRect();
+                  if (rect.width > 0 && rect.height > 0)
+                    alignmentItems.push({
+                      category: alignmentCategory(value[index]),
+                      text: value[index],
+                      rect
+                    });
+                }
+              }
+              let verticalCenterErrorCount = 0;
+              let maxVerticalCenterDelta = 0;
+              const verticalCenterSamples = [];
+              for (let index = 1; index < alignmentItems.length; index++) {
+                const previous = alignmentItems[index - 1];
+                const current = alignmentItems[index];
+                if (current.rect.top + 1.05 < previous.rect.top) continue;
+                const previousCenter = previous.rect.left + previous.rect.width / 2;
+                const currentCenter = current.rect.left + current.rect.width / 2;
+                const sameColumn = Math.abs(previousCenter - currentCenter)
+                  <= Math.max(8, previous.rect.width, current.rect.width) * 0.75;
+                if (!sameColumn) continue;
+                const delta = Math.abs(previousCenter - currentCenter);
+                maxVerticalCenterDelta = Math.max(maxVerticalCenterDelta, delta);
+                if (delta <= 1.1) continue;
+                verticalCenterErrorCount++;
+                if (verticalCenterSamples.length < 12) {
+                  verticalCenterSamples.push({
+                    previous: previous.text,
+                    current: current.text,
+                    delta: +delta.toFixed(2),
+                    previousRect: [previous.rect.left, previous.rect.top, previous.rect.width, previous.rect.height].map(v => +v.toFixed(2)),
+                    currentRect: [current.rect.left, current.rect.top, current.rect.width, current.rect.height].map(v => +v.toFixed(2))
+                  });
+                }
+              }
+              let cellOverlapCount = 0;
+              let maxCellOverlap = 0;
+              const cellOverlapItems = [];
+              for (let index = 1; index < alignmentItems.length; index++) {
+                const previous = alignmentItems[index - 1];
+                const current = alignmentItems[index];
+                if (current.rect.top + 1.05 < previous.rect.top) continue;
+                const previousCenter = previous.rect.left + previous.rect.width / 2;
+                const currentCenter = current.rect.left + current.rect.width / 2;
+                if (Math.abs(previousCenter - currentCenter) > 1.1) continue;
+                const overlap = previous.rect.bottom - current.rect.top;
+                if (overlap <= 1.05) continue;
+                cellOverlapCount++;
+                maxCellOverlap = Math.max(maxCellOverlap, overlap);
+                if (cellOverlapItems.length < 12) {
+                  cellOverlapItems.push({
+                    previous: previous.text,
+                    current: current.text,
+                    overlap: +overlap.toFixed(2),
+                    previousRect: [previous.rect.left, previous.rect.top, previous.rect.width, previous.rect.height].map(v => +v.toFixed(2)),
+                    currentRect: [current.rect.left, current.rect.top, current.rect.width, current.rect.height].map(v => +v.toFixed(2))
+                  });
+                }
+              }
+              const numberBoundaryGaps = [];
+              for (const run of sample.querySelectorAll('.kkindle-cjk-before-number')) {
+                const previous = run.previousSibling;
+                if (!previous) continue;
+                let previousText = '';
+                let previousRect = null;
+                if (previous.nodeType === Node.TEXT_NODE) {
+                  previousText = previous.nodeValue || '';
+                  let index = previousText.length - 1;
+                  while (index >= 0 && /\s/.test(previousText[index])) index--;
+                  if (index < 0) continue;
+                  const range = document.createRange();
+                  range.setStart(previous, index);
+                  range.setEnd(previous, index + 1);
+                  previousRect = range.getBoundingClientRect();
+                  previousText = previousText[index];
+                } else if (previous.matches?.('.kkindle-linux-vertical-cjk')) {
+                  previousText = previous.textContent || '';
+                  previousRect = previous.getBoundingClientRect();
+                }
+                if (!previousRect || !previousText) continue;
+                const runRect = run.getBoundingClientRect();
+                const previousCenter = (previousRect.left + previousRect.right) / 2;
+                const runCenter = (runRect.left + runRect.right) / 2;
+                // An orthogonal horizontal-tb compatibility cell can have a
+                // different physical X origin from the native Han Range even
+                // when it occupies the same vertical column. Compare using a
+                // fraction of the cell width, not a hard two-pixel cutoff.
+                const sameColumnTolerance = Math.max(
+                  2,
+                  parseFloat(getComputedStyle(run).fontSize || '0') * 0.75,
+                  Math.max(previousRect.width, runRect.width) * 0.75);
+                if (Math.abs(previousCenter - runCenter) > sameColumnTolerance) continue;
+                numberBoundaryGaps.push({
+                  boundary: previousText + '->' + (run.textContent || ''),
+                  gap: +(runRect.top - previousRect.bottom).toFixed(2)
+                });
+              }
+              const text = sample.textContent || '';
+              const footnote = sample.querySelector('.kkindle-linux-vertical-footnote');
+              const footnoteStyle = footnote ? getComputedStyle(footnote) : null;
+              const bodyStyle = getComputedStyle(document.body);
+              const bodyFontSize = parseFloat(bodyStyle.fontSize) || 0;
+              const footnoteRect = footnote?.getBoundingClientRect();
+              const footnoteInner = footnote?.querySelector(
+                ':scope > .kkindle-linux-vertical-footnote-inner');
+              let footnoteInkRect = null;
+              if (footnoteInner) {
+                const textWalker = document.createTreeWalker(
+                  footnoteInner, NodeFilter.SHOW_TEXT);
+                for (let node = textWalker.nextNode(); node; node = textWalker.nextNode()) {
+                  if (!(node.nodeValue || '').trim()) continue;
+                  const range = document.createRange();
+                  range.selectNodeContents(node);
+                  footnoteInkRect = range.getBoundingClientRect();
+                  break;
+                }
+              }
+              const footnoteCenterDelta = footnoteRect && footnoteInkRect
+                ? Math.max(
+                    Math.abs((footnoteRect.left + footnoteRect.width / 2)
+                      - (footnoteInkRect.left + footnoteInkRect.width / 2)),
+                    Math.abs((footnoteRect.top + footnoteRect.height / 2)
+                      - (footnoteInkRect.top + footnoteInkRect.height / 2)))
+                : Number.POSITIVE_INFINITY;
+              const pairOpen = Array.from(sample.querySelectorAll('.kkindle-linux-vertical-pair-open'));
+              const pairClose = Array.from(sample.querySelectorAll('.kkindle-linux-vertical-pair-close'));
+              const readCellGeometry = span => {
+                const outer = span.getBoundingClientRect();
+                const inner = span.querySelector(':scope > .kkindle-linux-vertical-cell-inner');
+                const glyph = inner?.querySelector(':scope > .kkindle-linux-vertical-glyph');
+                // Mapped punctuation is painted by ::before. The original
+                // text node remains transparent and WebKit reports its
+                // untransformed range, so using that range would measure a
+                // phantom glyph outside the visible centred cell.
+                if (inner?.dataset.kkindleVerticalGlyph)
+                  return { outer, inner: inner.getBoundingClientRect(), glyph: inner.getBoundingClientRect() };
+                // For a real generated glyph, measure the element rather than
+                // a Range over its text node. WebKitGTK can leave a Range in
+                // the pre-transform coordinate space when the parent cell is
+                // rotated (vertical ellipsis/dash) or relatively shifted.
+                if (inner && glyph)
+                  return { outer, inner: inner.getBoundingClientRect(), glyph: glyph.getBoundingClientRect() };
+                const node = glyph?.firstChild || inner?.firstChild || span.firstChild;
+                if (!node || node.nodeType !== Node.TEXT_NODE)
+                  return { outer, inner: inner?.getBoundingClientRect() || null, glyph: null };
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                return {
+                  outer,
+                  inner: inner?.getBoundingClientRect() || null,
+                  glyph: range.getBoundingClientRect()
+                };
+              };
+              const openGeometry = pairOpen[0] ? readCellGeometry(pairOpen[0]) : null;
+              const closeGeometry = pairClose[0] ? readCellGeometry(pairClose[0]) : null;
+              const pairOpenStyle = pairOpen[0] ? getComputedStyle(pairOpen[0]) : null;
+              const pairCloseStyle = pairClose[0] ? getComputedStyle(pairClose[0]) : null;
+              const pairOpenLeftInset = openGeometry?.glyph
+                ? openGeometry.glyph.left - openGeometry.outer.left : Number.POSITIVE_INFINITY;
+              const pairCloseRightInset = closeGeometry?.glyph
+                ? closeGeometry.outer.right - closeGeometry.glyph.right : Number.POSITIVE_INFINITY;
+              const pairOpenTopInset = openGeometry?.glyph
+                ? openGeometry.glyph.top - openGeometry.outer.top : Number.NEGATIVE_INFINITY;
+              const pairOpenBottomInset = openGeometry?.glyph
+                ? openGeometry.outer.bottom - openGeometry.glyph.bottom : Number.NEGATIVE_INFINITY;
+              const cellCenterDelta = geometry => geometry?.inner
+                ? Math.max(
+                    Math.abs((geometry.outer.left + geometry.outer.width / 2)
+                      - (geometry.inner.left + geometry.inner.width / 2)),
+                    Math.abs((geometry.outer.top + geometry.outer.height / 2)
+                      - (geometry.inner.top + geometry.inner.height / 2)))
+                : Number.POSITIVE_INFINITY;
+              const singlePunctuation = Array.from(
+                sample.querySelectorAll('.kkindle-linux-vertical-single-punctuation'));
+              let singlePunctuationStyleErrorCount = 0;
+              let singlePunctuationCenterErrorCount = 0;
+              for (const span of singlePunctuation) {
+                const style = getComputedStyle(span);
+                if (style.display !== 'inline-grid'
+                    || style.writingMode !== 'horizontal-tb'
+                    || style.alignItems !== 'center'
+                    || style.justifyItems !== 'center')
+                  singlePunctuationStyleErrorCount++;
+                const geometry = readCellGeometry(span);
+                const centeredBox = geometry.inner || geometry.glyph;
+                if (!centeredBox) {
+                  singlePunctuationCenterErrorCount++;
+                  continue;
+                }
+                const cellCenterX = geometry.outer.left + geometry.outer.width / 2;
+                const cellCenterY = geometry.outer.top + geometry.outer.height / 2;
+                const glyphCenterX = centeredBox.left + centeredBox.width / 2;
+                const glyphCenterY = centeredBox.top + centeredBox.height / 2;
+                if (Math.max(
+                    Math.abs(cellCenterX - glyphCenterX),
+                    Math.abs(cellCenterY - glyphCenterY)) > 1.1)
+                  singlePunctuationCenterErrorCount++;
+              }
+              const verticalCenteredMarks = Array.from(
+                sample.querySelectorAll('.kkindle-linux-vertical-centered-mark'));
+              let verticalCenteredMarkRotationErrorCount = 0;
+              let verticalCenteredMarkCenterErrorCount = 0;
+              for (const span of verticalCenteredMarks) {
+                const inner = span.querySelector(':scope > .kkindle-linux-vertical-cell-inner');
+                const matrix = new DOMMatrix(getComputedStyle(inner).transform);
+                if (Math.abs(matrix.b) < 0.8 || Math.abs(matrix.c) < 0.8)
+                  verticalCenteredMarkRotationErrorCount++;
+                const geometry = readCellGeometry(span);
+                const centeredBox = geometry.inner || geometry.glyph;
+                if (!centeredBox) {
+                  verticalCenteredMarkCenterErrorCount++;
+                  continue;
+                }
+                const dx = Math.abs(
+                  geometry.outer.left + geometry.outer.width / 2
+                  - centeredBox.left - centeredBox.width / 2);
+                const dy = Math.abs(
+                  geometry.outer.top + geometry.outer.height / 2
+                  - centeredBox.top - centeredBox.height / 2);
+                if (Math.max(dx, dy) > 1.1)
+                  verticalCenteredMarkCenterErrorCount++;
+              }
+              const singleDigits = Array.from(
+                sample.querySelectorAll('.kkindle-linux-vertical-single'));
+              let singleDigitCenterErrorCount = 0;
+              for (const span of singleDigits) {
+                const geometry = readCellGeometry(span);
+                const centeredBox = geometry.inner || geometry.glyph;
+                if (!centeredBox) {
+                  singleDigitCenterErrorCount++;
+                  continue;
+                }
+                const cellCenterX = geometry.outer.left + geometry.outer.width / 2;
+                const cellCenterY = geometry.outer.top + geometry.outer.height / 2;
+                const glyphCenterX = centeredBox.left + centeredBox.width / 2;
+                const glyphCenterY = centeredBox.top + centeredBox.height / 2;
+                if (Math.max(
+                    Math.abs(cellCenterX - glyphCenterX),
+                    Math.abs(cellCenterY - glyphCenterY)) > 1.1)
+                  singleDigitCenterErrorCount++;
+              }
+              const cjkCells = Array.from(
+                sample.querySelectorAll('.kkindle-linux-vertical-cjk'));
+              let cjkCellSizeErrorCount = 0;
+              let cjkGlyphCenterErrorCount = 0;
+              let cjkMaxGlyphCenterDelta = 0;
+              for (const cell of cjkCells) {
+                const outer = cell.getBoundingClientRect();
+                const style = getComputedStyle(cell);
+                const fontSize = parseFloat(style.fontSize) || 0;
+                if (!(fontSize > 0)
+                    || Math.abs(outer.width - fontSize) > 1.1
+                    || Math.abs(outer.height - fontSize) > 1.1)
+                  cjkCellSizeErrorCount++;
+                const glyph = cell.querySelector(
+                  ':scope > .kkindle-linux-vertical-cjk-ink > .kkindle-linux-vertical-glyph');
+                if (!glyph) {
+                  cjkGlyphCenterErrorCount++;
+                  continue;
+                }
+                const ink = glyph.getBoundingClientRect();
+                const delta = Math.max(
+                  Math.abs(outer.left + outer.width / 2 - ink.left - ink.width / 2),
+                  Math.abs(outer.top + outer.height / 2 - ink.top - ink.height / 2));
+                cjkMaxGlyphCenterDelta = Math.max(cjkMaxGlyphCenterDelta, delta);
+                if (delta > 1.1) cjkGlyphCenterErrorCount++;
+              }
+              const singlePunctuationSample = singlePunctuation[0]
+                ? readCellGeometry(singlePunctuation[0]) : null;
+              const singleDigitSample = singleDigits[0]
+                ? readCellGeometry(singleDigits[0]) : null;
+              return JSON.stringify({
+                adjacentOverlapCount,
+                maxOverlap: +maxOverlap.toFixed(2),
+                verticalCenterErrorCount,
+                maxVerticalCenterDelta: +maxVerticalCenterDelta.toFixed(2),
+                verticalCenterSamples,
+                cellOverlapCount,
+                maxCellOverlap: +maxCellOverlap.toFixed(2),
+                cellOverlapItems,
+                numberBoundaryGaps,
+                footnoteFound: !!footnote,
+                footnoteText: footnote?.textContent || '',
+                footnoteWidth: +(footnoteRect?.width || 0).toFixed(2),
+                footnoteHeight: +(footnoteRect?.height || 0).toFixed(2),
+                footnoteFontSize: +(parseFloat(footnoteStyle?.fontSize || '0') || 0).toFixed(2),
+                footnoteInlineAdvance: +bodyFontSize.toFixed(2),
+                footnoteCenterDelta: +footnoteCenterDelta.toFixed(2),
+                footnoteOuter: footnoteRect
+                  ? [footnoteRect.left, footnoteRect.top, footnoteRect.width, footnoteRect.height].map(v => +v.toFixed(2)) : null,
+                footnoteInk: footnoteInkRect
+                  ? [footnoteInkRect.left, footnoteInkRect.top, footnoteInkRect.width, footnoteInkRect.height].map(v => +v.toFixed(2)) : null,
+                pairOpenCount: pairOpen.length,
+                pairCloseCount: pairClose.length,
+                pairOpenJustifyItems: pairOpenStyle?.justifyItems || '',
+                pairCloseJustifyItems: pairCloseStyle?.justifyItems || '',
+                pairOpenLeftInset: +pairOpenLeftInset.toFixed(2),
+                pairCloseRightInset: +pairCloseRightInset.toFixed(2),
+                pairOpenTopInset: +pairOpenTopInset.toFixed(2),
+                pairOpenBottomInset: +pairOpenBottomInset.toFixed(2),
+                pairOpenCenterDelta: +cellCenterDelta(openGeometry).toFixed(2),
+                pairCloseCenterDelta: +cellCenterDelta(closeGeometry).toFixed(2),
+                pairOpenOuter: openGeometry?.outer
+                  ? [openGeometry.outer.left, openGeometry.outer.top, openGeometry.outer.width, openGeometry.outer.height].map(v => +v.toFixed(2)) : null,
+                pairOpenGlyph: openGeometry?.glyph
+                  ? [openGeometry.glyph.left, openGeometry.glyph.top, openGeometry.glyph.width, openGeometry.glyph.height].map(v => +v.toFixed(2)) : null,
+                pairOpenWritingMode: pairOpenStyle?.writingMode || '',
+                singlePunctuationOuter: singlePunctuationSample?.outer
+                  ? [singlePunctuationSample.outer.left, singlePunctuationSample.outer.top, singlePunctuationSample.outer.width, singlePunctuationSample.outer.height].map(v => +v.toFixed(2)) : null,
+                singlePunctuationGlyph: singlePunctuationSample?.glyph
+                  ? [singlePunctuationSample.glyph.left, singlePunctuationSample.glyph.top, singlePunctuationSample.glyph.width, singlePunctuationSample.glyph.height].map(v => +v.toFixed(2)) : null,
+                singleDigitOuter: singleDigitSample?.outer
+                  ? [singleDigitSample.outer.left, singleDigitSample.outer.top, singleDigitSample.outer.width, singleDigitSample.outer.height].map(v => +v.toFixed(2)) : null,
+                singleDigitGlyph: singleDigitSample?.glyph
+                  ? [singleDigitSample.glyph.left, singleDigitSample.glyph.top, singleDigitSample.glyph.width, singleDigitSample.glyph.height].map(v => +v.toFixed(2)) : null,
+                singlePunctuationCount: singlePunctuation.length,
+                singlePunctuationStyleErrorCount,
+                singlePunctuationCenterErrorCount,
+                verticalCenteredMarkCount: verticalCenteredMarks.length,
+                verticalCenteredMarkRotationErrorCount,
+                verticalCenteredMarkCenterErrorCount,
+                singleDigitCenterErrorCount,
+                cjkCellCount: cjkCells.length,
+                cjkCellSizeErrorCount,
+                cjkGlyphCenterErrorCount,
+                cjkMaxGlyphCenterDelta: +cjkMaxGlyphCenterDelta.toFixed(2),
+                dnaFound: text.includes('DNA'),
+                fpgaFound: text.includes('FPGA')
+              });
+            })();
+            """);
+        var raw = DecodeReaderScriptString(result) ?? result;
+        Require(!string.IsNullOrWhiteSpace(raw), "vertical fixture spacing probe returned no data");
+        using var document = JsonDocument.Parse(raw!);
+        return document.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// Walks consecutive real-book chapters in vertical mode and asserts the
+    /// same no-clipping/margin invariants page by page, while tallying which
+    /// vertical run classes (digits, tate-chu-yoko pairs, long numeric runs,
+    /// Latin words, ASCII punctuation) and how much CJK text the sweep
+    /// exercised. Real books open on arbitrary front matter, so this phase is
+    /// what proves mixed-script body text renders on the standard grid.
+    /// </summary>
+    private async Task SweepExternalVerticalChaptersAsync(TextWriter log, int startChapter)
+    {
+        var sweepChapters = 4;
+        if (int.TryParse(
+                Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_SWEEP"),
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var requestedSweep))
+        {
+            sweepChapters = Math.Max(0, requestedSweep);
+        }
+        if (sweepChapters <= 0) return;
+
+        var totalChapters = _readerDocument?.Chapters.Count ?? 0;
+        var lastSweptChapter = Math.Min(startChapter + sweepChapters - 1, totalChapters - 1);
+        var host = CurrentReaderHost
+            ?? throw new InvalidOperationException("external EPUB sweep reader host missing");
+        // Walk every page of the swept chapters by default. The old fixed cap
+        // of 40 silently stopped two thirds of the way through the long
+        // chapters of a real book, so a "no clipped glyphs" pass covered far
+        // less than the chapter count in the log suggested. Keep an override
+        // for quick smoke runs; the per-chapter log line still marks a chapter
+        // as capped whenever the bound actually truncates it.
+        var maxPagesPerChapter = 400;
+        if (int.TryParse(
+                Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE_SWEEP_MAX_PAGES"),
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var requestedMaxPages)
+            && requestedMaxPages > 0)
+        {
+            maxPagesPerChapter = requestedMaxPages;
+        }
+        var sweptPages = 0;
+        var sweptClippedPages = 0;
+        var sweptAsymmetricPages = 0;
+        var sweptEmptyPages = 0;
+        var sweptCappedChapters = 0;
+        var sweptBottomAlignedColumns = 0;
+
+        for (var chapter = startChapter; chapter <= lastSweptChapter; chapter++)
+        {
+            if (chapter != _readerChapterIndex)
+                await MoveReaderChapterAsync(chapter > _readerChapterIndex ? 1 : -1);
+            await Task.Delay(250, ReaderToken);
+            await WaitForKreaderDocumentAsync(host);
+            await host.InvokeScriptAsync(ReaderPaginationScripts.CreateChapterBoundaryScript(
+                moveToEnd: false,
+                horizontal: true,
+                vertical: true));
+            await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(vertical: true));
+            await Task.Delay(120, ReaderToken);
+
+            var firstPageEdge = await ReadKreaderVerticalEdgeDiagnosticsAsync(host);
+            var viewport = firstPageEdge.GetProperty("viewport").GetDouble();
+            var step = firstPageEdge.GetProperty("pageStep").GetDouble();
+            var extent = firstPageEdge.GetProperty("scrollWidth").GetDouble();
+            var rawMax = Math.Max(0, extent - viewport);
+            var rounded = step > 0 ? Math.Round(rawMax / step) : 0;
+            var chapterLastPage = step > 0
+                ? Math.Max(0,
+                    Math.Abs(rawMax - (rounded * step)) <= 4
+                        ? (int)rounded
+                        : (int)Math.Ceiling(rawMax / step))
+                : 0;
+            var walkedPages = Math.Min(chapterLastPage + 1, maxPagesPerChapter);
+            if (walkedPages < chapterLastPage + 1) sweptCappedChapters++;
+
+            for (var pageIndex = 0; pageIndex < walkedPages; pageIndex++)
+            {
+                var target = (pageIndex * step)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture);
+                await host.InvokeScriptAsync($$"""
+                    (() => {
+                      const el = document.scrollingElement || document.documentElement;
+                      window.scrollTo({ left: -{{target}}, top: 0, behavior: 'instant' });
+                    })();
+                    """);
+                await Task.Delay(50, ReaderToken);
+                await host.InvokeScriptAsync(ReaderPaginationScripts.VerticalStepExpression);
+                await Task.Delay(35, ReaderToken);
+                var edge = await ReadKreaderVerticalEdgeDiagnosticsAsync(host);
+                if (edge.GetProperty("glyphCount").GetInt32() <= 0
+                    && edge.GetProperty("visibleMediaCount").GetInt32() <= 0)
+                    sweptEmptyPages++;
+                if (edge.GetProperty("partialGlyphCount").GetInt32() > 0)
+                    sweptClippedPages++;
+                if (edge.GetProperty("marginDelta").GetDouble() > 0.1)
+                    sweptAsymmetricPages++;
+                Require(
+                    edge.GetProperty("partialGlyphCount").GetInt32() == 0,
+                    $"sweep chapter {chapter} page {pageIndex + 1}/{walkedPages} clips glyphs: " + edge);
+                Require(
+                    edge.GetProperty("marginDelta").GetDouble() <= 0.1,
+                    $"sweep chapter {chapter} page {pageIndex + 1}/{walkedPages} margins are asymmetric: " + edge);
+                RequireKreaderVerticalFlowInvariants(
+                    edge,
+                    $"sweep chapter {chapter} page {pageIndex + 1}/{walkedPages}",
+                    requireTopAlignedColumns: false);
+                sweptBottomAlignedColumns += edge.GetProperty("bottomAlignedColumnCount").GetInt32();
+                sweptPages++;
+            }
+
+            var coverage = await host.InvokeScriptAsync("""
+                (() => {
+                  const body = document.body;
+                  if (!body) return null;
+                  const count = selector => body.querySelectorAll(selector).length;
+                  const cjk = ((body.textContent || '').match(/[⺀-鿿豈-﫿]/g) || []).length;
+                  return JSON.stringify({
+                    digits: count('span.kkindle-vertical-digit[data-kkindle-vertical-run="1"]'),
+                    tcy: count('span.kkindle-tcy[data-kkindle-vertical-run="1"]'),
+                    longNumbers: count('span.kkindle-vertical-number[data-kkindle-vertical-run="1"]'),
+                    latin: count('span.kkindle-vertical-latin[data-kkindle-vertical-run="1"]'),
+                    punctuation: count('span.kkindle-vertical-punctuation[data-kkindle-vertical-run="1"]'),
+                    cjkCharacters: cjk
+                  });
+                })();
+                """);
+            using (var coverageDoc = JsonDocument.Parse(DecodeReaderScriptString(coverage) ?? "{}"))
+            {
+                var root = coverageDoc.RootElement;
+                int Value(string name) => root.TryGetProperty(name, out var element) ? element.GetInt32() : 0;
+                await log.WriteLineAsync(
+                    $"DEBUG sweep chapter {chapter} pages={walkedPages}/{chapterLastPage + 1}"
+                    + (walkedPages < chapterLastPage + 1 ? " (capped)" : string.Empty)
+                    + $" cjk={Value("cjkCharacters")}"
+                    + $" digits={Value("digits")} tcy={Value("tcy")}"
+                    + $" longNumbers={Value("longNumbers")} latin={Value("latin")}"
+                    + $" punctuation={Value("punctuation")}");
+            }
+            await log.WriteLineAsync($"PASS sweep chapter {chapter} kept all {walkedPages} pages unclipped and symmetric");
+        }
+
+        Require(sweptEmptyPages == 0, $"sweep rendered {sweptEmptyPages} blank pages");
+        Require(sweptClippedPages == 0, $"sweep clipped glyphs on {sweptClippedPages} pages");
+        Require(sweptAsymmetricPages == 0, $"sweep found asymmetric margins on {sweptAsymmetricPages} pages");
+        // State the coverage the sweep actually achieved rather than letting
+        // the chapter count imply full chapters were walked.
+        await log.WriteLineAsync(
+            $"PASS external vertical sweep covered {lastSweptChapter - startChapter + 1} chapters, "
+            + $"{sweptPages} pages, no clipped glyphs or blank pages; "
+            + $"truncatedChapters={sweptCappedChapters} "
+            + $"bottomAlignedColumns={sweptBottomAlignedColumns}");
     }
 
     private static async Task<JsonElement> ShowAndReadKreaderSelectionBarAsync(IReaderHost host)
@@ -625,6 +1528,22 @@ public partial class MainWindow
             throw new InvalidOperationException("selection bar metric script returned empty result.");
         using var document = JsonDocument.Parse(raw);
         return document.RootElement.Clone();
+    }
+
+    private static string NormalizeKreaderSelectionBarSignature(JsonElement metrics)
+    {
+        var fields = (metrics.GetProperty("signature").GetString() ?? string.Empty).Split('|');
+        // The bar is positioned against the selected glyph range. A vertical
+        // Latin run can legitimately move that range by a few pixels, which
+        // changes the auto-sized outer width/height without changing the bar
+        // controls or their writing direction. Compare the stable style and
+        // control dimensions, not those two placement-dependent fields.
+        if (fields.Length > 9)
+        {
+            fields[8] = "<dynamic-width>";
+            fields[9] = "<dynamic-height>";
+        }
+        return string.Join('|', fields);
     }
 
     private static async Task ClearKreaderValidationSelectionAsync(IReaderHost host)
@@ -964,6 +1883,21 @@ public partial class MainWindow
         throw new InvalidOperationException("Kreader document did not become ready.");
     }
 
+    private async Task<JsonElement> WaitForKreaderMetricsTextAsync(
+        IReaderHost host,
+        string expectedText)
+    {
+        JsonElement last = default;
+        for (var attempt = 0; attempt < 80; attempt++)
+        {
+            last = await ReadKreaderDomMetricsAsync(host);
+            if (last.GetProperty("text").GetString()?.Contains(expectedText, StringComparison.Ordinal) == true)
+                return last;
+            await Task.Delay(100, ReaderToken);
+        }
+        return last;
+    }
+
     private async Task<JsonElement> ReadKreaderDomMetricsAsync(IReaderHost host)
     {
         var result = await host.InvokeScriptAsync(
@@ -975,7 +1909,7 @@ public partial class MainWindow
               const style = body ? getComputedStyle(body) : null;
               return JSON.stringify({
                 ready: !!window.__kkindleReaderBridgeInstalled && !!body,
-                text: (body?.innerText || body?.textContent || '').slice(0, 4000),
+                text: (body?.textContent || body?.innerText || '').slice(0, 4000),
                 flowMode: Number(window.__kkindleReaderFlowMode || 0),
                 twoPage: window.__kkindleReaderTwoPage === true,
                 vertical: window.__kkindleReaderVertical === true,
@@ -1043,8 +1977,30 @@ public partial class MainWindow
                 ? Math.min(nominalSafeRight, parsedSafeRight)
                 : nominalSafeRight;
               const tolerance = 0.75;
+              // The usable column band along the inline (vertical) axis. In
+              // vertical-rl every column starts at the top of this band and
+              // grows downward; anything painted outside it either overflows
+              // an atomic run past the page or has been pushed to the bottom
+              // by an rtl inline direction.
+              const contentTop = parseFloat(bodyStyle.paddingTop) || 0;
+              const contentBottom = (el.clientHeight || 0) - (parseFloat(bodyStyle.paddingBottom) || 0);
+              const bodyFontSize = parseFloat(bodyStyle.fontSize) || 16;
+              const bandTolerance = 2;
               const partialGlyphs = [];
+              const visibleMedia = [];
+              const overflowGlyphs = [];
+              const columnBands = [];
+              // Glyphs are grouped into columns by proximity, not by exact
+              // left: an upright digit or ASCII punctuation cell centers its
+              // ink geometrically (`kkindle-cell-inner`), shifting the glyph
+              // rect a few pixels off the host column edge. Grouping by raw
+              // rect.left turned every such cell into a phantom one-glyph
+              // "column", and a full column that simply ended on such a cell
+              // was misread as a bottom-aligned line.
+              const columnMergeTolerance = Math.min(bodyFontSize * 0.75, 24);
               let glyphCount = 0;
+              let overflowTopCount = 0;
+              let overflowBottomCount = 0;
               let inspectedCharacters = 0;
               let minGlyphLeft = Number.POSITIVE_INFINITY;
               let maxGlyphRight = Number.NEGATIVE_INFINITY;
@@ -1072,8 +2028,37 @@ public partial class MainWindow
                     glyphCount++;
                     minGlyphLeft = Math.min(minGlyphLeft, rect.left);
                     maxGlyphRight = Math.max(maxGlyphRight, rect.right);
-                    if (!columnLefts.some(value => Math.abs(value - rect.left) < 0.5))
-                      columnLefts.push(rect.left);
+                    let band = null;
+                    let bestDistance = Number.POSITIVE_INFINITY;
+                    for (const candidate of columnBands) {
+                      const distance = Math.abs(candidate.left - rect.left);
+                      if (distance < bestDistance) {
+                        bestDistance = distance;
+                        band = candidate;
+                      }
+                    }
+                    if (!band || bestDistance > columnMergeTolerance) {
+                      band = { left: rect.left, top: rect.top, bottom: rect.bottom };
+                      columnBands.push(band);
+                      columnLefts.push(band.left);
+                    } else {
+                      band.top = Math.min(band.top, rect.top);
+                      band.bottom = Math.max(band.bottom, rect.bottom);
+                    }
+                    if (rect.top < contentTop - bandTolerance
+                        || rect.bottom > contentBottom + bandTolerance) {
+                      if (rect.top < contentTop - bandTolerance) overflowTopCount++;
+                      if (rect.bottom > contentBottom + bandTolerance) overflowBottomCount++;
+                      if (overflowGlyphs.length < 12) {
+                        overflowGlyphs.push({
+                          glyph: text[index],
+                          left: rect.left,
+                          right: rect.right,
+                          top: rect.top,
+                          bottom: rect.bottom
+                        });
+                      }
+                    }
                     if (rect.left < safeLeft - tolerance || rect.right > safeRight + tolerance) {
                       partialGlyphs.push({
                         glyph: text[index],
@@ -1087,6 +2072,43 @@ public partial class MainWindow
                 }
                 if (inspectedCharacters >= 12000) break;
               }
+              for (const media of body.querySelectorAll('img, svg, canvas, video, table')) {
+                const rect = media.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                if (rect.bottom <= 0 || rect.top >= el.clientHeight) continue;
+                if (rect.right <= safeLeft + tolerance || rect.left >= safeRight - tolerance) continue;
+                visibleMedia.push({
+                  tag: media.tagName,
+                  left: rect.left,
+                  right: rect.right,
+                  top: rect.top,
+                  bottom: rect.bottom
+                });
+              }
+              // A column whose text starts well below the top of the band and
+              // ends flush against its bottom is the signature of a bottom
+              // aligned inline direction (`direction: rtl` under vertical-rl).
+              // Columns that merely share space with an image are excluded:
+              // there the text legitimately starts below the picture.
+              let bottomAlignedColumnCount = 0;
+              const bottomAlignedColumns = [];
+              for (const band of columnBands) {
+                if (band.top <= contentTop + bodyFontSize * 3) continue;
+                if (band.bottom < contentBottom - bodyFontSize * 0.5) continue;
+                if (visibleMedia.some(item =>
+                    item.right > band.left - 1 && item.left < band.left + bodyFontSize * 2)) continue;
+                bottomAlignedColumnCount++;
+                if (bottomAlignedColumns.length < 8)
+                  bottomAlignedColumns.push({ left: band.left, top: band.top, bottom: band.bottom });
+              }
+              // Reading direction is not a geometric detail: under vertical-rl
+              // `direction` selects the inline axis, so rtl silently bottom
+              // aligns every partially filled line. Report the computed value
+              // of the body and of a real text block rather than trusting the
+              // stylesheet to still say ltr.
+              const textBlock = Array.from(body.querySelectorAll('p, li, blockquote, div'))
+                .find(node => (node.textContent || '').trim().length > 0);
+              const blockDirection = textBlock ? getComputedStyle(textBlock).direction : '';
               return JSON.stringify({
                 viewport,
                 scrollLeft: el.scrollLeft || 0,
@@ -1111,6 +2133,17 @@ public partial class MainWindow
                 columnCount: columnLefts.length,
                 columnLefts: columnLefts.sort((a, b) => a - b).slice(0, 80),
                 glyphCount,
+                visibleMediaCount: visibleMedia.length,
+                visibleMedia: visibleMedia.slice(0, 12),
+                contentTop,
+                contentBottom,
+                direction: bodyStyle.direction || '',
+                blockDirection,
+                overflowTopCount,
+                overflowBottomCount,
+                overflowGlyphs,
+                bottomAlignedColumnCount,
+                bottomAlignedColumns,
                 inspectedCharacters,
                 partialGlyphCount: partialGlyphs.length,
                 partialGlyphs: partialGlyphs.slice(0, 12)
@@ -1120,6 +2153,470 @@ public partial class MainWindow
         var raw = DecodeReaderScriptString(result) ?? result;
         if (string.IsNullOrWhiteSpace(raw))
             throw new InvalidOperationException("Kreader vertical edge diagnostic returned empty result.");
+        using var document = JsonDocument.Parse(raw);
+        return document.RootElement.Clone();
+    }
+
+    private async Task<JsonElement> ReadKreaderNativeVerticalInlineDiagnosticsAsync(IReaderHost host)
+    {
+        var result = await host.InvokeScriptAsync(
+            """
+            (() => {
+              const body = document.body;
+              if (!body) return null;
+              const tcyRuns = Array.from(body.querySelectorAll(
+                '.kkindle-tcy[data-kkindle-vertical-run="1"]'));
+              const nativeDigitRuns = Array.from(body.querySelectorAll(
+                '.kkindle-native-vertical-digits[data-kkindle-native-vertical-digits="1"]'));
+              const nativeDigits = Array.from(body.querySelectorAll(
+                '.kkindle-native-vertical-digit[data-kkindle-native-vertical-digit="1"]'));
+              const nativeFootnotes = Array.from(body.querySelectorAll(
+                '.kkindle-native-vertical-footnote[data-kkindle-native-vertical-footnote="1"]'));
+              const linuxNumberRuns = Array.from(body.querySelectorAll(
+                '.kkindle-linux-vertical-number[data-kkindle-linux-vertical-number="1"]'));
+              const linuxSingles = Array.from(body.querySelectorAll(
+                '.kkindle-linux-vertical-single[data-kkindle-linux-vertical-single="1"]'));
+              const linuxTcyRuns = Array.from(body.querySelectorAll(
+                '.kkindle-linux-vertical-tcy[data-kkindle-linux-vertical-tcy="1"]'));
+              const cjkSeparatedNumbers = Array.from(body.querySelectorAll(
+                '.kkindle-cjk-before-number'));
+              const legacySelector = [
+                '.kkindle-vertical-digit',
+                '.kkindle-vertical-number',
+                '.kkindle-vertical-latin',
+                '.kkindle-vertical-punctuation',
+                '.kkindle-cell-inner',
+                '.kkindle-tcy-inner'
+              ].join(',');
+              const legacy = Array.from(body.querySelectorAll(legacySelector));
+              let linuxNumericStyleErrorCount = 0;
+              let cjkNumberSpacingErrorCount = 0;
+              let syntheticLinuxNumberLayoutCount = 0;
+              for (const run of [...linuxSingles, ...linuxTcyRuns, ...linuxNumberRuns]) {
+                const style = getComputedStyle(run);
+                const isTcy = run.classList.contains('kkindle-linux-vertical-tcy');
+                const isSingle = run.classList.contains('kkindle-linux-vertical-single');
+                if (style.writingMode !== 'horizontal-tb')
+                  linuxNumericStyleErrorCount++;
+                if (style.position === 'absolute'
+                    || (style.transform && style.transform !== 'none'))
+                  syntheticLinuxNumberLayoutCount++;
+                if (isSingle) {
+                  const rect = run.getBoundingClientRect();
+                  const fontSize = parseFloat(style.fontSize) || 0;
+                  if (!(fontSize > 0)
+                      || Math.abs(rect.width - fontSize) > 1.05
+                      || Math.abs(rect.height - fontSize) > 1.05)
+                  linuxNumericStyleErrorCount++;
+                }
+              }
+              for (const run of cjkSeparatedNumbers) {
+                const style = getComputedStyle(run);
+                const margins = [
+                  style.marginTop,
+                  style.marginRight,
+                  style.marginBottom,
+                  style.marginLeft,
+                  style.marginInlineStart,
+                  style.marginInlineEnd,
+                  style.marginBlockStart,
+                  style.marginBlockEnd
+                ].map(value => Math.abs(parseFloat(value) || 0));
+                if (margins.some(margin => margin > 1.05))
+                  cjkNumberSpacingErrorCount++;
+              }
+              let syntheticLayoutCount = 0;
+              for (const node of legacy) {
+                const style = getComputedStyle(node);
+                if (style.display !== 'contents'
+                    || style.position === 'absolute'
+                    || (style.transform && style.transform !== 'none'))
+                  syntheticLayoutCount++;
+              }
+
+              let digitCellStyleErrorCount = 0;
+              let digitCellSizeErrorCount = 0;
+              let syntheticNativeDigitLayoutCount = 0;
+              for (const digit of nativeDigits) {
+                const style = getComputedStyle(digit);
+                const rect = digit.getBoundingClientRect();
+                const fontSize = parseFloat(style.fontSize) || 0;
+                if (style.display !== 'inline-block'
+                    || style.writingMode !== 'horizontal-tb')
+                  digitCellStyleErrorCount++;
+                if (!(fontSize > 0)
+                    || Math.abs(rect.width - fontSize) > 1.05
+                    || Math.abs(rect.height - fontSize) > 1.05)
+                  digitCellSizeErrorCount++;
+                if (style.position === 'absolute'
+                    || (style.transform && style.transform !== 'none'))
+                  syntheticNativeDigitLayoutCount++;
+              }
+
+              let digitOverlapCount = 0;
+              let maxDigitOverlap = 0;
+              for (const run of nativeDigitRuns) {
+                const digits = Array.from(run.querySelectorAll(
+                  ':scope > .kkindle-native-vertical-digit'));
+                for (let index = 1; index < digits.length; index++) {
+                  const previous = digits[index - 1].getBoundingClientRect();
+                  const current = digits[index].getBoundingClientRect();
+                  const previousCenter = previous.left + previous.width / 2;
+                  const currentCenter = current.left + current.width / 2;
+                  const sameColumn = Math.abs(previousCenter - currentCenter)
+                    <= Math.max(previous.width, current.width) * 0.75;
+                  if (!sameColumn) continue;
+                  const overlap = previous.bottom - current.top;
+                  if (overlap <= 1.05) continue;
+                  digitOverlapCount++;
+                  maxDigitOverlap = Math.max(maxDigitOverlap, overlap);
+                }
+              }
+
+              let footnoteCombineStyleErrorCount = 0;
+              let syntheticFootnoteLayoutCount = 0;
+              for (const footnote of nativeFootnotes) {
+                const style = getComputedStyle(footnote);
+                if (style.textCombineUpright !== 'all')
+                  footnoteCombineStyleErrorCount++;
+                if (style.position === 'absolute'
+                    || (style.transform && style.transform !== 'none'))
+                  syntheticFootnoteLayoutCount++;
+              }
+              syntheticNativeDigitLayoutCount += syntheticFootnoteLayoutCount;
+
+              let tcyStyleErrorCount = 0;
+              let minTcyInlineRatio = Number.POSITIVE_INFINITY;
+              let maxTcyInlineRatio = 0;
+              for (const run of tcyRuns) {
+                const style = getComputedStyle(run);
+                const rect = run.getBoundingClientRect();
+                const fontSize = parseFloat(style.fontSize) || 0;
+                if (style.textCombineUpright !== 'all') tcyStyleErrorCount++;
+                if (fontSize > 0) {
+                  const ratio = rect.height / fontSize;
+                  minTcyInlineRatio = Math.min(minTcyInlineRatio, ratio);
+                  maxTcyInlineRatio = Math.max(maxTcyInlineRatio, ratio);
+                }
+              }
+
+              const units = [];
+              const seenTcy = new Set();
+              const generatedSelector = [
+                '.kkindle-linux-vertical-single',
+                '.kkindle-linux-vertical-single-punctuation',
+                '.kkindle-linux-vertical-tcy',
+                '.kkindle-linux-vertical-number',
+                '.kkindle-linux-vertical-cjk',
+                '.kkindle-linux-vertical-pair-punctuation'
+              ].join(',');
+              const walker = document.createTreeWalker(
+                body,
+                NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+              const classify = character => {
+                if (/[A-Za-z]/.test(character)) return 'latin';
+                if (/[0-9]/.test(character)) return 'digit';
+                if (/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~，。！？、；：“”‘’（）《》〈〉【】…—]/.test(character))
+                  return 'punctuation';
+                if (/[⺀-鿿豈-﫿]/.test(character)) return 'cjk';
+                return 'other';
+              };
+              let latinCount = 0;
+              let digitCount = 0;
+              let punctuationCount = 0;
+              for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                  if (node.matches?.('.kkindle-tcy[data-kkindle-vertical-run="1"]')
+                      && !seenTcy.has(node)) {
+                    seenTcy.add(node);
+                    const rect = node.getBoundingClientRect();
+                    units.push({ category: 'digit', text: node.textContent || '', rect });
+                    digitCount += (node.textContent || '').length;
+                    continue;
+                  }
+                  if (node.matches?.(generatedSelector)) {
+                    const rect = node.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                      const text = node.textContent || '';
+                      const category = node.matches(
+                        '.kkindle-linux-vertical-single-punctuation, '
+                          + '.kkindle-linux-vertical-pair-punctuation')
+                        ? 'punctuation'
+                        : node.matches('.kkindle-linux-vertical-cjk')
+                          ? 'cjk'
+                        : 'digit';
+                      units.push({ category, text, rect });
+                      if (category === 'punctuation') punctuationCount++;
+                      else digitCount += text.replace(/[^0-9]/g, '').length;
+                    }
+                    continue;
+                  }
+                  continue;
+                }
+                const parent = node.parentElement;
+                if (!parent
+                    || parent.closest('#kkindle-selection-bar, script, style, noscript')
+                    || parent.closest('.kkindle-tcy[data-kkindle-vertical-run="1"], '
+                      + '.kkindle-linux-vertical-footnote, ' + generatedSelector))
+                  continue;
+                const text = node.nodeValue || '';
+                for (let index = 0; index < text.length; index++) {
+                  const character = text[index];
+                  if (/\s/.test(character)) continue;
+                  const range = document.createRange();
+                  range.setStart(node, index);
+                  range.setEnd(node, index + 1);
+                  const rect = range.getBoundingClientRect();
+                  if (!(rect.width > 0) || !(rect.height > 0)) continue;
+                  const category = classify(character);
+                  if (category === 'latin') latinCount++;
+                  else if (category === 'digit') digitCount++;
+                  else if (category === 'punctuation') punctuationCount++;
+                  units.push({ category, text: character, rect });
+                }
+              }
+
+              let boundaryOverlapCount = 0;
+              let maxBoundaryOverlap = 0;
+              const overlapItems = [];
+              for (let index = 1; index < units.length; index++) {
+                const previous = units[index - 1];
+                const current = units[index];
+                if (previous.category === current.category) continue;
+                if (!['latin', 'digit', 'punctuation', 'cjk'].includes(previous.category)
+                    && !['latin', 'digit', 'punctuation', 'cjk'].includes(current.category))
+                  continue;
+                const previousCenter = previous.rect.left + previous.rect.width / 2;
+                const currentCenter = current.rect.left + current.rect.width / 2;
+                const sameColumn = Math.abs(previousCenter - currentCenter)
+                  <= Math.max(previous.rect.width, current.rect.width) * 0.75;
+                if (!sameColumn) continue;
+                // DOM order advances to the next vertical column after the
+                // current column reaches its bottom. Its range therefore
+                // starts near the top again; that is a column transition, not
+                // two glyphs sharing the same inline space.
+                if (current.rect.top + 1.05 < previous.rect.top) continue;
+                const overlap = previous.rect.bottom - current.rect.top;
+                // WebKitGTK exposes adjacent Range advance boxes with up to
+                // one device pixel of shared edge after fractional layout is
+                // rounded. Treat only overlap beyond that rounding allowance
+                // as a real inline collision.
+                if (overlap <= 1.05) continue;
+                boundaryOverlapCount++;
+                maxBoundaryOverlap = Math.max(maxBoundaryOverlap, overlap);
+                if (overlapItems.length < 12) {
+                  overlapItems.push({
+                    previous: previous.text,
+                    current: current.text,
+                    overlap: +overlap.toFixed(2),
+                    previousRect: [previous.rect.left, previous.rect.top, previous.rect.width, previous.rect.height].map(v => +v.toFixed(2)),
+                    currentRect: [current.rect.left, current.rect.top, current.rect.width, current.rect.height].map(v => +v.toFixed(2))
+                  });
+                }
+              }
+              return JSON.stringify({
+                preparedVersion: body.dataset.kkindleVerticalInlinePrepared || '',
+                writingMode: getComputedStyle(body).writingMode,
+                textOrientation: getComputedStyle(body).textOrientation,
+                tcyCount: tcyRuns.length,
+                nativeDigitRunCount: nativeDigitRuns.length,
+                nativeDigitCount: nativeDigits.length,
+                digitCellStyleErrorCount,
+                digitCellSizeErrorCount,
+                digitOverlapCount,
+                maxDigitOverlap,
+                nativeFootnoteCount: nativeFootnotes.length,
+                linuxNumberRunCount: linuxNumberRuns.length,
+                linuxSingleCount: linuxSingles.length,
+                linuxTcyCount: linuxTcyRuns.length,
+                cjkSeparatedNumberCount: cjkSeparatedNumbers.length,
+                cjkNumberSpacingErrorCount,
+                linuxNumericStyleErrorCount,
+                syntheticLinuxNumberLayoutCount,
+                footnoteCombineStyleErrorCount,
+                syntheticNativeDigitLayoutCount,
+                tcyStyleErrorCount,
+                minTcyInlineRatio: Number.isFinite(minTcyInlineRatio) ? minTcyInlineRatio : 0,
+                maxTcyInlineRatio,
+                legacyWrapperCount: legacy.length,
+                syntheticLayoutCount,
+                latinCount,
+                digitCount,
+                punctuationCount,
+                boundaryOverlapCount,
+                maxBoundaryOverlap,
+                overlapItems
+              });
+            })();
+            """);
+        var raw = DecodeReaderScriptString(result) ?? result;
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new InvalidOperationException("Kreader native vertical inline diagnostic returned empty result.");
+        using var document = JsonDocument.Parse(raw);
+        return document.RootElement.Clone();
+    }
+
+    private async Task<JsonElement> ReadKreaderTcyDiagnosticsAsync(IReaderHost host)
+    {
+        var result = await host.InvokeScriptAsync(
+            """
+            (() => {
+              const body = document.body;
+              if (!body) return null;
+              const tolerance = 0.8;
+              const runs = Array.from(body.querySelectorAll(
+                '.kkindle-tcy[data-kkindle-vertical-run="1"], .kkindle-tcy-all[data-kkindle-vertical-run="1"]'));
+              let missingInnerCount = 0;
+              let outsideCount = 0;
+              let maxCenterDelta = 0;
+              let minInnerHeightRatio = Number.POSITIVE_INFINITY;
+              let minInnerWidthRatio = Number.POSITIVE_INFINITY;
+              let maxCellSizeError = 0;
+              const items = [];
+              const outsideItems = [];
+              for (const run of runs) {
+                const inner = run.querySelector(':scope > .kkindle-tcy-inner');
+                if (!inner) {
+                  missingInnerCount++;
+                  continue;
+                }
+                const outer = run.getBoundingClientRect();
+                const ink = inner.getBoundingClientRect();
+                const fontSize = parseFloat(getComputedStyle(run).fontSize) || 0;
+                const centerDeltaX = Math.abs((outer.left + outer.width / 2) - (ink.left + ink.width / 2));
+                const centerDeltaY = Math.abs((outer.top + outer.height / 2) - (ink.top + ink.height / 2));
+                const centerDelta = Math.max(centerDeltaX, centerDeltaY);
+                const innerHeightRatio = fontSize > 0 ? ink.height / fontSize : 0;
+                const cellSizeError = fontSize > 0
+                  ? Math.max(Math.abs(outer.width - fontSize), Math.abs(outer.height - fontSize))
+                  : Number.POSITIVE_INFINITY;
+                const outside = ink.left < outer.left - tolerance
+                  || ink.right > outer.right + tolerance
+                  || ink.top < outer.top - tolerance
+                  || ink.bottom > outer.bottom + tolerance;
+                if (outside) outsideCount++;
+                if (outside && outsideItems.length < 16) {
+                  outsideItems.push({
+                    text: run.textContent,
+                    className: run.className,
+                    outer: [outer.left, outer.top, outer.width, outer.height].map(value => +value.toFixed(2)),
+                    inner: [ink.left, ink.top, ink.width, ink.height].map(value => +value.toFixed(2)),
+                    fontSize: +fontSize.toFixed(2),
+                    fontWeight: getComputedStyle(inner).fontWeight,
+                    fontStyle: getComputedStyle(inner).fontStyle
+                  });
+                }
+                maxCenterDelta = Math.max(maxCenterDelta, centerDelta);
+                minInnerHeightRatio = Math.min(minInnerHeightRatio, innerHeightRatio);
+                minInnerWidthRatio = Math.min(
+                  minInnerWidthRatio,
+                  fontSize > 0 ? ink.width / fontSize : 0);
+                maxCellSizeError = Math.max(maxCellSizeError, cellSizeError);
+                if (items.length < 16) {
+                  items.push({
+                    text: run.textContent,
+                    length: run.dataset.kkindleTcyLength || '',
+                    outer: [outer.left, outer.top, outer.width, outer.height].map(value => +value.toFixed(2)),
+                    inner: [ink.left, ink.top, ink.width, ink.height].map(value => +value.toFixed(2)),
+                    fontSize: +fontSize.toFixed(2),
+                    fontFamily: getComputedStyle(inner).fontFamily,
+                    transform: getComputedStyle(inner).transform,
+                    centerDelta: +centerDelta.toFixed(3),
+                    innerHeightRatio: +innerHeightRatio.toFixed(3),
+                    outside
+                  });
+                }
+              }
+              const threeDigitRuns = Array.from(body.querySelectorAll(
+                '.kkindle-vertical-number[data-kkindle-vertical-run="1"]'))
+                .filter(run => /^\d{3}$/.test(run.textContent || ''));
+              // Single digits and ASCII punctuation cells must carry the
+              // same centered inner box as tate-chu-yoko; baseline-positioned
+              // ink drifts across the neighbouring CJK cell edge.
+              const centeredCells = Array.from(body.querySelectorAll(
+                '.kkindle-vertical-digit[data-kkindle-vertical-run="1"], '
+                + '.kkindle-vertical-punctuation[data-kkindle-vertical-run="1"]'));
+              let centeredMissingInnerCount = 0;
+              let centeredOutsideCount = 0;
+              let centeredMaxDelta = 0;
+              let centeredDigitCount = 0;
+              const centeredItems = [];
+              for (const cell of centeredCells) {
+                if (cell.classList.contains('kkindle-vertical-digit')) centeredDigitCount++;
+                const inner = cell.querySelector(':scope > .kkindle-cell-inner');
+                if (!inner) {
+                  centeredMissingInnerCount++;
+                  continue;
+                }
+                const outer = cell.getBoundingClientRect();
+                const ink = inner.getBoundingClientRect();
+                const dx = Math.abs((outer.left + outer.width / 2) - (ink.left + ink.width / 2));
+                const dy = Math.abs((outer.top + outer.height / 2) - (ink.top + ink.height / 2));
+                const delta = Math.max(dx, dy);
+                centeredMaxDelta = Math.max(centeredMaxDelta, delta);
+                const outside = ink.left < outer.left - tolerance
+                  || ink.right > outer.right + tolerance
+                  || ink.top < outer.top - tolerance
+                  || ink.bottom > outer.bottom + tolerance;
+                if (outside) {
+                  centeredOutsideCount++;
+                  if (centeredItems.length < 12) {
+                    centeredItems.push({
+                      text: cell.textContent,
+                      className: cell.className,
+                      outer: [outer.left, outer.top, outer.width, outer.height].map(v => +v.toFixed(2)),
+                      inner: [ink.left, ink.top, ink.width, ink.height].map(v => +v.toFixed(2)),
+                      delta: +delta.toFixed(3)
+                    });
+                  }
+                }
+              }
+              let threeDigitOrientationErrorCount = 0;
+              let minThreeDigitInlineRatio = Number.POSITIVE_INFINITY;
+              let maxThreeDigitBlockRatio = 0;
+              for (const run of threeDigitRuns) {
+                const rect = run.getBoundingClientRect();
+                const style = getComputedStyle(run);
+                const fontSize = parseFloat(style.fontSize) || 0;
+                if (style.textOrientation !== 'upright')
+                  threeDigitOrientationErrorCount++;
+                if (fontSize > 0) {
+                  minThreeDigitInlineRatio = Math.min(
+                    minThreeDigitInlineRatio,
+                    rect.height / fontSize);
+                  maxThreeDigitBlockRatio = Math.max(
+                    maxThreeDigitBlockRatio,
+                    rect.width / fontSize);
+                }
+              }
+              return JSON.stringify({
+                preparedVersion: body.dataset.kkindleVerticalInlinePrepared || '',
+                count: runs.length,
+                missingInnerCount,
+                outsideCount,
+                maxCenterDelta,
+                minInnerHeightRatio: Number.isFinite(minInnerHeightRatio) ? minInnerHeightRatio : 0,
+                minInnerWidthRatio: Number.isFinite(minInnerWidthRatio) ? minInnerWidthRatio : 0,
+                maxCellSizeError,
+                threeDigitCount: threeDigitRuns.length,
+                threeDigitOrientationErrorCount,
+                minThreeDigitInlineRatio: Number.isFinite(minThreeDigitInlineRatio)
+                  ? minThreeDigitInlineRatio : 0,
+                maxThreeDigitBlockRatio,
+                centeredCellCount: centeredCells.length,
+                centeredDigitCount,
+                centeredMissingInnerCount,
+                centeredOutsideCount,
+                centeredMaxDelta,
+                outsideItems,
+                items,
+                centeredItems
+              });
+            })();
+            """);
+        var raw = DecodeReaderScriptString(result) ?? result;
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new InvalidOperationException("Kreader tate-chu-yoko diagnostic returned empty result.");
         using var document = JsonDocument.Parse(raw);
         return document.RootElement.Clone();
     }
@@ -1183,6 +2680,48 @@ public partial class MainWindow
         if (!condition) throw new InvalidOperationException(message);
     }
 
+    /// <summary>
+    /// Invariants that must hold on every vertical page whatever the content.
+    /// The clipping and margin checks alone cannot see either of these: a page
+    /// whose lines are all bottom aligned, or one whose over-long atomic run
+    /// spills past the page bottom into the margin mask, both keep perfect
+    /// left/right edges and symmetric margins.
+    /// </summary>
+    /// <param name="requireTopAlignedColumns">
+    /// Only for content whose column layout is known. Real books legitimately
+    /// place text below a figure or a centered heading, so the bottom-aligned
+    /// column count is logged rather than asserted there.
+    /// </param>
+    private static void RequireKreaderVerticalFlowInvariants(
+        JsonElement edge,
+        string context,
+        bool requireTopAlignedColumns)
+    {
+        // Under vertical-rl `direction` selects the inline axis, not the
+        // column axis: rtl bottom aligns every partially filled line, the 2em
+        // first-line indent included, while changing nothing the other
+        // diagnostics measure.
+        Require(
+            edge.GetProperty("direction").GetString() == "ltr",
+            $"{context}: body inline direction is not ltr, so partially filled columns "
+            + "are bottom aligned: " + edge);
+        var blockDirection = edge.GetProperty("blockDirection").GetString();
+        Require(
+            string.IsNullOrEmpty(blockDirection) || blockDirection == "ltr",
+            $"{context}: a text block inherited a non-ltr inline direction: " + edge);
+        Require(
+            edge.GetProperty("overflowTopCount").GetInt32() == 0
+            && edge.GetProperty("overflowBottomCount").GetInt32() == 0,
+            $"{context}: glyphs are painted outside the column band, so an atomic "
+            + "sideways run overflows the page: " + edge);
+        if (requireTopAlignedColumns)
+        {
+            Require(
+                edge.GetProperty("bottomAlignedColumnCount").GetInt32() == 0,
+                $"{context}: a column's text is pushed against the page bottom: " + edge);
+        }
+    }
+
     private static void CreateKreaderValidationEpub(string path)
     {
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -1197,7 +2736,7 @@ public partial class MainWindow
             <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
               <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
                 <dc:identifier id="book-id">urn:uuid:1db98b52-2d1f-4d80-a3e9-kreaderlinux</dc:identifier>
-                <dc:title>Linux Kreader Validation EPUB</dc:title>
+                <dc:title>Linux Kreader Validation Long Numbers EPUB</dc:title>
                 <dc:creator>Kkindle Validation</dc:creator>
                 <dc:language>zh-CN</dc:language>
                 <dc:description>Linux Kreader validation fixture</dc:description>
@@ -1225,19 +2764,20 @@ public partial class MainWindow
     private static string BuildValidationChapter(string title, string start, bool includeFootnote)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>""" + title + "</title></head><body>");
+        builder.AppendLine("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>""" + title + """</title><style>.publication-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }</style></head><body>""");
         builder.Append("<h1>").Append(title).AppendLine("</h1>");
         if (includeFootnote)
         {
-            builder.AppendLine("""<p>Linux validation paragraph 001 includes search-token-linux and AI context linux.<a epub:type="noteref" role="doc-noteref" href="#footnote-1">[1]</a></p>""");
+            builder.AppendLine("""<p>Linux validation paragraph 001 includes COPYRIGHT, ISBN, A1, 单数字7，出版物直排横书<span class="publication-tcy">12</span>，三位数200，search-token-linux and AI context linux.竖排长数字12345678901234567890不能断开。<a epub:type="noteref" role="doc-noteref" href="#footnote-1">[1]</a></p>""");
             builder.AppendLine("""<aside id="footnote-1" epub:type="footnote"><p>Footnote validation body for Linux WebKit.</p></aside>""");
         }
+        builder.AppendLine("""<p class="vertical-fixture-sample">数字：单数字7，双位数12，三位数200。脚注<a epub:type="noteref" role="doc-noteref" href="#fixture-note">[12]</a>。缩写：DNA、FPGA、CPU、AI。中文标点：逗号，句号。问号？叹号！顿号、分号；冒号：双引号“甲”单引号‘乙’圆括号（丙）书名号《丁》〈戊〉方括号【己】〔庚〕［辛］花括号｛壬｝破折号——省略号……间隔号·。ASCII标点：!&quot;#$%&amp;'()*+,-./:;&lt;=&gt;?@[\]^_`{|}~。</p><aside id="fixture-note" epub:type="footnote"><p>Fixture footnote.</p></aside>""");
         var first = int.Parse(start);
         for (var i = 0; i < 90; i++)
         {
             builder.Append("<p>Linux validation paragraph ")
                 .Append((first + i).ToString("000"))
-                .Append(" keeps enough text for pagination, scrolling, search-token-linux, and AI context linux validation inside WPE WebKit. ")
+                .Append(" keeps enough text for pagination, scrolling, 双位数12，三位数200，search-token-linux, and AI context linux validation inside WPE WebKit. ")
                 .Append("The sentence repeats to create measurable layout width and height on Linux desktop. ")
                 .Append("竖排正文验证：天地玄黄，宇宙洪荒；日月盈昃，辰宿列张。标点必须留在完整字列内，不能在页面两侧被裁切。</p>");
         }

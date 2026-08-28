@@ -337,10 +337,13 @@ internal static class ReaderNavigationScripts
           } else if (vertical) {
             const padRight = parseFloat(bodyStyle.paddingRight) || 0;
             const contentRight = scroller.clientWidth - padRight;
-            const docRight = rect.right + scroller.scrollLeft;
+            const rawMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+            const distance = Math.abs(scroller.scrollLeft || 0)
+              + contentRight - rect.right;
+            const target = Math.max(0, distance > rawMax ? rawMax : distance);
             window.scrollTo({
-              left: Math.max(0, docRight - contentRight),
-              top: Math.max(0, docTop - padTop),
+              left: -target,
+              top: 0,
               behavior: 'instant'
             });
           } else {

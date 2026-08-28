@@ -54,60 +54,214 @@ public partial class MainWindow
 
     private const string PrepareVerticalInlineRunsScript = """
         (() => {
+          // Publication 縦中横: a two-digit run sits horizontally inside one
+          // one-em square, filling it like two half-width digits side by side
+          // while keeping full text height. The base CSS uses a fixed
+          // compression that suits common Linux fonts; here each cell is fit
+          // against its real untransformed layout width (offsetWidth ignores
+          // transforms), so DejaVu, Noto and embedded EPUB fonts all land on
+          // the standard square instead of a squeezed sliver.
+          const fitVerticalTcyRuns = () => {
+            if (window.__kkindleReaderVertical !== true) return;
+            const cells = document.querySelectorAll(
+              '.kkindle-tcy[data-kkindle-vertical-run="1"], .kkindle-tcy-all[data-kkindle-vertical-run="1"]');
+            for (const cell of cells) {
+              const inner = cell.querySelector(':scope > .kkindle-tcy-inner');
+              if (!inner) continue;
+              const em = parseFloat(getComputedStyle(inner).fontSize);
+              const natural = inner.offsetWidth;
+              if (!(em > 0) || !(natural > 0)) continue;
+              const scale = Math.min(1, (em * 0.96) / natural);
+              inner.style.setProperty(
+                'transform',
+                'translate(-50%, -50%) scaleX(' + scale.toFixed(4) + ')',
+                'important');
+            }
+          };
+
+          // Sideways runs are atomic by default so a word or a number is never
+          // torn apart mid-glyph. A run that is longer than the column it must
+          // live in cannot honor that: kept nowrap it overflows past the page
+          // bottom and the margin mask cuts it. Measure each run against the
+          // usable column extent and let the ones that cannot fit wrap.
+          // In vertical-rl the inline axis is vertical, so a run's border-box
+          // height is its inline extent.
+          const fitVerticalSidewaysRuns = () => {
+            if (window.__kkindleReaderVertical !== true) return;
+            const body = document.body;
+            const el = document.scrollingElement || document.documentElement;
+            if (!body || !el) return;
+            const runs = body.querySelectorAll(
+              '.kkindle-vertical-latin[data-kkindle-vertical-run="1"], '
+              + '.kkindle-vertical-number[data-kkindle-vertical-run="1"]');
+            for (const run of runs) run.classList.remove('kkindle-vertical-run-wrap');
+            const style = getComputedStyle(body);
+            const available = (el.clientHeight || 0)
+              - (parseFloat(style.paddingTop) || 0)
+              - (parseFloat(style.paddingBottom) || 0);
+            if (!(available > 0)) return;
+            for (const run of runs) {
+              if (run.getBoundingClientRect().height > available + 0.5)
+                run.classList.add('kkindle-vertical-run-wrap');
+            }
+          };
+
+          const fitVerticalRuns = () => {
+            fitVerticalTcyRuns();
+            fitVerticalSidewaysRuns();
+          };
+          window.__kkindleFitVerticalTcyRuns = fitVerticalTcyRuns;
+          window.__kkindleFitVerticalRuns = fitVerticalRuns;
+          // The usable column extent changes with the viewport, so the wrap
+          // decision has to be revisited on resize. Configuration passes only
+          // rebind the closure; the listener itself is installed once.
+          if (window.__kkindleVerticalFitResizeBound !== true) {
+            window.__kkindleVerticalFitResizeBound = true;
+            let pending = 0;
+            window.addEventListener('resize', () => {
+              if (pending) clearTimeout(pending);
+              pending = setTimeout(() => {
+                pending = 0;
+                if (typeof window.__kkindleFitVerticalRuns === 'function')
+                  window.__kkindleFitVerticalRuns();
+              }, 120);
+            });
+          }
+
           if (typeof window.__kkindlePrepareVerticalInlineRuns === 'function')
-            return window.__kkindlePrepareVerticalInlineRuns();
+            window.__kkindlePrepareVerticalInlineRuns();
 
           const prepare = () => {
             const body = document.body;
             if (!body || window.__kkindleReaderVertical !== true) return false;
+            if (body.dataset.kkindleVerticalInlinePrepared === '65') return true;
 
-            body.querySelectorAll('span.kkindle-vertical-digit[data-kkindle-vertical-run="1"]')
-              .forEach(span => span.replaceWith(...Array.from(span.childNodes)));
+            body.querySelectorAll('span[data-kkindle-vertical-run="1"]')
+              .forEach(span => span.replaceWith(document.createTextNode(span.textContent || '')));
 
-            const numericTokenPattern = /[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*/g;
+            // Keep these rules identical to MarkVerticalInlineRuns in
+            // EpubReaderPreparationService and to the injected bridge copy.
+            // A token carries its own internal connectors, so "don't", "AT&T"
+            // and "well-known" survive whole; adjacent tokens separated by a
+            // short ASCII gap merge into one phrase when either side has a
+            // letter, so an English sentence becomes one sideways run instead
+            // of one rotated box per word. Digit-only neighbours never merge.
+            const verticalInlineTokenPattern = /[A-Za-z0-9]+(?:['’&.,:/+\-–—][A-Za-z0-9]+|%|°[CF])*/g;
+            const numericTokenPattern = /^[0-9]+(?:[.,:/+\-–—][0-9]+|%|°[CF])*$/;
+            const verticalPunctuationCharacters = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+            const maxPhraseGap = 3;
             const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
             const textNodes = [];
             for (let node = walker.nextNode(); node; node = walker.nextNode()) {
               const parent = node.parentElement;
               if (!parent
                   || parent.closest('#kkindle-selection-bar, script, style, noscript, ruby, rt, [data-kkindle-vertical-run="1"]')
-                  || !/[0-9]/.test(node.nodeValue || ''))
+                  || !/[0-9A-Za-z!\"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(node.nodeValue || ''))
                 continue;
               textNodes.push(node);
             }
+
+            const canMerge = (value, left, right) => {
+              if (!/[A-Za-z]/.test(left.token) && !/[A-Za-z]/.test(right.token)) return false;
+              const gapStart = left.start + left.token.length;
+              const gapLength = right.start - gapStart;
+              if (gapLength < 1 || gapLength > maxPhraseGap) return false;
+              for (let index = gapStart; index < right.start; index++) {
+                const character = value[index];
+                if (character !== ' ' && character !== '\t'
+                    && !verticalPunctuationCharacters.includes(character))
+                  return false;
+              }
+              return true;
+            };
+
+            const classify = (token, merged) => {
+              const hasLatin = /[A-Za-z]/.test(token);
+              if (merged) return hasLatin ? 'kkindle-vertical-latin' : null;
+              const isNumericToken = numericTokenPattern.test(token);
+              const digitCount = (token.match(/[0-9]/g) || []).length;
+              if (!hasLatin && (!isNumericToken || digitCount === 0)) return null;
+              if (!isNumericToken) return 'kkindle-vertical-latin';
+              if (!/^[0-9]+$/.test(token)) return 'kkindle-vertical-number';
+              return token.length === 1
+                ? 'kkindle-vertical-digit'
+                : token.length === 2
+                ? 'kkindle-tcy'
+                : 'kkindle-vertical-number';
+            };
 
             for (const node of textNodes) {
               const value = node.nodeValue || '';
               const fragment = document.createDocumentFragment();
               let cursor = 0;
               let wrapped = false;
-              numericTokenPattern.lastIndex = 0;
-              for (let match = numericTokenPattern.exec(value);
+              const matches = [];
+              verticalInlineTokenPattern.lastIndex = 0;
+              for (let match = verticalInlineTokenPattern.exec(value);
                    match;
-                   match = numericTokenPattern.exec(value)) {
-                const token = match[0];
-                const start = match.index;
-                const before = value[start - 1] || '';
-                const after = value[start + token.length] || '';
-                const digitCount = (token.match(/[0-9]/g) || []).length;
-                const adjacentLatin = /[A-Za-z]/.test(before) || /[A-Za-z]/.test(after);
-                if (adjacentLatin || digitCount === 0)
-                  continue;
+                   match = verticalInlineTokenPattern.exec(value)) {
+                matches.push({ token: match[0], start: match.index });
+              }
 
-                const pureDigits = /^[0-9]+$/.test(token);
-                const className = pureDigits
-                    ? token.length >= 2 && token.length <= 4 ? 'kkindle-tcy' : null
-                    : token.length <= 4 ? 'kkindle-tcy-all' : null;
+              const runs = [];
+              for (let index = 0; index < matches.length;) {
+                let last = index;
+                while (last + 1 < matches.length
+                    && canMerge(value, matches[last], matches[last + 1]))
+                  last++;
+                const start = matches[index].start;
+                const end = matches[last].start + matches[last].token.length;
+                const token = value.slice(start, end);
+                const merged = last > index;
+                index = last + 1;
+                const className = classify(token, merged);
                 if (!className) continue;
+                runs.push({ start, length: end - start, token, className });
+              }
+
+              for (let index = 0; index < value.length; index++) {
+                if (!verticalPunctuationCharacters.includes(value[index])
+                    || runs.some(run => index >= run.start
+                      && index < run.start + run.length))
+                  continue;
+                runs.push({
+                  start: index,
+                  length: 1,
+                  token: value[index],
+                  className: 'kkindle-vertical-punctuation'
+                });
+              }
+
+              runs.sort((left, right) => left.start - right.start);
+              for (const run of runs) {
+                const { start, token, className } = run;
 
                 if (start > cursor)
                   fragment.appendChild(document.createTextNode(value.slice(cursor, start)));
                 const span = document.createElement('span');
                 span.className = className;
                 span.dataset.kkindleVerticalRun = '1';
-                span.textContent = token;
+                if (className === 'kkindle-tcy' || className === 'kkindle-tcy-all') {
+                  span.dataset.kkindleTcyLength = String(token.length);
+                  const inner = document.createElement('span');
+                  inner.className = 'kkindle-tcy-inner';
+                  inner.textContent = token;
+                  span.appendChild(inner);
+                } else if (
+                    className === 'kkindle-vertical-digit'
+                    || className === 'kkindle-vertical-punctuation') {
+                  // Same centered-cell structure as tate-chu-yoko so digit
+                  // and punctuation ink stays inside its one-em cell no
+                  // matter which Linux font supplies the baseline metrics.
+                  const inner = document.createElement('span');
+                  inner.className = 'kkindle-cell-inner';
+                  inner.textContent = token;
+                  span.appendChild(inner);
+                } else {
+                  span.textContent = token;
+                }
                 fragment.appendChild(span);
-                cursor = start + token.length;
+                cursor = start + run.length;
                 wrapped = true;
               }
               if (!wrapped) continue;
@@ -115,16 +269,767 @@ public partial class MainWindow
                 fragment.appendChild(document.createTextNode(value.slice(cursor)));
               node.parentNode?.replaceChild(fragment, node);
             }
+            body.dataset.kkindleVerticalInlinePrepared = '65';
             return true;
           };
 
-          if (document.body) return prepare();
-          document.addEventListener('DOMContentLoaded', prepare, { once: true });
+          if (!document.body) {
+            document.addEventListener('DOMContentLoaded', () => {
+              prepare();
+              fitVerticalRuns();
+            }, { once: true });
+            return true;
+          }
+          prepare();
+          fitVerticalRuns();
+          return true;
+        })();
+        """;
+
+    // Match Apple Books' publication model: WebKit receives the original text
+    // runs and the EPUB alone decides where tate-chu-yoko is appropriate via
+    // text-combine. Kreader only unwraps private boxes from older caches.
+    private const string PreparePublicationVerticalTextScript = """
+        (() => {
+          const prepare = () => {
+            const body = document.body;
+            if (!body || window.__kkindleReaderVertical !== true) return false;
+
+            body.querySelectorAll('span[data-kkindle-vertical-run="1"]')
+              .forEach(span => span.replaceWith(
+                document.createTextNode(span.textContent || '')));
+            body.querySelectorAll(
+              '.kkindle-native-vertical-digits, .kkindle-native-vertical-footnote, '
+              + '.kkindle-linux-vertical-single, .kkindle-linux-vertical-tcy, '
+              + '.kkindle-linux-vertical-number, '
+              + '.kkindle-linux-vertical-single-punctuation, '
+              + '.kkindle-linux-vertical-cjk, '
+              + '.kkindle-linux-vertical-pair-punctuation')
+              .forEach(span => span.replaceWith(
+                document.createTextNode(span.textContent || '')));
+            body.querySelectorAll('.kkindle-linux-vertical-footnote-inner')
+              .forEach(span => span.replaceWith(...span.childNodes));
+            body.querySelectorAll('.kkindle-linux-vertical-footnote')
+              .forEach(anchor => {
+                anchor.classList.remove('kkindle-linux-vertical-footnote');
+                anchor.removeAttribute('data-kkindle-linux-vertical-footnote');
+                anchor.style.removeProperty('--kkindle-linux-footnote-scale');
+              });
+            body.normalize();
+            body.dataset.kkindleVerticalInlinePrepared = 'publication-native-1';
+            window.__kkindleFitVerticalTcyRuns = null;
+            window.__kkindleFitVerticalRuns = null;
+            return true;
+          };
+
+          if (!document.body) {
+            document.addEventListener('DOMContentLoaded', prepare, { once: true });
+            return true;
+          }
+          return prepare();
+        })();
+        """;
+
+    // Vertical compatibility cells. Publication-authored text-combine always
+    // wins; isolated punctuation and otherwise-unmarked pure numeric runs get
+    // fixed one-em cells so their physical alignment is stable in vertical-rl
+    // on both WebKitGTK and WebView2.
+    private const string PrepareVerticalNumbersAndPunctuationScript = """
+        (() => {
+          const body = document.body;
+          if (!body || window.__kkindleReaderVertical !== true) return false;
+          // In vertical-rl the inline axis runs top-to-bottom. Each generated
+          // Han/digit/punctuation box therefore advances by its own local 1em;
+          // line-height belongs to the horizontal column pitch and must never
+          // be reused as the cell height.
+          const hasPublicationCombine = element => {
+            for (let node = element; node && node !== body; node = node.parentElement) {
+              const style = getComputedStyle(node);
+              const value = style.textCombineUpright || style.webkitTextCombine || '';
+              if (value && value !== 'none') return true;
+            }
+            return false;
+          };
+          for (const anchor of body.querySelectorAll('a')) {
+            if (anchor.classList.contains('kkindle-linux-vertical-footnote')) continue;
+            const label = (anchor.textContent || '').replace(/\s+/g, '');
+            const metadata = [
+              anchor.className || '',
+              anchor.getAttribute('role') || '',
+              anchor.getAttribute('epub:type') || '',
+              anchor.getAttribute('href') || '',
+              anchor.getAttribute('data-kkindle-footnote-href') || ''
+            ].join(' ');
+            const isFootnote = /kkindle-footnote-reference|doc-noteref|noteref|footnote|endnote/i.test(metadata)
+              || (!!anchor.querySelector('sup') && /^\[?\d{1,3}\]?$/.test(label));
+            if (!isFootnote) continue;
+            if (!label || label.length > 6 || !/[0-9０-９一二三四五六七八九十]/.test(label))
+              continue;
+            const inner = document.createElement('span');
+            inner.className = 'kkindle-linux-vertical-footnote-inner';
+            while (anchor.firstChild) inner.appendChild(anchor.firstChild);
+            anchor.appendChild(inner);
+            anchor.classList.add('kkindle-linux-vertical-footnote');
+            anchor.dataset.kkindleLinuxVerticalFootnote = '1';
+            const scale = label.length <= 3 ? 0.62 : label.length === 4 ? 0.50 : 0.42;
+            anchor.style.setProperty('--kkindle-linux-footnote-scale', scale + 'em');
+          }
+
+          const openingPunctuation = new Set([
+            '（', '《', '〈', '【', '〔', '［', '｛', '“', '‘', '「', '『', '〖', '〘', '〚'
+          ]);
+          const closingPunctuation = new Set([
+            '）', '》', '〉', '】', '〕', '］', '｝', '”', '’', '」', '』', '〗', '〙', '〛'
+          ]);
+          const openingQuotes = new Set(['“', '‘', '「', '『']);
+          const closingQuotes = new Set(['”', '’', '」', '』']);
+          const verticalPairGlyphs = new Map([
+            ['（', '︵'], ['）', '︶'], ['(', '︵'], [')', '︶'],
+            ['｛', '︷'], ['｝', '︸'], ['{', '︷'], ['}', '︸'],
+            ['〔', '︹'], ['〕', '︺'], ['【', '︻'], ['】', '︼'],
+            ['《', '︽'], ['》', '︾'], ['〈', '︿'], ['〉', '﹀'],
+            ['［', '﹇'], ['］', '﹈'], ['[', '﹇'], [']', '﹈'],
+            // Use the Unicode vertical quote forms instead of rotating the
+            // horizontal quote glyph. The latter has different left/right
+            // side bearings for open/close marks and was the source of the
+            // visibly asymmetric quote/bracket edges on Linux.
+            ['“', '﹁'], ['”', '﹂'], ['‘', '﹃'], ['’', '﹄'],
+            ['「', '﹁'], ['」', '﹂'], ['『', '﹃'], ['』', '﹄']
+          ]);
+          // Horizontal punctuation glyphs are intentionally positioned toward
+          // a corner of their em square. Use the Unicode vertical forms for
+          // marks that have a dedicated form; the original character remains
+          // in the text node for copy/search and the visible form is painted
+          // by the centered cell pseudo-element below.
+          const verticalSingleGlyphs = new Map([
+            ['，', '︐'], ['、', '︑'], ['。', '︒'],
+            ['：', '︓'], ['；', '︔'], ['！', '︕'], ['？', '︖'],
+            ['｡', '︒'], ['､', '︑']
+          ]);
+          const addCellGlyph = (inner, value) => {
+            const glyph = document.createElement('span');
+            glyph.className = 'kkindle-linux-vertical-glyph';
+            glyph.textContent = value;
+            inner.replaceChildren(glyph);
+            return glyph;
+          };
+          const asciiOpeningPunctuation = new Set(['(', '[', '{']);
+          const asciiClosingPunctuation = new Set([')', ']', '}']);
+          const singlePunctuation = new Set([
+            '，', '。', '！', '？', '、', '；', '：', '…', '—', '―', '–', '－',
+            '·', '・', '｡', '､', '．', '‥', '〃', '※', '〽', '﹏', '～', '〜'
+          ]);
+          const verticalCenteredMarks = new Set(['…', '‥', '—', '―', '–', '－']);
+          // Fullwidth colon/semicolon use their Unicode vertical forms below;
+          // only ASCII forms still need the explicit quarter-turn fallback.
+          const verticalRotatedPunctuation = new Set([':', ';']);
+          const asciiPunctuation = new Set([
+            '!', '"', '#', '$', '%', '&', '*', '+', ',', '-', '.', '/', ':',
+            ';', '<', '=', '>', '?', '@', '\\', '^', '_', '`', '|', '~'
+          ]);
+          const hasAsciiWordNeighbor = (value, index) =>
+            /[A-Za-z0-9]/.test(value[index - 1] || '')
+            || /[A-Za-z0-9]/.test(value[index + 1] || '');
+          const isPunctuationCandidate = (value, index) => {
+            const character = value[index];
+            return openingPunctuation.has(character)
+              || closingPunctuation.has(character)
+              || ((asciiOpeningPunctuation.has(character)
+                   || asciiClosingPunctuation.has(character))
+                  && !hasAsciiWordNeighbor(value, index))
+              || singlePunctuation.has(character)
+              || (asciiPunctuation.has(character) && !hasAsciiWordNeighbor(value, index));
+          };
+          const containsPunctuationCandidate = value => {
+            for (let index = 0; index < value.length; index++) {
+              if (isPunctuationCandidate(value, index)) return true;
+            }
+            return false;
+          };
+          const punctuationNodes = [];
+          const punctuationWalker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+          for (let node = punctuationWalker.nextNode(); node; node = punctuationWalker.nextNode()) {
+            const parent = node.parentElement;
+            if (!parent
+                || !containsPunctuationCandidate(node.nodeValue || '')
+                || parent.closest('#kkindle-selection-bar, script, style, noscript, '
+                  + '[data-kkindle-reader-chrome="1"], .kkindle-linux-vertical-footnote, '
+                  + '.kkindle-linux-vertical-single-punctuation, '
+                  + '.kkindle-linux-vertical-pair-punctuation')
+                || hasPublicationCombine(parent))
+              continue;
+            punctuationNodes.push(node);
+          }
+          for (const node of punctuationNodes) {
+            const value = node.nodeValue || '';
+            const fragment = document.createDocumentFragment();
+            let cursor = 0;
+            for (let index = 0; index < value.length; index++) {
+              const character = value[index];
+              const isOpening = openingPunctuation.has(character)
+                || (asciiOpeningPunctuation.has(character) && !hasAsciiWordNeighbor(value, index));
+              const isClosing = closingPunctuation.has(character)
+                || (asciiClosingPunctuation.has(character) && !hasAsciiWordNeighbor(value, index));
+              const isSingle = singlePunctuation.has(character)
+                || (asciiPunctuation.has(character) && !hasAsciiWordNeighbor(value, index));
+              if (!isOpening && !isClosing && !isSingle) continue;
+              if (index > cursor)
+                fragment.appendChild(document.createTextNode(value.slice(cursor, index)));
+              const span = document.createElement('span');
+              if (isOpening || isClosing) {
+                span.className = 'kkindle-linux-vertical-pair-punctuation '
+                  + (isOpening
+                    ? 'kkindle-linux-vertical-pair-open'
+                    : 'kkindle-linux-vertical-pair-close');
+                if (openingQuotes.has(character))
+                  span.classList.add('kkindle-linux-vertical-quote-open');
+                if (closingQuotes.has(character))
+                  span.classList.add('kkindle-linux-vertical-quote-close');
+                span.dataset.kkindleLinuxVerticalPairPunctuation = isOpening ? 'open' : 'close';
+              } else {
+                span.className = 'kkindle-linux-vertical-single-punctuation';
+                if (verticalCenteredMarks.has(character))
+                  span.classList.add('kkindle-linux-vertical-centered-mark');
+                if (verticalRotatedPunctuation.has(character))
+                  span.classList.add('kkindle-linux-vertical-rotated-punctuation');
+                span.dataset.kkindleLinuxVerticalSinglePunctuation = '1';
+              }
+              const inner = document.createElement('span');
+              inner.className = 'kkindle-linux-vertical-cell-inner';
+              inner.textContent = character;
+              if (isOpening || isClosing || verticalSingleGlyphs.has(character)) {
+                inner.dataset.kkindleVerticalGlyph = (isOpening || isClosing)
+                  ? (verticalPairGlyphs.get(character) || character)
+                  : verticalSingleGlyphs.get(character);
+              } else {
+                // An unmapped single mark is rendered by a real child glyph.
+                // Do not also attach the data attribute used by the pseudo
+                // element for vertical presentation forms, or it would paint
+                // the mark twice (and invalidate its optical centre).
+                inner.removeAttribute('data-kkindle-vertical-glyph');
+                addCellGlyph(inner, character);
+              }
+              span.appendChild(inner);
+              fragment.appendChild(span);
+              cursor = index + 1;
+            }
+            if (cursor < value.length)
+              fragment.appendChild(document.createTextNode(value.slice(cursor)));
+            node.parentNode?.replaceChild(fragment, node);
+          }
+          const nodes = [];
+          const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const parent = node.parentElement;
+            if (!parent
+                || !/[0-9]/.test(node.nodeValue || '')
+                || parent.closest('#kkindle-selection-bar, script, style, noscript, '
+                  + '[data-kkindle-reader-chrome="1"], .kkindle-linux-vertical-number, '
+                  + '.kkindle-linux-vertical-footnote, '
+                  + '.kkindle-linux-vertical-single-punctuation, '
+                  + '.kkindle-linux-vertical-pair-punctuation')
+                || hasPublicationCombine(parent))
+              continue;
+            nodes.push(node);
+          }
+          for (const node of nodes) {
+            const value = node.nodeValue || '';
+            const fragment = document.createDocumentFragment();
+            const pattern = /[0-9]+/g;
+            let cursor = 0;
+            let wrapped = false;
+            for (let match = pattern.exec(value); match; match = pattern.exec(value)) {
+              const before = value[match.index - 1] || '';
+              const after = value[match.index + match[0].length] || '';
+              if (/[A-Za-z0-9]/.test(before) || /[A-Za-z0-9]/.test(after)) continue;
+              if (match.index > cursor)
+                fragment.appendChild(document.createTextNode(value.slice(cursor, match.index)));
+              const span = document.createElement('span');
+              if (match[0].length === 1) {
+                span.className = 'kkindle-linux-vertical-single';
+                span.dataset.kkindleLinuxVerticalSingle = '1';
+                const inner = document.createElement('span');
+                inner.className = 'kkindle-linux-vertical-cell-inner';
+                inner.textContent = match[0];
+                addCellGlyph(inner, match[0]);
+                span.appendChild(inner);
+              } else if (match[0].length === 2) {
+                span.className = 'kkindle-linux-vertical-tcy';
+                span.dataset.kkindleLinuxVerticalTcy = '1';
+                const inner = document.createElement('span');
+                inner.className = 'kkindle-linux-vertical-tcy-inner';
+                inner.textContent = match[0];
+                span.appendChild(inner);
+              } else {
+                span.className = 'kkindle-linux-vertical-number';
+                span.dataset.kkindleLinuxVerticalNumber = '1';
+                for (const digit of match[0]) {
+                  const cell = document.createElement('span');
+                  cell.className = 'kkindle-linux-vertical-digit';
+                  const inner = document.createElement('span');
+                  inner.className = 'kkindle-linux-vertical-cell-inner';
+                  inner.textContent = digit;
+                  addCellGlyph(inner, digit);
+                  cell.appendChild(inner);
+                  span.appendChild(cell);
+                }
+              }
+              if (/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(before))
+                span.classList.add('kkindle-cjk-before-number');
+              fragment.appendChild(span);
+              cursor = match.index + match[0].length;
+              wrapped = true;
+            }
+            if (!wrapped) continue;
+            if (cursor < value.length)
+              fragment.appendChild(document.createTextNode(value.slice(cursor)));
+            node.parentNode?.replaceChild(fragment, node);
+          }
+          // Two digits use one horizontal tate-chu-yoko cell. Fit the actual
+          // loaded font's natural width into that cell, then let the grid
+          // center the complete run on the surrounding vertical column.
+          for (const cell of body.querySelectorAll(
+              '.kkindle-linux-vertical-tcy[data-kkindle-linux-vertical-tcy="1"]')) {
+            const inner = cell.querySelector(':scope > .kkindle-linux-vertical-tcy-inner');
+            if (!inner) continue;
+            const em = parseFloat(getComputedStyle(cell).fontSize);
+            const naturalWidth = inner.offsetWidth;
+            if (!(em > 0) || !(naturalWidth > 0)) continue;
+            const scale = Math.min(1, (em * 0.9) / naturalWidth);
+            inner.style.setProperty('transform', 'scaleX(' + scale.toFixed(4) + ')', 'important');
+          }
+
+          // WebKitGTK keeps an upright Han glyph on the font's native
+          // baseline, which is not necessarily the visual centre of the
+          // one-em advance box (KingHwaOldSong has a small right-side ink
+          // overhang). Give every ordinary Han character the same explicit
+          // cell as the compatibility marks. The outer cell is the layout
+          // unit; only the inner glyph is nudged, so the column rhythm and
+          // text offsets remain unchanged.
+          const cjkCharacterPattern = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+          const cjkNodes = [];
+          const cjkWalker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+          for (let node = cjkWalker.nextNode(); node; node = cjkWalker.nextNode()) {
+            const parent = node.parentElement;
+            const value = node.nodeValue || '';
+            if (!parent
+                || !cjkCharacterPattern.test(value)
+                || parent.closest(
+                  '#kkindle-selection-bar, script, style, noscript, ruby, rt, '
+                  + '[data-kkindle-reader-chrome="1"], '
+                  + '.kkindle-linux-vertical-cjk, '
+                  + '.kkindle-linux-vertical-single, '
+                  + '.kkindle-linux-vertical-single-punctuation, '
+                  + '.kkindle-linux-vertical-tcy, '
+                  + '.kkindle-linux-vertical-number, '
+                  + '.kkindle-linux-vertical-pair-punctuation, '
+                  + '.kkindle-linux-vertical-footnote')
+                || hasPublicationCombine(parent))
+              continue;
+            cjkNodes.push(node);
+          }
+          for (const node of cjkNodes) {
+            const value = node.nodeValue || '';
+            const fragment = document.createDocumentFragment();
+            let textStart = 0;
+            let wrapped = false;
+            for (let index = 0; index < value.length;) {
+              const codePoint = value.codePointAt(index);
+              const character = String.fromCodePoint(codePoint || 0);
+              const length = character.length;
+              if (!cjkCharacterPattern.test(character)) {
+                index += length;
+                continue;
+              }
+              if (index > textStart)
+                fragment.appendChild(document.createTextNode(value.slice(textStart, index)));
+              const cell = document.createElement('span');
+              cell.className = 'kkindle-linux-vertical-cjk';
+              cell.dataset.kkindleLinuxVerticalCjk = '1';
+              const ink = document.createElement('span');
+              ink.className = 'kkindle-linux-vertical-cjk-ink';
+              ink.dataset.kkindleVerticalInkCharacter = character;
+              addCellGlyph(ink, character);
+              cell.appendChild(ink);
+              fragment.appendChild(cell);
+              index += length;
+              textStart = index;
+              wrapped = true;
+            }
+            if (!wrapped) continue;
+            if (textStart < value.length)
+              fragment.appendChild(document.createTextNode(value.slice(textStart)));
+            node.parentNode?.replaceChild(fragment, node);
+          }
+
+          // Centre the actual ink, rather than only the browser's advance
+          // width. Canvas TextMetrics uses the same loaded font and weight as
+          // the DOM. The correction is per glyph and scales automatically
+          // for headings and bold titles.
+          const inkContext = document.createElement('canvas').getContext('2d');
+          const inkShiftCache = new Map();
+          const applyInkShift = inner => {
+            if (!inkContext) return;
+            const glyph = inner.dataset.kkindleVerticalGlyph
+              || inner.dataset.kkindleVerticalInkCharacter
+              || (inner.textContent || '');
+            if (!glyph || inner.classList.contains('kkindle-linux-vertical-tcy-inner')) return;
+            const style = getComputedStyle(inner);
+            const isRotatedMark = inner.parentElement?.classList.contains(
+              'kkindle-linux-vertical-centered-mark')
+              || inner.parentElement?.classList.contains(
+                'kkindle-linux-vertical-rotated-punctuation');
+            const key = [
+              style.fontStyle,
+              style.fontWeight,
+              style.fontSize,
+              style.fontFamily,
+              glyph,
+              isRotatedMark ? 'rotated' : 'upright'
+            ].join('|');
+            let shift = inkShiftCache.get(key);
+            if (shift === undefined) {
+              if (isRotatedMark) {
+                // The parent cell is quarter-turned after this pass. An
+                // upright optical Y correction would become a physical X
+                // offset after rotation, putting a dash/ellipsis off the
+                // shared centre line. Symmetric rotated marks use the grid
+                // centre directly.
+                shift = { x: 0, y: 0 };
+                inkShiftCache.set(key, shift);
+              } else {
+              inkContext.font = style.fontStyle + ' ' + style.fontWeight + ' '
+                + style.fontSize + ' ' + style.fontFamily;
+              const metrics = inkContext.measureText(glyph);
+              const advance = metrics.width;
+              const left = metrics.actualBoundingBoxLeft;
+              const right = metrics.actualBoundingBoxRight;
+              const actualAscent = metrics.actualBoundingBoxAscent;
+              const actualDescent = metrics.actualBoundingBoxDescent;
+              const fontAscent = metrics.fontBoundingBoxAscent;
+              const fontDescent = metrics.fontBoundingBoxDescent;
+              const shiftX = Number.isFinite(advance)
+                && advance > 0
+                && Number.isFinite(left)
+                && Number.isFinite(right)
+                ? (advance - (right - left)) / 2
+                : 0;
+              // The browser centres the line box, not the painted ink.
+              // Use the font box to recover the CSS baseline inside that
+              // line box, then move the painted glyph so its actual ink
+              // bounds have the same centre as the em cell. This matters
+              // most for vertical presentation brackets, whose arc sits
+              // toward opposite ends of the em by design.
+              const shiftY = Number.isFinite(actualAscent)
+                && Number.isFinite(actualDescent)
+                && Number.isFinite(fontAscent)
+                && Number.isFinite(fontDescent)
+                ? (actualAscent + fontDescent - fontAscent - actualDescent) / 2
+                : 0;
+              shift = { x: shiftX, y: shiftY };
+              inkShiftCache.set(key, shift);
+              }
+            }
+            inner.style.setProperty(
+              '--kkindle-vertical-ink-shift',
+              shift.x.toFixed(3) + 'px',
+              'important');
+            inner.style.setProperty(
+              '--kkindle-vertical-ink-shift-y',
+              shift.y.toFixed(3) + 'px',
+              'important');
+            inner.dataset.kkindleVerticalOpticalShiftX = shift.x.toFixed(3);
+            inner.dataset.kkindleVerticalOpticalShiftY = shift.y.toFixed(3);
+          };
+          body.querySelectorAll(
+            '.kkindle-linux-vertical-cjk-ink, '
+              + '.kkindle-linux-vertical-single > .kkindle-linux-vertical-cell-inner, '
+              + '.kkindle-linux-vertical-single-punctuation > .kkindle-linux-vertical-cell-inner, '
+              + '.kkindle-linux-vertical-number > .kkindle-linux-vertical-digit > .kkindle-linux-vertical-cell-inner, '
+              + '.kkindle-linux-vertical-pair-punctuation > .kkindle-linux-vertical-cell-inner')
+            .forEach(applyInkShift);
+
+          // Keep the optical correction independent from the outer inline
+          // span's DOMRect. WebKitGTK can report that parent rect from a stale
+          // vertical line box after a font-size change; feeding its centre
+          // back into the child's relative offset makes the glyph walk into a
+          // neighbouring column every time the reader is zoomed. Canvas ink
+          // bearings scale with the live computed font and are the stable
+          // paint-only correction here.
+          const restoreVerticalHanOpticalShift = () => body.querySelectorAll(
+            '.kkindle-linux-vertical-cjk').forEach(cell => {
+            const ink = cell.querySelector(':scope > .kkindle-linux-vertical-cjk-ink');
+            if (!ink) return;
+            const opticalX = parseFloat(ink.dataset.kkindleVerticalOpticalShiftX) || 0;
+            const opticalY = parseFloat(ink.dataset.kkindleVerticalOpticalShiftY) || 0;
+            ink.style.setProperty(
+              '--kkindle-vertical-ink-shift',
+              opticalX.toFixed(3) + 'px',
+              'important');
+            ink.style.setProperty(
+              '--kkindle-vertical-ink-shift-y',
+              opticalY.toFixed(3) + 'px',
+              'important');
+          });
+          window.__kkindleVerticalRecenterHan = restoreVerticalHanOpticalShift;
+          restoreVerticalHanOpticalShift();
+          body.dataset.kkindleVerticalInlinePrepared = 'publication-native-compat-1';
+          return true;
+        })();
+        """;
+
+    // Draw layout boxes while investigating Linux vertical typography. Every
+    // generated Han/digit/punctuation cell is outlined directly by CSS; only
+    // native Latin/other publication text needs fixed Range rectangles in the
+    // pointer-transparent layer. The refresh hooks remain layout-aware because
+    // cover fitting and late font/image loads can move those native ranges.
+    private const string PrepareVerticalDebugLayoutScript = """
+        (() => {
+          const body = document.body;
+          const root = document.documentElement;
+          if (!body || !root) return false;
+          body.dataset.kkindleVerticalDebugBoxes = '1';
+
+          let layer = document.getElementById('kkindle-vertical-debug-boxes');
+          if (!layer) {
+            layer = document.createElement('div');
+            layer.id = 'kkindle-vertical-debug-boxes';
+            layer.setAttribute('aria-hidden', 'true');
+            layer.style.cssText = [
+              'position:fixed',
+              'left:0',
+              'top:0',
+              'width:0',
+              'height:0',
+              'margin:0',
+              'padding:0',
+              'border:0',
+              'pointer-events:none',
+              'z-index:2147483647',
+              'writing-mode:horizontal-tb',
+              'font-family:sans-serif'
+            ].join(';');
+            root.appendChild(layer);
+          }
+
+          const colors = {
+            cjk: 'rgba(22, 163, 74, 0.92)',
+            latin: 'rgba(124, 58, 237, 0.92)',
+            digit: 'rgba(234, 88, 12, 0.92)',
+            punctuation: 'rgba(219, 39, 119, 0.92)',
+            other: 'rgba(107, 114, 128, 0.82)'
+          };
+          const classify = character => {
+            if (/[A-Za-z]/.test(character)) return 'latin';
+            if (/[0-9]/.test(character)) return 'digit';
+            if (/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~，。！？、；：“”‘’（）《》〈〉【】〔〕［］｛｝…—]/.test(character))
+              return 'punctuation';
+            if (/[⺀-鿿豈-﫿]/.test(character)) return 'cjk';
+            return 'other';
+          };
+          const isGenerated = node => !!node.closest?.(
+            '.kkindle-linux-vertical-single, '
+              + '.kkindle-linux-vertical-single-punctuation, '
+              + '.kkindle-linux-vertical-cjk, '
+              + '.kkindle-linux-vertical-tcy, '
+              + '.kkindle-linux-vertical-number, '
+              + '.kkindle-linux-vertical-pair-punctuation, '
+              + '.kkindle-linux-vertical-footnote, '
+              + '#kkindle-selection-bar, script, style, noscript');
+          const isVisibleRect = rect => rect
+            && rect.width > 0
+            && rect.height > 0
+            && Number.isFinite(rect.left)
+            && Number.isFinite(rect.top);
+          const appendFixedFrame = (fragment, rect, color, style = 'solid', kind = '') => {
+            if (!isVisibleRect(rect)) return;
+            const box = document.createElement('div');
+            if (kind) box.dataset.kkindleVerticalDebugKind = kind;
+            box.style.cssText = [
+              'position:fixed',
+              'left:' + rect.left.toFixed(2) + 'px',
+              'top:' + rect.top.toFixed(2) + 'px',
+              'width:' + rect.width.toFixed(2) + 'px',
+              'height:' + rect.height.toFixed(2) + 'px',
+              'box-sizing:border-box',
+              'margin:0',
+              'padding:0',
+              'border:1px ' + style + ' ' + color,
+              'pointer-events:none',
+              'writing-mode:horizontal-tb'
+            ].join(';');
+            fragment.appendChild(box);
+          };
+          const queueRefresh = () => {
+            if (queueRefresh.pending) return;
+            queueRefresh.pending = true;
+            requestAnimationFrame(() => {
+              queueRefresh.pending = false;
+              refresh();
+            });
+          };
+          const refreshAfterLayout = () => {
+            queueRefresh();
+            requestAnimationFrame(() => {
+              queueRefresh();
+              requestAnimationFrame(queueRefresh);
+            });
+            // Image decode and the cover-fit pass can settle after two
+            // animation frames on WebKitGTK. This delayed pass is still
+            // bounded and only runs while the debug overlay is enabled.
+            setTimeout(queueRefresh, 120);
+          };
+          const refresh = () => {
+            const fragment = document.createDocumentFragment();
+            const legend = document.createElement('div');
+            legend.style.cssText = [
+              'position:fixed',
+              'left:8px',
+              'top:8px',
+              'padding:3px 5px',
+              'border:1px solid rgba(17,24,39,.65)',
+              'background:rgba(255,255,255,.88)',
+              'color:#111',
+              'font:11px/1.2 sans-serif',
+              'white-space:nowrap',
+              'writing-mode:horizontal-tb'
+            ].join(';');
+            legend.textContent = '红=兼容字格 蓝=内部字形框 绿=汉字 紫=英文 橙=数字 粉=标点';
+            fragment.appendChild(legend);
+
+            // Han/digit/punctuation frames are CSS outlines on their real
+            // one-em layout cells. This fixed layer is only for native text
+            // ranges (Latin and other unwrapped publication content).
+
+            const viewportWidth = window.innerWidth || root.clientWidth || 0;
+            const viewportHeight = window.innerHeight || root.clientHeight || 0;
+            const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+            let drawn = 0;
+            for (let node = walker.nextNode(); node && drawn < 1400; node = walker.nextNode()) {
+              const parent = node.parentElement;
+              if (!parent || isGenerated(parent)) continue;
+              const text = node.nodeValue || '';
+              for (let index = 0; index < text.length && drawn < 1400; index++) {
+                if (/\s/.test(text[index])) continue;
+                const range = document.createRange();
+                range.setStart(node, index);
+                range.setEnd(node, index + 1);
+                for (const rect of range.getClientRects()) {
+                  if (!(rect.width > 0) || !(rect.height > 0)
+                      || rect.right < 0 || rect.bottom < 0
+                      || rect.left > viewportWidth || rect.top > viewportHeight)
+                    continue;
+                  appendFixedFrame(
+                    fragment,
+                    rect,
+                    colors[classify(text[index])],
+                    'solid',
+                    classify(text[index]));
+                  drawn++;
+                }
+              }
+            }
+            layer.replaceChildren(fragment);
+          };
+          queueRefresh.pending = false;
+          window.__kkindleVerticalDebugQueueRefresh = queueRefresh;
+          window.__kkindleVerticalDebugRefresh = refreshAfterLayout;
+          if (window.__kkindleVerticalDebugListenersBound !== true) {
+            window.__kkindleVerticalDebugListenersBound = true;
+            const refreshLiveLayout = () =>
+              window.__kkindleVerticalDebugQueueRefresh?.();
+            const refreshLoadedLayout = () =>
+              window.__kkindleVerticalDebugRefresh?.();
+            window.__kkindleVerticalDebugLiveLayoutHandler = refreshLiveLayout;
+            window.__kkindleVerticalDebugLoadHandler = refreshLoadedLayout;
+            window.addEventListener('scroll', refreshLiveLayout, true);
+            window.addEventListener('resize', refreshLiveLayout, true);
+            window.addEventListener('load', refreshLoadedLayout, true);
+            document.fonts?.ready?.then(() =>
+              window.__kkindleVerticalDebugRefresh?.()).catch(() => {});
+          }
+          window.__kkindleVerticalDebugResizeObserver?.disconnect?.();
+          if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(() =>
+              window.__kkindleVerticalDebugQueueRefresh?.());
+            observer.observe(root);
+            observer.observe(body);
+            window.__kkindleVerticalDebugResizeObserver = observer;
+          }
+          window.__kkindleVerticalDebugMutationObserver?.disconnect?.();
+          if (typeof MutationObserver === 'function') {
+            const observer = new MutationObserver(() =>
+              window.__kkindleVerticalDebugQueueRefresh?.());
+            observer.observe(body, {
+              subtree: true,
+              attributes: true,
+              attributeFilter: ['class', 'style']
+            });
+            window.__kkindleVerticalDebugMutationObserver = observer;
+          }
+          refreshAfterLayout();
+          return true;
+        })();
+        """;
+
+    // The settings switch must remove more than the visible layer: leaving
+    // observers and capture listeners alive would keep rebuilding detached
+    // debug rectangles after the user turns the feature off.
+    private const string RemoveVerticalDebugLayoutScript = """
+        (() => {
+          document.body?.removeAttribute('data-kkindle-vertical-debug-boxes');
+          document.getElementById('kkindle-vertical-debug-boxes')?.remove();
+          window.__kkindleVerticalDebugResizeObserver?.disconnect?.();
+          window.__kkindleVerticalDebugMutationObserver?.disconnect?.();
+          const liveHandler = window.__kkindleVerticalDebugLiveLayoutHandler;
+          const loadHandler = window.__kkindleVerticalDebugLoadHandler;
+          if (liveHandler) {
+            window.removeEventListener('scroll', liveHandler, true);
+            window.removeEventListener('resize', liveHandler, true);
+          }
+          if (loadHandler)
+            window.removeEventListener('load', loadHandler, true);
+          window.__kkindleVerticalDebugResizeObserver = null;
+          window.__kkindleVerticalDebugMutationObserver = null;
+          window.__kkindleVerticalDebugLiveLayoutHandler = null;
+          window.__kkindleVerticalDebugLoadHandler = null;
+          window.__kkindleVerticalDebugQueueRefresh = null;
+          window.__kkindleVerticalDebugRefresh = null;
+          window.__kkindleVerticalDebugListenersBound = false;
+          return true;
+        })();
+        """;
+
+    private const string RevealReaderDocumentScript = """
+        (() => {
+          const root = document.documentElement;
+          const body = document.body;
+          if (!root || !body) return false;
+          root.style.setProperty('visibility', 'visible', 'important');
+          root.style.setProperty('opacity', '1', 'important');
+          body.style.setProperty('visibility', 'visible', 'important');
+          body.style.setProperty('opacity', '1', 'important');
+          window.__kkindleReaderConfigured = true;
           return true;
         })();
         """;
 
     private ReaderLayoutSettings _readerLayout = NormalizeReaderLayoutForPlatform(new ReaderLayoutSettings());
+    private bool _readerVerticalDebugBoxesEnabled =
+        Environment.GetEnvironmentVariable("KKINDLE_VERTICAL_DEBUG_BOXES") == "1";
+
+    private bool ShouldShowReaderVerticalDebugBoxes() =>
+        OperatingSystem.IsLinux()
+        && _readerLayout.VerticalWriting
+        && _readerVerticalDebugBoxesEnabled;
+
+    private void LoadReaderVerticalDebugBoxesSetting()
+    {
+        _readerVerticalDebugBoxesEnabled =
+            _appSettings.ReaderVerticalDebugBoxesEnabled
+            ?? Environment.GetEnvironmentVariable("KKINDLE_VERTICAL_DEBUG_BOXES") == "1";
+    }
+
     private int _readerPageAnimation = ReaderAnimationFade;
     private readonly SemaphoreSlim _readerPageTurnGate = new(1, 1);
     private readonly SemaphoreSlim _readerLayoutGate = new(1, 1);
@@ -437,7 +1342,12 @@ public partial class MainWindow
 
     private static ReaderLayoutSettings NormalizeReaderLayoutForPlatform(ReaderLayoutSettings settings)
     {
-        return ReaderLayoutDefaults.Normalize(settings);
+        // WebKitGTK's native vertical flow is stable when it remains continuous.
+        // Exact viewport pagination requires glyph probes and edge masks whose
+        // geometry changes with fonts, DPI and native side-panel resizing.
+        return ReaderPlatformLayoutPolicy.Normalize(
+            settings,
+            preferContinuousVerticalFlow: OperatingSystem.IsLinux());
     }
 
     public ObservableCollection<ReaderBookmark> ReaderBookmarks { get; } = [];
@@ -605,6 +1515,37 @@ public partial class MainWindow
         IReaderHost host,
         CancellationToken cancellationToken)
     {
+        // The injected bridge hides the document on every navigation so the
+        // fallback-font/vertical-cell transition is never visible. That makes
+        // configuration the only thing that can put a chapter back on screen:
+        // if it is cancelled or throws part way through — a superseded
+        // navigation, a rapid chapter turn, a failed InvokeScript — the reader
+        // would stay permanently blank. Reveal on every exit path.
+        try
+        {
+            await ConfigureReaderHostCoreAsync(host, cancellationToken);
+        }
+        finally
+        {
+            if (!_readerIsPdf)
+            {
+                try
+                {
+                    await host.InvokeScriptAsync(RevealReaderDocumentScript);
+                }
+                catch
+                {
+                    // The document can already be gone when the navigation was
+                    // superseded. The next configuration reveals the new one.
+                }
+            }
+        }
+    }
+
+    private async Task ConfigureReaderHostCoreAsync(
+        IReaderHost host,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         ReaderProgressRow? restoredProgress = null;
         if (ReferenceEquals(host, CurrentReaderHost)
@@ -619,6 +1560,7 @@ public partial class MainWindow
         // configuration applies to EPUB pages only.
         if (_readerIsPdf) return;
         var pagination = _readerLayout.FlowMode == 1;
+        var showVerticalDebugBoxes = ShouldShowReaderVerticalDebugBoxes();
         var flowCss = ReaderPaginationScripts.CreateFlowCss(
             pagination,
             _readerLayout.VerticalWriting,
@@ -636,7 +1578,8 @@ public partial class MainWindow
                 _readerLayout.VerticalWriting,
                 pagination,
                 _readerLayout.ParagraphIndent,
-                bundledFontUri);
+                bundledFontUri,
+                showVerticalDebugBoxes);
         if (!pagination)
         {
             var bodyPadding = Math.Round(_readerLayout.BodyPadding);
@@ -665,6 +1608,7 @@ public partial class MainWindow
               window.__kkindleReaderFlowMode = {{_readerLayout.FlowMode}};
               window.__kkindleReaderVertical = {{(_readerLayout.VerticalWriting ? "true" : "false")}};
               window.__kkindleReaderTwoPage = {{(_readerLayout.TwoPageMode ? "true" : "false")}};
+              const firstReaderConfiguration = window.__kkindleReaderConfigured !== true;
               // Image limits must use the body's real content box. Using
               // 100vh without subtracting page padding makes a tall image plus
               // its margins too large for the first column, so Chromium moves
@@ -674,11 +1618,13 @@ public partial class MainWindow
               if (root && body) {
                 root.removeAttribute('hidden');
                 body.removeAttribute('hidden');
-                root.style.setProperty('visibility', 'visible', 'important');
-                root.style.setProperty('opacity', '1', 'important');
                 body.style.setProperty('display', 'block', 'important');
-                body.style.setProperty('visibility', 'visible', 'important');
-                body.style.setProperty('opacity', '1', 'important');
+                if (firstReaderConfiguration) {
+                  root.style.setProperty('visibility', 'hidden', 'important');
+                  root.style.setProperty('opacity', '0', 'important');
+                  body.style.setProperty('visibility', 'hidden', 'important');
+                  body.style.setProperty('opacity', '0', 'important');
+                }
                 body.style.removeProperty('transition');
                 body.style.removeProperty('will-change');
                 const bodyStyle = getComputedStyle(body);
@@ -750,7 +1696,7 @@ public partial class MainWindow
                   'kkindle-vertical-edge-mask-left',
                   'kkindle-vertical-edge-mask-right'
                 ];
-                const useLinuxVerticalEdgeMasks = {{(OperatingSystem.IsLinux() ? "true" : "false")}};
+                const useLinuxVerticalEdgeMasks = {{(OperatingSystem.IsLinux() && pagination ? "true" : "false")}};
                 if (useLinuxVerticalEdgeMasks && window.__kkindleReaderVertical === true) {
                   for (const id of edgeMaskIds) {
                     let mask = document.getElementById(id);
@@ -768,6 +1714,19 @@ public partial class MainWindow
                     document.getElementById(id)?.remove();
                 }
 
+                const continuousGuardIds = [
+                  'kkindle-vertical-flow-guard-left',
+                  'kkindle-vertical-flow-guard-right',
+                  'kkindle-vertical-flow-guard-top',
+                  'kkindle-vertical-flow-guard-bottom'
+                ];
+                if (!(window.__kkindleReaderVertical === true
+                    && window.__kkindleReaderFlowMode !== 1)) {
+                  for (const id of continuousGuardIds)
+                    document.getElementById(id)?.remove();
+                  document.documentElement.removeAttribute('data-kkindle-vertical-safe-boundary');
+                }
+
               }
               return true;
             })();
@@ -776,9 +1735,28 @@ public partial class MainWindow
         await WaitForReaderFontsAsync(host, cancellationToken);
         if (_readerLayout.VerticalWriting)
         {
-            await host.InvokeScriptAsync(PrepareVerticalInlineRunsScript);
+            await host.InvokeScriptAsync(PreparePublicationVerticalTextScript);
+            await host.InvokeScriptAsync(PrepareVerticalNumbersAndPunctuationScript);
+            if (!pagination)
+                await host.InvokeScriptAsync(ReaderPaginationScripts.ContinuousVerticalBoundaryScript);
+            if (showVerticalDebugBoxes)
+                await host.InvokeScriptAsync(PrepareVerticalDebugLayoutScript);
         }
+        if (!showVerticalDebugBoxes)
+            await host.InvokeScriptAsync(RemoveVerticalDebugLayoutScript);
         await host.InvokeScriptAsync(FitReaderCoverImageScript);
+        if (showVerticalDebugBoxes)
+        {
+            // The cover-fit pass can move the inline columns. Restore the
+            // live-font optical shift before native Range diagnostics refresh.
+            await host.InvokeScriptAsync(
+                "window.__kkindleVerticalRecenterHan?.(); true;");
+            // FitReaderCoverImageScript can move every vertical column after
+            // the initial Range probe (the viewport itself stays the same),
+            // so force a second measurement after the cover pass.
+            await host.InvokeScriptAsync(
+                "window.__kkindleVerticalDebugRefresh?.(); true;");
+        }
         if (pagination)
         {
             await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
@@ -843,6 +1821,11 @@ public partial class MainWindow
             }
             await ApplySavedAnnotationsAsync(host, cancellationToken);
         }
+        // The reveal itself lives in ConfigureReaderHostAsync's finally block:
+        // it must run after the final font, native vertical preparation, page snap
+        // and saved-position restore have settled (which removes the one-frame
+        // upward jump on the rightmost vertical column) but it must also run
+        // when one of those steps fails.
     }
 
     // Reader appearance overrides, mirroring the WinUI reference's
@@ -857,7 +1840,8 @@ public partial class MainWindow
         bool vertical,
         bool pagination,
         bool paragraphIndent,
-        string? bundledFontUri)
+        string? bundledFontUri,
+        bool showVerticalDebugBoxes)
     {
         var builder = new StringBuilder();
         builder.Append($"\nhtml {{ font-size: {Format(fontScale * 100)}% !important; text-rendering: optimizeLegibility; }}");
@@ -886,6 +1870,8 @@ public partial class MainWindow
         if (vertical)
         {
             builder.Append('\n').Append(ReaderAppearanceScripts.VerticalPublicationTypographyCss);
+            if (showVerticalDebugBoxes)
+                builder.Append('\n').Append(ReaderAppearanceScripts.VerticalDebugOutlineCss);
             // Natural vertical-rl pagination can only keep a page boundary
             // between complete glyph columns when every block advances on the
             // same line grid. Publisher block margins, padding and fixed
@@ -957,7 +1943,7 @@ public partial class MainWindow
         // This must be the final layout override: the shared heading,
         // blockquote and media rules above intentionally serve horizontal
         // pagination too and otherwise reintroduce fractional block margins.
-        if (vertical)
+        if (vertical && pagination)
             builder.Append(ReaderPaginationScripts.VerticalTypographyGridCss);
         // Use the original TTF as a same-origin local resource. In particular,
         // do not turn the 33 MB font into a data URI on Linux: WebKitGTK can
@@ -1620,11 +2606,20 @@ public partial class MainWindow
         var lineHeight = Math.Max(fontSize + 2, fontSize * _readerLayout.LineHeight);
         var overlayWidth = Math.Max(320, ReaderLinuxTextFallbackOverlay.Bounds.Width);
         var overlayHeight = Math.Max(320, ReaderLinuxTextFallbackOverlay.Bounds.Height);
+        var pageInsets = ReaderPlatformLayoutPolicy.GetVerticalPageInsets(
+            overlayWidth,
+            overlayHeight,
+            _readerLayout.BodyPadding);
+        ReaderLinuxTextFallbackPagedRoot.Padding = new Thickness(
+            pageInsets.Horizontal,
+            pageInsets.Vertical);
         // Use the already-arranged paged surface when it is available. The
         // overlay can retain its previous width for a compositor frame while
         // the TOC opens/closes; using that stale width lets a centered page
         // extend into the TOC column before the next reflow pass.
-        var availableContentWidth = Math.Max(1, overlayWidth - 48);
+        var availableContentWidth = Math.Max(
+            1,
+            overlayWidth - pageInsets.Horizontal * 2);
         // In vertical mode the page control is centered inside this grid and
         // its explicit Width is assigned below. Reading the grid's current
         // Bounds.Width here feeds the previous page width back into the next
@@ -1644,7 +2639,9 @@ public partial class MainWindow
         var pageWidth = _readerLayout.TwoPageMode
             ? Math.Max(1, (arrangedContentWidth - 28) / 2)
             : Math.Max(1, Math.Min(_readerLayout.MaxWidth, arrangedContentWidth));
-        var pageHeight = Math.Max(180, overlayHeight - 36);
+        var pageHeight = Math.Max(
+            180,
+            overlayHeight - pageInsets.Vertical * 2);
         var linesPerPage = Math.Max(4, (int)Math.Floor(pageHeight / lineHeight));
         // Vertical writing paginates on the same column grid the drawing
         // surface uses, so a page boundary always lands on a column start.
@@ -4732,6 +5729,11 @@ public partial class MainWindow
                 try
                 {
                     await host.InvokeScriptAsync(script);
+                    if (_readerLayout.VerticalWriting && _readerLayout.FlowMode != 1)
+                    {
+                        await host.InvokeScriptAsync(
+                            ReaderPaginationScripts.ContinuousVerticalBoundaryScript);
+                    }
                     await host.InvokeScriptAsync(FitReaderCoverImageScript);
                     if (_readerLayout.FlowMode == 1)
                         await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
@@ -7365,6 +8367,9 @@ public partial class MainWindow
           if (sign < 0 && position <= 4) return false;
           if (sign > 0 && position + viewport >= extent - 4) return false;
           const delta = sign * 72;
+          if (horizontal
+              && typeof window.__kkindleScrollContinuousVerticalBy === 'function')
+            return window.__kkindleScrollContinuousVerticalBy(delta);
           window.scrollBy(horizontal
             ? { left: vertical ? -delta : delta, top: 0, behavior: 'smooth' }
             : { left: 0, top: delta, behavior: 'smooth' });
@@ -8178,11 +9183,14 @@ public partial class MainWindow
             ReaderStatusText.Text = "PDF 使用页面模式，可用底部进度条或左右按钮翻页。";
             return;
         }
+        var requiredVerticalMode = OperatingSystem.IsLinux() ? "scroll" : "single";
         if (_readerLayout.VerticalWriting
-            && !string.Equals(tag, "single", StringComparison.Ordinal))
+            && !string.Equals(tag, requiredVerticalMode, StringComparison.Ordinal))
         {
             SyncReaderFlowMenu();
-            ShowReaderTransientStatus("竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。");
+            ShowReaderTransientStatus(OperatingSystem.IsLinux()
+                ? "Linux 竖排固定使用连续滚动，以保证 WebKit 排版稳定。"
+                : "竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。");
             return;
         }
         var flowMode = tag switch
@@ -8210,12 +9218,13 @@ public partial class MainWindow
         var flowMode = _readerLayout.FlowMode;
         var twoPage = _readerLayout.TwoPageMode;
         var vertical = _readerLayout.VerticalWriting;
+        var continuousVertical = vertical && OperatingSystem.IsLinux();
         ReaderScrollModeItem.IsChecked = flowMode == 0;
         ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage;
         ReaderTwoPageModeItem.IsChecked = flowMode == 1 && twoPage;
-        ReaderScrollModeItem.IsEnabled = !vertical;
+        ReaderScrollModeItem.IsEnabled = !vertical || continuousVertical;
         ReaderTwoPageModeItem.IsEnabled = !vertical;
-        ReaderSinglePageModeItem.IsEnabled = true;
+        ReaderSinglePageModeItem.IsEnabled = !continuousVertical;
         if (ReaderFlowButton is not null)
             ReaderFlowButton.Content = flowMode == 0 ? "滚动" : twoPage ? "双栏" : "单页";
     }

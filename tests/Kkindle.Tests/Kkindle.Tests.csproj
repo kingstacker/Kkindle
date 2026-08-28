@@ -14,6 +14,7 @@
     <Compile Include="..\..\src\Kkindle.App\ReaderAppearanceScripts.cs" Link="ReaderAppearanceScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderNavigationScripts.cs" Link="ReaderNavigationScripts.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderWaveScripts.cs" Link="ReaderWaveScripts.cs" />
+    <Compile Include="..\..\src\Kkindle.App\ReaderPlatformLayoutPolicy.cs" Link="ReaderPlatformLayoutPolicy.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackTitleLinePolicy.cs" Link="ReaderLinuxTextFallbackTitleLinePolicy.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxTextFallbackPagingPolicy.cs" Link="ReaderLinuxTextFallbackPagingPolicy.cs" />
     <Compile Include="..\..\src\Kkindle.App\ReaderLinuxVerticalPagingPolicy.cs" Link="ReaderLinuxVerticalPagingPolicy.cs" />
