@@ -337,7 +337,8 @@ public partial class MainWindow
     // on both WebKitGTK and WebView2.
     private const string PrepareVerticalNumbersAndPunctuationScript = """
         (() => {
-          const body = document.body;
+          const body = document.getElementById(window.__kkindleVertWrapRoot || '')
+            || document.body;
           if (!body || window.__kkindleReaderVertical !== true) return false;
           // In vertical-rl the inline axis runs top-to-bottom. Each generated
           // Han/digit/punctuation box therefore advances by its own local 1em;
@@ -774,7 +775,7 @@ public partial class MainWindow
           });
           window.__kkindleVerticalRecenterHan = restoreVerticalHanOpticalShift;
           restoreVerticalHanOpticalShift();
-          body.dataset.kkindleVerticalInlinePrepared = 'publication-native-compat-1';
+          document.body.dataset.kkindleVerticalInlinePrepared = 'publication-native-compat-1';
           return true;
         })();
         """;
@@ -1096,6 +1097,10 @@ public partial class MainWindow
     private string _readerPendingSelectionSuffix = string.Empty;
     private double _readerScrollPosition;
     private double _readerScrollRatio;
+    // Page-compose mode state: the visible page's char span within the
+    // chapter bank (used for progress display and persistence).
+    private int _readerPageChars;
+    private double _readerPageRatio;
     private double _readerScrollWidth;
     private double _readerScrollHeight;
     private double _readerClientWidth;
@@ -1341,6 +1346,31 @@ public partial class MainWindow
             ChapterTitleStart >= 0 && ChapterTitleLength > 0;
     }
 
+    /// <summary>
+    /// Vertical paginated reading runs the application-side page composer:
+    /// the chapter is banked once and pages are composed on demand, instead
+    /// of the whole chapter flowing as one 100k-element document.
+    /// </summary>
+    private bool IsReaderPageComposeMode =>
+        !_readerIsPdf && _readerLayout.VerticalWriting && _readerLayout.FlowMode == 1;
+
+    /// <summary>
+    /// Resolves the character offset the composed page should open at. New
+    /// page-mode saves persist the page-start character offset in
+    /// ScrollPosition; legacy pixel saves fall back to the chapter start.
+    /// </summary>
+    private int ResolveVerticalPageStartChar(ReaderProgressRow? restoredProgress)
+    {
+        if (restoredProgress is { } progress
+            && progress.ChapterIndex == _readerChapterIndex
+            && progress.ScrollPosition > 0)
+        {
+            return (int)Math.Clamp(progress.ScrollPosition, 0, int.MaxValue);
+        }
+
+        return 0;
+    }
+
     private static ReaderLayoutSettings NormalizeReaderLayoutForPlatform(ReaderLayoutSettings settings)
     {
         // Vertical writing is a paginated layout on every platform, including
@@ -1563,14 +1593,28 @@ public partial class MainWindow
         // to inject layout into (and InvokeScript would throw), so host
         // configuration applies to EPUB pages only.
         if (_readerIsPdf) return;
+        if (!IsReaderPageComposeMode)
+        {
+            // Leaving page mode (a layout switch on the same document): the
+            // vertical-rl page scaffolding must come down before the flowing
+            // architecture CSS lands, or html/body stay pinned to vertical.
+            await TryInvokeReaderTransitionAsync(
+                host,
+                "window.__pgTeardown?.(); true;");
+        }
         var pagination = _readerLayout.FlowMode == 1;
         var showVerticalDebugBoxes = ShouldShowReaderVerticalDebugBoxes();
-        var flowCss = ReaderPaginationScripts.CreateFlowCss(
-            pagination,
-            _readerLayout.VerticalWriting,
-            _readerLayout.TwoPageMode,
-            _readerLayout.BodyPadding,
-            _readerLayout.MaxWidth);
+        // Page-compose mode brings its own single-page geometry; the flowing
+        // architecture CSS (max-content body, edge masks, page-step vars)
+        // would fight it.
+        var flowCss = IsReaderPageComposeMode
+            ? string.Empty
+            : ReaderPaginationScripts.CreateFlowCss(
+                pagination,
+                _readerLayout.VerticalWriting,
+                _readerLayout.TwoPageMode,
+                _readerLayout.BodyPadding,
+                _readerLayout.MaxWidth);
         var bundledFontUri = await GetBundledFontUriAsync(host, cancellationToken);
         var css = ReaderAppearanceScripts.MonochromeScrollbarCss
             + "\n"
@@ -1739,7 +1783,41 @@ public partial class MainWindow
         LogReaderChapterTiming("cfg.styleInjected", configTiming);
         await WaitForReaderFontsAsync(host, cancellationToken);
         LogReaderChapterTiming("cfg.fontsReady", configTiming);
-        if (_readerLayout.VerticalWriting)
+        if (IsReaderPageComposeMode)
+        {
+            // Legacy extraction artifacts must be cleared before the content
+            // is banked; the per-configure unwrap is skipped in page mode
+            // (it would tear down composed pages).
+            await host.InvokeScriptAsync(PreparePublicationVerticalTextScript);
+            var pageStartChar = ResolveVerticalPageStartChar(restoredProgress);
+            try
+            {
+                await host.InvokeScriptAsync(
+                    ReaderVerticalPageScripts.BuildVerticalPageInitScript(pageStartChar));
+                await host.InvokeScriptAsync(
+                    "window.__kkindleVertWrapLimit = 0; window.__kkindleVertWrapRoot = '"
+                    + ReaderVerticalPageScripts.PageFlowId + "'; true;");
+                await host.InvokeScriptAsync(PrepareVerticalNumbersAndPunctuationScript);
+                var pageDump = await host.InvokeScriptAsync(
+                    "JSON.stringify((() => { const f = document.getElementById('kkindle-page-flow');"
+                    + " const b = document.getElementById('kkindle-page-bank');"
+                    + " const hEl = document.getElementById('kkindle-page-history');"
+                    + " return { bank: b.children.length, hist: hEl.children.length,"
+                    + " flowChildren: f.children.length, w: f.clientWidth, hgt: f.clientHeight,"
+                    + " sw: f.scrollWidth, text: (f.textContent || '').slice(0, 40),"
+                    + " h: window.__pg.h, pgf: window.__pg.f, bodyH: document.body.clientHeight }; })())");
+                LogReaderChapterTiming(
+                    "cfg.pageDump " + DecodeReaderScriptString(pageDump ?? string.Empty), configTiming);
+                LogReaderChapterTiming("cfg.pageComposed", configTiming);
+            }
+            catch (Exception ex)
+            {
+                LogReaderChapterTiming(
+                    "cfg.pageError: " + ex.Message.Replace('\n', ' '), configTiming);
+                throw;
+            }
+        }
+        else if (_readerLayout.VerticalWriting)
         {
             await host.InvokeScriptAsync(PreparePublicationVerticalTextScript);
             await host.InvokeScriptAsync(PrepareVerticalNumbersAndPunctuationScript);
@@ -1764,7 +1842,7 @@ public partial class MainWindow
             await host.InvokeScriptAsync(
                 "window.__kkindleVerticalDebugRefresh?.(); true;");
         }
-        if (pagination)
+        if (pagination && !IsReaderPageComposeMode)
         {
             await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
             LogReaderChapterTiming("cfg.snapped", configTiming);
@@ -1774,6 +1852,15 @@ public partial class MainWindow
 
         if (ReferenceEquals(host, CurrentReaderHost))
         {
+            if (IsReaderPageComposeMode)
+            {
+                // The page-mode init composed the saved offset directly;
+                // pixel-based restore scripts do not apply.
+                await ApplySavedAnnotationsAsync(host, cancellationToken);
+                LogReaderChapterTiming("cfg.annotations", configTiming);
+                return;
+            }
+
             if (restoredProgress is { } progress
                 && progress.ChapterIndex == _readerChapterIndex)
             {
@@ -5736,6 +5823,15 @@ public partial class MainWindow
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
+                    if (IsReaderPageComposeMode)
+                    {
+                        // The page fills to the live viewport: recompose at
+                        // the same saved start offset on every resize.
+                        await host.InvokeScriptAsync(
+                            "window.__pgComposeAt(window.__pgStartChar()); true;");
+                        await host.InvokeScriptAsync(FitReaderCoverImageScript);
+                        continue;
+                    }
                     await host.InvokeScriptAsync(script);
                     if (_readerLayout.VerticalWriting && _readerLayout.FlowMode != 1)
                     {
@@ -6342,6 +6438,21 @@ public partial class MainWindow
         bool hasPendingRestorePosition)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (IsReaderPageComposeMode)
+        {
+            // Page-compose addressing: the target fragment/anchor identifies a
+            // bank node; the helper walks the bank accumulating characters to
+            // find the page that contains it.
+            var pageTarget = DecodeReaderFragment(target.Fragment);
+            var pageScript = string.IsNullOrWhiteSpace(pageTarget)
+                ? "window.__pgComposeForward(); true;"
+                : $"window.__pgComposeToAnchor && window.__pgComposeToAnchor({EscapeJavaScriptSingleQuoted(pageTarget)}) !== false; true;";
+            await host.InvokeScriptAsync(pageScript);
+            await UpdateReaderScrollStateAsync(host);
+            UpdateReaderToolbar();
+            return;
+        }
+
         if (ReaderNavigationLocationPolicy.ShouldNormalizeChapterStart(intent, target, hasPendingRestorePosition))
         {
             await host.InvokeScriptAsync(ReaderNavigationScripts.NormalizeChapterStart);
@@ -8658,6 +8769,74 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>
+    /// Page-compose turn: the compose helper fills the next/previous page in
+    /// place (the bank/history containers make this a node shuffle), the hold
+    /// overlay covers the compose beat, and the reading position persists as
+    /// the page-start character offset.
+    /// </summary>
+    private async Task TurnReaderPageInPageComposeModeAsync(IReaderHost host, int direction)
+    {
+        var canScript = direction < 0
+            ? ReaderVerticalPageScripts.CanTurnBackwardScript
+            : ReaderVerticalPageScripts.CanTurnForwardScript;
+        var canResult = await host.InvokeScriptAsync(canScript);
+        if (!string.Equals(canResult?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            if (direction > 0 && _readerDocument is not null
+                && _readerChapterIndex < _readerDocument.Chapters.Count - 1)
+            {
+                await MoveReaderChapterAsync(1);
+            }
+            else if (direction < 0 && _readerChapterIndex > 0)
+            {
+                await MoveReaderChapterAsync(-1);
+            }
+            else
+            {
+                ReaderStatusText.Text = direction > 0 ? "已经是最后一章。" : "已经是第一章。";
+            }
+            return;
+        }
+
+        var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(ReaderToken);
+        var stateJson = await host.InvokeScriptAsync(direction < 0
+            ? "window.__pgComposeBackward(); JSON.stringify({ h: window.__pg.h, f: window.__pg.f, ratio: window.__pgRatio() });"
+            : "window.__pgComposeForward(); JSON.stringify({ h: window.__pg.h, f: window.__pg.f, ratio: window.__pgRatio() });");
+        LogReaderChapterTiming(
+            "turn.page dir=" + direction + " " + DecodeReaderScriptString(stateJson ?? string.Empty),
+            System.Diagnostics.Stopwatch.StartNew());
+        ApplyVerticalPageState(stateJson);
+        await UpdateReaderScrollStateAsync(host);
+        UpdateReaderToolbar();
+        await SaveReaderProgressAsync(ReaderToken);
+        ReaderChapterText.Text = GetReaderChapterPositionLabel();
+        await UpdateReaderBookmarkIndicatorAsync();
+        await HideReaderChapterHoldOverlayAsync();
+    }
+
+    private void ApplyVerticalPageState(string? stateJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(DecodeReaderScriptString(stateJson ?? string.Empty)
+                ?? stateJson ?? string.Empty);
+            var root = document.RootElement;
+            if (root.TryGetProperty("h", out var h) && h.TryGetInt32(out var hValue))
+                _readerScrollPosition = hValue;
+            if (root.TryGetProperty("f", out var f) && f.TryGetInt32(out var fValue))
+                _readerPageChars = fValue;
+            if (root.TryGetProperty("ratio", out var ratio) && ratio.TryGetDouble(out var ratioValue))
+                _readerPageRatio = ratioValue;
+        }
+        catch
+        {
+            // State parsing is diagnostics-adjacent; the turn itself already
+            // succeeded.
+        }
+        UpdateReaderToolbar();
+    }
+
     private async Task TurnReaderPageCoreAsync(int direction, bool chapterOnly)
     {
         if (chapterOnly)
@@ -8671,6 +8850,12 @@ public partial class MainWindow
             return;
         }
         if (CurrentReaderHost is not { } host) return;
+
+        if (IsReaderPageComposeMode)
+        {
+            await TurnReaderPageInPageComposeModeAsync(host, direction);
+            return;
+        }
 
         // A side-panel resize temporarily rebuilds the multicolumn layout.
         // Never inspect scrollWidth during that pass: Chromium briefly reports
