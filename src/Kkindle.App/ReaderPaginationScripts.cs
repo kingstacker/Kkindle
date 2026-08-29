@@ -98,7 +98,12 @@ internal static class ReaderPaginationScripts
         + " const pageIndex = Math.round(Math.abs(root.scrollLeft || 0) / resolvedStep);"
         + " const phaseKey = [location.href, viewport, resolvedStep, line, body.scrollWidth || 0, pageIndex].join('|');"
         + " let contentShift = Number(window.__kkindleVerticalContentShift || 0);"
-        + " if (window.__kkindleVerticalOriginPhaseKey !== phaseKey) {"
+        // A caller may set __kkindleVerticalStepSkipScan for a secondary step
+        // evaluation on an already-probed page (the saved-position restore):
+        // the scan then reuses the cached phase result and the full glyph walk
+        // runs once in the following Snap instead.
+        + " if (window.__kkindleVerticalOriginPhaseKey !== phaseKey"
+        + "  && window.__kkindleVerticalStepSkipScan !== 1) {"
         + "  contentShift = 0;"
         + "  document.documentElement.style.setProperty('--kkindle-vertical-content-shift', '0px');"
         + "  void body.offsetWidth;"
@@ -114,10 +119,29 @@ internal static class ReaderPaginationScripts
         + "   const text = node.nodeValue || '';"
         + "   const nodeRange = document.createRange();"
         + "   nodeRange.selectNodeContents(node);"
-        + "   const nodeIsVisible = Array.from(nodeRange.getClientRects()).some(rect =>"
-        + "    rect.bottom > 0 && rect.top < root.clientHeight"
-        + "    && rect.right > safeLeft - line && rect.left < safeRight + line);"
+        + "   let nodeIsVisible = false;"
+        + "   let nodeLeft = Number.POSITIVE_INFINITY;"
+        + "   let nodeRight = Number.NEGATIVE_INFINITY;"
+        + "   for (const rect of Array.from(nodeRange.getClientRects())) {"
+        + "    if (rect.right <= 0 || rect.left >= viewport) continue;"
+        + "    nodeLeft = Math.min(nodeLeft, rect.left);"
+        + "    nodeRight = Math.max(nodeRight, rect.right);"
+        + "    if (rect.bottom > 0 && rect.top < root.clientHeight"
+        + "     && rect.right > safeLeft - line && rect.left < safeRight + line)"
+        + "     nodeIsVisible = true;"
+        + "   }"
         + "   if (!nodeIsVisible) continue;"
+        // Glyphs farther than the maximum candidate shift from both mask edges
+        // can never cross an edge under any candidate offset, so they add zero
+        // crossings to the scan below. Measuring them character by character
+        // is the dominant probe cost on large chapters; the node rectangle is
+        // an upper bound of every glyph box inside it, so a fully interior
+        // node (with a small ink-overhang allowance) can skip its
+        // per-character measurement without changing the outcome.
+        + "   const interiorBound = baseSide + 4;"
+        + "   if (nodeLeft >= safeLeft + interiorBound"
+        + "    && nodeRight <= safeRight - interiorBound)"
+        + "    continue;"
         + "   for (let index = 0; index < text.length && inspected < 12000; index++) {"
         + "    inspected++;"
         + "    if (/\\s/.test(text[index])) continue;"
@@ -606,7 +630,14 @@ internal static class ReaderPaginationScripts
               const el = document.scrollingElement || document.documentElement;
               if (!el) return;
               const vertical = {{(vertical ? "true" : "false")}};
+              // The pre-scroll evaluation only needs the page step for the
+              // target math: the edge glyphs it would measure are replaced by
+              // the scroll below, so its glyph scan is skipped and the single
+              // post-scroll walk inside the rAF performs the authoritative
+              // calibration on the page that is actually shown.
+              window.__kkindleVerticalStepSkipScan = 1;
               const step = vertical ? {{VerticalStepExpression}} : {{PageStepExpression}};
+              window.__kkindleVerticalStepSkipScan = 0;
               if (step <= 0) return;
               const rawMax = Math.max(0, el.scrollWidth - el.clientWidth);
               const trailingInset = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
@@ -726,7 +757,12 @@ internal static class ReaderPaginationScripts
               const body = document.body;
               if (!el || !body) return false;
               const vertical = {{(vertical ? "true" : "false")}};
+              // The full glyph walk just ran in the preceding Snap for this
+              // chapter; reuse its cached phase and let the deferred Snap
+              // re-probe after the reveal if anything settled differently.
+              window.__kkindleVerticalStepSkipScan = 1;
               const step = vertical ? {{VerticalStepExpression}} : {{PageStepExpression}};
+              window.__kkindleVerticalStepSkipScan = 0;
               if (step <= 0) return false;
               const requestedRaw = {{Format(safeLeft)}};
               const requested = vertical ? Math.abs(requestedRaw) : requestedRaw;

@@ -3,6 +3,8 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
+using System.Diagnostics;
+using System.Text.Json;
 
 namespace Kkindle;
 
@@ -285,6 +287,7 @@ public partial class MainWindow
         Uri target,
         CancellationToken cancellationToken)
     {
+        var timing = Stopwatch.StartNew();
         var gate = ReferenceEquals(host, _readerPreloadHost)
             ? _readerPreloadHostNavigationGate
             : _readerActiveHostNavigationGate;
@@ -304,6 +307,7 @@ public partial class MainWindow
             {
                 return false;
             }
+            LogReaderChapterTiming("nav.ready", timing);
 
             // A TOC click can request a fragment in the chapter currently
             // prepared by the hidden host. Same-document WebView navigation
@@ -341,7 +345,9 @@ public partial class MainWindow
                     // document hidden until the native and DOM viewports agree.
                     if (ReferenceEquals(host, CurrentReaderHost))
                         _ = await WaitForReaderViewportToMatchHostAsync(host, cancellationToken);
+                    LogReaderChapterTiming("nav.viewportSettled", timing);
                     await ConfigureReaderHostAsync(host, cancellationToken);
+                    LogReaderChapterTiming("nav.configured", timing);
                 }
                 return loaded;
             }
@@ -408,8 +414,38 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>
+    /// DEBUG chapter-switch profiler: appends one line per stage to
+    /// reader-timing.log so a slow vertical chapter turn can be attributed to
+    /// navigation, font waiting, vertical cell preparation or the reveal.
+    /// </summary>
+    private void LogReaderChapterTiming(string stage, Stopwatch clock)
+    {
+        try
+        {
+            var entry = JsonSerializer.Serialize(new
+            {
+                timestamp = DateTimeOffset.Now,
+                stage,
+                elapsedMs = clock.ElapsedMilliseconds,
+                chapter = _readerChapterIndex,
+                vertical = _readerLayout.VerticalWriting,
+                flowMode = _readerLayout.FlowMode
+            });
+            Directory.CreateDirectory(_paths.Logs);
+            File.AppendAllText(
+                Path.Combine(_paths.Logs, "reader-timing.log"),
+                entry + Environment.NewLine);
+        }
+        catch
+        {
+            // Timing is diagnostic only and must never break a chapter turn.
+        }
+    }
+
     private async Task MoveReaderChapterAsync(int offset, bool startAtChapterTitle = false)
     {
+        var chapterTiming = Stopwatch.StartNew();
         await ResetReaderInPageSearchForNavigationAsync();
         _readerPendingBookmarkQuote = null;
         _readerPendingBookmarkPosition = null;
@@ -469,7 +505,9 @@ public partial class MainWindow
         try
         {
             ReaderStatusText.Text = string.Empty;
+            var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(token);
             var loaded = await NavigateReaderHostAndWaitAsync(host, target, token);
+            LogReaderChapterTiming("move.navigated", chapterTiming);
             if (!loaded) throw new InvalidOperationException("章节加载失败。");
 
             await ApplySavedAnnotationsAsync(host, token);
@@ -477,6 +515,7 @@ public partial class MainWindow
                 host,
                 moveToEnd: offset < 0 && !startAtChapterTitle,
                 token);
+            LogReaderChapterTiming("move.boundary", chapterTiming);
             var outgoingHost = CurrentReaderHost;
             await RunReaderContentTransitionAsync(
                 outgoingHost,
@@ -497,7 +536,9 @@ public partial class MainWindow
                         moveLinuxFallbackToEnd);
                     return true;
                 },
-                token);
+                token,
+                animate: !holdOverlay);
+            LogReaderChapterTiming("move.transition", chapterTiming);
             FocusCurrentReaderHost();
             PrimeReaderContinuousEdgeTracking();
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
@@ -517,6 +558,7 @@ public partial class MainWindow
         }
         finally
         {
+            await HideReaderChapterHoldOverlayAsync();
             if (ReferenceEquals(_readerNavigationCancellation, navigationCancellation))
                 _readerNavigationCancellation = null;
             navigationCancellation.Dispose();

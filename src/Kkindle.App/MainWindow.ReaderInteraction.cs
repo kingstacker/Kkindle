@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -1515,6 +1516,7 @@ public partial class MainWindow
         IReaderHost host,
         CancellationToken cancellationToken)
     {
+        var revealTiming = System.Diagnostics.Stopwatch.StartNew();
         // The injected bridge hides the document on every navigation so the
         // fallback-font/vertical-cell transition is never visible. That makes
         // configuration the only thing that can put a chapter back on screen:
@@ -1532,6 +1534,7 @@ public partial class MainWindow
                 try
                 {
                     await host.InvokeScriptAsync(RevealReaderDocumentScript);
+                    LogReaderChapterTiming("cfg.revealed", revealTiming);
                 }
                 catch
                 {
@@ -1546,6 +1549,7 @@ public partial class MainWindow
         IReaderHost host,
         CancellationToken cancellationToken)
     {
+        var configTiming = System.Diagnostics.Stopwatch.StartNew();
         cancellationToken.ThrowIfCancellationRequested();
         ReaderProgressRow? restoredProgress = null;
         if (ReferenceEquals(host, CurrentReaderHost)
@@ -1732,7 +1736,9 @@ public partial class MainWindow
             })();
         """;
         await host.InvokeScriptAsync(script);
+        LogReaderChapterTiming("cfg.styleInjected", configTiming);
         await WaitForReaderFontsAsync(host, cancellationToken);
+        LogReaderChapterTiming("cfg.fontsReady", configTiming);
         if (_readerLayout.VerticalWriting)
         {
             await host.InvokeScriptAsync(PreparePublicationVerticalTextScript);
@@ -1741,6 +1747,7 @@ public partial class MainWindow
                 await host.InvokeScriptAsync(ReaderPaginationScripts.ContinuousVerticalBoundaryScript);
             if (showVerticalDebugBoxes)
                 await host.InvokeScriptAsync(PrepareVerticalDebugLayoutScript);
+            LogReaderChapterTiming("cfg.verticalPrep", configTiming);
         }
         if (!showVerticalDebugBoxes)
             await host.InvokeScriptAsync(RemoveVerticalDebugLayoutScript);
@@ -1760,6 +1767,7 @@ public partial class MainWindow
         if (pagination)
         {
             await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
+            LogReaderChapterTiming("cfg.snapped", configTiming);
         }
         await WriteReaderLayoutDiagnosticsAsync("configure", host);
         await UpdateLinuxReaderTextFallbackAsync(cancellationToken, host);
@@ -6139,6 +6147,7 @@ public partial class MainWindow
                     _readerLinuxTextFallbackPageIndex = linuxFallbackMovesToTargetEnd ? -1 : 0;
                 }
             }
+            var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(navigationToken);
             var loaded = await NavigateReaderHostAndWaitAsync(host, target, navigationToken);
             if (!loaded) throw new InvalidOperationException("章节加载失败。");
 
@@ -6180,7 +6189,7 @@ public partial class MainWindow
                     return true;
                 },
                 navigationToken,
-                animate: intent != ReaderNavigationIntent.None);
+                animate: !holdOverlay && intent != ReaderNavigationIntent.None);
             FocusCurrentReaderHost();
             PrimeReaderContinuousEdgeTracking();
             SetReaderTocSelection(item);
@@ -6213,9 +6222,77 @@ public partial class MainWindow
         }
         finally
         {
+            await HideReaderChapterHoldOverlayAsync();
             if (ReferenceEquals(_readerNavigationCancellation, navigationCancellation))
                 _readerNavigationCancellation = null;
             navigationCancellation.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Freezes the outgoing page above the webview for the duration of a
+    /// chapter switch. Same-host chapter navigation clears the document as
+    /// soon as it starts, which shows a blank surface until the new chapter
+    /// is revealed; the hold overlay keeps the last visible frame on screen
+    /// so the reader only ever changes content once, at the fade-in. Returns
+    /// false when no snapshot is available and the caller should keep its
+    /// regular transition.
+    /// </summary>
+    private async Task<bool> TryShowReaderChapterHoldOverlayAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_readerIsPdf) return false;
+        if (CurrentReaderHost is not IReaderPageSnapshotProvider provider) return false;
+        try
+        {
+            var png = await provider.CaptureVisiblePageAsync(cancellationToken);
+            if (png is not { Length: > 0 })
+            {
+                LogReaderChapterTiming("hold.captureEmpty", Stopwatch.StartNew());
+                return false;
+            }
+            ReaderChapterHoldImage.Source = new Bitmap(new MemoryStream(png));
+            ReaderChapterHoldLayer.Opacity = 1;
+            ReaderChapterHoldLayer.IsVisible = true;
+            LogReaderChapterTiming("hold.shown", Stopwatch.StartNew());
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task HideReaderChapterHoldOverlayAsync()
+    {
+        try
+        {
+            if (!ReaderChapterHoldLayer.IsVisible)
+            {
+                LogReaderChapterTiming("hide.notVisible", Stopwatch.StartNew());
+                return;
+            }
+            ReaderChapterHoldLayer.Opacity = 0;
+            await Task.Delay(220).ConfigureAwait(true);
+            ReaderChapterHoldLayer.IsVisible = false;
+            ReaderChapterHoldImage.Source = null;
+            LogReaderChapterTiming("hold.hidden", Stopwatch.StartNew());
+        }
+        catch
+        {
+            // A stuck overlay would block the reader, so tolerate any
+            // failure here and force the layer down.
+            try
+            {
+                ReaderChapterHoldLayer.IsVisible = false;
+            }
+            catch
+            {
+            }
         }
     }
 

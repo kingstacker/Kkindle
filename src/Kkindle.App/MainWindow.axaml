@@ -3778,6 +3778,23 @@
                         <ContentControl x:Name="ReaderPreloadHostSlot"
                                         HorizontalContentAlignment="Stretch"
                                         VerticalContentAlignment="Stretch" />
+                        <!-- Chapter-switch hold layer: freezes the outgoing page
+                             bitmap above the webview while the next chapter is
+                             loading and configuring, so the reader never shows
+                             the blank navigation gap. -->
+                        <Border x:Name="ReaderChapterHoldLayer"
+                                Background="{StaticResource PaperBrush}"
+                                IsVisible="False"
+                                IsHitTestVisible="False"
+                                ZIndex="30">
+                            <Border.Transitions>
+                                <Transitions>
+                                    <DoubleTransition Property="Opacity"
+                                                      Duration="0:0:0.18" />
+                                </Transitions>
+                            </Border.Transitions>
+                            <Image x:Name="ReaderChapterHoldImage" Stretch="Fill" />
+                        </Border>
                     </Grid>
 
                     <Border x:Name="ReaderLinuxTextFallbackOverlay"
