@@ -151,26 +151,6 @@ public sealed class ReaderNavigationLocationTests
             new Uri(target),
             hasPendingRestorePosition: false));
     }
-
-    [Fact]
-    public void FootnoteNavigationKeepsItsExplicitFragment()
-    {
-        var target = new Uri("file:///c:/cache/EPUB/chapter.xhtml#note-1");
-        Assert.False(ReaderNavigationLocationPolicy.ShouldNormalizeChapterStart(
-            ReaderNavigationIntent.Footnote,
-            target,
-            hasPendingRestorePosition: false));
-
-        var script = ReaderNavigationScripts.CreateFragmentScroll(
-            "note-1",
-            flowMode: 0,
-            vertical: false,
-            revealFootnote: true);
-        Assert.Contains("const revealFootnote = true", script, StringComparison.Ordinal);
-        Assert.Contains("revealTarget.style?.setProperty('display', 'block', 'important')", script, StringComparison.Ordinal);
-        Assert.Contains("revealTarget.style?.setProperty('visibility', 'visible', 'important')", script, StringComparison.Ordinal);
-    }
-
     [Fact]
     public void ChapterStartNormalizationSkipsBreakpointRestore()
     {

@@ -458,50 +458,15 @@ public sealed class EpubReaderTests
             Assert.DoesNotContain("onload=", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("https://example.com", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("javascript:", html, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Content-Security-Policy", html, StringComparison.Ordinal);
-            Assert.Contains("script-src 'nonce-", html, StringComparison.Ordinal);
-            Assert.Contains("src=\".kkindle-reader-bridge.js\"", html, StringComparison.Ordinal);
+            // The self-drawn engine renders the sanitized XHTML directly:
+            Assert.DoesNotContain("Content-Security-Policy", html, StringComparison.Ordinal);
             Assert.Contains("srcset=\"../images/ok.webp 1x\"", html, StringComparison.Ordinal);
             Assert.Contains("src=\"../images/lazy.jpg\"", html, StringComparison.Ordinal);
             Assert.DoesNotContain("<![CDATA[", html, StringComparison.Ordinal);
-            var bridge = await File.ReadAllTextAsync(Path.Combine(
+            Assert.False(File.Exists(Path.Combine(
                 Path.GetDirectoryName(document.Chapters[0])!,
-                ".kkindle-reader-bridge.js"));
-            Assert.Contains("invokeCSharpAction", bridge, StringComparison.Ordinal);
-            Assert.Contains("chrome.webview", bridge, StringComparison.Ordinal);
-            Assert.Contains("postAvWebViewMessage", bridge, StringComparison.Ordinal);
-            Assert.Contains("type: \"scroll\"", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("turnPaginatedPage", bridge, StringComparison.Ordinal);
-            Assert.Contains("send({ type: \"page\", direction });", bridge, StringComparison.Ordinal);
-            Assert.Contains("send({ type: \"key\", key });", bridge, StringComparison.Ordinal);
-            Assert.Contains("paginatedWheelRemainder", bridge, StringComparison.Ordinal);
-            Assert.Contains("visibility: visible !important; opacity: 1 !important;", bridge, StringComparison.Ordinal);
-            Assert.Contains("contextmenu", bridge, StringComparison.Ordinal);
-            Assert.Contains("reportSelection(event)", bridge, StringComparison.Ordinal);
-            Assert.Contains("contextMenu: !!contextEvent", bridge, StringComparison.Ordinal);
-            Assert.Contains("getSelectionAnchorRect", bridge, StringComparison.Ordinal);
-            Assert.Contains("const anchorX = hasAnchor ? rect.left", bridge, StringComparison.Ordinal);
-            Assert.Contains("const left = Math.min(Math.max(8, x)", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("const anchorX = contextEvent ? contextEvent.clientX", bridge, StringComparison.Ordinal);
-            Assert.Contains("align-self: center", bridge, StringComparison.Ordinal);
-            Assert.Contains("bookmarkToggle", bridge, StringComparison.Ordinal);
-            Assert.Contains("data-kkindle-footnote-href", bridge, StringComparison.Ordinal);
-            Assert.Contains("footnoteHoverElement", bridge, StringComparison.Ordinal);
-            Assert.Contains("if (footnoteHoverElement === element) return", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("element.removeAttribute('href')", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("if (footnote) return", bridge, StringComparison.Ordinal);
-            Assert.Contains("send({ type: \"link\", href: absoluteHref", bridge, StringComparison.Ordinal);
-            Assert.Contains("type: \"footnoteHover\"", bridge, StringComparison.Ordinal);
-            Assert.Contains("nativeContinuousScroll", bridge, StringComparison.Ordinal);
-            Assert.Contains("if (nativeContinuousScroll) return", bridge, StringComparison.Ordinal);
-            Assert.Contains("type: 'continuousEdge'", bridge, StringComparison.Ordinal);
-            Assert.Contains("continuousWheelGestureGap", bridge, StringComparison.Ordinal);
-            Assert.Contains("if (startsNewGesture)", bridge, StringComparison.Ordinal);
-            Assert.Contains("window.scrollBy({ left: -delta, top: 0", bridge, StringComparison.Ordinal);
-            Assert.Contains("getContinuousScrollMetrics", bridge, StringComparison.Ordinal);
-            Assert.Contains("body?.scrollHeight", bridge, StringComparison.Ordinal);
-            Assert.Contains("position + viewport >= extent - 4", bridge, StringComparison.Ordinal);
-            Assert.Contains("../images/ok.jpg", html, StringComparison.Ordinal);
+                Path.GetDirectoryName(document.Chapters[0])!,
+                ".kkindle-reader-bridge.js")));
             Assert.Contains("class=\"kkindle-footnote-marker\">注</sup>", html, StringComparison.Ordinal);
             Assert.DoesNotContain("这是完整脚注解释", html, StringComparison.Ordinal);
             Assert.DoesNotContain("width=\"24\"", html, StringComparison.Ordinal);
@@ -728,47 +693,7 @@ public sealed class EpubReaderTests
             Assert.Contains("original chapter", html, StringComparison.Ordinal);
             Assert.DoesNotContain("kkindle-vertical-latin", html, StringComparison.Ordinal);
             Assert.DoesNotContain("stale transformed chapter", html, StringComparison.Ordinal);
-            var bridge = await File.ReadAllTextAsync(Path.Combine(
-                Path.GetDirectoryName(rebuilt.Chapters[0])!,
-                ".kkindle-reader-bridge.js"));
-            Assert.Contains("data-action=\"highlight-menu\"", bridge, StringComparison.Ordinal);
-            Assert.Contains("荧光标记（黑白反色）  ▰", bridge, StringComparison.Ordinal);
-            Assert.Contains(".kk-sel-styles.above", bridge, StringComparison.Ordinal);
-            Assert.Contains("display: inline-flex; align-items: center; justify-content: center", bridge, StringComparison.Ordinal);
-            Assert.Contains("writing-mode: horizontal-tb !important", bridge, StringComparison.Ordinal);
-            Assert.Contains("text-orientation: mixed !important", bridge, StringComparison.Ordinal);
-            Assert.Contains("selectionBar.style.display = 'flex'", bridge, StringComparison.Ordinal);
-            Assert.Contains("dismissedSelectionText", bridge, StringComparison.Ordinal);
-            Assert.Contains("highlightButton.addEventListener('mouseenter', openStyles)", bridge, StringComparison.Ordinal);
-            Assert.Contains("highlightButton.addEventListener('mouseleave', scheduleCloseStyles)", bridge, StringComparison.Ordinal);
-            Assert.Contains("highlightPanel.addEventListener('mouseenter', clearCloseStylesTimer)", bridge, StringComparison.Ordinal);
-            Assert.Contains("if (!pointerIsInHighlightMenu()) closeStyles()", bridge, StringComparison.Ordinal);
-            Assert.Contains("}, 160)", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain(".kk-sel-highlight-wrap:not(:hover) .kk-sel-styles", bridge, StringComparison.Ordinal);
-            Assert.Contains("document.addEventListener('mousemove'", bridge, StringComparison.Ordinal);
-            Assert.Contains("pointerIsInHighlightMenu()", bridge, StringComparison.Ordinal);
-            Assert.Contains("document.documentElement.addEventListener('mouseleave', closeStyles)", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("document.addEventListener('mouseleave', closeStyles, true)", bridge, StringComparison.Ordinal);
-            Assert.Contains("position: absolute; top: 100%; left: 0", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("styleHoverTimer", bridge, StringComparison.Ordinal);
-            Assert.Contains("isSelectionBarTarget", bridge, StringComparison.Ordinal);
-            Assert.Contains("if (!hadSelection && !canTurnPage)", bridge, StringComparison.Ordinal);
-            Assert.Contains("selectionBar?.style.display === 'flex'", bridge, StringComparison.Ordinal);
-            Assert.Contains("pagePointerDown", bridge, StringComparison.Ordinal);
-            Assert.Contains("document.addEventListener(\"pointerup\"", bridge, StringComparison.Ordinal);
-            Assert.Contains("requestAnimationFrame?.(() =>", bridge, StringComparison.Ordinal);
-            Assert.Contains("send({ type: \"pageClick\", side: onLeft ? \"left\" : \"right\" });", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("const direction = onLeft", bridge, StringComparison.Ordinal);
-            Assert.DoesNotContain("turnPaginatedPage", bridge, StringComparison.Ordinal);
-            var pointerSideIndex = bridge.IndexOf(
-                "const onLeft = x < width / 3",
-                StringComparison.Ordinal);
-            var pointerSendIndex = bridge.IndexOf(
-                "send({ type: \"pageClick\", side: onLeft ? \"left\" : \"right\" });",
-                pointerSideIndex,
-                StringComparison.Ordinal);
-            Assert.InRange(pointerSendIndex - pointerSideIndex, 1, 360);
-            Assert.EndsWith("\n68", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n69", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

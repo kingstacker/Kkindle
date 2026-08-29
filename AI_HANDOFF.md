@@ -2,7 +2,7 @@
 
 > 供后续 AI 和开发者快速接手。本文只记录当前有效状态，不保留已完成的迁移流水账。
 >
-> 更新时间：2026-08-28
+> 更新时间：2026-08-29
 >
 > 本次验证目录：/home/stacker/work_pro/Kkindle
 
@@ -11,9 +11,10 @@
 - Kkindle 是 C# / .NET 10 / Avalonia 12.1.1 跨平台桌面应用，Windows、Linux、macOS 各有一个瘦启动项目。
 - Avalonia 是唯一 UI 实现；src/Kkindle.App.WinUI 已完整删除。4 个阅读器脚本和应用图标已迁入 src/Kkindle.App，解决方案、测试及三端打包引用均已更新。
 - 当前开发版本为 0.6.0-dev.6，统一定义在 Directory.Build.props。关于页通过程序集 AssemblyInformationalVersion 显示版本，不再维护 UI 硬编码版本号。
-- 当前工作分支为 `master`，已合并 `origin/codex/fix-calibre-output-profile`，远程为 git@github.com:kingstacker/Kkindle.git。
+- 当前工作分支为 `native-engine`（自绘排版引擎已落地，见第 9 节），主线为 `master`，远程为 git@github.com:kingstacker/Kkindle.git。Route A 的未提交改动在 `git stash@{0}`。
+- 2026-08-29 落地：Kreader 的 EPUB 排版完全切换到自绘引擎（`src/Kkindle.Layout` + `NativeReaderHost`），WebView 排版脚本与桥注入已删除；PDF 仍走平台 WebView。详见第 9 节。
 - 当前 `global.json` 固定 .NET SDK 10.0.400；Avalonia 主包和桌面包为 12.1.1，Avalonia.Controls.WebView 为 12.1.0。
-- 2026-08-28 验证结果：.NET 10 全解决方案构建 0 警告、0 错误；可移植测试 324 项全部通过。Linux 真机 Kreader 验证 harness（`KKINDLE_KREADER_VALIDATE=1`）三连通过：分页竖排首页占满正文区、原生 WebKit 页面快照、API/点击区/滚轮/滑动/墨水动画翻页、批注、搜索全部断言通过；动画探针（`KKINDLE_ANIMATION_PROBE=1`）确认 slide/wave 覆盖层在 Linux 真实渲染。外部 EPUB 路径（`KKINDLE_KREADER_VALIDATE_EPUB`）现已在 Linux 执行完整分页竖排扫描（逐页无裁切、页步精确、书架往返恢复），合成中文长编 8 章实测通过，含 `KKINDLE_KREADER_VALIDATE_MAXIMIZE=1` 与 `KKINDLE_KREADER_VALIDATE_ASSISTANT=1` 的视口重校准路径；内联版本断言按 `publication-native-1` 与 `publication-native-compat-1` 分支接受。
+- 2026-08-29 验证结果：Linux Debug 构建 0 警告、0 错误；可移植测试 286 项全部通过（含 9 项 `KkindleLayoutEngineTests` 自绘引擎测试；54 项 WebKit 脚本测试随排版路径移除而删除）。Kreader 验证 harness 的 WebKit 断言已删除并留桩（运行输出 SKIPPED），待按 PageModel 重写（见 9.4）。
 - Linux Debug 入口为 `src/Kkindle.Desktop.Linux/bin/Debug/net10.0/Kkindle`。调试产物不提交 Git；运行时必须保留同目录的 DLL、PDB、WebView 和资源文件，不能只复制入口文件。
 - Linux 真实桌面启动和 Calibre 转换已验收；Windows/macOS 真实桌面、真实 Kindle 设备和 macOS 签名/公证仍未完整验收。
 
@@ -21,6 +22,7 @@
 
     Kkindle/
     ├─ src/Kkindle.App/                Avalonia UI、阅读器及共享脚本
+    ├─ src/Kkindle.Layout/             自绘排版引擎（HarfBuzz shaping + Skia 绘制，零 UI 依赖）
     ├─ src/Kkindle.Core/               模型、接口和领域策略
     ├─ src/Kkindle.Infrastructure/     SQLite、字典、转换、缓存、网络服务
     ├─ src/Kkindle.Platform.Common/    挂载磁盘型 Kindle、跨平台公共实现
@@ -47,8 +49,8 @@
 - 本地书库支持 EPUB、PDF、MOBI、AZW3 导入，SHA-256 去重，同书多格式合并，元数据/封面编辑、搜索筛选、收藏和分类。
 - Linux 文件管理器拖放支持 `text/uri-list` 与 GNOME 文件拖放格式；拖入文件夹会递归收集 EPUB、PDF、MOBI、AZW3，并去重后导入。
 - Kreader 支持 EPUB、PDF 和 AZW3 临时转 EPUB；包括分页、双栏、滚动、书签、搜索、划线批注、脚注、AI、阅读统计、禅模式及进度恢复。
-- Linux 竖排与其他平台一样使用分页单页布局：内容根级注入 `writing-mode: vertical-rl`、`text-orientation: mixed` 和 `direction: ltr`，保留 EPUB 原始文本节点及出版物自带的 `text-combine`，不拆英文、脚注或 ASCII 标点。正文的字符与词间距使用字体/WebKit 的原生 advance，不人为拉伸 CJK 标点或侧排英文。由于 WebKitGTK 配合部分中文字体会让数字和相邻汉字共用绘制起点，未被出版物标记的纯数字按固定规则兼容：1 位正立占一格、2 位直排横书占一格、3 位及以上逐位正立竖排，每格提供完整 `1em` 排版占位且不使用定位或变换；括号统一使用 Unicode 竖排字形。**WebKitGTK 行盒塌缩修复（真实书籍必现）**：① 出版方 `<div>` 包裹层不再用 `display:contents` 扁平化（改为保留真实盒子并重置 block-size）——扁平化包裹层里的正交内容会让 WebKitGTK 把行盒逐列下移一字，章节约一半字形被裁出视口、`scrollWidth` 停在一页宽；② 兼容字格必须与父级同为 `vertical-rl`（历史上强制 `horizontal-tb` 的正交原子盒会把行盒压到 `1em`，列距塌缩一半），字格通过注入的 `--kkindle-vertical-line-pitch` 变量加对称 `margin-block` 把行盒撑回完整行距，数字 run 容器随之改为 `flex-direction: row`。分页几何由 `VerticalStepExpression` 按视口实时校准：整字列页步长 + 字形探针把两侧遮罩对齐到真实列间隙，页面占满正文区且不裁半个汉字；左侧遮罩是真实 DOM 节点（WebKitGTK 对 html 伪元素的绘制顺序不可靠），列尾禁则悬挂标点（`。〉` 等）允许伸入上下页边距且保持可见。翻页沿负 X 轴整页步进：鼠标左/右三分之一点击区按竖排镜像（左=下一页）、滚轮 120 delta 累积翻页、`TurnReaderPageAsync` 的共享 pending 槽会把动画期间的后续输入排队而非丢弃。翻页动画三档全可用：淡入淡出走 JS opacity；左右滑动与电子墨水刷新通过 `LinuxWebKitSnapshotLibrary` P/Invoke `webkit_web_view_get_snapshot`（WPE/WebKitGTK 二选一，符号缺失时自动回退 fade）取旧页位图后走与 Windows 相同的覆盖层管线。目录、搜索、批注和进度恢复使用同一负 X 坐标系；提取缓存格式为 68。**切章性能**：字形探针跳过距两边缘超过候选位移上限的内部节点（这些字形对 Crossing 扫描零贡献，测与不测结果一致）；Snap 在滚动前只取页步长（跳过扫描），滚动后的 rAF 探针做唯一一次全量校准；保存位置恢复复用同一相位缓存不再重扫。切章时 `ReaderChapterHoldLayer` 用原生 WebKit 快照冻结旧页画面盖住导航空窗，新章显现后 220ms 淡出——用户全程看旧页，无白屏；DEBUG 版 `reader-timing.log` 记录切章各阶段耗时（nav/cfg.prep.cells/cfg.snapped/revealed/hold.*）。验证 harness 带列距回归守卫（相邻字列间距 ≥ 0.7×行距，直接盯住行盒塌缩回归）。调试版设置 `KKINDLE_VERTICAL_DEBUG_BOXES=1` 时会显示外层字格、内层字形和原生字符 Range 外框。
-- Linux 文本回退阅读器支持跨页选择同步、批注范围渲染、划线样式、选择工具栏轻触关闭和分页/滚动交互；WebView 自带选择工具栏不再与 Avalonia 工具栏重复显示。
+- Linux 竖排由自绘引擎按固定网格排版：字格 1em、列距 = 行距、首列缩进 2 根、数字 1 位正立 / 2 位合字 / 3 位及以上与拉丁为原子侧排 run、收标点悬挂进页边距；横排为两端对齐 + 2em 首行缩进。EPUB 全部经 `NativeReaderHost`（HarfBuzz + Skia 自绘）渲染，WebKitGTK 排版兼容层与桥注入已删除，实现细节与后续工作见第 9 节。
+- Linux 文本回退阅读器（`ReaderLinuxTextFallback*`，`UseLinuxPlainTextRecoveryFallback=false`）已被自绘引擎取代：源码与测试保留仅供诊断，计划整体清理（见 9.4）。
 - 极简目录使用细线矩形三横图标，收起/展开按钮与字体按钮视觉对齐。
 - 极简目录章节浮窗异步读取 EPUB 章节正文前 4 个非空行；按章节路径缓存，切换书籍时清空。PDF 只显示页码。
 - 阅读统计图表的竖线已改为细线。
@@ -96,10 +98,9 @@
 
 - EPUB 落盘时必须移除 script、iframe、on*、javascript:、外部资源，并注入 nonce CSP。不要扩大导航白名单或重新启用书籍自带脚本。
 - Windows WebView2 指针由 Avalonia 管理。禁止对 Avalonia 提供的指针调用 Marshal.ReleaseComObject，也不要反射 Avalonia 内部 COM 类型，否则打开书籍可能原生闪退。
-- 分页时 html 是唯一滚动容器，body 必须 overflow:visible。单页 column-count:1，双栏 column-count:2，翻页步长统一使用 scrollingElement.clientWidth。
-- fragment 分页断点只用 break-before: column !important，不要加入 page-break-before。
 - 阅读器导航必须经过现有意图、序列号、取消令牌和单消费者 gate；不要从 WebView 回调直接并发调用切章。
-- 阅读器脚本位于 src/Kkindle.App/ReaderNavigationScripts.cs、ReaderPaginationScripts.cs、ReaderAppearanceScripts.cs、ReaderWaveScripts.cs。
+- EPUB 排版由 src/Kkindle.Layout（HarfBuzz+Skia，零 UI 依赖）与 src/Kkindle.App/NativeReaderHost.cs 承担；宿主输入输出走与旧桥相同的 JSON 协议（scroll/selection/pageClick/wheel/key/link/footnoteHover），改协议必须同步 HandleReaderBridgeMessage 与 NativeReaderHost.Emit。
+- SkiaSharp/HarfBuzzSharp 的 Linux native 库必须显式引用（metapackage 不含）：见 Kkindle.Layout.csproj。升级引擎库 = 独立 PR + 重跑 KkindleLayoutEngineTests 确定性快照。
 
 ### 4.2 Kindle 数据
 
@@ -128,7 +129,7 @@
     dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj --no-restore
     dotnet build src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj --no-restore
 
-结果：324 项测试通过；Linux Debug 构建 0 警告、0 错误。2026-08-22 还通过 Debug UI 使用系统 `ebook-convert` 实际完成两本 EPUB→AZW3 转换，并额外验证了配置指向 `calibre` 主程序时的自动纠正。
+结果：286 项测试通过（含 9 项自绘引擎测试）；Linux Debug 构建 0 警告、0 错误。2026-08-22 还通过 Debug UI 使用系统 `ebook-convert` 实际完成两本 EPUB→AZW3 转换，并额外验证了配置指向 `calibre` 主程序时的自动纠正。
 
 Windows 验证从临时目录执行绝对项目路径，以确保使用仓库锁定的 SDK：
 
@@ -163,7 +164,7 @@ robocopy 返回码 0 至 7 都表示成功。同步时必须保留目标目录�
 - Linux/macOS 的窗口、字体、WebKit 阅读器、PDF、挂载 Kindle、密钥环和安全弹出尚未真机验收。
 - MTP-only Kindle 只在 Windows 支持；Linux/macOS 只支持文件系统挂载设备。
 - PDF 使用平台 WebView 内置查看器，选择、缩放、点击区域翻页等能力受引擎限制。
-- Linux 竖排已改为与其他平台一致的分页单页布局；连续竖排的边界护栏脚本保留但默认配置不再触达。
+- 自绘引擎当前恒为分页：连续滚动（FlowMode=0）与双栏暂以分页呈现（见 9.4）；PDF 仍使用平台 WebView 内置查看器。
 - Kindle/KFX 字典和书籍不处理 DRM。
 - 当前 Windows 环境没有可用 WSL 发行版，因此只能编译 macOS 项目，不能在本机执行 bash -n scripts/build-macos-release.sh 或验证 .app 签名。
 - Windows/Linux/macOS Rebuild 可能报告 MainWindow.ReaderInteraction.cs 中两个 Linux 文本回退字段未使用的 CS0169 警告；当前不影响构建。
@@ -175,3 +176,37 @@ robocopy 返回码 0 至 7 都表示成功。同步时必须保留目标目录�
 - 单文件导入、转换或封面解析失败不能升级为整批失败。
 - 修改行为时同步更新测试和本文档；提交前运行 git diff --check。
 - 不提交 artifacts/、bin/、obj/、本地数据、缓存、日志、密钥或账号信息。
+
+## 9. 自绘排版引擎（Kreader Native Engine，2026-08-29 已落地）
+
+### 9.1 当前状态：已切换，WebView 排版已移除
+
+- **EPUB 排版已完全由自绘引擎承担**：加载、shaping、断行、禁则、分页、绘制全部在 `src/Kkindle.Layout`（纯 C#，HarfBuzzSharp 8.3.1.3 + SkiaSharp 3.119.4，三端同一套 native 库）；`src/Kkindle.App/NativeReaderHost.cs` 是 Avalonia 宿主，实现 `IReaderHost` + `IReaderPageSnapshotProvider`，把输入翻译成与原 WebKit 桥一致的 JSON 协议（`scroll`/`selection`/`pageClick`/`wheel`/`key`/`link`/`footnoteHover`），MainWindow 的批注工具栏、脚注弹窗、进度、书签、TOC、整本书搜索全部复用。
+- **WebView 排版机制已删除**：五个脚本库（ReaderPaginationScripts/ReaderNavigationScripts/ReaderVerticalPageScripts/ReaderAppearanceScripts/ReaderWaveScripts）、三个脚本测试文件、`EpubReaderPreparationService` 的桥脚本与 CSP 注入全部移除；提取缓存格式 bump 到 **69**（旧缓存自动重建）。PDF 仍走平台 WebView 内置查看器（`NativeWebViewReaderHost` 仅为 PDF 保留）。
+- 阅读器宿主按打开格式选择：EPUB → `NativeReaderHost`，PDF → `NativeWebViewReaderHost`（`EnsureReaderHostsAsync` 按类型重建，Windows 的预加载宿主同样按格式创建）。
+- 测试：`KkindleLayoutEngineTests` 9 项（横排分页覆盖/无越界、禁则上收法、竖排数字规则、竖排偏移单调、跨次排版 JSON 逐字节一致、命中测试往返、脚注隐藏、出版社 CSS 强调、真实字体渲染冒烟）；全套可移植测试 286 项通过，Linux Debug 构建 0 警告 0 错误。
+- **Route A 已被取代**：`page-compose-wip` 分支与其未提交改动保存在 `git stash@{0}`（route-A-wip-backup before native engine cutover），不再合并。
+
+### 9.2 引擎红线（延续原决策，全部已实现）
+
+- 度量与绘制同一份代码：advance 来自 HarfBuzz shaping（float，units/upem 显式换算），绘制用同一字形 id 画（HarfBuzz 与 Skia 读同一字体文件，索引一致）。
+- 字体：捆绑京华老宋体（`Assets/Fonts/KingHwaOldSong-v3.0.ttf`，竖排优化字体，含 vert 特形）；`TypesetFontLibrary` 管理字体与回退链，系统字体栈不参与排版。
+- 依赖钉死：SkiaSharp 3.119.4 / HarfBuzzSharp 8.3.1.3；**注意两个 metapackage 的 nuspec 不含 Linux native，必须在消费工程显式引用 `SkiaSharp.NativeAssets.Linux` 与 `HarfBuzzSharp.NativeAssets.Linux`**（Kkindle.Layout 已引用，测试与 App 经传递获得）。
+- 竖排是自研固定网格：字格 1em、列距 = 行距、首列缩进 2em、标题加粗居中且前后各空一列、数字规则与旧实现一致（1 位正立、2 位合字、3+/拉丁为原子侧排 run）、收标点悬挂进下页边距、开标点不落列尾；HarfBuzz TTB 只用于取 vert 竖排字形。
+- 横排：行高网格、两端对齐（inter-character 均摊）、`text-indent: 2em`、禁则用"上收法"（收标点放不进时连同上一格下移，开标点不落行尾）；与 WebKit 的差异仅是行尾不悬挂（竖排仍悬挂）。
+
+### 9.3 位置与偏移约定（兼容性关键）
+
+- 批注/搜索/进度的字符偏移沿用 body textContent 约定：`XhtmlChapterLoader` 逐字拼接所有正文文本节点（含隐藏脚注定义与 ruby rt 的 ghost 文本），与 WebKit 的 textContent 一致，旧批注数据直接命中。
+- 进度 `ScrollPosition`：竖排 = 页首字符偏移；横排分页 = 页号 × 视口宽（`NativeReaderHost.GetScrollState` 上报，`scroll` 消息语义与原桥相同，竖排取绝对值）。
+- `EpubReaderPreparationService` 的净化（script/iframe/on*/外链/CSS url）保留，注入类工作全部移除；脚注标记 `<sup class="kkindle-footnote-marker">` 注入保留。
+
+### 9.4 后续工作（按优先级）
+
+- **真机验证**：Linux Debug 入口打开真实 EPUB（横排 + 竖排各一）人工核对渲染；Windows/macOS 构建验收（引擎三端确定性依赖同字体同库，理论上一致，需实测 PageModel JSON 快照）。
+- **翻页动画**：当前 native 面板用 Avalonia 透明度渐变（140ms 出 / 200ms 入）；slide/墨水动画改用 `CaptureVisiblePageAsync`（已实现，PNG 快照）+ Avalonia 覆盖层复刻（`ReaderLinuxFallbackTransitionPlayer` 的三档实现可参考，其 WaveSweepMs 已内联 230）。
+- **验证 harness 重写**：`MainWindow.KreaderValidation.cs` 的 WebKit 竖排断言已删除并留桩（SKIPPED），需按 PageModel/页面快照重写 KKINDLE_KREADER_VALIDATE 系列。
+- **连续滚动与双栏（FlowMode=0 / TwoPageMode）**：native 宿主当前恒为单页分页，两个模式暂以分页呈现；后续以"虚拟页列滚动 / 双页并排"实现，或在设置页于 native 引擎下隐藏这两个选项。
+- 竖排图片降级为独立页（与横排一致的整页插图槽），行内图、ruby 注音渲染（rt 已入偏移流不渲染）、表格美化、内嵌字体解混淆按 9.4 原计划 Phase 4 推进。
+- Linux 文本回退阅读器（`ReaderLinuxTextFallback*`、`UseLinuxPlainTextRecoveryFallback=false`）已被引擎取代，可在下一个清理项中整体删除（其转场播放器 `ReaderLinuxFallbackTransitionPlayer` 可先留作动画参考）。
+- **升级纪律**：升级 SkiaSharp/HarfBuzzSharp 必须 rebase `KkindleLayoutEngineTests` 的确定性快照并单独成 PR。

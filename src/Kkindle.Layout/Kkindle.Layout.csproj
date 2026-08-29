@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The SkiaSharp/HarfBuzzSharp metapackages only declare Win32 and macOS
+         natives; the Linux native libraries must be referenced explicitly or
+         the engine cannot shape or rasterize on Linux. -->
+    <PackageReference Include="HarfBuzzSharp" Version="8.3.1.3" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="8.3.1.3" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
+  </ItemGroup>
+
+</Project>

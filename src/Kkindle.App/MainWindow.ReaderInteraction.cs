@@ -1097,10 +1097,6 @@ public partial class MainWindow
     private string _readerPendingSelectionSuffix = string.Empty;
     private double _readerScrollPosition;
     private double _readerScrollRatio;
-    // Page-compose mode state: the visible page's char span within the
-    // chapter bank (used for progress display and persistence).
-    private int _readerPageChars;
-    private double _readerPageRatio;
     private double _readerScrollWidth;
     private double _readerScrollHeight;
     private double _readerClientWidth;
@@ -1359,18 +1355,6 @@ public partial class MainWindow
     /// page-mode saves persist the page-start character offset in
     /// ScrollPosition; legacy pixel saves fall back to the chapter start.
     /// </summary>
-    private int ResolveVerticalPageStartChar(ReaderProgressRow? restoredProgress)
-    {
-        if (restoredProgress is { } progress
-            && progress.ChapterIndex == _readerChapterIndex
-            && progress.ScrollPosition > 0)
-        {
-            return (int)Math.Clamp(progress.ScrollPosition, 0, int.MaxValue);
-        }
-
-        return 0;
-    }
-
     private static ReaderLayoutSettings NormalizeReaderLayoutForPlatform(ReaderLayoutSettings settings)
     {
         // Vertical writing is a paginated layout on every platform, including
@@ -1581,479 +1565,29 @@ public partial class MainWindow
     {
         var configTiming = System.Diagnostics.Stopwatch.StartNew();
         cancellationToken.ThrowIfCancellationRequested();
-        ReaderProgressRow? restoredProgress = null;
-        if (ReferenceEquals(host, CurrentReaderHost)
-            && _readerRestoredProgress is { } pendingProgress
-            && pendingProgress.ChapterIndex == _readerChapterIndex)
+        if (host is not NativeReaderHost nativeReader)
         {
-            restoredProgress = pendingProgress;
+            // Only PDF still renders inside the platform webview viewer;
+            // there is no reader document to configure there.
+            return;
         }
 
-        // PDF renders inside WebView2's built-in viewer: there is no document
-        // to inject layout into (and InvokeScript would throw), so host
-        // configuration applies to EPUB pages only.
-        if (_readerIsPdf) return;
-        if (!IsReaderPageComposeMode)
+        var restoreNative = ReferenceEquals(host, CurrentReaderHost)
+            && _readerRestoredProgress is { } pendingNative
+            && pendingNative.ChapterIndex == _readerChapterIndex;
+        await nativeReader.Configure(
+            _readerLayout,
+            _readerScrollPosition,
+            _readerCurrentFragment,
+            restoreNative);
+        if (restoreNative)
         {
-            // Leaving page mode (a layout switch on the same document): the
-            // vertical-rl page scaffolding must come down before the flowing
-            // architecture CSS lands, or html/body stay pinned to vertical.
-            await TryInvokeReaderTransitionAsync(
-                host,
-                "window.__pgTeardown?.(); true;");
-        }
-        var pagination = _readerLayout.FlowMode == 1;
-        var showVerticalDebugBoxes = ShouldShowReaderVerticalDebugBoxes();
-        // Page-compose mode brings its own single-page geometry; the flowing
-        // architecture CSS (max-content body, edge masks, page-step vars)
-        // would fight it.
-        var flowCss = IsReaderPageComposeMode
-            ? string.Empty
-            : ReaderPaginationScripts.CreateFlowCss(
-                pagination,
-                _readerLayout.VerticalWriting,
-                _readerLayout.TwoPageMode,
-                _readerLayout.BodyPadding,
-                _readerLayout.MaxWidth);
-        var bundledFontUri = await GetBundledFontUriAsync(host, cancellationToken);
-        var css = ReaderAppearanceScripts.MonochromeScrollbarCss
-            + "\n"
-            + flowCss
-            + BuildReaderAppearanceCss(
-                _readerLayout.FontScale,
-                _readerLayout.LineHeight,
-                BuildReaderFontStack(_readerLayout.FontFamily),
-                _readerLayout.VerticalWriting,
-                pagination,
-                _readerLayout.ParagraphIndent,
-                bundledFontUri,
-                showVerticalDebugBoxes);
-        if (!pagination)
-        {
-            var bodyPadding = Math.Round(_readerLayout.BodyPadding);
-            var maxWidth = Math.Round(_readerLayout.MaxWidth);
-            css += _readerLayout.VerticalWriting
-                ? $"\nbody {{ max-width: none !important; writing-mode: vertical-rl !important; text-orientation: mixed !important; margin: 0 auto !important; padding: {Format(bodyPadding)}px !important; }}"
-                : $"\nbody {{ width: 100% !important; max-width: calc({Format(maxWidth)}px + {Format(bodyPadding * 2)}px) !important; margin: 0 auto !important; padding: {Format(bodyPadding)}px !important; writing-mode: horizontal-tb !important; }}";
+            _readerRestoredProgress = null;
         }
 
-        var serializedCss = JsonSerializer.Serialize(css);
-        var script = $$"""
-            (() => {
-              const css = {{serializedCss}};
-              let style = document.getElementById('kkindle-reader-style');
-              if (!style) {
-                style = document.createElement('style');
-                style.id = 'kkindle-reader-style';
-                document.head.appendChild(style);
-              }
-              style.textContent = css;
-              // FontFaceSet is asynchronous. Reset the per-document marker so
-              // the host waits for this style pass before revealing a newly
-              // navigated chapter.
-              window.__kkindleReaderFontReady = false;
-              window.__kkindleReaderFontWaitStarted = false;
-              window.__kkindleReaderFlowMode = {{_readerLayout.FlowMode}};
-              window.__kkindleReaderVertical = {{(_readerLayout.VerticalWriting ? "true" : "false")}};
-              window.__kkindleReaderTwoPage = {{(_readerLayout.TwoPageMode ? "true" : "false")}};
-              const firstReaderConfiguration = window.__kkindleReaderConfigured !== true;
-              // Image limits must use the body's real content box. Using
-              // 100vh without subtracting page padding makes a tall image plus
-              // its margins too large for the first column, so Chromium moves
-              // the whole image to page two and leaves page one blank.
-              const root = document.documentElement;
-              const body = document.body;
-              if (root && body) {
-                root.removeAttribute('hidden');
-                body.removeAttribute('hidden');
-                body.style.setProperty('display', 'block', 'important');
-                if (firstReaderConfiguration) {
-                  root.style.setProperty('visibility', 'hidden', 'important');
-                  root.style.setProperty('opacity', '0', 'important');
-                  body.style.setProperty('visibility', 'hidden', 'important');
-                  body.style.setProperty('opacity', '0', 'important');
-                }
-                body.style.removeProperty('transition');
-                body.style.removeProperty('will-change');
-                const bodyStyle = getComputedStyle(body);
-                const paddingTop = parseFloat(bodyStyle.paddingTop) || 0;
-                const paddingBottom = parseFloat(bodyStyle.paddingBottom) || 0;
-                const viewportHeight = root.clientHeight || window.innerHeight || body.clientHeight || 0;
-                const contentHeight = viewportHeight - paddingTop - paddingBottom;
-                if (contentHeight > 0)
-                  root.style.setProperty('--kkindle-page-content-h', contentHeight + 'px');
-
-                // EPUB2/Calibre books frequently use a plain first paragraph
-                // for the chapter title. Mark only the first meaningful text
-                // block, and only when its semantics or computed typography
-                // identify it as a heading. Horizontal layout keeps the
-                // publisher styling; vertical layout applies the shared title
-                // grid rule so assistant/TOC resizing cannot clip it.
-                body.querySelectorAll('.kkindle-chapter-heading').forEach(element =>
-                  element.classList.remove('kkindle-chapter-heading'));
-                if (window.__kkindleReaderVertical === true) {
-                  const bodyFontSize = parseFloat(getComputedStyle(body).fontSize) || 16;
-                  const blocks = Array.from(body.children).slice(0, 12);
-                  for (const element of blocks) {
-                    const text = (element.innerText || element.textContent || '')
-                      .replace(/\s+/g, ' ')
-                      .trim();
-                    if (!text) continue;
-                    const tag = element.tagName.toLowerCase();
-                    const semanticHeading = /^h[1-6]$/.test(tag);
-                    const emphasized = !!element.querySelector(
-                      'strong, b, [class~="bold"], [class*="title" i], [class*="heading" i]');
-                    const ownStyle = getComputedStyle(element);
-                    let largestFontSize = parseFloat(ownStyle.fontSize) || bodyFontSize;
-                    element.querySelectorAll('span, strong, b, em').forEach(descendant => {
-                      largestFontSize = Math.max(
-                        largestFontSize,
-                        parseFloat(getComputedStyle(descendant).fontSize) || 0);
-                    });
-                    const typographicHeading = largestFontSize >= bodyFontSize * 1.2;
-                    if (text.length <= 80
-                        && (semanticHeading || emphasized || typographicHeading))
-                      element.classList.add('kkindle-chapter-heading');
-                    break;
-                  }
-                }
-
-                // Some EPUB converters put every source line in a paragraph
-                // behind a <br>. That is a physical line break, not a
-                // paragraph boundary, and it makes a reflowable paragraph
-                // jump to the next line while there is still room on the
-                // current one. Flatten those breaks for prose paragraphs;
-                // preformatted and explicitly marked verse remain intact.
-                body.querySelectorAll('br').forEach(br => {
-                  const paragraph = br.closest('p, li, blockquote, div, section, article, main');
-                  if (!paragraph
-                      || br.closest('pre, code, kbd, samp')
-                      || br.closest('[class*="poem"], [class*="poetry"], [class*="verse"], [id*="poem"], [id*="poetry"], [id*="verse"]')
-                      || /(?:poem|poetry|verse|诗|詩)/i.test(
-                        `${paragraph.className || ''} ${paragraph.id || ''}`))
-                    return;
-                  br.replaceWith(document.createTextNode(' '));
-                });
-
-                // Fixed html pseudo-elements are not consistently painted
-                // above body content by WebKitGTK. Keep the edge masks as
-                // real document nodes so a partial vertical glyph can never
-                // leak into the reader chrome. They are empty and excluded
-                // from text selection, diagnostics and hit testing.
-                const edgeMaskIds = [
-                  'kkindle-vertical-edge-mask-left',
-                  'kkindle-vertical-edge-mask-right'
-                ];
-                const useLinuxVerticalEdgeMasks = {{(OperatingSystem.IsLinux() && pagination ? "true" : "false")}};
-                if (useLinuxVerticalEdgeMasks && window.__kkindleReaderVertical === true) {
-                  for (const id of edgeMaskIds) {
-                    let mask = document.getElementById(id);
-                    if (!mask) {
-                      mask = document.createElement('div');
-                      mask.id = id;
-                      mask.setAttribute('aria-hidden', 'true');
-                      mask.dataset.kkindleReaderChrome = '1';
-                      mask.tabIndex = -1;
-                      body.appendChild(mask);
-                    }
-                  }
-                } else {
-                  for (const id of edgeMaskIds)
-                    document.getElementById(id)?.remove();
-                }
-
-                const continuousGuardIds = [
-                  'kkindle-vertical-flow-guard-left',
-                  'kkindle-vertical-flow-guard-right',
-                  'kkindle-vertical-flow-guard-top',
-                  'kkindle-vertical-flow-guard-bottom'
-                ];
-                if (!(window.__kkindleReaderVertical === true
-                    && window.__kkindleReaderFlowMode !== 1)) {
-                  for (const id of continuousGuardIds)
-                    document.getElementById(id)?.remove();
-                  document.documentElement.removeAttribute('data-kkindle-vertical-safe-boundary');
-                }
-
-              }
-              return true;
-            })();
-        """;
-        await host.InvokeScriptAsync(script);
-        LogReaderChapterTiming("cfg.styleInjected", configTiming);
-        await WaitForReaderFontsAsync(host, cancellationToken);
-        LogReaderChapterTiming("cfg.fontsReady", configTiming);
-        if (IsReaderPageComposeMode)
-        {
-            // Legacy extraction artifacts must be cleared before the content
-            // is banked; the per-configure unwrap is skipped in page mode
-            // (it would tear down composed pages).
-            await host.InvokeScriptAsync(PreparePublicationVerticalTextScript);
-            var pageStartChar = ResolveVerticalPageStartChar(restoredProgress);
-            try
-            {
-                await host.InvokeScriptAsync(
-                    ReaderVerticalPageScripts.BuildVerticalPageInitScript(pageStartChar));
-                await host.InvokeScriptAsync(
-                    "window.__kkindleVertWrapLimit = 0; window.__kkindleVertWrapRoot = '"
-                    + ReaderVerticalPageScripts.PageFlowId + "'; true;");
-                await host.InvokeScriptAsync(PrepareVerticalNumbersAndPunctuationScript);
-                var pageDump = await host.InvokeScriptAsync(
-                    "JSON.stringify((() => { const f = document.getElementById('kkindle-page-flow');"
-                    + " const b = document.getElementById('kkindle-page-bank');"
-                    + " const hEl = document.getElementById('kkindle-page-history');"
-                    + " return { bank: b.children.length, hist: hEl.children.length,"
-                    + " flowChildren: f.children.length, w: f.clientWidth, hgt: f.clientHeight,"
-                    + " sw: f.scrollWidth, text: (f.textContent || '').slice(0, 40),"
-                    + " h: window.__pg.h, pgf: window.__pg.f, bodyH: document.body.clientHeight }; })())");
-                LogReaderChapterTiming(
-                    "cfg.pageDump " + DecodeReaderScriptString(pageDump ?? string.Empty), configTiming);
-                LogReaderChapterTiming("cfg.pageComposed", configTiming);
-            }
-            catch (Exception ex)
-            {
-                LogReaderChapterTiming(
-                    "cfg.pageError: " + ex.Message.Replace('\n', ' '), configTiming);
-                throw;
-            }
-        }
-        else if (_readerLayout.VerticalWriting)
-        {
-            await host.InvokeScriptAsync(PreparePublicationVerticalTextScript);
-            await host.InvokeScriptAsync(PrepareVerticalNumbersAndPunctuationScript);
-            if (!pagination)
-                await host.InvokeScriptAsync(ReaderPaginationScripts.ContinuousVerticalBoundaryScript);
-            if (showVerticalDebugBoxes)
-                await host.InvokeScriptAsync(PrepareVerticalDebugLayoutScript);
-            LogReaderChapterTiming("cfg.verticalPrep", configTiming);
-        }
-        if (!showVerticalDebugBoxes)
-            await host.InvokeScriptAsync(RemoveVerticalDebugLayoutScript);
-        await host.InvokeScriptAsync(FitReaderCoverImageScript);
-        if (showVerticalDebugBoxes)
-        {
-            // The cover-fit pass can move the inline columns. Restore the
-            // live-font optical shift before native Range diagnostics refresh.
-            await host.InvokeScriptAsync(
-                "window.__kkindleVerticalRecenterHan?.(); true;");
-            // FitReaderCoverImageScript can move every vertical column after
-            // the initial Range probe (the viewport itself stays the same),
-            // so force a second measurement after the cover pass.
-            await host.InvokeScriptAsync(
-                "window.__kkindleVerticalDebugRefresh?.(); true;");
-        }
-        if (pagination && !IsReaderPageComposeMode)
-        {
-            await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
-            LogReaderChapterTiming("cfg.snapped", configTiming);
-        }
-        await WriteReaderLayoutDiagnosticsAsync("configure", host);
-        await UpdateLinuxReaderTextFallbackAsync(cancellationToken, host);
-
-        if (ReferenceEquals(host, CurrentReaderHost))
-        {
-            if (IsReaderPageComposeMode)
-            {
-                // The page-mode init composed the saved offset directly;
-                // pixel-based restore scripts do not apply.
-                await ApplySavedAnnotationsAsync(host, cancellationToken);
-                LogReaderChapterTiming("cfg.annotations", configTiming);
-                return;
-            }
-
-            if (restoredProgress is { } progress
-                && progress.ChapterIndex == _readerChapterIndex)
-            {
-                var restored = false;
-                if (progress.ScrollPosition > 0)
-                {
-                    var horizontal = pagination || _readerLayout.VerticalWriting;
-                    var left = horizontal ? progress.ScrollPosition : 0;
-                    var top = horizontal ? 0 : progress.ScrollPosition;
-                    double? chapterRatio = null;
-                    if (_readerDocument is { Chapters.Count: > 0 } document)
-                    {
-                        var ratio = (progress.ProgressPercent * document.Chapters.Count / 100d)
-                            - progress.ChapterIndex;
-                        if (double.IsFinite(ratio) && ratio >= -0.02 && ratio <= 1.02)
-                            chapterRatio = Math.Clamp(ratio, 0, 1);
-                    }
-                    var restoreResult = await host.InvokeScriptAsync(
-                        ReaderPaginationScripts.CreateRestorePositionScript(
-                            left,
-                            top,
-                            pagination,
-                            _readerLayout.VerticalWriting,
-                            chapterRatio));
-                    restored = string.Equals(
-                        restoreResult?.Trim().Trim('"'),
-                        "true",
-                        StringComparison.OrdinalIgnoreCase);
-                }
-                else if (!string.IsNullOrWhiteSpace(progress.Fragment))
-                {
-                    var fragment = EscapeJavaScriptSingleQuoted(
-                        DecodeReaderFragment(progress.Fragment) ?? string.Empty);
-                    var restoreResult = await host.InvokeScriptAsync(ReaderNavigationScripts.CreateFragmentScroll(
-                        fragment,
-                        _readerLayout.FlowMode,
-                        _readerLayout.VerticalWriting,
-                        _readerLayout.TwoPageMode));
-                    restored = string.Equals(
-                        restoreResult?.Trim().Trim('"'),
-                        "true",
-                        StringComparison.OrdinalIgnoreCase);
-                }
-                else
-                    restored = true;
-
-                // Keep the breakpoint pending when the DOM was not ready.
-                // A later configuration pass may retry it; consuming it before
-                // a successful scroll lets the opening save overwrite the
-                // database with the chapter start.
-                if (restored && ReferenceEquals(_readerRestoredProgress, progress))
-                    _readerRestoredProgress = null;
-            }
-            await ApplySavedAnnotationsAsync(host, cancellationToken);
-        }
-        // The reveal itself lives in ConfigureReaderHostAsync's finally block:
-        // it must run after the final font, native vertical preparation, page snap
-        // and saved-position restore have settled (which removes the one-frame
-        // upward jump on the rightmost vertical column) but it must also run
-        // when one of those steps fails.
+        await ApplySavedAnnotationsAsync(host, cancellationToken);
+        LogReaderChapterTiming("cfg.configured", configTiming);
     }
-
-    // Reader appearance overrides, mirroring the WinUI reference's
-    // ApplyReaderAppearanceAsync: white surface, bundled reading font,
-    // selection inversion, justified text, link/heading/paragraph/blockquote
-    // spacing, image constraints for paginated columns, horizontal overflow
-    // guards and the fragment-break anchor rule used by CreateFragmentScroll.
-    private static string BuildReaderAppearanceCss(
-        double fontScale,
-        double lineHeight,
-        string fontStack,
-        bool vertical,
-        bool pagination,
-        bool paragraphIndent,
-        string? bundledFontUri,
-        bool showVerticalDebugBoxes)
-    {
-        var builder = new StringBuilder();
-        builder.Append($"\nhtml {{ font-size: {Format(fontScale * 100)}% !important; text-rendering: optimizeLegibility; --kkindle-vertical-line-pitch: {Format(lineHeight)}em; }}");
-        builder.Append("\nhtml, body { background: #FFFFFF !important; color: #111111 !important; border: 0 !important; outline: 0 !important; box-shadow: none !important; }");
-        if (OperatingSystem.IsLinux())
-            builder.Append("\nhtml, body { visibility: visible !important; opacity: 1 !important; }");
-        builder.Append($"\nbody {{ font-size: 1rem !important; line-height: {Format(lineHeight)} !important; font-family: {fontStack} !important; letter-spacing: 0.012em !important; box-sizing: border-box; }}");
-        // Horizontal and vertical body text share the same logical Chinese
-        // punctuation prohibitions. In vertical-rl, line-start/line-end map to
-        // the top/bottom of the glyph column; text-orientation:mixed and the
-        // font's vertical OpenType forms continue to determine glyph shape.
-        builder.Append('\n').Append(ReaderAppearanceScripts.StandardLineBreakingCss);
-        builder.Append("\nbody :where(p, div, span, section, article, main, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, a, em, strong, b, i, ruby, rt) { visibility: visible !important; opacity: 1 !important; color: #111111 !important; -webkit-text-fill-color: #111111 !important; font-family: inherit !important; white-space: normal !important; }");
-        // Some older WebKit builds do not apply :where() consistently to
-        // EPUB descendants. Keep a plain descendant selector as the final
-        // authority. EPUB stylesheets often use class rules such as
-        // `.calibre27 { color: rgb(0, 0, 255) }`; those publisher colors are
-        // not part of the reader palette and must not leak into body copy.
-        builder.Append("\nbody * { font-family: inherit !important; color: #111111 !important; -webkit-text-fill-color: #111111 !important; }");
-        // EPUB stylesheets frequently assign a different line-height to each
-        // class. Keep reflowable body blocks on the one line grid selected in
-        // the reader settings so a paragraph's internal leading and the
-        // spacing between paragraphs do not drift apart.
-        builder.Append($"\nbody :where(p, div, section, article, main, li, td, th, blockquote) {{ line-height: {Format(lineHeight)} !important; }}");
-        builder.Append($"\nbody p, body div, body section, body article, body main, body li, body td, body th, body blockquote {{ line-height: {Format(lineHeight)} !important; }}");
-        if (vertical)
-        {
-            builder.Append('\n').Append(ReaderAppearanceScripts.VerticalPublicationTypographyCss);
-            if (showVerticalDebugBoxes)
-                builder.Append('\n').Append(ReaderAppearanceScripts.VerticalDebugOutlineCss);
-            // Natural vertical-rl pagination can only keep a page boundary
-            // between complete glyph columns when every block advances on the
-            // same line grid. Publisher block margins, padding and fixed
-            // physical widths otherwise accumulate a fractional X offset and
-            // leave half a column visible under both page-edge masks.
-            // Headings remain bold and centered, but use the body glyph grid;
-            // their one-line block margins preserve title separation without
-            // shifting every following page boundary by a fractional column.
-        }
-        else
-            builder.Append("\nbody :where(p, div, section, article, main, li, td, th, blockquote) { text-align: justify !important; text-justify: inter-character !important; }");
-        builder.Append("\nbody pre, body code, body kbd, body samp { white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: normal !important; line-break: strict !important; -webkit-line-break: strict !important; -epub-line-break: strict !important; }");
-        builder.Append("\nbody br { display: inline !important; }");
-        // Hide note definitions in the document itself. Some EPUBs use the
-        // standard aside/epub:type form, while others use a target id such as
-        // footnote-2-185; the bridge also hides arbitrary fragment targets.
-        builder.Append("\nbody aside[id*='footnote'], body aside[id*='endnote'], body aside[class*='footnote'], body aside[class*='endnote'], body .duokan-footnote-content, body .duokan-footnote-item, body [id^='footnote-'], body [id^='endnote-'] { display: none !important; }");
-        if (!vertical)
-            builder.Append("\nbody { text-align: justify !important; }");
-        builder.Append("\n::selection, body *::selection { background: #000000 !important; background-color: #000000 !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }");
-        builder.Append("\na { color: #222222 !important; }");
-        // Footnote markers are part of the sentence, not standalone page
-        // content. Keep the marker's glyph and its superscript wrapper as one
-        // small inline unit so a column break cannot strand [1] on an empty
-        // page. The bridge adds the class to the actual noteref anchors after
-        // the XHTML body has been parsed.
-        builder.Append("\nbody a.kkindle-footnote-reference, body span.kkindle-footnote-marker { white-space: nowrap !important; line-height: 1 !important; break-inside: avoid !important; break-before: avoid-column !important; break-after: avoid-column !important; text-decoration: none !important; }");
-        // Footnote references often contain an 80x80 image whose alt text is
-        // the entire note. Keep the publisher's marker image, but size it to
-        // the surrounding glyph instead of treating it as body artwork.
-        builder.Append("\nbody a.kkindle-footnote-reference img, body a.kkindle-footnote-reference svg, body a[href*='footnote'] img, body a[href*='endnote'] img { display: inline-block !important; width: 1.15em !important; height: 1.15em !important; min-width: 0 !important; min-height: 0 !important; max-width: 1.15em !important; max-height: 1.15em !important; object-fit: contain !important; margin: 0 0.08em !important; vertical-align: middle !important; }");
-        builder.Append("\nbody span.sbiao { white-space: nowrap !important; line-height: 1 !important; break-inside: avoid !important; break-before: avoid-column !important; break-after: avoid-column !important; }");
-        // Paragraphs share the same line grid as their internal lines. Do not
-        // add a second independent margin between adjacent paragraphs: the
-        // next paragraph starts on the next body line.
-        builder.Append("\np { margin: 0 !important; }");
-        // EPUB styles frequently bake paragraph indentation into per-book
-        // classes. Make this reader setting authoritative in both horizontal
-        // and vertical writing; text-indent follows the logical inline start,
-        // so two em also means two glyphs from the top in vertical-rl.
-        // Most EPUBs use p, but a number of older Chinese books put the body
-        // copy in div/section containers and apply text-indent there. Reset
-        // every common block when the reader switch is off; otherwise a
-        // publisher class can keep a visible indent even though p is reset.
-        builder.Append(paragraphIndent
-            ? "\nbody p, body li, body dd, body blockquote { text-indent: 2em !important; }"
-            : "\nbody p, body div, body section, body article, body main, body li, body dd, body dt, body td, body th, body blockquote { text-indent: 0 !important; }");
-        builder.Append($"\nli, blockquote {{ font-size: 1rem !important; line-height: {Format(lineHeight)} !important; }}");
-        // Chapter headings are a separate centered row. The rem margins are
-        // deliberately larger than one body line, making the transition from
-        // the title to the first paragraph visibly distinct and consistent
-        // across font sizes.
-        builder.Append($"\nbody :where(h1, h2, h3, h4, h5, h6) {{ display: block !important; width: 100% !important; box-sizing: border-box !important; color: #111111 !important; text-align: center !important; line-height: 1.35 !important; font-weight: 700 !important; margin: {Format(lineHeight * 1.15)}rem 0 {Format(lineHeight * 1.25)}rem 0 !important; break-inside: avoid !important; }}");
-        builder.Append($"\nbody h1, body h2, body h3, body h4, body h5, body h6 {{ display: block !important; width: 100% !important; box-sizing: border-box !important; color: #111111 !important; text-align: center !important; line-height: 1.35 !important; font-weight: 700 !important; margin: {Format(lineHeight * 1.15)}rem 0 {Format(lineHeight * 1.25)}rem 0 !important; break-inside: avoid !important; }}");
-        // Publishers sometimes color individual characters inside a heading
-        // with nested b/span rules. A chapter title is one visual unit in the
-        // reader, so force every descendant to the same solid black.
-        builder.Append("\nbody h1 *, body h2 *, body h3 *, body h4 *, body h5 *, body h6 * { color: #000000 !important; -webkit-text-fill-color: #000000 !important; opacity: 1 !important; font-weight: inherit !important; }");
-        builder.Append("\nblockquote { border-left: 3px solid #222222 !important; margin: 1.4em 0 !important; padding: 0.2em 1.1em !important; color: #333333 !important; opacity: 0.88; }");
-        builder.Append("\nimg, svg { display: block; width: auto !important; max-width: 100% !important; max-height: calc(var(--kkindle-page-content-h, 100vh) - 3.6em) !important; height: auto !important; object-fit: contain !important; margin: 1.8em auto !important; break-inside: avoid; } svg image { max-width: 100% !important; }");
-        builder.Append("\n.chatu-part { margin-top: 4vh !important; text-align: center !important; } .chatu-part img { width: auto !important; max-width: min(42%, 260px) !important; max-height: 38vh !important; margin: 0.8em auto !important; } .chatu-part + h1 { margin-top: 0.8em !important; }");
-        builder.Append("\nimg.kkindle-cover, .kkindle-cover img, svg.kkindle-cover, .kkindle-cover svg { max-height: calc(var(--kkindle-page-content-h, 100vh) - 6em) !important; margin: 1em auto !important; }");
-        if (pagination)
-            builder.Append("\nimg.kkindle-cover, .kkindle-cover img, svg.kkindle-cover, .kkindle-cover svg { break-inside: avoid-column !important; }");
-        builder.Append("\npre, table { max-width: 100% !important; overflow-x: auto !important; }");
-        builder.Append("\nhr { border: 0 !important; border-top: 1px solid #222222 !important; opacity: 0.24; margin: 2em 0 !important; }");
-        builder.Append("\nruby { ruby-align: center !important; } rt { font-size: 0.5em !important; color: inherit !important; }");
-        builder.Append("\n.kkindle-fragment-break { break-before: column !important; }");
-        // This must be the final layout override: the shared heading,
-        // blockquote and media rules above intentionally serve horizontal
-        // pagination too and otherwise reintroduce fractional block margins.
-        if (vertical && pagination)
-            builder.Append(ReaderPaginationScripts.VerticalTypographyGridCss);
-        // Use the original TTF as a same-origin local resource. In particular,
-        // do not turn the 33 MB font into a data URI on Linux: WebKitGTK can
-        // report that face as loaded while still shaping the page with its
-        // fallback font. The URI is relative to the current XHTML chapter or
-        // an absolute file URI when the host is outside the EPUB cache.
-        if (bundledFontUri is not null)
-            builder.Append($"\n@font-face {{ font-family: \"{ReaderWebBundledFontFamily}\"; src: url(\"{bundledFontUri}\") format(\"truetype\"); font-style: normal; font-weight: 400; font-display: block; unicode-range: U+0-10FFFF; }}");
-        return builder.ToString();
-    }
-
-    // Image-only chapters and cover pages often contain a raster that is
-    // nearly as large as the WebView. Mark the first large image so the
-    // tighter cover rule keeps it on the first pagination column. Dimensions
-    // come from the media itself rather than book-specific names or classes.
     private const string FitReaderCoverImageScript = """
         (() => {
           const root = document.documentElement;
@@ -5529,6 +5063,19 @@ public partial class MainWindow
     private async Task UpdateReaderScrollStateAsync(IReaderHost host)
     {
         if (TryApplyLinuxReaderTextFallbackState()) return;
+        if (host is NativeReaderHost nativeReader)
+        {
+            var nativeState = nativeReader.GetScrollState();
+            ApplyReaderScrollState(new ReaderScrollState(
+                nativeState.Position,
+                nativeState.Ratio,
+                nativeState.ScrollWidth,
+                nativeState.ScrollHeight,
+                nativeState.ClientWidth,
+                nativeState.ClientHeight));
+            return;
+        }
+
         var state = await CaptureReaderScrollStateAsync(host);
         if (state is null) return;
         ApplyReaderScrollState(state);
@@ -5540,36 +5087,10 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var horizontal = _readerLayout.FlowMode == 1 || _readerLayout.VerticalWriting;
-        var vertical = _readerLayout.VerticalWriting;
-        var ratio = state.Ratio.ToString(CultureInfo.InvariantCulture);
-        var script = $$"""
-            (() => {
-              const el = document.scrollingElement || document.documentElement;
-              if (!el) return false;
-              const horizontal = {{(horizontal ? "true" : "false")}};
-              const vertical = {{(vertical ? "true" : "false")}};
-              const maximum = horizontal
-                ? Math.max(0, (el.scrollWidth || 0) - (el.clientWidth || 0))
-                : Math.max(0, (el.scrollHeight || 0) - (el.clientHeight || 0));
-              const target = Math.max(0, Math.min(maximum, maximum * {{ratio}}));
-              window.scrollTo(horizontal
-                ? { left: vertical ? -target : target, top: 0, behavior: 'instant' }
-                : { left: 0, top: target, behavior: 'instant' });
-              return true;
-            })();
-            """;
-        try
+        if (host is NativeReaderHost nativeReader)
         {
-            await host.InvokeScriptAsync(script);
-            if (_readerLayout.FlowMode == 1)
-                await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
+            nativeReader.SeekToRatio(state.Ratio);
             await UpdateReaderScrollStateAsync(host);
-        }
-        catch
-        {
-            // A layout pass can race a native host swap. The next bridge
-            // scroll report will refresh the state when the host is stable.
         }
     }
 
@@ -5791,101 +5312,22 @@ public partial class MainWindow
         IReaderHost capturedHost,
         ReaderScrollState? capturedState)
     {
-        await _readerLayoutGate.WaitAsync(cancellationToken);
-        try
-        {
-            var currentHost = CurrentReaderHost;
-            if (!ReferenceEquals(currentHost, capturedHost)) return;
-            if (ReaderWebViewHost.Bounds.Width <= 0) return;
-
-            var script = $$"""
-                (() => {
-                  const root = document.documentElement;
-                  const body = document.body;
-                  if (!root || !body) return false;
-                  const bodyStyle = getComputedStyle(body);
-                  const paddingTop = parseFloat(bodyStyle.paddingTop) || 0;
-                  const paddingBottom = parseFloat(bodyStyle.paddingBottom) || 0;
-                  const viewportHeight = root.clientHeight || window.innerHeight || body.clientHeight || 0;
-                  const contentHeight = viewportHeight - paddingTop - paddingBottom;
-                  if (contentHeight > 0)
-                    root.style.setProperty('--kkindle-page-content-h', contentHeight + 'px');
-                  return true;
-                })();
-                """;
-            var hosts = new[] { _readerActiveHost, _readerPreloadHost }
-                .Where(host => host is not null)
-                .Cast<IReaderHost>()
-                .Distinct()
-                .ToArray();
-            foreach (var host in hosts)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    if (IsReaderPageComposeMode)
-                    {
-                        // The page fills to the live viewport: recompose at
-                        // the same saved start offset on every resize.
-                        await host.InvokeScriptAsync(
-                            "window.__pgComposeAt(window.__pgStartChar()); true;");
-                        await host.InvokeScriptAsync(FitReaderCoverImageScript);
-                        continue;
-                    }
-                    await host.InvokeScriptAsync(script);
-                    if (_readerLayout.VerticalWriting && _readerLayout.FlowMode != 1)
-                    {
-                        await host.InvokeScriptAsync(
-                            ReaderPaginationScripts.ContinuousVerticalBoundaryScript);
-                    }
-                    await host.InvokeScriptAsync(FitReaderCoverImageScript);
-                    if (_readerLayout.FlowMode == 1)
-                        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
-                }
-                catch
-                {
-                    // The preload document can be between navigations. Its
-                    // normal configuration pass will pick up the final width.
-                }
-            }
-
-            if (capturedState is not null
-                && ReferenceEquals(CurrentReaderHost, capturedHost))
-            {
-                await RestoreReaderScrollStateAsync(
-                    capturedHost,
-                    capturedState,
-                    cancellationToken);
-            }
-            if (ReferenceEquals(CurrentReaderHost, capturedHost))
-            {
-                // Restore can change the visible page and therefore the
-                // glyph-phase sample. Re-run the vertical calibration against
-                // the final side-panel width before publishing diagnostics or
-                // allowing the next user page turn.
-                if (_readerLayout.FlowMode == 1 && _readerLayout.VerticalWriting)
-                {
-                    await capturedHost.InvokeScriptAsync(
-                        ReaderPaginationScripts.VerticalStepExpression);
-                    await capturedHost.InvokeScriptAsync(
-                        ReaderPaginationScripts.Snap(vertical: true));
-                }
-                await UpdateReaderScrollStateAsync(capturedHost);
-                PrimeReaderContinuousEdgeTracking();
-                UpdateReaderToolbar();
-                await WriteReaderLayoutDiagnosticsAsync("viewport-relayout", capturedHost);
-            }
-        }
-        finally
-        {
-            _readerLayoutGate.Release();
-        }
+        // The self-drawn surface recomposes on resize by itself; the PDF
+        // webview viewer scales its own page.
+        await Task.CompletedTask;
     }
 
     private async Task<bool> WaitForReaderViewportToMatchHostAsync(
         IReaderHost host,
         CancellationToken token)
     {
+        if (host is NativeReaderHost)
+        {
+            // The self-drawn surface sizes from Avalonia bounds directly; the
+            // relayout timer handles any late resize.
+            return true;
+        }
+
         const int maximumAttempts = 10;
         const double tolerance = 2;
         for (var attempt = 0; attempt < maximumAttempts; attempt++)
@@ -6438,78 +5880,44 @@ public partial class MainWindow
         bool hasPendingRestorePosition)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (IsReaderPageComposeMode)
+        if (host is not NativeReaderHost nativeReader)
         {
-            // Page-compose addressing: the target fragment/anchor identifies a
-            // bank node; the helper walks the bank accumulating characters to
-            // find the page that contains it.
-            var pageTarget = DecodeReaderFragment(target.Fragment);
-            var pageScript = string.IsNullOrWhiteSpace(pageTarget)
-                ? "window.__pgComposeForward(); true;"
-                : $"window.__pgComposeToAnchor && window.__pgComposeToAnchor({EscapeJavaScriptSingleQuoted(pageTarget)}) !== false; true;";
-            await host.InvokeScriptAsync(pageScript);
-            await UpdateReaderScrollStateAsync(host);
-            UpdateReaderToolbar();
             return;
         }
 
-        if (ReaderNavigationLocationPolicy.ShouldNormalizeChapterStart(intent, target, hasPendingRestorePosition))
-        {
-            await host.InvokeScriptAsync(ReaderNavigationScripts.NormalizeChapterStart);
-            return;
-        }
-
+        var nativeFragment = DecodeReaderFragment(target.Fragment);
         if (intent is ReaderNavigationIntent.Search or ReaderNavigationIntent.AiSource)
         {
-            await UpdateReaderLocationHashAsync(host, target, cancellationToken);
             await ScrollToPendingReaderChunkAsync(host, cancellationToken);
-            return;
         }
-
-        if (intent == ReaderNavigationIntent.Bookmark
-            && ((_readerPendingBookmarkPosition is not null
-                 && _readerPendingBookmarkFlowMode == _readerLayout.FlowMode)
-                || !string.IsNullOrWhiteSpace(_readerPendingBookmarkQuote)))
+        else if (intent == ReaderNavigationIntent.Annotation && _readerPendingAnnotation is { } pending)
         {
-            await UpdateReaderLocationHashAsync(host, target, cancellationToken);
-            await ScrollToPendingReaderBookmarkAsync(host, cancellationToken);
-            return;
-        }
-
-        if (intent == ReaderNavigationIntent.Annotation
-            && _readerPendingAnnotation is { } annotation)
-        {
-            await UpdateReaderLocationHashAsync(host, target, cancellationToken);
-            await ScrollToPendingReaderAnnotationAsync(host, annotation, cancellationToken);
+            nativeReader.ScrollToOffset(Math.Max(0, pending.StartOffset));
             _readerPendingAnnotation = null;
-            return;
         }
-
-        var fragment = target.Fragment;
-        if (!string.IsNullOrWhiteSpace(fragment)
-            && intent is not (ReaderNavigationIntent.Search or ReaderNavigationIntent.AiSource))
+        else if (intent == ReaderNavigationIntent.Bookmark)
         {
-            var escaped = EscapeJavaScriptSingleQuoted(
-                DecodeReaderFragment(fragment) ?? string.Empty);
-            await host.InvokeScriptAsync(ReaderNavigationScripts.CreateFragmentScroll(
-                escaped,
-                _readerLayout.FlowMode,
-                _readerLayout.VerticalWriting,
-                _readerLayout.TwoPageMode,
-                revealFootnote: intent == ReaderNavigationIntent.Footnote));
+            if (_readerPendingBookmarkPosition is { } bookmarkPosition)
+            {
+                if (nativeReader.Vertical)
+                {
+                    nativeReader.ScrollToOffset((int)Math.Max(0, bookmarkPosition));
+                }
+                else
+                {
+                    nativeReader.SeekToPixelScroll(bookmarkPosition);
+                }
+            }
+            _readerPendingBookmarkPosition = null;
+            _readerPendingBookmarkQuote = null;
         }
-    }
+        else if (!string.IsNullOrWhiteSpace(nativeFragment))
+        {
+            nativeReader.ScrollToFragment(nativeFragment);
+        }
 
-    private static async Task UpdateReaderLocationHashAsync(
-        IReaderHost host,
-        Uri target,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var escaped = EscapeJavaScriptSingleQuoted(
-            DecodeReaderFragment(target.Fragment) ?? string.Empty);
-        await host.InvokeScriptAsync(
-            ReaderNavigationScripts.CreateLocationHashUpdate(escaped));
+        await UpdateReaderScrollStateAsync(host);
+        UpdateReaderToolbar();
     }
 
     private static string? GetReaderTargetFragment(Uri target)
@@ -6650,138 +6058,10 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var serializedId = JsonSerializer.Serialize(annotation.Id.ToString("N"));
-        var serializedQuote = JsonSerializer.Serialize(annotation.SelectedText.Trim());
-        var startOffset = Math.Max(0, annotation.StartOffset);
-        var endOffset = Math.Max(startOffset, annotation.EndOffset);
-        var pagination = _readerLayout.FlowMode == 1 ? "true" : "false";
-        var verticalWriting = _readerLayout.VerticalWriting ? "true" : "false";
-        var script = $$"""
-            (() => {
-              const id = {{serializedId}};
-              const quote = {{serializedQuote}};
-              const pagination = {{pagination}};
-              const vertical = {{verticalWriting}};
-              const ignored = node => {
-                const parent = node?.parentElement;
-                return !parent
-                  || ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)
-                  || !!parent.closest?.('#kkindle-selection-bar, .kkindle-wave-sweep');
-              };
-              const nodes = [];
-              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-              while (walker.nextNode()) {
-                if (!ignored(walker.currentNode)) nodes.push(walker.currentNode);
-              }
-              if (nodes.length === 0) return false;
-              const text = nodes.map(node => node.data || '').join('');
-              const rangeFromOffsets = (start, end) => {
-                let cursor = 0;
-                let startNode = null;
-                let endNode = null;
-                let startLocal = 0;
-                let endLocal = 0;
-                for (const node of nodes) {
-                  const next = cursor + (node.data || '').length;
-                  if (!startNode && start <= next) {
-                    startNode = node;
-                    startLocal = Math.max(0, start - cursor);
-                  }
-                  if (end <= next) {
-                    endNode = node;
-                    endLocal = Math.max(0, end - cursor);
-                    break;
-                  }
-                  cursor = next;
-                }
-                if (!startNode) return null;
-                endNode = endNode || startNode;
-                const range = document.createRange();
-                range.setStart(startNode, Math.min(startLocal, startNode.data.length));
-                range.setEnd(endNode, Math.min(endLocal, endNode.data.length));
-                return range;
-              };
-              const reveal = range => {
-                if (!range) return false;
-                const scroller = document.scrollingElement || document.documentElement;
-                const rects = range.getClientRects ? Array.from(range.getClientRects()) : [];
-                const rect = rects.find(item => item.width > 0 || item.height > 0)
-                  || range.getBoundingClientRect?.();
-                if (!rect) return false;
-                if (pagination) {
-                  const bodyStyle = getComputedStyle(document.body);
-                  const step = vertical
-                    ? {{ReaderPaginationScripts.VerticalStepExpression}}
-                    : {{ReaderPaginationScripts.PageStepExpression}};
-                  if (step <= 0) return false;
-                  if (vertical) {
-                    // Vertical-rl pagination scrolls a negative range; land on
-                    // the page owning the annotation via the live viewport delta.
-                    const padRight = parseFloat(bodyStyle.paddingRight) || 0;
-                    const rawMax = Math.max(0, (scroller.scrollWidth || 0) - (scroller.clientWidth || 0));
-                    const maximum = rawMax;
-                    const contentRight = scroller.clientWidth - padRight;
-                    const distance = Math.abs(scroller.scrollLeft || 0)
-                      + Math.max(0, contentRight - rect.right);
-                    window.scrollTo({ left: -(Math.min(maximum, Math.floor(distance / step) * step)), top: 0, behavior: 'instant' });
-                    return true;
-                  }
-                  const absoluteLeft = rect.left + (scroller.scrollLeft || 0) + Math.max(0, rect.width) / 2;
-                  const maximum = Math.max(0, (scroller.scrollWidth || 0) - (scroller.clientWidth || 0));
-                  const target = Math.max(0, Math.min(maximum, Math.floor(Math.max(0, absoluteLeft) / step) * step));
-                  window.scrollTo({ left: target, top: 0, behavior: 'instant' });
-                  return true;
-                }
-                const element = range.startContainer.parentElement;
-                element?.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
-                return !!element;
-              };
-
-              const marked = document.querySelector(`[data-kkindle-annotation="${id}"]`);
-              if (marked) {
-                const markedRange = document.createRange();
-                markedRange.selectNodeContents(marked);
-                if (reveal(markedRange)) return true;
-              }
-
-              let start = {{startOffset}};
-              let end = {{endOffset}};
-              if (end <= start || start >= text.length) {
-                const needle = (quote || '').trim();
-                const at = needle ? text.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase()) : -1;
-                if (at < 0) return false;
-                start = at;
-                end = at + needle.length;
-              }
-              return reveal(rangeFromOffsets(
-                Math.max(0, Math.min(start, text.length)),
-                Math.max(0, Math.min(end, text.length))));
-            })();
-            """;
-
-        for (var attempt = 0; attempt < 4; attempt++)
+        if (host is NativeReaderHost nativeReader)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                var result = await host.InvokeScriptAsync(script);
-                if (string.Equals(result?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (_readerLayout.FlowMode == 1)
-                        await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
-                    return;
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch
-            {
-                // The hidden/native host may still be settling its document.
-            }
-            if (attempt < 3)
-                await Task.Delay(100, cancellationToken);
+            nativeReader.ScrollToOffset(Math.Max(0, annotation.StartOffset));
+            await UpdateReaderScrollStateAsync(host);
         }
     }
 
@@ -6792,6 +6072,19 @@ public partial class MainWindow
         if (_readerBookFile is null || _readerDocument is null) return;
         var chapterPath = GetReaderChapterPath(host);
         if (chapterPath is null) return;
+
+        if (host is NativeReaderHost nativeReader)
+        {
+            // Annotation offsets are body-textContent coordinates; the native
+            // loader reproduces the same stream, so they apply directly.
+            var nativeAnnotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken);
+            nativeReader.SetAnnotations(nativeAnnotations
+                .Where(item => string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase))
+                .Where(item => !string.IsNullOrWhiteSpace(item.SelectedText))
+                .ToList());
+            return;
+        }
+
         var annotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken);
         var marks = annotations
             .Where(item => string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase))
@@ -6970,6 +6263,41 @@ public partial class MainWindow
         try
         {
             if (sequence != _readerSearchSequence) return;
+            if (CurrentReaderHost is NativeReaderHost nativeReader)
+            {
+                // Case-folded search over the same body-text stream the
+                // WebKit walker saw; highlights paint per page.
+                var nativeQuery = query.Trim();
+                var nativeHits = new List<(int Start, int Length)>();
+                var nativeBody = nativeReader.BodyText ?? string.Empty;
+                if (nativeQuery.Length > 0)
+                {
+                    var foldedBody = nativeBody.ToLowerInvariant();
+                    var foldedQuery = nativeQuery.ToLowerInvariant();
+                    var nativeHit = foldedBody.IndexOf(foldedQuery, StringComparison.Ordinal);
+                    while (nativeHit >= 0)
+                    {
+                        nativeHits.Add((nativeHit, nativeQuery.Length));
+                        nativeHit = foldedBody.IndexOf(
+                            foldedQuery,
+                            nativeHit + Math.Max(1, foldedQuery.Length),
+                            StringComparison.Ordinal);
+                    }
+                }
+
+                nativeReader.SetSearchHighlights(nativeHits, null);
+                _readerSearchCount = nativeHits.Count;
+                _readerSearchIndex = _readerSearchCount > 0
+                    ? navigate
+                        ? 0
+                        : Math.Clamp(_readerSearchIndex, 0, _readerSearchCount - 1)
+                    : -1;
+                if (navigate && _readerSearchCount > 0)
+                    await NavigateReaderSearchAsync(_readerSearchIndex, sequence);
+                else
+                    UpdateReaderSearchCount();
+                return;
+            }
         var serializedQuery = JsonSerializer.Serialize(query);
         var script = $$"""
             (() => {
@@ -7096,64 +6424,11 @@ public partial class MainWindow
         }
         if (sequence is not null && sequence.Value != _readerSearchSequence) return;
         _readerSearchIndex = (index % _readerSearchCount + _readerSearchCount) % _readerSearchCount;
-        var pagination = _readerLayout.FlowMode == 1 ? "true" : "false";
-        var script = $$"""
-            (() => {
-              const groups = [];
-              const byKey = new Map();
-              for (const mark of Array.from(document.querySelectorAll('mark.kkindle-page-find-hit'))) {
-                const key = mark.getAttribute('data-kkindle-page-hit') || `single-${groups.length}`;
-                let group = byKey.get(key);
-                if (!group) {
-                  group = [];
-                  byKey.set(key, group);
-                  groups.push(group);
-                }
-                group.push(mark);
-              }
-              for (let i = 0; i < groups.length; i++) {
-                const current = i === {{_readerSearchIndex}};
-                for (const mark of groups[i]) {
-                  mark.style.setProperty('background', current ? '#000000' : '#D8D8D8', 'important');
-                  mark.style.setProperty('color', current ? '#FFFFFF' : '#000000', 'important');
-                }
-              }
-              const mark = groups[{{_readerSearchIndex}}]?.[0];
-              if (!mark) return false;
-              if ({{pagination}}) {
-                const scroller = document.scrollingElement || document.documentElement;
-                mark.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'instant' });
-                const vertical = {{(_readerLayout.VerticalWriting ? "true" : "false")}};
-                const bodyStyle = getComputedStyle(document.body);
-                const step = vertical
-                  ? {{ReaderPaginationScripts.VerticalStepExpression}}
-                  : {{ReaderPaginationScripts.PageStepExpression}};
-                if (step > 0) {
-                  const trailing = parseFloat(bodyStyle.paddingRight) || 0;
-                  const rawMax = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
-                  const max = vertical
-                    ? rawMax
-                    : Math.max(0, Math.round(Math.max(0, rawMax - trailing) / step) * step);
-                  const distance = vertical ? Math.abs(scroller.scrollLeft || 0) : (scroller.scrollLeft || 0);
-                  const snapped = Math.min(max, Math.round(distance / step) * step);
-                  window.scrollTo({ left: vertical ? -snapped : snapped, top: 0, behavior: 'instant' });
-                }
-              } else {
-                mark.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-              }
-              return true;
-            })();
-            """;
-        try
+        if (host is NativeReaderHost nativeReader)
         {
-            await host.InvokeScriptAsync(script);
+            nativeReader.ScrollToSearchHit(_readerSearchIndex);
+            UpdateReaderSearchCount();
         }
-        catch
-        {
-            // Search navigation is best-effort when a chapter is being
-            // replaced by the other reader host.
-        }
-        UpdateReaderSearchCount();
     }
 
     private async Task ClearReaderSearchAsync()
@@ -8775,68 +8050,6 @@ public partial class MainWindow
     /// overlay covers the compose beat, and the reading position persists as
     /// the page-start character offset.
     /// </summary>
-    private async Task TurnReaderPageInPageComposeModeAsync(IReaderHost host, int direction)
-    {
-        var canScript = direction < 0
-            ? ReaderVerticalPageScripts.CanTurnBackwardScript
-            : ReaderVerticalPageScripts.CanTurnForwardScript;
-        var canResult = await host.InvokeScriptAsync(canScript);
-        if (!string.Equals(canResult?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
-        {
-            if (direction > 0 && _readerDocument is not null
-                && _readerChapterIndex < _readerDocument.Chapters.Count - 1)
-            {
-                await MoveReaderChapterAsync(1);
-            }
-            else if (direction < 0 && _readerChapterIndex > 0)
-            {
-                await MoveReaderChapterAsync(-1);
-            }
-            else
-            {
-                ReaderStatusText.Text = direction > 0 ? "已经是最后一章。" : "已经是第一章。";
-            }
-            return;
-        }
-
-        var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(ReaderToken);
-        var stateJson = await host.InvokeScriptAsync(direction < 0
-            ? "window.__pgComposeBackward(); JSON.stringify({ h: window.__pg.h, f: window.__pg.f, ratio: window.__pgRatio() });"
-            : "window.__pgComposeForward(); JSON.stringify({ h: window.__pg.h, f: window.__pg.f, ratio: window.__pgRatio() });");
-        LogReaderChapterTiming(
-            "turn.page dir=" + direction + " " + DecodeReaderScriptString(stateJson ?? string.Empty),
-            System.Diagnostics.Stopwatch.StartNew());
-        ApplyVerticalPageState(stateJson);
-        await UpdateReaderScrollStateAsync(host);
-        UpdateReaderToolbar();
-        await SaveReaderProgressAsync(ReaderToken);
-        ReaderChapterText.Text = GetReaderChapterPositionLabel();
-        await UpdateReaderBookmarkIndicatorAsync();
-        await HideReaderChapterHoldOverlayAsync();
-    }
-
-    private void ApplyVerticalPageState(string? stateJson)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(DecodeReaderScriptString(stateJson ?? string.Empty)
-                ?? stateJson ?? string.Empty);
-            var root = document.RootElement;
-            if (root.TryGetProperty("h", out var h) && h.TryGetInt32(out var hValue))
-                _readerScrollPosition = hValue;
-            if (root.TryGetProperty("f", out var f) && f.TryGetInt32(out var fValue))
-                _readerPageChars = fValue;
-            if (root.TryGetProperty("ratio", out var ratio) && ratio.TryGetDouble(out var ratioValue))
-                _readerPageRatio = ratioValue;
-        }
-        catch
-        {
-            // State parsing is diagnostics-adjacent; the turn itself already
-            // succeeded.
-        }
-        UpdateReaderToolbar();
-    }
-
     private async Task TurnReaderPageCoreAsync(int direction, bool chapterOnly)
     {
         if (chapterOnly)
@@ -8850,58 +8063,31 @@ public partial class MainWindow
             return;
         }
         if (CurrentReaderHost is not { } host) return;
-
-        if (IsReaderPageComposeMode)
+        if (host is not NativeReaderHost nativeTurn)
         {
-            await TurnReaderPageInPageComposeModeAsync(host, direction);
+            // Only the self-drawn surface paginates EPUB now.
+            return;
+        }
+        if (IsLinuxReaderTextFallbackActive())
+        {
+            await TurnLinuxReaderTextFallbackPageAsync(direction);
             return;
         }
 
-        // A side-panel resize temporarily rebuilds the multicolumn layout.
-        // Never inspect scrollWidth during that pass: Chromium briefly reports
-        // one viewport and a normal next-page turn would be mistaken for a
-        // chapter boundary.
-        await _readerLayoutGate.WaitAsync(ReaderToken);
-        try
+        if (nativeTurn.CanTurn(direction))
         {
-            if (!ReferenceEquals(CurrentReaderHost, host)) return;
-            if (IsLinuxReaderTextFallbackActive())
-            {
-                await TurnLinuxReaderTextFallbackPageAsync(direction);
-                return;
-            }
-
-            await WriteReaderLayoutDiagnosticsAsync("before-page-turn", host);
-
-            // Decide which content change is needed before starting the visual
-            // transition. At a chapter edge the old path animated a failed DOM
-            // turn and then animated the chapter swap, producing two different
-            // beats for what should feel like one continuous page turn.
-            var canTurnResult = await host.InvokeScriptAsync(
-                ReaderPaginationScripts.CreateCanTurnScript(direction, _readerLayout.VerticalWriting));
-            var canTurnWithinChapter = string.Equals(
-                canTurnResult?.Trim(),
-                "true",
-                StringComparison.OrdinalIgnoreCase);
-            if (canTurnWithinChapter)
-            {
-                await TurnReaderPageWithAnimationAsync(host, direction);
-                return;
-            }
-
-            if (direction > 0 && _readerDocument is not null
-                && _readerChapterIndex < _readerDocument.Chapters.Count - 1)
-            {
-                await MoveReaderChapterAsync(1);
-            }
-            else if (direction < 0 && _readerChapterIndex > 0)
-            {
-                await MoveReaderChapterAsync(-1);
-            }
+            await TurnReaderPageWithAnimationAsync(host, direction);
+            return;
         }
-        finally
+
+        if (direction > 0 && _readerDocument is not null
+            && _readerChapterIndex < _readerDocument.Chapters.Count - 1)
         {
-            _readerLayoutGate.Release();
+            await MoveReaderChapterAsync(1);
+        }
+        else if (direction < 0 && _readerChapterIndex > 0)
+        {
+            await MoveReaderChapterAsync(-1);
         }
     }
 
@@ -8913,16 +8099,50 @@ public partial class MainWindow
             host,
             host,
             direction,
-            // The transition pipeline already animates the visual change. The
-            // DOM position must land synchronously on the target page; a second
-            // smooth scroll here can still be mid-flight when alignment runs,
-            // making the next click finish the previous turn.
-            () => host.InvokeScriptAsync(
-                ReaderPaginationScripts.CreateTurnScript(
-                    direction,
-                    smooth: false,
-                    _readerLayout.VerticalWriting)),
+            () => host is NativeReaderHost nativeTurn
+                ? Task.FromResult<string?>(nativeTurn.TurnPage(direction) ? "true" : "false")
+                : Task.FromResult<string?>(null),
             ReaderToken);
+    }
+
+    private static async Task<T> RunNativeReaderContentTransitionAsync<T>(
+        NativeReaderHost host,
+        int animation,
+        bool animate,
+        Func<Task<T>> changeContentAsync,
+        CancellationToken cancellationToken)
+    {
+        if (!animate || animation == ReaderAnimationNone)
+        {
+            return await changeContentAsync();
+        }
+
+        var view = (Control)host.View;
+        await FadeNativeReaderViewAsync(view, view.Opacity, 0.0, 140, cancellationToken);
+        try
+        {
+            return await changeContentAsync();
+        }
+        finally
+        {
+            await FadeNativeReaderViewAsync(view, 0.0, 1.0, 200, cancellationToken);
+        }
+    }
+
+    private static async Task FadeNativeReaderViewAsync(
+        Control view,
+        double from,
+        double to,
+        int milliseconds,
+        CancellationToken cancellationToken)
+    {
+        var steps = Math.Max(1, milliseconds / 20);
+        for (var i = 1; i <= steps; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            view.Opacity = from + ((to - from) * i / steps);
+            await Task.Delay(milliseconds / steps, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -8939,106 +8159,38 @@ public partial class MainWindow
         CancellationToken cancellationToken,
         bool animate = true)
     {
-        // The selected animation applies to every visible reader content
-        // change, including chapter/TOC jumps in continuous mode. A chapter
-        // boundary is still a full-screen turn from the reader's point of
-        // view, so it must not silently drop the user's animation choice.
-        if (UseLinuxPlainTextRecoveryFallback && OperatingSystem.IsLinux())
+        var animation = animate ? _readerPageAnimation : ReaderAnimationNone;
+        if (animation == ReaderAnimationNone)
         {
-            // Retained only for the disabled diagnostic fallback mode. The
-            // production Linux reader follows the native WebKit transition
-            // path below.
+            return await changeContentAsync();
+        }
+
+        if (UseLinuxPlainTextRecoveryFallback && OperatingSystem.IsLinux()
+            && outgoingHost is not NativeReaderHost)
+        {
             return await RunLinuxReaderFallbackContentTransitionAsync(
                 ReaderPaginationPolicy.GetVisualTurnDirection(
                     direction,
                     !_readerIsPdf && _readerLayout.VerticalWriting),
-                animate ? _readerPageAnimation : ReaderAnimationNone,
+                animation,
                 changeContentAsync,
                 cancellationToken);
         }
 
-        var animation = animate ? _readerPageAnimation : ReaderAnimationNone;
-        if (animation == ReaderAnimationNone)
-            return await changeContentAsync();
-
-        // Logical navigation is shared by both writing modes. Only the visual
-        // X direction mirrors in vertical-rl, including in-chapter turns,
-        // chapter swaps and every directional transition fallback.
-        var visualDirection = ReaderPaginationPolicy.GetVisualTurnDirection(
-            direction,
-            !_readerIsPdf && _readerLayout.VerticalWriting);
-
-        if (animation is ReaderAnimationSlide or ReaderAnimationWave)
+        if (outgoingHost is NativeReaderHost nativeHost)
         {
-            var snapshot = outgoingHost is IReaderPageSnapshotProvider provider
-                ? await provider.CaptureVisiblePageAsync(cancellationToken)
-                : null;
-            if (snapshot is { Length: > 0 })
-            {
-                if (animation == ReaderAnimationWave)
-                {
-                    var waveResult = await TryRunReaderWaveTransitionAsync(
-                        outgoingHost,
-                        incomingHost,
-                        visualDirection,
-                        snapshot,
-                        changeContentAsync,
-                        cancellationToken);
-                    if (waveResult.Succeeded)
-                    {
-                        await UpdateReaderScrollStateAsync(incomingHost);
-                        return waveResult.Result!;
-                    }
-                }
-                else
-                {
-                    var slideResult = await TryRunReaderSlideTransitionAsync(
-                        outgoingHost,
-                        incomingHost,
-                        visualDirection,
-                        snapshot,
-                        changeContentAsync,
-                        cancellationToken);
-                    if (slideResult.Succeeded)
-                    {
-                        await UpdateReaderScrollStateAsync(incomingHost);
-                        return slideResult.Result!;
-                    }
-                }
-            }
-
-            // Keep the native View Transition only as a last-resort fallback.
-            // The captured-page path is the same on in-chapter and chapter
-            // turns, so the reader never changes animation implementation at
-            // a chapter boundary.
-            if (ReferenceEquals(outgoingHost, incomingHost))
-            {
-                var viewTransition = await TryRunReaderViewTransitionAsync(
-                    incomingHost,
-                    visualDirection,
-                    animation,
-                    changeContentAsync,
-                    cancellationToken);
-                if (viewTransition.Succeeded)
-                {
-                    await UpdateReaderScrollStateAsync(incomingHost);
-                    return viewTransition.Result!;
-                }
-            }
-
-            // Screenshot capture is optional on non-Windows hosts. Preserve
-            // navigation and fall back to an opacity-only transition rather
-            // than transforming the live overflowing document.
-            animation = ReaderAnimationFade;
+            // The self-drawn surface animates with an Avalonia opacity dip;
+            // snapshot-driven slide/wave overlays return through
+            // CaptureVisiblePageAsync in a later pass.
+            return await RunNativeReaderContentTransitionAsync(
+                nativeHost,
+                animation,
+                animate,
+                changeContentAsync,
+                cancellationToken);
         }
 
-        var result = await RunReaderFadeTransitionAsync(
-            outgoingHost,
-            incomingHost,
-            changeContentAsync,
-            cancellationToken);
-        await UpdateReaderScrollStateAsync(incomingHost);
-        return result;
+        return await changeContentAsync();
     }
 
     private ReaderLinuxFallbackTransitionSurface? BuildLinuxReaderFallbackTransitionSurface()
@@ -9085,246 +8237,12 @@ public partial class MainWindow
             cancellationToken);
     }
 
-    private async Task<T> RunReaderFadeTransitionAsync<T>(
-        IReaderHost outgoingHost,
-        IReaderHost incomingHost,
-        Func<Task<T>> changeContentAsync,
-        CancellationToken cancellationToken)
-    {
-        await TryInvokeReaderTransitionAsync(
-            outgoingHost,
-            CreateReaderFadeTransitionScript(phase: 0));
-
-        try
-        {
-            await Task.Delay(ReaderTransitionOutDurationMs, cancellationToken);
-            if (!ReferenceEquals(outgoingHost, incomingHost))
-            {
-                await TryInvokeReaderTransitionAsync(
-                    incomingHost,
-                    CreateReaderFadeTransitionScript(phase: 1));
-            }
-
-            var result = await changeContentAsync();
-            if (ReferenceEquals(outgoingHost, incomingHost))
-            {
-                await TryInvokeReaderTransitionAsync(
-                    incomingHost,
-                    CreateReaderFadeTransitionScript(phase: 1));
-            }
-            try
-            {
-                await incomingHost.InvokeScriptAsync(
-                    CreateReaderFadeTransitionScript(phase: 2));
-                await Task.Delay(ReaderTransitionInDurationMs, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch
-            {
-                // Content has already changed; a cosmetic reveal failure must
-                // not turn a successful page/chapter navigation into an error.
-            }
-            return result;
-        }
-        finally
-        {
-            var cleanup = CreateReaderFadeTransitionCleanupScript();
-            await TryInvokeReaderTransitionAsync(outgoingHost, cleanup);
-            if (!ReferenceEquals(outgoingHost, incomingHost))
-            {
-                await TryInvokeReaderTransitionAsync(incomingHost, cleanup);
-            }
-        }
-    }
-
     private const int ReaderTransitionOutDurationMs = 300;
     private const int ReaderTransitionInDurationMs = 360;
     private const int ReaderSlideDurationMs = 430;
     // 墨水屏刷新波前传播时长（普通文本翻页约 200~250ms）；残影在波形结束后
     // 还要保持并消退，因此覆盖层需要多停留 ReaderWaveScripts.GhostTailMs。
     private const int ReaderWaveDurationMs = 230;
-
-    private async Task<(bool Succeeded, T? Result)> TryRunReaderViewTransitionAsync<T>(
-        IReaderHost host,
-        int direction,
-        int animation,
-        Func<Task<T>> changeContentAsync,
-        CancellationToken cancellationToken)
-    {
-        var duration = animation == ReaderAnimationWave
-            ? ReaderWaveDurationMs
-            : ReaderSlideDurationMs;
-        var startScript = animation == ReaderAnimationWave
-            ? ReaderWaveScripts.CreateWaveViewTransitionStartScript(
-                forward: direction > 0,
-                durationMs: duration)
-            : ReaderWaveScripts.CreateSlideViewTransitionStartScript(
-                forward: direction > 0,
-                durationMs: duration);
-        if (!await TryInvokeReaderBooleanScriptAsync(host, startScript))
-            return (false, default);
-
-        var ready = false;
-        try
-        {
-            // startViewTransition captures the old page before entering its
-            // update callback. Wait for that callback before changing the
-            // scroll position, then release it so Chromium snapshots the new
-            // page and animates the two independent bitmaps.
-            for (var attempt = 0; attempt < 30; attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (await TryInvokeReaderBooleanScriptAsync(
-                        host,
-                        ReaderWaveScripts.ViewTransitionReadyScript))
-                {
-                    ready = true;
-                    break;
-                }
-                await Task.Delay(10, cancellationToken);
-            }
-            if (!ready) return (false, default);
-
-            var result = await changeContentAsync();
-            await TryInvokeReaderBooleanScriptAsync(
-                host,
-                ReaderWaveScripts.ViewTransitionReleaseScript);
-            await Task.Delay(duration + 80, cancellationToken);
-            return (true, result);
-        }
-        finally
-        {
-            await TryInvokeReaderTransitionAsync(
-                host,
-                ReaderWaveScripts.ViewTransitionReleaseScript);
-            await TryInvokeReaderTransitionAsync(
-                host,
-                ReaderWaveScripts.ViewTransitionCleanupScript);
-        }
-    }
-
-    private async Task<(bool Succeeded, T? Result)> TryRunReaderWaveTransitionAsync<T>(
-        IReaderHost outgoingHost,
-        IReaderHost incomingHost,
-        int direction,
-        byte[] snapshot,
-        Func<Task<T>> changeContentAsync,
-        CancellationToken cancellationToken)
-    {
-        var dataUrl = "data:image/png;base64," + Convert.ToBase64String(snapshot);
-        if (dataUrl.Length > 4_500_000) return (false, default);
-
-        var width = Math.Max(1, ReaderWebViewHost.Bounds.Width);
-        var height = Math.Max(1, ReaderWebViewHost.Bounds.Height);
-        var overlayScript = ReaderWaveScripts.CreateWaveOverlayScript(
-            dataUrl,
-            width,
-            height,
-            forward: direction > 0,
-            totalDurationMs: ReaderWaveDurationMs,
-            startPaused: true);
-
-        if (!await TryInvokeReaderBooleanScriptAsync(incomingHost, overlayScript))
-            return (false, default);
-
-        try
-        {
-            if (!await WaitForReaderOverlayReadyAsync(
-                    incomingHost,
-                    ReaderWaveScripts.WaveOverlayReadyScript,
-                    cancellationToken))
-            {
-                return (false, default);
-            }
-            // The captured old page remains frozen above the reader while the
-            // live page or prepared chapter changes underneath. Starting only
-            // after that change prevents the previous implementation's visible
-            // jump near the end of an already-running wave.
-            var result = await changeContentAsync();
-            if (!await TryInvokeReaderBooleanScriptAsync(
-                    incomingHost,
-                    ReaderWaveScripts.CreateWaveStartScript()))
-            {
-                return (true, result);
-            }
-
-            await Task.Delay(ReaderWaveDurationMs + ReaderWaveScripts.GhostTailMs + 60, cancellationToken);
-            return (true, result);
-        }
-        finally
-        {
-            await TryInvokeReaderTransitionAsync(
-                incomingHost,
-                ReaderWaveScripts.CreateWaveCleanupScript());
-            if (!ReferenceEquals(outgoingHost, incomingHost))
-            {
-                await TryInvokeReaderTransitionAsync(
-                    outgoingHost,
-                    ReaderWaveScripts.CreateWaveCleanupScript());
-            }
-        }
-    }
-
-    private async Task<(bool Succeeded, T? Result)> TryRunReaderSlideTransitionAsync<T>(
-        IReaderHost outgoingHost,
-        IReaderHost incomingHost,
-        int direction,
-        byte[] snapshot,
-        Func<Task<T>> changeContentAsync,
-        CancellationToken cancellationToken)
-    {
-        var dataUrl = "data:image/png;base64," + Convert.ToBase64String(snapshot);
-        if (dataUrl.Length > 4_500_000) return (false, default);
-
-        var width = Math.Max(1, ReaderWebViewHost.Bounds.Width);
-        var height = Math.Max(1, ReaderWebViewHost.Bounds.Height);
-        var overlayScript = ReaderWaveScripts.CreateSlideOverlayScript(
-            dataUrl,
-            width,
-            height,
-            forward: direction > 0,
-            durationMs: ReaderSlideDurationMs,
-            startPaused: true);
-
-        if (!await TryInvokeReaderBooleanScriptAsync(incomingHost, overlayScript))
-            return (false, default);
-
-        try
-        {
-            if (!await WaitForReaderOverlayReadyAsync(
-                    incomingHost,
-                    ReaderWaveScripts.SlideOverlayReadyScript,
-                    cancellationToken))
-            {
-                return (false, default);
-            }
-            // Only the frozen bitmap moves. The real paginated body is never
-            // transformed, so its fractional scroll extent cannot be clamped.
-            var result = await changeContentAsync();
-            if (await TryInvokeReaderBooleanScriptAsync(
-                    incomingHost,
-                    ReaderWaveScripts.CreateSlideStartScript()))
-            {
-                await Task.Delay(ReaderSlideDurationMs + 60, cancellationToken);
-            }
-            return (true, result);
-        }
-        finally
-        {
-            await TryInvokeReaderTransitionAsync(
-                incomingHost,
-                ReaderWaveScripts.CreateSlideCleanupScript());
-            if (!ReferenceEquals(outgoingHost, incomingHost))
-            {
-                await TryInvokeReaderTransitionAsync(
-                    outgoingHost,
-                    ReaderWaveScripts.CreateSlideCleanupScript());
-            }
-        }
-    }
 
     private static async Task<bool> WaitForReaderOverlayReadyAsync(
         IReaderHost host,

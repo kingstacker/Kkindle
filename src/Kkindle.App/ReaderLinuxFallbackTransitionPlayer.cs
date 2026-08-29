@@ -30,7 +30,7 @@ internal sealed record ReaderLinuxFallbackTransitionSurface(
 /// layered over the freshly rendered incoming frame and animated away with
 /// timings lifted from the WebView implementations — fade 300ms out / 360ms
 /// in, slide 430ms cubic-bezier(.38,0,.2,1), wave sweep
-/// ReaderWaveScripts.TotalDurationMs plus a GhostTailMs residue.
+/// Wave sweep duration (230 ms) plus a GhostTailMs residue.
 ///
 /// Snapshot capture failure degrades silently to an instant switch so a
 /// cosmetic hiccup can never block navigation.
@@ -48,7 +48,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     private const double FadeInMs = 360;
     private const double SlideDurationMs = 430;
     private const double SlideShadowWidthRatio = 0.05;
-    private const double WaveSweepMs = ReaderWaveScripts.TotalDurationMs;
+    private const double WaveSweepMs = 230; // was ReaderWaveScripts.TotalDurationMs
     private const double WaveBandWidthRatio = 0.125;
     private const double WaveGhostOpacity = 0.022;
     private const double WaveGhostHoldMs = 60;

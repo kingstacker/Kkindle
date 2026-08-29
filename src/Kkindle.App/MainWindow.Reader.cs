@@ -184,11 +184,42 @@ public partial class MainWindow
         }
     }
 
+    private IReaderHost CreateReaderHostForCurrentFormat() =>
+        _readerIsPdf
+            ? _readerHostFactory()
+            : new NativeReaderHost();
+
+    private bool IsReaderHostTypeCompatible(IReaderHost host) =>
+        _readerIsPdf
+            ? host is not NativeReaderHost
+            : host is NativeReaderHost;
+
     private async Task EnsureReaderHostsAsync()
     {
+        if (_readerActiveHost is not null && !IsReaderHostTypeCompatible(_readerActiveHost))
+        {
+            // The reader surface follows the opened format: self-drawn engine
+            // for EPUB, the platform webview only for PDF rendering.
+            ReaderActiveHostSlot.Content = null;
+            _readerActiveHost.NavigationStarting -= ReaderHost_NavigationStarting;
+            _readerActiveHost.NavigationCompleted -= ReaderHost_NavigationCompleted;
+            _readerActiveHost.WebMessageReceived -= ReaderHost_WebMessageReceived;
+            (_readerActiveHost as IDisposable)?.Dispose();
+            _readerActiveHost = null;
+            if (_readerPreloadHost is not null)
+            {
+                ReaderPreloadHostSlot.Content = null;
+                _readerPreloadHost.NavigationStarting -= ReaderHost_NavigationStarting;
+                _readerPreloadHost.NavigationCompleted -= ReaderHost_NavigationCompleted;
+                _readerPreloadHost.WebMessageReceived -= ReaderHost_WebMessageReceived;
+                (_readerPreloadHost as IDisposable)?.Dispose();
+                _readerPreloadHost = null;
+            }
+        }
+
         if (_readerActiveHost is null)
         {
-            _readerActiveHost = _readerHostFactory();
+            _readerActiveHost = CreateReaderHostForCurrentFormat();
             _readerActiveHost.NavigationStarting += ReaderHost_NavigationStarting;
             _readerActiveHost.NavigationCompleted += ReaderHost_NavigationCompleted;
             _readerActiveHost.WebMessageReceived += ReaderHost_WebMessageReceived;
@@ -196,7 +227,7 @@ public partial class MainWindow
 
             if (!OperatingSystem.IsLinux())
             {
-                _readerPreloadHost = _readerHostFactory();
+                _readerPreloadHost = CreateReaderHostForCurrentFormat();
                 if (ReferenceEquals(_readerActiveHost, _readerPreloadHost))
                     throw new InvalidOperationException("阅读器宿主工厂必须返回两个不同实例。");
 
@@ -571,18 +602,11 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        // Vertical writing paginates along the X axis in both flow modes, but
-        // its scroll range is negative; only horizontal pagination uses the
-        // positive X axis, and everything else scrolls vertically.
-        var vertical = _readerLayout.VerticalWriting;
-        var horizontal = !vertical && _readerLayout.FlowMode == 1;
-        if (!moveToEnd)
-            await host.InvokeScriptAsync(ReaderNavigationScripts.NormalizeChapterStart);
-        await host.InvokeScriptAsync(
-            ReaderPaginationScripts.CreateChapterBoundaryScript(moveToEnd, horizontal, vertical));
-        if (_readerLayout.FlowMode == 1)
-            await host.InvokeScriptAsync(ReaderPaginationScripts.Snap(_readerLayout.VerticalWriting));
-        await UpdateReaderScrollStateAsync(host);
+        if (host is NativeReaderHost nativeReader)
+        {
+            nativeReader.SeekToBoundary(moveToEnd);
+            await UpdateReaderScrollStateAsync(host);
+        }
     }
 
     private string GetReaderChapterLabel() => _readerIsPdf

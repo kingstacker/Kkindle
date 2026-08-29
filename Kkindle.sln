@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kkindle.Desktop.MacOS", "sr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kkindle.Platform.Common.Tests", "tests\Kkindle.Platform.Common.Tests\Kkindle.Platform.Common.Tests.csproj", "{A75ABB77-9E43-4A23-9082-0BAB8DFFBC00}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kkindle.Layout", "src\Kkindle.Layout\Kkindle.Layout.csproj", "{B1537CA0-476F-4B83-8F47-0575E5C50546}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -197,6 +199,18 @@ Global
 		{A75ABB77-9E43-4A23-9082-0BAB8DFFBC00}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A75ABB77-9E43-4A23-9082-0BAB8DFFBC00}.Release|x86.ActiveCfg = Release|Any CPU
 		{A75ABB77-9E43-4A23-9082-0BAB8DFFBC00}.Release|x86.Build.0 = Release|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Debug|x64.Build.0 = Debug|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Debug|x86.Build.0 = Debug|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Release|x64.ActiveCfg = Release|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Release|x64.Build.0 = Release|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Release|x86.ActiveCfg = Release|Any CPU
+		{B1537CA0-476F-4B83-8F47-0575E5C50546}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -208,5 +222,6 @@ Global
 		{6645E097-A0C0-4CFB-94BA-63F2A1ECB906} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{BD8EDE7B-6FF3-4005-8E54-5CB0962066DC} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{A75ABB77-9E43-4A23-9082-0BAB8DFFBC00} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{B1537CA0-476F-4B83-8F47-0575E5C50546} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
