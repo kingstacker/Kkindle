@@ -252,21 +252,57 @@ jobs:
           pattern: Kkindle-*
           path: artifacts
           merge-multiple: true
+      - name: Check out sources for changelog
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Create checksums
         run: |
           cd artifacts
           sha256sum * > SHA256SUMS.txt
-      - name: Generate changelog from commits
+      - name: Generate detailed changelog
         shell: bash
         run: |
           set -euo pipefail
-          gh api \
-            --method POST \
-            -H 'Accept: application/vnd.github+json' \
-            "/repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-            -f "tag_name=${RELEASE_TAG}" \
-            --jq '.body' > "$RUNNER_TEMP/kkindle-release-notes.md"
-          test -s "$RUNNER_TEMP/kkindle-release-notes.md"
+          tag="${RELEASE_TAG#v}"
+          changelog="$RUNNER_TEMP/kkindle-release-notes.md"
+
+          # 1) A matching "## 0.7.0", "## v0.7.0" or "## [0.7.0]" section in
+          #    CHANGELOG.md wins: it is the curated release catalogue. Only a
+          #    level-2 heading ends the section so "###" subsections survive.
+          if [[ -f CHANGELOG.md ]]; then
+            awk -v ver="$tag" '
+              BEGIN { pattern = "^## +\\[?v?" ver "\\]?([) .:-]|$)" }
+              $0 ~ pattern { found = 1; next }
+              found && /^## / { exit }
+              found { print }
+            ' CHANGELOG.md > "$changelog" || true
+            sed -i '/./,$!d' "$changelog"
+          fi
+
+          # 2) Fall back to a detailed commit log since the previous tag.
+          if [[ ! -s "$changelog" ]]; then
+            prev_tag="$(git describe --tags --abbrev=0 "${RELEASE_TAG}^" 2>/dev/null || true)"
+            range="${prev_tag:+${prev_tag}..}${RELEASE_TAG}"
+            {
+              echo "## 更新内容"
+              echo
+              if [[ -n "$prev_tag" ]]; then
+                echo "范围：\`${prev_tag} → ${RELEASE_TAG}\`"
+              else
+                echo "首个发布版本。"
+              fi
+              echo
+              git log --no-merges --date=short \
+                --pretty=format:"- %ad %s ([%h](https://github.com/${GITHUB_REPOSITORY}/commit/%H))" \
+                "$range"
+              echo
+            } > "$changelog"
+          fi
+
+          test -s "$changelog"
+          echo "----- release notes -----"
+          cat "$changelog"
       - name: Create update manifest
         shell: bash
         run: |

@@ -10,7 +10,7 @@
 
 - Kkindle 是 C# / .NET 10 / Avalonia 12.1.1 跨平台桌面应用，Windows、Linux、macOS 各有一个瘦启动项目。
 - Avalonia 是唯一 UI 实现；src/Kkindle.App.WinUI 已完整删除。4 个阅读器脚本和应用图标已迁入 src/Kkindle.App，解决方案、测试及三端打包引用均已更新。
-- 当前开发版本为 0.6.0-dev.6，统一定义在 Directory.Build.props。关于页通过程序集 AssemblyInformationalVersion 显示版本，不再维护 UI 硬编码版本号。
+- 当前开发版本为 0.7.0-dev.1，统一定义在 Directory.Build.props。关于页通过程序集 AssemblyInformationalVersion 显示版本，不再维护 UI 硬编码版本号。
 - 当前工作分支为 `native-engine`（自绘排版引擎已落地，见第 9 节），主线为 `master`，远程为 git@github.com:kingstacker/Kkindle.git。Route A 的未提交改动在 `git stash@{0}`。
 - 2026-08-29 落地：Kreader 的 EPUB 排版完全切换到自绘引擎（`src/Kkindle.Layout` + `NativeReaderHost`），WebView 排版脚本与桥注入已删除；PDF 仍走平台 WebView。详见第 9 节。
 - 当前 `global.json` 固定 .NET SDK 10.0.400；Avalonia 主包和桌面包为 12.1.1，Avalonia.Controls.WebView 为 12.1.0。
