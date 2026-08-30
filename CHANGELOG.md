@@ -4,7 +4,7 @@
 Release 说明；某版本没有对应章节时，自动回退为该版本的详细提交日志。
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## 0.7.0 (开发中)
+## 0.7.0 (2026-08-30)
 
 ### 新增
 
