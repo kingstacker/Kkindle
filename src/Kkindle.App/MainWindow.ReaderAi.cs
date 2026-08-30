@@ -133,6 +133,8 @@ public partial class MainWindow
         ReaderAiView.IsVisible = true;
         ReaderNotesView.IsVisible = false;
         ReaderAiComposer.IsVisible = true;
+        ReaderAiSendBar.IsVisible = true;
+        ReaderNotesExportBar.IsVisible = false;
         SetReaderAssistantTabState(ReaderAiTabButton, selected: true);
         SetReaderAssistantTabState(ReaderNotesTabButton, selected: false);
     }
@@ -147,6 +149,8 @@ public partial class MainWindow
         ReaderAiView.IsVisible = false;
         ReaderNotesView.IsVisible = true;
         ReaderAiComposer.IsVisible = false;
+        ReaderAiSendBar.IsVisible = false;
+        ReaderNotesExportBar.IsVisible = true;
         SetReaderAssistantTabState(ReaderAiTabButton, selected: false);
         SetReaderAssistantTabState(ReaderNotesTabButton, selected: true);
     }

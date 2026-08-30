@@ -1719,14 +1719,19 @@
         <Style Selector="MenuItem:open /template/ ContentPresenter#PART_HeaderPresenter">
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
-        <Style Selector="MenuItem:open /template/ Path#PART_ChevronPath">
+        <Style Selector="MenuItem:open:not(:empty) /template/ Path#PART_ChevronPath">
             <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+            <Setter Property="IsVisible" Value="True" />
+            <Setter Property="Opacity" Value="1" />
         </Style>
         <!-- A submenu parent is also marked selected while the pointer moves
              into the child popup. Keep its chevron in the same slot and ink
-             colour instead of letting the selected-state theme hide it. -->
-        <Style Selector="MenuItem:selected /template/ Path#PART_ChevronPath">
+             colour instead of letting the selected-state theme hide it.
+             Items without a submenu keep the theme's :empty chevron hidden. -->
+        <Style Selector="MenuItem:selected:not(:empty) /template/ Path#PART_ChevronPath">
             <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+            <Setter Property="IsVisible" Value="True" />
+            <Setter Property="Opacity" Value="1" />
         </Style>
         <Style Selector="MenuItem.instantMenuHover /template/ Border#PART_LayoutRoot">
             <Setter Property="Background" Value="{StaticResource InkBrush}" />
@@ -1742,6 +1747,12 @@
              can turn a nested chevron white while its row is still white. -->
         <Style Selector="MenuItem /template/ Path">
             <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+        </Style>
+        <!-- 带子菜单的项：右箭头在任何交互状态下都保持可见（普通、悬停、
+             按下、子菜单展开/选中），只按所在行的底色切换黑白，不隐藏。 -->
+        <Style Selector="MenuItem:not(:empty) /template/ Path#PART_ChevronPath">
+            <Setter Property="IsVisible" Value="True" />
+            <Setter Property="Opacity" Value="1" />
         </Style>
         <Style Selector="MenuItem:pointerover /template/ Path, MenuItem:pressed /template/ Path">
             <Setter Property="Fill" Value="{StaticResource PaperBrush}" />

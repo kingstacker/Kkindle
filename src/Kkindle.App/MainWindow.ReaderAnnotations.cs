@@ -1,4 +1,5 @@
 using System.Text;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -12,10 +13,17 @@ namespace Kkindle;
 
 public partial class MainWindow
 {
+    // The annotation editor lives in the in-body input popup now; the notes
+    // pane only lists annotations. Style/color therefore come from the last
+    // 划线 ▾ choice (or the defaults below) instead of panel combos.
+    private string _readerLastHighlightStyle = "solid";
+    private Point? _readerLastSelectionPopupAnchor;
+    private double? _readerLastSelectionPopupBottom;
+
     private async Task SaveReaderAnnotationAsync(
         string note,
-        bool preserveExistingNote = false,
-        string? underlineStyle = null)
+        string? underlineStyle = null,
+        string? color = null)
     {
         if (_readerBookCard is null || _readerBookFile is null) return;
         var selectedText = (_readerPendingSelection ?? string.Empty).Trim();
@@ -61,21 +69,16 @@ public partial class MainWindow
             }
         }
 
+        var normalizedStyle = NormalizeReaderAnnotationStyle(underlineStyle ?? _readerLastHighlightStyle);
         annotation.ChapterPath = chapterPath;
         annotation.Fragment = _readerIsPdf
             ? null
             : _readerCurrentFragment;
         if (selectedText.Length > 0) annotation.SelectedText = selectedText;
-        var normalizedStyle = NormalizeReaderAnnotationStyle(
-            underlineStyle ?? GetReaderComboTag(ReaderAnnotationStyleBox, "solid"));
-        annotation.Note = preserveExistingNote
-            && string.IsNullOrWhiteSpace(note)
-            && exact is not null
-                ? exact.Note
-                : note.Trim();
+        annotation.Note = note.Trim();
         annotation.Color = normalizedStyle == "marker"
             ? "#000000"
-            : NormalizeReaderAnnotationColor(GetReaderComboTag(ReaderAnnotationColorBox, "#000000"));
+            : NormalizeReaderAnnotationColor(color ?? "#000000");
         annotation.UnderlineStyle = normalizedStyle;
         annotation.StartOffset = _readerPendingSelectionStartOffset;
         annotation.EndOffset = _readerPendingSelectionEndOffset > _readerPendingSelectionStartOffset
@@ -104,13 +107,13 @@ public partial class MainWindow
             else if (_readerIsPdf)
                 await ApplySavedReaderPdfAnnotationsAsync(ReaderToken);
             HideReaderSelectionPopup();
+            HideReaderAnnotationInputPopup();
             _readerPendingSelection = null;
             _readerPendingSelectionStartOffset = 0;
             _readerPendingSelectionEndOffset = 0;
             _readerPendingSelectionPrefix = string.Empty;
             _readerPendingSelectionSuffix = string.Empty;
-            ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
-            ShowReaderTransientStatus(string.IsNullOrWhiteSpace(annotation.Note) ? "划线已保存" : "划线与笔记已保存");
+            ShowReaderTransientStatus(string.IsNullOrWhiteSpace(annotation.Note) ? "划线已保存" : "批注已保存");
         }
         catch (Exception exception)
         {
@@ -118,25 +121,84 @@ public partial class MainWindow
         }
     }
 
-    private async void ReaderAnnotationSaveButton_Click(object? sender, RoutedEventArgs e)
-        => await SaveReaderAnnotationAsync(
-            ReaderAnnotationNoteBox.Text ?? string.Empty,
-            preserveExistingNote: false);
+    private void ShowReaderAnnotationInputPopup()
+    {
+        if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
+        ReaderAnnotationInputQuote.Text = _readerPendingSelection;
+        ReaderAnnotationInputBox.Text = string.Empty;
+        ShowReaderPopupNearSelection(
+            ReaderAnnotationInputPopup,
+            ReaderAnnotationInputPanel,
+            fallbackWidth: 320,
+            fallbackHeight: 190,
+            _readerLastSelectionPopupAnchor,
+            _readerLastSelectionPopupBottom);
+        ReaderAnnotationInputBox.Focus();
+    }
+
+    private void HideReaderAnnotationInputPopup()
+    {
+        ReaderAnnotationInputPopup.IsOpen = false;
+    }
+
+    private void ReaderAnnotationInputPopup_Closed(object? sender, EventArgs e)
+    {
+        // Light dismiss (clicking back into the body) closes the popup without
+        // going through cancel/save; drop the pending selection so a stale
+        // highlight doesn't linger behind the Closed cleanup.
+        if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
+        _readerPendingSelection = null;
+        _readerPendingSelectionStartOffset = 0;
+        _readerPendingSelectionEndOffset = 0;
+        _readerPendingSelectionPrefix = string.Empty;
+        _readerPendingSelectionSuffix = string.Empty;
+        if (!_readerIsPdf && CurrentReaderHost is { } host)
+            _ = ClearCurrentReaderSelectionAsync(host);
+    }
+
+    private void ReaderAnnotationInputCancelButton_Click(object? sender, RoutedEventArgs e)
+        => CloseReaderAnnotationInputPopup();
+
+    private async void ReaderAnnotationInputSaveButton_Click(object? sender, RoutedEventArgs e)
+        => await SaveReaderAnnotationAsync(ReaderAnnotationInputBox.Text ?? string.Empty);
+
+    private void ReaderAnnotationInputBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            CloseReaderAnnotationInputPopup();
+        }
+        else if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            e.Handled = true;
+            ReaderAnnotationInputSaveButton_Click(sender, e);
+        }
+    }
+
+    // Cancel/light dismiss: close the window and release the live selection so
+    // the body returns to its plain rendering.
+    private void CloseReaderAnnotationInputPopup()
+    {
+        HideReaderAnnotationInputPopup();
+        if (IsLinuxReaderTextFallbackActive())
+        {
+            ClearLinuxReaderTextFallbackSelectionState();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
+        _readerPendingSelection = null;
+        _readerPendingSelectionStartOffset = 0;
+        _readerPendingSelectionEndOffset = 0;
+        _readerPendingSelectionPrefix = string.Empty;
+        _readerPendingSelectionSuffix = string.Empty;
+        if (!_readerIsPdf && CurrentReaderHost is { } host)
+            _ = ClearCurrentReaderSelectionAsync(host);
+    }
 
     private async void ReaderAnnotationItemButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: ReaderAnnotation annotation }) return;
-        _selectedReaderAnnotation = annotation;
-        ReaderAnnotationSelectionText.Text = annotation.SelectedText;
-        ReaderAnnotationNoteBox.Text = annotation.Note;
-        SelectReaderComboTag(ReaderAnnotationColorBox, annotation.Color);
-        SelectReaderComboTag(ReaderAnnotationStyleBox, annotation.UnderlineStyle);
-        ReaderDeleteAnnotationButton.IsEnabled = true;
-        _readerPendingSelection = annotation.SelectedText;
-        _readerPendingSelectionStartOffset = annotation.StartOffset;
-        _readerPendingSelectionEndOffset = annotation.EndOffset;
-        _readerPendingSelectionPrefix = annotation.Prefix;
-        _readerPendingSelectionSuffix = annotation.Suffix;
         await NavigateToReaderAnnotationAsync(annotation);
     }
 
@@ -181,27 +243,20 @@ public partial class MainWindow
         }
     }
 
-    private async void ReaderDeleteAnnotationButton_Click(object? sender, RoutedEventArgs e)
+    private async void ReaderAnnotationItemDeleteButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (_selectedReaderAnnotation is null) return;
+        if (sender is not Button { Tag: ReaderAnnotation annotation }) return;
         try
         {
-            await _readerData.DeleteAnnotationAsync(_selectedReaderAnnotation.Id, ReaderToken);
+            await _readerData.DeleteAnnotationAsync(annotation.Id, ReaderToken);
             MarkReadingMaterialsDirty();
-            _selectedReaderAnnotation = null;
+            if (ReferenceEquals(_selectedReaderAnnotation, annotation))
+                _selectedReaderAnnotation = null;
             await RefreshReaderAnnotationsAsync(ReaderToken);
             if (IsLinuxReaderTextFallbackActive())
                 ApplyLinuxReaderTextFallbackAnnotationRanges();
             if (!_readerIsPdf && CurrentReaderHost is { } host)
                 await ApplySavedAnnotationsAsync(host, ReaderToken);
-            ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
-            ReaderAnnotationNoteBox.Text = string.Empty;
-            ReaderDeleteAnnotationButton.IsEnabled = false;
-            _readerPendingSelection = null;
-            _readerPendingSelectionStartOffset = 0;
-            _readerPendingSelectionEndOffset = 0;
-            _readerPendingSelectionPrefix = string.Empty;
-            _readerPendingSelectionSuffix = string.Empty;
             ShowReaderTransientStatus("批注已删除");
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
@@ -243,13 +298,12 @@ public partial class MainWindow
 
     // The "划线 ▾" quick-style actions now arrive from the in-page selection
     // bar (the webview is a native HWND island Avalonia cannot paint over);
-    // the style choice still lands in the same combo used by the notes pane.
+    // the chosen style is remembered as the default for later annotations.
     private async Task ApplyReaderHighlightStyleAsync(string style)
     {
-        SelectReaderComboTag(ReaderAnnotationStyleBox, style);
+        _readerLastHighlightStyle = style;
         await SaveReaderAnnotationAsync(
             string.Empty,
-            preserveExistingNote: true,
             underlineStyle: style);
     }
 
@@ -343,15 +397,5 @@ public partial class MainWindow
         {
             ReaderStatusText.Text = $"导出批注失败：{exception.Message}";
         }
-    }
-
-    private static string GetReaderComboTag(ComboBox comboBox, string fallback)
-        => (comboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? fallback;
-
-    private static void SelectReaderComboTag(ComboBox comboBox, string tag)
-    {
-        comboBox.SelectedItem = comboBox.Items
-            .OfType<ComboBoxItem>()
-            .FirstOrDefault(item => string.Equals(item.Tag as string, tag, StringComparison.OrdinalIgnoreCase));
     }
 }

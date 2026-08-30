@@ -1,7 +1,10 @@
 using Avalonia;
+using Avalonia.Animation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -55,6 +58,75 @@ public partial class MainWindow
     private bool _readerChapterPreviewAbove;
     private readonly Dictionary<string, string> _readerChapterPreviewTextCache = new(StringComparer.OrdinalIgnoreCase);
     private int _readerChapterPreviewRequestVersion;
+
+    // 目录列表的滚动条自动隐藏：滚动时淡入，静止约一秒后淡出，悬停条上
+    // 期间保持可见。Avalonia ScrollBar 自带的 AllowAutoHide 只跟随指针悬
+    // 停，滚轮滚动不会让滑块出现，所以这里直接驱动 Opacity。
+    private const int ReaderTocScrollBarIdleHideMs = 900;
+    private ScrollBar? _readerTocScrollBar;
+    private DispatcherTimer? _readerTocScrollBarHideTimer;
+
+    private void ReaderTocList_TemplateApplied(object? sender, TemplateAppliedEventArgs e)
+    {
+        if (_readerTocScrollBar is not null) return;
+        var scrollViewer = FindDescendants<ScrollViewer>(ReaderTocList).FirstOrDefault();
+        var scrollBar = FindDescendants<ScrollBar>(ReaderTocList)
+            .FirstOrDefault(candidate => candidate.Orientation == Orientation.Vertical);
+        if (scrollViewer is null || scrollBar is null) return;
+
+        _readerTocScrollBar = scrollBar;
+        scrollBar.Transitions = new Transitions
+        {
+            new DoubleTransition
+            {
+                Property = Visual.OpacityProperty,
+                Duration = TimeSpan.FromMilliseconds(180)
+            }
+        };
+        scrollBar.Opacity = 0;
+        scrollViewer.ScrollChanged += ReaderTocScrollViewer_ScrollChangedForBar;
+        scrollBar.PointerEntered += (_, _) => ShowReaderTocScrollBar();
+        scrollBar.PointerExited += (_, _) => ScheduleReaderTocScrollBarHide();
+    }
+
+    private void ReaderTocScrollViewer_ScrollChangedForBar(object? sender, ScrollChangedEventArgs e)
+    {
+        if (e.OffsetDelta.Y != 0) ShowReaderTocScrollBar();
+    }
+
+    private void ShowReaderTocScrollBar()
+    {
+        if (_readerTocScrollBar is not { } scrollBar) return;
+        scrollBar.Opacity = 1;
+        EnsureReaderTocScrollBarHideTimer().Stop();
+        EnsureReaderTocScrollBarHideTimer().Start();
+    }
+
+    private void ScheduleReaderTocScrollBarHide()
+    {
+        if (_readerTocScrollBar is not { IsPointerOver: false }) return;
+        EnsureReaderTocScrollBarHideTimer().Stop();
+        EnsureReaderTocScrollBarHideTimer().Start();
+    }
+
+    private DispatcherTimer EnsureReaderTocScrollBarHideTimer()
+    {
+        if (_readerTocScrollBarHideTimer is not null) return _readerTocScrollBarHideTimer;
+        _readerTocScrollBarHideTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(ReaderTocScrollBarIdleHideMs)
+        };
+        _readerTocScrollBarHideTimer.Tick += (_, _) =>
+        {
+            _readerTocScrollBarHideTimer!.Stop();
+            if (_readerTocScrollBar is not { } scrollBar) return;
+            if (scrollBar.IsPointerOver)
+                scrollBar.Opacity = 1;
+            else
+                scrollBar.Opacity = 0;
+        };
+        return _readerTocScrollBarHideTimer;
+    }
 
     private void ReaderTocMinimalToggleButton_Click(object? sender, RoutedEventArgs e)
     {

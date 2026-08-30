@@ -55,7 +55,8 @@ public sealed class TypesetPainter
         IReadOnlyList<SKRect>? highlightBands = null,
         IReadOnlyList<SKRect>? searchBands = null,
         IReadOnlyList<TypesetAnnotationOverlay>? annotationOverlays = null,
-        bool showVerticalDebugBoxes = false)
+        bool showVerticalDebugBoxes = false,
+        IReadOnlyList<SKRect>? focusedSearchBands = null)
     {
         using var background = new SKPaint { Color = _theme.Background, Style = SKPaintStyle.Fill };
         canvas.DrawRect(0, 0, page.Width, page.Height, background);
@@ -71,6 +72,8 @@ public sealed class TypesetPainter
 
         if (searchBands is not null)
         {
+            // Secondary search hits stay on the muted paper-tone band with
+            // ordinary text so the focused hit stands out.
             using var mark = new SKPaint { Color = _theme.SearchMark, Style = SKPaintStyle.Fill };
             foreach (var band in searchBands)
             {
@@ -78,7 +81,21 @@ public sealed class TypesetPainter
             }
         }
 
-        PaintAnnotationMarkers(canvas, annotationOverlays);
+        if (focusedSearchBands is not null)
+        {
+            // The focused search hit (Ctrl+F current match, or every hit of a
+            // whole-book result jump when no focus exists) uses the same
+            // black-white inversion as the selection: an ink band whose
+            // glyphs repaint in the paper colour, so the keyword stays
+            // findable in dense vertical body text.
+            using var mark = new SKPaint { Color = _theme.Selection, Style = SKPaintStyle.Fill };
+            foreach (var band in focusedSearchBands)
+            {
+                canvas.DrawRect(band, mark);
+            }
+        }
+
+        var markerBands = PaintAnnotationMarkers(canvas, annotationOverlays);
 
         using var rulePaint = new SKPaint { Color = _theme.Rule, Style = SKPaintStyle.Fill, IsAntialias = true };
         foreach (var decoration in page.Decorations)
@@ -116,9 +133,31 @@ public sealed class TypesetPainter
             }
         }
 
-        // Selection is painted between the text background and the glyphs with
-        // inverted glyph color, matching the WebKit reader's black-on-white
-        // inverted selection.
+        // Selection, the focused search hit and annotation markers are
+        // painted between the text background and the glyphs with inverted
+        // glyph color, matching the WebKit reader's black-on-white inverted
+        // selection.
+        var inversionBands = new List<SKRect>();
+        if (selectionBands is { Count: > 0 })
+        {
+            inversionBands.AddRange(selectionBands);
+        }
+
+        if (focusedSearchBands is { Count: > 0 })
+        {
+            inversionBands.AddRange(focusedSearchBands);
+        }
+
+        if (markerBands.Count > 0)
+        {
+            inversionBands.InsertRange(0, markerBands);
+        }
+
+        if (inversionBands.Count == 0)
+        {
+            inversionBands = null;
+        }
+
         if (selectionBands is { Count: > 0 } bands)
         {
             using var selection = new SKPaint { Color = _theme.Selection, Style = SKPaintStyle.Fill };
@@ -127,7 +166,6 @@ public sealed class TypesetPainter
                 canvas.DrawRect(band, selection);
             }
         }
-
         using var textFill = new SKPaint
         {
             Color = _theme.Text,
@@ -176,15 +214,15 @@ public sealed class TypesetPainter
             var syntheticBold = run.SyntheticBold || run.Style.Bold;
             DrawPlacedBlob(canvas, run, font, blob, textFill, syntheticBold, run.FontSize * run.Scale);
 
-            // Paint only selected glyphs in the inverted color. The old
-            // implementation inverted every run on a page as soon as a
-            // selection existed, making unrelated text unreadable.
-            if (selectionBands is { Count: > 0 } selection)
+            // Paint only selected or marker-covered glyphs in the inverted
+            // color. The old implementation inverted every run on a page as
+            // soon as a selection existed, making unrelated text unreadable.
+            if (inversionBands is not null)
             {
                 for (var glyphIndex = 0; glyphIndex < glyphCount; glyphIndex++)
                 {
                     var glyphRect = ChapterLayoutInteraction.GetGlyphRect(page, run, glyphIndex);
-                    if (!selection.Any(band => band.IntersectsWith(glyphRect)))
+                    if (!inversionBands.Any(band => band.IntersectsWith(glyphRect)))
                     {
                         continue;
                     }
@@ -249,34 +287,43 @@ public sealed class TypesetPainter
         IsAntialias = true,
     };
 
-    private static void PaintAnnotationMarkers(
+    private List<SKRect> PaintAnnotationMarkers(
         SKCanvas canvas,
         IReadOnlyList<TypesetAnnotationOverlay>? overlays)
     {
+        var bands = new List<SKRect>();
         if (overlays is not { Count: > 0 })
         {
-            return;
+            return bands;
         }
 
+        // The 荧光标记（黑白反色） style is a black-white inversion: a solid
+        // ink band whose glyphs are repainted in the paper colour, exactly
+        // like the selection rendering below.
+        using var marker = new SKPaint
+        {
+            Color = _theme.Selection,
+            Style = SKPaintStyle.Fill,
+            IsAntialias = true,
+        };
         foreach (var overlay in overlays)
         {
-            if (NormalizeAnnotationStyle(overlay.Style) == "marker")
+            if (NormalizeAnnotationStyle(overlay.Style) != "marker")
             {
-                using var marker = new SKPaint
+                continue;
+            }
+
+            foreach (var band in overlay.Bands)
+            {
+                if (band.Width > 0 && band.Height > 0)
                 {
-                    Color = WithAlpha(overlay.Color, 72),
-                    Style = SKPaintStyle.Fill,
-                    IsAntialias = true,
-                };
-                foreach (var band in overlay.Bands)
-                {
-                    if (band.Width > 0 && band.Height > 0)
-                    {
-                        canvas.DrawRect(band, marker);
-                    }
+                    canvas.DrawRect(band, marker);
+                    bands.Add(band);
                 }
             }
         }
+
+        return bands;
     }
 
     private static void PaintAnnotationUnderlines(
@@ -514,9 +561,6 @@ public sealed class TypesetPainter
             "marker" => "marker",
             _ => "solid",
         };
-
-    private static SKColor WithAlpha(SKColor color, byte alpha) =>
-        new(color.Red, color.Green, color.Blue, alpha);
 
     private static void DrawPlacedImage(SKCanvas canvas, SKImage image, PlacedImage placed)
     {

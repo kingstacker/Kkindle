@@ -70,8 +70,8 @@ public sealed class ReaderPaginationTests
     }
 
     [Theory]
-    [InlineData(1, 100, 200, 100)]
-    [InlineData(-1, 100, 200, 200)]
+    [InlineData(1, 100, 200, 101)]
+    [InlineData(-1, 100, 200, 199)]
     [InlineData(0, 100, 200, -1)]
     [InlineData(1, -1, -1, -1)]
     public void SelectionPagingUsesTheTargetPageBoundaryAsTheCaretEndpoint(

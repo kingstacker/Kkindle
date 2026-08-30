@@ -169,7 +169,10 @@
                         <Binding Path="IsVisible" ElementName="DoubanPreviewOverlay" />
                         <Binding Path="IsVisible" ElementName="ImportFormatSelectionOverlay" />
                         <Binding Path="IsVisible" ElementName="MessageOverlay" />
-                        <Binding Path="IsOpen" ElementName="ReaderLayoutSettingsPopup" />
+                        <!-- ReaderLayoutSettingsPopup is intentionally absent:
+                             its own dim overlay is a native popup window that
+                             already covers the caption column; adding it here
+                             stacks a second mask and darkens the corner. -->
                     </MultiBinding>
                 </Border.IsVisible>
             </Border>
@@ -3332,6 +3335,7 @@
                             <ListBox x:Name="ReaderTocList"
                                      Classes="readerTocList"
                                      Background="#FFFFFF"
+                                     TemplateApplied="ReaderTocList_TemplateApplied"
                                      SelectionChanged="ReaderTocList_SelectionChanged">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate x:DataType="infra:EpubReaderNavigationItem">
@@ -3778,6 +3782,33 @@
                         <ContentControl x:Name="ReaderPreloadHostSlot"
                                         HorizontalContentAlignment="Stretch"
                                         VerticalContentAlignment="Stretch" />
+                        <!-- Native page-turn transition overlay for the
+                             self-drawn reader surface. The captured old-page
+                             snapshot sits above the live content while fade,
+                             slide or e-ink wave animations reveal the new
+                             page; the band/edge rectangles are driven by
+                             ReaderTransitionPlayer. -->
+                        <Panel x:Name="ReaderNativeTransitionLayer"
+                               IsHitTestVisible="False"
+                               ClipToBounds="True"
+                               ZIndex="25">
+                            <Image x:Name="ReaderNativeTransitionGhost"
+                                   IsHitTestVisible="False"
+                                   IsVisible="False" />
+                            <Image x:Name="ReaderNativeTransitionSnapshot"
+                                   IsHitTestVisible="False"
+                                   IsVisible="False" />
+                            <Rectangle x:Name="ReaderNativeTransitionTrail"
+                                       IsHitTestVisible="False"
+                                       IsVisible="False" />
+                            <Rectangle x:Name="ReaderNativeTransitionFront"
+                                       IsHitTestVisible="False"
+                                       IsVisible="False" />
+                            <Rectangle x:Name="ReaderNativeTransitionEdge"
+                                       IsHitTestVisible="False"
+                                       IsVisible="False"
+                                       Fill="#22000000" />
+                        </Panel>
                         <!-- Chapter-switch hold layer: freezes the outgoing page
                              bitmap above the webview while the next chapter is
                              loading and configuring, so the reader never shows
@@ -3929,7 +3960,7 @@
                                  sits above the live content while fade, slide or
                                  e-ink wave animations reveal the new page; the
                                  band/edge rectangles are driven by
-                                 ReaderLinuxFallbackTransitionPlayer. -->
+                                 ReaderTransitionPlayer. -->
                             <Panel x:Name="ReaderLinuxTextFallbackTransitionLayer"
                                    IsVisible="True"
                                    IsHitTestVisible="False"
@@ -4182,7 +4213,7 @@
                                       Height="12"
                                       Data="M 9,1.5 L 3,6 L 9,10.5"
                                       Stroke="{StaticResource InkBrush}"
-                                      StrokeThickness="1.35"
+                                      StrokeThickness="0.85"
                                       StrokeLineCap="Square"
                                       StrokeJoin="Miter"
                                       IsHitTestVisible="False" />
@@ -4205,8 +4236,8 @@
                     </Grid>
 
                     <Grid Grid.Row="2">
-                        <Grid x:Name="ReaderAiView">
-                            <ScrollViewer x:Name="ReaderAiScrollViewer" Padding="20,18,20,22" VerticalScrollBarVisibility="Auto">
+                        <Grid x:Name="ReaderAiView" RowDefinitions="*,Auto">
+                            <ScrollViewer x:Name="ReaderAiScrollViewer" Padding="20,18,20,8" VerticalScrollBarVisibility="Auto">
                                 <StackPanel Spacing="18">
                                     <StackPanel x:Name="ReaderAiEmptyState" Spacing="4">
                                         <TextBlock Text="基于当前选文和本地书籍索引对话"
@@ -4259,89 +4290,73 @@
                                     </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
+                            <Grid x:Name="ReaderAiComposer" Grid.Row="1" RowDefinitions="Auto,Auto" RowSpacing="12" Margin="20,8,20,14">
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="思考深度" FontSize="11" />
+                                        <ComboBox x:Name="ReaderAiReasoningDepthBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" SelectionChanged="ReaderAiReasoningDepthBox_SelectionChanged" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="5">
+                                        <TextBlock Text="模型" FontSize="11" />
+                                        <ComboBox x:Name="ReaderAiModelSelectorBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" PlaceholderText="选择模型" SelectionChanged="ReaderAiModelSelectorBox_SelectionChanged" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBox x:Name="ReaderAiQuestionBox"
+                                         Grid.Row="1"
+                                         Classes="readerMinimalField"
+                                         MinHeight="130"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         PlaceholderText="询问这本书…（Ctrl+Enter 发送）"
+                                         KeyDown="ReaderAiQuestionBox_KeyDown" />
+                            </Grid>
                         </Grid>
 
-                        <Grid x:Name="ReaderNotesView" IsVisible="False">
-                            <ScrollViewer Padding="20,18,20,22" VerticalScrollBarVisibility="Auto">
+                        <Grid x:Name="ReaderNotesView" IsVisible="False" RowDefinitions="*,Auto">
+                            <ScrollViewer Grid.Row="0" Padding="20,18,20,12" VerticalScrollBarVisibility="Auto">
                                 <StackPanel Spacing="16">
-                                    <TextBlock Text="为正文中选中的文字添加划线和笔记。批注仅保存在本机。"
+                                    <TextBlock x:Name="ReaderAnnotationEmptyText"
+                                               Text="本书还没有划线或批注。在正文中选中文字后即可创建。"
                                                FontSize="11"
                                                Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <Border Padding="2,8"
-                                            Background="Transparent"
-                                            BorderBrush="{StaticResource HairlineBrush}"
-                                            BorderThickness="0,0,0,1"
-                                            CornerRadius="0">
-                                        <TextBlock x:Name="ReaderAnnotationSelectionText"
-                                                   Text="请先在正文中选择一段文字，再点击顶部“批注”。"
-                                                   FontSize="12"
-                                                   MaxHeight="80"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   TextWrapping="Wrap" />
-                                    </Border>
-                                    <TextBox x:Name="ReaderAnnotationNoteBox"
-                                             Classes="readerMinimalField"
-                                             MinHeight="76"
-                                             AcceptsReturn="True"
-                                             TextWrapping="Wrap"
-                                             PlaceholderText="写下对这段文字的想法（可留空）" />
-                                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                                        <StackPanel Spacing="5">
-                                            <TextBlock Text="划线颜色" FontSize="11" />
-                                            <ComboBox x:Name="ReaderAnnotationColorBox" Classes="readerMinimalField" SelectedIndex="0" MinHeight="32" FontSize="10">
-                                                <ComboBoxItem Content="黑色" Tag="#000000" />
-                                                <ComboBoxItem Content="黄色" Tag="#F1C40F" />
-                                                <ComboBoxItem Content="蓝色" Tag="#4A90E2" />
-                                                <ComboBoxItem Content="绿色" Tag="#38A169" />
-                                                <ComboBoxItem Content="红色" Tag="#D95F76" />
-                                            </ComboBox>
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Spacing="5">
-                                            <TextBlock Text="线条样式" FontSize="11" />
-                                            <ComboBox x:Name="ReaderAnnotationStyleBox" Classes="readerMinimalField" SelectedIndex="0" MinHeight="32" FontSize="10">
-                                                <ComboBoxItem Content="直线" Tag="solid" />
-                                                <ComboBoxItem Content="双线" Tag="double" />
-                                                <ComboBoxItem Content="虚线" Tag="dashed" />
-                                                <ComboBoxItem Content="点线" Tag="dotted" />
-                                                <ComboBoxItem Content="波浪线" Tag="wavy" />
-                                                <ComboBoxItem Content="荧光标记（黑白反色）" Tag="marker" />
-                                            </ComboBox>
-                                        </StackPanel>
-                                    </Grid>
-                                    <Button Classes="readerMinimalAction" Content="保存划线与笔记" HorizontalAlignment="Stretch" Click="ReaderAnnotationSaveButton_Click" />
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                            <TextBlock Text="本书批注" FontSize="13" FontWeight="SemiBold" />
-                                            <TextBlock Text="点击条目回到正文" FontSize="9" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <Button x:Name="ReaderDeleteAnnotationButton"
-                                                Grid.Column="1"
-                                                Classes="readerMinimalAction"
-                                                Content="删除选中"
-                                                IsEnabled="False"
-                                                Click="ReaderDeleteAnnotationButton_Click" />
-                                    </Grid>
+                                               TextWrapping="Wrap"
+                                               IsVisible="False" />
                                     <ItemsControl x:Name="ReaderAnnotationList" ItemsSource="{Binding ReaderAnnotations}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="core:ReaderAnnotation">
-                                                <Button Classes="readerNoteItem"
-                                                        Margin="0,0,0,7"
-                                                        Tag="{Binding}"
-                                                        HorizontalContentAlignment="Stretch"
-                                                        Click="ReaderAnnotationItemButton_Click">
-                                                    <StackPanel Spacing="5" HorizontalAlignment="Stretch">
-                                                        <TextBlock Text="{Binding DisplayQuote}" FontSize="11" FontWeight="SemiBold" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
-                                                        <TextBlock Text="{Binding DisplayNote}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                </Button>
+                                                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,7">
+                                                    <Button Classes="readerNoteItem"
+                                                            Tag="{Binding}"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            Click="ReaderAnnotationItemButton_Click">
+                                                        <StackPanel Spacing="5" HorizontalAlignment="Stretch">
+                                                            <TextBlock Text="{Binding DisplayQuote}" FontSize="11" FontWeight="SemiBold" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding DisplayNote}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Column="1"
+                                                            Classes="icon"
+                                                            Width="30"
+                                                            MinWidth="30"
+                                                            Height="30"
+                                                            Margin="6,0,0,0"
+                                                            VerticalAlignment="Top"
+                                                            AutomationProperties.Name="删除这条批注"
+                                                            ToolTip.Tip="删除这条批注"
+                                                            Tag="{Binding}"
+                                                            Click="ReaderAnnotationItemDeleteButton_Click">
+                                                        <Path Width="10"
+                                                              Height="10"
+                                                              Data="M 1,1 L 9,9 M 9,1 L 1,9"
+                                                              Stroke="{StaticResource InkBrush}"
+                                                              StrokeThickness="1.2"
+                                                              StrokeLineCap="Square"
+                                                              IsHitTestVisible="False" />
+                                                    </Button>
+                                                </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                                        <Button Classes="readerMinimalAction" Content="导出 Markdown" HorizontalAlignment="Stretch" Click="ReaderExportMarkdownButton_Click" />
-                                        <Button Grid.Column="1" Classes="readerMinimalAction" Content="导出文本" HorizontalAlignment="Stretch" Click="ReaderExportTextButton_Click" />
-                                    </Grid>
                                     <TextBlock x:Name="ReaderExportStatusText" FontSize="10" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </ScrollViewer>
@@ -4404,37 +4419,23 @@
                         </ScrollViewer>
                     </Grid>
 
-                    <Border Grid.Row="3"
-                            Padding="20,14,20,18"
-                            BorderBrush="{StaticResource HairlineBrush}"
-                            BorderThickness="0,1,0,0">
-                        <Grid x:Name="ReaderAiComposer" RowDefinitions="Auto,Auto,Auto" RowSpacing="12">
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                                <StackPanel Spacing="5">
-                                    <TextBlock Text="思考深度" FontSize="11" />
-                                    <ComboBox x:Name="ReaderAiReasoningDepthBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" SelectionChanged="ReaderAiReasoningDepthBox_SelectionChanged" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="5">
-                                    <TextBlock Text="模型" FontSize="11" />
-                                    <ComboBox x:Name="ReaderAiModelSelectorBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" PlaceholderText="选择模型" SelectionChanged="ReaderAiModelSelectorBox_SelectionChanged" />
-                                </StackPanel>
-                            </Grid>
-                            <TextBox x:Name="ReaderAiQuestionBox"
-                                     Grid.Row="1"
-                                     Classes="readerMinimalField"
-                                     MinHeight="74"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     PlaceholderText="询问这本书…（Ctrl+Enter 发送）"
-                                     KeyDown="ReaderAiQuestionBox_KeyDown" />
-                            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                                <TextBlock Text="仅发送相关片段，不上传整本书" FontSize="9" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
+                    <!-- Bottom strip. No top hairline by design; the two bars
+                         measure 49 DIP tall (6 + 36 + 7). -->
+                    <Border Grid.Row="3">
+                        <Grid>
+                            <Grid x:Name="ReaderAiSendBar" Margin="20,6,20,7" IsVisible="False">
                                 <Button x:Name="ReaderAiSendButton"
-                                        Grid.Column="1"
                                         Classes="readerMinimalAction"
                                         Content="发送"
                                         MinWidth="66"
+                                        HorizontalAlignment="Right"
                                         Click="ReaderAiSendButton_Click" />
+                            </Grid>
+                            <Grid x:Name="ReaderNotesExportBar" Margin="20,6,20,7" IsVisible="False">
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                    <Button Classes="readerMinimalAction" Content="导出 Markdown" HorizontalAlignment="Stretch" Click="ReaderExportMarkdownButton_Click" />
+                                    <Button Grid.Column="1" Classes="readerMinimalAction" Content="导出文本" HorizontalAlignment="Stretch" Click="ReaderExportTextButton_Click" />
+                                </Grid>
                             </Grid>
                         </Grid>
                     </Border>
@@ -4455,7 +4456,7 @@
                         MaxHeight="760"
                         Background="{StaticResource PaperBrush}"
                         BorderBrush="#000000"
-                        BorderThickness="2"
+                        BorderThickness="1"
                         CornerRadius="0"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
@@ -4644,6 +4645,54 @@
                 </Border>
             </Popup>
 
+            <!-- In-body annotation editor: picking 批注 on a selection opens
+                 this small input window right at the selection instead of
+                 routing through the notes pane. It needs the same native
+                 popup treatment as the selection bar to paint over the
+                 HWND-backed reader surface. -->
+            <Popup x:Name="ReaderAnnotationInputPopup"
+                   IsOpen="False"
+                   IsLightDismissEnabled="True"
+                   OverlayDismissEventPassThrough="True"
+                   ShouldUseOverlayLayer="True"
+                   TakesFocusFromNativeControl="False"
+                   Closed="ReaderAnnotationInputPopup_Closed">
+                <Border x:Name="ReaderAnnotationInputPanel"
+                        Width="320"
+                        Padding="12"
+                        Background="{StaticResource PaperBrush}"
+                        BorderBrush="#000000"
+                        BorderThickness="1"
+                        CornerRadius="0">
+                    <StackPanel Spacing="10">
+                        <TextBlock x:Name="ReaderAnnotationInputQuote"
+                                   FontSize="11"
+                                   Foreground="{StaticResource MutedInkBrush}"
+                                   MaxHeight="40"
+                                   TextTrimming="CharacterEllipsis"
+                                   TextWrapping="Wrap" />
+                        <TextBox x:Name="ReaderAnnotationInputBox"
+                                 Classes="readerMinimalField"
+                                 MinHeight="64"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 PlaceholderText="写下批注（可留空，仅划线）"
+                                 KeyDown="ReaderAnnotationInputBox_KeyDown" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <Button Classes="readerMinimalAction"
+                                    Content="取消"
+                                    HorizontalAlignment="Stretch"
+                                    Click="ReaderAnnotationInputCancelButton_Click" />
+                            <Button Grid.Column="1"
+                                    Classes="readerMinimalAction"
+                                    Content="保存批注"
+                                    HorizontalAlignment="Stretch"
+                                    Click="ReaderAnnotationInputSaveButton_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Popup>
+
             <!-- A native popup keeps the footnote above the HWND-backed
                  WebView2 surface, matching the WinUI reference reader. -->
             <Popup x:Name="ReaderFootnoteHostPopup"
@@ -4670,6 +4719,45 @@
                                    FontSize="12"
                                    LineHeight="20"
                                    TextWrapping="Wrap" />
+                    </ScrollViewer>
+                </Border>
+            </Popup>
+
+            <!-- Annotation hover preview over the reading surface. Same native
+                 popup treatment as the footnote preview: the reading surface
+                 would cover an ordinary overlay. -->
+            <Popup x:Name="ReaderAnnotationHoverHostPopup"
+                   IsOpen="False"
+                   IsLightDismissEnabled="False"
+                   ShouldUseOverlayLayer="False"
+                   TakesFocusFromNativeControl="False"
+                   IsHitTestVisible="False">
+                <Border x:Name="ReaderAnnotationHoverPopup"
+                        Width="360"
+                        MaxHeight="260"
+                        Padding="12,10"
+                        Background="{StaticResource PaperBrush}"
+                        BorderBrush="#000000"
+                        BorderThickness="2"
+                        CornerRadius="0"
+                        IsHitTestVisible="False"
+                        IsVisible="False">
+                    <ScrollViewer MaxHeight="236"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="6">
+                            <TextBlock x:Name="ReaderAnnotationHoverQuote"
+                                       Foreground="{StaticResource InkBrush}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       LineHeight="20"
+                                       TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReaderAnnotationHoverNote"
+                                       Foreground="{StaticResource MutedInkBrush}"
+                                       FontSize="11"
+                                       LineHeight="18"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
                     </ScrollViewer>
                 </Border>
             </Popup>

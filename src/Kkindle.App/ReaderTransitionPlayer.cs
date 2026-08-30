@@ -8,14 +8,14 @@ using Avalonia.Threading;
 
 namespace Kkindle;
 
-/// <summary>Named overlay elements the fallback transition player drives.</summary>
+/// <summary>Named overlay elements the reader transition player drives.</summary>
 /// <param name="SnapshotSource">The live reader surface to photograph.</param>
 /// <param name="Snapshot">Image showing the outgoing frame.</param>
 /// <param name="Ghost">Reserved for future cross-fade layering.</param>
 /// <param name="Trail">Wave trailing band; doubles as fade backdrop veil.</param>
 /// <param name="Front">Wave leading band.</param>
 /// <param name="Edge">Slide edge shadow.</param>
-internal sealed record ReaderLinuxFallbackTransitionSurface(
+internal sealed record ReaderTransitionSurface(
     Visual SnapshotSource,
     Image Snapshot,
     Image Ghost,
@@ -25,17 +25,17 @@ internal sealed record ReaderLinuxFallbackTransitionSurface(
     IBrush? Backdrop);
 
 /// <summary>
-/// Native playback of the three reader page-turn animations on the Linux
-/// text-fallback surface: a RenderTargetBitmap of the outgoing frame is
-/// layered over the freshly rendered incoming frame and animated away with
-/// timings lifted from the WebView implementations — fade 300ms out / 360ms
-/// in, slide 430ms cubic-bezier(.38,0,.2,1), wave sweep
-/// Wave sweep duration (230 ms) plus a GhostTailMs residue.
+/// Native playback of the three reader page-turn animations: a
+/// RenderTargetBitmap of the outgoing frame is layered over the freshly
+/// rendered incoming frame and animated away with timings lifted from the
+/// WebView implementations — fade 300ms out / 360ms in, slide 430ms
+/// cubic-bezier(.38,0,.2,1), wave sweep 230 ms plus a ghost residue. Used by
+/// both the self-drawn reader surface and the Linux text-fallback surface.
 ///
 /// Snapshot capture failure degrades silently to an instant switch so a
 /// cosmetic hiccup can never block navigation.
 /// </summary>
-internal static class ReaderLinuxFallbackTransitionPlayer
+internal static class ReaderTransitionPlayer
 {
     // Mirrors the private ReaderAnimation* constants in MainWindow.
     internal const int AnimationNone = 0;
@@ -62,7 +62,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     private const int ZTop = 40;
 
     public static async Task<T> RunAsync<T>(
-        ReaderLinuxFallbackTransitionSurface surface,
+        ReaderTransitionSurface surface,
         int animation,
         int visualDirection,
         Func<Task<T>> changeContentAsync,
@@ -103,7 +103,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     }
 
     private static async Task PlayFramesAsync(
-        ReaderLinuxFallbackTransitionSurface surface,
+        ReaderTransitionSurface surface,
         int animation,
         int visualDirection,
         CancellationToken cancellationToken)
@@ -141,7 +141,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     }
 
     private static bool DrawFrame(
-        ReaderLinuxFallbackTransitionSurface surface,
+        ReaderTransitionSurface surface,
         int animation,
         int visualDirection,
         double elapsed)
@@ -158,7 +158,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     /// <summary>Fade-through-background: old page dissolves over the veil,
     /// then the veil dissolves over the new page — same two beats as the
     /// WebView opacity transitions.</summary>
-    private static bool DrawFadeFrame(ReaderLinuxFallbackTransitionSurface surface, double elapsed)
+    private static bool DrawFadeFrame(ReaderTransitionSurface surface, double elapsed)
     {
         if (elapsed < FadeOutMs)
         {
@@ -179,7 +179,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     }
 
     private static bool DrawSlideFrame(
-        ReaderLinuxFallbackTransitionSurface surface,
+        ReaderTransitionSurface surface,
         int visualDirection,
         double elapsed)
     {
@@ -207,7 +207,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     }
 
     private static bool DrawWaveFrame(
-        ReaderLinuxFallbackTransitionSurface surface,
+        ReaderTransitionSurface surface,
         int visualDirection,
         double elapsed)
     {
@@ -283,7 +283,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
     }
 
     private static void Begin(
-        ReaderLinuxFallbackTransitionSurface surface,
+        ReaderTransitionSurface surface,
         RenderTargetBitmap snapshot,
         int animation)
     {
@@ -321,7 +321,7 @@ internal static class ReaderLinuxFallbackTransitionPlayer
         control.ZIndex = zIndex;
     }
 
-    private static void Reset(ReaderLinuxFallbackTransitionSurface surface)
+    private static void Reset(ReaderTransitionSurface surface)
     {
         ResetImage(surface.Snapshot, ZSnapshot);
         ResetImage(surface.Ghost, ZGhost);

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -53,15 +54,54 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private bool _selectionAutoPageTurnArmed;
     private int _selectionAutoPageTurnDirection;
 
+    /// <summary>How composed pages are presented in the viewport.</summary>
+    private enum ReaderPresentation
+    {
+        Single,
+        Spread,
+        Scroll,
+    }
+
+    private ReaderPresentation _presentation = ReaderPresentation.Single;
+
+    // The paragraph-indent flag is baked into the loaded blocks by the
+    // chapter loader, so a runtime toggle must re-run the load, not just the
+    // layout pass. Tracked to detect that change in Configure.
+    private bool _loadedParagraphIndent = true;
+
+    // Scroll-mode content offset in DIP from the chapter top. Composed pages
+    // stack vertically and the viewport slices one or two of them.
+    private double _scrollOffset;
+
     private static readonly TimeSpan SelectionAutoPageTurnDelay = TimeSpan.FromSeconds(1);
 
     private readonly Dictionary<string, int> _fragmentPagesByRequest = new(StringComparer.Ordinal);
     private int? _pendingRestoreOffset;
     private int? _pendingRestorePage;
+    private double? _pendingScrollOffset;
     private string? _pendingFragment;
     private bool _pendingSeekToEnd;
 
+    // Continuous-mode scrollbar overlay. A real ScrollBar visual child so
+    // thumb drags and track clicks work; kept out of the layout otherwise.
+    private readonly ScrollBar _scrollBar = new()
+    {
+        Orientation = Avalonia.Layout.Orientation.Vertical,
+        Width = 12,
+        Margin = new Thickness(0, 4, 2, 4),
+        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+        VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch,
+        IsVisible = false,
+    };
+    private bool _suppressScrollBarSync;
+
     private readonly List<ReaderAnnotation> _annotations = new();
+    private int _annotationsVersion;
+    private Guid? _hoveredAnnotationId;
+    private List<(ReaderAnnotation Annotation, IReadOnlyList<SKRect> Bands)>? _annotationHoverBands;
+    private int _annotationHoverBandsPage = -1;
+    private ChapterLayout? _annotationHoverBandsLayout;
+    private int _annotationHoverBandsVersion = -1;
     private List<(int Start, int Length)>? _searchHits;
     private int? _focusSearchHit;
 
@@ -86,6 +126,20 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         ClipToBounds = true;
         ReadyTask = _readyTcs.Task;
         _readyTcs.TrySetResult();
+        VisualChildren.Add(_scrollBar);
+        _scrollBar.Scroll += (_, args) =>
+        {
+            if (_suppressScrollBarSync) return;
+            _suppressScrollBarSync = true;
+            try
+            {
+                SetScrollOffset(args.NewValue);
+            }
+            finally
+            {
+                _suppressScrollBarSync = false;
+            }
+        };
         PropertyChanged += (_, args) =>
         {
             if (args.Property == BoundsProperty)
@@ -183,8 +237,28 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public bool IsNative => true;
 
-    /// <summary>The native EPUB surface is always page based.</summary>
-    public bool IsPaginated => true;
+    /// <summary>
+    /// True when the surface presents paginated pages. Horizontal scroll
+    /// mode scrolls continuously instead, so the surrounding pipeline treats
+    /// it like the WebView scroll reader (scroll-state saves, edge-driven
+    /// chapter advance, keyboard scrolling).
+    /// </summary>
+    public bool IsPaginated => _presentation != ReaderPresentation.Scroll;
+
+    private bool IsSpread => _presentation == ReaderPresentation.Spread;
+
+    private bool IsScroll => _presentation == ReaderPresentation.Scroll;
+
+    /// <summary>Composed pages turned per step: two for the spread layout.</summary>
+    private int PageStep => IsSpread ? 2 : 1;
+
+    private double ComposePageWidth(double viewportWidth) =>
+        IsSpread ? Math.Max(1, viewportWidth / 2) : viewportWidth;
+
+    private double MaxScrollOffset =>
+        Math.Max(0, (_layout?.Pages.Count ?? 0) * Math.Max(1, Bounds.Height) - Math.Max(1, Bounds.Height));
+
+    private double ClampScrollOffset(double value) => Math.Clamp(value, 0, MaxScrollOffset);
 
     public int PageCount => _layout?.Pages.Count ?? 0;
 
@@ -204,13 +278,22 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         bool restoreFromProgress,
         bool showVerticalDebugBoxes)
     {
+        var indentChanged = _content is not null
+            && Source is not null
+            && settings.ParagraphIndent != _loadedParagraphIndent;
         var settingsChanged = SettingsChanged(settings);
+        _presentation = DerivePresentation(settings);
         _settings = settings;
         _showVerticalDebugBoxes = showVerticalDebugBoxes;
 
         if (_content is not null && (settingsChanged || _layout is null || _composePending))
         {
             Recompose();
+        }
+
+        if (indentChanged)
+        {
+            ReloadChapterForIndentChange();
         }
 
         // A saved progress position is authoritative when it exists. The
@@ -226,7 +309,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             _pendingRestoreOffset = null;
             _pendingRestorePage = null;
             _pendingSeekToEnd = false;
-            if (Vertical)
+            _pendingScrollOffset = null;
+            if (IsScroll)
+            {
+                // Continuous mode saves an absolute content offset.
+                _pendingScrollOffset = Math.Max(0, scrollPosition);
+            }
+            else if (Vertical)
             {
                 _pendingRestoreOffset = (int)Math.Round(Math.Max(0, scrollPosition));
             }
@@ -240,6 +329,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             _pendingRestoreOffset = null;
             _pendingRestorePage = null;
             _pendingSeekToEnd = false;
+            _pendingScrollOffset = null;
+            if (!IsScroll)
+            {
+                _scrollOffset = 0;
+            }
         }
 
         ApplyPendingPosition();
@@ -248,6 +342,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         EmitScroll();
         return Task.CompletedTask;
     }
+
+    private static ReaderPresentation DerivePresentation(ReaderLayoutSettings settings) =>
+        settings.VerticalWriting
+            ? ReaderPresentation.Single
+            : settings.FlowMode == 0
+                ? ReaderPresentation.Scroll
+                : settings.TwoPageMode ? ReaderPresentation.Spread : ReaderPresentation.Single;
 
     /// <summary>Chapter-boundary positioning: the first page or the last full page.</summary>
     public void SeekToBoundary(bool toEnd)
@@ -258,7 +359,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return;
         }
 
+        if (IsScroll)
+        {
+            SetScrollOffset(toEnd ? MaxScrollOffset : 0);
+            return;
+        }
+
         _pageIndex = toEnd ? Math.Max(0, _layout.Pages.Count - 1) : 0;
+        if (IsSpread)
+        {
+            _pageIndex -= _pageIndex % 2;
+        }
+
         _bitmapDirty = true;
         InvalidateVisual();
         EmitScroll();
@@ -273,6 +385,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var page = _layout.GetPageIndexOfOffset(offset);
+        if (IsScroll)
+        {
+            // Continuous mode jumps to the top of the hit's page.
+            SetScrollOffset(Math.Max(0, page) * Math.Max(1, Bounds.Height));
+            return;
+        }
+
+        if (IsSpread && page > 0)
+        {
+            page -= page % 2;
+        }
+
         if (page >= 0 && page != _pageIndex)
         {
             _pageIndex = page;
@@ -292,6 +416,17 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var page = _layout.GetPageIndexOfFragment(fragmentId);
+        if (IsScroll)
+        {
+            SetScrollOffset(Math.Max(0, page) * Math.Max(1, Bounds.Height));
+            return;
+        }
+
+        if (IsSpread && page > 0)
+        {
+            page -= page % 2;
+        }
+
         if (page >= 0 && page != _pageIndex)
         {
             _pageIndex = page;
@@ -303,10 +438,17 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     /// <summary>
     /// Seeks by a persisted horizontal pixel scroll (page stride × index).
-    /// In vertical writing the persisted value is a character offset instead.
+    /// In vertical writing the persisted value is a character offset instead;
+    /// in horizontal scroll mode it is the absolute content offset.
     /// </summary>
     public void SeekToPixelScroll(double pixelScroll)
     {
+        if (IsScroll)
+        {
+            SetScrollOffset(pixelScroll);
+            return;
+        }
+
         if (Vertical)
         {
             ScrollToOffset((int)Math.Max(0, pixelScroll));
@@ -327,7 +469,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return;
         }
 
+        if (IsScroll)
+        {
+            SetScrollOffset(Math.Clamp(ratio, 0, 1) * MaxScrollOffset);
+            return;
+        }
+
         var page = (int)Math.Clamp(Math.Round(ratio * (_layout.Pages.Count - 1)), 0, _layout.Pages.Count - 1);
+        if (IsSpread)
+        {
+            page -= page % 2;
+        }
+
         if (page != _pageIndex)
         {
             _pageIndex = page;
@@ -340,12 +493,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// <summary>True when the page turn stays inside the chapter.</summary>
     public bool CanTurn(int direction)
     {
+        if (IsScroll)
+        {
+            // Continuous mode scrolls instead of turning.
+            return false;
+        }
+
         if (_layout is null || _layout.Pages.Count == 0)
         {
             return false;
         }
 
-        var target = _pageIndex + direction;
+        var target = _pageIndex + direction * PageStep;
         return target >= 0 && target < _layout.Pages.Count;
     }
 
@@ -357,17 +516,63 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return false;
         }
 
-        _pageIndex += direction;
+        _pageIndex += direction * PageStep;
+        if (IsSpread)
+        {
+            _pageIndex -= _pageIndex % 2;
+        }
+
         _bitmapDirty = true;
         InvalidateVisual();
         EmitScroll();
         return true;
     }
 
+    /// <summary>Scrolls the continuous surface by wheel/keyboard pixels.</summary>
+    public void ScrollByPixel(double delta)
+    {
+        if (!IsScroll)
+        {
+            return;
+        }
+
+        var next = ClampScrollOffset(_scrollOffset + delta);
+        var edge = next <= 0 && delta < 0
+            ? -1
+            : next >= MaxScrollOffset && delta > 0
+                ? 1
+                : 0;
+        SetScrollOffset(next);
+        if (edge != 0)
+        {
+            // Chapter edge reached while scrolling: hand the direction to the
+            // host pipeline so the next/previous chapter takes over, exactly
+            // like the WebView continuous reader's edge report.
+            Emit(new { type = "continuousEdge", direction = edge });
+        }
+    }
+
+    private void SetScrollOffset(double value)
+    {
+        var next = ClampScrollOffset(value);
+        if (Math.Abs(next - _scrollOffset) < 0.01)
+        {
+            _scrollOffset = next;
+            return;
+        }
+
+        _scrollOffset = next;
+        _bitmapDirty = true;
+        InvalidateVisual();
+        EmitScroll();
+    }
+
     public void SetAnnotations(IReadOnlyList<ReaderAnnotation> annotations)
     {
         _annotations.Clear();
         _annotations.AddRange(annotations);
+        _annotationsVersion++;
+        _hoveredAnnotationId = null;
         _bitmapDirty = true;
         InvalidateVisual();
     }
@@ -389,6 +594,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         if (_searchHits is { Count: > 0 } && index >= 0 && index < _searchHits.Count)
         {
+            if (_focusSearchHit != index)
+            {
+                // Moving the focus restyles the current hit (inverted) and
+                // the previous one (muted), so repaint even when the page
+                // does not change.
+                _focusSearchHit = index;
+                _bitmapDirty = true;
+                InvalidateVisual();
+            }
+
             ScrollToOffset(_searchHits[index].Start);
         }
     }
@@ -397,6 +612,14 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         var viewportWidth = Math.Max(1, Bounds.Width);
         var viewportHeight = Math.Max(1, Bounds.Height);
+        if (IsScroll)
+        {
+            var total = viewportHeight * Math.Max(1, PageCount);
+            var maximum = Math.Max(0, total - viewportHeight);
+            var top = Math.Clamp(_scrollOffset, 0, maximum);
+            return (top, maximum > 0 ? Math.Clamp(top / maximum, 0, 1) : 0, viewportWidth, total, viewportWidth, viewportHeight);
+        }
+
         if (Vertical)
         {
             var start = _layout is not null
@@ -409,7 +632,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return (start, Math.Clamp((double)start / total, 0, 1), total, viewportHeight, viewportWidth, viewportHeight);
         }
 
-        var stride = viewportWidth;
+        var stride = Math.Max(1, ComposePageWidth(viewportWidth));
         var scrollWidth = stride * Math.Max(1, PageCount);
         var left = _pageIndex * stride;
         var maxLeft = Math.Max(0, scrollWidth - stride);
@@ -420,36 +643,48 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         get
         {
+            if (IsScroll)
+            {
+                return _scrollOffset;
+            }
+
             if (Vertical)
             {
                 return GetScrollState().Position;
             }
 
-            return CurrentPage * Math.Max(1, Bounds.Width);
+            return CurrentPage * ComposePageWidth(Math.Max(1, Bounds.Width));
         }
     }
 
     private int PageFromPixelScroll(double scrollPosition)
     {
-        var stride = Math.Max(1, Bounds.Width);
-        return (int)Math.Clamp(Math.Round(scrollPosition / stride), 0, Math.Max(0, PageCount - 1));
+        var stride = Math.Max(1, ComposePageWidth(Math.Max(1, Bounds.Width)));
+        var page = (int)Math.Clamp(Math.Round(scrollPosition / stride), 0, Math.Max(0, PageCount - 1));
+        if (IsSpread)
+        {
+            page -= page % 2;
+        }
+
+        return page;
     }
 
     public string? BodyText => _content?.BodyText;
 
-    /// <summary>Returns a short quote from the currently visible native page.</summary>
+    /// <summary>Returns a short quote from the first visible composed page.</summary>
     public string? GetCurrentPageQuote(int maxLength = 72)
     {
+        var pageIndex = VisibleFirstPageIndex;
         if (_content is null
             || _layout is null
-            || _pageIndex < 0
-            || _pageIndex >= _layout.Pages.Count
+            || pageIndex < 0
+            || pageIndex >= _layout.Pages.Count
             || maxLength <= 0)
         {
             return null;
         }
 
-        var page = _layout.Pages[_pageIndex];
+        var page = _layout.Pages[pageIndex];
         if (page.TextStartOffset < 0 || page.TextEndOffset <= page.TextStartOffset)
         {
             return null;
@@ -484,6 +719,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         || Math.Abs(settings.MaxWidth - _settings.MaxWidth) > 0.001
         || settings.VerticalWriting != _settings.VerticalWriting
         || settings.ParagraphIndent != _settings.ParagraphIndent
+        || settings.FlowMode != _settings.FlowMode
+        || settings.TwoPageMode != _settings.TwoPageMode
         || Math.Abs(settings.BodyPadding - _settings.BodyPadding) > 0.001;
 
     private void NavigateCore(string chapterPath, string? fragment)
@@ -506,11 +743,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _hasLastPointerPosition = false;
         _searchHits = null;
         _pageIndex = 0;
+        _scrollOffset = 0;
+        _pendingScrollOffset = null;
 
         // Compose off the UI thread; layout and shaping are pure CPU work on
         // engine-owned state, and the result is applied back on the UI thread.
         var settings = _settings;
-        var width = Math.Max(1, Bounds.Width);
+        var width = Math.Max(1, ComposePageWidth(Bounds.Width));
         var height = Math.Max(1, Bounds.Height);
         var startingArgs = new ReaderNavigationStartingEventArgs(navigationSource);
         NavigationStarting?.Invoke(this, startingArgs);
@@ -545,6 +784,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 _content = composed.content;
                 _options = composed.options;
                 _layout = composed.layout;
+                _loadedParagraphIndent = settings.ParagraphIndent;
                 _composePending = false;
                 _bitmapDirty = true;
                 _pageIndex = 0;
@@ -736,6 +976,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             }
         }
 
+        if (_pendingScrollOffset is { } pendingScroll)
+        {
+            _scrollOffset = ClampScrollOffset(pendingScroll);
+            _pendingScrollOffset = null;
+            return;
+        }
+
         if (_pendingRestoreOffset is { } offset)
         {
             var offsetPage = _layout.GetPageIndexOfOffset(Math.Clamp(offset, 0, Math.Max(0, _layout.BodyTextLength - 1)));
@@ -766,6 +1013,76 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         {
             return fragment;
         }
+    }
+
+    /// <summary>
+    /// Re-runs the chapter load for a paragraph-indent toggle. The indent is
+    /// applied by the loader when blocks are built, so Recompose alone never
+    /// changes it. The reading position is re-armed as a pending restore;
+    /// those fields are written after NavigateCore because it clears them.
+    /// </summary>
+    private void ReloadChapterForIndentChange()
+    {
+        if (Source is null || _disposed)
+        {
+            return;
+        }
+
+        // Capture the reading position first: NavigateCore resets the page
+        // index while the old layout stays valid until the reload applies.
+        double scrollOffset = 0;
+        int? restoreOffset = null;
+        var restorePage = 0;
+        if (IsScroll)
+        {
+            scrollOffset = _scrollOffset;
+        }
+        else if (Vertical)
+        {
+            if (_layout is not null
+                && _pageIndex >= 0
+                && _pageIndex < _layout.Pages.Count
+                && _layout.Pages[_pageIndex].TextStartOffset >= 0)
+            {
+                restoreOffset = _layout.Pages[_pageIndex].TextStartOffset;
+            }
+        }
+        else
+        {
+            restorePage = _pageIndex;
+        }
+
+        var uri = Source;
+        var path = uri.IsFile ? uri.LocalPath : uri.AbsolutePath;
+        string? fragment = null;
+        if (!string.IsNullOrWhiteSpace(uri.Fragment))
+        {
+            try
+            {
+                fragment = Uri.UnescapeDataString(uri.Fragment.TrimStart('#'));
+            }
+            catch (UriFormatException)
+            {
+                fragment = uri.Fragment.TrimStart('#');
+            }
+        }
+
+        NavigateCore(path, fragment);
+
+        if (IsScroll)
+        {
+            _pendingScrollOffset = scrollOffset;
+        }
+        else if (Vertical)
+        {
+            _pendingRestoreOffset = restoreOffset;
+        }
+        else
+        {
+            _pendingRestorePage = restorePage;
+        }
+
+        _loadedParagraphIndent = _settings.ParagraphIndent;
     }
 
     // ---- rendering --------------------------------------------------------
@@ -801,7 +1118,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return;
         }
 
-        var width = Math.Max(1, Bounds.Width);
+        var width = Math.Max(1, ComposePageWidth(Bounds.Width));
         var height = Math.Max(1, Bounds.Height);
         var startOffset = _layout is not null
             && _pageIndex < _layout.Pages.Count
@@ -813,10 +1130,27 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _layout = Compose(_content, options);
         _composePending = false;
 
-        if (startOffset >= 0)
+        if (IsScroll)
         {
-            var page = _layout.GetPageIndexOfOffset(startOffset);
-            _pageIndex = page >= 0 ? page : 0;
+            _scrollOffset = ClampScrollOffset(_scrollOffset);
+        }
+        else
+        {
+            if (IsSpread)
+            {
+                _pageIndex -= _pageIndex % 2;
+            }
+
+            if (startOffset >= 0)
+            {
+                var page = _layout.GetPageIndexOfOffset(startOffset);
+                if (IsSpread && page > 0)
+                {
+                    page -= page % 2;
+                }
+
+                _pageIndex = page >= 0 ? page : 0;
+            }
         }
     }
 
@@ -868,10 +1202,6 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return;
         }
 
-        var page = _pageIndex >= 0 && _pageIndex < _layout.Pages.Count
-            ? _layout.Pages[_pageIndex]
-            : null;
-
         using var frame = _bitmap.Lock();
         var info = new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
         using var surface = SKSurface.Create(info, frame.Address, frame.RowBytes);
@@ -881,17 +1211,57 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var canvas = surface.Canvas;
-        if (page is null)
+        canvas.Clear(SKColors.White);
+        canvas.Save();
+        canvas.Scale((float)scaling);
+
+        switch (_presentation)
         {
-            canvas.Clear(SKColors.White);
+            case ReaderPresentation.Spread:
+            {
+                // Two half-width composed pages fill the viewport side by side.
+                var half = (float)(Math.Max(1, Bounds.Width) / 2);
+                PaintPage(canvas, _pageIndex, 0f, 0f);
+                PaintPage(canvas, _pageIndex + 1, half, 0f);
+                break;
+            }
+            case ReaderPresentation.Scroll:
+            {
+                // Composed pages stack vertically; paint the two slices that
+                // intersect the viewport at the scroll offset.
+                var pageHeight = (float)Math.Max(1, Bounds.Height);
+                var first = (int)(_scrollOffset / pageHeight);
+                var slice = (float)(_scrollOffset - first * pageHeight);
+                PaintPage(canvas, first, 0f, -slice);
+                PaintPage(canvas, first + 1, 0f, pageHeight - slice);
+                break;
+            }
+            default:
+                PaintPage(canvas, _pageIndex, 0f, 0f);
+                break;
+        }
+
+        canvas.Restore();
+        canvas.Flush();
+    }
+
+    private void PaintPage(SKCanvas canvas, int pageIndex, float offsetX, float offsetY)
+    {
+        if (_layout is null
+            || _options is null
+            || pageIndex < 0
+            || pageIndex >= _layout.Pages.Count)
+        {
             return;
         }
 
+        var page = _layout.Pages[pageIndex];
         canvas.Save();
-        canvas.Scale((float)scaling);
+        canvas.Translate(offsetX, offsetY);
         var selectionBands = SelectionBandsFor(page);
         var annotationOverlays = AnnotationOverlaysFor(page);
         var searchBands = SearchBandsFor(page);
+        var focusedSearchBands = FocusedSearchBandsFor(page);
         lock (_engineGate)
         {
             var painter = new TypesetPainter(Engine.Fonts, TypesetPaintTheme.Paper, ResolveImage);
@@ -902,10 +1272,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 highlightBands: null,
                 searchBands: searchBands,
                 annotationOverlays: annotationOverlays,
-                showVerticalDebugBoxes: _showVerticalDebugBoxes);
+                showVerticalDebugBoxes: _showVerticalDebugBoxes,
+                focusedSearchBands: focusedSearchBands);
         }
+
         canvas.Restore();
-        canvas.Flush();
     }
 
     private TypesetFontLibrary FontsForPainting => Engine.Fonts;
@@ -1022,6 +1393,45 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var bands = new List<SKRect>();
+        for (var index = 0; index < _searchHits.Count; index++)
+        {
+            // With a focused hit (Ctrl+F) the current match paints as the
+            // black-white inversion and the rest stay on the muted band.
+            if (_focusSearchHit is { } focus && index == focus)
+            {
+                continue;
+            }
+
+            bands.AddRange(_layout.GetOverlayRects(page.Index, _searchHits[index].Start, _searchHits[index].Length));
+        }
+
+        return bands.Count > 0 ? bands : null;
+    }
+
+    /// <summary>
+    /// Bands rendered as the black-white inversion: the focused Ctrl+F hit,
+    /// or — when no focus exists, as after a whole-book search jump — every
+    /// hit on the page.
+    /// </summary>
+    private IReadOnlyList<SKRect>? FocusedSearchBandsFor(LayoutPage page)
+    {
+        if (_searchHits is not { Count: > 0 } || _layout is null)
+        {
+            return null;
+        }
+
+        var bands = new List<SKRect>();
+        if (_focusSearchHit is { } focus
+            && focus >= 0
+            && focus < _searchHits.Count)
+        {
+            bands.AddRange(_layout.GetOverlayRects(
+                page.Index,
+                _searchHits[focus].Start,
+                _searchHits[focus].Length));
+            return bands.Count > 0 ? bands : null;
+        }
+
         foreach (var (start, length) in _searchHits)
         {
             bands.AddRange(_layout.GetOverlayRects(page.Index, start, length));
@@ -1041,12 +1451,17 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private void EmitScroll()
     {
+        SyncScrollBar();
         var state = GetScrollState();
+        // Scroll mode scrolls vertically like a web page, so the position is
+        // reported as scrollTop; paginated modes keep the horizontal bridge
+        // convention.
+        var scrollMode = IsScroll;
         Emit(new
         {
             type = "scroll",
-            top = 0.0,
-            left = state.Position,
+            top = scrollMode ? state.Position : 0.0,
+            left = scrollMode ? 0.0 : state.Position,
             scrollWidth = state.ScrollWidth,
             scrollHeight = state.ScrollHeight,
             clientWidth = state.ClientWidth,
@@ -1055,8 +1470,138 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         });
     }
 
+    /// <summary>
+    /// Translates a control-space point into the composed page under it and
+    /// that page's local coordinates. Single-page presents the current page;
+    /// the spread splits the viewport into halves; scroll mode stacks pages
+    /// vertically under the scroll offset.
+    /// </summary>
+    private (int Page, SKPoint Local)? MapPointToPage(Point position)
+    {
+        if (_layout is null || _layout.Pages.Count == 0)
+        {
+            return null;
+        }
+
+        switch (_presentation)
+        {
+            case ReaderPresentation.Spread:
+            {
+                var half = Math.Max(1, Bounds.Width / 2);
+                var right = position.X >= half;
+                var page = Math.Min(_pageIndex + (right ? 1 : 0), _layout.Pages.Count - 1);
+                var localX = right ? position.X - half : position.X;
+                return (page, new SKPoint((float)localX, (float)position.Y));
+            }
+            case ReaderPresentation.Scroll:
+            {
+                var pageHeight = Math.Max(1, Bounds.Height);
+                var contentY = Math.Max(0, _scrollOffset) + position.Y;
+                var page = Math.Clamp((int)(contentY / pageHeight), 0, _layout.Pages.Count - 1);
+                return (page, new SKPoint((float)position.X, (float)(contentY - page * pageHeight)));
+            }
+            default:
+                return (_pageIndex, new SKPoint((float)position.X, (float)position.Y));
+        }
+    }
+
+    /// <summary>Control-space origin of one composed page in the viewport.</summary>
+    private Point PageOrigin(int page)
+    {
+        switch (_presentation)
+        {
+            case ReaderPresentation.Spread:
+                return new Point(Math.Max(0, (page - _pageIndex)) * Math.Max(1, Bounds.Width / 2), 0);
+            case ReaderPresentation.Scroll:
+                return new Point(0, page * Math.Max(1, Bounds.Height) - Math.Max(0, _scrollOffset));
+            default:
+                return new Point(0, 0);
+        }
+    }
+
+    private int VisibleFirstPageIndex =>
+        IsScroll ? Math.Clamp((int)(Math.Max(0, _scrollOffset) / Math.Max(1, Bounds.Height)), 0, Math.Max(0, PageCount - 1)) : _pageIndex;
+
+    /// <summary>
+    /// Keeps the continuous-mode scrollbar in step with the offset. Runs on
+    /// every scroll report; state changes that would invalidate layout are
+    /// deferred to a dispatcher pass because sync can be requested from
+    /// arrange, where invalidations are illegal.
+    /// </summary>
+    private void SyncScrollBar()
+    {
+        var desiredVisible = IsScroll && _layout is not null && _layout.Pages.Count > 0 && MaxScrollOffset > 0.5;
+        if (_scrollBar.IsVisible != desiredVisible
+            || Math.Abs(_scrollBar.Maximum - MaxScrollOffset) > 0.5)
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(ApplyScrollBarState, DispatcherPriority.Background);
+            return;
+        }
+
+        if (desiredVisible)
+        {
+            ApplyScrollBarState();
+        }
+    }
+
+    private void ApplyScrollBarState()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var visible = IsScroll && _layout is not null && _layout.Pages.Count > 0 && MaxScrollOffset > 0.5;
+        _scrollBar.IsVisible = visible;
+        if (!visible)
+        {
+            return;
+        }
+
+        _suppressScrollBarSync = true;
+        try
+        {
+            _scrollBar.Maximum = MaxScrollOffset;
+            _scrollBar.ViewportSize = Math.Max(1, Bounds.Height);
+            _scrollBar.LargeChange = Math.Max(1, Bounds.Height);
+            _scrollBar.SmallChange = 48;
+            _scrollBar.Value = Math.Clamp(_scrollOffset, 0, MaxScrollOffset);
+        }
+        finally
+        {
+            _suppressScrollBarSync = false;
+        }
+    }
+
+    // The scrollbar is a visual child of this control, so its pointer input
+    // bubbles through here; the reading-surface handlers must ignore it.
+    private bool IsOverScrollBar(Point position) =>
+        IsScroll && _scrollBar.IsVisible && position.X >= Bounds.Width - 20;
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        _scrollBar.Measure(new Size(12, Math.Max(0, availableSize.Height)));
+        return base.MeasureOverride(availableSize);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        SyncScrollBar();
+        _scrollBar.Arrange(new Rect(
+            Math.Max(0, finalSize.Width - 14),
+            0,
+            14,
+            finalSize.Height));
+        return finalSize;
+    }
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
+        if (IsOverScrollBar(e.GetPosition(this)))
+        {
+            return;
+        }
+
         Focus();
         StopSelectionAutoPageTurn();
         var point = e.GetCurrentPoint(this);
@@ -1072,12 +1617,14 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _pointerDownPosition = position;
         _lastPointerPosition = position;
         _hasLastPointerPosition = true;
-        _pointerHotZone = _layout?.GetHotZoneAt(
-            _pageIndex,
-            new SKPoint((float)position.X, (float)position.Y));
-        _pointerDownOffset = _layout?.HitTest(
-            _pageIndex,
-            new SKPoint((float)position.X, (float)position.Y)) ?? -1;
+        ClearAnnotationHover();
+        var mapped = MapPointToPage(position);
+        _pointerHotZone = mapped is { } downMap
+            ? _layout?.GetHotZoneAt(downMap.Page, downMap.Local)
+            : null;
+        _pointerDownOffset = mapped is { } downMap2
+            ? _layout?.HitTest(downMap2.Page, downMap2.Local) ?? -1
+            : -1;
 
         if (_pointerHotZone is { Kind: HotZoneKind.FootnoteMarker } footnote)
         {
@@ -1097,6 +1644,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         var position = e.GetPosition(this);
+        if (IsOverScrollBar(position))
+        {
+            return;
+        }
+
         var previousPosition = _lastPointerPosition;
         var hadPreviousPosition = _hasLastPointerPosition;
         _lastPointerPosition = position;
@@ -1104,6 +1656,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         if (!_pointerDown)
         {
             UpdateFootnoteHover(position);
+            UpdateAnnotationHover(position);
             return;
         }
 
@@ -1157,6 +1710,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
+        if (IsOverScrollBar(e.GetPosition(this)))
+        {
+            return;
+        }
+
         if (!_pointerDown)
         {
             base.OnPointerReleased(e);
@@ -1168,10 +1726,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var wasDrag = _pointerDragStarted;
         StopSelectionAutoPageTurn();
         var insideSurface = IsInsideSurface(position);
-        var releasedHotZone = insideSurface
-            ? _layout?.GetHotZoneAt(
-                _pageIndex,
-                new SKPoint((float)position.X, (float)position.Y))
+        var releasedMap = insideSurface ? MapPointToPage(position) : null;
+        var releasedHotZone = releasedMap is { } releaseMap
+            ? _layout?.GetHotZoneAt(releaseMap.Page, releaseMap.Local)
             : null;
         var clickSide = insideSurface ? GetPageClickSide(position) : null;
         _pointerDown = false;
@@ -1240,6 +1797,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         if (!_pointerDown)
         {
             UpdateFootnoteHover(null);
+            UpdateAnnotationHover(null);
         }
 
         base.OnPointerExited(e);
@@ -1247,6 +1805,20 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
+        // Scroll mode consumes the wheel itself: the offset drives the paint
+        // directly and chapter edges are reported through continuousEdge.
+        if (IsScroll)
+        {
+            var scrollDelta = -e.Delta.Y * 120;
+            if (scrollDelta != 0)
+            {
+                ScrollByPixel(scrollDelta);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         // Avalonia's positive Y wheel delta means wheel-up; the reader bridge
         // uses the browser convention where positive deltaY advances forward.
         var delta = (int)Math.Round(-e.Delta.Y * 120);
@@ -1274,11 +1846,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             Key.Right => "ArrowRight",
             Key.Up => "ArrowUp",
             Key.Down => "ArrowDown",
-            Key.PageUp => "PageUp",
-            Key.PageDown => "PageDown",
+            // Continuous mode scrolls by keys instead of turning pages, so the
+            // page keys report as arrow keys and reuse the smooth scroll path.
+            Key.PageUp => IsScroll ? "ArrowUp" : "PageUp",
+            Key.PageDown or Key.Space => IsScroll ? "ArrowDown" : "PageDown",
             Key.Home => "Home",
             Key.End => "End",
-            Key.Space => "PageDown",
             Key.Escape => "escape",
             Key.F11 => "f11",
             _ => null,
@@ -1320,11 +1893,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private void UpdateFootnoteHover(Point? position, PlacedHotZone? knownZone = null)
     {
         PlacedHotZone? zone = knownZone;
-        if (zone is null && position is { } point && _layout is not null)
+        if (zone is null && position is { } point)
         {
-            zone = _layout.GetHotZoneAt(
-                _pageIndex,
-                new SKPoint((float)point.X, (float)point.Y));
+            var map = MapPointToPage(point);
+            zone = map is { } mapped
+                ? _layout?.GetHotZoneAt(mapped.Page, mapped.Local)
+                : null;
         }
 
         if (zone is { Kind: HotZoneKind.FootnoteMarker } footnote
@@ -1351,6 +1925,112 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             _hoveredFootnoteHref = null;
             Emit(new { type = "footnoteLeave" });
         }
+    }
+
+    // Annotation hover mirrors the painted underline overlays: the hit-test
+    // uses the exact same GetOverlayRects bands, so the pointer reacts to what
+    // is visible on the page (horizontal and vertical layouts included).
+    private void UpdateAnnotationHover(Point? position)
+    {
+        if (position is { } point
+            && _hoveredFootnoteHref is null
+            && MapPointToPage(point) is { } mapped
+            && TryGetAnnotationAt(mapped.Page, new Point(mapped.Local.X, mapped.Local.Y), out var annotation))
+        {
+            if (_hoveredAnnotationId != annotation.Id)
+            {
+                _hoveredAnnotationId = annotation.Id;
+                Emit(new
+                {
+                    type = "annotationHover",
+                    id = annotation.Id,
+                    quote = annotation.SelectedText,
+                    note = annotation.Note,
+                    x = point.X,
+                    y = point.Y,
+                });
+            }
+
+            return;
+        }
+
+        ClearAnnotationHover();
+    }
+
+    private void ClearAnnotationHover()
+    {
+        if (_hoveredAnnotationId is null)
+        {
+            return;
+        }
+
+        _hoveredAnnotationId = null;
+        Emit(new { type = "annotationLeave" });
+    }
+
+    private bool TryGetAnnotationAt(int pageIndex, Point point, out ReaderAnnotation annotation)
+    {
+        annotation = null!;
+        if (_layout is null
+            || pageIndex < 0
+            || pageIndex >= _layout.Pages.Count)
+        {
+            return false;
+        }
+
+        EnsureAnnotationHoverBands(pageIndex);
+        foreach (var (candidate, bands) in _annotationHoverBands!)
+        {
+            foreach (var band in bands)
+            {
+                if (point.X >= band.Left && point.X <= band.Right
+                    && point.Y >= band.Top && point.Y <= band.Bottom)
+                {
+                    annotation = candidate;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void EnsureAnnotationHoverBands(int pageIndex)
+    {
+        if (_annotationHoverBands is not null
+            && _annotationHoverBandsPage == pageIndex
+            && ReferenceEquals(_annotationHoverBandsLayout, _layout)
+            && _annotationHoverBandsVersion == _annotationsVersion)
+        {
+            return;
+        }
+
+        var bands = new List<(ReaderAnnotation, IReadOnlyList<SKRect>)>();
+        if (pageIndex >= 0 && pageIndex < _layout!.Pages.Count)
+        {
+            var page = _layout.Pages[pageIndex];
+            foreach (var candidate in _annotations)
+            {
+                if (candidate.EndOffset <= candidate.StartOffset)
+                {
+                    continue;
+                }
+
+                var rects = _layout.GetOverlayRects(
+                    page.Index,
+                    candidate.StartOffset,
+                    candidate.EndOffset - candidate.StartOffset);
+                if (rects.Count > 0)
+                {
+                    bands.Add((candidate, rects));
+                }
+            }
+        }
+
+        _annotationHoverBands = bands;
+        _annotationHoverBandsPage = pageIndex;
+        _annotationHoverBandsLayout = _layout;
+        _annotationHoverBandsVersion = _annotationsVersion;
     }
 
     private void EmitSelection()
@@ -1393,16 +2073,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private int GetSelectionHitOffset(Point position)
     {
-        if (_layout is null
-            || _pageIndex < 0
-            || _pageIndex >= _layout.Pages.Count)
+        if (_layout is null)
         {
             return -1;
         }
 
-        var offset = _layout.HitTest(
-            _pageIndex,
-            new SKPoint((float)position.X, (float)position.Y));
+        var mapped = MapPointToPage(position);
+        if (mapped is not { } hit)
+        {
+            return -1;
+        }
+
+        var offset = _layout.HitTest(hit.Page, hit.Local);
         if (offset >= 0)
         {
             return offset;
@@ -1411,7 +2093,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         // Pointer capture continues after the pointer leaves the page. Keep
         // the selection alive at the corresponding text boundary instead of
         // cancelling the auto-turn as soon as HitTest has no glyph to use.
-        var page = _layout.Pages[_pageIndex];
+        var page = _layout.Pages[hit.Page];
         if (page.TextStartOffset < 0 || page.TextEndOffset <= page.TextStartOffset)
         {
             return -1;
@@ -1420,7 +2102,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var boundaryDirection = GetPointerBoundaryDirection(position);
         if (boundaryDirection == 0)
         {
-            return -1;
+            // Inside the surface but with no glyph under the pointer (a page
+            // margin or inter-column gap): keep the last endpoint instead of
+            // killing the selection and the armed auto-turn.
+            return _selectionActiveOffset;
         }
 
         // Once a page has turned, the captured pointer may still be outside
@@ -1429,8 +2114,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         // target page on the next pointer event.
         if (_selectionAutoPageTurnArmed
             && _selectionActiveOffset >= 0
-            && ((boundaryDirection > 0 && _selectionActiveOffset == page.TextStartOffset)
-                || (boundaryDirection < 0 && _selectionActiveOffset == page.TextEndOffset)))
+            && ((boundaryDirection > 0 && _selectionActiveOffset == page.TextStartOffset + 1)
+                || (boundaryDirection < 0 && _selectionActiveOffset == page.TextEndOffset - 1)))
         {
             return _selectionActiveOffset;
         }
@@ -1442,33 +2127,33 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         if (Vertical)
         {
-            // The selection gesture for vertical pages follows the physical
-            // horizontal direction requested by the reader UI: right enters
-            // the next page and left returns to the previous page.
-            if (position.X > Bounds.Width)
-            {
-                return 1;
-            }
-
+            // vertical-rl advances to the physical left: dragging past the
+            // left edge enters the next page and past the right edge returns
+            // to the previous page, matching the page-click hot zones.
             if (position.X < 0)
             {
-                return -1;
-            }
-        }
-        else
-        {
-            if (position.X > Bounds.Width || position.Y > Bounds.Height)
-            {
                 return 1;
             }
 
-            if (position.X < 0 || position.Y < 0)
+            if (position.X > Bounds.Width)
             {
                 return -1;
             }
+
+            return 0;
         }
 
-        return position.Y > Bounds.Height ? 1 : position.Y < 0 ? -1 : 0;
+        if (position.X > Bounds.Width || position.Y > Bounds.Height)
+        {
+            return 1;
+        }
+
+        if (position.X < 0 || position.Y < 0)
+        {
+            return -1;
+        }
+
+        return 0;
     }
 
     private int GetSelectionPageTurnDirection(
@@ -1478,13 +2163,14 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         if (_layout is null
             || _selectionAnchor < 0
-            || _pageIndex < 0
-            || _pageIndex >= _layout.Pages.Count)
+            || MapPointToPage(position) is not { } mapped
+            || mapped.Page < 0
+            || mapped.Page >= _layout.Pages.Count)
         {
             return 0;
         }
 
-        var page = _layout.Pages[_pageIndex];
+        var page = _layout.Pages[mapped.Page];
         var atPageStart = ReaderSelectionPagingPolicy.IsAtPageStart(
             offset,
             page.TextStartOffset,
@@ -1499,34 +2185,87 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var logicalDirection = Math.Sign(offset - _selectionAnchor);
-        if (Vertical && previousPosition is { } previous)
+        if (logicalDirection == 0)
         {
-            var physicalDirection = Math.Sign(position.X - previous.X);
-            if (atPageEnd && physicalDirection > 0)
-            {
-                return 1;
-            }
-
-            if (atPageStart && physicalDirection < 0)
-            {
-                return -1;
-            }
+            return 0;
         }
 
-        // The offset direction is authoritative when the pointer moves along
-        // the text flow, or when a platform sends a boundary event without a
-        // horizontal delta. It also covers the first event after a press.
+        // Classic edge: the endpoint reached this page's boundary in the
+        // direction of extension. IsAtPageStart/IsAtPageEnd allow a
+        // one-character tolerance so a drag at the edge does not stick.
         if (atPageEnd && logicalDirection > 0)
         {
-            return 1;
+            return GateSelectionPageTurn(1, position, previousPosition);
         }
 
         if (atPageStart && logicalDirection < 0)
         {
-            return -1;
+            return GateSelectionPageTurn(-1, position, previousPosition);
+        }
+
+        // Continuation: after a cross-page turn the endpoint stays parked on
+        // the entry boundary of the new page (its first character when
+        // extending forward, its last character when extending backward), so
+        // keep turning while the drag holds there. Requiring an armed turn in
+        // the same direction keeps a selection that merely starts at a page
+        // boundary from turning without ever having crossed a page.
+        if (_selectionAutoPageTurnArmed
+            && _selectionAutoPageTurnDirection == logicalDirection)
+        {
+            if (logicalDirection > 0 && atPageStart)
+            {
+                return GateSelectionPageTurn(1, position, previousPosition);
+            }
+
+            if (logicalDirection < 0 && atPageEnd)
+            {
+                return GateSelectionPageTurn(-1, position, previousPosition);
+            }
         }
 
         return 0;
+    }
+
+    private int GateSelectionPageTurn(int direction, Point position, Point? previousPosition)
+    {
+        // A real drag reversing toward the anchor releases the page edge;
+        // sub-dead-zone tremor must not reset the countdown.
+        if (previousPosition is { } previous)
+        {
+            var dragDirection = GetDragTurnDirection(position, previous);
+            if (dragDirection != 0 && dragDirection != direction)
+            {
+                return 0;
+            }
+        }
+
+        return direction;
+    }
+
+    /// <summary>
+    /// Physical drag direction expressed in logical page turns: +1 while the
+    /// pointer moves toward the next page, -1 toward the previous page.
+    /// Movements within the dead zone count as stationary.
+    /// </summary>
+    private int GetDragTurnDirection(Point position, Point previous)
+    {
+        const double DeadZone = 4.0;
+        if (Vertical)
+        {
+            // vertical-rl presents the next page to the physical left,
+            // matching the page-click hot zones.
+            var deltaX = position.X - previous.X;
+            return Math.Abs(deltaX) < DeadZone ? 0 : -Math.Sign(deltaX);
+        }
+
+        var xDelta = position.X - previous.X;
+        if (Math.Abs(xDelta) >= DeadZone)
+        {
+            return Math.Sign(xDelta);
+        }
+
+        var yDelta = position.Y - previous.Y;
+        return Math.Abs(yDelta) < DeadZone ? 0 : Math.Sign(yDelta);
     }
 
     private void ArmSelectionAutoPageTurn(int direction)
@@ -1634,14 +2373,69 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private (float Left, float Top, float Bottom)? GetSelectionPlacement(int start, int end)
     {
-        if (_layout is null
-            || _pageIndex < 0
-            || _pageIndex >= _layout.Pages.Count)
+        if (_layout is null)
         {
             return null;
         }
 
-        var rects = _layout.GetOverlayRects(_pageIndex, start, end - start);
+        // The selection bands live on the composed page that shows them. For
+        // spread/scroll presentations several pages are visible; anchor to
+        // the first visible page that actually paints part of the selection.
+        foreach (var pageIndex in VisiblePageIndexes())
+        {
+            var placement = GetSelectionPlacementOnPage(pageIndex, start, end);
+            if (placement is { } result)
+            {
+                var origin = PageOrigin(pageIndex);
+                return (result.Left + (float)origin.X, result.Top + (float)origin.Y, result.Bottom + (float)origin.Y);
+            }
+        }
+
+        return null;
+    }
+
+    private IEnumerable<int> VisiblePageIndexes()
+    {
+        if (_layout is null)
+        {
+            yield break;
+        }
+
+        if (IsSpread)
+        {
+            yield return _pageIndex;
+            if (_pageIndex + 1 < _layout.Pages.Count)
+            {
+                yield return _pageIndex + 1;
+            }
+
+            yield break;
+        }
+
+        if (IsScroll)
+        {
+            yield return VisibleFirstPageIndex;
+            if (VisibleFirstPageIndex + 1 < _layout.Pages.Count)
+            {
+                yield return VisibleFirstPageIndex + 1;
+            }
+
+            yield break;
+        }
+
+        yield return _pageIndex;
+    }
+
+    private (float Left, float Top, float Bottom)? GetSelectionPlacementOnPage(int pageIndex, int start, int end)
+    {
+        if (_layout is null
+            || pageIndex < 0
+            || pageIndex >= _layout.Pages.Count)
+        {
+            return null;
+        }
+
+        var rects = _layout.GetOverlayRects(pageIndex, start, end - start);
         if (rects.Count == 0)
         {
             // A forward cross-page selection ends immediately before the new
@@ -1655,7 +2449,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             var boundaryCharacter = _selectionActiveOffset >= _selectionAnchor
                 ? boundary
                 : boundary - 1;
-            var page = _layout.Pages[_pageIndex];
+            var page = _layout.Pages[pageIndex];
             var candidates = new[]
             {
                 boundaryCharacter,
@@ -1667,7 +2461,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 if (candidate < 0
                     || candidate < page.TextStartOffset
                     || candidate >= page.TextEndOffset
-                    || _layout.GetCharRect(_pageIndex, candidate) is not { } rect)
+                    || _layout.GetCharRect(pageIndex, candidate) is not { } rect)
                 {
                     continue;
                 }

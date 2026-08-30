@@ -1,17 +1,19 @@
 #if DEBUG
 using System.IO.Compression;
 using System.Text;
-using System.Text.Json;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media.Imaging;
 using Kkindle.Core;
 
 namespace Kkindle;
 
 public partial class MainWindow
 {
-    // DEBUG-only diagnostics: opens the validation EPUB in paged mode, clicks
-    // the right side of the document for every page-turn animation and samples
-    // the DOM so both the injected pointer bridge and the visual pipeline are
-    // covered by the same probe.
+    // DEBUG-only diagnostics: opens the validation EPUB in paged mode and
+    // drives a real page turn for every page-turn animation, photographing the
+    // reader surface (snapshot overlay included) mid-transition so both the
+    // turn pipeline and the visual overlays are covered by the same probe.
     private async Task RunKreaderAnimationProbeAndExitAsync()
     {
         var logPath = Environment.GetEnvironmentVariable("KKINDLE_ANIMATION_PROBE_LOG");
@@ -36,9 +38,12 @@ public partial class MainWindow
             var epubCard = ViewModel.Books.First(card => card.Title.Contains("Linux Kreader Validation", StringComparison.OrdinalIgnoreCase));
             var epubFile = epubCard.Book.Files.First(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
             await OpenBookAsync(epubCard, epubFile);
-            var host = CurrentReaderHost ?? throw new InvalidOperationException("reader host missing");
-            await WaitForKreaderDocumentAsync(host);
+            if (CurrentReaderHost is not NativeReaderHost nativeHost)
+                throw new InvalidOperationException("reader host is not the native surface");
+            await nativeHost.ReadyTask;
             await SetKreaderValidationLayoutAsync(flowMode: 1, twoPage: false);
+            await WaitForKreaderNativePageAsync(nativeHost);
+            await log.WriteLineAsync("PASS native reader ready");
 
             foreach (var (name, animation) in new[]
                      {
@@ -52,30 +57,17 @@ public partial class MainWindow
                 await Task.Delay(150);
                 await log.WriteLineAsync($"--- {name} ---");
 
-                // Return to a known page first.
-                await host.InvokeScriptAsync(
-                    "(() => { (document.scrollingElement||document.documentElement).scrollLeft = 0; return true; })();");
-                await Task.Delay(120);
-
-                if (!await TriggerKreaderPointerPageTurnAsync(host))
-                    throw new InvalidOperationException($"{name} pointer click could not be dispatched");
-                var observations = new List<string>();
-                for (var sample = 0; sample < 24; sample++)
+                // Drive the app's real turn pipeline without awaiting it, then
+                // photograph the mid-transition frames as they render.
+                var turn = TurnReaderPageCoreAsync(1, chapterOnly: false);
+                for (var sample = 0; sample < 14; sample++)
                 {
-                    await Task.Delay(40);
-                    observations.Add(await ReadAnimationProbeSampleAsync(host));
-                    if (sample is 2 or 8 or 14)
-                        await SaveAnimationProbeFrameAsync(host, name, sample);
+                    await Task.Delay(50);
+                    await SaveAnimationProbeFrameAsync(name, sample);
                 }
-
-                foreach (var line in observations.Where(o => o.Contains('|')))
-                    await log.WriteLineAsync(line);
-                var summary = SummarizeProbeObservations(name, observations);
-                await log.WriteLineAsync("SUMMARY " + summary);
-
-                await Task.Delay(400);
-                var final = await ReadAnimationProbeSampleAsync(host);
-                await log.WriteLineAsync("FINAL " + final);
+                await turn;
+                await log.WriteLineAsync($"PASS {name} turn completed");
+                await Task.Delay(300);
             }
 
             await log.WriteLineAsync("probe completed");
@@ -92,134 +84,47 @@ public partial class MainWindow
         }
     }
 
-    private static async Task<bool> TriggerKreaderPointerPageTurnAsync(IReaderHost host)
+    private static async Task WaitForKreaderNativePageAsync(
+        NativeReaderHost host)
     {
-        var result = await host.InvokeScriptAsync("""
-            (() => {
-              const width = window.innerWidth || document.documentElement.clientWidth || 0;
-              const height = window.innerHeight || document.documentElement.clientHeight || 0;
-              if (width <= 0 || height <= 0 || typeof PointerEvent !== 'function') return false;
-              const x = Math.floor(width * .9);
-              const y = Math.floor(height * .5);
-              const interactive = 'a, button, input, textarea, select, option, label, #kkindle-selection-bar';
-              const target = (document.elementsFromPoint?.(x, y) || [])
-                .find(element => element instanceof Element && !element.closest(interactive))
-                || document.body;
-              if (!(target instanceof Element)) return false;
-              const options = {
-                bubbles: true,
-                cancelable: true,
-                composed: true,
-                pointerId: 177,
-                pointerType: 'mouse',
-                isPrimary: true,
-                button: 0,
-                clientX: x,
-                clientY: y
-              };
-              target.dispatchEvent(new PointerEvent('pointerdown', { ...options, buttons: 1 }));
-              target.dispatchEvent(new PointerEvent('pointerup', { ...options, buttons: 0 }));
-              return true;
-            })();
-            """);
-        return string.Equals(result?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+        for (var attempt = 0; attempt < 80; attempt++)
+        {
+            if (host.CaptureVisiblePageAsync(CancellationToken.None).Result is { Length: > 0 })
+                return;
+            await Task.Delay(100);
+        }
+        throw new InvalidOperationException("native reader page did not render.");
     }
 
-    private async Task SaveAnimationProbeFrameAsync(IReaderHost host, string name, int sample)
+    private async Task SaveAnimationProbeFrameAsync(string name, int sample)
     {
-        if (host is not IReaderPageSnapshotProvider provider) return;
         try
         {
-            var png = await provider.CaptureVisiblePageAsync(CancellationToken.None);
-            if (png is { Length: > 0 })
-            {
-                var logPath = Environment.GetEnvironmentVariable("KKINDLE_ANIMATION_PROBE_LOG");
-                var directory = string.IsNullOrWhiteSpace(logPath)
-                    ? _paths.Logs
-                    : Path.GetDirectoryName(logPath)!;
-                await File.WriteAllBytesAsync(
-                    Path.Combine(directory, $"kreader-animation-{name}-{sample}.png"),
-                    png);
-            }
+            var visual = ReaderWebViewHost as Visual ?? (Visual)this;
+            var bounds = visual.Bounds;
+            var scaling = TopLevel.GetTopLevel(visual)?.RenderScaling ?? 1;
+            var pixelWidth = (int)Math.Ceiling(bounds.Width * scaling);
+            var pixelHeight = (int)Math.Ceiling(bounds.Height * scaling);
+            if (pixelWidth < 16 || pixelHeight < 16) return;
+
+            using var bitmap = new RenderTargetBitmap(
+                new PixelSize(pixelWidth, pixelHeight),
+                new Vector(96 * scaling, 96 * scaling));
+            bitmap.Render(visual);
+            using var stream = new MemoryStream();
+            bitmap.Save(stream);
+            var logPath = Environment.GetEnvironmentVariable("KKINDLE_ANIMATION_PROBE_LOG");
+            var directory = string.IsNullOrWhiteSpace(logPath)
+                ? _paths.Logs
+                : Path.GetDirectoryName(logPath)!;
+            await File.WriteAllBytesAsync(
+                Path.Combine(directory, $"kreader-animation-{name}-{sample}.png"),
+                stream.ToArray());
         }
         catch
         {
             // Diagnostics must never affect reading or navigation.
         }
-    }
-
-    private async Task<string> ReadAnimationProbeSampleAsync(IReaderHost host)
-    {
-        try
-        {
-            var result = await host.InvokeScriptAsync("""
-                (() => {
-                  const el = document.scrollingElement || document.documentElement;
-                  const body = document.body || document.documentElement;
-                  let vtActive = null;
-                  try {
-                    const rootPseudo = document.documentElement;
-                    vtActive = !!window.__kkindleViewTransition;
-                  } catch (_) {}
-                  return JSON.stringify({
-                    op: body.style ? (body.style.opacity || '') : '',
-                    cop: (() => { try { return getComputedStyle(body).opacity; } catch (_) { return ''; } })(),
-                    wave: !!document.getElementById('kk-wave'),
-                    waveImg: (() => {
-                      const c = document.getElementById('kk-wave-image');
-                      return c ? (c.dataset.kkReady || '?') : '';
-                    })(),
-                    slide: !!document.getElementById('kk-slide'),
-                    slideImg: (() => {
-                      const c = document.getElementById('kk-slide-image');
-                      return c ? (c.dataset.kkReady || '?') : '';
-                    })(),
-                    vtStyle: !!document.getElementById('kk-view-transition-style'),
-                    vt: vtActive,
-                    vtReady: window.__kkindleViewTransitionReady === true,
-                    sl: Math.round(el?.scrollLeft || 0),
-                    vtSupported: typeof document.startViewTransition === 'function'
-                  });
-                })();
-                """);
-            var raw = DecodeReaderScriptString(result) ?? result;
-            if (string.IsNullOrWhiteSpace(raw))
-                return "sample-failed empty script result";
-            using var document = JsonDocument.Parse(raw);
-            var root = document.RootElement;
-            return $"{root.GetProperty("cop").GetString()}|wave={root.GetProperty("wave").GetBoolean()}/{root.GetProperty("waveImg").GetString()}"
-                   + $"|slide={root.GetProperty("slide").GetBoolean()}/{root.GetProperty("slideImg").GetString()}"
-                   + $"|vt={root.GetProperty("vt").GetBoolean()}|vtReady={root.GetProperty("vtReady").GetBoolean()}"
-                   + $"|vtStyle={root.GetProperty("vtStyle").GetBoolean()}"
-                   + $"|sl={root.GetProperty("sl").GetInt32()}"
-                   + $"|supportsVT={root.GetProperty("vtSupported").GetBoolean()}";
-        }
-        catch (Exception exception)
-        {
-            return "sample-failed " + exception.Message;
-        }
-    }
-
-    private static string SummarizeProbeObservations(string name, List<string> observations)
-    {
-        var parsed = observations
-            .Where(o => o.StartsWith("1|") || o.StartsWith("0.") || char.IsDigit(o.FirstOrDefault()))
-            .ToList();
-        var anyFade = parsed.Any(o =>
-        {
-            var head = o.Split('|')[0];
-            return double.TryParse(head, System.Globalization.CultureInfo.InvariantCulture, out var value) && value < 0.95;
-        });
-        var anyWave = parsed.Any(o => o.Contains("|wave=true", StringComparison.OrdinalIgnoreCase));
-        var anySlide = parsed.Any(o => o.Contains("|slide=true", StringComparison.OrdinalIgnoreCase));
-        var anyVt = parsed.Any(o => o.Contains("|vt=true", StringComparison.OrdinalIgnoreCase));
-        var advanced = parsed.Any(o =>
-        {
-            var index = o.IndexOf("|sl=", StringComparison.Ordinal);
-            if (index < 0) return false;
-            return int.TryParse(o[(index + 4)..].Split('|')[0], out var value) && value > 0;
-        });
-        return $"fadeSeen={anyFade} waveOverlay={anyWave} slideOverlay={anySlide} viewTransition={anyVt} pageAdvanced={advanced}";
     }
 }
 #endif

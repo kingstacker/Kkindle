@@ -380,6 +380,7 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
         var selectionEnd = Math.Max(SelectionStart, SelectionEnd);
         var backing = InvertedSelectionBackground ?? Brushes.Black;
         var invertedForeground = InvertedSelectionForeground ?? Brushes.White;
+        var markerRanges = CollectMarkerRanges();
         var bodyTypeface = new Typeface(FontFamily, FontStyle.Normal, FontWeight, FontStretch.Normal);
         var footnoteTypeface = new Typeface(
             FontFamily,
@@ -387,16 +388,19 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
             FontWeight.Bold,
             FontStretch.Normal);
 
-        DrawAnnotationFills(context);
-
         foreach (var cell in _cells)
         {
             var character = text[cell.Offset];
             var selected = cell.Offset < selectionEnd
                 && cell.Offset + cell.Length > selectionStart;
-            if (selected)
+            // 荧光标记（黑白反色）inverts its cells exactly like the live
+            // selection: solid ink backing with paper-coloured glyphs.
+            var inverted = selected
+                || markerRanges.Any(range =>
+                    cell.Offset < range.End && cell.Offset + cell.Length > range.Start);
+            if (inverted)
                 context.FillRectangle(backing, cell.Bounds);
-            var brush = selected ? invertedForeground : Foreground ?? Brushes.Black;
+            var brush = inverted ? invertedForeground : Foreground ?? Brushes.Black;
 
             if (character == MainWindow.ReaderLinuxTextFallbackFootnoteMarker)
             {
@@ -547,18 +551,20 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
         FontSize,
         brush);
 
-    private void DrawAnnotationFills(DrawingContext context)
+    private List<(int Start, int End)> CollectMarkerRanges()
     {
-        if (AnnotationRanges is not { Count: > 0 } || _cells is not { } cells) return;
+        var ranges = new List<(int Start, int End)>();
+        if (AnnotationRanges is not { Count: > 0 }) return ranges;
         var sourceLength = (Text ?? string.Empty).Length;
         foreach (var annotation in AnnotationRanges)
         {
             if (annotation.Style != "marker") continue;
-            var color = ParseAnnotationColor(annotation.Color);
-            var brush = new SolidColorBrush(Color.FromArgb(72, color.R, color.G, color.B));
-            foreach (var rect in EnumerateAnnotationRects(annotation, cells, sourceLength))
-                context.FillRectangle(brush, rect);
+            var start = Math.Clamp(annotation.Start, 0, sourceLength);
+            var end = Math.Clamp(annotation.Start + annotation.Length, start, sourceLength);
+            if (end > start) ranges.Add((start, end));
         }
+
+        return ranges;
     }
 
     private void DrawAnnotationUnderlines(DrawingContext context)

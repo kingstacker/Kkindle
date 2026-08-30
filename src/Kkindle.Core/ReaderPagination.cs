@@ -154,8 +154,9 @@ public static class ReaderSelectionPagingPolicy
 
     /// <summary>
     /// Returns the endpoint to use after moving the selection onto the target
-    /// page. Forward selection starts at the target page's first character;
-    /// backward selection starts at the position after its last character.
+    /// page. Forward selection ends after the target page's first character
+    /// so that character joins the selection; backward selection starts on
+    /// its last character for the same reason.
     /// </summary>
     public static int GetCrossPageEndpoint(int direction, int pageStart, int pageEnd)
     {
@@ -164,7 +165,7 @@ public static class ReaderSelectionPagingPolicy
             return -1;
         }
 
-        return direction > 0 ? pageStart : pageEnd;
+        return direction > 0 ? pageStart + 1 : pageEnd - 1;
     }
 
     private static bool HasText(int pageStart, int pageEnd) =>

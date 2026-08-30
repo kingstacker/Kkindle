@@ -1021,8 +1021,7 @@ public partial class MainWindow
         Environment.GetEnvironmentVariable("KKINDLE_VERTICAL_DEBUG_BOXES") == "1";
 
     private bool ShouldShowReaderVerticalDebugBoxes() =>
-        OperatingSystem.IsLinux()
-        && _readerLayout.VerticalWriting
+        _readerLayout.VerticalWriting
         && _readerVerticalDebugBoxesEnabled;
 
     private void LoadReaderVerticalDebugBoxesSetting()
@@ -1387,18 +1386,6 @@ public partial class MainWindow
             VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting,
             ParagraphIndent = _appSettings.DefaultReaderLayout.ParagraphIndent
         });
-        // EPUB chapters are rendered by NativeReaderHost. That surface has a
-        // single physical page per layout page; do not leave a legacy saved
-        // "scroll" or "two-page" flag visible while the engine is waiting for
-        // page turns.
-        if (document.Chapters.Count > 0)
-        {
-            _readerLayout = _readerLayout with
-            {
-                FlowMode = 1,
-                TwoPageMode = false,
-            };
-        }
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
@@ -1473,6 +1460,7 @@ public partial class MainWindow
         ReaderInPageSearchBar.IsVisible = false;
         ReaderLayoutSettingsPopup.IsOpen = false;
         HideReaderFootnotePopup();
+        HideReaderAnnotationHoverPopup();
         ReaderBookmarkCornerMarker.IsVisible = false;
         ReaderAiMessages.Clear();
         ReaderAiSources.Clear();
@@ -1481,6 +1469,8 @@ public partial class MainWindow
         ReaderNotesView.IsVisible = false;
         ReaderAiSettingsView.IsVisible = false;
         ReaderAiComposer.IsVisible = true;
+        ReaderAiSendBar.IsVisible = true;
+        ReaderNotesExportBar.IsVisible = false;
         ReaderAssistantPanel.IsVisible = false;
         ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         SetReaderCompactNavigationItems(_readerTocItems);
@@ -3445,7 +3435,7 @@ public partial class MainWindow
         _readerPendingSelectionEndOffset = 0;
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
-        ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
+        _selectedReaderAnnotation = null;
     }
 
     private void ClearLinuxReaderTextFallbackVisualSelection()
@@ -3583,8 +3573,6 @@ public partial class MainWindow
         _readerPendingSelectionPrefix = pageText[..start];
         _readerPendingSelectionSuffix = end < pageText.Length ? pageText[end..] : string.Empty;
         _selectedReaderAnnotation = null;
-        ReaderDeleteAnnotationButton.IsEnabled = false;
-        ReaderAnnotationSelectionText.Text = selectedText;
         return true;
     }
 
@@ -3690,8 +3678,6 @@ public partial class MainWindow
         _readerPendingSelectionPrefix = pageText[..start];
         _readerPendingSelectionSuffix = end < pageText.Length ? pageText[end..] : string.Empty;
         _selectedReaderAnnotation = null;
-        ReaderDeleteAnnotationButton.IsEnabled = false;
-        ReaderAnnotationSelectionText.Text = selectedText;
         return true;
     }
 
@@ -3723,8 +3709,6 @@ public partial class MainWindow
         _readerPendingSelectionPrefix = pageText[..start];
         _readerPendingSelectionSuffix = end < pageText.Length ? pageText[end..] : string.Empty;
         _selectedReaderAnnotation = null;
-        ReaderDeleteAnnotationButton.IsEnabled = false;
-        ReaderAnnotationSelectionText.Text = selectedText;
         return true;
     }
 
@@ -5116,7 +5100,7 @@ public partial class MainWindow
             if (nativeReader.Vertical)
                 nativeReader.ScrollToOffset((int)Math.Max(0, Math.Round(state.Position)));
             else
-                nativeReader.SeekToRatio(state.Ratio);
+                nativeReader.SeekToPixelScroll(state.Position);
             await UpdateReaderScrollStateAsync(host);
         }
     }
@@ -6406,8 +6390,8 @@ public partial class MainWindow
                   const mark = document.createElement('mark');
                   mark.className = 'kkindle-page-find-hit';
                   mark.setAttribute('data-kkindle-page-hit', String(index));
-                  mark.style.setProperty('background', '#D8D8D8', 'important');
-                  mark.style.setProperty('color', '#000000', 'important');
+                  mark.style.setProperty('background', '#000000', 'important');
+                  mark.style.setProperty('color', '#FFFFFF', 'important');
                   mark.style.setProperty('text-decoration', 'none', 'important');
                   try {
                     range.surroundContents(mark);
@@ -7008,6 +6992,51 @@ public partial class MainWindow
             HideReaderFootnotePopup();
     }
 
+    private Point? _readerAnnotationHoverPlacementPoint;
+
+    private void ShowReaderAnnotationHoverPopup(string quote, string note, Point? placementPoint)
+    {
+        ReaderAnnotationHoverQuote.Text = string.IsNullOrWhiteSpace(quote) ? "批注" : quote;
+        ReaderAnnotationHoverNote.Text = note ?? string.Empty;
+        ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
+        if (placementPoint is { } point)
+            _readerAnnotationHoverPlacementPoint = point;
+        ReaderAnnotationHoverPopup.IsVisible = true;
+        if (CurrentReaderHost?.View is Control view
+            && _readerAnnotationHoverPlacementPoint is { } anchor)
+        {
+            ReaderAnnotationHoverHostPopup.PlacementTarget = view;
+            ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
+            ReaderAnnotationHoverHostPopup.PlacementRect = new Rect(anchor.X, anchor.Y, 1, 1);
+            ReaderAnnotationHoverHostPopup.PlacementAnchor =
+                Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
+            ReaderAnnotationHoverHostPopup.PlacementGravity =
+                Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight;
+            ReaderAnnotationHoverHostPopup.PlacementConstraintAdjustment =
+                Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipX
+                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY
+                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideX
+                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY;
+        }
+        else
+        {
+            ReaderAnnotationHoverHostPopup.PlacementTarget = ReaderWebViewHost;
+            ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.Pointer;
+        }
+        ReaderAnnotationHoverHostPopup.HorizontalOffset = 12;
+        ReaderAnnotationHoverHostPopup.VerticalOffset = 14;
+        ReaderAnnotationHoverHostPopup.IsOpen = true;
+    }
+
+    private void HideReaderAnnotationHoverPopup()
+    {
+        ReaderAnnotationHoverHostPopup.IsOpen = false;
+        ReaderAnnotationHoverPopup.IsVisible = false;
+        ReaderAnnotationHoverQuote.Text = string.Empty;
+        ReaderAnnotationHoverNote.Text = string.Empty;
+        _readerAnnotationHoverPlacementPoint = null;
+    }
+
     private void HideReaderFootnotePopup()
     {
         // Invalidate a resolver that is still awaiting the note text. This
@@ -7106,8 +7135,6 @@ public partial class MainWindow
                     if (!string.IsNullOrWhiteSpace(_readerPendingSelection))
                     {
                         _selectedReaderAnnotation = null;
-                        ReaderDeleteAnnotationButton.IsEnabled = false;
-                        ReaderAnnotationSelectionText.Text = _readerPendingSelection;
                         if (CurrentReaderHost is NativeReaderHost nativeReader)
                         {
                             Point? placementPoint = null;
@@ -7156,7 +7183,6 @@ public partial class MainWindow
                         _readerPendingSelectionEndOffset = 0;
                         _readerPendingSelectionPrefix = string.Empty;
                         _readerPendingSelectionSuffix = string.Empty;
-                        ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
                         HideReaderSelectionPopup();
                     }
                     break;
@@ -7265,6 +7291,27 @@ public partial class MainWindow
                     // pointer has genuinely left the marker.
                     if (!OperatingSystem.IsWindows() || IsNativeReaderPaginated)
                         HideReaderFootnotePopup();
+                    break;
+                case "annotationHover":
+                {
+                    Point? annotationPlacementPoint = null;
+                    if (root.TryGetProperty("x", out var annotationX)
+                        && root.TryGetProperty("y", out var annotationY)
+                        && annotationX.TryGetDouble(out var annotationPx)
+                        && annotationY.TryGetDouble(out var annotationPy))
+                    {
+                        annotationPlacementPoint = new Point(Math.Max(0, annotationPx), Math.Max(0, annotationPy));
+                    }
+                    ShowReaderAnnotationHoverPopup(
+                        ReadString(root, "quote"),
+                        ReadString(root, "note"),
+                        annotationPlacementPoint);
+                    break;
+                }
+                case "annotationLeave":
+                    // The native host emits this from Avalonia pointer events,
+                    // which stay authoritative regardless of platform.
+                    HideReaderAnnotationHoverPopup();
                     break;
                 case "resize":
                     ScheduleReaderRelayout();
@@ -7442,18 +7489,42 @@ public partial class MainWindow
             return;
         }
 
+        // Remember where the selection sits so the annotation input window can
+        // open at the same spot after the bar hands off to it.
+        _readerLastSelectionPopupAnchor = placementPoint;
+        _readerLastSelectionPopupBottom = selectionBottom;
+        ShowReaderPopupNearSelection(
+            ReaderSelectionHostPopup,
+            ReaderSelectionPopupBar,
+            fallbackWidth: 360,
+            fallbackHeight: 38,
+            placementPoint,
+            selectionBottom);
+    }
+
+    // Shared placement math for popups anchored to the live text selection:
+    // center on the selection's left edge, prefer above, clamp inside the
+    // reader body, and never let the positioner flip against the desktop.
+    private void ShowReaderPopupNearSelection(
+        Popup popup,
+        Control content,
+        double fallbackWidth,
+        double fallbackHeight,
+        Point? placementPoint,
+        double? selectionBottom)
+    {
         var hostWidth = Math.Max(1, ReaderWebViewHost.Bounds.Width);
         var hostHeight = Math.Max(1, ReaderWebViewHost.Bounds.Height);
         var anchor = placementPoint ?? new Point(
             Math.Max(24, hostWidth / 2),
             Math.Max(24, hostHeight / 2));
-        var barWidth = ReaderSelectionPopupBar.Bounds.Width;
-        var barHeight = ReaderSelectionPopupBar.Bounds.Height;
+        var barWidth = content.Bounds.Width;
+        var barHeight = content.Bounds.Height;
         // On the first open Avalonia may not have arranged the Popup content
         // yet. Use a conservative fallback size; forcing an infinite measure
         // from a selection event can invalidate the reader's layout pass.
-        if (!double.IsFinite(barWidth) || barWidth <= 0) barWidth = 360;
-        if (!double.IsFinite(barHeight) || barHeight <= 0) barHeight = 38;
+        if (!double.IsFinite(barWidth) || barWidth <= 0) barWidth = fallbackWidth;
+        if (!double.IsFinite(barHeight) || barHeight <= 0) barHeight = fallbackHeight;
 
         const double bodyInset = 8;
         const double aboveGap = 10;
@@ -7463,8 +7534,6 @@ public partial class MainWindow
         // that point by half the bar width so the bar's left edge aligns with
         // the selection's left edge. If the selection is too close to the
         // reader's right edge, clamp the whole bar back inside the body.
-        // The positioner is deliberately not allowed to flip/slide against
-        // the desktop work area: the reader body is the boundary.
         var minimumLeft = bodyInset;
         var maximumLeft = Math.Max(minimumLeft, hostWidth - bodyInset - barWidth);
         var left = Math.Clamp(anchor.X, minimumLeft, maximumLeft);
@@ -7484,20 +7553,20 @@ public partial class MainWindow
                 bottom,
                 bodyInset,
                 Math.Max(bodyInset, hostHeight - bodyInset - barHeight - belowGap));
-        ReaderSelectionHostPopup.PlacementTarget = ReaderWebViewHost;
-        ReaderSelectionHostPopup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
-        ReaderSelectionHostPopup.PlacementRect = new Rect(anchorX, anchorY, 1, 1);
-        ReaderSelectionHostPopup.PlacementAnchor =
+        popup.PlacementTarget = ReaderWebViewHost;
+        popup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
+        popup.PlacementRect = new Rect(anchorX, anchorY, 1, 1);
+        popup.PlacementAnchor =
             Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
-        ReaderSelectionHostPopup.PlacementGravity =
+        popup.PlacementGravity =
             placeAbove
                 ? Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.Top
                 : Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.Bottom;
-        ReaderSelectionHostPopup.PlacementConstraintAdjustment =
+        popup.PlacementConstraintAdjustment =
             Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.None;
-        ReaderSelectionHostPopup.HorizontalOffset = 0;
-        ReaderSelectionHostPopup.VerticalOffset = placeAbove ? -aboveGap : belowGap;
-        ReaderSelectionHostPopup.IsOpen = true;
+        popup.HorizontalOffset = 0;
+        popup.VerticalOffset = placeAbove ? -aboveGap : belowGap;
+        popup.IsOpen = true;
     }
 
     private void HideReaderSelectionPopup()
@@ -7551,7 +7620,6 @@ public partial class MainWindow
         _readerPendingSelectionEndOffset = 0;
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
-        ReaderAnnotationSelectionText.Text = "请先在正文中选择一段文字，再点击顶部“批注”。";
         if (!_readerIsPdf && CurrentReaderHost is { } host)
             _ = ClearCurrentReaderSelectionAsync(host);
     }
@@ -7676,12 +7744,7 @@ public partial class MainWindow
     private void ReaderSelectionAnnotateButton_Click(object? sender, RoutedEventArgs e)
     {
         HideReaderSelectionPopup();
-        _selectedReaderAnnotation = null;
-        ReaderDeleteAnnotationButton.IsEnabled = false;
-        ReaderAnnotationNoteBox.Text = string.Empty;
-        if (_readerZenMode) ExitReaderZenMode();
-        ShowReaderNotesTab();
-        ReaderAnnotationNoteBox.Focus();
+        ShowReaderAnnotationInputPopup();
     }
 
     private void ReaderSelectionAiButton_Click(object? sender, RoutedEventArgs e)
@@ -7724,12 +7787,8 @@ public partial class MainWindow
                 }
                 break;
             case "annotate":
-                _selectedReaderAnnotation = null;
-                ReaderDeleteAnnotationButton.IsEnabled = false;
-                ReaderAnnotationNoteBox.Text = string.Empty;
-                if (_readerZenMode) ExitReaderZenMode();
-                ShowReaderNotesTab();
-                ReaderAnnotationNoteBox.Focus();
+                HideReaderSelectionPopup();
+                ShowReaderAnnotationInputPopup();
                 break;
             case "ai":
                 if (!string.IsNullOrWhiteSpace(_readerPendingSelection))
@@ -7972,6 +8031,15 @@ public partial class MainWindow
             SetLinuxReaderTextFallbackOffset(
                 ReaderLinuxTextFallbackScroll.Offset.Y + Math.Sign(direction) * 72);
             TryAdvanceReaderScrollChapter();
+            return;
+        }
+
+        if (CurrentReaderHost is NativeReaderHost nativeReader)
+        {
+            // The continuous native surface scrolls itself; keyboard input
+            // nudges the same offset the wheel drives.
+            nativeReader.ScrollByPixel(Math.Sign(direction) * 72);
+            _ = ObserveReaderTaskAsync(UpdateReaderScrollStateAsync(nativeReader));
             return;
         }
 
@@ -8252,46 +8320,6 @@ public partial class MainWindow
             ReaderToken);
     }
 
-    private static async Task<T> RunNativeReaderContentTransitionAsync<T>(
-        NativeReaderHost host,
-        int animation,
-        bool animate,
-        Func<Task<T>> changeContentAsync,
-        CancellationToken cancellationToken)
-    {
-        if (!animate || animation == ReaderAnimationNone)
-        {
-            return await changeContentAsync();
-        }
-
-        var view = (Control)host.View;
-        await FadeNativeReaderViewAsync(view, view.Opacity, 0.0, 140, cancellationToken);
-        try
-        {
-            return await changeContentAsync();
-        }
-        finally
-        {
-            await FadeNativeReaderViewAsync(view, 0.0, 1.0, 200, cancellationToken);
-        }
-    }
-
-    private static async Task FadeNativeReaderViewAsync(
-        Control view,
-        double from,
-        double to,
-        int milliseconds,
-        CancellationToken cancellationToken)
-    {
-        var steps = Math.Max(1, milliseconds / 20);
-        for (var i = 1; i <= steps; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            view.Opacity = from + ((to - from) * i / steps);
-            await Task.Delay(milliseconds / steps, cancellationToken);
-        }
-    }
-
     /// <summary>
     /// Runs the one transition pipeline used by both in-chapter page turns and
     /// chapter/TOC navigation. With two hosts, the outgoing document animates
@@ -8312,13 +8340,15 @@ public partial class MainWindow
             return await changeContentAsync();
         }
 
+        var visualDirection = ReaderPaginationPolicy.GetVisualTurnDirection(
+            direction,
+            !_readerIsPdf && _readerLayout.VerticalWriting);
+
         if (UseLinuxPlainTextRecoveryFallback && OperatingSystem.IsLinux()
             && outgoingHost is not NativeReaderHost)
         {
             return await RunLinuxReaderFallbackContentTransitionAsync(
-                ReaderPaginationPolicy.GetVisualTurnDirection(
-                    direction,
-                    !_readerIsPdf && _readerLayout.VerticalWriting),
+                visualDirection,
                 animation,
                 changeContentAsync,
                 cancellationToken);
@@ -8326,13 +8356,16 @@ public partial class MainWindow
 
         if (outgoingHost is NativeReaderHost nativeHost)
         {
-            // The self-drawn surface animates with an Avalonia opacity dip;
-            // snapshot-driven slide/wave overlays return through
-            // CaptureVisiblePageAsync in a later pass.
-            return await RunNativeReaderContentTransitionAsync(
-                nativeHost,
+            // The self-drawn surface renders the incoming page immediately, so
+            // the outgoing frame is photographed and animated away on a
+            // snapshot overlay while the new page waits underneath.
+            var surface = BuildReaderNativeTransitionSurface(nativeHost);
+            if (surface is null)
+                return await changeContentAsync();
+            return await ReaderTransitionPlayer.RunAsync(
+                surface,
                 animation,
-                animate,
+                visualDirection,
                 changeContentAsync,
                 cancellationToken);
         }
@@ -8340,14 +8373,30 @@ public partial class MainWindow
         return await changeContentAsync();
     }
 
-    private ReaderLinuxFallbackTransitionSurface? BuildLinuxReaderFallbackTransitionSurface()
+    private ReaderTransitionSurface? BuildReaderNativeTransitionSurface(
+        NativeReaderHost host)
+    {
+        if (host.View is not Control nativeView) return null;
+        var bounds = ReaderNativeTransitionLayer.Bounds;
+        if (bounds.Width < 32 || bounds.Height < 32) return null;
+        return new ReaderTransitionSurface(
+            nativeView,
+            ReaderNativeTransitionSnapshot,
+            ReaderNativeTransitionGhost,
+            ReaderNativeTransitionTrail,
+            ReaderNativeTransitionFront,
+            ReaderNativeTransitionEdge,
+            ReaderWebViewHost.Background);
+    }
+
+    private ReaderTransitionSurface? BuildLinuxReaderFallbackTransitionSurface()
     {
         if (!IsLinuxReaderTextFallbackActive())
             return null;
         var bounds = ReaderLinuxTextFallbackContent.Bounds;
         if (bounds.Width < 32 || bounds.Height < 32)
             return null;
-        return new ReaderLinuxFallbackTransitionSurface(
+        return new ReaderTransitionSurface(
             ReaderLinuxTextFallbackContent,
             ReaderLinuxTextFallbackTransitionSnapshot,
             ReaderLinuxTextFallbackTransitionGhost,
@@ -8376,7 +8425,7 @@ public partial class MainWindow
         if (surface is null)
             return await changeContentAsync();
 
-        return await ReaderLinuxFallbackTransitionPlayer.RunAsync(
+        return await ReaderTransitionPlayer.RunAsync(
             surface,
             animation,
             visualDirection,
@@ -8539,18 +8588,8 @@ public partial class MainWindow
             ReaderStatusText.Text = "PDF 使用页面模式，可用底部进度条或左右按钮翻页。";
             return;
         }
-        var requiredVerticalMode = "single";
-        if (CurrentReaderHost is NativeReaderHost)
-        {
-            if (!string.Equals(tag, "single", StringComparison.Ordinal))
-            {
-                SyncReaderFlowMenu();
-                ShowReaderTransientStatus("自绘 EPUB 阅读器目前仅支持单页分页。");
-                return;
-            }
 
-            tag = requiredVerticalMode;
-        }
+        var requiredVerticalMode = "single";
         if (_readerLayout.VerticalWriting
             && !string.Equals(tag, requiredVerticalMode, StringComparison.Ordinal))
         {
@@ -8567,8 +8606,8 @@ public partial class MainWindow
         var twoPage = string.Equals(tag, "double", StringComparison.Ordinal);
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with
         {
-            FlowMode = CurrentReaderHost is NativeReaderHost ? 1 : flowMode,
-            TwoPageMode = CurrentReaderHost is NativeReaderHost ? false : twoPage
+            FlowMode = flowMode,
+            TwoPageMode = twoPage
         });
         SyncReaderFlowMenu();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
@@ -8580,15 +8619,24 @@ public partial class MainWindow
     private void SyncReaderFlowMenu()
     {
         if (ReaderScrollModeItem is null || ReaderSinglePageModeItem is null || ReaderTwoPageModeItem is null) return;
-        var nativePaged = IsNativeReaderPaginated;
-        var flowMode = nativePaged ? 1 : _readerLayout.FlowMode;
-        var twoPage = nativePaged ? false : _readerLayout.TwoPageMode;
+        var flowMode = _readerLayout.FlowMode;
+        var twoPage = _readerLayout.TwoPageMode;
         var vertical = _readerLayout.VerticalWriting;
+        if (vertical)
+        {
+            // Vertical writing always presents as single pages.
+            flowMode = 1;
+            twoPage = false;
+        }
+
         ReaderScrollModeItem.IsChecked = flowMode == 0;
         ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage;
         ReaderTwoPageModeItem.IsChecked = flowMode == 1 && twoPage;
-        ReaderScrollModeItem.IsEnabled = !vertical && !nativePaged;
-        ReaderTwoPageModeItem.IsEnabled = !vertical && !nativePaged;
+        // The native engine now implements continuous scroll and the
+        // two-column spread for horizontal writing; only vertical writing is
+        // restricted to single pages.
+        ReaderScrollModeItem.IsEnabled = !vertical;
+        ReaderTwoPageModeItem.IsEnabled = !vertical;
         ReaderSinglePageModeItem.IsEnabled = true;
         if (ReaderFlowButton is not null)
             ReaderFlowButton.Content = flowMode == 0 ? "滚动" : twoPage ? "双栏" : "单页";
@@ -8675,7 +8723,10 @@ public partial class MainWindow
 
     private void UpdateReaderBookmarkCornerSurface()
     {
-        ReaderBookmarkCornerButton.IsVisible = _readerIsPdf;
+        // The corner click zone toggles a bookmark at the current position
+        // for every reader surface: the native EPUB engine has no injected
+        // page to draw the ribbon, so the Avalonia corner stays active here.
+        ReaderBookmarkCornerButton.IsVisible = true;
         ReaderWebViewHost.Margin = new Thickness(
             0,
             _readerIsPdf ? 34 : 12,

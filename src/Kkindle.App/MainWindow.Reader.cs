@@ -851,6 +851,7 @@ public partial class MainWindow
         StopReaderFootnoteHoverPoll();
         _readerFootnoteHoverSequence++;
         HideReaderFootnotePopup();
+        HideReaderAnnotationHoverPopup();
         _readerBookmarkIndicatorSequence++;
         ReaderBookmarkCornerMarker.IsVisible = false;
         ReaderTocCompactPanel.IsVisible = false;

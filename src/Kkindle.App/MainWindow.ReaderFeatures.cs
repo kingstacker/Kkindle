@@ -285,6 +285,8 @@ public partial class MainWindow
             ReaderAiView.IsVisible = true;
             ReaderNotesView.IsVisible = false;
             ReaderAiComposer.IsVisible = true;
+            ReaderAiSendBar.IsVisible = true;
+            ReaderNotesExportBar.IsVisible = false;
             ReaderAssistantPanel.IsVisible = false;
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
 
@@ -361,10 +363,10 @@ public partial class MainWindow
     {
         ReaderAnnotations.Clear();
         _selectedReaderAnnotation = null;
-        ReaderDeleteAnnotationButton.IsEnabled = false;
         if (_readerBookFile is null) return;
         var annotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken);
         foreach (var annotation in annotations) ReaderAnnotations.Add(annotation);
+        ReaderAnnotationEmptyText.IsVisible = ReaderAnnotations.Count == 0;
     }
 
     private void ShowReaderTocTab()
@@ -889,7 +891,10 @@ public partial class MainWindow
                 location.FlowMode,
                 location.ScrollPosition,
                 tolerance));
-        ReaderBookmarkCornerMarker.IsVisible = _readerIsPdf && isBookmarked;
+        // The corner ribbon shows on every surface. EPUB used to delegate the
+        // triangle to the injected WebView page; the self-drawn engine has no
+        // DOM, so the Avalonia marker renders for it as well.
+        ReaderBookmarkCornerMarker.IsVisible = isBookmarked;
         if (!_readerIsPdf)
             _ = ObserveReaderTaskAsync(SetReaderDocumentBookmarkIndicatorAsync(isBookmarked));
     }
@@ -1077,7 +1082,16 @@ public partial class MainWindow
         }
         if (result.Source is { } source)
         {
-            await NavigateToReaderChunkAsync(source, result.Query ?? string.Empty);
+            var chunkNavigated = await NavigateToReaderChunkAsync(source, result.Query ?? string.Empty);
+            // The chunk jump positions the page by offset alone. In dense
+            // vertical body text the keyword itself carries no mark unless the
+            // in-page highlights are applied, which reads exactly like a jump
+            // that never happened.
+            if (chunkNavigated && !string.IsNullOrWhiteSpace(result.Query))
+            {
+                var sequence = ++_readerSearchSequence;
+                await ApplyReaderSearchAsync(result.Query, sequence, navigate: false);
+            }
             return;
         }
         if (_readerDocument is null || string.IsNullOrWhiteSpace(result.Target)) return;
@@ -1096,12 +1110,12 @@ public partial class MainWindow
             : "搜索结果定位失败，请重试。";
     }
 
-    private async Task NavigateToReaderChunkAsync(BookContentChunk source, string query)
+    private async Task<bool> NavigateToReaderChunkAsync(BookContentChunk source, string query)
     {
         if (_readerDocument is null)
         {
             ShowReaderSearchStatus("无法定位正文：书籍内容尚未准备完成。");
-            return;
+            return false;
         }
 
         var targetPath = Path.GetFullPath(Path.Combine(
@@ -1110,7 +1124,7 @@ public partial class MainWindow
         if (!IsPathInside(_readerDocument.RootPath, targetPath) || !File.Exists(targetPath))
         {
             ShowReaderSearchStatus("无法定位正文：对应章节文件不存在。");
-            return;
+            return false;
         }
 
         var matchOffset = FindReaderSearchMatchOffset(source.Content, query);
@@ -1132,6 +1146,7 @@ public partial class MainWindow
         ReaderSearchStatusText.Text = navigated
             ? $"已跳转到《{source.ChapterTitle}》相关位置。"
             : "搜索结果定位失败，请重试。";
+        return navigated;
     }
 
     // Mirrors the search index's whitespace handling when re-locating a
@@ -1550,9 +1565,8 @@ public partial class MainWindow
 
     private void UpdateReaderVerticalDebugBoxesControlAvailability()
     {
-        ReaderVerticalDebugBoxesPanel.IsVisible = OperatingSystem.IsLinux();
-        ReaderVerticalDebugBoxesCheck.IsEnabled = OperatingSystem.IsLinux()
-            && ReaderVerticalWritingCheck.IsChecked == true;
+        ReaderVerticalDebugBoxesPanel.IsVisible = true;
+        ReaderVerticalDebugBoxesCheck.IsEnabled = ReaderVerticalWritingCheck.IsChecked == true;
     }
 
     private void UpdateReaderLayoutStatus()
