@@ -247,15 +247,17 @@ jobs:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Checkout must run BEFORE the artifact download: it cleans the
+      # workspace and would otherwise delete the downloaded release files.
+      - name: Check out sources for changelog
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
           pattern: Kkindle-*
           path: artifacts
           merge-multiple: true
-      - name: Check out sources for changelog
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - name: Create checksums
         run: |
           cd artifacts
