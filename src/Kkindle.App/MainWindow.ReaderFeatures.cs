@@ -219,6 +219,9 @@ public partial class MainWindow
         BookFile file,
         string path)
     {
+        // Invalidate any debounced progress save from the previous reader
+        // session before installing the new session cancellation source.
+        Interlocked.Increment(ref _readerProgressSaveSequence);
         _readerSessionCancellation?.Cancel();
         _readerSessionCancellation?.Dispose();
         _readerSessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
@@ -1513,10 +1516,8 @@ public partial class MainWindow
         {
             UpdateReaderZoomLabel();
             await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
+            await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
             await SaveReaderLayoutAsync(CancellationToken.None);
-            await SaveGlobalReaderVerticalWritingAsync(
-                _readerLayout.VerticalWriting,
-                CancellationToken.None);
             ReaderLayoutSettingsStatusText.Text = _readerLayout.VerticalWriting
                 ? "竖排已全局开启；段首缩进也对所有书生效，自绘阅读器使用单页阅读。"
                 : "竖排已全局关闭；段首缩进仍对所有书生效，现在可选择滚动、单页或双栏。";
@@ -1598,10 +1599,8 @@ public partial class MainWindow
                     _readerPageAnimation = GetSelectedReaderPageAnimation();
                     UpdateReaderZoomLabel();
                     await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
+                    await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
                     await SaveReaderLayoutAsync(CancellationToken.None);
-                    await SaveGlobalReaderParagraphIndentAsync(
-                        _readerLayout.ParagraphIndent,
-                        CancellationToken.None);
                 }
                 catch
                 {
@@ -1650,11 +1649,8 @@ public partial class MainWindow
         _readerPageAnimation = ReaderAnimationFade;
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
+        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
         await SaveReaderLayoutAsync(CancellationToken.None);
-        await SaveGlobalReaderVerticalWritingAsync(false, CancellationToken.None);
-        await SaveGlobalReaderParagraphIndentAsync(
-            _readerLayout.ParagraphIndent,
-            CancellationToken.None);
         ReaderLayoutSettingsStatusText.Text = "已恢复默认排版。";
     }
 

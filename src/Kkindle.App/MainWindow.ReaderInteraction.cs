@@ -1381,11 +1381,10 @@ public partial class MainWindow
         // paragraph indentation are global reader preferences. Ignore stale
         // per-book values left by older builds so opening another book cannot
         // silently change either global option.
-        _readerLayout = NormalizeReaderLayoutForPlatform(bookLayout with
-        {
-            VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting,
-            ParagraphIndent = _appSettings.DefaultReaderLayout.ParagraphIndent
-        });
+        _readerLayout = NormalizeReaderLayoutForPlatform(
+            ReaderLayoutDefaults.ApplyGlobalPreferences(
+                bookLayout,
+                _appSettings.DefaultReaderLayout));
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
@@ -5135,8 +5134,14 @@ public partial class MainWindow
                 else
                     UpdateLinuxReaderTextFallbackMode();
             }
+            // NativeReaderHost preserves a semantic text/page anchor while it
+            // recomposes. Its position is a character offset in vertical page
+            // mode but a pixel offset in horizontal mode; replaying the old
+            // numeric value here would reinterpret one coordinate system as
+            // the other and reopen the wrong page after a layout switch.
             if (scrollState is not null
                 && currentHost is not null
+                && currentHost is not NativeReaderHost
                 && ReferenceEquals(CurrentReaderHost, currentHost))
             {
                 await RestoreReaderScrollStateAsync(currentHost, scrollState, cancellationToken);
@@ -6497,16 +6502,15 @@ public partial class MainWindow
     private async Task SaveReaderLayoutAsync(CancellationToken cancellationToken)
     {
         if (_readerBookCard is null || _readerBookFile is null) return;
+        var bookId = _readerBookCard.Book.Id;
+        var bookFileId = _readerBookFile.Id;
+        var layout = NormalizeReaderLayoutForPlatform(_readerLayout);
         try
         {
             await _readerData.SaveLayoutSettingsAsync(
-                _readerBookCard.Book.Id,
-                _readerBookFile.Id,
-                NormalizeReaderLayoutForPlatform(_readerLayout with
-                {
-                    VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting,
-                    ParagraphIndent = _appSettings.DefaultReaderLayout.ParagraphIndent
-                }),
+                bookId,
+                bookFileId,
+                layout,
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -6517,45 +6521,31 @@ public partial class MainWindow
         }
     }
 
-    private async Task SaveGlobalReaderVerticalWritingAsync(
-        bool verticalWriting,
+    private async Task SaveCurrentReaderGlobalPreferencesAsync(
         CancellationToken cancellationToken)
     {
         _appSettings = AppSettings.Normalize(_appSettings with
         {
             DefaultReaderLayout = _appSettings.DefaultReaderLayout with
             {
-                VerticalWriting = verticalWriting
+                VerticalWriting = _readerLayout.VerticalWriting,
+                ParagraphIndent = _readerLayout.ParagraphIndent
             }
         });
 
         // Keep the basic-settings switch in lockstep without scheduling a
-        // second competing settings write.
+        // second competing settings write. This is also called by the close
+        // checkpoint, so a quick exit cannot lose a just-selected direction.
         _suppressAppSettingsAutoSave = true;
         try
         {
             if (DefaultVerticalWritingCheck is not null)
-                DefaultVerticalWritingCheck.IsChecked = verticalWriting;
+                DefaultVerticalWritingCheck.IsChecked = _readerLayout.VerticalWriting;
         }
         finally
         {
             _suppressAppSettingsAutoSave = false;
         }
-
-        await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
-    }
-
-    private async Task SaveGlobalReaderParagraphIndentAsync(
-        bool paragraphIndent,
-        CancellationToken cancellationToken)
-    {
-        _appSettings = AppSettings.Normalize(_appSettings with
-        {
-            DefaultReaderLayout = _appSettings.DefaultReaderLayout with
-            {
-                ParagraphIndent = paragraphIndent
-            }
-        });
 
         await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
     }

@@ -46,6 +46,10 @@ public partial class MainWindow
         string epubPath,
         bool restoreProgress = true)
     {
+        // A delayed scroll checkpoint belongs to the previous reader session.
+        // Invalidate it before replacing the cancellation source so it cannot
+        // write the old book/page into a newly opened session.
+        Interlocked.Increment(ref _readerProgressSaveSequence);
         _readerSessionCancellation?.Cancel();
         _readerSessionCancellation?.Dispose();
         _readerSessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
@@ -782,6 +786,7 @@ public partial class MainWindow
         object? sender,
         ReaderWebMessageReceivedEventArgs e)
     {
+        if (Volatile.Read(ref _readerCloseInProgress) != 0) return;
         if (sender is not IReaderHost host || !ReferenceEquals(host, CurrentReaderHost)) return;
         HandleReaderBridgeMessage(e.Body);
     }
@@ -789,6 +794,10 @@ public partial class MainWindow
     private async Task CloseReaderAsync()
     {
         if (Interlocked.Exchange(ref _readerCloseInProgress, 1) != 0) return;
+        // Invalidate debounced bridge saves before waiting for the authoritative
+        // close checkpoint. The close path below is the only save that should
+        // survive a return to the bookshelf.
+        Interlocked.Increment(ref _readerProgressSaveSequence);
         try
         {
         // Return-to-bookshelf is the authoritative checkpoint. Wait for a
@@ -813,6 +822,16 @@ public partial class MainWindow
         finally
         {
             _readerPageTurnGate.Release();
+        }
+        try
+        {
+            await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+        }
+        catch
+        {
+            // Returning to the bookshelf must still complete if the settings
+            // file is temporarily unavailable; the per-book layout save below
+            // remains best-effort as well.
         }
         await SaveReaderLayoutAsync(CancellationToken.None);
         StopReaderStatsTimer();

@@ -133,6 +133,17 @@ public static class ReaderLayoutDefaults
     public const double MinBodyPadding = 24;
     public const double MaxBodyPadding = 160;
 
+    public static ReaderLayoutSettings ApplyGlobalPreferences(
+        ReaderLayoutSettings bookLayout,
+        ReaderLayoutSettings globalLayout)
+    {
+        return Normalize(bookLayout with
+        {
+            VerticalWriting = globalLayout.VerticalWriting,
+            ParagraphIndent = globalLayout.ParagraphIndent
+        });
+    }
+
     public static ReaderLayoutSettings Normalize(ReaderLayoutSettings settings)
     {
         var fontScale = double.IsFinite(settings.FontScale)
