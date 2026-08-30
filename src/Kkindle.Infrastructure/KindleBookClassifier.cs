@@ -12,7 +12,7 @@ internal static class KindleBookClassifier
     public static async Task<bool> IsDictionaryAsync(string path, CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
-        if (extension is not (".azw" or ".azw3" or ".mobi" or ".kfx")) return false;
+        if (extension is not (".azw" or ".azw3" or ".mobi" or ".prc" or ".kfx")) return false;
 
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
         var length = (int)Math.Min(stream.Length, MaximumHeaderBytes);

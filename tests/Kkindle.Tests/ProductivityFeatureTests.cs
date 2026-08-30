@@ -123,6 +123,26 @@ public sealed class ProductivityFeatureTests
     }
 
     [Fact]
+    public async Task PrcDictionaryUsesKindleDictionaryImportPipeline()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "dictionary.prc");
+            await File.WriteAllTextAsync(source, "fake PRC Kindle dictionary");
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new DictionaryService(paths, new FakeKindleDictionaryConverter());
+
+            var imported = await service.ImportAsync(source, "PRC 测试词典");
+
+            Assert.Equal(2, imported.EntryCount);
+            Assert.Equal("PRC 测试词典", imported.Name);
+            Assert.Equal("电子阅读器", Assert.Single(await service.LookupAsync("KINDLE")).Definition.Replace(Environment.NewLine, string.Empty));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task FontLibraryCopiesListsAndRemovesManagedFont()
     {
         var root = TestHelpers.CreateTempDirectory();

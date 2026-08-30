@@ -7,7 +7,7 @@ public static class BookFormatConversionPolicy
     public static bool IsConvertibleFormat(string? format) => Normalize(format) is "epub" or "azw3" or "pdf" or "mobi";
 
     public static bool IsCalibreInputFormat(string? format) =>
-        IsConvertibleFormat(format) || Normalize(format) is "azw" or "kfx";
+        IsConvertibleFormat(format) || Normalize(format) is "azw" or "prc" or "kfx";
 
     public static BookFile? SelectSource(
         IEnumerable<BookFile>? files,

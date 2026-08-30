@@ -19,8 +19,10 @@ public sealed class BookFormatConversionPolicyTests
     {
         Assert.True(BookFormatConversionPolicy.IsCalibreInputFormat(".KFX"));
         Assert.True(BookFormatConversionPolicy.IsCalibreInputFormat(".AZW"));
+        Assert.True(BookFormatConversionPolicy.IsCalibreInputFormat(".PRC"));
         Assert.False(BookFormatConversionPolicy.IsConvertibleFormat("kfx"));
         Assert.False(BookFormatConversionPolicy.IsConvertibleFormat("azw"));
+        Assert.False(BookFormatConversionPolicy.IsConvertibleFormat("prc"));
     }
 
     [Fact]

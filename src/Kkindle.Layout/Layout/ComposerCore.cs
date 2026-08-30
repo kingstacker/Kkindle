@@ -1,3 +1,4 @@
+using System.Globalization;
 using SkiaSharp;
 
 namespace Kkindle.Layout;
@@ -21,16 +22,38 @@ internal sealed record LayoutCell
     /// <summary>Global offset into ChapterContent.BodyText, or -1 for non-text cells.</summary>
     public required int TextStart { get; init; }
     public required int TextLength { get; init; }
+    /// <summary>Original Unicode text represented by this cell, including combining marks.</summary>
+    public string Text { get; init; } = string.Empty;
     public int[] Clusters { get; init; } = Array.Empty<int>();
     public required TypesetInlineStyle Style { get; init; }
     public string? LinkHref { get; init; }
     public string? FootnoteHref { get; init; }
+    public string? FootnoteText { get; init; }
+    /// <summary>Resolved raster for an inline image; null for text cells.</summary>
+    public string? ImagePath { get; init; }
+    /// <summary>Physical width of the unrotated inline image.</summary>
+    public float ImageWidth { get; init; }
+    /// <summary>Physical height of the unrotated inline image.</summary>
+    public float ImageHeight { get; init; }
+    /// <summary>Vertical mode: paint the inline image as a sideways object.</summary>
+    public bool ImageSideways { get; init; }
     public bool IsSpace { get; init; }
     public bool IsLineBreak { get; init; }
     /// <summary>Vertical mode: shaped horizontally, painted rotated 90° clockwise.</summary>
     public bool Sideways { get; init; }
     /// <summary>Vertical mode: combined digits centered inside one upright cell.</summary>
     public bool Combined { get; init; }
+    /// <summary>
+    /// Vertical mode: this punctuation has no usable vertical presentation
+    /// glyph and must be painted as a quarter-turned horizontal glyph.
+    /// </summary>
+    public bool VerticalRotation { get; init; }
+    /// <summary>
+    /// A footnote reference is one compact superscript unit. Keeping the
+    /// complete marker (for example, "[3]") in one cell prevents its brackets
+    /// from being paginated and aligned as independent body characters.
+    /// </summary>
+    public bool FootnoteMarker { get; init; }
     /// <summary>The cell's single character when it is exactly one char, else null.</summary>
     public char? Character { get; init; }
     /// <summary>Superscript cells (footnote markers, sup) shift toward the line start edge.</summary>
@@ -82,6 +105,22 @@ internal sealed class PageBuilder
         }
     }
 
+    public void RecordFragments(IEnumerable<string> fragmentIds)
+    {
+        foreach (var fragmentId in fragmentIds)
+        {
+            RecordFragment(fragmentId);
+        }
+    }
+
+    public void NextIfUsed()
+    {
+        if (_used)
+        {
+            Next();
+        }
+    }
+
     public void Next()
     {
         _pages.Add(_current);
@@ -115,6 +154,7 @@ internal sealed class PageBuilder
                 Images = last.Images,
                 Decorations = last.Decorations,
                 HotZones = last.HotZones,
+                DebugBoxes = last.DebugBoxes,
             };
         }
     }
@@ -141,7 +181,54 @@ internal sealed class PageBuilder
         _used = true;
     }
 
-    public void AddHotZone(PlacedHotZone zone) => _current.HotZones.Add(zone);
+    public void AddDebugBox(TypesetDebugBox box) => _current.DebugBoxes.Add(box);
+
+    public void AddHotZone(PlacedHotZone zone)
+    {
+        // A link is shaped as several cells (for example, the three
+        // characters in "[1]"). Keep one hit target for the visible run so
+        // pointer release and footnote hover do not depend on which glyph was
+        // hit. Do not merge across a line/column break: wrapped links still
+        // need one independent target per visible fragment.
+        if (_current.HotZones.LastOrDefault() is { } previous
+            && string.Equals(previous.Href, zone.Href, StringComparison.Ordinal)
+            && previous.Kind == zone.Kind
+            && string.Equals(previous.FootnoteText, zone.FootnoteText, StringComparison.Ordinal)
+            && AreAdjacentOnFlowAxis(previous.Rect, zone.Rect))
+        {
+            _current.HotZones[^1] = new PlacedHotZone
+            {
+                Kind = previous.Kind,
+                Rect = new SKRect(
+                    Math.Min(previous.Rect.Left, zone.Rect.Left),
+                    Math.Min(previous.Rect.Top, zone.Rect.Top),
+                    Math.Max(previous.Rect.Right, zone.Rect.Right),
+                    Math.Max(previous.Rect.Bottom, zone.Rect.Bottom)),
+                Href = previous.Href,
+                FootnoteText = previous.FootnoteText,
+            };
+            return;
+        }
+
+        _current.HotZones.Add(zone);
+    }
+
+    private bool AreAdjacentOnFlowAxis(SKRect previous, SKRect current)
+    {
+        const float epsilon = 0.75f;
+        if (_options.WritingMode == TypesetWritingMode.HorizontalTb)
+        {
+            return Math.Abs(previous.Top - current.Top) <= epsilon
+                && Math.Abs(previous.Bottom - current.Bottom) <= epsilon
+                && current.Left <= previous.Right + epsilon
+                && previous.Left <= current.Right + epsilon;
+        }
+
+        return Math.Abs(previous.Left - current.Left) <= epsilon
+            && Math.Abs(previous.Right - current.Right) <= epsilon
+            && current.Top <= previous.Bottom + epsilon
+            && previous.Top <= current.Bottom + epsilon;
+    }
 
     public void MarkUsed() => _used = true;
 
@@ -198,16 +285,25 @@ internal sealed class CellFactory
         TypesetInlineStyle style,
         string? linkHref,
         string? footnoteHref,
-        bool vertical)
+        bool vertical,
+        string? footnoteText = null,
+        bool footnoteMarker = false)
     {
         var fontSize = _context.Options.BaseFontSize;
         if (style.Superscript)
         {
-            fontSize *= 0.75f;
+            // Footnote references use a compact marker size. Other <sup>
+            // content keeps the slightly larger superscript scale so ordinary
+            // mathematical/text superscripts do not change unexpectedly.
+            fontSize *= footnoteMarker ? 0.70f : 0.75f;
         }
 
         string fontPath = _context.MainFont;
-        var shaped = _context.Shaper.Shape(unitText, 0, unitText.Length, fontPath, fontSize, vertical: false);
+        // HTML collapses ordinary line breaks and runs of whitespace. Keep
+        // the original UTF-16 length for offset mapping, but shape whitespace
+        // as one regular space so a newline never turns into a .notdef box.
+        var shapeText = unitText.All(TypesetText.IsSpace) ? " " : unitText;
+        var shaped = _context.Shaper.Shape(shapeText, 0, shapeText.Length, fontPath, fontSize, vertical: false);
 
         if (ContainsNotdef(shaped))
         {
@@ -218,7 +314,7 @@ internal sealed class CellFactory
                     continue;
                 }
 
-                var retry = _context.Shaper.Shape(unitText, 0, unitText.Length, fallback, fontSize, vertical: false);
+                var retry = _context.Shaper.Shape(shapeText, 0, shapeText.Length, fallback, fontSize, vertical: false);
                 if (!ContainsNotdef(retry))
                 {
                     fontPath = fallback;
@@ -258,11 +354,14 @@ internal sealed class CellFactory
             FontSize = fontSize,
             TextStart = globalTextStart,
             TextLength = unitText.Length,
+            Text = unitText,
             Clusters = shaped.Clusters,
             Style = style,
             LinkHref = linkHref,
             FootnoteHref = footnoteHref,
-            Character = unitText.Length == 1 ? unitText[0] : null,
+            FootnoteText = footnoteText,
+            FootnoteMarker = footnoteMarker,
+            Character = unitText.Length == 1 && !TypesetText.IsSpace(unitText[0]) ? unitText[0] : null,
         };
     }
 
@@ -295,16 +394,102 @@ internal sealed class CellFactory
             return cells;
         }
 
-        if (item.Kind == InlineKind.FootnoteMarker)
+        if (item.Kind == InlineKind.Image)
+        {
+            if (item.ImagePath is null || !File.Exists(item.ImagePath))
+            {
+                return cells;
+            }
+
+            using var codec = SKCodec.Create(item.ImagePath);
+            var info = codec?.Info;
+            if (info is null || info.Value.Width <= 0 || info.Value.Height <= 0)
+            {
+                return cells;
+            }
+
+            // Formula images in this EPUB specify height:1.5em. Preserve that
+            // inline metric instead of treating the source pixel dimensions as
+            // a block image size. A conservative cap keeps malformed/oversized
+            // formula assets from escaping the content box in either mode.
+            var hasWidthConstraint = item.ImageWidthFactor is > 0f;
+            var requestedHeight = _context.Options.BaseFontSize
+                * Math.Clamp(item.ImageHeightEm ?? 1.5f, 0.5f, 8f);
+            var scale = hasWidthConstraint
+                ? Math.Min(
+                    _context.Options.ContentWidth * Math.Clamp(item.ImageWidthFactor!.Value, 0.01f, 1f),
+                    item.DecorativeQuote ? _context.Options.BaseFontSize * 5f : float.MaxValue)
+                    / info.Value.Width
+                : requestedHeight / info.Value.Height;
+            var maxWidth = vertical
+                ? _context.Options.ContentHeight
+                : _context.Options.ContentWidth;
+            scale = Math.Min(scale, maxWidth / info.Value.Width);
+            if (!hasWidthConstraint)
+            {
+                scale = Math.Min(scale, 1f);
+            }
+            if (vertical)
+            {
+                // A vertical inline image is rotated like an existing sideways
+                // Latin run. Its unrotated height becomes the cross-column
+                // width, so keep it comfortably within one vertical column.
+                scale = Math.Min(
+                    scale,
+                    (_context.Options.BodyLineHeight * 0.90f) / info.Value.Height);
+            }
+
+            var width = Math.Max(1f, info.Value.Width * scale);
+            var height = Math.Max(1f, info.Value.Height * scale);
+            cells.Add(new LayoutCell
+            {
+                Glyphs = Array.Empty<ushort>(),
+                GlyphX = Array.Empty<float>(),
+                GlyphY = Array.Empty<float>(),
+                Advance = width,
+                Ascent = height * 0.84f,
+                Descent = height * 0.16f,
+                FontPath = _context.MainFont,
+                FontSize = _context.Options.BaseFontSize,
+                TextStart = item.TextStart,
+                TextLength = 0,
+                Style = item.Style,
+                LinkHref = item.LinkHref,
+                FootnoteHref = item.FootnoteHref,
+                FootnoteText = item.FootnoteText,
+                ImagePath = item.ImagePath,
+                ImageWidth = width,
+                ImageHeight = height,
+                ImageSideways = vertical,
+            });
+            return cells;
+        }
+
+        if (item.Kind == InlineKind.FootnoteMarker || item.FootnoteHref is not null)
         {
             var marker = item.Text.Length > 0 ? item.Text : "注";
-            cells.Add(ShapeCell(
+            var markerStyle = item.Style with
+            {
+                Superscript = true,
+                NoWrap = true,
+            };
+            var cell = ShapeCell(
                 marker,
                 item.TextStart,
-                item.Style,
+                markerStyle,
                 item.LinkHref,
                 item.FootnoteHref,
-                vertical));
+                vertical,
+                item.FootnoteText,
+                footnoteMarker: true);
+            cells.Add(cell with
+            {
+                FootnoteMarker = true,
+                // In vertical writing a reference such as "[3]" is a
+                // tate-chu-yoko unit: one compact horizontal marker centered
+                // in one vertical cell, rather than three separate rows.
+                Combined = vertical,
+            });
             return cells;
         }
 
@@ -335,16 +520,82 @@ internal sealed class CellFactory
                 item.LinkHref,
                 item.FootnoteHref,
                 vertical: false);
-            cell = cell with { IsSpace = unit.Kind == TextUnitKind.Space };
-            cells.Add(cell);
+            if (unit.Kind == TextUnitKind.LatinWord
+                && unitText.Length > 1
+                && cell.Advance > _context.Options.ContentWidth + 0.01f)
+            {
+                // A URL or an unspaced Latin token can be wider than the
+                // entire content box. Keep ordinary words atomic, but split
+                // this exceptional case into source-preserving glyph units so
+                // one cell can never force a line past the right edge.
+                for (var offset = 0; offset < unitText.Length;)
+                {
+                    var length = char.IsHighSurrogate(unitText[offset])
+                        && offset + 1 < unitText.Length
+                        && char.IsLowSurrogate(unitText[offset + 1])
+                        ? 2
+                        : 1;
+                    cells.Add(ShapeCell(
+                        unitText.Substring(offset, length),
+                        item.TextStart + unit.Start + offset,
+                        item.Style,
+                        item.LinkHref,
+                        item.FootnoteHref,
+                        vertical: false));
+                    offset += length;
+                }
+            }
+            else
+            {
+                cell = cell with { IsSpace = unit.Kind == TextUnitKind.Space };
+                cells.Add(cell);
+            }
         }
 
         return cells;
     }
 
+    /// <summary>
+    /// Collapses whitespace that was split into separate XHTML text nodes by
+    /// inline markup. The retained cell keeps the first source range, while
+    /// later collapsed ranges remain in BodyText for offset compatibility.
+    /// </summary>
+    public static void CollapseWhitespace(List<LayoutCell> cells)
+    {
+        var previousWasSpace = false;
+        for (var index = 0; index < cells.Count; index++)
+        {
+            var cell = cells[index];
+            if (cell.IsLineBreak)
+            {
+                previousWasSpace = false;
+                continue;
+            }
+
+            if (!cell.IsSpace)
+            {
+                previousWasSpace = false;
+                continue;
+            }
+
+            if (previousWasSpace)
+            {
+                cells.RemoveAt(index--);
+                continue;
+            }
+
+            previousWasSpace = true;
+        }
+    }
+
     private void AppendVerticalCells(List<LayoutCell> cells, InlineItem item)
     {
-        var units = VerticalTextUnits.Tokenize(item.Text);
+        var units = VerticalTextUnits.Tokenize(
+            item.Text,
+            item.Style.VerticalTextCombineLimit ?? 2,
+            item.Style.VerticalTextOrientation ?? TypesetVerticalOrientation.Mixed);
+        var previousWasSpace = cells.Count > 0 && cells[^1].IsSpace;
+        var previousWasLineBreak = cells.Count > 0 && cells[^1].IsLineBreak;
         foreach (var unit in units)
         {
             if (unit.IsLineBreak)
@@ -362,26 +613,143 @@ internal sealed class CellFactory
                     Style = item.Style,
                     LinkHref = item.LinkHref,
                     FootnoteHref = item.FootnoteHref,
+                    FootnoteText = item.FootnoteText,
                     IsLineBreak = true,
                 });
+                previousWasSpace = false;
+                previousWasLineBreak = true;
                 continue;
             }
 
             var unitText = item.Text.Substring(unit.Offset, unit.Length);
+            var isSpace = unitText.All(TypesetText.IsSpace);
+            if (isSpace)
+            {
+                // XHTML source formatting is normally collapsed whitespace.
+                // Do not let indentation/newlines become visible empty cells
+                // at the start of a paragraph or after an explicit break.
+                if (previousWasSpace || previousWasLineBreak)
+                {
+                    previousWasSpace = true;
+                    continue;
+                }
+            }
+
             var cell = ShapeCell(
                 unitText,
                 item.TextStart + unit.Offset,
                 item.Style,
                 item.LinkHref,
                 item.FootnoteHref,
-                vertical: true);
+                vertical: true,
+                footnoteText: item.FootnoteText);
             cell = cell with
             {
+                IsSpace = isSpace,
                 Sideways = unit.IsSidewaysRun,
                 Combined = unit.IsCombined,
             };
-            cells.Add(cell);
+            if (cell.Sideways && cell.Advance > _context.Options.ContentHeight + 0.01f)
+            {
+                // A publication can contain an unspaced URL, identifier or
+                // formula longer than one vertical column. Split only at text
+                // element boundaries, retaining the original source offsets;
+                // a long run must never be clipped or make pagination stall.
+                cells.AddRange(SplitOversizedSidewaysCell(item, unitText, unit, cell));
+            }
+            else
+            {
+                cells.Add(cell);
+            }
+            previousWasSpace = isSpace;
+            previousWasLineBreak = false;
         }
+    }
+
+    private List<LayoutCell> SplitOversizedSidewaysCell(
+        InlineItem item,
+        string unitText,
+        VerticalTextUnits.Unit unit,
+        LayoutCell original)
+    {
+        var result = new List<LayoutCell>();
+        var starts = StringInfo.ParseCombiningCharacters(unitText);
+        if (starts.Length == 0)
+        {
+            return [original];
+        }
+
+        var chunkStart = 0;
+        for (var elementIndex = 0; elementIndex < starts.Length; elementIndex++)
+        {
+            var elementStart = starts[elementIndex];
+            var elementEnd = elementIndex + 1 < starts.Length
+                ? starts[elementIndex + 1]
+                : unitText.Length;
+            var candidateText = unitText[chunkStart..elementEnd];
+            var candidate = ShapeCell(
+                candidateText,
+                item.TextStart + unit.Offset + chunkStart,
+                item.Style,
+                item.LinkHref,
+                item.FootnoteHref,
+                vertical: true,
+                footnoteText: item.FootnoteText) with
+            {
+                Sideways = true,
+            };
+
+            if (candidate.Advance > _context.Options.ContentHeight + 0.01f
+                && elementStart > chunkStart)
+            {
+                result.Add(ShapeCell(
+                    unitText[chunkStart..elementStart],
+                    item.TextStart + unit.Offset + chunkStart,
+                    item.Style,
+                    item.LinkHref,
+                    item.FootnoteHref,
+                    vertical: true,
+                    footnoteText: item.FootnoteText) with
+                {
+                    Sideways = true,
+                });
+                chunkStart = elementStart;
+                candidate = ShapeCell(
+                    unitText[chunkStart..elementEnd],
+                    item.TextStart + unit.Offset + chunkStart,
+                    item.Style,
+                    item.LinkHref,
+                    item.FootnoteHref,
+                    vertical: true,
+                    footnoteText: item.FootnoteText) with
+                {
+                    Sideways = true,
+                };
+            }
+
+            if (elementEnd == unitText.Length)
+            {
+                result.Add(candidate);
+                chunkStart = elementEnd;
+            }
+        }
+
+        if (result.Count == 0 || chunkStart < unitText.Length)
+        {
+            result.Add(ShapeCell(
+                unitText[chunkStart..],
+                item.TextStart + unit.Offset + chunkStart,
+                item.Style,
+                item.LinkHref,
+                item.FootnoteHref,
+                vertical: true,
+                footnoteText: item.FootnoteText) with
+            {
+                Sideways = true,
+            });
+        }
+
+        return result;
     }
 
     private (float Ascent, float Descent) GetMetrics(string fontPath, float fontSize)

@@ -37,6 +37,54 @@ public sealed class ReaderPaginationTests
                 verticalWriting));
     }
 
+    [Theory]
+    [InlineData(0, 0, 10, true)]
+    [InlineData(1, 0, 10, true)]
+    [InlineData(2, 0, 10, false)]
+    [InlineData(10, 0, 10, false)]
+    public void SelectionPagingRecognizesTheFirstCharacterBoundary(
+        int offset,
+        int pageStart,
+        int pageEnd,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ReaderSelectionPagingPolicy.IsAtPageStart(offset, pageStart, pageEnd));
+    }
+
+    [Theory]
+    [InlineData(9, 0, 10, true)]
+    [InlineData(10, 0, 10, true)]
+    [InlineData(8, 0, 10, false)]
+    [InlineData(0, 0, 10, false)]
+    public void SelectionPagingRecognizesTheLastCharacterBoundary(
+        int offset,
+        int pageStart,
+        int pageEnd,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ReaderSelectionPagingPolicy.IsAtPageEnd(offset, pageStart, pageEnd));
+    }
+
+    [Theory]
+    [InlineData(1, 100, 200, 100)]
+    [InlineData(-1, 100, 200, 200)]
+    [InlineData(0, 100, 200, -1)]
+    [InlineData(1, -1, -1, -1)]
+    public void SelectionPagingUsesTheTargetPageBoundaryAsTheCaretEndpoint(
+        int direction,
+        int pageStart,
+        int pageEnd,
+        int expectedEndpoint)
+    {
+        Assert.Equal(
+            expectedEndpoint,
+            ReaderSelectionPagingPolicy.GetCrossPageEndpoint(direction, pageStart, pageEnd));
+    }
+
     [Fact]
     public void ColumnWidthSupportsSingleAndTwoPageSpreads()
     {

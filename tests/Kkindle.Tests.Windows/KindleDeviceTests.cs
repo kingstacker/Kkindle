@@ -386,6 +386,29 @@ public sealed class KindleDeviceTests
     }
 
     [Fact]
+    public async Task DisplaysAndManagesPrcKindleDictionariesInsideDedicatedDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "documents"));
+        var source = Path.Combine(root, "english.prc");
+        await File.WriteAllBytesAsync(source, [9, 8, 7]);
+        try
+        {
+            var service = new KindleDeviceService();
+            var device = new KindleDevice { RootPath = root, Name = "Fake Kindle", IsReady = true };
+
+            await service.SendResourceAsync(device, KindleResourceKind.Dictionary, source);
+            var dictionary = Assert.Single(await service.ScanResourcesAsync(device, KindleResourceKind.Dictionary));
+            Assert.Equal(Path.Combine("documents", "dictionaries", "english.prc"), dictionary.RelativePath);
+            Assert.Equal("PRC", dictionary.Format);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task ResourceOperationsRejectWrongFormatsAndPathTraversal()
     {
         var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
@@ -418,6 +441,7 @@ public sealed class KindleDeviceTests
     [InlineData(KindleResourceKind.Font, "fonts/font.otf", true)]
     [InlineData(KindleResourceKind.Font, "documents/font.otf", false)]
     [InlineData(KindleResourceKind.Dictionary, "documents/dictionaries/main.mobi", true)]
+    [InlineData(KindleResourceKind.Dictionary, "documents/dictionaries/main.prc", true)]
     [InlineData(KindleResourceKind.Dictionary, "documents/main.mobi", false)]
     public void ResourcePolicyConfinesFilesToExpectedKindleDirectory(
         KindleResourceKind kind,

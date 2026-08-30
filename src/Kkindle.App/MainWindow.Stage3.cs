@@ -2539,7 +2539,7 @@ public partial class MainWindow
         DeviceResourcePathText.Text = kind == KindleResourceKind.Font ? @"Kindle\fonts" : @"Kindle\documents\dictionaries";
         DeviceResourceSafetyText.Text = kind == KindleResourceKind.Font
             ? "仅读写 Kindle 的 fonts 目录；支持 TTF、OTF。导入或删除后建议断开设备并重启 Kindle。"
-            : "仅读写 Kindle 的 documents\\dictionaries 目录；支持 AZW、AZW3、MOBI、KFX。删除前请确认不是当前正在使用的主词典。";
+            : "仅读写 Kindle 的 documents\\dictionaries 目录；支持 AZW、AZW3、MOBI、PRC、KFX。删除前请确认不是当前正在使用的主词典。";
         await RefreshDeviceResourcesAsync();
     }
 
@@ -2637,7 +2637,7 @@ public partial class MainWindow
         if (_deviceResourceBusy || _kindle is null || CurrentDevice is null) return;
         var extensions = _deviceResourceKind == KindleResourceKind.Font
             ? new[] { "*.ttf", "*.otf" }
-            : new[] { "*.azw", "*.azw3", "*.mobi", "*.kfx" };
+            : new[] { "*.azw", "*.azw3", "*.mobi", "*.prc", "*.kfx" };
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel is null) return;
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -2672,7 +2672,7 @@ public partial class MainWindow
         }
         else if (draggedPaths.Length > 0)
         {
-            var formats = _deviceResourceKind == KindleResourceKind.Font ? "TTF / OTF" : "AZW / AZW3 / MOBI / KFX";
+            var formats = _deviceResourceKind == KindleResourceKind.Font ? "TTF / OTF" : "AZW / AZW3 / MOBI / PRC / KFX";
             await ShowMessageAsync("无法导入", $"拖入的文件中没有可用的 {formats} 文件。");
         }
     }
@@ -3389,7 +3389,7 @@ public partial class MainWindow
             [
                 new FilePickerFileType("支持的词典")
                 {
-                    Patterns = ["*.mdx", "*.azw", "*.azw3", "*.mobi", "*.kfx", "*.txt", "*.tsv", "*.csv"]
+                    Patterns = ["*.mdx", "*.azw", "*.azw3", "*.mobi", "*.prc", "*.kfx", "*.txt", "*.tsv", "*.csv"]
                 }
             ]
         });

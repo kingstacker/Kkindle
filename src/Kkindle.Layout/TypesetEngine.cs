@@ -47,13 +47,29 @@ public sealed class TypesetEngine : IDisposable
 
         pages.Finish(endOfChapter: true);
 
-        return new ChapterLayout
+        var layout = new ChapterLayout
         {
             Pages = pages.Pages,
             BodyTextLength = content.BodyText.Length,
             FragmentPages = pages.Fragments,
             Options = options,
         };
+
+        // Block-level fragment ids are recorded when a block first enters a
+        // page, which is sufficient for structural/image anchors. Inline ids
+        // can occur after a long paragraph has already crossed a page break;
+        // their source offsets are authoritative and must replace that coarse
+        // first-page mapping.
+        foreach (var (fragmentId, offset) in content.FragmentTextOffsets)
+        {
+            var fragmentPage = layout.GetPageIndexOfOffset(offset);
+            if (fragmentPage >= 0)
+            {
+                pages.Fragments[fragmentId] = fragmentPage;
+            }
+        }
+
+        return layout;
     }
 }
 
@@ -76,7 +92,8 @@ public static class ChapterLayoutInteraction
 {
     public static int GetPageIndexOfOffset(this ChapterLayout layout, int offset)
     {
-        var best = -1;
+        var firstTextPage = -1;
+        var lastTextPage = -1;
         for (var i = 0; i < layout.Pages.Count; i++)
         {
             var page = layout.Pages[i];
@@ -85,29 +102,27 @@ public static class ChapterLayoutInteraction
                 continue;
             }
 
-            if (page.TextStartOffset <= offset)
+            firstTextPage = firstTextPage < 0 ? i : firstTextPage;
+            lastTextPage = i;
+            if (offset < page.TextStartOffset)
             {
-                best = i;
+                return i == firstTextPage ? firstTextPage : i;
             }
-            else
+
+            if (page.TextEndOffset < 0 || offset < page.TextEndOffset)
             {
-                break;
+                return i;
             }
         }
 
-        if (best >= 0 && layout.Pages[best].TextEndOffset > 0 && offset >= layout.Pages[best].TextEndOffset)
+        if (firstTextPage < 0)
         {
-            // Offset sits in a gap (whitespace between pages); clamp forward.
-            for (var i = best + 1; i < layout.Pages.Count; i++)
-            {
-                if (layout.Pages[i].TextStartOffset >= 0)
-                {
-                    return i;
-                }
-            }
+            return -1;
         }
 
-        return best;
+        // Offsets after the final visible run belong to the final page. This
+        // is also where trailing whitespace safely restores.
+        return lastTextPage;
     }
 
     public static int GetPageIndexOfFragment(this ChapterLayout layout, string fragmentId) =>
@@ -133,42 +148,34 @@ public static class ChapterLayoutInteraction
 
             var local = offset - run.TextStart;
             var glyphIndex = FindGlyphForCluster(run, local);
-            if (glyphIndex < 0)
+            if (glyphIndex < 0
+                || glyphIndex >= run.Glyphs.Length
+                || glyphIndex >= run.X.Length)
             {
                 continue;
             }
 
-            var size = run.FontSize * run.Scale;
-            var nextIndex = glyphIndex + 1;
-            var x0 = run.OriginX + run.X[glyphIndex];
-            var y0 = run.OriginY + run.Y[glyphIndex];
+            return GetGlyphRect(layout.Pages[pageIndex], run, glyphIndex);
+        }
 
-            if (run.Sideways)
+        return null;
+    }
+
+    /// <summary>Returns the interactive zone under a page point, if any.</summary>
+    public static PlacedHotZone? GetHotZoneAt(this ChapterLayout layout, int pageIndex, SKPoint point)
+    {
+        if (pageIndex < 0 || pageIndex >= layout.Pages.Count)
+        {
+            return null;
+        }
+
+        var zones = layout.Pages[pageIndex].HotZones;
+        for (var i = zones.Count - 1; i >= 0; i--)
+        {
+            if (zones[i].Rect.Contains(point.X, point.Y))
             {
-                var advance = nextIndex < run.X.Length
-                    ? run.X[nextIndex] - run.X[glyphIndex]
-                    : Math.Max(size * 0.5f, run.FlowAdvance - run.X[glyphIndex]);
-                return new SKRect(
-                    run.OriginX - size * 0.25f,
-                    y0,
-                    run.OriginX + size * 0.9f,
-                    y0 + Math.Max(2f, advance));
+                return zones[i];
             }
-
-            if (layout.Pages[pageIndex].WritingMode == TypesetWritingMode.VerticalRl)
-            {
-                // Upright cells: one cell box per glyph.
-                return new SKRect(
-                    x0,
-                    y0 - size * 0.88f,
-                    x0 + size,
-                    y0 + size * 0.12f);
-            }
-
-            var width = nextIndex < run.X.Length
-                ? run.X[nextIndex] - run.X[glyphIndex]
-                : Math.Max(2f, size * 0.6f);
-            return new SKRect(x0, y0 - size * 0.9f, x0 + Math.Max(2f, width), y0 + size * 0.24f);
         }
 
         return null;
@@ -185,39 +192,37 @@ public static class ChapterLayoutInteraction
         var best = -1;
         var bestDistance = float.MaxValue;
         var bestAfterMidpoint = false;
+        var page = layout.Pages[pageIndex];
 
         foreach (var run in layout.Pages[pageIndex].Runs)
         {
-            if (run.Glyphs.Length == 0)
+            var glyphCount = Math.Min(run.Glyphs.Length, run.X.Length);
+            if (glyphCount == 0 || run.TextStart < 0)
             {
                 continue;
             }
 
-            for (var i = 0; i < run.X.Length; i++)
+            for (var i = 0; i < glyphCount; i++)
             {
                 var size = run.FontSize * run.Scale;
-                float cx;
-                float cy;
-                if (run.Sideways)
+                var rect = GetGlyphRect(page, run, i);
+                var distance = DistanceToRect(point, rect);
+                var tolerance = Math.Max(6f, size * 1.25f);
+                if (distance > tolerance)
                 {
-                    var nextX = i + 1 < run.X.Length ? run.X[i + 1] : run.X[i] + size * 0.55f;
-                    cx = run.OriginX;
-                    cy = run.OriginY + (run.X[i] + nextX) / 2f;
-                }
-                else
-                {
-                    var nextX = i + 1 < run.X.Length ? run.X[i + 1] : run.X[i] + size * 0.55f;
-                    cx = run.OriginX + (run.X[i] + nextX) / 2f;
-                    cy = run.OriginY;
+                    continue;
                 }
 
-                var distance = Distance(point, new SKPoint(cx, cy));
+                var cx = (rect.Left + rect.Right) / 2f;
+                var cy = (rect.Top + rect.Bottom) / 2f;
                 if (distance < bestDistance)
                 {
                     bestDistance = distance;
                     var local = i < run.Clusters.Length ? run.Clusters[i] : 0;
-                    best = run.TextStart >= 0 ? run.TextStart + local : -1;
-                    bestAfterMidpoint = distance > size * 0.45f;
+                    best = run.TextStart + local;
+                    bestAfterMidpoint = page.WritingMode == TypesetWritingMode.VerticalRl
+                        ? point.Y > cy
+                        : point.X > cx;
                 }
             }
         }
@@ -227,7 +232,9 @@ public static class ChapterLayoutInteraction
             best++;
         }
 
-        return Math.Clamp(best, 0, Math.Max(0, layout.BodyTextLength));
+        return best < 0
+            ? -1
+            : Math.Clamp(best, 0, Math.Max(0, layout.BodyTextLength));
     }
 
     /// <summary>
@@ -325,10 +332,46 @@ public static class ChapterLayoutInteraction
         return best;
     }
 
-    private static float Distance(SKPoint a, SKPoint b)
+    internal static SKRect GetGlyphRect(LayoutPage page, PlacedRun run, int glyphIndex)
     {
-        var dx = a.X - b.X;
-        var dy = a.Y - b.Y;
+        var size = run.FontSize * run.Scale;
+        var nextIndex = glyphIndex + 1;
+        if (run.Sideways)
+        {
+            var advance = nextIndex < run.X.Length
+                ? run.X[nextIndex] - run.X[glyphIndex]
+                : Math.Max(size * 0.5f, run.FlowAdvance - run.X[glyphIndex]);
+            var top = run.OriginY + run.X[glyphIndex];
+            return new SKRect(
+                run.OriginX - size * 0.25f,
+                top,
+                run.OriginX + size * 0.9f,
+                top + Math.Max(2f, advance));
+        }
+
+        var x0 = run.OriginX + run.X[glyphIndex];
+        var y0 = run.OriginY + (glyphIndex < run.Y.Length ? run.Y[glyphIndex] : 0f);
+        if (page.WritingMode == TypesetWritingMode.VerticalRl)
+        {
+            var left = run.CellWidth > 0f ? run.OriginX : x0;
+            var right = run.CellWidth > 0f ? left + run.CellWidth : x0 + size;
+            return new SKRect(
+                left,
+                y0 - size * 0.88f,
+                right,
+                y0 + size * 0.12f);
+        }
+
+        var width = nextIndex < run.X.Length
+            ? run.X[nextIndex] - run.X[glyphIndex]
+            : Math.Max(2f, run.FlowAdvance - run.X[glyphIndex]);
+        return new SKRect(x0, y0 - size * 0.9f, x0 + Math.Max(2f, width), y0 + size * 0.24f);
+    }
+
+    private static float DistanceToRect(SKPoint point, SKRect rect)
+    {
+        var dx = point.X < rect.Left ? rect.Left - point.X : point.X > rect.Right ? point.X - rect.Right : 0f;
+        var dy = point.Y < rect.Top ? rect.Top - point.Y : point.Y > rect.Bottom ? point.Y - rect.Bottom : 0f;
         return MathF.Sqrt(dx * dx + dy * dy);
     }
 }

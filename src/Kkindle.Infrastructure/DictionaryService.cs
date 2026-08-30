@@ -48,12 +48,12 @@ public sealed class DictionaryService
         var entries = extension switch
         {
             ".mdx" => await ParseMdxAsync(sourcePath, cancellationToken),
-            ".azw" or ".azw3" or ".mobi" or ".kfx" => await ParseKindleDictionaryAsync(sourcePath, cancellationToken),
+            ".azw" or ".azw3" or ".mobi" or ".prc" or ".kfx" => await ParseKindleDictionaryAsync(sourcePath, cancellationToken),
             ".txt" or ".tsv" or ".csv" => await ParseAsync(sourcePath, cancellationToken),
-            _ => throw new NotSupportedException("支持 MDX、AZW、AZW3、MOBI、KFX、TXT、TSV 和 CSV 词典。")
+            _ => throw new NotSupportedException("支持 MDX、AZW、AZW3、MOBI、PRC、KFX、TXT、TSV 和 CSV 词典。")
         };
         if (entries.Count == 0)
-            throw new InvalidDataException(extension is ".azw" or ".azw3" or ".mobi" or ".kfx"
+            throw new InvalidDataException(extension is ".azw" or ".azw3" or ".mobi" or ".prc" or ".kfx"
                 ? "转换后的 Kindle 词典中没有识别到词条。请确认文件是未受 DRM 保护的 Kindle 词典。"
                 : "词典中没有识别到可用词条。");
         _paths.EnsureDirectories();

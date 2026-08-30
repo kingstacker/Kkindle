@@ -26,6 +26,13 @@ public enum InlineKind
     FootnoteMarker,
 }
 
+public enum TypesetVerticalOrientation
+{
+    Mixed,
+    Upright,
+    Sideways,
+}
+
 public enum HotZoneKind
 {
     Link,
@@ -42,7 +49,17 @@ public readonly record struct TypesetInlineStyle(
     bool Underline = false,
     bool Strikeout = false,
     bool Superscript = false,
-    bool NoWrap = false);
+    bool NoWrap = false)
+{
+    /// <summary>
+    /// Null means that the document did not specify text-combine-upright;
+    /// the reader's publication default is two digits.
+    /// </summary>
+    public int? VerticalTextCombineLimit { get; init; }
+
+    /// <summary>Null means mixed orientation, subject to the reader default.</summary>
+    public TypesetVerticalOrientation? VerticalTextOrientation { get; init; }
+}
 
 /// <summary>
 /// One piece of inline content in document order. Non-text items still carry
@@ -57,8 +74,16 @@ public sealed class InlineItem
     public int TextStart { get; init; } = -1;
     public TypesetInlineStyle Style { get; init; }
     public string? ImagePath { get; init; }
+    /// <summary>Requested inline image height in em units, when the EPUB provides one.</summary>
+    public float? ImageHeightEm { get; init; }
+    /// <summary>Requested image width as a fraction of the content width.</summary>
+    public float? ImageWidthFactor { get; init; }
+    /// <summary>Decorative quote artwork uses a readable font-relative cap on wide pages.</summary>
+    public bool DecorativeQuote { get; init; }
     public string? LinkHref { get; init; }
     public string? FootnoteHref { get; init; }
+    /// <summary>Inline note text for publishers that encode a footnote in an image alt attribute.</summary>
+    public string? FootnoteText { get; init; }
     /// <summary>Ghost text is part of the offset stream (ruby rt) but never rendered.</summary>
     public bool Ghost { get; init; }
 }
@@ -71,8 +96,11 @@ public sealed class ContentBlock
 {
     public BlockKind Kind { get; init; } = BlockKind.Paragraph;
     public string? ElementId { get; init; }
+    /// <summary>All fragment ids contained by this block, including inline anchors.</summary>
+    public IReadOnlyList<string> FragmentIds { get; init; } = Array.Empty<string>();
     public TypesetInlineStyle Style { get; init; }
     public bool Center { get; init; }
+    public bool AlignRight { get; init; }
     public bool Justify { get; init; }
     public float TextIndentEm { get; init; }
     public float SpaceBeforeLines { get; init; }
@@ -82,9 +110,9 @@ public sealed class ContentBlock
 
 /// <summary>
 /// A chapter reduced to typed blocks. <see cref="BodyText"/> is the verbatim
-/// concatenation of every body text node (including hidden footnote
-/// definitions) so character offsets stay compatible with annotations that
-/// were captured against the live document's textContent.
+/// concatenation of every body text node, including footnote definitions, so
+/// character offsets stay compatible with annotations that were captured
+/// against the live document's textContent.
 /// </summary>
 public sealed class ChapterContent
 {
@@ -93,6 +121,9 @@ public sealed class ChapterContent
     public required IReadOnlyList<ContentBlock> Blocks { get; init; }
     /// <summary>Element ids that must still answer fragment navigation.</summary>
     public IReadOnlySet<string> FragmentIds { get; init; } = new HashSet<string>();
+    /// <summary>Text offsets at which visible fragment ids begin, when they have one.</summary>
+    public IReadOnlyDictionary<string, int> FragmentTextOffsets { get; init; } =
+        new Dictionary<string, int>(StringComparer.Ordinal);
 }
 
 public sealed class TypesetLayoutOptions
@@ -133,11 +164,37 @@ public sealed class PlacedRect
     public int TextLength { get; init; }
 }
 
+/// <summary>
+/// A persisted reader annotation projected onto the visible page. The layout
+/// package deliberately receives only geometry and paint information here so
+/// the native painter does not depend on the application's data layer.
+/// </summary>
+public sealed class TypesetAnnotationOverlay
+{
+    public required IReadOnlyList<SKRect> Bands { get; init; }
+    public required string Style { get; init; }
+    public required SKColor Color { get; init; }
+}
+
+public enum TypesetDebugBoxKind
+{
+    HanCell,
+    CompatibilityCell,
+    Glyph,
+}
+
+/// <summary>One diagnostic frame emitted by the native vertical composer.</summary>
+public readonly record struct TypesetDebugBox(SKRect Rect, TypesetDebugBoxKind Kind);
+
 public sealed class PlacedImage
 {
     public required string Path { get; init; }
     public required SKRect Rect { get; init; }
+    /// <summary>Clockwise rotation applied by the painter, used by vertical inline formulas.</summary>
+    public float RotationDegrees { get; init; }
     public string? LinkHref { get; init; }
+    public string? FootnoteHref { get; init; }
+    public string? FootnoteText { get; init; }
 }
 
 public sealed class PlacedHotZone
@@ -145,6 +202,7 @@ public sealed class PlacedHotZone
     public required HotZoneKind Kind { get; init; }
     public required SKRect Rect { get; init; }
     public required string Href { get; init; }
+    public string? FootnoteText { get; init; }
 }
 
 /// <summary>
@@ -171,6 +229,12 @@ public sealed record PlacedRun
     public bool SyntheticBold { get; init; }
     /// <summary>Uniform paint scale for combined (tate-chu-yoko) digit cells.</summary>
     public float Scale { get; init; } = 1f;
+    /// <summary>
+    /// Width of an upright vertical cell in the cross-flow direction. Zero
+    /// keeps the legacy glyph-bounds behavior used by horizontal and sideways
+    /// runs.
+    /// </summary>
+    public float CellWidth { get; init; }
     public required int TextStart { get; init; }
     public required int TextLength { get; init; }
     /// <summary>Per-glyph offset from <see cref="TextStart"/> into the chapter text.</summary>
@@ -196,6 +260,7 @@ public sealed class LayoutPage
     public List<PlacedImage> Images { get; init; } = new();
     public List<PlacedRect> Decorations { get; init; } = new();
     public List<PlacedHotZone> HotZones { get; init; } = new();
+    public List<TypesetDebugBox> DebugBoxes { get; init; } = new();
 }
 
 public sealed class ChapterLayout

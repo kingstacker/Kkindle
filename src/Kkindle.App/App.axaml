@@ -132,6 +132,10 @@
 
         <x:Double x:Key="MenuFlyoutSeparatorThemeHeight">0.5</x:Double>
         <x:Double x:Key="MenuFlyoutThemeMinHeight">0</x:Double>
+        <!-- Fluent defaults this to -4 so a submenu overlaps its parent menu.
+             The reader menus use square, adjacent panels: their borders must
+             meet at the parent's right edge without covering one another. -->
+        <x:Double x:Key="MenuFlyoutSubItemPopupHorizontalOffset">0</x:Double>
         <Thickness x:Key="MenuFlyoutPresenterThemePadding">0</Thickness>
         <Thickness x:Key="MenuFlyoutPresenterBorderThemeThickness">1</Thickness>
         <!-- The Fluent menu template reads this key directly. Use the compact
@@ -156,7 +160,10 @@
         <SolidColorBrush x:Key="MenuFlyoutSubItemChevron" Color="{StaticResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutSubItemChevronPointerOver" Color="{StaticResource PaperColor}" />
         <SolidColorBrush x:Key="MenuFlyoutSubItemChevronPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronSubMenuOpened" Color="{StaticResource PaperColor}" />
+        <!-- Opening the submenu must not make the parent chevron disappear
+             against its white row. Its position remains controlled by the
+             unchanged MenuFlyoutItemChevronMargin resource above. -->
+        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronSubMenuOpened" Color="{StaticResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutSubItemChevronDisabled" Color="#8A8A8A" />
         <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForeground" Color="{StaticResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundPointerOver" Color="{StaticResource PaperColor}" />
@@ -1713,6 +1720,12 @@
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="MenuItem:open /template/ Path#PART_ChevronPath">
+            <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+        </Style>
+        <!-- A submenu parent is also marked selected while the pointer moves
+             into the child popup. Keep its chevron in the same slot and ink
+             colour instead of letting the selected-state theme hide it. -->
+        <Style Selector="MenuItem:selected /template/ Path#PART_ChevronPath">
             <Setter Property="Fill" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="MenuItem.instantMenuHover /template/ Border#PART_LayoutRoot">

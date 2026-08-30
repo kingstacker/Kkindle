@@ -32,11 +32,24 @@ public static class PageModelJson
         int TextLength,
         int[] Clusters);
 
-    public sealed record ImageDto(string Path, float Left, float Top, float Right, float Bottom);
+    public sealed record ImageDto(
+        string Path,
+        float Left,
+        float Top,
+        float Right,
+        float Bottom,
+        float RotationDegrees = 0f);
 
     public sealed record RectDto(int Kind, float Left, float Top, float Right, float Bottom, int TextStart);
 
-    public sealed record ZoneDto(int Kind, string Href, float Left, float Top, float Right, float Bottom);
+    public sealed record ZoneDto(
+        int Kind,
+        string Href,
+        string? FootnoteText,
+        float Left,
+        float Top,
+        float Right,
+        float Bottom);
 
     public sealed record PageDto(
         int Index,
@@ -81,7 +94,13 @@ public static class PageModelJson
             r.TextStart,
             r.TextLength,
             r.Clusters)).ToList(),
-        page.Images.Select(i => new ImageDto(i.Path, i.Rect.Left, i.Rect.Top, i.Rect.Right, i.Rect.Bottom)).ToList(),
+        page.Images.Select(i => new ImageDto(
+            i.Path,
+            i.Rect.Left,
+            i.Rect.Top,
+            i.Rect.Right,
+            i.Rect.Bottom,
+            i.RotationDegrees)).ToList(),
         page.Decorations.Select(d => new RectDto(
             (int)d.Kind,
             d.Rect.Left,
@@ -92,6 +111,7 @@ public static class PageModelJson
         page.HotZones.Select(z => new ZoneDto(
             (int)z.Kind,
             z.Href,
+            z.FootnoteText,
             z.Rect.Left,
             z.Rect.Top,
             z.Rect.Right,

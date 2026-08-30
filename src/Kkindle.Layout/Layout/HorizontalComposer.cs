@@ -47,7 +47,7 @@ internal sealed class HorizontalComposer
                     PlaceImageBlock(block);
                     break;
                 case BlockKind.Rule:
-                    PlaceRule();
+                    PlaceRule(block);
                     break;
                 default:
                     PlaceTextBlock(block);
@@ -59,8 +59,8 @@ internal sealed class HorizontalComposer
     private void PlaceTextBlock(ContentBlock block)
     {
         var isHeading = block.Kind == BlockKind.Heading;
-        var lineHeight = isHeading ? BaseFontSize * 1.35f : BodyLineHeight;
-
+        var startsAtPageTop = isHeading
+            && (!string.IsNullOrWhiteSpace(block.ElementId) || block.FragmentIds.Count > 0);
         float leftInset = 0f;
         float rightInset = 0f;
         if (block.Kind == BlockKind.Blockquote)
@@ -77,8 +77,28 @@ internal sealed class HorizontalComposer
         {
             cells.AddRange(_cells.BuildCells(item, vertical: false));
         }
+        CellFactory.CollapseWhitespace(cells);
+        var lineHeight = isHeading
+            ? BaseFontSize * 1.35f
+            : Math.Max(BodyLineHeight, cells
+                .Where(cell => cell.ImagePath is not null)
+                .Select(cell => cell.ImageHeight)
+                .DefaultIfEmpty(0f)
+                .Max());
 
-        _cursorY += block.SpaceBeforeLines * BodyLineHeight;
+        if (startsAtPageTop)
+        {
+            // TOC headings are fragment targets. A page that merely contains
+            // the heading is not enough: the target must be the first visible
+            // line after a click, just like scrollIntoView({ block: "start" })
+            // in the old document reader.
+            _pages.NextIfUsed();
+            _cursorY = InsetV;
+        }
+        else
+        {
+            _cursorY += block.SpaceBeforeLines * BodyLineHeight;
+        }
 
         var lines = BreakLines(cells, availWidth, block.TextIndentEm * BaseFontSize);
         var quoteTop = float.MaxValue;
@@ -88,11 +108,16 @@ internal sealed class HorizontalComposer
         {
             if (_cursorY + lineHeight > ContentBottom + 0.01f)
             {
-                _pages.Next();
+                _pages.NextIfUsed();
                 _cursorY = InsetV;
             }
 
             var line = lines[lineIndex];
+            if (lineIndex == 0)
+            {
+                _pages.RecordFragment(block.ElementId);
+                _pages.RecordFragments(block.FragmentIds);
+            }
             if (block.Kind == BlockKind.Blockquote)
             {
                 quoteTop = Math.Min(quoteTop, _cursorY);
@@ -139,7 +164,45 @@ internal sealed class HorizontalComposer
 
         foreach (var cell in line.Cells)
         {
-            var superscriptShift = cell.Superscript ? -cell.FontSize * 0.35f : 0f;
+            if (cell.ImagePath is not null)
+            {
+                run?.Flush(_pages);
+                run = null;
+
+                var imageWidth = Math.Max(1f, cell.ImageWidth);
+                var imageHeight = Math.Max(1f, cell.ImageHeight);
+                var imageRect = new SKRect(
+                    penX,
+                    lineTop + Math.Max(0f, (lineHeight - imageHeight) / 2f),
+                    penX + imageWidth,
+                    lineTop + Math.Max(0f, (lineHeight - imageHeight) / 2f) + imageHeight);
+                _pages.AddImage(new PlacedImage
+                {
+                    Path = cell.ImagePath,
+                    Rect = imageRect,
+                    LinkHref = cell.LinkHref,
+                    FootnoteHref = cell.FootnoteHref,
+                    FootnoteText = cell.FootnoteText,
+                });
+
+                if (cell.LinkHref is not null || cell.FootnoteHref is not null)
+                {
+                    _pages.AddHotZone(new PlacedHotZone
+                    {
+                        Kind = cell.FootnoteHref is not null ? HotZoneKind.FootnoteMarker : HotZoneKind.Link,
+                        Rect = imageRect,
+                        Href = cell.FootnoteHref ?? cell.LinkHref!,
+                        FootnoteText = cell.FootnoteText,
+                    });
+                }
+
+                penX += cell.Advance;
+                continue;
+            }
+
+            var superscriptShift = cell.Superscript
+                ? -(cell.FootnoteMarker ? BaseFontSize * 0.30f : cell.FontSize * 0.35f)
+                : 0f;
             var cellBaseline = baseline + superscriptShift;
 
             if (run is null || !run.CanAppend(cell, cellBaseline))
@@ -162,6 +225,7 @@ internal sealed class HorizontalComposer
                     Kind = cell.FootnoteHref is not null ? HotZoneKind.FootnoteMarker : HotZoneKind.Link,
                     Rect = new SKRect(penX, lineTop, penX + Math.Max(cell.Advance, 4f), lineTop + lineHeight),
                     Href = cell.FootnoteHref ?? cell.LinkHref!,
+                    FootnoteText = cell.FootnoteText,
                 });
             }
 
@@ -307,38 +371,70 @@ internal sealed class HorizontalComposer
         }
 
         var info = codec.Info;
-        var maxW = ContentWidth;
+        if (info.Width <= 0 || info.Height <= 0)
+        {
+            return;
+        }
+        var hasWidthConstraint = item.ImageWidthFactor is > 0f;
+        var maxW = hasWidthConstraint
+            ? Math.Min(
+                ContentWidth * Math.Clamp(item.ImageWidthFactor!.Value, 0.01f, 1f),
+                item.DecorativeQuote ? BaseFontSize * 5f : float.MaxValue)
+            : ContentWidth;
         var maxH = Math.Max(1f, _context.Options.ContentHeight - BaseFontSize * 3.6f);
-        var scale = Math.Min(1f, Math.Min(maxW / info.Width, maxH / info.Height));
+        var scale = Math.Min(maxW / info.Width, maxH / info.Height);
+        if (!hasWidthConstraint)
+        {
+            scale = Math.Min(1f, scale);
+        }
         var w = info.Width * scale;
         var h = info.Height * scale;
 
         _cursorY += BaseFontSize * 1.8f;
         if (_cursorY + h > ContentBottom + 0.01f)
         {
-            _pages.Next();
+            _pages.NextIfUsed();
             _cursorY = InsetV + BaseFontSize * 0.5f;
         }
 
-        var x = InsetH + (ContentWidth - w) / 2f;
+        var x = block.AlignRight
+            ? InsetH + ContentWidth - w
+            : block.Center
+                ? InsetH + (ContentWidth - w) / 2f
+                : InsetH;
+        _pages.RecordFragment(block.ElementId);
+        _pages.RecordFragments(block.FragmentIds);
         _pages.AddImage(new PlacedImage
         {
             Path = item.ImagePath,
             Rect = new SKRect(x, _cursorY, x + w, _cursorY + h),
             LinkHref = item.LinkHref,
+            FootnoteHref = item.FootnoteHref,
         });
+        if (item.LinkHref is not null || item.FootnoteHref is not null)
+        {
+            _pages.AddHotZone(new PlacedHotZone
+            {
+                Kind = item.FootnoteHref is not null ? HotZoneKind.FootnoteMarker : HotZoneKind.Link,
+                Rect = new SKRect(x, _cursorY, x + w, _cursorY + h),
+                Href = item.FootnoteHref ?? item.LinkHref!,
+                FootnoteText = item.FootnoteText,
+            });
+        }
         _cursorY += h + BaseFontSize * 1.8f;
     }
 
-    private void PlaceRule()
+    private void PlaceRule(ContentBlock block)
     {
         _cursorY += BaseFontSize * 2f;
         if (_cursorY + 1f > ContentBottom + 0.01f)
         {
-            _pages.Next();
+            _pages.NextIfUsed();
             _cursorY = InsetV + BaseFontSize;
         }
 
+        _pages.RecordFragment(block.ElementId);
+        _pages.RecordFragments(block.FragmentIds);
         _pages.AddDecoration(new PlacedRect
         {
             Kind = DecorationKind.Rule,
@@ -364,7 +460,9 @@ internal sealed class HorizontalComposer
             Used += cell.Advance;
             Ascent = Math.Max(Ascent, cell.Ascent);
             Descent = Math.Max(Descent, cell.Descent);
-            GlyphCount += Math.Max(1, cell.Glyphs.Length);
+            GlyphCount += cell.FootnoteMarker
+                ? 1
+                : Math.Max(1, cell.Glyphs.Length);
         }
 
         public void RemoveLast()
@@ -377,7 +475,16 @@ internal sealed class HorizontalComposer
             var removed = Cells[^1];
             Cells.RemoveAt(Cells.Count - 1);
             Used -= removed.Advance;
-            GlyphCount -= Math.Max(1, removed.Glyphs.Length);
+            GlyphCount -= removed.FootnoteMarker
+                ? 1
+                : Math.Max(1, removed.Glyphs.Length);
+            Ascent = 0f;
+            Descent = 0f;
+            foreach (var cell in Cells)
+            {
+                Ascent = Math.Max(Ascent, cell.Ascent);
+                Descent = Math.Max(Descent, cell.Descent);
+            }
         }
 
         /// <summary>Distributes <paramref name="extra"/> pixels across all inter-glyph gaps.</summary>
@@ -390,22 +497,38 @@ internal sealed class HorizontalComposer
             }
 
             var perGap = extra / gaps;
-            float delta = 0f;
             for (var index = 0; index < Cells.Count; index++)
             {
                 var cell = Cells[index];
                 var shiftedX = new float[cell.GlyphX.Length];
-                for (var i = 0; i < cell.GlyphX.Length; i++)
+                if (!cell.FootnoteMarker)
                 {
-                    shiftedX[i] = cell.GlyphX[i] + delta + perGap * i;
+                    for (var i = 0; i < cell.GlyphX.Length; i++)
+                    {
+                        // Gaps inside a shaped cell belong in its local glyph
+                        // positions. The gap after a cell belongs in that
+                        // cell's advance, so PlaceLine does not count the same
+                        // distance twice when it advances to the next cell.
+                        shiftedX[i] = cell.GlyphX[i] + perGap * i;
+                    }
+                }
+                else
+                {
+                    // A marker is an atomic visual unit. Justification may add
+                    // space after it, but must never stretch the distance
+                    // between its paired brackets and the reference number.
+                    Array.Copy(cell.GlyphX, shiftedX, cell.GlyphX.Length);
                 }
 
+                var glyphCount = Math.Max(1, cell.Glyphs.Length);
+                var gapsAfter = index == Cells.Count - 1
+                    ? cell.FootnoteMarker ? 0 : Math.Max(0, glyphCount - 1)
+                    : cell.FootnoteMarker ? 1 : glyphCount;
                 Cells[index] = cell with
                 {
                     GlyphX = shiftedX,
-                    Advance = cell.Advance + perGap * cell.GlyphX.Length,
+                    Advance = cell.Advance + perGap * gapsAfter,
                 };
-                delta += perGap * cell.GlyphX.Length;
             }
 
             Used += extra;
@@ -423,6 +546,7 @@ internal sealed class HorizontalComposer
         private LayoutCell? _first;
         private LayoutCell? _last;
         private int _cellClusterBase;
+        private float _flowAdvance;
 
         public RunAccumulator(float baseline)
         {
@@ -449,6 +573,7 @@ internal sealed class HorizontalComposer
             _cellClusterBase = _first.TextStart >= 0 && cell.TextStart >= 0
                 ? cell.TextStart - _first.TextStart
                 : 0;
+            _flowAdvance += cell.Advance;
         }
 
         public void AddGlyph(ushort glyph, float x, float y, int cluster)
@@ -474,7 +599,10 @@ internal sealed class HorizontalComposer
             for (var i = 0; i < _x.Count; i++)
             {
                 x[i] = _x[i] - originX;
-                y[i] = _y[i] - _baseline;
+                // Cell glyph offsets are already relative to the baseline.
+                // Subtracting the absolute line baseline here moves every
+                // horizontal glyph far above the page.
+                y[i] = _y[i];
             }
 
             var textStart = _first.TextStart;
@@ -491,7 +619,7 @@ internal sealed class HorizontalComposer
                 Y = y,
                 OriginX = originX,
                 OriginY = _baseline,
-                FlowAdvance = x.Length > 0 ? _x[^1] - _x[0] : 0f,
+                FlowAdvance = _flowAdvance,
                 TextStart = textStart,
                 TextLength = textLength,
                 Clusters = _clusters.ToArray(),
@@ -505,6 +633,7 @@ internal sealed class HorizontalComposer
         {
             _first = null;
             _last = null;
+            _flowAdvance = 0f;
             _glyphs.Clear();
             _x.Clear();
             _y.Clear();

@@ -129,3 +129,44 @@ public static class ReaderPaginationPolicy
         return Math.Clamp(aligned, 0, rawMax);
     }
 }
+
+/// <summary>
+/// Boundary rules for a text selection whose endpoint can cross paginated
+/// content. Selection offsets are caret boundaries: the start of a page is
+/// before its first character and the end is after its last character.
+/// </summary>
+public static class ReaderSelectionPagingPolicy
+{
+    /// <summary>
+    /// Allows the hit-test tolerance around the first glyph to count as the
+    /// page-start boundary. This keeps a drag that begins just inside the
+    /// first glyph from getting stuck at the page edge.
+    /// </summary>
+    public static bool IsAtPageStart(int offset, int pageStart, int pageEnd) =>
+        HasText(pageStart, pageEnd) && offset <= pageStart + 1;
+
+    /// <summary>
+    /// Allows the hit-test tolerance around the last glyph to count as the
+    /// page-end boundary. The returned endpoint remains exclusive.
+    /// </summary>
+    public static bool IsAtPageEnd(int offset, int pageStart, int pageEnd) =>
+        HasText(pageStart, pageEnd) && offset >= pageEnd - 1;
+
+    /// <summary>
+    /// Returns the endpoint to use after moving the selection onto the target
+    /// page. Forward selection starts at the target page's first character;
+    /// backward selection starts at the position after its last character.
+    /// </summary>
+    public static int GetCrossPageEndpoint(int direction, int pageStart, int pageEnd)
+    {
+        if (!HasText(pageStart, pageEnd) || direction == 0)
+        {
+            return -1;
+        }
+
+        return direction > 0 ? pageStart : pageEnd;
+    }
+
+    private static bool HasText(int pageStart, int pageEnd) =>
+        pageStart >= 0 && pageEnd > pageStart;
+}

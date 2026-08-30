@@ -35,6 +35,12 @@ public partial class MainWindow
     private CancellationToken ReaderToken =>
         _readerSessionCancellation?.Token ?? _lifetimeCancellation.Token;
 
+    private bool IsNativeReaderPaginated =>
+        !_readerIsPdf && CurrentReaderHost is NativeReaderHost { IsPaginated: true };
+
+    private bool IsReaderPaginated =>
+        _readerIsPdf || _readerLayout.FlowMode == 1 || IsNativeReaderPaginated;
+
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
         if (!ReaderRoot.IsVisible) return;
@@ -65,12 +71,23 @@ public partial class MainWindow
             return;
         }
 
+        if (IsReaderPaginated
+            && CurrentReaderHost is NativeReaderHost nativeReader
+            && !IsReaderTextInputFocused()
+            && e.Key is Key.Home or Key.End)
+        {
+            e.Handled = true;
+            nativeReader.SeekToBoundary(e.Key == Key.End);
+            _ = ObserveReaderTaskAsync(UpdateReaderScrollStateAsync(nativeReader));
+            return;
+        }
+
         // Native WebViews are swapped at chapter boundaries. If Windows sends
         // the next arrow to the Avalonia window before the newly visible HWND
         // has accepted focus, keep paginated navigation responsive here. Keys
         // delivered to the native WebView never enter Avalonia's routed input,
         // so any arrow reaching this handler still needs to be handled.
-        if (_readerLayout.FlowMode == 1
+        if (IsReaderPaginated
             && !IsReaderTextInputFocused()
             && CurrentReaderHost?.View is Control)
         {
@@ -89,11 +106,16 @@ public partial class MainWindow
                     TurnReaderPageAsync(chapterDirection, chapterOnly: true));
                 return;
             }
-            var direction = e.Key is Key.Left or Key.Up or Key.PageUp
-                ? -1
-                : e.Key is Key.Right or Key.Down or Key.PageDown
-                    ? 1
-                    : 0;
+            var verticalPageOrder = !_readerIsPdf && _readerLayout.VerticalWriting;
+            var direction = e.Key == Key.Left
+                ? (verticalPageOrder ? 1 : -1)
+                : e.Key == Key.Right
+                    ? (verticalPageOrder ? -1 : 1)
+                    : e.Key is Key.Up or Key.PageUp
+                        ? -1
+                        : e.Key is Key.Down or Key.PageDown
+                            ? 1
+                            : 0;
             if (direction != 0)
             {
                 e.Handled = true;
@@ -105,6 +127,7 @@ public partial class MainWindow
 
         if (!_readerIsPdf
             && _readerLayout.FlowMode == 0
+            && !IsNativeReaderPaginated
             && !IsReaderTextInputFocused()
             && CurrentReaderHost?.View is Control)
         {
@@ -553,6 +576,9 @@ public partial class MainWindow
     private async Task<string?> CaptureCurrentPageQuoteAsync()
     {
         if (CurrentReaderHost is not { } host) return null;
+        if (host is NativeReaderHost nativeReader)
+            return nativeReader.GetCurrentPageQuote();
+
         try
         {
             var result = await host.InvokeScriptAsync(
@@ -709,6 +735,17 @@ public partial class MainWindow
         }
 
         if (CurrentReaderHost is not { } host) return null;
+        if (host is NativeReaderHost nativeReader)
+        {
+            var nativeState = nativeReader.GetScrollState();
+            var nativePosition = Math.Max(0, (int)Math.Round(nativeState.Position));
+            return new ReaderBookmarkLocation(
+                chapterPath,
+                nativePosition,
+                Math.Max(1, flowMode),
+                _readerCurrentFragment);
+        }
+
         try
         {
             var result = await host.InvokeScriptAsync(
@@ -1379,7 +1416,7 @@ public partial class MainWindow
     private void ReaderLayoutSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
         ReaderVerticalWritingCheck.Content = OperatingSystem.IsLinux()
-            ? "竖排排版（全局，连续滚动）"
+            ? "竖排排版（全局，自绘单页）"
             : "竖排排版（全局，仅支持单页）";
         _suppressReaderLayoutChange = true;
         try
@@ -1466,9 +1503,7 @@ public partial class MainWindow
                 _readerLayout.VerticalWriting,
                 CancellationToken.None);
             ReaderLayoutSettingsStatusText.Text = _readerLayout.VerticalWriting
-                ? OperatingSystem.IsLinux()
-                    ? "竖排已全局开启；Linux 使用原生连续滚动以保证排版稳定。"
-                    : "竖排已全局开启；段首缩进也对所有书生效，竖排仅支持单页阅读。"
+                ? "竖排已全局开启；段首缩进也对所有书生效，自绘阅读器使用单页阅读。"
                 : "竖排已全局关闭；段首缩进仍对所有书生效，现在可选择滚动、单页或双栏。";
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
@@ -1524,9 +1559,7 @@ public partial class MainWindow
     {
         var (flowMode, twoPageMode) = GetSelectedReaderFlowMode();
         ReaderLayoutSettingsStatusText.Text = ReaderVerticalWritingCheck.IsChecked == true
-            ? OperatingSystem.IsLinux()
-                ? "竖排和段首缩进是全局设置；Linux 竖排固定使用原生连续滚动。"
-                : "竖排和段首缩进是全局设置；竖排固定使用单页阅读。"
+            ? "竖排和段首缩进是全局设置；自绘阅读器固定使用单页阅读。"
             : twoPageMode && flowMode != 1
             ? "双页仅用于分页模式；当前模式下暂不生效。"
             : "设置立即生效；段首缩进为全局设置，其他排版参数按书保存。";

@@ -1387,6 +1387,18 @@ public partial class MainWindow
             VerticalWriting = _appSettings.DefaultReaderLayout.VerticalWriting,
             ParagraphIndent = _appSettings.DefaultReaderLayout.ParagraphIndent
         });
+        // EPUB chapters are rendered by NativeReaderHost. That surface has a
+        // single physical page per layout page; do not leave a legacy saved
+        // "scroll" or "two-page" flag visible while the engine is waiting for
+        // page turns.
+        if (document.Chapters.Count > 0)
+        {
+            _readerLayout = _readerLayout with
+            {
+                FlowMode = 1,
+                TwoPageMode = false,
+            };
+        }
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
@@ -1579,7 +1591,8 @@ public partial class MainWindow
             _readerLayout,
             _readerScrollPosition,
             _readerCurrentFragment,
-            restoreNative);
+            restoreNative,
+            showVerticalDebugBoxes: ShouldShowReaderVerticalDebugBoxes());
         if (restoreNative)
         {
             _readerRestoredProgress = null;
@@ -5024,6 +5037,17 @@ public partial class MainWindow
         if (_readerIsPdf) return null;
         if (CaptureLinuxReaderTextFallbackState() is { } linuxState)
             return linuxState;
+        if (host is NativeReaderHost nativeReader)
+        {
+            var nativeState = nativeReader.GetScrollState();
+            return new ReaderScrollState(
+                nativeState.Position,
+                nativeState.Ratio,
+                nativeState.ScrollWidth,
+                nativeState.ScrollHeight,
+                nativeState.ClientWidth,
+                nativeState.ClientHeight);
+        }
         try
         {
             var result = await host.InvokeScriptAsync(
@@ -5089,7 +5113,10 @@ public partial class MainWindow
         cancellationToken.ThrowIfCancellationRequested();
         if (host is NativeReaderHost nativeReader)
         {
-            nativeReader.SeekToRatio(state.Ratio);
+            if (nativeReader.Vertical)
+                nativeReader.ScrollToOffset((int)Math.Max(0, Math.Round(state.Position)));
+            else
+                nativeReader.SeekToRatio(state.Ratio);
             await UpdateReaderScrollStateAsync(host);
         }
     }
@@ -5911,6 +5938,16 @@ public partial class MainWindow
             _readerPendingBookmarkPosition = null;
             _readerPendingBookmarkQuote = null;
         }
+        else if (ReaderNavigationLocationPolicy.ShouldNormalizeChapterStart(
+                     intent,
+                     target,
+                     hasPendingRestorePosition))
+        {
+            // A plain TOC/progress target can point at the same XHTML that is
+            // already loaded. Reset the native page explicitly; otherwise the
+            // selection changes while the old page remains visible.
+            nativeReader.SeekToBoundary(toEnd: false);
+        }
         else if (!string.IsNullOrWhiteSpace(nativeFragment))
         {
             nativeReader.ScrollToFragment(nativeFragment);
@@ -6686,24 +6723,27 @@ public partial class MainWindow
         }
     }
 
-    private async Task HandleReaderLinkAsync(string href, bool showFootnote = false)
+    private async Task<bool> HandleReaderLinkAsync(string href, bool showFootnote = false)
     {
         _readerFootnoteHoverSequence++;
-        if (_readerDocument is null || !Uri.TryCreate(href, UriKind.Absolute, out var uri) || !uri.IsFile) return;
+        if (_readerDocument is null || !Uri.TryCreate(href, UriKind.Absolute, out var uri) || !uri.IsFile)
+            return false;
         var path = Path.GetFullPath(uri.LocalPath);
-        if (!IsPathInside(_readerDocument.RootPath, path)) return;
+        if (!IsPathInside(_readerDocument.RootPath, path))
+            return false;
 
         var match = _readerDocument.Chapters
             .Select((chapter, index) => (chapter, index))
             .FirstOrDefault(item => string.Equals(Path.GetFullPath(item.chapter), path, StringComparison.OrdinalIgnoreCase));
-        if (match.chapter is null) return;
+        if (match.chapter is null)
+            return false;
         var chapterIndex = match.index;
         var item = new EpubReaderNavigationItem(
             $"第 {chapterIndex + 1} 章",
             uri.AbsoluteUri,
             chapterIndex);
         HideReaderFootnotePopup();
-        await NavigateToReaderItemAsync(
+        return await NavigateToReaderItemAsync(
             item,
             _readerSessionCancellation?.Token ?? CancellationToken.None,
             showFootnote ? ReaderNavigationIntent.Footnote : ReaderNavigationIntent.Link);
@@ -6736,6 +6776,19 @@ public partial class MainWindow
             _readerFootnoteHref = uri.AbsoluteUri;
             ShowReaderFootnotePopup(footnote, placementPoint);
         }
+    }
+
+    private void ShowDirectReaderFootnote(
+        string href,
+        string text,
+        Point? placementPoint)
+    {
+        // Some reader exports encode the complete note in an image's alt
+        // attribute and have no target XHTML fragment to resolve. Keep the
+        // synthetic href as the hover identity, but bypass the URI resolver.
+        _readerFootnoteHoverSequence++;
+        _readerFootnoteHref = href;
+        ShowReaderFootnotePopup(text, placementPoint);
     }
 
     private void StartReaderFootnoteHoverPoll()
@@ -6778,6 +6831,12 @@ public partial class MainWindow
 
     private async Task PollReaderFootnoteHoverAsync()
     {
+        // NativeReaderHost reports exact layout hot-zones from Avalonia
+        // pointer events. Its script probe is intentionally a no-op, so a
+        // Windows polling tick must not dismiss a popup opened by that host.
+        if (CurrentReaderHost is NativeReaderHost)
+            return;
+
         if (_readerIsPdf
             || !OperatingSystem.IsWindows()
             || !ReaderRoot.IsVisible
@@ -6997,7 +7056,7 @@ public partial class MainWindow
                 case "scroll":
                     if (IsLinuxReaderTextFallbackActive())
                         break;
-                    var horizontalScroll = _readerLayout.FlowMode == 1 || _readerLayout.VerticalWriting;
+                    var horizontalScroll = IsReaderPaginated || _readerLayout.VerticalWriting;
                     if (!_readerIsPdf)
                     {
                         var reportedFragment = ReadString(root, "fragment").TrimStart('#');
@@ -7029,6 +7088,11 @@ public partial class MainWindow
                     // second WebView script call for every animation frame.
                     UpdateReaderBookmarkIndicatorFromTrackedLocation();
                     break;
+                case "selectionPageTurn":
+                    if (IsLinuxReaderTextFallbackActive())
+                        break;
+                    UpdateReaderToolbar();
+                    break;
                 case "selection":
                     if (IsLinuxReaderTextFallbackActive())
                         break;
@@ -7044,14 +7108,46 @@ public partial class MainWindow
                         _selectedReaderAnnotation = null;
                         ReaderDeleteAnnotationButton.IsEnabled = false;
                         ReaderAnnotationSelectionText.Text = _readerPendingSelection;
-                        // The WebView bridge renders its own action bar above
-                        // the native browser surface. Opening the Avalonia
-                        // popup here as well creates two perfectly overlapping
-                        // bars: the upper layer can clear the selection before
-                        // the lower layer saves a highlight, and light-dismiss
-                        // can pass the same edge click through as a page turn.
-                        // Keep ReaderSelectionHostPopup exclusively for the
-                        // Linux text fallback, which has no in-page toolbar.
+                        if (CurrentReaderHost is NativeReaderHost nativeReader)
+                        {
+                            Point? placementPoint = null;
+                            double? selectionBottom = null;
+                            if (root.TryGetProperty("x", out var selectionX)
+                                && root.TryGetProperty("y", out var selectionY)
+                                && selectionX.TryGetDouble(out var x)
+                                && selectionY.TryGetDouble(out var y))
+                            {
+                                placementPoint = new Point(x, y);
+                                if (root.TryGetProperty("bottom", out var bottom)
+                                    && bottom.TryGetDouble(out var bottomValue))
+                                {
+                                    selectionBottom = bottomValue;
+                                }
+
+                                // NativeReaderHost is nested in a ContentControl
+                                // inside ReaderWebViewHost. Translate its local
+                                // selection geometry before placing the popup,
+                                // otherwise the bar is offset by the host slot's
+                                // margin on resized reader windows.
+                                if (nativeReader.View is Control nativeView
+                                    && nativeView.TranslatePoint(new Point(0, 0), ReaderWebViewHost)
+                                        is { } nativeOrigin)
+                                {
+                                    placementPoint = new Point(
+                                        placementPoint.Value.X + nativeOrigin.X,
+                                        placementPoint.Value.Y + nativeOrigin.Y);
+                                    if (selectionBottom is { } translatedBottom)
+                                    {
+                                        selectionBottom = translatedBottom + nativeOrigin.Y;
+                                    }
+                                }
+                            }
+
+                            // The self-drawn EPUB surface has no DOM action bar;
+                            // use the Avalonia popup for the same selection
+                            // actions used by the fallback reader.
+                            ShowReaderSelectionPopup(placementPoint, selectionBottom);
+                        }
                     }
                     else
                     {
@@ -7072,12 +7168,44 @@ public partial class MainWindow
                     {
                         var showFootnote = root.TryGetProperty("footnote", out var footnote)
                             && footnote.ValueKind == JsonValueKind.True;
-                        _ = ObserveReaderTaskAsync(
-                            HandleReaderLinkAsync(href.GetString() ?? string.Empty, showFootnote));
+                        var hrefText = href.GetString() ?? string.Empty;
+                        if (showFootnote && CurrentReaderHost is NativeReaderHost)
+                        {
+                            Point? placementPoint = null;
+                            if (root.TryGetProperty("x", out var linkX)
+                                && root.TryGetProperty("y", out var linkY)
+                                && linkX.TryGetDouble(out var x)
+                                && linkY.TryGetDouble(out var y))
+                            {
+                                placementPoint = new Point(Math.Max(0, x), Math.Max(0, y));
+                            }
+
+                            var directFootnoteText = ReadString(root, "footnoteText");
+                            if (!string.IsNullOrWhiteSpace(directFootnoteText))
+                            {
+                                ShowDirectReaderFootnote(
+                                    hrefText,
+                                    directFootnoteText,
+                                    placementPoint);
+                            }
+                            else
+                            {
+                                // Native footnote definitions are part of the
+                                // composed chapter now. A click is therefore
+                                // a real fragment navigation; hover remains
+                                // the lightweight preview interaction.
+                                _ = ObserveReaderTaskAsync(
+                                    HandleReaderLinkAsync(hrefText, showFootnote: true));
+                            }
+                        }
+                        else
+                        {
+                            _ = ObserveReaderTaskAsync(HandleReaderLinkAsync(hrefText, showFootnote));
+                        }
                     }
                     break;
                 case "page":
-                    if ((_readerIsPdf || _readerLayout.FlowMode == 1)
+                    if (IsReaderPaginated
                         && root.TryGetProperty("direction", out var pageDirection)
                         && pageDirection.TryGetInt32(out var pageTurnDirection))
                     {
@@ -7087,7 +7215,7 @@ public partial class MainWindow
                     }
                     break;
                 case "pageClick":
-                    if (!_readerIsPdf && _readerLayout.FlowMode == 1
+                    if (!_readerIsPdf && (_readerLayout.FlowMode == 1 || IsNativeReaderPaginated)
                         && root.TryGetProperty("side", out var pageSide))
                     {
                         var side = pageSide.GetString();
@@ -7112,13 +7240,22 @@ public partial class MainWindow
                             && footnoteX.TryGetDouble(out var x)
                             && footnoteY.TryGetDouble(out var y))
                         {
-                            placementPoint = new Point(Math.Max(0, x), Math.Max(0, y));
+                                placementPoint = new Point(Math.Max(0, x), Math.Max(0, y));
                         }
-                        _ = ObserveReaderTaskAsync(
-                            HandleReaderFootnoteHoverAsync(
-                                footnoteHref.GetString() ?? string.Empty,
-                                true,
-                                placementPoint));
+                        var hrefText = footnoteHref.GetString() ?? string.Empty;
+                        var directFootnoteText = ReadString(root, "footnoteText");
+                        if (!string.IsNullOrWhiteSpace(directFootnoteText))
+                        {
+                            ShowDirectReaderFootnote(hrefText, directFootnoteText, placementPoint);
+                        }
+                        else
+                        {
+                            _ = ObserveReaderTaskAsync(
+                                HandleReaderFootnoteHoverAsync(
+                                    hrefText,
+                                    true,
+                                    placementPoint));
+                        }
                     }
                     break;
                 case "footnoteLeave":
@@ -7126,7 +7263,7 @@ public partial class MainWindow
                     // Chromium report pointerout. On Windows the screen-space
                     // hover poll is authoritative and dismisses after the
                     // pointer has genuinely left the marker.
-                    if (!OperatingSystem.IsWindows())
+                    if (!OperatingSystem.IsWindows() || IsNativeReaderPaginated)
                         HideReaderFootnotePopup();
                     break;
                 case "resize":
@@ -7138,7 +7275,7 @@ public partial class MainWindow
                     // reference's low-level mouse hook (120 units per page,
                     // direction flips reset the remainder, and the browser is
                     // told to ignore the event so it never double-scrolls).
-                    if ((_readerIsPdf || _readerLayout.FlowMode == 1)
+                    if (IsReaderPaginated
                         && root.TryGetProperty("deltaY", out var wheel))
                     {
                         var delta = (int)Math.Round(wheel.GetDouble());
@@ -7162,6 +7299,7 @@ public partial class MainWindow
                 case "continuousEdge":
                     if (!_readerIsPdf
                         && _readerLayout.FlowMode == 0
+                        && !IsNativeReaderPaginated
                         && root.TryGetProperty("direction", out var edgeDirection)
                         && edgeDirection.TryGetInt32(out var continuousDirection))
                     {
@@ -7204,7 +7342,14 @@ public partial class MainWindow
                     if (root.TryGetProperty("key", out var key))
                     {
                         var keyName = key.GetString();
-                        if (_readerIsPdf || _readerLayout.FlowMode == 1)
+                        if (CurrentReaderHost is NativeReaderHost nativeReader
+                            && keyName is "Home" or "End")
+                        {
+                            nativeReader.SeekToBoundary(string.Equals(keyName, "End", StringComparison.Ordinal));
+                            _ = ObserveReaderTaskAsync(UpdateReaderScrollStateAsync(nativeReader));
+                            break;
+                        }
+                        if (IsReaderPaginated)
                         {
                             // Single-page and two-column EPUB layouts share the
                             // same key map: up/down change chapters while
@@ -7242,7 +7387,9 @@ public partial class MainWindow
                             if (direction != 0)
                                 _ = ObserveReaderTaskAsync(TurnReaderPageAsync(direction));
                         }
-                        else if (_readerLayout.FlowMode == 0 && _readerDocument is not null)
+                        else if (_readerLayout.FlowMode == 0
+                            && !IsNativeReaderPaginated
+                            && _readerDocument is not null)
                         {
                             // Continuous mode (WinUI reference): left/right own
                             // chapter navigation; up/down scroll smoothly and
@@ -8393,6 +8540,17 @@ public partial class MainWindow
             return;
         }
         var requiredVerticalMode = "single";
+        if (CurrentReaderHost is NativeReaderHost)
+        {
+            if (!string.Equals(tag, "single", StringComparison.Ordinal))
+            {
+                SyncReaderFlowMenu();
+                ShowReaderTransientStatus("自绘 EPUB 阅读器目前仅支持单页分页。");
+                return;
+            }
+
+            tag = requiredVerticalMode;
+        }
         if (_readerLayout.VerticalWriting
             && !string.Equals(tag, requiredVerticalMode, StringComparison.Ordinal))
         {
@@ -8409,8 +8567,8 @@ public partial class MainWindow
         var twoPage = string.Equals(tag, "double", StringComparison.Ordinal);
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with
         {
-            FlowMode = flowMode,
-            TwoPageMode = twoPage
+            FlowMode = CurrentReaderHost is NativeReaderHost ? 1 : flowMode,
+            TwoPageMode = CurrentReaderHost is NativeReaderHost ? false : twoPage
         });
         SyncReaderFlowMenu();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
@@ -8422,14 +8580,15 @@ public partial class MainWindow
     private void SyncReaderFlowMenu()
     {
         if (ReaderScrollModeItem is null || ReaderSinglePageModeItem is null || ReaderTwoPageModeItem is null) return;
-        var flowMode = _readerLayout.FlowMode;
-        var twoPage = _readerLayout.TwoPageMode;
+        var nativePaged = IsNativeReaderPaginated;
+        var flowMode = nativePaged ? 1 : _readerLayout.FlowMode;
+        var twoPage = nativePaged ? false : _readerLayout.TwoPageMode;
         var vertical = _readerLayout.VerticalWriting;
         ReaderScrollModeItem.IsChecked = flowMode == 0;
         ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage;
         ReaderTwoPageModeItem.IsChecked = flowMode == 1 && twoPage;
-        ReaderScrollModeItem.IsEnabled = !vertical;
-        ReaderTwoPageModeItem.IsEnabled = !vertical;
+        ReaderScrollModeItem.IsEnabled = !vertical && !nativePaged;
+        ReaderTwoPageModeItem.IsEnabled = !vertical && !nativePaged;
         ReaderSinglePageModeItem.IsEnabled = true;
         if (ReaderFlowButton is not null)
             ReaderFlowButton.Content = flowMode == 0 ? "滚动" : twoPage ? "双栏" : "单页";
@@ -9049,15 +9208,23 @@ public partial class MainWindow
     {
         try
         {
+            var useNativeLayout = CurrentReaderHost is NativeReaderHost;
             var counts = await Task.Run(
-                () => document.Chapters
-                    .Select(path => EstimateReaderChapterPageCount(
-                        path,
+                () => useNativeLayout
+                    ? NativeReaderHost.EstimatePageCounts(
+                        document.Chapters,
                         layout,
                         viewportWidth,
-                        viewportHeight))
-                    .Select(count => Math.Max(1, count))
-                    .ToArray(),
+                        viewportHeight,
+                        cancellation.Token)
+                    : document.Chapters
+                        .Select(path => EstimateReaderChapterPageCount(
+                            path,
+                            layout,
+                            viewportWidth,
+                            viewportHeight))
+                        .Select(count => Math.Max(1, count))
+                        .ToArray(),
                 cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
 
@@ -9171,6 +9338,14 @@ public partial class MainWindow
                 ? pageCount - 1
                 : _readerLinuxTextFallbackPageIndex;
             return (Math.Clamp(pageIndex + 1, 1, pageCount), pageCount);
+        }
+
+        if (CurrentReaderHost is NativeReaderHost nativeReader)
+        {
+            var pageCount = Math.Max(1, nativeReader.PageCount);
+            return (
+                Math.Clamp(nativeReader.CurrentPage + 1, 1, pageCount),
+                pageCount);
         }
 
         var horizontal = _readerLayout.FlowMode == 1 || _readerLayout.VerticalWriting;

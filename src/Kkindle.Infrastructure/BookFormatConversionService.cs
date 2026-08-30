@@ -47,7 +47,7 @@ public sealed class BookFormatConversionService : IBookFormatConverter
             throw new FileNotFoundException("源书籍文件不存在。", source);
         if (!BookFormatConversionPolicy.IsCalibreInputFormat(sourceFormat)
             || !BookFormatConversionPolicy.IsConvertibleFormat(targetFormat))
-            throw new NotSupportedException("目前支持 EPUB、AZW、AZW3、PDF、MOBI 和 KFX 作为转换源，输出支持 EPUB、AZW3、PDF 和 MOBI。");
+            throw new NotSupportedException("目前支持 EPUB、AZW、AZW3、PDF、MOBI、PRC 和 KFX 作为转换源，输出支持 EPUB、AZW3、PDF 和 MOBI。");
         if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("转换目标不能与源文件相同。 ");
         if (File.Exists(destination))
@@ -101,7 +101,7 @@ public sealed class BookFormatConversionService : IBookFormatConverter
                 startInfo.ArgumentList.Add("kindle_scribe");
             }
             if (targetFormat == "azw3"
-                || (targetFormat == "epub" && sourceFormat is "azw" or "azw3" or "mobi"))
+                || (targetFormat == "epub" && sourceFormat is "azw" or "azw3" or "mobi" or "prc"))
             {
                 // Let the Kindle choose its built-in CJK font and foreground color.
                 // Legacy AZW3 files often hard-code desktop Chinese font families or

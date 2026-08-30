@@ -29,7 +29,7 @@ public sealed class BookMetadataService : IMetadataService
         var title = CleanFileTitle(Path.GetFileNameWithoutExtension(path));
         byte[]? coverBytes = null;
         var authors = "未知作者";
-        if (extension is ".mobi" or ".azw" or ".azw3" or ".kfx")
+        if (extension is ".mobi" or ".azw" or ".azw3" or ".prc" or ".kfx")
         {
             var kindleMetadata = await ReadKindleMetadataAsync(path, cancellationToken);
             if (!string.IsNullOrWhiteSpace(kindleMetadata.Title)) title = kindleMetadata.Title;

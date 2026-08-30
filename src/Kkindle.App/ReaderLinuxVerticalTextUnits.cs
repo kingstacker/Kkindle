@@ -120,6 +120,14 @@ internal static class ReaderLinuxVerticalTextUnits
         // same one the sanitizer and the bridge apply.
         var end = offset + match.Length;
         var previousToken = match.Value;
+        var numericGrouping = false;
+        while (TryGetNextNumericGroup(text, end, previousToken, out var numericMatch))
+        {
+            end = numericMatch.Index + numericMatch.Length;
+            previousToken = numericMatch.Value;
+            numericGrouping = true;
+        }
+
         var merged = false;
         while (TryGetNextTokenAcrossGap(text, end, previousToken, out var nextMatch))
         {
@@ -129,7 +137,10 @@ internal static class ReaderLinuxVerticalTextUnits
         }
 
         var token = text[offset..end];
-        var hasLetter = token.Any(char.IsAsciiLetter);
+        var classifierToken = numericGrouping
+            ? RemoveGroupingSpaces(token)
+            : token;
+        var hasLetter = classifierToken.Any(char.IsAsciiLetter);
         length = end - offset;
         if (merged)
         {
@@ -147,15 +158,15 @@ internal static class ReaderLinuxVerticalTextUnits
             return true;
         }
 
-        if (!NumericTokenPattern.IsMatch(token) || !token.Any(char.IsAsciiDigit))
+        if (!NumericTokenPattern.IsMatch(classifierToken) || !classifierToken.Any(char.IsAsciiDigit))
             return false;
 
-        if (token.All(char.IsAsciiDigit))
+        if (classifierToken.All(char.IsAsciiDigit))
         {
             // One digit keeps the plain CJK grid cell; exactly two become one
             // tate-chu-yoko square; longer stays a sideways run.
-            if (token.Length == 1) return false;
-            if (token.Length == 2)
+            if (classifierToken.Length == 1) return false;
+            if (classifierToken.Length == 2)
             {
                 combined = true;
                 return true;
@@ -164,6 +175,50 @@ internal static class ReaderLinuxVerticalTextUnits
 
         sideways = true;
         return true;
+    }
+
+    private static bool TryGetNextNumericGroup(
+        string text,
+        int gapStart,
+        string previousToken,
+        out Match next)
+    {
+        next = Match.Empty;
+        if (previousToken.Length is < 1 or > 3
+            || !previousToken.All(char.IsAsciiDigit))
+        {
+            return false;
+        }
+
+        for (var gapLength = 1; gapLength <= 3; gapLength++)
+        {
+            var candidateStart = gapStart + gapLength;
+            if (candidateStart >= text.Length)
+                return false;
+
+            for (var gapOffset = gapStart; gapOffset < candidateStart; gapOffset++)
+            {
+                if (text[gapOffset] is not (' ' or '\t' or '\u00A0'))
+                    return false;
+            }
+
+            if (!char.IsAsciiDigit(text[candidateStart]))
+                continue;
+
+            var match = InlineTokenPattern.Match(text, candidateStart);
+            if (!match.Success
+                || match.Index != candidateStart
+                || match.Length != 3
+                || !match.Value.All(char.IsAsciiDigit))
+            {
+                return false;
+            }
+
+            next = match;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryGetNextTokenAcrossGap(
@@ -277,4 +332,16 @@ internal static class ReaderLinuxVerticalTextUnits
 
     private static bool IsPunctuation(char character) =>
         PunctuationCharacters.IndexOf(character) >= 0;
+
+    private static string RemoveGroupingSpaces(string text)
+    {
+        var builder = new System.Text.StringBuilder(text.Length);
+        foreach (var character in text)
+        {
+            if (character is not (' ' or '\t' or '\u00A0'))
+                builder.Append(character);
+        }
+
+        return builder.ToString();
+    }
 }

@@ -1,4 +1,5 @@
 using Kkindle;
+using Kkindle.Layout;
 
 namespace Kkindle.Tests;
 
@@ -123,6 +124,22 @@ public sealed class ReaderLinuxVerticalPagingTests
     }
 
     [Fact]
+    public void ThousandsGroupingSpaceDoesNotBecomeAStandaloneVerticalCell()
+    {
+        var text = "甲5 000亿乙";
+        var units = ReaderLinuxVerticalTextUnits.Tokenize(text);
+
+        Assert.Equal(
+            [
+                (0, 1, false, false),
+                (1, 5, false, true),
+                (6, 1, false, false),
+                (7, 1, false, false)
+            ],
+            units.Select(unit => (unit.Offset, unit.Length, unit.IsCombined, unit.IsSidewaysRun)));
+    }
+
+    [Fact]
     public void LatinWordsAndPhrasesAreSingleSidewaysRuns()
     {
         // The fallback renderer used to fall through to one rotated cell per
@@ -161,6 +178,49 @@ public sealed class ReaderLinuxVerticalPagingTests
                 (7, 1, false, false)
             ],
             units.Select(unit => (unit.Offset, unit.Length, unit.IsCombined, unit.IsSidewaysRun)));
+    }
+
+    [Fact]
+    public void TokenizerKeepsUnicodeTextElementsAtomic()
+    {
+        const string text = "甲e\u0301乙😀丙";
+        var units = VerticalTextUnits.Tokenize(text);
+
+        Assert.Contains(
+            units,
+            unit => text.Substring(unit.Offset, unit.Length) == "e\u0301");
+        Assert.Contains(
+            units,
+            unit => text.Substring(unit.Offset, unit.Length) == "😀");
+        Assert.DoesNotContain(
+            units,
+            unit => text.Substring(unit.Offset, unit.Length) == "\u0301");
+    }
+
+    [Fact]
+    public void TokenizerHonorsExplicitVerticalOrientationAndCombinationLimits()
+    {
+        var combined = VerticalTextUnits.Tokenize(
+            "AB1234",
+            int.MaxValue,
+            TypesetVerticalOrientation.Mixed);
+        Assert.Single(combined);
+        Assert.All(combined, unit => Assert.True(unit.IsCombined));
+
+        var upright = VerticalTextUnits.Tokenize(
+            "AB",
+            2,
+            TypesetVerticalOrientation.Upright);
+        Assert.Equal(2, upright.Count);
+        Assert.All(upright, unit => Assert.False(unit.IsSidewaysRun));
+
+        var noCombine = VerticalTextUnits.Tokenize(
+            "123",
+            0,
+            TypesetVerticalOrientation.Mixed);
+        Assert.Equal(3, noCombine.Count);
+        Assert.All(noCombine, unit =>
+            Assert.False(unit.IsCombined || unit.IsSidewaysRun));
     }
 
     [Fact]

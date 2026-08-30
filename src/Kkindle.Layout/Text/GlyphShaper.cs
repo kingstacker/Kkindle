@@ -129,6 +129,11 @@ public sealed class GlyphShaper
 {
     private readonly TypesetFontLibrary _library;
 
+    // HarfBuzz normally enables `vert` as a side effect of a vertical buffer
+    // direction. Keep it explicit so vertical presentation forms are selected
+    // consistently when the same EPUB is laid out on different hosts.
+    private static readonly Feature VerticalFeature = Feature.Parse("vert");
+
     public GlyphShaper(TypesetFontLibrary library)
     {
         _library = library;
@@ -162,7 +167,14 @@ public sealed class GlyphShaper
         buffer.AddUtf16(text.AsSpan(start, length));
         buffer.GuessSegmentProperties();
         buffer.Direction = vertical ? Direction.TopToBottom : Direction.LeftToRight;
-        font.Shape(buffer);
+        if (vertical)
+        {
+            font.Shape(buffer, new[] { VerticalFeature });
+        }
+        else
+        {
+            font.Shape(buffer);
+        }
         var infos = buffer.GlyphInfos.ToArray();
         var positions = buffer.GlyphPositions.ToArray();
         var count = infos.Length;
@@ -203,17 +215,72 @@ public sealed class GlyphShaper
     /// character with a top-to-bottom direction selects the font's vertical
     /// presentation form (the OpenType vert feature) when it has one.
     /// </summary>
-    public ushort GetVerticalGlyphId(char character, string fontPath, out bool isNotdef)
+    public ushort GetVerticalGlyphId(char character, string fontPath, out bool isNotdef) =>
+        GetVerticalGlyphId(character.ToString(), fontPath, out isNotdef);
+
+    public ushort GetVerticalGlyphId(string text, string fontPath, out bool isNotdef)
     {
-        var shaped = Shape(character.ToString(), 0, 1, fontPath, 1000f, vertical: true);
+        var shaped = Shape(text, 0, text.Length, fontPath, 1000f, vertical: true);
         isNotdef = shaped.GlyphIds.Length == 0 || shaped.GlyphIds[0] == 0;
         return shaped.GlyphIds.Length == 0 ? (ushort)0 : shaped.GlyphIds[0];
     }
 
-    /// <summary>True when the font file covers the character (non-notdef glyph).</summary>
-    public bool Covers(string fontPath, char character)
+    /// <summary>
+    /// True when a standalone punctuation mark has no usable vertical
+    /// presentation glyph in the selected face and must be rotated.
+    /// </summary>
+    public bool NeedsVerticalRotation(char character, string fontPath) =>
+        NeedsVerticalRotation(character.ToString(), fontPath);
+
+    public bool NeedsVerticalRotation(string text, string fontPath)
     {
-        var shaped = Shape(character.ToString(), 0, 1, fontPath, 1000f, vertical: false);
+        if (!TypesetText.TryGetFirstScalar(text, out var scalar))
+        {
+            return false;
+        }
+
+        // This engine deliberately keeps the established reader behavior for
+        // isolated ASCII digits: one digit is an upright cell and two digits
+        // are tate-chu-yoko. Longer numeric/Latin runs are already marked as
+        // sideways by VerticalTextUnits before this method is reached.
+        if (scalar <= char.MaxValue && char.IsAsciiLetterOrDigit((char)scalar))
+        {
+            return false;
+        }
+
+        if (!TypesetText.IsVerticalTransformed(text))
+        {
+            // UAX #50 defaults unlisted non-CJK characters (including ASCII
+            // semicolon, tilde, brackets and U+2014) to R: rotate them 90°
+            // clockwise in mixed vertical text. CJK-native marks are upright
+            // unless they are one of the explicit rotated fullwidth forms.
+            return TypesetText.ShouldRotateInVertical(text);
+        }
+
+        // Tr characters are upright only after a typographic vertical
+        // transformation. If the font has no alternate glyph, use the CSS
+        // fallback of a clockwise rotation rather than leaving a horizontal
+        // glyph in the vertical line.
+        var horizontal = Shape(text, 0, text.Length, fontPath, 1000f, vertical: false);
+        var vertical = Shape(text, 0, text.Length, fontPath, 1000f, vertical: true);
+        if (vertical.GlyphIds.Length == 0 || vertical.GlyphIds[0] == 0)
+        {
+            return true;
+        }
+
+        return horizontal.GlyphIds.Length == 0
+            || horizontal.GlyphIds[0] == 0
+            || horizontal.GlyphIds.SequenceEqual(vertical.GlyphIds);
+    }
+
+    /// <summary>True when the font file covers the character (non-notdef glyph).</summary>
+    public bool Covers(string fontPath, char character) =>
+        Covers(fontPath, character.ToString());
+
+    public bool Covers(string fontPath, string text)
+    {
+        var shaped = Shape(text, 0, text.Length, fontPath, 1000f, vertical: false);
         return shaped.GlyphIds.Length > 0 && shaped.GlyphIds[0] != 0;
     }
+
 }

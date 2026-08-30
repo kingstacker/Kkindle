@@ -14,7 +14,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
     private const long MaximumMetadataFileSize = 128L * 1024 * 1024;
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".epub", ".pdf", ".mobi", ".azw3", ".azw", ".kfx"
+        ".epub", ".pdf", ".mobi", ".azw3", ".azw", ".prc", ".kfx"
     };
 
     private readonly IMetadataService _metadata;
@@ -239,7 +239,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         if (!KindleResourcePolicy.IsSupportedFile(kind, sourcePath))
             throw new InvalidDataException(kind == KindleResourceKind.Font
                 ? "Kindle 字体仅支持 TTF 和 OTF。"
-                : "Kindle 字典仅支持 AZW、AZW3、MOBI 和 KFX。");
+                : "Kindle 字典仅支持 AZW、AZW3、MOBI、PRC 和 KFX。");
         var root = GetResourceRoot(device, kind);
         Directory.CreateDirectory(root);
         var destination = GetUniqueDestination(root, SafeFileName(Path.GetFileName(sourcePath)));

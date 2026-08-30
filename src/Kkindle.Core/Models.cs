@@ -253,7 +253,7 @@ public sealed class KindleDeviceResource
 public static class KindleResourcePolicy
 {
     private static readonly HashSet<string> FontExtensions = new(StringComparer.OrdinalIgnoreCase) { ".ttf", ".otf" };
-    private static readonly HashSet<string> DictionaryExtensions = new(StringComparer.OrdinalIgnoreCase) { ".azw", ".azw3", ".mobi", ".kfx" };
+    private static readonly HashSet<string> DictionaryExtensions = new(StringComparer.OrdinalIgnoreCase) { ".azw", ".azw3", ".mobi", ".prc", ".kfx" };
 
     public static string RootRelativePath(KindleResourceKind kind) => kind switch
     {

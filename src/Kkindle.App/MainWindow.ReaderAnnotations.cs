@@ -255,6 +255,12 @@ public partial class MainWindow
 
     private static async Task ClearCurrentReaderSelectionAsync(IReaderHost host)
     {
+        if (host is NativeReaderHost nativeReader)
+        {
+            nativeReader.ClearSelection();
+            return;
+        }
+
         try
         {
             await host.InvokeScriptAsync(

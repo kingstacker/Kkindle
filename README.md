@@ -117,7 +117,7 @@ macOS 当前发布包未宣称经过实际设备验证；正式使用前请先�
 - 支持向设备发送书籍、安全删除、传输校验、断线清理和设备插拔监听；支持多选批量导出到电脑书库或从设备删除。
 - 仅访问 Kindle 的 `documents` 目录，不修改设备系统数据库。
 - Kindle 字体管理可读取、导入、导出和删除设备 `fonts` 目录中的 TTF、OTF 文件。
-- Kindle 字典管理可读取、导入、导出和删除设备 `documents\dictionaries` 目录中的 AZW、AZW3、MOBI、KFX 文件。
+- Kindle 字典管理可读取、导入、导出和删除设备 `documents\dictionaries` 目录中的 AZW、AZW3、MOBI、PRC、KFX 文件。
 - 字体和字典操作同时支持 USB 磁盘与 WPD/MTP Kindle，并限制在对应目录内；取消或断连时会清理未完成的传输文件。
 - 可读取 Kindle `documents\My Clippings.txt` 中的文字划线与笔记。删除操作仅移除该文件中的记录，不会修改书籍侧车数据库或云端同步标注。
 - 支持通过 SMTP 将 EPUB 或 PDF 发送到 Kindle 个人文档邮箱。
