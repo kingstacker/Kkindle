@@ -261,6 +261,7 @@ public sealed class ProductivityFeatureTests
             Directory.CreateDirectory(Path.Combine(relocated, "data"));
             Directory.CreateDirectory(Path.Combine(relocated, "backups"));
             Directory.CreateDirectory(Path.Combine(temporary, "Kkindle", "updates"));
+            Directory.CreateDirectory(Path.Combine(temporary, "Kkindle", "resource-transfer"));
             await File.WriteAllTextAsync(Path.Combine(relocated, "keep.txt"), "unrelated");
             await File.WriteAllTextAsync(
                 Path.Combine(relocated, "data", "app-settings.json"),
@@ -271,6 +272,9 @@ public sealed class ProductivityFeatureTests
             await File.WriteAllTextAsync(
                 Path.Combine(temporary, "Kkindle", "updates", "pending.exe"),
                 "update");
+            await File.WriteAllTextAsync(
+                Path.Combine(temporary, "Kkindle", "resource-transfer", "in-progress.tmp"),
+                "keep");
             AppRootConfiguration.Save(application, relocated);
 
             AppDataCleanup.RemoveForUninstall(application, temporary);
@@ -281,7 +285,8 @@ public sealed class ProductivityFeatureTests
             Assert.True(File.Exists(Path.Combine(relocated, "keep.txt")));
             Assert.True(Directory.Exists(relocated));
             Assert.False(File.Exists(Path.Combine(application, "app-root.json")));
-            Assert.False(Directory.Exists(Path.Combine(temporary, "Kkindle")));
+            Assert.False(Directory.Exists(Path.Combine(temporary, "Kkindle", "updates")));
+            Assert.True(File.Exists(Path.Combine(temporary, "Kkindle", "resource-transfer", "in-progress.tmp")));
 
             var defaultApplication = Path.Combine(root, "default-app");
             Directory.CreateDirectory(Path.Combine(defaultApplication, "data"));
@@ -289,7 +294,10 @@ public sealed class ProductivityFeatureTests
                 Path.Combine(defaultApplication, "data", "app-settings.json"),
                 "{}");
             AppDataCleanup.RemoveForUninstall(defaultApplication, temporary);
-            Assert.False(Directory.Exists(Path.Combine(defaultApplication, "data")));
+            // The installer itself removes the default data root through its
+            // native [UninstallDelete] entries; the helper must not delete it
+            // a second time while an uninstaller wrapper is waiting.
+            Assert.True(Directory.Exists(Path.Combine(defaultApplication, "data")));
         }
         finally { TestHelpers.TryDelete(root); }
     }

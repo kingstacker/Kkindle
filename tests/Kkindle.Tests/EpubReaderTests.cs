@@ -46,6 +46,146 @@ public sealed class EpubReaderTests
     }
 
     [Fact]
+    public async Task MergesNestedLinksFromPhysicalTocPages()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "nested-physical-toc.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                      <rootfiles><rootfile full-path="content.opf" /></rootfiles>
+                    </container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "content.opf", """
+                    <package xmlns="http://www.idpf.org/2007/opf">
+                      <manifest>
+                        <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" />
+                        <item id="toc" href="toc.xhtml" media-type="application/xhtml+xml" />
+                        <item id="volume-one" href="volume-one.xhtml" media-type="application/xhtml+xml" />
+                        <item id="volume-one-toc" href="volume-one-toc.xhtml" media-type="application/xhtml+xml" />
+                        <item id="one" href="one.xhtml" media-type="application/xhtml+xml" />
+                        <item id="two" href="two.xhtml" media-type="application/xhtml+xml" />
+                        <item id="volume-two" href="volume-two.xhtml" media-type="application/xhtml+xml" />
+                        <item id="volume-two-toc" href="volume-two-toc.xhtml" media-type="application/xhtml+xml" />
+                        <item id="three" href="three.xhtml" media-type="application/xhtml+xml" />
+                        <item id="four" href="four.xhtml" media-type="application/xhtml+xml" />
+                        <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+                      </manifest>
+                      <spine toc="ncx">
+                        <itemref idref="cover" />
+                        <itemref idref="toc" />
+                        <itemref idref="volume-one" />
+                        <itemref idref="volume-one-toc" />
+                        <itemref idref="one" />
+                        <itemref idref="two" />
+                        <itemref idref="volume-two" />
+                        <itemref idref="volume-two-toc" />
+                        <itemref idref="three" />
+                        <itemref idref="four" />
+                      </spine>
+                    </package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "toc.ncx", """
+                    <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+                      <navMap>
+                        <navPoint id="toc"><navLabel><text>目录</text></navLabel><content src="toc.xhtml#toc-heading" /></navPoint>
+                        <navPoint id="volume-one"><navLabel><text>第一册</text></navLabel><content src="volume-one.xhtml" /></navPoint>
+                        <navPoint id="volume-two"><navLabel><text>第二册</text></navLabel><content src="volume-two.xhtml" /></navPoint>
+                      </navMap>
+                    </ncx>
+                    """);
+                TestHelpers.AddZipEntry(archive, "cover.xhtml", "<html><body>封面</body></html>");
+                TestHelpers.AddZipEntry(archive, "toc.xhtml", """
+                    <html><body><p>目录</p>
+                      <p><a href="volume-one.xhtml">第一册</a></p>
+                      <p><a href="volume-two.xhtml">第二册</a></p>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "volume-one.xhtml", "<html><body>第一册</body></html>");
+                TestHelpers.AddZipEntry(archive, "volume-one-toc.xhtml", """
+                    <html><body><p>目录</p>
+                      <p><a href="one.xhtml">第一章</a></p>
+                      <p><a href="two.xhtml">第二章</a></p>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "one.xhtml", "<html><body>一</body></html>");
+                TestHelpers.AddZipEntry(archive, "two.xhtml", "<html><body>二</body></html>");
+                TestHelpers.AddZipEntry(archive, "volume-two.xhtml", "<html><body>第二册</body></html>");
+                TestHelpers.AddZipEntry(archive, "volume-two-toc.xhtml", """
+                    <html><body><p>目录</p>
+                      <p><a href="three.xhtml">第三章</a></p>
+                      <p><a href="four.xhtml">第四章</a></p>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "three.xhtml", "<html><body>三</body></html>");
+                TestHelpers.AddZipEntry(archive, "four.xhtml", "<html><body>四</body></html>");
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('b', 64));
+
+            Assert.Equal(
+                ["目录", "第一册", "第一章", "第二章", "第二册", "第三章", "第四章"],
+                document.Navigation.Select(item => item.Title));
+            Assert.Equal([1, 2, 4, 5, 6, 8, 9], document.Navigation.Select(item => item.ChapterIndex));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task DoesNotTreatFootnoteLinksAsNavigationEntries()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "footnotes-not-toc.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="content.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "content.opf", """
+                    <package><manifest>
+                      <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                      <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+                    </manifest>
+                    <spine toc="ncx"><itemref idref="chapter" /></spine></package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "toc.ncx", """
+                    <ncx><navMap>
+                      <navPoint><navLabel><text>第一章</text></navLabel><content src="chapter.xhtml" /></navPoint>
+                    </navMap></ncx>
+                    """);
+                TestHelpers.AddZipEntry(archive, "chapter.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body>
+                      <h2 id="sigil_toc_id_1">第一章</h2>
+                      <p>正文<sup><a href="#note1n" id="note1">[1]</a></sup>继续。</p>
+                      <p>更多正文<sup><a href="#note2n" id="note2">［2］</a></sup>。</p>
+                      <div class="fnote">
+                        <p><a href="#note1" id="note1n">[1]</a>第一条脚注</p>
+                        <p><a href="#note2" id="note2n">［2］</a>第二条脚注</p>
+                      </div>
+                    </body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('f', 64));
+
+            Assert.Equal(["第一章"], document.Navigation.Select(item => item.Title));
+            Assert.DoesNotContain(document.Navigation, item => item.Title is "[1]" or "［2］");
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task KeepsNativeVerticalTextRunsUnmodified()
     {
         var root = TestHelpers.CreateTempDirectory();
@@ -239,10 +379,11 @@ public sealed class EpubReaderTests
             var document = await new EpubReaderPreparationService(paths)
                 .PrepareAsync(epub, new string('3', 64));
 
-            Assert.Equal(["序言", "第一部"], document.Navigation.Select(item => item.Title));
-            Assert.Equal([3, 4], document.Navigation.Select(item => item.ChapterIndex));
-            Assert.EndsWith("intro.xhtml#intro", document.Navigation[0].Target);
-            Assert.EndsWith("part.xhtml#part-one", document.Navigation[1].Target);
+            Assert.Equal(["目录", "序言", "第一部"], document.Navigation.Select(item => item.Title));
+            Assert.Equal([2, 3, 4], document.Navigation.Select(item => item.ChapterIndex));
+            Assert.EndsWith("toc.xhtml", document.Navigation[0].Target);
+            Assert.EndsWith("intro.xhtml#intro", document.Navigation[1].Target);
+            Assert.EndsWith("part.xhtml#part-one", document.Navigation[2].Target);
             Assert.Equal(["封面", "书名页", "目录", "序言", "第一部"], document.ChapterTitles);
         }
         finally { TestHelpers.TryDelete(root); }

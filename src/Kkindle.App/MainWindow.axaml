@@ -3348,6 +3348,7 @@
                             <ListBox x:Name="ReaderTocList"
                                      Classes="readerTocList"
                                      Background="#FFFFFF"
+                                     AttachedToVisualTree="ReaderTocList_AttachedToVisualTree"
                                      TemplateApplied="ReaderTocList_TemplateApplied"
                                      SelectionChanged="ReaderTocList_SelectionChanged">
                                 <ListBox.ItemTemplate>

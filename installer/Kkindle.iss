@@ -74,6 +74,7 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "/cleanup-uninstall"; Flags: runh
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\backups"
+Type: files; Name: "{app}\.kkindle-migration.kkindle"
 Type: files; Name: "{app}\app-root.json"
 Type: files; Name: "{app}\app-root.json.tmp"
 Type: files; Name: "{app}\kkindle-crash.log"

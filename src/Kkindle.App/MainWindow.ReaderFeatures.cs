@@ -1029,7 +1029,8 @@ public partial class MainWindow
                 // entries or legacy chunks with different paths/offsets. At this
                 // final presentation boundary, identical title + snippet means an
                 // identical user-facing result and must only be shown once.
-                var distinct = results
+                var distinct = EpubReaderSearchPolicy
+                    .FilterAndOrder(_readerDocument, results)
                     .Select(result => new ReaderSearchResultViewModel(result, query))
                     .DistinctBy(
                         item => $"{item.Title}\u001f{item.Excerpt}",

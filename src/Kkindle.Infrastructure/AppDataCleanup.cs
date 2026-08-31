@@ -7,9 +7,9 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public static class AppDataCleanup
 {
-    private static readonly string[] TemporaryDirectoryNames =
+    private static readonly string[] TemporaryDirectoryRelativePaths =
     [
-        "Kkindle",
+        Path.Combine("Kkindle", "updates"),
         "KkindleConversions",
         "KkindleKreaderValidation",
         "KkindleAnimationProbe"
@@ -23,25 +23,27 @@ public static class AppDataCleanup
         var configuredRoot = AppRootConfiguration.TryReadRoot(applicationRoot);
         var dataRoot = configuredRoot ?? applicationRoot;
 
-        // These are the only directories Kkindle creates below its data root.
-        // Do not delete an arbitrary user-selected root recursively: a user may
-        // have selected a folder that also contains unrelated files.
-        TryDeleteDirectory(Path.Combine(dataRoot, "data"));
-        TryDeleteDirectory(Path.Combine(dataRoot, "backups"));
-        TryDeleteFile(AppRootConfiguration.MigrationBackupPath(dataRoot));
-
-        // An externally selected root is safe to remove only when it is empty
-        // after its Kkindle-owned children have been deleted.
-        if (!PathsEqual(applicationRoot, dataRoot))
+        // The normal install root is removed by Inno's native
+        // [UninstallDelete] entries. Do not make an uninstaller wrapper wait
+        // for a second recursive delete of a potentially large library.
+        // Only an externally selected root needs cleanup here because Inno
+        // cannot express that runtime-selected path in the static script.
+        if (configuredRoot is not null && !PathsEqual(applicationRoot, dataRoot))
+        {
+            TryDeleteDirectory(Path.Combine(dataRoot, "data"));
+            TryDeleteDirectory(Path.Combine(dataRoot, "backups"));
+            TryDeleteFile(AppRootConfiguration.MigrationBackupPath(dataRoot));
             TryDeleteEmptyDirectory(dataRoot);
+        }
 
         TryDeleteFile(Path.Combine(applicationRoot, "app-root.json"));
         TryDeleteFile(Path.Combine(applicationRoot, "app-root.json.tmp"));
         TryDeleteFile(Path.Combine(applicationRoot, "kkindle-crash.log"));
 
         var tempRoot = Path.GetFullPath(temporaryDirectory ?? Path.GetTempPath());
-        foreach (var name in TemporaryDirectoryNames)
-            TryDeleteDirectory(Path.Combine(tempRoot, name));
+        foreach (var relativePath in TemporaryDirectoryRelativePaths)
+            TryDeleteDirectory(Path.Combine(tempRoot, relativePath));
+        TryDeleteEmptyDirectory(Path.Combine(tempRoot, "Kkindle"));
     }
 
     private static bool PathsEqual(string left, string right) =>
@@ -52,6 +54,22 @@ public static class AppDataCleanup
 
     private static void TryDeleteDirectory(string path)
     {
+        try
+        {
+            if (!Directory.Exists(path)) return;
+            Directory.Delete(path, recursive: true);
+            return;
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        // Most directories can be removed in one native operation. Only pay
+        // for a full attribute walk when a read-only item actually blocked it;
+        // this matters when an uninstaller wrapper waits for this process.
         try
         {
             if (!Directory.Exists(path)) return;

@@ -1006,10 +1006,17 @@ public sealed partial class ReaderDataService
         // return the same chapter once for every chunk in that chapter.
         var contentMatch = BuildFtsColumnQuery("Content", searchable);
         var titleMatch = BuildFtsColumnQuery("ChapterTitle", searchable);
+        // The reader's whole-book search passes int.MaxValue and presents
+        // every hit as a reading list. Relevance ordering is useful for
+        // bounded retrieval callers, but it makes that list jump between
+        // chapters instead of following the book.
+        var orderBy = limit == int.MaxValue
+            ? "c.ChapterIndex, c.ChunkIndex, c.StartOffset, c.Id"
+            : "best_matches.Rank, c.ChapterIndex, c.ChunkIndex";
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             WITH matched AS (
                 SELECT c.Id, bm25(BookContentFts, 1.0, 2.8) AS Rank
                 FROM BookContentFts
@@ -1032,7 +1039,7 @@ public sealed partial class ReaderDataService
                    best_matches.Rank
             FROM best_matches
             INNER JOIN BookContentChunks c ON c.Id = best_matches.Id
-            ORDER BY best_matches.Rank, c.ChapterIndex, c.ChunkIndex
+            ORDER BY {orderBy}
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$contentQuery", contentMatch);

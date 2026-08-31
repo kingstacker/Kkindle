@@ -151,6 +151,11 @@ public sealed class EpubReaderPreparationService
         return new EpubReaderDocument(cacheRoot, chapters, navigation, chapterTitles);
     }
 
+    private sealed record PhysicalTocPage(
+        int ChapterIndex,
+        string Title,
+        IReadOnlyList<EpubReaderNavigationItem> Items);
+
     private static async Task<List<EpubReaderNavigationItem>> ReadNavigationAsync(
         XDocument package,
         IReadOnlyDictionary<string, ManifestItem> manifest,
@@ -159,6 +164,8 @@ public sealed class EpubReaderPreparationService
         IReadOnlyList<string> chapters,
         CancellationToken cancellationToken)
     {
+        var navigation = new List<EpubReaderNavigationItem>();
+        var hasNavigation = false;
         var navItem = manifest.Values.FirstOrDefault(item =>
             HasToken(item.Properties, "nav"));
         if (navItem is not null)
@@ -180,70 +187,260 @@ public sealed class EpubReaderPreparationService
                         chapters))
                     .OrderByDescending(items => items.Count)
                     .FirstOrDefault(items => items.Count > 0);
-                if (explicitToc is not null) return explicitToc;
-
-                var inferredToc = navElements
-                    .Where(element => !IsKnownNonTocNavigationElement(element))
-                    .Select(element => CreateNavigationItems(
-                        GetNavigationLinks(element),
-                        navPath,
-                        cacheRoot,
-                        chapters))
-                    .OrderByDescending(items => items.Count)
-                    .FirstOrDefault(items => items.Count > 0);
-                if (inferredToc is not null)
+                if (explicitToc is not null)
                 {
-                    return inferredToc;
+                    navigation = explicitToc;
+                    hasNavigation = true;
+                }
+
+                if (!hasNavigation)
+                {
+                    var inferredToc = navElements
+                        .Where(element => !IsKnownNonTocNavigationElement(element))
+                        .Select(element => CreateNavigationItems(
+                            GetNavigationLinks(element),
+                            navPath,
+                            cacheRoot,
+                            chapters))
+                        .OrderByDescending(items => items.Count)
+                        .FirstOrDefault(items => items.Count > 0);
+                    if (inferredToc is not null)
+                    {
+                        navigation = inferredToc;
+                        hasNavigation = true;
+                    }
                 }
             }
         }
 
-        var guideToc = package.Descendants()
-            .FirstOrDefault(element =>
-                element.Name.LocalName.Equals("reference", StringComparison.OrdinalIgnoreCase)
-                && HasToken(GetAttributeValue(element, "type"), "toc"));
-        var guideHref = GetAttributeValue(guideToc, "href");
-        if (!string.IsNullOrWhiteSpace(guideHref))
+        if (!hasNavigation)
         {
-            var guidePathPart = guideHref.Split('#', 2)[0].Split('?', 2)[0];
-            var guidePath = ResolveContainedPath(
-                packageDirectory,
-                Uri.UnescapeDataString(guidePathPart));
-            EnsureContainedPath(cacheRoot, guidePath);
-            if (File.Exists(guidePath))
+            var guideToc = package.Descendants()
+                .FirstOrDefault(element =>
+                    element.Name.LocalName.Equals("reference", StringComparison.OrdinalIgnoreCase)
+                    && HasToken(GetAttributeValue(element, "type"), "toc"));
+            var guideHref = GetAttributeValue(guideToc, "href");
+            if (!string.IsNullOrWhiteSpace(guideHref))
             {
-                var guideDocument = await LoadXmlAsync(guidePath, cancellationToken);
-                var guideItems = CreateNavigationItems(
-                    GetNavigationLinks(guideDocument.Root),
-                    guidePath,
-                    cacheRoot,
-                    chapters);
-                if (guideItems.Count > 0) return guideItems;
+                var guidePathPart = guideHref.Split('#', 2)[0].Split('?', 2)[0];
+                var guidePath = ResolveContainedPath(
+                    packageDirectory,
+                    Uri.UnescapeDataString(guidePathPart));
+                EnsureContainedPath(cacheRoot, guidePath);
+                if (File.Exists(guidePath))
+                {
+                    var guideDocument = await LoadXmlAsync(guidePath, cancellationToken);
+                    var guideItems = CreateNavigationItems(
+                        GetNavigationLinks(guideDocument.Root),
+                        guidePath,
+                        cacheRoot,
+                        chapters);
+                    if (guideItems.Count > 0)
+                    {
+                        navigation = guideItems;
+                        hasNavigation = true;
+                    }
+                }
             }
         }
 
-        var spineTocId = package.Descendants().FirstOrDefault(element => element.Name.LocalName == "spine")?
-            .Attribute("toc")?.Value;
-        if (spineTocId is null || !manifest.TryGetValue(spineTocId, out var ncxItem)) return [];
-
-        var ncxPath = ResolveContainedPath(packageDirectory, Uri.UnescapeDataString(ncxItem.Href!.Split('#')[0]));
-        EnsureContainedPath(cacheRoot, ncxPath);
-        if (!File.Exists(ncxPath)) return [];
-
-        var ncx = await LoadXmlAsync(ncxPath, cancellationToken);
-        return CreateNavigationItems(
-            ncx.Descendants().Where(element => element.Name.LocalName == "navPoint")
-                .Select(element =>
+        if (!hasNavigation)
+        {
+            var spineTocId = package.Descendants().FirstOrDefault(element => element.Name.LocalName == "spine")?
+                .Attribute("toc")?.Value;
+            if (spineTocId is not null && manifest.TryGetValue(spineTocId, out var ncxItem))
+            {
+                var ncxPath = ResolveContainedPath(
+                    packageDirectory,
+                    Uri.UnescapeDataString(ncxItem.Href!.Split('#')[0]));
+                EnsureContainedPath(cacheRoot, ncxPath);
+                if (File.Exists(ncxPath))
                 {
-                    var title = element.Descendants().FirstOrDefault(descendant => descendant.Name.LocalName == "navLabel")?
-                        .Descendants().FirstOrDefault(descendant => descendant.Name.LocalName == "text")?.Value;
-                    var href = element.Elements().FirstOrDefault(child => child.Name.LocalName == "content")?
-                        .Attribute("src")?.Value;
-                    return (Title: NormalizeTitle(title), Href: href);
-                }),
-            ncxPath,
+                    var ncx = await LoadXmlAsync(ncxPath, cancellationToken);
+                    navigation = CreateNavigationItems(
+                        ncx.Descendants().Where(element => element.Name.LocalName == "navPoint")
+                            .Select(element =>
+                            {
+                                var title = element.Descendants().FirstOrDefault(descendant => descendant.Name.LocalName == "navLabel")?
+                                    .Descendants().FirstOrDefault(descendant => descendant.Name.LocalName == "text")?.Value;
+                                var href = element.Elements().FirstOrDefault(child => child.Name.LocalName == "content")?
+                                    .Attribute("src")?.Value;
+                                return (Title: NormalizeTitle(title), Href: href);
+                            }),
+                        ncxPath,
+                        cacheRoot,
+                        chapters);
+                    hasNavigation = navigation.Count > 0;
+                }
+            }
+        }
+
+        return await MergePhysicalTocNavigationAsync(
+            navigation,
             cacheRoot,
-            chapters);
+            chapters,
+            cancellationToken);
+    }
+
+    private static async Task<List<EpubReaderNavigationItem>> MergePhysicalTocNavigationAsync(
+        List<EpubReaderNavigationItem> navigation,
+        string cacheRoot,
+        IReadOnlyList<string> chapters,
+        CancellationToken cancellationToken)
+    {
+        var tocPages = await ReadPhysicalTocPagesAsync(
+            cacheRoot,
+            chapters,
+            cancellationToken);
+        if (tocPages.Count == 0)
+            return navigation;
+
+        var result = new List<EpubReaderNavigationItem>(navigation);
+        var keys = new HashSet<string>(
+            result.Select(GetNavigationKey),
+            StringComparer.OrdinalIgnoreCase);
+
+        // The first physical TOC is the book-level directory. Sub-TOC pages
+        // are content sources only: their chapter links are added below, but
+        // the pages themselves should not create repeated "目录" rows.
+        var rootTocPage = tocPages[0];
+        // Some EPUBs already publish the root TOC in NCX/guide, often with a
+        // heading fragment. It is still the same physical page, so do not add
+        // a second synthetic page-level entry just because the fragments differ.
+        if (!result.Any(item => item.ChapterIndex == rootTocPage.ChapterIndex))
+        {
+            AddUniqueNavigationItem(
+                result,
+                keys,
+                new EpubReaderNavigationItem(
+                    rootTocPage.Title,
+                    new Uri(chapters[rootTocPage.ChapterIndex]).AbsoluteUri,
+                    rootTocPage.ChapterIndex));
+        }
+
+        foreach (var tocPage in tocPages)
+        {
+            foreach (var item in tocPage.Items)
+                AddUniqueNavigationItem(result, keys, item);
+        }
+
+        return result
+            .Select((item, order) => (item, order))
+            .OrderBy(entry => entry.item.ChapterIndex)
+            .ThenBy(entry => entry.order)
+            .Select(entry => entry.item)
+            .ToList();
+    }
+
+    private static async Task<List<PhysicalTocPage>> ReadPhysicalTocPagesAsync(
+        string cacheRoot,
+        IReadOnlyList<string> chapters,
+        CancellationToken cancellationToken)
+    {
+        var pages = new List<PhysicalTocPage>();
+        for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var document = await LoadXmlAsync(chapters[chapterIndex], cancellationToken);
+                var links = GetNavigationLinks(document.Root).ToArray();
+                if (!IsPhysicalTocPage(document, links))
+                    continue;
+
+                var items = CreateNavigationItems(
+                    links,
+                    chapters[chapterIndex],
+                    cacheRoot,
+                    chapters);
+                if (items.Count == 0)
+                    continue;
+
+                pages.Add(new PhysicalTocPage(
+                    chapterIndex,
+                    GetPhysicalTocTitle(document),
+                    items));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // A broken auxiliary XHTML page must not prevent the rest of
+                // the EPUB from opening or erase its NCX navigation.
+            }
+        }
+
+        return pages;
+    }
+
+    private static bool IsPhysicalTocPage(
+        XDocument document,
+        IReadOnlyCollection<(string Title, string? Href)> links)
+    {
+        if (links.Count < 2)
+            return false;
+        if (document.Descendants().Any(IsTocNavigationElement))
+            return true;
+
+        return document.Descendants()
+            .Where(element => element.Name.LocalName is
+                "title" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6"
+                or "p" or "div" or "section")
+            .Any(element => IsTocHeading(element.Value));
+    }
+
+    private static string GetPhysicalTocTitle(XDocument document)
+    {
+        var visibleTitle = document.Descendants()
+            .Where(element => element.Name.LocalName is
+                "h1" or "h2" or "h3" or "h4" or "h5" or "h6"
+                or "p" or "div" or "section")
+            .Select(element => NormalizeTitle(element.Value))
+            .FirstOrDefault(IsTocHeading);
+        if (!string.IsNullOrWhiteSpace(visibleTitle))
+            return visibleTitle;
+
+        return document.Descendants()
+            .Where(element => element.Name.LocalName == "title")
+            .Select(element => NormalizeTitle(element.Value))
+            .FirstOrDefault(IsTocHeading)
+            ?? "目录";
+    }
+
+    private static bool IsTocHeading(string value)
+    {
+        var compact = new string(value
+            .Where(character => char.IsLetterOrDigit(character)
+                || character is >= '\u3400' and <= '\u9fff')
+            .ToArray());
+        return compact.Equals("目录", StringComparison.OrdinalIgnoreCase)
+            || compact.Equals("目录页", StringComparison.OrdinalIgnoreCase)
+            || compact.Equals("目錄", StringComparison.OrdinalIgnoreCase)
+            || compact.Equals("目錄頁", StringComparison.OrdinalIgnoreCase)
+            || compact.Equals("目次", StringComparison.OrdinalIgnoreCase)
+            || compact.Equals("contents", StringComparison.OrdinalIgnoreCase)
+            || compact.Equals("tableofcontents", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetNavigationKey(EpubReaderNavigationItem item)
+    {
+        if (Uri.TryCreate(item.Target, UriKind.Absolute, out var target))
+            return $"{item.ChapterIndex}\0{target.Fragment}";
+        return $"{item.ChapterIndex}\0{item.Target}";
+    }
+
+    private static void AddUniqueNavigationItem(
+        List<EpubReaderNavigationItem> items,
+        HashSet<string> keys,
+        EpubReaderNavigationItem item)
+    {
+        if (keys.Add(GetNavigationKey(item)))
+        {
+            items.Add(item);
+            return;
+        }
     }
 
     private static List<EpubReaderNavigationItem> CreateNavigationItems(
@@ -257,6 +454,7 @@ public sealed class EpubReaderPreparationService
         foreach (var (title, href) in source)
         {
             if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(href)) continue;
+            if (IsFootnoteNavigationEntry(title, href)) continue;
             if (Uri.TryCreate(href, UriKind.Absolute, out var absolute) && !absolute.IsFile) continue;
 
             var parts = href.Split('#', 2);
@@ -281,11 +479,52 @@ public sealed class EpubReaderPreparationService
     private static IEnumerable<(string Title, string? Href)> GetNavigationLinks(XElement? navigation) =>
         navigation?.Descendants()
             .Where(element => element.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase))
+            .Where(element => !IsFootnoteLink(element))
             .Select(element => (
                 Title: NormalizeTitle(element.Value),
                 Href: element.Attributes().FirstOrDefault(attribute =>
                     attribute.Name.LocalName.Equals("href", StringComparison.OrdinalIgnoreCase))?.Value))
         ?? [];
+
+    private static bool IsFootnoteLink(XElement element)
+    {
+        if (HasToken(GetAttributeValue(element, "rel"), "footnote")
+            || HasToken(GetAttributeValue(element, "rel"), "noteref")
+            || HasToken(GetAttributeValue(element, "role"), "doc-noteref")
+            || HasToken(GetAttributeValue(element, "type"), "noteref"))
+        {
+            return true;
+        }
+
+        var id = GetAttributeValue(element, "id");
+        var href = GetAttributeValue(element, "href");
+        var fragment = href?.Split('#', 2).ElementAtOrDefault(1);
+        return IsFootnoteMarker(element.Value)
+            && (LooksLikeFootnoteIdentifier(id) || LooksLikeFootnoteIdentifier(fragment));
+    }
+
+    private static bool IsFootnoteNavigationEntry(string title, string href)
+    {
+        var fragment = href.Split('#', 2).ElementAtOrDefault(1);
+        return LooksLikeFootnoteIdentifier(fragment)
+            || (IsFootnoteMarker(title)
+                && LooksLikeFootnoteIdentifier(Path.GetFileNameWithoutExtension(
+                    href.Split('#', 2)[0].Split('?', 2)[0])));
+    }
+
+    private static bool IsFootnoteMarker(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && Regex.IsMatch(
+            value.Trim(),
+            @"^(?:\[\s*\d+\s*\]|［\s*\d+\s*］)$",
+            RegexOptions.CultureInvariant);
+
+    private static bool LooksLikeFootnoteIdentifier(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && Regex.IsMatch(
+            value.Trim(),
+            @"^(?:note|notes|fn|footnote|footnotes)[-_]?\d+[a-z]*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static bool IsTocNavigationElement(XElement element) =>
         element.Attributes().Any(attribute =>
@@ -318,6 +557,10 @@ public sealed class EpubReaderPreparationService
 
     private static bool HasTocHint(string? value) =>
         !string.IsNullOrWhiteSpace(value)
+        && !Regex.IsMatch(
+            value,
+            @"(?:^|[_-])sigil[_-]toc[_-]id(?:[_-]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
         && Regex.IsMatch(
             value,
             @"(?:^|[\s_-])(toc|table[-_]?of[-_]?contents?)(?:$|[\s_-])",

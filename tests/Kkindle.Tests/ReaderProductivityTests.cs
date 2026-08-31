@@ -357,6 +357,41 @@ public sealed class ReaderProductivityTests
     }
 
     [Fact]
+    public async Task WholeBookSearchOrdersResultsByReadingPosition()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var service = new ReaderDataService(new AppPaths(Path.Combine(root, "app")));
+            await service.InitializeAsync();
+            var bookId = Guid.NewGuid();
+            var fileId = Guid.NewGuid();
+            var hash = new string('o', 64);
+
+            await service.ReplaceBookChunksAsync(bookId, fileId, hash,
+            [
+                new BookContentChunkDraft(0, 0, "序幕", "text/000.xhtml", 0, 40,
+                    "序幕开头的阅读顺序命中。"),
+                new BookContentChunkDraft(1, 0, "第二章", "text/001.xhtml", 0, 80,
+                    string.Join(' ', Enumerable.Repeat("第二章正文包含阅读顺序命中。", 12))),
+                new BookContentChunkDraft(2, 0, "第三章", "text/002.xhtml", 0, 40,
+                    "第三章结尾的阅读顺序命中。")
+            ]);
+
+            var results = await service.SearchBookAsync(
+                bookId,
+                "阅读顺序命中",
+                int.MaxValue,
+                exactPhraseOnly: true);
+
+            Assert.Equal(
+                new[] { "序幕", "第二章", "第三章" },
+                results.Select(result => result.ChapterTitle).ToArray());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task WholeBookExactSearchRejectsPartialChineseNgramMatches()
     {
         var root = TestHelpers.CreateTempDirectory();

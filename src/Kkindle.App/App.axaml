@@ -430,6 +430,17 @@
         <Style Selector="ScrollViewer.bookScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
             <Setter Property="Opacity" Value="1" />
         </Style>
+        <!-- The reader TOC uses the same transient thumb behavior, but owns a
+             separate class because its ListBox has its own template ScrollViewer. -->
+        <Style Selector="ScrollViewer.readerTocScroll /template/ ScrollBar /template/ Grid#Root Thumb">
+            <Setter Property="Opacity" Value="0" />
+        </Style>
+        <Style Selector="ScrollViewer.readerTocScroll.readerTocScrolling /template/ ScrollBar /template/ Grid#Root Thumb">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="ScrollViewer.readerTocScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
         <!-- The detail pane's save button rests grey (a secondary action next to
              the destructive delete) and turns ink-black on hover. Fluent paints
              hover on the template's ContentPresenter, so the overrides must
@@ -978,48 +989,36 @@
         </Style>
 
         <!-- WinUI's ToggleSwitch is the settings control, not a text
-             checkbox. The track and thumb are deliberately drawn here so
-             Fluent's accent colour can never enter the monochrome UI. -->
+             checkbox. Keep it as a compact track and thumb: the setting label
+             already provides the meaning, so an extra "开/关" caption only
+             adds noise. Fluent's accent colour must not enter the control. -->
         <Style Selector="ToggleSwitch">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
             <Setter Property="Background" Value="{StaticResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="IsThreeState" Value="False" />
-            <Setter Property="OnContent" Value="{DynamicResource Ui.Auto.39EAE64CFC41EF37}" />
-            <Setter Property="OffContent" Value="{DynamicResource Ui.Auto.5D0AE622F61F8EBF}" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Grid ColumnDefinitions="48,Auto" ColumnSpacing="8" MinHeight="24">
+                    <Grid ColumnDefinitions="36" MinHeight="20">
                         <Border x:Name="SwitchTrack"
-                                Width="48"
-                                Height="24"
+                                Width="36"
+                                Height="20"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1"
-                                CornerRadius="12">
+                                CornerRadius="10">
                             <Grid x:Name="PART_MovingKnobs">
                                 <Border x:Name="SwitchThumb"
-                                        Width="18"
-                                        Height="18"
+                                        Width="14"
+                                        Height="14"
                                         Margin="2"
                                         Background="{StaticResource InkBrush}"
-                                        CornerRadius="9"
+                                        CornerRadius="7"
                                         HorizontalAlignment="Left"
                                         VerticalAlignment="Center" />
                             </Grid>
                         </Border>
-                        <ContentPresenter x:Name="OnContentPresenter"
-                                          Grid.Column="1"
-                                          Content="{TemplateBinding OnContent}"
-                                          Foreground="{TemplateBinding Foreground}"
-                                          VerticalAlignment="Center"
-                                          IsVisible="False" />
-                        <ContentPresenter x:Name="OffContentPresenter"
-                                          Grid.Column="1"
-                                          Content="{TemplateBinding OffContent}"
-                                          Foreground="{TemplateBinding Foreground}"
-                                          VerticalAlignment="Center" />
                     </Grid>
                 </ControlTemplate>
             </Setter>
@@ -1031,12 +1030,6 @@
         <Style Selector="ToggleSwitch:checked /template/ Border#SwitchThumb">
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-        </Style>
-        <Style Selector="ToggleSwitch:checked /template/ ContentPresenter#OnContentPresenter">
-            <Setter Property="IsVisible" Value="True" />
-        </Style>
-        <Style Selector="ToggleSwitch:checked /template/ ContentPresenter#OffContentPresenter">
-            <Setter Property="IsVisible" Value="False" />
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />

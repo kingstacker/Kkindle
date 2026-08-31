@@ -1497,33 +1497,11 @@ public partial class MainWindow
 
     private static IReadOnlyList<EpubReaderNavigationItem> BuildReaderNavigationItems(
         EpubReaderDocument document)
-    {
-        if (document.Navigation.Count == 0)
-        {
-            return document.Chapters.Select((chapter, index) => new EpubReaderNavigationItem(
-                GetPreparedChapterTitle(document, index),
-                new Uri(chapter).AbsoluteUri,
-                index)).ToArray();
-        }
-
-        var orderedNavigation = document.Navigation
-            .Select((item, order) => (item, order))
-            .OrderBy(entry => entry.item.ChapterIndex)
-            .ThenBy(entry => entry.order)
-            .Select(entry => entry.item)
-            .ToArray();
-        var firstNavigationChapter = orderedNavigation[0].ChapterIndex;
-        var result = new List<EpubReaderNavigationItem>();
-        for (var chapterIndex = 0; chapterIndex < firstNavigationChapter; chapterIndex++)
-        {
-            result.Add(new EpubReaderNavigationItem(
-                GetPreparedChapterTitle(document, chapterIndex),
-                new Uri(document.Chapters[chapterIndex]).AbsoluteUri,
-                chapterIndex));
-        }
-        result.AddRange(orderedNavigation);
-        return result;
-    }
+        => EpubReaderNavigationPolicy.Build(
+            document,
+            UiText.Get("封面"),
+            UiText.Get("目录"),
+            chapterIndex => GetPreparedChapterTitle(document, chapterIndex));
 
     private static string GetPreparedChapterTitle(EpubReaderDocument document, int chapterIndex)
     {
@@ -6304,22 +6282,11 @@ public partial class MainWindow
                 // Case-folded search over the same body-text stream the
                 // WebKit walker saw; highlights paint per page.
                 var nativeQuery = query.Trim();
-                var nativeHits = new List<(int Start, int Length)>();
                 var nativeBody = nativeReader.BodyText ?? string.Empty;
-                if (nativeQuery.Length > 0)
-                {
-                    var foldedBody = nativeBody.ToLowerInvariant();
-                    var foldedQuery = nativeQuery.ToLowerInvariant();
-                    var nativeHit = foldedBody.IndexOf(foldedQuery, StringComparison.Ordinal);
-                    while (nativeHit >= 0)
-                    {
-                        nativeHits.Add((nativeHit, nativeQuery.Length));
-                        nativeHit = foldedBody.IndexOf(
-                            foldedQuery,
-                            nativeHit + Math.Max(1, foldedQuery.Length),
-                            StringComparison.Ordinal);
-                    }
-                }
+                var nativeHits = ReaderSearchTextPolicy
+                    .FindMatches(nativeBody, nativeQuery)
+                    .Select(match => (match.Start, match.Length))
+                    .ToList();
 
                 nativeReader.SetSearchHighlights(nativeHits, null);
                 _readerSearchCount = nativeHits.Count;

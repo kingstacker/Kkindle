@@ -43,6 +43,18 @@ public sealed class ReaderSearchResultViewModel : ObservableObject
         string? target = null)
     {
         var presentation = ReaderSearchPresentation.CreateSnippet(source.Content, query);
+        // A title-only hit has no matching characters in the body chunk, so
+        // showing the body's opening text would produce a result card with no
+        // visible search term. Keep the result, but use the matching title as
+        // its excerpt so every card exposes the reason it was returned.
+        if (presentation.HighlightRanges.Count == 0)
+        {
+            var titlePresentation = ReaderSearchPresentation.CreateSnippet(
+                source.ChapterTitle,
+                query);
+            if (titlePresentation.HighlightRanges.Count > 0)
+                presentation = titlePresentation;
+        }
         Title = source.ChapterTitle;
         Excerpt = presentation.Snippet;
         ChapterIndex = source.ChapterIndex;
@@ -106,9 +118,11 @@ internal static class ReaderSearchPresentation
         var hasMatch = match >= 0;
         if (match < 0) match = 0;
 
-        var start = Math.Max(0, match - 45);
-        if (start + maximumLength > normalized.Length)
-            start = Math.Max(0, normalized.Length - maximumLength);
+        // Keep the hit near the beginning of the excerpt. The result row is
+        // intentionally limited to four lines; shifting a late hit backward
+        // to include the tail can push the actual keyword below that visual
+        // limit, making a valid result look unrelated.
+        var start = Math.Max(0, match - 36);
         var length = Math.Min(maximumLength, normalized.Length - start);
         var snippet = normalized.Substring(start, length);
         var prefix = start > 0 ? "…" : string.Empty;
