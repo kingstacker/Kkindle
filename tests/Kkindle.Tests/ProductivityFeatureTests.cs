@@ -38,6 +38,8 @@ public sealed class ProductivityFeatureTests
                 LastAutoUpdateCheckAt = new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)),
                 PendingUpdateVersion = "1.2.3",
                 PendingUpdateReleaseNotes = "修复阅读器翻页问题",
+                PendingUpdatePackagePath = Path.Combine(root, "update.exe"),
+                PendingUpdateDownloadedAt = new DateTimeOffset(2026, 8, 23, 9, 35, 0, TimeSpan.FromHours(8)),
                 DefaultReaderLayout = new ReaderLayoutSettings(FontScale: 9, LineHeight: -1)
             });
 
@@ -57,12 +59,17 @@ public sealed class ProductivityFeatureTests
             Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)), restored.LastAutoUpdateCheckAt);
             Assert.Equal("1.2.3", restored.PendingUpdateVersion);
             Assert.Equal("修复阅读器翻页问题", restored.PendingUpdateReleaseNotes);
+            Assert.Equal(Path.Combine(root, "update.exe"), restored.PendingUpdatePackagePath);
+            Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 35, 0, TimeSpan.FromHours(8)), restored.PendingUpdateDownloadedAt);
+            Assert.Equal(restored, store.LoadSynchronously());
 
             // Defaults start clean; a fresh install has never checked for updates.
             var freshSettings = new AppSettings();
             Assert.False(freshSettings.OnboardingCompleted);
             Assert.Null(freshSettings.LastAutoUpdateCheckAt);
             Assert.Null(freshSettings.PendingUpdateVersion);
+            Assert.Null(freshSettings.PendingUpdatePackagePath);
+            Assert.Null(freshSettings.PendingUpdateDownloadedAt);
             Assert.InRange(restored.DefaultReaderLayout.FontScale, 0.75, 2.0);
             Assert.InRange(restored.DefaultReaderLayout.LineHeight, 1.2, 2.8);
 

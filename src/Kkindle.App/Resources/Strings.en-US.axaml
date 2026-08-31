@@ -919,6 +919,15 @@
     <x:String x:Key="Ui.Auto.E952E0CAFB0E8ACA">Deep</x:String>
     <x:String x:Key="Ui.Auto.7DC12B72DC21C5D8">Click “New collection” to create one, then use a book’s context menu to add books to it.</x:String>
     <x:String x:Key="Ui.Auto.3F979620B6CC7368">Click the yellow dot to download and install the latest version</x:String>
+    <x:String x:Key="Ui.Auto.20269ABED6E67A92">Update package downloaded; exit the app to install {0}</x:String>
+    <x:String x:Key="Ui.Auto.978F91EEB66558DA">Update downloaded</x:String>
+    <x:String x:Key="Ui.Auto.B3C5AF03C8A709A0">The Kkindle {0} update package is downloaded. The current window will stay open; installation will be completed when you exit the app.</x:String>
+    <x:String x:Key="Ui.Auto.DA604B1A7D7CE6C8">Download complete; waiting for the app to exit…</x:String>
+    <x:String x:Key="Ui.Auto.802D738C1D1C5542">The update package is no longer available. Check for updates again.</x:String>
+    <x:String x:Key="Ui.Auto.F9C4B68BF69E9F13">Update ready</x:String>
+    <x:String x:Key="Ui.Auto.842BF1C66B1B09E7">The Kkindle {0} update package is downloaded. The installer will start and complete the update after you exit the app.&#xA;&#xA;Exit now and install?</x:String>
+    <x:String x:Key="Ui.Auto.FBAADDB8EBEA32D1">Exit and install</x:String>
+    <x:String x:Key="Ui.Auto.73A133C1B6ACB488">Update package downloaded. Click here or exit the app to complete installation.</x:String>
     <x:String x:Key="Ui.Auto.CE0744E60649AFA6">Version {0}</x:String>
     <x:String x:Key="Ui.Auto.A7286BA3D06D5271">Version: {0}</x:String>
     <x:String x:Key="Ui.Auto.C6813F72F7E223AF">User question:&#xA;{0}&#xA;&#xA;Book excerpts:&#xA;{1}</x:String>

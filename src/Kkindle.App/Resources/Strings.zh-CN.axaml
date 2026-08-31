@@ -919,6 +919,15 @@
     <x:String x:Key="Ui.Auto.E952E0CAFB0E8ACA">深入</x:String>
     <x:String x:Key="Ui.Auto.7DC12B72DC21C5D8">点击“新建收藏夹”创建，之后可在书籍右键菜单中把书籍加入其中。</x:String>
     <x:String x:Key="Ui.Auto.3F979620B6CC7368">点击黄点即可下载并安装最新版</x:String>
+    <x:String x:Key="Ui.Auto.20269ABED6E67A92">更新包已下载，退出应用后安装 {0}</x:String>
+    <x:String x:Key="Ui.Auto.978F91EEB66558DA">更新已下载</x:String>
+    <x:String x:Key="Ui.Auto.B3C5AF03C8A709A0">Kkindle {0} 更新包已下载完成。当前窗口保持打开；退出应用时会提示并完成安装。</x:String>
+    <x:String x:Key="Ui.Auto.DA604B1A7D7CE6C8">下载完成，等待退出应用…</x:String>
+    <x:String x:Key="Ui.Auto.802D738C1D1C5542">更新包已失效，请重新检查更新</x:String>
+    <x:String x:Key="Ui.Auto.F9C4B68BF69E9F13">更新已就绪</x:String>
+    <x:String x:Key="Ui.Auto.842BF1C66B1B09E7">Kkindle {0} 更新包已下载完成。退出应用后将启动安装程序并完成更新。&#xA;&#xA;现在退出并安装吗？</x:String>
+    <x:String x:Key="Ui.Auto.FBAADDB8EBEA32D1">退出并安装</x:String>
+    <x:String x:Key="Ui.Auto.73A133C1B6ACB488">更新包已下载，点击此处或退出应用即可完成安装</x:String>
     <x:String x:Key="Ui.Auto.CE0744E60649AFA6">版本 {0}</x:String>
     <x:String x:Key="Ui.Auto.A7286BA3D06D5271">版本：{0}</x:String>
     <x:String x:Key="Ui.Auto.C6813F72F7E223AF">用户问题：&#xA;{0}&#xA;&#xA;书籍片段：&#xA;{1}</x:String>

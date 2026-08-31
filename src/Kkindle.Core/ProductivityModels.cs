@@ -40,6 +40,10 @@ public sealed record AppSettings
     public string? PendingUpdateVersion { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PendingUpdateReleaseNotes { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PendingUpdatePackagePath { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DateTimeOffset? PendingUpdateDownloadedAt { get; init; }
 
     public bool AutoDoubanMatchOnImport { get; init; }
     public bool AutoConnectDevice { get; init; } = true;

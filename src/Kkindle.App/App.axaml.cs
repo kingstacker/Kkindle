@@ -43,8 +43,14 @@ public partial class App : Application
             var applicationDirectory = AppContext.BaseDirectory;
             var paths = _services?.Paths
                 ?? new AppPaths(AppRootConfiguration.ResolveRoot(applicationDirectory));
+            var startupSettings = new AppSettingsStore(paths).LoadSynchronously();
+            ApplyLanguage(startupSettings.UiLanguage);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
-            var window = new MainWindow(paths, library, services: _services);
+            var window = new MainWindow(
+                paths,
+                library,
+                services: _services,
+                startupSettings: startupSettings);
             desktop.MainWindow = window;
             _ = window.InitializeLibraryAsync();
         }

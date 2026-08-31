@@ -9,6 +9,32 @@ public sealed class AppSettingsStore
     private readonly AppPaths _paths;
     public AppSettingsStore(AppPaths paths) => _paths = paths;
 
+    // The first window surface must be selected before Avalonia presents the
+    // desktop window. Keep this small synchronous bootstrap read separate from
+    // the full async startup load used by MainWindow.
+    public AppSettings LoadSynchronously()
+    {
+        try
+        {
+            _paths.EnsureDirectories();
+            if (!File.Exists(_paths.Settings)) return new AppSettings();
+            using var stream = new FileStream(_paths.Settings, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return AppSettings.Normalize(JsonSerializer.Deserialize<AppSettings>(stream, JsonOptions));
+        }
+        catch (JsonException)
+        {
+            return new AppSettings();
+        }
+        catch (IOException)
+        {
+            return new AppSettings();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new AppSettings();
+        }
+    }
+
     public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
     {
         _paths.EnsureDirectories();

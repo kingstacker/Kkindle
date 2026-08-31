@@ -130,11 +130,13 @@ public partial class MainWindow : Window
         IBookLibraryService library,
         IBookFormatConverter? formatConverter = null,
         DoubanMetadataService? douban = null,
-        AppServices? services = null)
+        AppServices? services = null,
+        AppSettings? startupSettings = null)
     {
         _paths = paths;
         _rootConfigurationDirectory = services?.RootConfigurationDirectory ?? AppContext.BaseDirectory;
         _library = library;
+        _appSettings = AppSettings.Normalize(startupSettings);
         _formatConverter = formatConverter ?? new BookFormatConversionService();
         _readerFormatCache = new ReaderFormatCacheService(paths, _formatConverter);
         _douban = douban ?? new DoubanMetadataService();
@@ -164,6 +166,13 @@ public partial class MainWindow : Window
         ViewModel = new LibraryViewModel(library, paths.Data);
 
         InitializeComponent();
+        if (startupSettings is not null && !_appSettings.OnboardingCompleted)
+        {
+            // Choose the first-run surface before the window is presented. The
+            // async library/database initialization can continue behind it.
+            LibraryRoot.IsVisible = false;
+            ShowOnboardingIfNeeded();
+        }
         UiText.LanguageChanged += MainWindowLanguageChanged;
         ApplyApplicationIcon();
         InitializeTrayIcon();
@@ -379,7 +388,16 @@ public partial class MainWindow : Window
         UpdateCalibreDetectionStatus();
         UpdateZLibraryAccountStatus();
         if (!string.IsNullOrWhiteSpace(_pendingUpdateVersion))
-            ShowUpdateBadge(_pendingUpdateVersion, _appSettings.PendingUpdateReleaseNotes);
+        {
+            var packageReady = TryGetPendingUpdatePackage(out _, out _);
+            ShowUpdateBadge(
+                _pendingUpdateVersion,
+                _appSettings.PendingUpdateReleaseNotes,
+                packageReady);
+            AboutUpdateStatusText.Text = packageReady
+                ? T("更新包已下载，退出应用后安装 {0}", _pendingUpdateVersion)
+                : T("发现新版本 {0}", _pendingUpdateVersion);
+        }
         if (ReaderRoot.IsVisible)
         {
             UpdateReaderToolbar();
@@ -661,9 +679,23 @@ public partial class MainWindow : Window
     // bar, so this is the only path besides CloseWindowButton_Click).
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
     {
-        if (!ReaderRoot.IsVisible) return;
-        e.Cancel = true;
-        _ = CloseReaderAsync();
+        if (_allowWindowCloseForPendingUpdate) return;
+        if (ReaderRoot.IsVisible)
+        {
+            e.Cancel = true;
+            _ = CloseReaderAsync();
+            return;
+        }
+        if (TryGetPendingUpdatePackage(out var packagePath, out var version))
+        {
+            e.Cancel = true;
+            // The download-complete notice is an informational overlay. If
+            // the user closes from it, dismiss it first so the install
+            // confirmation is visible instead of being stacked underneath.
+            if (MessageOverlay.IsVisible)
+                CompleteMessage();
+            _ = PromptPendingUpdateInstallAsync(packagePath, version);
+        }
     }
 
     private async void MainWindow_Closed(object? sender, EventArgs e)

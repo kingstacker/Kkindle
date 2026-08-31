@@ -306,7 +306,9 @@ public partial class MainWindow
             }
 
             OnboardingOverlay.IsVisible = false;
+            LibraryRoot.IsVisible = true;
             UpdateLibraryUi();
+            StartAutomaticUpdateCheck();
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {

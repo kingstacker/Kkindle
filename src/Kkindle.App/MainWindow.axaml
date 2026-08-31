@@ -208,9 +208,8 @@
                                            FontSize="18"
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
-                                <!-- Update-available badge: a small amber dot beside the
-                                     app title. Hovering shows the release notes; clicking
-                                     offers to download and install the new version. -->
+                                <!-- Update badge: hovering shows the release notes; after
+                                     download, clicking starts the explicit exit/install flow. -->
                                 <Button x:Name="UpdateBadgeButton"
                                         IsVisible="False"
                                         Click="UpdateBadgeButton_Click"
@@ -4871,20 +4870,27 @@
                               MinHeight="360">
                             <Grid x:Name="OnboardingWelcomePage"
                                   RowDefinitions="Auto,Auto,Auto,Auto"
-                                  RowSpacing="18">
+                                  RowSpacing="18"
+                                  HorizontalAlignment="Stretch">
                                 <TextBlock Text="{DynamicResource Ui.Onboarding.WelcomeTitle}"
                                            FontSize="34"
-                                           FontWeight="Bold" />
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Stretch"
+                                           TextAlignment="Left" />
                                 <TextBlock Grid.Row="1"
                                            Text="{DynamicResource Ui.Onboarding.WelcomeSubtitle}"
                                            FontSize="17"
                                            Foreground="{StaticResource MutedInkBrush}"
+                                           HorizontalAlignment="Stretch"
+                                           TextAlignment="Left"
                                            TextWrapping="Wrap" />
                                 <TextBlock Grid.Row="2"
                                            Text="{DynamicResource Ui.Onboarding.WelcomeDescription}"
                                            FontSize="14"
                                            LineHeight="23"
                                            MaxWidth="620"
+                                           HorizontalAlignment="Left"
+                                           TextAlignment="Left"
                                            TextWrapping="Wrap" />
                                 <Border Grid.Row="3"
                                         Margin="0,12,0,0"
@@ -4901,6 +4907,7 @@
                                                   Grid.Row="1"
                                                   Width="260"
                                                   HorizontalAlignment="Left"
+                                                  HorizontalContentAlignment="Left"
                                                   SelectedIndex="0"
                                                   SelectionChanged="OnboardingLanguageBox_SelectionChanged">
                                             <ComboBoxItem Content="{DynamicResource Ui.Auto.9937E365AAF3A085}"
@@ -4912,6 +4919,8 @@
                                                    Text="{DynamicResource Ui.Onboarding.LanguageHint}"
                                                    FontSize="11"
                                                    Foreground="{StaticResource MutedInkBrush}"
+                                                   HorizontalAlignment="Stretch"
+                                                   TextAlignment="Left"
                                                    TextWrapping="Wrap" />
                                     </Grid>
                                 </Border>
@@ -4920,15 +4929,20 @@
                             <Grid x:Name="OnboardingDevicePage"
                                   IsVisible="False"
                                   RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                                  RowSpacing="18">
+                                  RowSpacing="18"
+                                  HorizontalAlignment="Stretch">
                                 <TextBlock Text="{DynamicResource Ui.Onboarding.DeviceTitle}"
                                            FontSize="30"
-                                           FontWeight="Bold" />
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Stretch"
+                                           TextAlignment="Left" />
                                 <TextBlock Grid.Row="1"
                                            Text="{DynamicResource Ui.Onboarding.DeviceDescription}"
                                            FontSize="14"
                                            LineHeight="23"
                                            Foreground="{StaticResource MutedInkBrush}"
+                                           HorizontalAlignment="Stretch"
+                                           TextAlignment="Left"
                                            TextWrapping="Wrap" />
                                 <Grid Grid.Row="2"
                                       ColumnDefinitions="*,*"
@@ -4938,6 +4952,7 @@
                                                    FontSize="12"
                                                    FontWeight="SemiBold" />
                                         <ComboBox x:Name="OnboardingVendorBox"
+                                                  HorizontalContentAlignment="Left"
                                                   SelectionChanged="OnboardingVendorBox_SelectionChanged" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Spacing="8">
@@ -4946,6 +4961,7 @@
                                                    FontWeight="SemiBold" />
                                         <ComboBox x:Name="OnboardingDeviceModelBox"
                                                   IsEnabled="False"
+                                                  HorizontalContentAlignment="Left"
                                                   SelectionChanged="OnboardingDeviceModelBox_SelectionChanged" />
                                     </StackPanel>
                                 </Grid>
@@ -4962,6 +4978,8 @@
                                                    Text="{DynamicResource Ui.Onboarding.NoModelSelected}"
                                                    FontSize="16"
                                                    FontWeight="SemiBold"
+                                                   HorizontalAlignment="Stretch"
+                                                   TextAlignment="Left"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
@@ -4971,6 +4989,8 @@
                                            IsVisible="False"
                                            FontSize="11"
                                            Foreground="{StaticResource MutedInkBrush}"
+                                           HorizontalAlignment="Stretch"
+                                           TextAlignment="Left"
                                            TextWrapping="Wrap" />
                             </Grid>
                         </Grid>
