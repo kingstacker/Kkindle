@@ -1355,9 +1355,7 @@
                   Margin="30,24,30,18"
                   IsVisible="False"
                   RowDefinitions="Auto,*,Auto"
-                  DragDrop.AllowDrop="True"
-                  DragDrop.DragOver="DeviceResourcePage_DragOver"
-                  DragDrop.Drop="DeviceResourcePage_Drop">
+                  DragDrop.AllowDrop="True">
                   <Grid.Transitions>
                       <Transitions>
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
@@ -2250,7 +2248,8 @@
                                     </Border>
                             <Border x:Name="DictionaryManagementSection"
                                     Classes="flatSubsection"
-                                    Padding="0,12,0,0">
+                                    Padding="0,12,0,0"
+                                    DragDrop.AllowDrop="True">
                                         <StackPanel Spacing="10">
                                             <TextBlock Text="{DynamicResource Ui.Auto.F0486713A9BABBE5}" FontSize="16" FontWeight="SemiBold" />
                                             <TextBlock Text="{DynamicResource Ui.Auto.7C456B8E16853FCF}"

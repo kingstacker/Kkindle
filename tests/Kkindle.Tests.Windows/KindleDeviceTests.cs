@@ -363,6 +363,81 @@ public sealed class KindleDeviceTests
     }
 
     [Fact]
+    public async Task ImportsFontAfterSourceFileLockIsReleased()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "documents"));
+        var sourceDirectory = Path.Combine(root, "sources");
+        Directory.CreateDirectory(sourceDirectory);
+        var source = Path.Combine(sourceDirectory, "locked.ttf");
+        var content = new byte[512 * 1024];
+        Random.Shared.NextBytes(content);
+        await File.WriteAllBytesAsync(source, content);
+
+        FileStream? sourceLock = null;
+        try
+        {
+            sourceLock = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.None);
+            var service = new KindleDeviceService();
+            var device = new KindleDevice { RootPath = root, Name = "Fake Kindle", IsReady = true };
+
+            var transfer = service.SendResourceAsync(device, KindleResourceKind.Font, source);
+            await Task.Delay(400);
+            sourceLock.Dispose();
+            sourceLock = null;
+
+            await transfer;
+
+            var importedPath = Path.Combine(root, "fonts", "locked.ttf");
+            Assert.Equal(content, await File.ReadAllBytesAsync(importedPath));
+            Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "fonts"), "*.kkindle-part", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            sourceLock?.Dispose();
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task DeletesFontAfterDeviceFileLockIsReleased()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
+        var fonts = Path.Combine(root, "fonts");
+        Directory.CreateDirectory(Path.Combine(root, "documents"));
+        Directory.CreateDirectory(fonts);
+        var path = Path.Combine(fonts, "locked.ttf");
+        await File.WriteAllBytesAsync(path, [1, 2, 3, 4]);
+
+        FileStream? fileLock = null;
+        try
+        {
+            fileLock = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            var service = new KindleDeviceService();
+            var device = new KindleDevice { RootPath = root, Name = "Fake Kindle", IsReady = true };
+            var resource = new KindleDeviceResource
+            {
+                Kind = KindleResourceKind.Font,
+                RelativePath = Path.Combine("fonts", "locked.ttf"),
+                Size = 4
+            };
+
+            var removal = service.RemoveResourceAsync(device, resource);
+            await Task.Delay(400);
+            fileLock.Dispose();
+            fileLock = null;
+
+            await removal;
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            fileLock?.Dispose();
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task ManagesKindleDictionariesInsideDedicatedDirectory()
     {
         var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));

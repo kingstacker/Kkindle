@@ -50,6 +50,8 @@ public partial class MainWindow
     private bool _stage3Ready;
     private bool _deviceResourceBusy;
     private KindleResourceKind _deviceResourceKind = KindleResourceKind.Font;
+    private static readonly HashSet<string> LocalDictionaryExtensions =
+        new([".mdx", ".azw", ".azw3", ".mobi", ".prc", ".kfx", ".txt", ".tsv", ".csv"], StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string DeviceKey, KindleResourceKind Kind), IReadOnlyList<KindleDeviceResource>> _deviceResourceCache = [];
     private readonly Dictionary<string, IReadOnlyList<KindleClipping>> _deviceClippingCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _backupBusy;
@@ -2665,6 +2667,21 @@ public partial class MainWindow
         }, _lifetimeCancellation.Token);
     }
 
+    private async Task PersistDeviceAuxiliaryCacheBestEffortAsync(KindleDevice device)
+    {
+        try
+        {
+            await PersistDeviceAuxiliaryCacheAsync(device);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The device operation has already succeeded. A locked local
+            // cache must not turn a successful resource import/delete into a
+            // false failure in the device page.
+            DevicePageStatusText.Text = T("设备缓存暂未更新：{0}", UiText.Localize(exception.Message));
+        }
+    }
+
     private void DeviceResourceList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         var hasSelection = DeviceResourceList.SelectedItem is KindleDeviceResource;
@@ -2684,20 +2701,35 @@ public partial class MainWindow
     private async void ImportDeviceResourceButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_deviceResourceBusy || _kindle is null || CurrentDevice is null) return;
-        var extensions = _deviceResourceKind == KindleResourceKind.Font
-            ? new[] { "*.ttf", "*.otf" }
-            : new[] { "*.azw", "*.azw3", "*.mobi", "*.prc", "*.kfx" };
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null) return;
-        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        try
         {
-            Title = T("导入 Kindle 资源"),
-            AllowMultiple = true,
-            FileTypeFilter = [new FilePickerFileType(T("Kindle 资源")) { Patterns = extensions }]
-        });
-        var paths = files.Select(file => file.TryGetLocalPath()).Where(path => path is not null).Select(path => path!).ToArray();
-        if (paths.Length == 0) return;
-        await ImportDeviceResourcePathsAsync(paths);
+            var extensions = _deviceResourceKind == KindleResourceKind.Font
+                ? new[] { "*.ttf", "*.otf" }
+                : new[] { "*.azw", "*.azw3", "*.mobi", "*.prc", "*.kfx" };
+            var topLevel = TopLevel.GetTopLevel(this);
+            if (topLevel is null) return;
+            var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = T("导入 Kindle 资源"),
+                AllowMultiple = true,
+                FileTypeFilter = [new FilePickerFileType(T("Kindle 资源")) { Patterns = extensions }]
+            });
+            var paths = files
+                .Select(file => file.TryGetLocalPath())
+                .Where(path => path is not null)
+                .Select(path => path!)
+                .ToArray();
+            if (paths.Length == 0) return;
+            await ImportDeviceResourcePathsAsync(paths);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            DeviceResourceStatusText.Text = T("导入失败：{0}", UiText.Localize(exception.Message));
+            await ShowMessageAsync(T("无法导入"), UiText.Localize(exception.Message));
+        }
     }
 
     private void DeviceResourcePage_DragOver(object? sender, DragEventArgs e)
@@ -2710,20 +2742,98 @@ public partial class MainWindow
 
     private async void DeviceResourcePage_Drop(object? sender, DragEventArgs e)
     {
-        var draggedPaths = LibraryDropImportPolicy.GetLocalPaths(e.DataTransfer);
-        var paths = draggedPaths
-            .Where(path => KindleResourcePolicy.IsSupportedFile(_deviceResourceKind, path))
-            .ToArray();
         e.Handled = true;
-        if (paths.Length > 0)
+        try
         {
-            await ImportDeviceResourcePathsAsync(paths);
+            var draggedPaths = LibraryDropImportPolicy.GetLocalPaths(e.DataTransfer);
+            var paths = draggedPaths
+                .Where(path => KindleResourcePolicy.IsSupportedFile(_deviceResourceKind, path))
+                .ToArray();
+            if (paths.Length > 0)
+            {
+                // Explorer can keep the drag-source handle open until the
+                // Drop event returns. Yield once so the WPD reader starts
+                // after that drag transaction has been released.
+                await Dispatcher.UIThread.InvokeAsync(() => { });
+                await ImportDeviceResourcePathsAsync(paths);
+            }
+            else if (draggedPaths.Length > 0)
+            {
+                var formats = _deviceResourceKind == KindleResourceKind.Font ? "TTF / OTF" : "AZW / AZW3 / MOBI / PRC / KFX";
+                await ShowMessageAsync(T("无法导入"), T("拖入的文件中没有可用的 {0} 文件。", formats));
+            }
         }
-        else if (draggedPaths.Length > 0)
+        catch (OperationCanceledException)
         {
-            var formats = _deviceResourceKind == KindleResourceKind.Font ? "TTF / OTF" : "AZW / AZW3 / MOBI / PRC / KFX";
-            await ShowMessageAsync(T("无法导入"), T("拖入的文件中没有可用的 {0} 文件。", formats));
         }
+        catch (Exception exception)
+        {
+            DeviceResourceStatusText.Text = T("导入失败：{0}", UiText.Localize(exception.Message));
+            await ShowMessageAsync(T("无法导入"), UiText.Localize(exception.Message));
+        }
+    }
+
+    private void DictionaryManagementSection_DragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = LibraryDropImportPolicy.CanAccept(e.DataTransfer)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void DictionaryManagementSection_Drop(object? sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        try
+        {
+            var draggedPaths = LibraryDropImportPolicy.GetLocalPaths(e.DataTransfer);
+            var paths = draggedPaths
+                .Where(IsSupportedLocalDictionaryPath)
+                .ToArray();
+            if (paths.Length > 0)
+            {
+                // The source application may still hold a handle during the
+                // Drop event; let it finish before parsing the dictionary.
+                await Dispatcher.UIThread.InvokeAsync(() => { });
+                await ImportLocalDictionaryPathsAsync(paths);
+            }
+            else if (draggedPaths.Length > 0)
+            {
+                DictionaryResultText.Text = T("拖入的文件中没有可用的词典文件。支持 MDX、AZW、AZW3、MOBI、PRC、KFX、TXT、TSV 和 CSV。");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            DictionaryResultText.Text = T("字典导入失败：{0}", UiText.Localize(exception.Message));
+        }
+    }
+
+    private static bool IsSupportedLocalDictionaryPath(string path) =>
+        LocalDictionaryExtensions.Contains(Path.GetExtension(path));
+
+    private async Task ImportLocalDictionaryPathsAsync(IEnumerable<string> sourcePaths)
+    {
+        var paths = sourcePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Where(IsSupportedLocalDictionaryPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            DictionaryResultText.Text = T("没有找到可导入的词典文件。");
+            return;
+        }
+
+        foreach (var path in paths)
+            await _dictionaryService.ImportAsync(path, cancellationToken: _lifetimeCancellation.Token);
+
+        await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
+        DictionaryResultText.Text = paths.Length == 1
+            ? T("字典已导入。")
+            : T("已导入 {0} 个词典。", paths.Length);
     }
 
     private async Task ImportDeviceResourcePathsAsync(IEnumerable<string> sourcePaths) =>
@@ -2758,7 +2868,7 @@ public partial class MainWindow
             InvalidateCurrentDeviceResourceCache();
             await RefreshDeviceResourcesAsync(forceRefresh: true);
             if (CurrentDevice is { } currentDevice)
-                await PersistDeviceAuxiliaryCacheAsync(currentDevice);
+                await PersistDeviceAuxiliaryCacheBestEffortAsync(currentDevice);
             ShowTransferToast(T("导入 Kindle 资源"), T("已导入 {0} 个文件。", paths.Length), progress: 100, autoHide: true);
         }
         catch (Exception exception)
@@ -2768,7 +2878,7 @@ public partial class MainWindow
                 InvalidateCurrentDeviceResourceCache();
                 await RefreshDeviceResourcesAsync(forceRefresh: true);
                 if (CurrentDevice is { } currentDevice)
-                    await PersistDeviceAuxiliaryCacheAsync(currentDevice);
+                    await PersistDeviceAuxiliaryCacheBestEffortAsync(currentDevice);
             }
             DeviceResourceStatusText.Text = T("导入失败：{0}", UiText.Localize(exception.Message));
             await ShowMessageAsync(T("无法导入"), UiText.Localize(exception.Message));
@@ -2822,7 +2932,7 @@ public partial class MainWindow
                 await _kindle.RemoveResourceAsync(device, resource, _lifetimeCancellation.Token);
                 InvalidateCurrentDeviceResourceCache();
                 await RefreshDeviceResourcesAsync(forceRefresh: true);
-                await PersistDeviceAuxiliaryCacheAsync(device);
+                await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
                 DeviceResourceStatusText.Text = T("已删除 {0}", resource.FileName);
                 ShowTransferToast(T("删除 Kindle 资源"), T("已删除 {0}", resource.FileName), progress: 100, autoHide: true);
             }
@@ -3413,23 +3523,29 @@ public partial class MainWindow
 
     private async void ImportFontButton_Click(object? sender, RoutedEventArgs e)
     {
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null) return;
-        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = T("导入本地字体"),
-            AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType(T("字体")) { Patterns = ["*.ttf", "*.otf", "*.woff", "*.woff2"] }]
-        });
-        var path = files.FirstOrDefault()?.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path)) return;
         try
         {
+            var topLevel = TopLevel.GetTopLevel(this);
+            if (topLevel is null) return;
+            var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = T("导入本地字体"),
+                AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType(T("字体")) { Patterns = ["*.ttf", "*.otf", "*.woff", "*.woff2"] }]
+            });
+            var path = files.FirstOrDefault()?.TryGetLocalPath();
+            if (string.IsNullOrWhiteSpace(path)) return;
             await _fontLibrary.ImportAsync(path, _lifetimeCancellation.Token);
             await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
-            SettingsStatusText.Text = T("字体已导入。");
+            FontManagementStatusText.Text = T("字体已导入。");
         }
-        catch (Exception exception) { SettingsStatusText.Text = T("字体导入失败：{0}", UiText.Localize(exception.Message)); }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            FontManagementStatusText.Text = T("字体导入失败：{0}", UiText.Localize(exception.Message));
+        }
     }
 
     private async void RemoveFontButton_Click(object? sender, RoutedEventArgs e)
@@ -3449,29 +3565,33 @@ public partial class MainWindow
 
     private async void ImportDictionaryButton_Click(object? sender, RoutedEventArgs e)
     {
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null) return;
-        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = T("导入本地字典"),
-            AllowMultiple = false,
-            FileTypeFilter =
-            [
-                new FilePickerFileType(T("支持的词典"))
-                {
-                    Patterns = ["*.mdx", "*.azw", "*.azw3", "*.mobi", "*.prc", "*.kfx", "*.txt", "*.tsv", "*.csv"]
-                }
-            ]
-        });
-        var path = files.FirstOrDefault()?.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path)) return;
         try
         {
-            await _dictionaryService.ImportAsync(path, cancellationToken: _lifetimeCancellation.Token);
-            await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
-            DictionaryResultText.Text = T("字典已导入。");
+            var topLevel = TopLevel.GetTopLevel(this);
+            if (topLevel is null) return;
+            var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = T("导入本地字典"),
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType(T("支持的词典"))
+                    {
+                        Patterns = ["*.mdx", "*.azw", "*.azw3", "*.mobi", "*.prc", "*.kfx", "*.txt", "*.tsv", "*.csv"]
+                    }
+                ]
+            });
+            var path = files.FirstOrDefault()?.TryGetLocalPath();
+            if (string.IsNullOrWhiteSpace(path)) return;
+            await ImportLocalDictionaryPathsAsync([path]);
         }
-        catch (Exception exception) { DictionaryResultText.Text = T("字典导入失败：{0}", UiText.Localize(exception.Message)); }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            DictionaryResultText.Text = T("字典导入失败：{0}", UiText.Localize(exception.Message));
+        }
     }
 
     private async void RemoveDictionaryButton_Click(object? sender, RoutedEventArgs e)

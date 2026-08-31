@@ -8,6 +8,7 @@ internal static class WpdKindleAccess
 {
     private const int MyComputerShellFolder = 17;
     private const int CopyWithoutUi = 4 | 16 | 1024;
+    private static readonly Guid WpdObjectPropertySet = new("EF6B490D-5CD8-437A-AFFC-DA8B60EE4A3C");
 
     public static void ReleaseDeviceSessions(CancellationToken cancellationToken)
     {
@@ -203,8 +204,6 @@ internal static class WpdKindleAccess
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("待发送的设备资源不存在。", sourcePath);
         if (!KindleResourcePolicy.IsSupportedFile(kind, sourcePath)) throw new InvalidDataException("设备资源格式不受支持。");
         var source = new FileInfo(sourcePath);
-        var stagingDirectory = Path.Combine(Path.GetTempPath(), "Kkindle", "resource-transfer", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(stagingDirectory);
         var rootRelative = KindleResourcePolicy.RootRelativePath(kind);
         string? targetRelativePath = null;
         var completed = false;
@@ -217,12 +216,15 @@ internal static class WpdKindleAccess
             dynamic targetRoot = FindOrCreateFolderPath(storage, rootRelative, cancellationToken);
             var finalName = GetUniqueFileName(targetRoot, source.Name);
             targetRelativePath = $"{rootRelative}\\{finalName}";
-            var stagedPath = Path.Combine(stagingDirectory, finalName);
-            File.Copy(sourcePath, stagedPath, false);
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new TransferProgress(0, source.Length, $"正在发送 {source.Name}"));
-            dynamic targetFolder = targetRoot.GetFolder;
-            targetFolder.CopyHere(stagedPath, CopyWithoutUi);
+            WpdNativeTransfer.SendFile(
+                device.RootPath,
+                GetWpdObjectId(targetRoot),
+                sourcePath,
+                finalName,
+                progress,
+                cancellationToken);
             WaitForStorageItem(device, targetRelativePath, source.Length, progress, source.Name, cancellationToken);
             progress?.Report(new TransferProgress(source.Length, source.Length, $"已发送 {finalName}"));
             completed = true;
@@ -235,9 +237,6 @@ internal static class WpdKindleAccess
         {
             Release(shell);
             if (!completed && targetRelativePath is not null) TryRemoveStorageItem(device, targetRelativePath);
-            try { Directory.Delete(stagingDirectory, true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
         }
     }
 
@@ -604,13 +603,16 @@ internal static class WpdKindleAccess
             var finalName = safeName;
             RemoveExistingDocument(device, documents, finalName, cancellationToken);
             transferName = finalName;
-            var stagedPath = Path.Combine(stagingDirectory, finalName);
-            File.Copy(sourcePath, stagedPath, overwrite: false);
             cancellationToken.ThrowIfCancellationRequested();
 
             progress?.Report(new TransferProgress(0, sourceInfo.Length, $"正在发送 {sourceInfo.Name}"));
-            dynamic targetFolder = documents.GetFolder;
-            targetFolder.CopyHere(stagedPath, CopyWithoutUi);
+            WpdNativeTransfer.SendFile(
+                device.RootPath,
+                GetWpdObjectId(documents),
+                sourcePath,
+                finalName,
+                progress,
+                cancellationToken);
 
             var timeout = TimeSpan.FromMinutes(Math.Clamp(2 + sourceInfo.Length / (100d * 1024 * 1024), 2, 30));
             WaitForItem(
@@ -713,8 +715,13 @@ internal static class WpdKindleAccess
                 throw new TimeoutException("等待 Kindle 更新旧封面超时。");
         }
 
-        dynamic folder = thumbnailFolder.GetFolder;
-        folder.CopyHere(stagedThumbnail, CopyWithoutUi);
+        WpdNativeTransfer.SendFile(
+            device.RootPath,
+            GetWpdObjectId(thumbnailFolder),
+            stagedThumbnail,
+            thumbnailFileName,
+            null,
+            cancellationToken);
         WaitForStorageItem(
             device,
             $@"system\thumbnails\{thumbnailFileName}",
@@ -766,6 +773,15 @@ internal static class WpdKindleAccess
                 return child;
         }
         return null;
+    }
+
+    private static string GetWpdObjectId(dynamic shellItem)
+    {
+        var value = shellItem.ExtendedProperty($"{{{WpdObjectPropertySet}}} 2");
+        var objectId = Convert.ToString(value);
+        if (string.IsNullOrWhiteSpace(objectId))
+            throw new IOException("无法读取 Kindle 目标目录的 WPD 对象 ID。");
+        return objectId;
     }
 
     private static dynamic? FindItemByRelativePath(dynamic root, string relativePath)

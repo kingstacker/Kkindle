@@ -199,6 +199,44 @@ public partial class MainWindow : Window
             LibraryPane_Drop,
             RoutingStrategies.Bubble,
             handledEventsToo: true);
+        // The device resource page contains a ListBox/ScrollViewer which may
+        // handle drag events before they reach the page. Register here with
+        // handledEventsToo so a resource dropped on any part of that page still
+        // reaches the Kindle transfer path. The XAML attached handlers were
+        // removed to avoid running the Drop handler twice.
+        DeviceResourcePage.AddHandler(
+            DragDrop.DragEnterEvent,
+            DeviceResourcePage_DragOver,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        DeviceResourcePage.AddHandler(
+            DragDrop.DragOverEvent,
+            DeviceResourcePage_DragOver,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        DeviceResourcePage.AddHandler(
+            DragDrop.DropEvent,
+            DeviceResourcePage_Drop,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        // The local dictionary list contains interactive children (ListBox and
+        // TextBox), so listen after handled events to make the whole section a
+        // drop target instead of only its unused whitespace.
+        DictionaryManagementSection.AddHandler(
+            DragDrop.DragEnterEvent,
+            DictionaryManagementSection_DragOver,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        DictionaryManagementSection.AddHandler(
+            DragDrop.DragOverEvent,
+            DictionaryManagementSection_DragOver,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        DictionaryManagementSection.AddHandler(
+            DragDrop.DropEvent,
+            DictionaryManagementSection_Drop,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
         // SelectableTextBlock handles PointerPressed while beginning a text
         // selection. Listen after handled events so the reader can freeze its
         // scroll offset before Avalonia brings the selection into view.
@@ -1367,14 +1405,13 @@ public partial class MainWindow : Window
 
     private void LibraryPane_DragOver(object? sender, DragEventArgs e)
     {
+        // This handler is installed on the window so Linux file managers can
+        // reach the native XDND target. Do not let it handle other pages: in
+        // particular, doing so would overwrite the Kindle resource page's
+        // Copy effect with None.
+        if (!LibraryWorkspace.IsVisible) return;
+
         _dropOverlayHideTimer?.Stop();
-        if (!LibraryWorkspace.IsVisible)
-        {
-            e.DragEffects = DragDropEffects.None;
-            LibraryDropOverlay.IsVisible = false;
-            e.Handled = true;
-            return;
-        }
         // X11/Wayland drag payloads are often delivered lazily. Reading the
         // paths during DragOver can return an empty list for directories and
         // advertising None prevents the file manager from ever sending Drop.
@@ -1388,6 +1425,8 @@ public partial class MainWindow : Window
 
     private void LibraryPane_DragLeave(object? sender, RoutedEventArgs e)
     {
+        if (!LibraryWorkspace.IsVisible) return;
+
         // Crossing child element boundaries fires DragLeave immediately
         // followed by DragOver again; hiding instantly makes the overlay
         // flicker while the drag moves across the book grid. Defer the hide
@@ -1456,13 +1495,9 @@ public partial class MainWindow : Window
 
     private async void LibraryPane_Drop(object? sender, DragEventArgs e)
     {
+        if (!LibraryWorkspace.IsVisible) return;
+
         _dropOverlayHideTimer?.Stop();
-        if (!LibraryWorkspace.IsVisible)
-        {
-            LibraryDropOverlay.IsVisible = false;
-            e.Handled = true;
-            return;
-        }
         var paths = LibraryDropImportPolicy.GetLocalPaths(e.DataTransfer);
         LibraryDropOverlay.IsVisible = false;
         e.Handled = true;

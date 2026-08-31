@@ -32,6 +32,40 @@ public sealed class DeviceModelStoreTests
     }
 
     [Fact]
+    public async Task SavesAuxiliaryCacheAfterExistingFileLockIsReleased()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        FileStream? fileLock = null;
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var store = new KindleDeviceAuxiliaryCacheStore(paths);
+            await store.SaveAsync("SERIAL-0001", new KindleDeviceAuxiliaryCacheSnapshot());
+
+            var cachePath = Path.Combine(paths.Data, "kindle-device-cache.json");
+            fileLock = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.None);
+            var save = store.SaveAsync(
+                "SERIAL-0001",
+                new KindleDeviceAuxiliaryCacheSnapshot { UpdatedAt = DateTimeOffset.UtcNow });
+            await Task.Delay(400);
+            fileLock.Dispose();
+            fileLock = null;
+
+            await save;
+
+            var reopened = new KindleDeviceAuxiliaryCacheStore(paths);
+            var snapshot = await reopened.GetAsync("SERIAL-0001");
+            Assert.NotNull(snapshot);
+            Assert.NotEqual(default, snapshot!.UpdatedAt);
+        }
+        finally
+        {
+            fileLock?.Dispose();
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
     public async Task UpdatingModelForSameSerialOverwritesMapping()
     {
         var root = TestHelpers.CreateTempDirectory();

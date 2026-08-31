@@ -15,6 +15,8 @@ public sealed class KindleDeviceAuxiliaryCacheSnapshot
 public sealed class KindleDeviceAuxiliaryCacheStore
 {
     private const int CurrentVersion = 1;
+    private const int FileOperationRetryAttempts = 30;
+    private const int FileOperationRetryDelayMilliseconds = 100;
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CacheDocument? _document;
@@ -58,14 +60,16 @@ public sealed class KindleDeviceAuxiliaryCacheStore
                 entry.Snapshot = snapshot;
 
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var temporary = _path + ".tmp";
+            var temporary = $"{_path}.{Guid.NewGuid():N}.tmp";
             try
             {
-                await using var stream = new FileStream(
-                    temporary, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-                await JsonSerializer.SerializeAsync(stream, _document, cancellationToken: cancellationToken);
-                await stream.FlushAsync(cancellationToken);
-                File.Move(temporary, _path, overwrite: true);
+                await using (var stream = new FileStream(
+                                 temporary, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+                {
+                    await JsonSerializer.SerializeAsync(stream, _document, cancellationToken: cancellationToken);
+                    await stream.FlushAsync(cancellationToken);
+                }
+                await MoveFileAsync(temporary, _path, cancellationToken);
             }
             finally
             {
@@ -73,6 +77,40 @@ public sealed class KindleDeviceAuxiliaryCacheStore
             }
         }
         finally { _gate.Release(); }
+    }
+
+    private static async Task MoveFileAsync(
+        string source,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < FileOperationRetryAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                File.Move(source, destination, overwrite: true);
+                return;
+            }
+            catch (IOException exception) when (IsSharingViolation(exception))
+            {
+                if (attempt + 1 >= FileOperationRetryAttempts) throw;
+                await Task.Delay(FileOperationRetryDelayMilliseconds, cancellationToken);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Windows reports an open destination as access denied for
+                // some filesystem providers instead of ERROR_SHARING_VIOLATION.
+                if (attempt + 1 >= FileOperationRetryAttempts) throw;
+                await Task.Delay(FileOperationRetryDelayMilliseconds, cancellationToken);
+            }
+        }
+    }
+
+    private static bool IsSharingViolation(IOException exception)
+    {
+        var win32Error = exception.HResult & 0xFFFF;
+        return win32Error is 32 or 33;
     }
 
     private async Task EnsureLoadedAsync(CancellationToken cancellationToken)

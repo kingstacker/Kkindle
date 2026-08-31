@@ -12,6 +12,8 @@ namespace Kkindle.Platform.Common;
 public sealed class MassStorageKindleDeviceService : IKindleDeviceService
 {
     private const long MaximumMetadataFileSize = 128L * 1024 * 1024;
+    private const int FileOperationRetryAttempts = 30;
+    private const int FileOperationRetryDelayMilliseconds = 100;
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".epub", ".pdf", ".mobi", ".azw3", ".azw", ".prc", ".kfx"
@@ -146,7 +148,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
             if (!string.IsNullOrWhiteSpace(bookFile.Sha256)
                 && !hash.Equals(bookFile.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("传输校验失败，设备上的文件未被替换。");
-            File.Move(temporary, destination, true);
+            await MoveFileAsync(temporary, destination, overwrite: true, cancellationToken);
 
             var thumbnail = await KindleThumbnailService.CreateAsync(sourcePath, _metadata, cancellationToken, coverOverridePath);
             if (thumbnail is not null)
@@ -187,7 +189,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         try
         {
             await CopyAsync(source, temporary, new FileInfo(source).Length, progress, cancellationToken, "正在导出");
-            File.Move(temporary, destination, true);
+            await MoveFileAsync(temporary, destination, overwrite: true, cancellationToken);
             return destination;
         }
         finally
@@ -243,16 +245,15 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         var root = GetResourceRoot(device, kind);
         Directory.CreateDirectory(root);
         var destination = GetUniqueDestination(root, SafeFileName(Path.GetFileName(sourcePath)));
-        var temporary = destination + ".kkindle-part";
+        var temporary = $"{destination}.{Guid.NewGuid():N}.kkindle-part";
         try
         {
             var total = new FileInfo(sourcePath).Length;
-            await CopyAsync(sourcePath, temporary, total, progress, cancellationToken);
-            var sourceHash = await Hashing.Sha256Async(sourcePath, cancellationToken);
-            var targetHash = await Hashing.Sha256Async(temporary, cancellationToken);
+            var sourceHash = await CopyAndHashAsync(sourcePath, temporary, total, progress, cancellationToken);
+            var targetHash = await HashFileAsync(temporary, cancellationToken);
             if (!sourceHash.Equals(targetHash, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("传输校验失败，Kindle 资源未写入。");
-            File.Move(temporary, destination, true);
+            await MoveFileAsync(temporary, destination, overwrite: true, cancellationToken);
         }
         finally
         {
@@ -290,7 +291,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
             throw new InvalidOperationException("设备资源路径无效。");
         var path = ResolveWithinRoot(device.RootPath, resource.RelativePath, GetResourceRoot(device, resource.Kind));
         RejectLink(path);
-        if (File.Exists(path)) File.Delete(path);
+        if (File.Exists(path)) await DeleteFileAsync(path, cancellationToken);
         await Task.CompletedTask;
     }
 
@@ -562,18 +563,142 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         CancellationToken cancellationToken,
         string action = "正在发送")
     {
-        await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await CopyCoreAsync(source, target, total, progress, cancellationToken, action, hash: null);
+    }
+
+    private static async Task<string> CopyAndHashAsync(
+        string source,
+        string target,
+        long total,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken,
+        string action = "正在发送")
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        await CopyCoreAsync(source, target, total, progress, cancellationToken, action, hash);
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static async Task CopyCoreAsync(
+        string source,
+        string target,
+        long total,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken,
+        string action,
+        IncrementalHash? hash)
+    {
+        await using var input = await OpenFileStreamAsync(
+            source,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            FileOptions.Asynchronous | FileOptions.SequentialScan,
+            cancellationToken);
+        await using var output = await OpenFileStreamAsync(
+            target,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            FileOptions.Asynchronous | FileOptions.SequentialScan,
+            cancellationToken);
         var buffer = new byte[128 * 1024];
         long copied = 0;
         int read;
         while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
         {
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            hash?.AppendData(buffer, 0, read);
             copied += read;
             progress?.Report(new TransferProgress(copied, total, $"{action} {Path.GetFileName(source)}"));
         }
         await output.FlushAsync(cancellationToken);
+    }
+
+    private static async Task<string> HashFileAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = await OpenFileStreamAsync(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            FileOptions.Asynchronous | FileOptions.SequentialScan,
+            cancellationToken);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static async Task<FileStream> OpenFileStreamAsync(
+        string path,
+        FileMode mode,
+        FileAccess access,
+        FileShare share,
+        FileOptions options,
+        CancellationToken cancellationToken)
+    {
+        IOException? lastSharingException = null;
+        for (var attempt = 0; attempt < FileOperationRetryAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(path, mode, access, share, 128 * 1024, options);
+            }
+            catch (IOException exception) when (IsSharingViolation(exception))
+            {
+                lastSharingException = exception;
+                if (attempt + 1 >= FileOperationRetryAttempts) throw;
+                await Task.Delay(FileOperationRetryDelayMilliseconds, cancellationToken);
+            }
+        }
+
+        throw lastSharingException ?? new IOException($"无法打开传输文件：{path}");
+    }
+
+    private static async Task MoveFileAsync(
+        string source,
+        string destination,
+        bool overwrite,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < FileOperationRetryAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                File.Move(source, destination, overwrite);
+                return;
+            }
+            catch (IOException exception) when (IsSharingViolation(exception))
+            {
+                if (attempt + 1 >= FileOperationRetryAttempts) throw;
+                await Task.Delay(FileOperationRetryDelayMilliseconds, cancellationToken);
+            }
+        }
+    }
+
+    private static async Task DeleteFileAsync(string path, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < FileOperationRetryAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                File.Delete(path);
+                return;
+            }
+            catch (IOException exception) when (IsSharingViolation(exception))
+            {
+                if (attempt + 1 >= FileOperationRetryAttempts) throw;
+                await Task.Delay(FileOperationRetryDelayMilliseconds, cancellationToken);
+            }
+        }
+    }
+
+    private static bool IsSharingViolation(IOException exception)
+    {
+        var win32Error = exception.HResult & 0xFFFF;
+        return win32Error is 32 or 33;
     }
 
     private static string GetUniqueDestination(string directory, string fileName)
