@@ -14,6 +14,18 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Inno Setup invokes this hidden command before removing the install
+        // directory. It handles relocated data and temporary update files that
+        // the installer cannot describe with a fixed [UninstallDelete] path.
+        if (args.Any(argument => string.Equals(
+                argument,
+                "/cleanup-uninstall",
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            AppDataCleanup.RemoveForUninstall(AppContext.BaseDirectory);
+            return;
+        }
+
         // Any unhandled exception is written to a crash log next to the exe
         // (and in the data logs directory) before the process dies, so remote
         // startup failures can be diagnosed from the user machine.

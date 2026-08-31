@@ -161,7 +161,9 @@ Download the latest version from [GitHub Releases](https://github.com/kingstacke
 
 All platform packages include the .NET runtime but not Calibre. Kkindle discovers a system Calibre installation or accepts an `ebook-convert` path in Settings. Linux data follows XDG directories; macOS data is stored in `~/Library/Application Support/Kkindle`.
 
-The Windows installer checks GitHub Releases for the latest stable version after startup by default; you can also check manually in Settings > About. After confirmation, it downloads the installer and verifies it against `SHA256SUMS.txt`; Kkindle stays open and marks the update as ready. When you exit, Kkindle asks for confirmation before launching the installer and restarting. The Windows portable build currently opens the Release download page only; in-app installers for Linux and macOS are planned for a later version.
+The Windows installer checks GitHub Releases for the latest stable version after startup by default; you can also check manually in Settings > About. After confirmation, it downloads the installer and verifies it against `SHA256SUMS.txt`; Kkindle stays open and marks the update as ready. When you exit, Kkindle asks for confirmation before launching the installer; after installation, the new main window opens automatically. The Windows portable build currently opens the Release download page only; in-app installers for Linux and macOS are planned for a later version.
+
+Uninstalling the Windows installer also removes Kkindle's local library, settings, backups, caches, and downloaded update packages. Export a `.kkindle` backup from Settings and Backups first if the data should be kept.
 
 ## Run from source
 

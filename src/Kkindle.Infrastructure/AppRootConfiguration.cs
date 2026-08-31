@@ -11,17 +11,38 @@ public static class AppRootConfiguration
     {
         var configurationRoot = Path.GetFullPath(configurationDirectory);
         var fallback = Path.GetFullPath(fallbackRoot ?? configurationRoot);
-        var path = ConfigPath(configurationRoot);
-        if (!File.Exists(path)) return fallback;
+        var configured = TryReadRoot(configurationRoot);
+        if (configured is null) return fallback;
         try
         {
-            var config = JsonSerializer.Deserialize<RootConfig>(File.ReadAllText(path));
-            if (string.IsNullOrWhiteSpace(config?.Root)) return fallback;
-            var configured = Path.GetFullPath(config.Root);
             Directory.CreateDirectory(configured);
             return configured;
         }
-        catch { return fallback; }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    // Uninstall cleanup must be able to inspect the persisted root without
+    // creating a directory that is about to be removed. Normal startup uses
+    // ResolveRoot, which retains the historical create-on-read behavior.
+    public static string? TryReadRoot(string configurationDirectory)
+    {
+        var configurationRoot = Path.GetFullPath(configurationDirectory);
+        var path = ConfigPath(configurationRoot);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var config = JsonSerializer.Deserialize<RootConfig>(File.ReadAllText(path));
+            return string.IsNullOrWhiteSpace(config?.Root)
+                ? null
+                : Path.GetFullPath(config.Root);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static void Save(string configurationDirectory, string root)

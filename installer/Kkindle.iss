@@ -62,4 +62,18 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; The in-app updater runs the installer silently after the user confirms the
+; pending update. Start the newly installed version when that installer exits.
 Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Flags: nowait skipifdoesntexist; Check: WizardSilent
+
+[UninstallRun]
+; The application deliberately excludes these paths from [Files] so an
+; upgrade preserves the library. Clean them only during a real uninstall.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "/cleanup-uninstall"; Flags: runhidden waituntilterminated; Check: FileExists(ExpandConstant('{app}\{#MyAppExeName}'))
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\data"
+Type: filesandordirs; Name: "{app}\backups"
+Type: files; Name: "{app}\app-root.json"
+Type: files; Name: "{app}\app-root.json.tmp"
+Type: files; Name: "{app}\kkindle-crash.log"

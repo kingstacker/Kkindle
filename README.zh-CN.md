@@ -161,7 +161,9 @@ macOS 当前发布包未宣称经过实际设备验证；正式使用前请先�
 
 三端发行包均自包含 .NET 运行时且不捆绑 Calibre；应用会自动发现系统安装的 Calibre，也可在设置中指定 `ebook-convert`。Linux 数据遵循 XDG 目录，macOS 数据位于 `~/Library/Application Support/Kkindle`。
 
-Windows 安装版默认在启动后检查 GitHub Releases 的最新稳定版，也可在“设置 > 关于”中手动检查。确认更新后，程序会下载安装包并根据 `SHA256SUMS.txt` 校验；Kkindle 会保持打开并标记“更新已就绪”。退出应用时，Kkindle 会再次提示确认，然后启动安装器并重新启动。Windows 便携版目前只会打开 Release 下载页；Linux 与 macOS 的应用内安装器将在后续版本接入。
+Windows 安装版默认在启动后检查 GitHub Releases 的最新稳定版，也可在“设置 > 关于”中手动检查。确认更新后，程序会下载安装包并根据 `SHA256SUMS.txt` 校验；Kkindle 会保持打开并标记“更新已就绪”。退出应用时，Kkindle 会再次提示确认，然后启动安装器；安装完成后会自动重新打开新版本主界面。Windows 便携版目前只会打开 Release 下载页；Linux 与 macOS 的应用内安装器将在后续版本接入。
+
+卸载 Windows 安装版时，会同时清理 Kkindle 的本地书库、配置、备份、缓存和已下载的更新包；如需保留数据，请先在“设置与备份”中导出 `.kkindle` 备份。
 
 ## 从源码运行
 

@@ -250,6 +250,51 @@ public sealed class ProductivityFeatureTests
     }
 
     [Fact]
+    public async Task UninstallCleanupRemovesDefaultAndRelocatedOwnedData()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var application = Path.Combine(root, "app");
+            var relocated = Path.Combine(root, "relocated");
+            var temporary = Path.Combine(root, "temp");
+            Directory.CreateDirectory(Path.Combine(relocated, "data"));
+            Directory.CreateDirectory(Path.Combine(relocated, "backups"));
+            Directory.CreateDirectory(Path.Combine(temporary, "Kkindle", "updates"));
+            await File.WriteAllTextAsync(Path.Combine(relocated, "keep.txt"), "unrelated");
+            await File.WriteAllTextAsync(
+                Path.Combine(relocated, "data", "app-settings.json"),
+                "{}");
+            await File.WriteAllTextAsync(
+                Path.Combine(relocated, ".kkindle-migration.kkindle"),
+                "migration");
+            await File.WriteAllTextAsync(
+                Path.Combine(temporary, "Kkindle", "updates", "pending.exe"),
+                "update");
+            AppRootConfiguration.Save(application, relocated);
+
+            AppDataCleanup.RemoveForUninstall(application, temporary);
+
+            Assert.False(Directory.Exists(Path.Combine(relocated, "data")));
+            Assert.False(Directory.Exists(Path.Combine(relocated, "backups")));
+            Assert.False(File.Exists(Path.Combine(relocated, ".kkindle-migration.kkindle")));
+            Assert.True(File.Exists(Path.Combine(relocated, "keep.txt")));
+            Assert.True(Directory.Exists(relocated));
+            Assert.False(File.Exists(Path.Combine(application, "app-root.json")));
+            Assert.False(Directory.Exists(Path.Combine(temporary, "Kkindle")));
+
+            var defaultApplication = Path.Combine(root, "default-app");
+            Directory.CreateDirectory(Path.Combine(defaultApplication, "data"));
+            await File.WriteAllTextAsync(
+                Path.Combine(defaultApplication, "data", "app-settings.json"),
+                "{}");
+            AppDataCleanup.RemoveForUninstall(defaultApplication, temporary);
+            Assert.False(Directory.Exists(Path.Combine(defaultApplication, "data")));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task LibraryPersistsProductivityAndDoubanMetadata()
     {
         var root = TestHelpers.CreateTempDirectory();
