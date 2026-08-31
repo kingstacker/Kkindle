@@ -3,170 +3,170 @@
 [![Release](https://github.com/kingstacker/Kkindle/actions/workflows/release.yml/badge.svg)](https://github.com/kingstacker/Kkindle/actions/workflows/release.yml)
 [![GitHub release](https://img.shields.io/github/v/release/kingstacker/Kkindle?display_name=tag)](https://github.com/kingstacker/Kkindle/releases/latest)
 
-[简体中文](README.md) · [English](README.en.md)
+[简体中文](README.zh-CN.md) · **English**
 
-Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle 设备管理器。它使用 Avalonia 构建，将本地书库、格式转换、阅读、批注、AI 辅助阅读和 Kindle 传输集中在一个简洁的灰白纸张风格界面中。
+Kkindle is a personal ebook and Kindle device manager for Windows, Linux, and macOS. Built with Avalonia, it brings your local library, format conversion, reading, annotations, AI-assisted reading, and Kindle transfers together in a quiet gray-and-paper interface.
 
-首次启动时会显示两步欢迎向导：第一步选择界面语言，默认根据系统语言自动选择简体中文或 English；第二步选择 Kindle 品牌和设备型号。向导完成后可在设置和设备卡片中继续修改这些选项。
+On first launch, a two-step welcome wizard asks for the interface language and your primary Kindle model. The language defaults to Simplified Chinese for Chinese system locales and to English for other system locales. Both choices can be changed later from Settings or the device card.
 
-## 三端状态
+## Platform status
 
-| 平台 | 基本测试 | 平台验证 | 当前状态 |
+| Platform | Core testing | Platform validation | Current status |
 | --- | --- | --- | --- |
-| Windows 11 x64 | 已完成：Release 构建、自动化测试、Windows 安装包冒烟测试 | 已在 Windows 11 实机测试 | 基本功能可用，可发布 |
-| Linux x64 | 已完成：Release 构建、公共平台测试、Linux 包启动冒烟测试 | 已在 Debian 13 实机测试 | 基本功能可用，可发布 |
-| macOS Intel/Apple Silicon | 已完成：Release 构建与签名/包校验流程 | 尚未进行 macOS 实机测试 | 可生成发布包，等待实机验证 |
+| Windows 11 x64 | Complete: Release build, automated tests, and Windows installer smoke tests | Tested on a physical Windows 11 machine | Core features usable and release-ready |
+| Linux x64 | Complete: Release build, shared platform tests, and Linux package launch smoke test | Tested on a physical Debian 13 machine | Core features usable and release-ready |
+| macOS Intel/Apple Silicon | Complete: Release build and signing/package validation flow | Physical macOS testing is still pending | Packages can be generated; hardware validation pending |
 
-macOS 当前发布包未宣称经过实际设备验证；正式使用前请先在目标 macOS 版本上验证启动、阅读器和 Kindle USB 挂载功能。
+The current macOS packages are not advertised as physically validated. Before regular use, verify startup, the reader, and Kindle USB mounting on the target macOS version.
 
-## 界面预览
+## Screenshots
 
-### 电脑书库
+### Desktop library
 
-![Kkindle 电脑书库主界面](docs/images/主界面.png)
+![Kkindle desktop library](docs/images/主界面.png)
 
-### 画廊模式
+### Gallery mode
 
-![Kkindle 画廊模式](docs/images/画廊模式.png)
+![Kkindle gallery mode](docs/images/画廊模式.png)
 
-### 电脑书库（右键菜单）
+### Desktop library context menu
 
-![Kkindle 书库右键菜单](docs/images/电脑书库右键菜单.png)
+![Kkindle desktop library context menu](docs/images/电脑书库右键菜单.png)
 
-### 豆瓣封面匹配
+### Douban metadata matching
 
-![Kkindle 豆瓣封面匹配](docs/images/豆瓣匹配.png)
+![Kkindle Douban metadata matching](docs/images/豆瓣匹配.png)
 
-### Kindle 书库管理
+### Kindle library management
 
-![Kkindle 设备书库管理](docs/images/Kindle书库管理.png)
+![Kkindle Kindle library management](docs/images/Kindle书库管理.png)
 
-### Kindle 字体与词典管理
+### Kindle fonts and dictionaries
 
-![Kkindle 字体与词典管理](docs/images/Kindle字体词典管理.png)
+![Kkindle Kindle font and dictionary management](docs/images/Kindle字体词典管理.png)
 
-### 笔记与标注
+### Notes and annotations
 
-![Kkindle 笔记与标注管理](docs/images/批注管理.png)
+![Kkindle notes and annotations](docs/images/批注管理.png)
 
-### Kreader 阅读器
+### Kreader
 
-![Kreader 分页阅读界面](docs/images/Kreader主界面.png)
+![Kreader paginated reading view](docs/images/Kreader主界面.png)
 
-### Kreader 禅模式
+### Kreader Zen mode
 
-![Kreader 禅模式阅读界面，左侧为极简目录](docs/images/禅模式.png)
+![Kreader Zen mode with the minimal table of contents on the left](docs/images/禅模式.png)
 
-### AI 阅读助手
+### AI reading assistant
 
-![Kreader AI 阅读助手](docs/images/AI对话.png)
+![Kreader AI reading assistant](docs/images/AI对话.png)
 
-### Z-Library 在线书库
+### Z-Library online library
 
-![Z-Library 在线书库](docs/images/Z-library在线书库.png)
+![Z-Library online library](docs/images/Z-library在线书库.png)
 
-### 基础设置
+### General settings
 
-![Kkindle 基础设置界面](docs/images/基础设置界面.png)
+![Kkindle general settings](docs/images/基础设置界面.png)
 
-## 主要功能
+## Features
 
-### 首次运行与双语界面
+### First-run wizard and bilingual UI
 
-- 首次进入主界面时显示欢迎向导，支持在应用内切换简体中文和 English。
-- 系统语言为中文（`zh-*`）时默认使用简体中文；其它系统语言默认使用 English。
-- 第二步向导支持选择 Kindle 品牌和型号，并保存为默认设备型号；连接具体设备后仍可单独记忆该设备的型号。
-- 界面语言可稍后在设置中切换，切换会立即刷新主要界面、阅读器、状态提示和设备选择项。
+- The first launch opens a welcome wizard with Simplified Chinese and English interface options.
+- Chinese system locales (`zh-*`) default to Simplified Chinese; other system locales default to English.
+- The second step lets you choose a Kindle vendor and model and saves the selection as the default device model. A connected device can still keep its own remembered model.
+- The language can be changed later in Settings, with the main interface, reader, status messages, and device selectors refreshed immediately.
 
-### 本地书库管理
+### Local library management
 
-- 导入 EPUB、PDF、MOBI 和 AZW3，支持拖放导入与中文文件名；导入文件夹时可逐本选择是否自动补齐 EPUB/AZW3 格式。
-- 自动解析 EPUB 的标题、作者、简介和封面，使用 SHA-256 去重，并把同一本书的不同格式统一归档。
-- 提供标题/作者搜索、作者/标签/格式/分类/阅读状态筛选、收藏筛选和多种排序方式。
-- 支持分类、收藏、待读/阅读中/已读状态管理；开始阅读和读完时会自动更新状态。
-- 提供书架、列表和画廊显示模式；单击书籍打开详情，快速双击直接阅读，双击不会误触发详情面板。
-- 支持封面、标题、作者、系列、标签、分类、简介等元数据编辑，以及框选/多选批量操作（发送到 Kindle、发送到邮箱、删除）。
-- 可按书名从豆瓣匹配元数据；候选结果显示封面、作者、出版社、出版时间、价格、评分与评价人数，确认后再更新书籍。
-- 使用独立 SQLite 数据库，书籍、封面和阅读记录均保存在本机。
+- Import EPUB, PDF, MOBI, and AZW3 files, including drag-and-drop and Chinese filenames. When importing a folder, choose per book whether to generate missing EPUB/AZW3 formats automatically.
+- Parse EPUB titles, authors, descriptions, and covers automatically; deduplicate with SHA-256 and group multiple formats of the same book together.
+- Search by title or author, filter by author, tag, format, collection, reading status, or favorite state, and sort in several ways.
+- Manage collections, favorites, and unread/reading/finished states; starting and finishing a book updates its state automatically.
+- Switch between shelf, list, and gallery views. Single-click opens details; a quick double-click opens the reader without accidentally opening the details panel.
+- Edit covers, titles, authors, series, tags, collections, and descriptions. Rectangle selection and multi-selection support batch actions such as sending to Kindle, sending by email, and deleting.
+- Match metadata by title through Douban. Candidates show cover, author, publisher, publication date, price, rating, and rating count before you confirm an update.
+- Store books, covers, and reading records locally in a dedicated SQLite database.
 
-### Kreader 阅读器
+### Kreader reader
 
-- 阅读 EPUB、PDF、AZW3 和 MOBI；打开 AZW3/MOBI 时会自动准备临时 EPUB 阅读副本。
-- EPUB 支持目录、书签、页内查找（Ctrl+F）、脚注浮窗和阅读进度记忆；书签摘要取自书签所在页的章节与正文。
-- 支持横排分页/滚动与单页/双页显示；竖排在所有平台均为分页单页布局，Linux 上按整字列页步长与字形探针实时校准，页面占满正文区、两侧不裁半个汉字。点击页面左右三分之一或滚动滚轮即可翻页（竖排按传统方向镜像）。阅读器会预加载下一章减少切换等待。
-- 翻页动画支持无动画、淡入淡出、左右滑动和水波流动；禅模式提供真全屏阅读（F11 进入、Esc 退出），支持极简目录。
-- PDF 支持本地文本索引、全文搜索、页码进度、书签、页面笔记和 AI 上下文检索。
-- 支持字号、行高、正文宽度、页边距和 CJK 字体等按书保存的排版设置；新书默认使用 `1.20×` 字号、`1.80` 行高、`1200 px` 正文宽度和 `24 px` 左右边距。
-- 支持 EPUB 划线、笔记、快捷批注、原文定位与导出；批注列表显示章节、选中内容和批注，并在新增后自动刷新。
-- 内置简洁的 AI 阅读助手，可基于当前选文和本地书籍索引进行章节总结、选文解释、全书概览和自由对话，支持思考深度与模型选择，并兼容 DeepSeek、OpenAI 等接口。
+- Read EPUB, PDF, AZW3, and MOBI. AZW3/MOBI files are prepared as temporary EPUB reading copies when opened.
+- EPUB supports table of contents, bookmarks, in-page search (`Ctrl+F`), footnote popups, and remembered reading progress. Bookmark summaries use the chapter and text from the bookmarked page.
+- Support horizontal paginated/scrolling layouts and single-/two-page display. Vertical writing uses a paginated single-page layout on every platform; on Linux, glyph probes continuously calibrate whole-column page steps so the text fills the reading area without clipping half a CJK character at either edge. Click the left or right third of the page or use the mouse wheel to turn pages; vertical writing mirrors the traditional direction. The next chapter is preloaded to reduce transition waits.
+- Choose no animation, fade, horizontal slide, or ripple page transitions. Zen mode provides true full-screen reading (`F11` to enter, `Esc` to exit) with a minimal table of contents.
+- PDF supports a local text index, full-text search, page progress, bookmarks, page notes, and AI context retrieval.
+- Save typography per book, including font size, line height, text width, margins, and CJK font. New books default to `1.20×` font size, `1.80` line height, `1200 px` text width, and `24 px` side margins.
+- Create EPUB highlights and notes, use quick annotation tools, jump back to the source, and export annotations. The annotation list shows chapter, selected text, and note, and refreshes after new annotations are added.
+- The built-in AI reading assistant can summarize chapters, explain selections, provide a whole-book overview, and hold a free-form conversation using the current selection and local book index. It supports reasoning-depth and model selection and works with DeepSeek, OpenAI, and compatible endpoints.
 
-### 阅读效率工具
+### Reading productivity tools
 
-- 导入 TTF、OTF、WOFF 或 WOFF2 字体，并在阅读排版和默认排版中直接选择。
-- 导入 UTF-8 文本词典（`词条<Tab>释义` 或 `词条=释义`），阅读时选词即可查询。
-- 阅读数据看板汇总已开始/已读完书籍、累计时长、平均进度、书签和批注，并支持导出 CSV。
-- “笔记与标注”统一汇总全部本地书籍的划线批注和已连接 Kindle 的 `My Clippings.txt`；支持来源筛选、全文搜索、本地原文定位及逐条删除。
-- “导出记录”可按当前来源与搜索条件，将本地和 Kindle 阅读资料合并导出为 Markdown 或纯文本。
+- Import TTF, OTF, WOFF, and WOFF2 fonts and select them in reader and default typography settings.
+- Import UTF-8 text dictionaries (`term<Tab>definition` or `term=definition`) and look up a selected word while reading.
+- The reading dashboard summarizes started/finished books, total time, average progress, bookmarks, and annotations, and exports CSV.
+- The Notes & Annotations view unifies highlights from local books and `My Clippings.txt` from connected Kindles. Filter by source, search full text, locate local source text, and delete individual records.
+- Export Records combines local and Kindle reading materials as Markdown or plain text using the current source and search filters.
 
-### Z-Library 在线书库
+### Z-Library online library
 
-- 通过 Z-Library 官方 eapi 搜索并下载书籍，支持书名/作者搜索、格式与语言筛选、分页浏览。
-- 下载完成后自动导入电脑书库，自动解析元数据与封面并去重；临时下载文件自动清理。
-- 账号凭据（邮箱与密码）使用当前系统用户的 DPAPI、Secret Service 或 Keychain 加密保存在本机，不写入备份包；API 服务地址可配置。
-- 下载任务在列表中实时显示状态，可随时取消，完成后自动入库。
+- Search and download through Z-Library's official eAPI with title/author search, format and language filters, and pagination.
+- Import completed downloads into the desktop library, parse metadata and covers, deduplicate, and clean up temporary files automatically.
+- Store account credentials (email and password) encrypted with the current user's DPAPI, Secret Service, or Keychain. The API service address is configurable, and credentials are not written to backup packages.
+- Show download status in the task list, allow cancellation, and add completed books to the library automatically.
 
-### 格式转换
+### Format conversion
 
-- 通过 Calibre 在 EPUB、AZW3 和 PDF 之间转换，MOBI 也可作为转换源；生成的格式会自动归入原书。
-- Kindle 书籍可通过右键导出到电脑书库；KFX 可使用用户在 Calibre 中安装的 KFX Input 插件转换为 EPUB（不支持绕过 DRM）。
-- 显示实时转换进度；任务可缩小到后台，并可从书籍卡片恢复查看。
-- 三端发布包均不捆绑 Calibre；可自动发现系统安装目录或 PATH 中的 `ebook-convert`，也可在设置中手动指定，或点击按钮从 Calibre 官方源下载安装。
+- Use Calibre to convert between EPUB, AZW3, and PDF; MOBI can also be used as a source. Generated formats are grouped with the original book.
+- Export Kindle books to the desktop library from the context menu. KFX can be converted to EPUB with the KFX Input plugin installed by the user in Calibre; DRM bypass is not supported.
+- Show live conversion progress. Tasks can be minimized to the background and reopened from the book card.
+- Calibre is not bundled in any platform package. Kkindle discovers `ebook-convert` in standard install locations or `PATH`, accepts a manually configured path, and can download Calibre from its official source through Settings.
 
-### Kindle 传输
+### Kindle transfer
 
-- 识别 USB 磁盘以及 WPD/MTP 模式连接的 Kindle，显示设备容量、书籍和封面；首次运行向导支持选择默认设备型号，连接后会自动记忆具体设备型号。
-- 支持向设备发送书籍、安全删除、传输校验、断线清理和设备插拔监听；支持多选批量导出到电脑书库或从设备删除。
-- 仅访问 Kindle 的 `documents` 目录，不修改设备系统数据库。
-- Kindle 字体管理可读取、导入、导出和删除设备 `fonts` 目录中的 TTF、OTF 文件。
-- Kindle 字典管理可读取、导入、导出和删除设备 `documents\dictionaries` 目录中的 AZW、AZW3、MOBI、PRC、KFX 文件。
-- 字体和字典操作同时支持 USB 磁盘与 WPD/MTP Kindle，并限制在对应目录内；取消或断连时会清理未完成的传输文件。
-- 可读取 Kindle `documents\My Clippings.txt` 中的文字划线与笔记。删除操作仅移除该文件中的记录，不会修改书籍侧车数据库或云端同步标注。
-- 支持通过 SMTP 将 EPUB 或 PDF 发送到 Kindle 个人文档邮箱。
+- Detect Kindles connected as USB disks or through WPD/MTP, and show device capacity, books, and covers. The first-run wizard supports a default model, while each connected device can retain its own model.
+- Send books to a device, safely eject, verify transfers, clean up after disconnects, and monitor device insertion/removal. Multi-selection supports batch export to the desktop library or deletion from the device.
+- Access only the Kindle `documents` directory and do not modify the device system database.
+- Read, import, export, and delete TTF/OTF files in the device `fonts` directory.
+- Read, import, export, and delete AZW/AZW3/MOBI/PRC/KFX files in `documents/dictionaries`.
+- Font and dictionary operations support both USB disks and WPD/MTP Kindles and stay inside their designated directories. Incomplete transfers are cleaned up on cancellation or disconnect.
+- Read highlights and notes from `documents/My Clippings.txt`. Deletion only removes records from that file; it does not modify book sidecars or cloud-synced annotations.
+- Send EPUB or PDF files to the Kindle Personal Documents address through SMTP.
 
-### 备份与隐私
+### Backup and privacy
 
-- 一键导出或导入 `.kkindle` 备份，迁移书库、封面和阅读记录；可启用每日自动备份与保留数量限制。
-- 可在设置中选择默认打开格式、Calibre 路径、AI/网络权限和数据目录，并通过备份包安全迁移数据目录。
-- AI API Key 使用当前系统用户的安全存储加密后保存在本机。
-- API Key 和 SMTP 密码不会写入备份包；AI 对话仅发送相关片段，不上传整本书。
+- Import or export `.kkindle` backups to migrate the library, covers, and reading records; enable daily backups and retention limits if desired.
+- Configure the default open format, Calibre path, AI/network permissions, and data directory in Settings, and migrate the data directory safely through a backup package.
+- Encrypt AI API keys in the current user's secure storage.
+- API keys and SMTP passwords are not written to backup packages. AI requests send only relevant excerpts, never the entire book.
 
-## 环境要求
+## Requirements
 
-- Windows 11 x64、主流 x64 Linux 桌面，或 macOS 12 及以上（Intel/Apple Silicon）
-- 从源码构建统一使用 `global.json` 指定的 [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0)；发布脚本会拒绝其它 SDK。
-- Linux 需要 WebKitGTK、Secret Service/`secret-tool`
-- 三端如需格式转换，均需用户另行安装 Calibre，或在设置中指定已有的 `ebook-convert`
-- Windows 支持 USB 磁盘和 WPD/MTP Kindle；Linux/macOS 当前支持挂载为 USB 磁盘的 Kindle
+- Windows 11 x64, a mainstream x64 Linux desktop, or macOS 12 or later (Intel/Apple Silicon).
+- Building from source requires the [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0) specified by `global.json`; the release scripts reject other SDK versions.
+- Linux requires WebKitGTK and Secret Service/`secret-tool`.
+- Calibre must be installed separately for format conversion on any platform, or an existing `ebook-convert` path must be configured in Settings.
+- Windows supports USB-disk and WPD/MTP Kindles; Linux/macOS currently support Kindles mounted as USB disks.
 
-## 下载与安装
+## Download and installation
 
-请从 [GitHub Releases](https://github.com/kingstacker/Kkindle/releases) 下载最新版本：
+Download the latest version from [GitHub Releases](https://github.com/kingstacker/Kkindle/releases):
 
-- `Kkindle-X.Y.Z-win-x64-setup.exe`：推荐的安装版，支持开始菜单快捷方式、可选桌面快捷方式和卸载。
-- `Kkindle-X.Y.Z-win-x64-portable.zip`：解压即用的便携版。
-- `kkindle_X.Y.Z_amd64.deb` / `arm64.deb`：Ubuntu、Debian、Linux Mint 安装包。
-- `Kkindle-X.Y.Z-linux-x64.tar.gz` / `linux-arm64.tar.gz`：其他 Linux 发行版使用的便携包。
-- `Kkindle-X.Y.Z-osx-arm64.tar.gz` / `osx-x64.tar.gz`：macOS `.app` 包。
-- `SHA256SUMS.txt`：所有发行包的 SHA-256 校验值。
+- `Kkindle-X.Y.Z-win-x64-setup.exe`: recommended installer with Start Menu shortcuts, an optional desktop shortcut, and an uninstaller.
+- `Kkindle-X.Y.Z-win-x64-portable.zip`: portable version; extract and run.
+- `kkindle_X.Y.Z_amd64.deb` / `arm64.deb`: packages for Ubuntu, Debian, and Linux Mint.
+- `Kkindle-X.Y.Z-linux-x64.tar.gz` / `linux-arm64.tar.gz`: portable packages for other Linux distributions.
+- `Kkindle-X.Y.Z-osx-arm64.tar.gz` / `osx-x64.tar.gz`: macOS `.app` packages.
+- `SHA256SUMS.txt`: SHA-256 checksums for every release package.
 
-三端发行包均自包含 .NET 运行时且不捆绑 Calibre；应用会自动发现系统安装的 Calibre，也可在设置中指定 `ebook-convert`。Linux 数据遵循 XDG 目录，macOS 数据位于 `~/Library/Application Support/Kkindle`。
+All platform packages include the .NET runtime but not Calibre. Kkindle discovers a system Calibre installation or accepts an `ebook-convert` path in Settings. Linux data follows XDG directories; macOS data is stored in `~/Library/Application Support/Kkindle`.
 
-Windows 安装版默认在启动后检查 GitHub Releases 的最新稳定版，也可在“设置 > 关于”中手动检查。确认更新后，程序会下载安装包、根据 `SHA256SUMS.txt` 校验并静默安装，然后重新启动。Windows 便携版目前只会打开 Release 下载页；Linux 与 macOS 的应用内安装器将在后续版本接入。
+The Windows installer checks GitHub Releases for the latest stable version after startup by default; you can also check manually in Settings > About. After confirmation, it downloads the installer, verifies it against `SHA256SUMS.txt`, installs silently, and restarts. The Windows portable build currently opens the Release download page only; in-app installers for Linux and macOS are planned for a later version.
 
-## 从源码运行
+## Run from source
 
 ```powershell
-dotnet --version  # 必须输出 10.0.400
+dotnet --version  # must print 10.0.400
 dotnet restore Kkindle.sln
 dotnet build Kkindle.sln -p:Platform=x64
 dotnet test Kkindle.sln --no-build -p:Platform=x64
@@ -175,91 +175,91 @@ dotnet run --project src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj 
 # macOS: dotnet run --project src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj
 ```
 
-## 本地构建发行包
+## Build release packages locally
 
-安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php) 后运行：
+Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then run:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1 `
   -Version 1.0.0
 ```
 
-Windows 脚本会生成安装版 EXE、便携版 ZIP 和校验值。Linux/macOS 分别使用 `scripts/build-linux-release.sh` 与 `scripts/build-macos-release.sh`；完整命令见 [跨平台说明](docs/cross-platform.md)。
+The Windows script creates an installer EXE, portable ZIP, and checksums. Use `scripts/build-linux-release.sh` and `scripts/build-macos-release.sh` for Linux and macOS; see [cross-platform notes](docs/cross-platform.md) for the complete commands.
 
-发布结果位于：
+Release outputs are placed in:
 
 ```text
 artifacts\release\1.0.0\
 ```
 
-Windows 应用数据默认保存在可执行文件旁；Linux 使用 XDG 数据目录，macOS 使用 `~/Library/Application Support/Kkindle`。三端均可在设置中迁移数据目录。自动备份位于数据根目录旁的 `backups` 目录。
+Windows stores application data next to the executable by default; Linux uses XDG data directories, and macOS uses `~/Library/Application Support/Kkindle`. All platforms support moving the data directory from Settings. Automatic backups are stored in the `backups` directory beside the data root.
 
-## GitHub 自动发版
+## Automated GitHub releases
 
-`.github/workflows/release.yml` 会在推送 `vX.Y.Z` 标签时分别在 Windows、Ubuntu 和 macOS runner 上构建三端自包含发行包、统一计算校验值、生成 `update-manifest.json` 并创建 GitHub Release。带后缀的标签会发布为预发行版。
+When a `vX.Y.Z` tag is pushed, `.github/workflows/release.yml` builds self-contained packages for Windows, Ubuntu, and macOS, computes unified checksums, generates `update-manifest.json`, and creates a GitHub Release. Tags with a suffix are published as prereleases.
 
 ```powershell
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-失败后可在 GitHub Actions 中手动运行 Release 工作流并填写已有标签；工作流会覆盖该 Release 中同名产物，不会重复创建版本。
+If a run fails, manually run the Release workflow in GitHub Actions with an existing tag. The workflow replaces files with the same names in that Release and does not create a duplicate version.
 
-## GitHub 开发版构建
+## GitHub development builds
 
-程序尚未稳定时，不需要创建标签或 GitHub Release。可在 GitHub Actions 中手动运行 `Development Build`，填写类似 `0.6.0-dev` 的基础版本；工作流会自动追加运行编号，生成三平台开发包并作为 Actions Artifacts 保存 7 天。推送 `develop` 或 `dev/**` 分支也会自动触发该工作流。
+While the program is still evolving, there is no need to create a tag or GitHub Release. Run `Development Build` manually in GitHub Actions with a base version such as `0.6.0-dev`; the workflow appends the run number, builds packages for all three platforms, and stores them as Actions artifacts for seven days. Pushing the `develop` or `dev/**` branches also triggers this workflow automatically.
 
-开发版只生成 Windows 便携 ZIP、Linux 安装包/便携包和 macOS ad-hoc 包，不会创建 Release，也不会修改仓库标签。macOS 压缩包内附有 Gatekeeper 打开说明。
+Development builds produce a Windows portable ZIP, Linux installer/portable packages, and a macOS ad-hoc package. They do not create Releases or modify repository tags. The macOS archive includes Gatekeeper opening instructions.
 
-## 验证
+## Verification
 
-项目包含书库与旧数据库迁移、备份、阅读进度、排版、格式策略、PDF 文本提取、词典、字体和应用设置等自动化测试：
+The project includes automated tests for the library and legacy database migration, backups, reading progress, typography, format policies, PDF text extraction, dictionaries, fonts, application settings, and related platform behavior:
 
 ```powershell
-dotnet --version  # 必须输出 10.0.400
+dotnet --version  # must print 10.0.400
 dotnet test Kkindle.sln -c Debug -p:Platform=x64
 dotnet test Kkindle.sln -c Release -p:Platform=x64
 ```
 
-## 项目结构
+## Project structure
 
 ```text
-src/Kkindle.App             跨平台 Avalonia 界面
-src/Kkindle.Core            领域模型、策略与服务接口
-src/Kkindle.Infrastructure  SQLite、设备、转换、备份与 AI 服务实现
-src/Kkindle.Desktop.*       Windows、Linux、macOS 启动头
-src/Kkindle.Platform.*      三端平台服务
-tests/                      可移植、公共平台及 Windows 平台测试
+src/Kkindle.App             Cross-platform Avalonia UI
+src/Kkindle.Core            Domain models, policies, and service contracts
+src/Kkindle.Infrastructure  SQLite, device, conversion, backup, and AI services
+src/Kkindle.Desktop.*       Windows, Linux, and macOS entry points
+src/Kkindle.Platform.*      Platform-specific services
+tests/                      Portable, shared-platform, and Windows-platform tests
 ```
 
-## 参考技术与开源项目
+## Referenced technologies and open-source projects
 
-Kkindle 的功能设计与实现使用或参考了以下开源项目。列入本节仅说明技术关系；各项目的源码与组件仍适用其各自的许可证。
+Kkindle's feature design and implementation use or reference the projects below. This section describes technical relationships only; each project's source and components remain subject to their own licenses.
 
-### 功能实现参考与外部工具
+### Feature references and external tools
 
-- [ZlibraryKO/zlibrary.koplugin](https://github.com/ZlibraryKO/zlibrary.koplugin)：Z-Library 登录、搜索、语言与格式筛选、服务地址发现及下载流程的实现参考。
-- [kovidgoyal/calibre](https://github.com/kovidgoyal/calibre)：通过独立的 `ebook-convert` 进程完成 EPUB、AZW3、MOBI、PDF 与 KFX 等格式的读取或转换。
-- [KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290)：用于处理无 DRM 的 KFX 文件；可由用户自行安装，也可在设置中从 Calibre 官方插件索引下载安装。
+- [ZlibraryKO/zlibrary.koplugin](https://github.com/ZlibraryKO/zlibrary.koplugin): reference for Z-Library login, search, language and format filters, service-address discovery, and download flows.
+- [kovidgoyal/calibre](https://github.com/kovidgoyal/calibre): runs through the separate `ebook-convert` process for reading or converting EPUB, AZW3, MOBI, PDF, and KFX formats.
+- [KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290): handles DRM-free KFX files; users install it themselves or from Calibre's official plugin index in Settings.
 
-### 应用运行依赖
+### Runtime dependencies
 
-- [AvaloniaUI/Avalonia](https://github.com/AvaloniaUI/Avalonia)：Windows、Linux、macOS 桌面 UI 与原生 WebView 基础。
-- [CommunityToolkit/dotnet](https://github.com/CommunityToolkit/dotnet)：提供 `CommunityToolkit.Mvvm` MVVM 基础设施。
-- [dotnet/efcore](https://github.com/dotnet/efcore)：`Microsoft.Data.Sqlite` 的源码项目，用于本地 SQLite 数据存储。
-- [UglyToad/PdfPig](https://github.com/UglyToad/PdfPig)：用于读取和提取 PDF 文本。
+- [AvaloniaUI/Avalonia](https://github.com/AvaloniaUI/Avalonia): Windows, Linux, and macOS desktop UI and native WebView foundation.
+- [CommunityToolkit/dotnet](https://github.com/CommunityToolkit/dotnet): MVVM infrastructure through `CommunityToolkit.Mvvm`.
+- [dotnet/efcore](https://github.com/dotnet/efcore): source project for `Microsoft.Data.Sqlite`, used for local SQLite storage.
+- [UglyToad/PdfPig](https://github.com/UglyToad/PdfPig): PDF reading and text extraction.
 
-### 测试工具
+### Test tools
 
-- [xunit/xunit](https://github.com/xunit/xunit)：自动化测试框架。
-- [xunit/visualstudio.xunit](https://github.com/xunit/visualstudio.xunit)：xUnit 的 Visual Studio 与 .NET 测试适配器。
-- [microsoft/vstest](https://github.com/microsoft/vstest)：`Microsoft.NET.Test.Sdk` 对应的测试平台。
+- [xunit/xunit](https://github.com/xunit/xunit): automated testing framework.
+- [xunit/visualstudio.xunit](https://github.com/xunit/visualstudio.xunit): Visual Studio and .NET test adapter for xUnit.
+- [microsoft/vstest](https://github.com/microsoft/vstest): test platform used by `Microsoft.NET.Test.Sdk`.
 
-## 许可证
+## License
 
-本项目基于 [MIT License](LICENSE) 开源。随应用分发的字体、Calibre 等第三方组件适用各自的许可证。
+This project is released under the [MIT License](LICENSE). Fonts, Calibre, and other third-party components distributed with the application remain subject to their respective licenses.
 
-## 致谢
+## Acknowledgements
 
-- 社区：[LINUX DO](https://linux.do/?tl=en)
-- 公益站：any
+- Community: [LINUX DO](https://linux.do/?tl=en)
+- Public-interest site: any
