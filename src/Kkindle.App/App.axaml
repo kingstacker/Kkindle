@@ -552,7 +552,7 @@
             <Setter Property="Stroke" Value="{StaticResource InkBrush}" />
         </Style>
         <!-- Sidebar entries: quiet “ink dot” selection — no filled rows, only
-             a 4 px dot beside the active item, with a faint rounded wash on
+             a 6 px dot beside the active item, with a faint rounded wash on
              hover so the rail reads like a paper table of contents. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
@@ -577,9 +577,9 @@
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
                             </Transitions>
                         </Border.Transitions>
-                        <Grid ColumnDefinitions="4,7,*">
-                            <Ellipse Width="4"
-                                     Height="4"
+                        <Grid ColumnDefinitions="6,5,*">
+                            <Ellipse Width="6"
+                                     Height="6"
                                      Fill="{TemplateBinding BorderBrush}"
                                      VerticalAlignment="Center" />
                             <ContentPresenter Grid.Column="2"
@@ -847,7 +847,7 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
-        <!-- Long selected text (e.g. author names in a 112px filter box) must
+        <!-- Long selected text (e.g. author names in a 145px filter box) must
              trim instead of pushing the dropdown chevron out of the border. -->
         <Style Selector="ComboBox /template/ ContentControl#ContentPresenter TextBlock">
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />

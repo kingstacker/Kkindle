@@ -366,6 +366,8 @@ public partial class MainWindow : Window
         RefreshOnboardingLocalizedChoices();
         if (_filterControlsReady)
             RefreshLocalizedFilterItems();
+        RefreshLocalizedZLibraryFilterItems();
+        RefreshLocalizedReadingMaterialsSourceFilter();
         ViewModel.RefreshView();
         UpdateLibraryUi();
         if (_selectedCard is not null)
@@ -406,6 +408,56 @@ public partial class MainWindow : Window
         {
             _updatingFilterControls = false;
         }
+    }
+
+    private void RefreshLocalizedZLibraryFilterItems()
+    {
+        var extensionIndex = ZLibraryExtensionBox.SelectedIndex;
+        var languageIndex = ZLibraryLanguageBox.SelectedIndex;
+        SetComboBoxItemContent(ZLibraryExtensionBox, 0, T("全部格式"));
+
+        var languageLabels = new[]
+        {
+            "全部语言",
+            "中文",
+            "英文",
+            "日文",
+            "韩文",
+            "俄文",
+            "德文",
+            "法文",
+            "西班牙文"
+        };
+
+        for (var index = 0; index < languageLabels.Length; index++)
+            SetComboBoxItemContent(ZLibraryLanguageBox, index, T(languageLabels[index]));
+
+        RestoreComboBoxSelection(ZLibraryExtensionBox, extensionIndex);
+        RestoreComboBoxSelection(ZLibraryLanguageBox, languageIndex);
+    }
+
+    private void RefreshLocalizedReadingMaterialsSourceFilter()
+    {
+        var selectedIndex = ReadingMaterialsSourceBox.SelectedIndex;
+        SetComboBoxItemContent(ReadingMaterialsSourceBox, 0, T("全部来源"));
+        SetComboBoxItemContent(ReadingMaterialsSourceBox, 1, T("本地书库"));
+        SetComboBoxItemContent(ReadingMaterialsSourceBox, 2, "Kindle");
+        RestoreComboBoxSelection(ReadingMaterialsSourceBox, selectedIndex);
+    }
+
+    private static void SetComboBoxItemContent(ComboBox comboBox, int index, string content)
+    {
+        if (index >= 0 && index < comboBox.Items.Count && comboBox.Items[index] is ComboBoxItem item)
+            item.Content = content;
+    }
+
+    private static void RestoreComboBoxSelection(ComboBox comboBox, int selectedIndex)
+    {
+        if (selectedIndex < 0 || selectedIndex >= comboBox.Items.Count)
+            return;
+
+        comboBox.SelectedIndex = -1;
+        comboBox.SelectedIndex = selectedIndex;
     }
 
     public ObservableCollection<BookCollectionFolderViewModel> CollectionFolders { get; } = [];

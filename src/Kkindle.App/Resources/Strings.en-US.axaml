@@ -33,7 +33,7 @@
     <x:String x:Key="Ui.Auto.6A85554C141A6383">SMTP server</x:String>
     <x:String x:Key="Ui.Auto.CB6DE497BBC98EBB">SMTP username</x:String>
     <x:String x:Key="Ui.Auto.05F75734785394FA">USB drive</x:String>
-    <x:String x:Key="Ui.Auto.6C1BAA83960E7BC6">Z-Library online library</x:String>
+    <x:String x:Key="Ui.Auto.6C1BAA83960E7BC6">Z-Library</x:String>
     <x:String x:Key="Ui.Auto.C8EA76F5CCA7AE85">Z-Library online library: search and download ebooks</x:String>
     <x:String x:Key="Ui.Auto.04C7E918A97AA2D2">Z-Library account settings</x:String>
     <x:String x:Key="Ui.Auto.780A8542C562FD78">Z-Library account email</x:String>
@@ -327,7 +327,7 @@
     <x:String x:Key="Ui.Auto.B5F15473FDC0FEFE">Filter</x:String>
     <x:String x:Key="Ui.Auto.79C2AA25294BFC84">Filter and export reading materials</x:String>
     <x:String x:Key="Ui.Auto.8131EAFD02396E6A">Description</x:String>
-    <x:String x:Key="Ui.Auto.9937E365AAF3A085">Simplified Chinese</x:String>
+    <x:String x:Key="Ui.Auto.9937E365AAF3A085">简体中文</x:String>
     <x:String x:Key="Ui.Auto.1F58A78826EAB7D0">Manage fonts on Kindle</x:String>
     <x:String x:Key="Ui.Auto.2A3E14BD213AC42D">Manage dictionaries on Kindle</x:String>
     <x:String x:Key="Ui.Auto.6426A1A2141ECAD5">Manage local data, reading preferences, and device settings.</x:String>
@@ -351,7 +351,6 @@
     <x:String x:Key="Ui.Auto.5A0E877ACFB138E4">Binding</x:String>
     <x:String x:Key="Ui.Auto.CB25397603C98E43">Spanish</x:String>
     <x:String x:Key="Ui.Auto.93ACD7FCCB3F0D76">Explain selection</x:String>
-    <x:String x:Key="Ui.Auto.C542A755DC8136AA">Make knowledge and literature from around the world accessible to everyone</x:String>
     <x:String x:Key="Ui.Auto.E1506406A5BD8F02">Device</x:String>
     <x:String x:Key="Ui.Auto.13E641A3EA2095DF">Device model</x:String>
     <x:String x:Key="Ui.Auto.BD94EEB3FD1C6354">Device connected</x:String>

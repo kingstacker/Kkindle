@@ -540,17 +540,59 @@
                         Margin="0,0,0,12"
                         Padding="10"
                         IsVisible="False">
-                    <!-- Keep the filter chips tight so the bar reads as one row of controls. -->
-                    <Grid ColumnDefinitions="112,112,112,112,112,100,Auto,Auto" ColumnSpacing="4">
-                        <ComboBox x:Name="AuthorFilterBox" Classes="filterCombo" PlaceholderText="{DynamicResource Ui.Auto.89050DD0FBDA32A3}" SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <ComboBox x:Name="TagFilterBox" Classes="filterCombo" Grid.Column="1" PlaceholderText="{DynamicResource Ui.Auto.B709CB12F0ABA6BE}" SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <ComboBox x:Name="FormatFilterBox" Classes="filterCombo" Grid.Column="2" PlaceholderText="{DynamicResource Ui.Auto.CCCB7189507A26E7}" SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <ComboBox x:Name="CategoryFilterBox" Classes="filterCombo" Grid.Column="3" PlaceholderText="{DynamicResource Ui.Auto.A1054434857F0A98}" SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <ComboBox x:Name="ReadingStatusFilterBox" Classes="filterCombo" Grid.Column="4" PlaceholderText="{DynamicResource Ui.Auto.0A379C1E7398FBA1}" SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <ComboBox x:Name="LibrarySortBox" Classes="filterCombo" Grid.Column="5" PlaceholderText="{DynamicResource Ui.Auto.A96C9A854190874D}" SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <CheckBox x:Name="FavoritesOnlyCheckBox" Grid.Column="6" Content="{DynamicResource Ui.Auto.60A53514EB9228A2}" VerticalAlignment="Center" Click="FavoritesOnlyCheckBox_Click" />
-                        <Button Grid.Column="7" Classes="quiet" Content="{DynamicResource Ui.Auto.657D9CBF45EC9E6A}" Click="ClearFiltersButton_Click" />
-                    </Grid>
+                    <!-- English labels need more room than the Chinese labels. Let
+                         the controls wrap as a group at narrow window widths so no
+                         filter or action is pushed outside the visible panel. -->
+                    <WrapPanel Orientation="Horizontal"
+                               HorizontalAlignment="Stretch"
+                               VerticalAlignment="Center">
+                        <ComboBox x:Name="AuthorFilterBox"
+                                  Classes="filterCombo"
+                                  Width="145"
+                                  Margin="0,0,6,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.89050DD0FBDA32A3}"
+                                  SelectionChanged="FilterComboBox_SelectionChanged" />
+                        <ComboBox x:Name="TagFilterBox"
+                                  Classes="filterCombo"
+                                  Width="145"
+                                  Margin="0,0,6,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.B709CB12F0ABA6BE}"
+                                  SelectionChanged="FilterComboBox_SelectionChanged" />
+                        <ComboBox x:Name="FormatFilterBox"
+                                  Classes="filterCombo"
+                                  Width="145"
+                                  Margin="0,0,6,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.CCCB7189507A26E7}"
+                                  SelectionChanged="FilterComboBox_SelectionChanged" />
+                        <ComboBox x:Name="CategoryFilterBox"
+                                  Classes="filterCombo"
+                                  Width="145"
+                                  Margin="0,0,6,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.A1054434857F0A98}"
+                                  SelectionChanged="FilterComboBox_SelectionChanged" />
+                        <ComboBox x:Name="ReadingStatusFilterBox"
+                                  Classes="filterCombo"
+                                  Width="145"
+                                  Margin="0,0,6,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.0A379C1E7398FBA1}"
+                                  SelectionChanged="FilterComboBox_SelectionChanged" />
+                        <ComboBox x:Name="LibrarySortBox"
+                                  Classes="filterCombo"
+                                  Width="145"
+                                  FontSize="12"
+                                  Margin="0,0,6,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.A96C9A854190874D}"
+                                  SelectionChanged="FilterComboBox_SelectionChanged" />
+                        <CheckBox x:Name="FavoritesOnlyCheckBox"
+                                  Content="{DynamicResource Ui.Auto.60A53514EB9228A2}"
+                                  Margin="0,0,12,6"
+                                  VerticalAlignment="Center"
+                                  Click="FavoritesOnlyCheckBox_Click" />
+                        <Button Classes="quiet"
+                                Content="{DynamicResource Ui.Auto.657D9CBF45EC9E6A}"
+                                Margin="0,0,0,6"
+                                Click="ClearFiltersButton_Click" />
+                    </WrapPanel>
                 </Border>
 
             <Grid x:Name="LibraryContentHost"
@@ -761,37 +803,44 @@
                             </ItemsControl>
                         </ScrollViewer>
 
-                        <StackPanel x:Name="EmptyLibraryState"
-                                    Width="320"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Spacing="10"
-                                    IsVisible="False"
-                                    IsHitTestVisible="False">
-                            <Path Data="M 3.5,6.5 C 6.5,5.4 9.9,5.9 12,7.8 C 14.1,5.9 17.5,5.4 20.5,6.5 V 18.2 C 17.5,17.1 14.1,17.6 12,19.4 C 9.9,17.6 6.5,17.1 3.5,18.2 Z M 12,7.8 V 19.4"
-                                  Width="48"
-                                  Height="48"
-                                  Margin="0,0,0,4"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  UseLayoutRounding="True"
-                                  Stretch="Uniform"
-                                  Stroke="{StaticResource InkBrush}"
-                                  StrokeThickness="1.5"
-                                  StrokeLineCap="Round"
-                                  StrokeJoin="Round"
-                                  Fill="Transparent" />
-                            <TextBlock x:Name="EmptyLibraryTitleText"
-                                       Text="{DynamicResource Ui.Auto.CFEEF6870D35C4EA}"
-                                       HorizontalAlignment="Center"
-                                       FontSize="20"
-                                       FontWeight="Bold" />
-                            <TextBlock x:Name="EmptyLibraryMessageText"
-                                       Text="{DynamicResource Ui.Auto.A1D2A323B5C89F04}"
-                                       Foreground="{StaticResource MutedInkBrush}"
-                                       TextAlignment="Center"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
+                        <Grid x:Name="EmptyLibraryState"
+                              Margin="24,0"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              IsVisible="False"
+                              IsHitTestVisible="False">
+                            <StackPanel MaxWidth="320"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Spacing="10">
+                                <Path Data="M 3.5,6.5 C 6.5,5.4 9.9,5.9 12,7.8 C 14.1,5.9 17.5,5.4 20.5,6.5 V 18.2 C 17.5,17.1 14.1,17.6 12,19.4 C 9.9,17.6 6.5,17.1 3.5,18.2 Z M 12,7.8 V 19.4"
+                                      Width="48"
+                                      Height="48"
+                                      Margin="0,0,0,4"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      UseLayoutRounding="True"
+                                      Stretch="Uniform"
+                                      Stroke="{StaticResource InkBrush}"
+                                      StrokeThickness="1.5"
+                                      StrokeLineCap="Round"
+                                      StrokeJoin="Round"
+                                      Fill="Transparent" />
+                                <TextBlock x:Name="EmptyLibraryTitleText"
+                                           Text="{DynamicResource Ui.Auto.CFEEF6870D35C4EA}"
+                                           HorizontalAlignment="Stretch"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           FontSize="20"
+                                           FontWeight="Bold" />
+                                <TextBlock x:Name="EmptyLibraryMessageText"
+                                           Text="{DynamicResource Ui.Auto.A1D2A323B5C89F04}"
+                                           HorizontalAlignment="Stretch"
+                                           Foreground="{StaticResource MutedInkBrush}"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
 
                         <Border x:Name="LibraryDropOverlay"
                                 HorizontalAlignment="Center"
@@ -1315,13 +1364,13 @@
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
                       </Transitions>
                   </Grid.Transitions>
-                <Grid ColumnDefinitions="*,Auto">
+                <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
                     <StackPanel Spacing="3">
                         <StackPanel Orientation="Horizontal" Spacing="9">
                             <Border Background="{StaticResource InkBrush}" Padding="7,3" VerticalAlignment="Center">
                                 <TextBlock Text="{DynamicResource Ui.Auto.E1506406A5BD8F02}" Foreground="{StaticResource PaperBrush}" FontSize="11" FontWeight="Bold" />
                             </Border>
-                            <TextBlock x:Name="DeviceResourcePageTitle" Text="{DynamicResource Ui.Auto.267DBF8C2A617630}" FontSize="28" FontWeight="Bold" />
+                            <TextBlock x:Name="DeviceResourcePageTitle" Text="{DynamicResource Ui.Auto.267DBF8C2A617630}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="7">
                             <TextBlock x:Name="DeviceResourceDeviceText" Text="{DynamicResource Ui.Auto.9514487168A00698}" Foreground="{StaticResource InkBrush}" FontSize="12" FontWeight="SemiBold" />
@@ -1334,13 +1383,13 @@
                         </StackPanel>
                         <TextBlock x:Name="DeviceResourceStatusText" Text="{DynamicResource Ui.Auto.B5B59EF7D3AF6071}" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="0,46,0,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                        <Button x:Name="ImportDeviceResourceButton" Content="{DynamicResource Ui.Auto.3C652C6EFD4EB3F8}" Padding="11,6" Click="ImportDeviceResourceButton_Click" />
-                        <Button x:Name="ExportDeviceResourceButton" Content="{DynamicResource Ui.Auto.DAB0F7CAA4DEA42D}" Classes="quiet" IsEnabled="False" Padding="11,6" Click="ExportDeviceResourceButton_Click" />
-                        <Button x:Name="DeleteDeviceResourceButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" Classes="quiet" IsEnabled="False" Padding="11,6" Click="DeleteDeviceResourceButton_Click" />
-                        <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}" Classes="quiet" Padding="11,6" Click="RefreshDeviceResourcesButton_Click" />
+                    <WrapPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="ImportDeviceResourceButton" Content="{DynamicResource Ui.Auto.3C652C6EFD4EB3F8}" Margin="0,0,8,0" Padding="11,6" Click="ImportDeviceResourceButton_Click" />
+                        <Button x:Name="ExportDeviceResourceButton" Content="{DynamicResource Ui.Auto.DAB0F7CAA4DEA42D}" Classes="quiet" IsEnabled="False" Margin="0,0,8,0" Padding="11,6" Click="ExportDeviceResourceButton_Click" />
+                        <Button x:Name="DeleteDeviceResourceButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" Classes="quiet" IsEnabled="False" Margin="0,0,8,0" Padding="11,6" Click="DeleteDeviceResourceButton_Click" />
+                        <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}" Classes="quiet" Margin="0,0,8,0" Padding="11,6" Click="RefreshDeviceResourcesButton_Click" />
                         <Button Content="{DynamicResource Ui.Auto.A51CE8191584FCF7}" Padding="11,6" Click="ShowAllBooksButton_Click" />
-                    </StackPanel>
+                    </WrapPanel>
                 </Grid>
                 <Grid Grid.Row="1" Margin="0,20,0,0">
                     <ListBox x:Name="DeviceResourceList"
@@ -1417,8 +1466,8 @@
                         <StackPanel Spacing="11">
                             <TextBlock Text="{DynamicResource Ui.Auto.A488E93D69CC1296}" FontSize="12" />
                             <ComboBox x:Name="ReadingMaterialsSourceBox" SelectedIndex="0" SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
-                                <ComboBoxItem Content="{DynamicResource Ui.Auto.9F357ADB6100FACE}" Tag="all" />
-                                <ComboBoxItem Content="{DynamicResource Ui.Auto.0DB60879DB80B5B7}" Tag="local" />
+                                <ComboBoxItem Content="Any source" Tag="all" />
+                                <ComboBoxItem Content="Local library" Tag="local" />
                                 <ComboBoxItem Content="Kindle" Tag="kindle" />
                             </ComboBox>
                         </StackPanel>
@@ -1719,12 +1768,6 @@
                             <TextBlock Text="{DynamicResource Ui.Auto.B9086662B1DF1F20}" Foreground="{StaticResource PaperBrush}" FontSize="11" FontWeight="Bold" />
                         </Border>
                         <TextBlock Text="{DynamicResource Ui.Auto.6C1BAA83960E7BC6}" FontSize="28" FontWeight="Bold" />
-                                                <TextBlock Text="{DynamicResource Ui.Auto.C542A755DC8136AA}"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   FontSize="13"
-                                   MaxWidth="360"
-                                   TextWrapping="Wrap"
-                                   VerticalAlignment="Center" />
                     </StackPanel>
                     <TextBlock x:Name="ZLibraryStatusText"
                                Margin="0,3,0,0"
@@ -1740,10 +1783,10 @@
                              KeyDown="ZLibrarySearchBox_KeyDown" />
                     <ComboBox x:Name="ZLibraryExtensionBox"
                               Grid.Column="1"
-                              Width="110"
+                              Width="140"
                               Height="38"
                               SelectedIndex="0">
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.CCCB7189507A26E7}" Tag="" />
+                        <ComboBoxItem Content="Any format" Tag="" />
                         <ComboBoxItem Content="EPUB" Tag="epub" />
                         <ComboBoxItem Content="PDF" Tag="pdf" />
                         <ComboBoxItem Content="MOBI" Tag="mobi" />
@@ -1754,18 +1797,18 @@
                     </ComboBox>
                     <ComboBox x:Name="ZLibraryLanguageBox"
                               Grid.Column="2"
-                              Width="110"
+                              Width="150"
                               Height="38"
                               SelectedIndex="0">
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.B25B2E4E11693509}" Tag="" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.72726D8818F69306}" Tag="chinese" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.348EA84C60466C77}" Tag="english" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.FFB5F47363D4EEDD}" Tag="japanese" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.9ADB531F355AD086}" Tag="korean" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.0217721CFF551810}" Tag="russian" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.2F0CCDF33145208B}" Tag="german" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.056C699350257241}" Tag="french" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Auto.CB25397603C98E43}" Tag="spanish" />
+                        <ComboBoxItem Content="Any language" Tag="" />
+                        <ComboBoxItem Content="Chinese" Tag="chinese" />
+                        <ComboBoxItem Content="English" Tag="english" />
+                        <ComboBoxItem Content="Japanese" Tag="japanese" />
+                        <ComboBoxItem Content="Korean" Tag="korean" />
+                        <ComboBoxItem Content="Russian" Tag="russian" />
+                        <ComboBoxItem Content="German" Tag="german" />
+                        <ComboBoxItem Content="French" Tag="french" />
+                        <ComboBoxItem Content="Spanish" Tag="spanish" />
                     </ComboBox>
                     <Button x:Name="ZLibrarySearchButton"
                             Classes="icon"

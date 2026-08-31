@@ -327,6 +327,8 @@ public partial class MainWindow
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
         if (Application.Current is App app)
             app.ApplyLanguage(_appSettings.UiLanguage);
+        RefreshLocalizedZLibraryFilterItems();
+        RefreshLocalizedReadingMaterialsSourceFilter();
         LoadReaderVerticalDebugBoxesSetting();
         await DetectCalibreAtStartupAsync(cancellationToken);
         _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);

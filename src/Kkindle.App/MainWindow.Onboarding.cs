@@ -69,7 +69,7 @@ public partial class MainWindow
     {
         if (OnboardingLanguageBox.Items.Count < 2) return;
         if (OnboardingLanguageBox.Items[0] is ComboBoxItem chineseItem)
-            chineseItem.Content = UiText.IsEnglish ? "Simplified Chinese" : "简体中文";
+            chineseItem.Content = "简体中文";
         if (OnboardingLanguageBox.Items[1] is ComboBoxItem englishItem)
             englishItem.Content = "English";
     }

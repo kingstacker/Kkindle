@@ -33,7 +33,7 @@
     <x:String x:Key="Ui.Auto.6A85554C141A6383">SMTP 服务器</x:String>
     <x:String x:Key="Ui.Auto.CB6DE497BBC98EBB">SMTP 用户名</x:String>
     <x:String x:Key="Ui.Auto.05F75734785394FA">USB 磁盘</x:String>
-    <x:String x:Key="Ui.Auto.6C1BAA83960E7BC6">Z-Library 在线书库</x:String>
+    <x:String x:Key="Ui.Auto.6C1BAA83960E7BC6">Z-Library</x:String>
     <x:String x:Key="Ui.Auto.C8EA76F5CCA7AE85">Z-Library 在线书库：搜索并下载电子书</x:String>
     <x:String x:Key="Ui.Auto.04C7E918A97AA2D2">Z-Library 账号设置</x:String>
     <x:String x:Key="Ui.Auto.780A8542C562FD78">Z-Library 账号邮箱</x:String>
@@ -351,7 +351,6 @@
     <x:String x:Key="Ui.Auto.5A0E877ACFB138E4">装帧</x:String>
     <x:String x:Key="Ui.Auto.CB25397603C98E43">西班牙文</x:String>
     <x:String x:Key="Ui.Auto.93ACD7FCCB3F0D76">解释选中</x:String>
-    <x:String x:Key="Ui.Auto.C542A755DC8136AA">让全球的知识和文献对所有人触手可及</x:String>
     <x:String x:Key="Ui.Auto.E1506406A5BD8F02">设备</x:String>
     <x:String x:Key="Ui.Auto.13E641A3EA2095DF">设备型号</x:String>
     <x:String x:Key="Ui.Auto.BD94EEB3FD1C6354">设备已连接</x:String>
