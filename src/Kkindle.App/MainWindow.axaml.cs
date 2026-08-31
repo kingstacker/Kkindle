@@ -2736,10 +2736,11 @@ public partial class MainWindow : Window
     // Monochrome information dialog (WinUI ShowMessageAsync). Fire-and-forget
     // callers can use "_ = ShowMessageAsync(...)"; the awaited task completes
     // when the user dismisses the dialog.
-    private Task ShowMessageAsync(string title, string message)
+    private Task ShowMessageAsync(string title, string message, string? actionText = null)
     {
         MessageTitleText.Text = UiText.Localize(title);
         MessageBodyText.Text = UiText.Localize(message);
+        MessageOkButton.Content = actionText ?? T("知道了");
         ShowOverlay(MessageOverlay);
         MessageOverlay.Focus();
         _messageCompletion?.TrySetResult(true);

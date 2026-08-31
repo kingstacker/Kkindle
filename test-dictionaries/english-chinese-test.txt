@@ -1,0 +1,11 @@
+# Kkindle 英汉测试词典（10 条）
+hello=你好；问候语
+world=世界；人类社会
+book=书；书籍
+kindle=点燃；Kindle 电子书阅读器
+dictionary=词典；字典
+read=阅读；读
+language=语言
+computer=计算机；电脑
+test=测试；检验
+light=光；光线；轻的

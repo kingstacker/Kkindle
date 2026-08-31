@@ -1,0 +1,11 @@
+# Kkindle 汉英测试词典（10 条）
+你好=hello；a greeting
+世界=world；the earth or all people
+书=book；a written work
+阅读=read；to look at and understand written words
+词典=dictionary；a reference book of words
+语言=language；a system of communication
+电脑=computer；an electronic machine for processing data
+测试=test；an examination or trial
+光=light；brightness that makes things visible
+学习=learn；to acquire knowledge or a skill

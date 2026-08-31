@@ -376,6 +376,7 @@
     <x:String x:Key="Ui.Auto.E1FD8BC385380027">Daily average over the last 7 days —</x:String>
     <x:String x:Key="Ui.Auto.83A25C492C9A33C4">Daily reading time over the last 14 days</x:String>
     <x:String x:Key="Ui.Auto.A51CE8191584FCF7">Back to bookshelf</x:String>
+    <x:String x:Key="Ui.Auto.54C1945A1C69E258">Back to reading</x:String>
     <x:String x:Key="Ui.Auto.B062EE4E5C2C9E1B">Back to candidates</x:String>
     <x:String x:Key="Ui.Auto.D35813D68B11A471">Back to all books</x:String>
     <x:String x:Key="Ui.Auto.5A24236E1754E954">Back to favorites</x:String>

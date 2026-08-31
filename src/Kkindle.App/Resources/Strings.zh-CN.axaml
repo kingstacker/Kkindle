@@ -376,6 +376,7 @@
     <x:String x:Key="Ui.Auto.E1FD8BC385380027">近 7 天日均 —</x:String>
     <x:String x:Key="Ui.Auto.83A25C492C9A33C4">近十四天每天阅读时长柱状图</x:String>
     <x:String x:Key="Ui.Auto.A51CE8191584FCF7">返回书架</x:String>
+    <x:String x:Key="Ui.Auto.54C1945A1C69E258">返回阅读</x:String>
     <x:String x:Key="Ui.Auto.B062EE4E5C2C9E1B">返回候选列表</x:String>
     <x:String x:Key="Ui.Auto.D35813D68B11A471">返回全部书籍</x:String>
     <x:String x:Key="Ui.Auto.5A24236E1754E954">返回收藏夹</x:String>

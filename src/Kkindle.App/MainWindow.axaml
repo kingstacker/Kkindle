@@ -5047,33 +5047,43 @@
                     <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
                 </Transitions>
             </Grid.Transitions>
-            <Border Width="560"
-                    MaxWidth="560"
+            <Border Width="500"
+                    MaxWidth="500"
+                    MaxHeight="640"
+                    Margin="24"
                     Background="{StaticResource PaperBrush}"
                     BorderBrush="{StaticResource InkBrush}"
                     BorderThickness="1"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
-                <Grid RowDefinitions="Auto,Auto">
-                    <StackPanel Margin="28,24,28,22" Spacing="13">
+                <Grid RowDefinitions="Auto,*,Auto">
+                    <StackPanel Grid.Row="0"
+                                Margin="24,20,24,14"
+                                Spacing="10">
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <Rectangle Width="10"
-                                       Height="24"
+                                       Height="21"
                                        Margin="0,-2,0,0"
                                        Fill="{StaticResource InkBrush}"
                                        VerticalAlignment="Center" />
                             <TextBlock x:Name="MessageTitleText"
-                                       FontSize="24"
+                                       FontSize="20"
                                        FontWeight="Bold"
                                        VerticalAlignment="Center" />
                         </StackPanel>
-                        <TextBlock x:Name="MessageBodyText"
-                                   FontSize="15"
-                                   LineHeight="23"
-                                   TextWrapping="Wrap" />
                     </StackPanel>
-                    <Grid Grid.Row="1"
-                          Margin="28,18,28,22"
+                    <ScrollViewer Grid.Row="1"
+                                  MaxHeight="440"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Margin="24,0,24,4">
+                        <TextBlock x:Name="MessageBodyText"
+                                   FontSize="13"
+                                   LineHeight="20"
+                                   TextWrapping="Wrap" />
+                    </ScrollViewer>
+                    <Grid Grid.Row="2"
+                          Margin="24,14,24,20"
                           Background="{StaticResource PaperBrush}">
                         <Button x:Name="MessageOkButton"
                                 Content="{DynamicResource Ui.Auto.DE32E20193AD1042}"

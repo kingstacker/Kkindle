@@ -345,7 +345,8 @@ public partial class MainWindow
         // reference's ReaderSelectionDictionaryButton_Click.
         await ShowMessageAsync(T("词典 · {0}", term), entries.Count == 0
             ? T("没有找到释义。请先在“字典管理”中导入词典。")
-            : string.Join("\n\n", entries.Select(entry => $"[{entry.DictionaryName}] {entry.Definition}")));
+            : string.Join("\n\n", entries.Select(entry => $"[{entry.DictionaryName}] {entry.Definition}")),
+            T("返回阅读"));
     }
 
     private void ReaderFootnoteCloseButton_Click(object? sender, RoutedEventArgs e)
