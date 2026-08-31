@@ -31,12 +31,12 @@ public sealed class KindleEmailSettings
 
     public string? Validate()
     {
-        if (!TryCreateAddress(KindleEmailAddress)) return "请输入有效的 Kindle 收件邮箱地址。";
-        if (!TryCreateAddress(SenderEmailAddress)) return "请输入有效的发件邮箱地址。";
-        if (string.IsNullOrWhiteSpace(SmtpHost)) return "请输入 SMTP 服务器地址。";
-        if (SmtpPort is < 1 or > 65535) return "SMTP 端口必须在 1 到 65535 之间。";
-        if (string.IsNullOrWhiteSpace(SmtpUsername)) return "请输入 SMTP 用户名。";
-        if (string.IsNullOrWhiteSpace(SmtpPassword)) return "请输入 SMTP 密码或应用专用密码。";
+        if (!TryCreateAddress(KindleEmailAddress)) return UiText.Get("请输入有效的 Kindle 收件邮箱地址。");
+        if (!TryCreateAddress(SenderEmailAddress)) return UiText.Get("请输入有效的发件邮箱地址。");
+        if (string.IsNullOrWhiteSpace(SmtpHost)) return UiText.Get("请输入 SMTP 服务器地址。");
+        if (SmtpPort is < 1 or > 65535) return UiText.Get("SMTP 端口必须在 1 到 65535 之间。");
+        if (string.IsNullOrWhiteSpace(SmtpUsername)) return UiText.Get("请输入 SMTP 用户名。");
+        if (string.IsNullOrWhiteSpace(SmtpPassword)) return UiText.Get("请输入 SMTP 密码或应用专用密码。");
         return null;
     }
 

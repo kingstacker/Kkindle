@@ -317,23 +317,33 @@ public sealed class ReaderSearchHighlightTextBlock : TextBlock
     }
 }
 
-public sealed class ReaderAiSourceViewModel
+public sealed class ReaderAiSourceViewModel : ObservableObject, IDisposable
 {
     public ReaderAiSourceViewModel(BookContentChunk chunk)
     {
+        UiText.LanguageChanged += OnLanguageChanged;
         Chunk = chunk;
-        Label = $"{chunk.ChapterTitle} · 片段 {chunk.ChunkIndex + 1}";
     }
 
     public ReaderAiSourceViewModel(PdfPageText page)
     {
+        UiText.LanguageChanged += OnLanguageChanged;
         Page = page;
-        Label = $"第 {page.PageNumber} 页 · {CreateExcerpt(page.Text, 100)}";
     }
 
     public BookContentChunk? Chunk { get; }
     public PdfPageText? Page { get; }
-    public string Label { get; }
+    public string Label => Chunk is { } chunk
+        ? UiText.Get("{0} · 片段 {1}", chunk.ChapterTitle, chunk.ChunkIndex + 1)
+        : Page is { } page
+            ? UiText.Get("第 {0} 页 · {1}", page.PageNumber, CreateExcerpt(page.Text, 100))
+            : string.Empty;
+
+    private void OnLanguageChanged(object? sender, EventArgs e) =>
+        OnPropertyChanged(nameof(Label));
+
+    public void Dispose() =>
+        UiText.LanguageChanged -= OnLanguageChanged;
 
     private static string CreateExcerpt(string value, int length)
     {
@@ -342,7 +352,7 @@ public sealed class ReaderAiSourceViewModel
     }
 }
 
-public sealed class ReaderAiMessageViewModel : ObservableObject
+public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 {
     private string _content;
     private string _reasoning;
@@ -350,6 +360,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject
 
     public ReaderAiMessageViewModel(string role, string content = "", string reasoning = "")
     {
+        UiText.LanguageChanged += OnLanguageChanged;
         Role = role;
         _content = content;
         _reasoning = reasoning;
@@ -359,7 +370,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject
 
     public bool IsUser => Role.Equals("user", StringComparison.OrdinalIgnoreCase);
 
-    public string RoleLabel => IsUser ? "你" : "Kreader AI";
+    public string RoleLabel => IsUser ? UiText.Get("你") : "Kreader AI";
 
     // WinUI reference bubbles: the user message is a transparent box with a
     // black ink border on the right, the assistant reply a white card with a
@@ -402,4 +413,10 @@ public sealed class ReaderAiMessageViewModel : ObservableObject
         Reasoning = reasoning;
         IsReasoningVisible = reasoning.Length > 0 && (isStreaming || Content.Length == 0);
     }
+
+    private void OnLanguageChanged(object? sender, EventArgs e) =>
+        OnPropertyChanged(nameof(RoleLabel));
+
+    public void Dispose() =>
+        UiText.LanguageChanged -= OnLanguageChanged;
 }

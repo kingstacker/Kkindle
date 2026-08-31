@@ -58,7 +58,7 @@ public partial class MainWindow
 
         try
         {
-            SetTaskStatus($"正在准备《{card.Title}》的阅读缓存…");
+            SetTaskStatus(T("正在准备《{0}》的阅读缓存…", card.Title));
             var contentHash = file.Sha256;
             if (contentHash.Length != 64)
                 contentHash = await Hashing.Sha256Async(epubPath, sessionToken);
@@ -120,7 +120,7 @@ public partial class MainWindow
                 target,
                 sessionToken);
             if (!loaded)
-                throw new InvalidOperationException("阅读器无法加载 EPUB 章节。");
+                throw new InvalidOperationException(T("阅读器无法加载 EPUB 章节。"));
 
             SetReaderHostLayer();
             FocusCurrentReaderHost();
@@ -143,8 +143,8 @@ public partial class MainWindow
         catch (Exception exception)
         {
             await CloseReaderAsync();
-            SetTaskStatus($"打开 EPUB 阅读器失败：{exception.Message}");
-            await ShowMessageAsync("无法打开书籍", exception.Message);
+            SetTaskStatus(T("打开 EPUB 阅读器失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法打开书籍"), UiText.Localize(exception.Message));
         }
     }
 
@@ -233,7 +233,7 @@ public partial class MainWindow
             {
                 _readerPreloadHost = CreateReaderHostForCurrentFormat();
                 if (ReferenceEquals(_readerActiveHost, _readerPreloadHost))
-                    throw new InvalidOperationException("阅读器宿主工厂必须返回两个不同实例。");
+                    throw new InvalidOperationException(T("阅读器宿主工厂必须返回两个不同实例。"));
 
                 _readerPreloadHost.NavigationStarting += ReaderHost_NavigationStarting;
                 _readerPreloadHost.NavigationCompleted += ReaderHost_NavigationCompleted;
@@ -265,7 +265,7 @@ public partial class MainWindow
                 _readerSessionCancellation?.Token ?? _lifetimeCancellation.Token))
         {
             throw new InvalidOperationException(
-                "阅读器 WebView 初始化超时。请确认 Linux 已安装 WPE WebKit 运行库后重试。");
+                T("阅读器 WebView 初始化超时。请确认 Linux 已安装 WPE WebKit 运行库后重试。"));
         }
 
         if (_readerPreloadHost is not null)
@@ -522,7 +522,7 @@ public partial class MainWindow
         if (targetIndex < 0 || targetIndex >= _readerDocument.Chapters.Count)
         {
             _readerLinuxTextFallbackMoveToChapterEnd = false;
-            ReaderStatusText.Text = offset < 0 ? "已经是第一章。" : "已经是最后一章。";
+            ReaderStatusText.Text = offset < 0 ? T("已经是第一章。") : T("已经是最后一章。");
             return;
         }
         ResetReaderContinuousEdgeTracking();
@@ -543,7 +543,7 @@ public partial class MainWindow
             var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(token);
             var loaded = await NavigateReaderHostAndWaitAsync(host, target, token);
             LogReaderChapterTiming("move.navigated", chapterTiming);
-            if (!loaded) throw new InvalidOperationException("章节加载失败。");
+            if (!loaded) throw new InvalidOperationException(T("章节加载失败。"));
 
             await ApplySavedAnnotationsAsync(host, token);
             await PositionReaderChapterBoundaryAsync(
@@ -589,7 +589,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            ReaderStatusText.Text = $"章节加载失败：{exception.Message}";
+            ReaderStatusText.Text = T("章节加载失败：{0}", UiText.Localize(exception.Message));
         }
         finally
         {
@@ -614,7 +614,7 @@ public partial class MainWindow
     }
 
     private string GetReaderChapterLabel() => _readerIsPdf
-        ? $"{_readerPdfPage} / {Math.Max(1, _readerPdfPages.Count)} · 第 {_readerPdfPage} 页"
+        ? T("{0} / {1} · 第 {0} 页", _readerPdfPage, Math.Max(1, _readerPdfPages.Count))
         : _readerDocument is null
             ? string.Empty
             : GetCurrentReaderTocIndex() is var tocIndex && tocIndex >= 0
@@ -622,7 +622,7 @@ public partial class MainWindow
                 : $"{_readerChapterIndex + 1} / {_readerDocument.Chapters.Count} · {GetReaderChapterDisplayName(_readerChapterIndex)}";
 
     private string GetReaderChapterPositionLabel() => _readerIsPdf
-        ? $"{_readerPdfPage} / {Math.Max(1, _readerPdfPages.Count)}"
+        ? T("{0} / {1}", _readerPdfPage, Math.Max(1, _readerPdfPages.Count))
         : _readerDocument is null
             ? string.Empty
             : GetCurrentReaderTocIndex() is var tocIndex && tocIndex >= 0
@@ -643,7 +643,7 @@ public partial class MainWindow
         var targetIndex = currentIndex + direction;
         if (currentIndex < 0 || targetIndex < 0 || targetIndex >= _readerTocItems.Count)
         {
-            ReaderStatusText.Text = direction < 0 ? "已经是目录第一项。" : "已经是目录最后一项。";
+            ReaderStatusText.Text = direction < 0 ? T("已经是目录第一项。") : T("已经是目录最后一项。");
             return;
         }
 
@@ -688,7 +688,7 @@ public partial class MainWindow
             var fileName = Path.GetFileNameWithoutExtension(_readerDocument.Chapters[chapterIndex]);
             if (!string.IsNullOrWhiteSpace(fileName)) return fileName;
         }
-        return $"第 {chapterIndex + 1} 章";
+        return T("第 {0} 章", chapterIndex + 1);
     }
 
     private void SetReaderHostLayer(bool revealActiveHost = true)
@@ -776,7 +776,7 @@ public partial class MainWindow
         if (sender is not IReaderHost host || !ReferenceEquals(host, CurrentReaderHost)) return;
         if (!e.IsSuccess)
         {
-            ReaderStatusText.Text = "当前章节加载失败。";
+            ReaderStatusText.Text = T("当前章节加载失败。");
             return;
         }
         ResetReaderStatusText();
@@ -902,8 +902,7 @@ public partial class MainWindow
         _readerCurrentFragment = null;
         _readerSearchSequence++;
         _readerWholeSearchSequence++;
-        ReaderAiMessages.Clear();
-        ReaderAiSources.Clear();
+        ClearReaderAiCollections();
         _readerPendingSelection = null;
         _readerPendingSelectionStartOffset = 0;
         _readerPendingSelectionEndOffset = 0;

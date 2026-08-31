@@ -18,11 +18,11 @@ public static class ReaderAnnotationExport
     {
         var builder = new StringBuilder();
         builder.Append("# ").AppendLine(Trim(bookTitle));
-        builder.Append("作者：").AppendLine(Trim(authors));
+        builder.Append(UiText.Get("作者：")).AppendLine(Trim(authors));
         builder.AppendLine();
         if (annotations.Count == 0)
         {
-            builder.AppendLine("本书暂无划线与批注。");
+            builder.AppendLine(UiText.Get("本书暂无划线与批注。"));
             return builder.ToString();
         }
 
@@ -39,9 +39,9 @@ public static class ReaderAnnotationExport
             builder.Append("> ").AppendLine(Trim(annotation.SelectedText));
             builder.AppendLine();
             if (!string.IsNullOrWhiteSpace(annotation.Note))
-                builder.Append("批注：").AppendLine(Trim(annotation.Note));
-            builder.Append("创建时间：").AppendLine(annotation.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss zzz"));
-            builder.Append("定位：").AppendLine(BuildLocationLabel(annotation));
+                builder.Append(UiText.Get("批注：")).AppendLine(Trim(annotation.Note));
+            builder.Append(UiText.Get("创建时间：")).AppendLine(annotation.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss zzz"));
+            builder.Append(UiText.Get("定位：")).AppendLine(BuildLocationLabel(annotation));
             builder.AppendLine("---");
             builder.AppendLine();
         }
@@ -56,11 +56,11 @@ public static class ReaderAnnotationExport
     {
         var builder = new StringBuilder();
         builder.AppendLine(Trim(bookTitle));
-        builder.Append("作者：").AppendLine(Trim(authors));
+        builder.Append(UiText.Get("作者：")).AppendLine(Trim(authors));
         builder.AppendLine();
         if (annotations.Count == 0)
         {
-            builder.AppendLine("本书暂无划线与批注。");
+            builder.AppendLine(UiText.Get("本书暂无划线与批注。"));
             return builder.ToString();
         }
 
@@ -77,9 +77,9 @@ public static class ReaderAnnotationExport
                 .AppendLine(string.IsNullOrWhiteSpace(chapterTitle) ? annotation.ChapterPath : chapterTitle);
             builder.AppendLine(Trim(annotation.SelectedText));
             if (!string.IsNullOrWhiteSpace(annotation.Note))
-                builder.Append("批注：").AppendLine(Trim(annotation.Note));
-            builder.Append("创建时间：").AppendLine(annotation.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss zzz"));
-            builder.Append("定位：").AppendLine(BuildLocationLabel(annotation));
+                builder.Append(UiText.Get("批注：")).AppendLine(Trim(annotation.Note));
+            builder.Append(UiText.Get("创建时间：")).AppendLine(annotation.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss zzz"));
+            builder.Append(UiText.Get("定位：")).AppendLine(BuildLocationLabel(annotation));
             builder.AppendLine();
         }
         return builder.ToString().TrimEnd();
@@ -90,7 +90,7 @@ public static class ReaderAnnotationExport
         var location = annotation.ChapterPath;
         if (!string.IsNullOrWhiteSpace(annotation.Fragment))
             location += "#" + annotation.Fragment;
-        return $"{location}（偏移 {annotation.StartOffset}–{annotation.EndOffset}）";
+        return UiText.Get("{0}（偏移 {1}–{2}）", location, annotation.StartOffset, annotation.EndOffset);
     }
 
     private static string Trim(string value)

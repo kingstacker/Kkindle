@@ -18,8 +18,8 @@ public sealed class ReaderAnnotation
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    public string DisplayQuote => string.IsNullOrWhiteSpace(SelectedText) ? "未命名批注" : SelectedText;
-    public string DisplayNote => string.IsNullOrWhiteSpace(Note) ? "仅划线" : Note;
+    public string DisplayQuote => string.IsNullOrWhiteSpace(SelectedText) ? UiText.Get("未命名批注") : SelectedText;
+    public string DisplayNote => string.IsNullOrWhiteSpace(Note) ? UiText.Get("仅划线") : Note;
 }
 
 public sealed record BookContentChunk(
@@ -78,8 +78,8 @@ public sealed class ReaderBookmark
     public string Quote { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? "未命名书签" : Title;
-    public string DisplayQuote => string.IsNullOrWhiteSpace(Quote) ? "当前阅读位置" : Quote;
+    public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? UiText.Get("未命名书签") : Title;
+    public string DisplayQuote => string.IsNullOrWhiteSpace(Quote) ? UiText.Get("当前阅读位置") : Quote;
     public string DisplayTime => CreatedAt.ToLocalTime().ToString("MM-dd HH:mm");
 }
 
@@ -195,9 +195,9 @@ public sealed class ReaderReadingStats
         get
         {
             var seconds = CumulativeSeconds;
-            if (seconds < 60) return $"{seconds} 秒";
-            if (seconds < 3600) return $"{seconds / 60} 分钟";
-            return $"{seconds / 3600.0:0.0} 小时";
+            if (seconds < 60) return UiText.Get("{0} 秒", seconds);
+            if (seconds < 3600) return UiText.Get("{0} 分钟", seconds / 60);
+            return UiText.Get("{0:0.0} 小时", seconds / 3600.0);
         }
     }
 }

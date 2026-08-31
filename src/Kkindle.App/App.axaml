@@ -986,8 +986,8 @@
             <Setter Property="Background" Value="{StaticResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="IsThreeState" Value="False" />
-            <Setter Property="OnContent" Value="开" />
-            <Setter Property="OffContent" Value="关" />
+            <Setter Property="OnContent" Value="{DynamicResource Ui.Auto.39EAE64CFC41EF37}" />
+            <Setter Property="OffContent" Value="{DynamicResource Ui.Auto.5D0AE622F61F8EBF}" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Grid ColumnDefinitions="48,Auto" ColumnSpacing="8" MinHeight="24">

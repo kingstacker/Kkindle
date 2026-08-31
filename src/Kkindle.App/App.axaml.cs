@@ -9,6 +9,7 @@ namespace Kkindle;
 public partial class App : Application
 {
     private readonly AppServices? _services;
+    private UiLanguageService? _uiLanguageService;
 
     /// <summary>
     /// Parameterless constructor for the XAML previewer and designer, which
@@ -30,7 +31,10 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        _uiLanguageService = new UiLanguageService(this);
     }
+
+    public void ApplyLanguage(string? language) => _uiLanguageService?.Apply(language);
 
     public override void OnFrameworkInitializationCompleted()
     {

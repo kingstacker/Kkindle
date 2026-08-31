@@ -4,6 +4,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Kkindle.Core;
 using System.Reflection;
 
 namespace Kkindle;
@@ -623,7 +624,7 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
             }
             else
             {
-                AddRun("注");
+            AddRun(UiText.Get("注"));
             }
             textStart = index + 1;
         }

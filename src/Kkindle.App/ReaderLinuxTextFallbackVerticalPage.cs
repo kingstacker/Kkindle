@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Kkindle.Core;
 
 namespace Kkindle;
 
@@ -410,7 +411,7 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
                 DrawCenteredGlyph(
                     context,
                     cell,
-                    CreateFormatted("注", footnoteTypeface, brush),
+                    CreateFormatted(UiText.Get("注"), footnoteTypeface, brush),
                     brush);
                 continue;
             }

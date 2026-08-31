@@ -10,6 +10,16 @@ namespace Kkindle;
 
 public partial class MainWindow
 {
+    private void UpdateReaderAiLanguageText()
+    {
+        if (ReaderAiStatusText is null || _readerAiBusy) return;
+        ReaderAiStatusText.Text = _appSettings.AiEnabled
+            ? _readerAiSettings.IsConfigured
+                ? T("AI 已就绪；回答只会使用当前书籍的本地文本片段。")
+                : T("AI 尚未配置，请打开设置填写 API Key。")
+            : T("AI 已在应用设置中关闭。");
+    }
+
     private async Task InitializeReaderAiAsync(CancellationToken cancellationToken)
     {
         try
@@ -17,18 +27,14 @@ public partial class MainWindow
             _readerAiSettings = await _aiSettingsStore.LoadAsync(cancellationToken);
             ApplyReaderAiSettingsToControls();
             _ = RefreshReaderAiModelSelectorAsync(cancellationToken);
-            ReaderAiStatusText.Text = _appSettings.AiEnabled
-                ? _readerAiSettings.IsConfigured
-                    ? "AI 已就绪；回答只会使用当前书籍的本地文本片段。"
-                    : "AI 尚未配置，请打开设置填写 API Key。"
-                : "AI 已在应用设置中关闭。";
+            UpdateReaderAiLanguageText();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            ReaderAiStatusText.Text = $"读取 AI 设置失败：{exception.Message}";
+            ReaderAiStatusText.Text = T("读取 AI 设置失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
@@ -63,7 +69,7 @@ public partial class MainWindow
 
             UpdateReaderAiReasoningDepthSelector();
             ReaderAiProviderText.Text = $"{_readerAiSettings.ProviderDisplayName} · "
-                + (_readerAiSettings.IsConfigured ? _readerAiSettings.Model : "未配置");
+                + (_readerAiSettings.IsConfigured ? _readerAiSettings.Model : T("未配置"));
         }
         finally
         {
@@ -80,16 +86,16 @@ public partial class MainWindow
         var options = _readerAiSettings.Provider.Equals("deepseek", StringComparison.OrdinalIgnoreCase)
             ? new[]
             {
-                ("auto", "自动"),
-                ("high", "深入"),
-                ("max", "极致")
+                ("auto", T("自动")),
+                ("high", T("深入")),
+                ("max", T("极致"))
             }
             : new[]
             {
-                ("auto", "自动"),
-                ("low", "快速"),
-                ("medium", "平衡"),
-                ("high", "深入")
+                ("auto", T("自动")),
+                ("low", T("快速")),
+                ("medium", T("平衡")),
+                ("high", T("深入"))
             };
         var selectedDepth = options.Any(option => option.Item1.Equals(
                 _readerAiReasoningDepth,
@@ -175,7 +181,7 @@ public partial class MainWindow
             || endpoint.Scheme is not ("http" or "https")
             || model.Length == 0)
         {
-            ReaderAiSettingsStatusText.Text = "请填写有效的 HTTP Base URL 和模型名称。";
+            ReaderAiSettingsStatusText.Text = T("请填写有效的 HTTP Base URL 和模型名称。");
             return;
         }
 
@@ -190,15 +196,15 @@ public partial class MainWindow
             };
             await _aiSettingsStore.SaveAsync(_readerAiSettings, ReaderToken);
             ApplyReaderAiSettingsToControls();
-            ReaderAiSettingsStatusText.Text = "AI 设置已保存。";
+            ReaderAiSettingsStatusText.Text = T("AI 设置已保存。");
             ShowReaderAiTab();
             ReaderAiStatusText.Text = _readerAiSettings.IsConfigured
-                ? "AI 已就绪；回答只会使用当前书籍的本地文本片段。"
-                : "设置已保存，但还缺少 API Key。";
+                ? T("AI 已就绪；回答只会使用当前书籍的本地文本片段。")
+                : T("设置已保存，但还缺少 API Key。");
         }
         catch (Exception exception)
         {
-            ReaderAiSettingsStatusText.Text = $"保存失败：{exception.Message}";
+            ReaderAiSettingsStatusText.Text = T("保存失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
@@ -265,29 +271,28 @@ public partial class MainWindow
     }
 
     private async void ReaderAiSummarizeChapterButton_Click(object? sender, RoutedEventArgs e)
-        => await SendReaderAiQuestionAsync($"请用清晰的中文总结当前章节（{GetReaderChapterLabel()}），列出核心观点、关键人物或概念，以及值得回看的段落。");
+        => await SendReaderAiQuestionAsync(T("请用清晰的中文总结当前章节（{0}），列出核心观点、关键人物或概念，以及值得回看的段落。", GetReaderChapterLabel()));
 
     private async void ReaderAiExplainSelectionButton_Click(object? sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_readerPendingSelection))
         {
-            ReaderAiStatusText.Text = "请先在正文中选择一段文字。";
+            ReaderAiStatusText.Text = T("请先在正文中选择一段文字。");
             return;
         }
-        await SendReaderAiQuestionAsync($"请解释下面这段文字的含义、上下文和可能的隐含前提，并用一个简单例子帮助理解：\n\n{_readerPendingSelection}");
+        await SendReaderAiQuestionAsync(T("请解释下面这段文字的含义、上下文和可能的隐含前提，并用一个简单例子帮助理解：\n\n{0}", _readerPendingSelection));
     }
 
     private async void ReaderAiSummarizeBookButton_Click(object? sender, RoutedEventArgs e)
-        => await SendReaderAiQuestionAsync("请概览这本书的主题、结构、主要论点和适合继续阅读的方向；如果上下文不足，请明确说明。");
+        => await SendReaderAiQuestionAsync(T("请概览这本书的主题、结构、主要论点和适合继续阅读的方向；如果上下文不足，请明确说明。"));
 
     private void ReaderAiClearButton_Click(object? sender, RoutedEventArgs e)
     {
         _readerAiConversation.Clear();
-        ReaderAiMessages.Clear();
-        ReaderAiSources.Clear();
+        ClearReaderAiCollections();
         ReaderAiSourcesPanel.IsVisible = false;
         ReaderAiEmptyState.IsVisible = true;
-        ReaderAiStatusText.Text = "对话已清空。";
+        ReaderAiStatusText.Text = T("对话已清空。");
     }
 
     private async Task SendReaderAiQuestionAsync(string question)
@@ -295,17 +300,17 @@ public partial class MainWindow
         if (_readerAiBusy) return;
         if (!_appSettings.AiEnabled)
         {
-            ReaderAiStatusText.Text = "AI 已在应用设置中关闭。";
+            ReaderAiStatusText.Text = T("AI 已在应用设置中关闭。");
             return;
         }
         if (!_appSettings.NetworkEnabled)
         {
-            ReaderAiStatusText.Text = "网络访问已关闭，无法调用 AI 服务。";
+            ReaderAiStatusText.Text = T("网络访问已关闭，无法调用 AI 服务。");
             return;
         }
         if (!_readerAiSettings.IsConfigured)
         {
-            ReaderAiStatusText.Text = "请先到设置面板的 AI 助手设置中填写 Base URL、模型和 API Key。";
+            ReaderAiStatusText.Text = T("请先到设置面板的 AI 助手设置中填写 Base URL、模型和 API Key。");
             return;
         }
 
@@ -321,7 +326,9 @@ public partial class MainWindow
         ReaderAiMessages.Add(userMessage);
         ReaderAiMessages.Add(assistantMessage);
         ReaderAiEmptyState.IsVisible = false;
-        ReaderAiStatusText.Text = "正在整理本地片段并请求 AI…";
+        ReaderAiStatusText.Text = T("正在整理本地片段并请求 AI…");
+        foreach (var source in ReaderAiSources)
+            source.Dispose();
         ReaderAiSources.Clear();
         ReaderAiSourcesPanel.IsVisible = false;
 
@@ -330,8 +337,8 @@ public partial class MainWindow
             var context = await BuildReaderAiContextAsync(question, token);
             foreach (var source in context.Sources) ReaderAiSources.Add(source);
             ReaderAiSourcesPanel.IsVisible = ReaderAiSources.Count > 0;
-            var instructions = "你是 Kkindle 内置的 Kreader AI 助手。只根据用户问题和提供的书籍片段回答；不要假装读过未提供的内容。回答使用中文，简洁但有结构，必要时指出证据来自哪一章或哪一页。";
-            var prompt = $"用户问题：\n{question}\n\n书籍片段：\n{context.Text}";
+            var instructions = T("你是 Kkindle 内置的 Kreader AI 助手。只根据用户问题和提供的书籍片段回答；不要假装读过未提供的内容。回答使用中文，简洁但有结构，必要时指出证据来自哪一章或哪一页。");
+            var prompt = T("用户问题：\n{0}\n\n书籍片段：\n{1}", question, context.Text);
             var answer = new StringBuilder();
             var reasoning = new StringBuilder();
             await foreach (var chunk in _aiChatClient.StreamAsync(
@@ -348,21 +355,21 @@ public partial class MainWindow
             }
 
             var finalAnswer = answer.ToString().Trim();
-            if (finalAnswer.Length == 0) finalAnswer = "AI 没有返回可显示的正文。";
+            if (finalAnswer.Length == 0) finalAnswer = T("AI 没有返回可显示的正文。");
             assistantMessage.Update(finalAnswer, reasoning.ToString(), isStreaming: false);
             _readerAiConversation.Add(new AiConversationTurn("user", question));
             _readerAiConversation.Add(new AiConversationTurn("assistant", finalAnswer));
-            ReaderAiStatusText.Text = $"已完成 · {DateTime.Now:HH:mm}";
+            ReaderAiStatusText.Text = T("已完成 · {0:HH:mm}", DateTime.Now);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            assistantMessage.Update("请求已取消。", string.Empty, isStreaming: false);
-            ReaderAiStatusText.Text = "AI 请求已取消。";
+            assistantMessage.Update(T("请求已取消。"), string.Empty, isStreaming: false);
+            ReaderAiStatusText.Text = T("AI 请求已取消。");
         }
         catch (Exception exception)
         {
-            assistantMessage.Update($"请求失败：{exception.Message}", string.Empty, isStreaming: false);
-            ReaderAiStatusText.Text = "AI 请求失败，请检查服务地址和 API Key。";
+            assistantMessage.Update(T("请求失败：{0}", UiText.Localize(exception.Message)), string.Empty, isStreaming: false);
+            ReaderAiStatusText.Text = T("AI 请求失败，请检查服务地址和 API Key。");
         }
         finally
         {
@@ -434,15 +441,15 @@ public partial class MainWindow
             if (current is not null)
             {
                 sources.Add(new ReaderAiSourceViewModel(current));
-                text.AppendLine($"[第 {current.PageNumber} 页]\n{LimitReaderContext(current.Text)}");
+                text.AppendLine(T("[第 {0} 页]\n{1}", current.PageNumber, LimitReaderContext(current.Text)));
             }
             if (text.Length == 0)
-                text.AppendLine("（当前 PDF 页面没有可提取的文本。）");
+                text.AppendLine(T("（当前 PDF 页面没有可提取的文本。）"));
             return new ReaderAiContext(text.ToString(), sources);
         }
 
         if (_readerBookCard is null || _readerBookFile is null || _readerDocument is null)
-            return new ReaderAiContext("（当前没有可用的书籍文本。）", sources);
+            return new ReaderAiContext(T("（当前没有可用的书籍文本。）"), sources);
 
         await _bookContent.EnsureIndexedAsync(_readerBookCard.Book, _readerBookFile, _readerDocument, cancellationToken);
         chunks.AddRange(await _readerData.SearchBookAsync(
@@ -464,9 +471,9 @@ public partial class MainWindow
         foreach (var chunk in chunks.DistinctBy(chunk => chunk.Id).Take(8))
         {
             sources.Add(new ReaderAiSourceViewModel(chunk));
-            text.AppendLine($"[{chunk.ChapterTitle}]\n{LimitReaderContext(chunk.Content)}");
+            text.AppendLine(T("[{0}]\n{1}", chunk.ChapterTitle, LimitReaderContext(chunk.Content)));
         }
-        if (text.Length == 0) text.AppendLine("（本地索引中没有找到相关片段。）");
+        if (text.Length == 0) text.AppendLine(T("（本地索引中没有找到相关片段。）"));
         return new ReaderAiContext(text.ToString(), sources);
     }
 

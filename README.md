@@ -3,7 +3,11 @@
 [![Release](https://github.com/kingstacker/Kkindle/actions/workflows/release.yml/badge.svg)](https://github.com/kingstacker/Kkindle/actions/workflows/release.yml)
 [![GitHub release](https://img.shields.io/github/v/release/kingstacker/Kkindle?display_name=tag)](https://github.com/kingstacker/Kkindle/releases/latest)
 
+[简体中文](README.md) · [English](README.en.md)
+
 Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle 设备管理器。它使用 Avalonia 构建，将本地书库、格式转换、阅读、批注、AI 辅助阅读和 Kindle 传输集中在一个简洁的灰白纸张风格界面中。
+
+首次启动时会显示两步欢迎向导：第一步选择界面语言，默认根据系统语言自动选择简体中文或 English；第二步选择 Kindle 品牌和设备型号。向导完成后可在设置和设备卡片中继续修改这些选项。
 
 ## 三端状态
 
@@ -67,6 +71,13 @@ macOS 当前发布包未宣称经过实际设备验证；正式使用前请先�
 
 ## 主要功能
 
+### 首次运行与双语界面
+
+- 首次进入主界面时显示欢迎向导，支持在应用内切换简体中文和 English。
+- 系统语言为中文（`zh-*`）时默认使用简体中文；其它系统语言默认使用 English。
+- 第二步向导支持选择 Kindle 品牌和型号，并保存为默认设备型号；连接具体设备后仍可单独记忆该设备的型号。
+- 界面语言可稍后在设置中切换，切换会立即刷新主要界面、阅读器、状态提示和设备选择项。
+
 ### 本地书库管理
 
 - 导入 EPUB、PDF、MOBI 和 AZW3，支持拖放导入与中文文件名；导入文件夹时可逐本选择是否自动补齐 EPUB/AZW3 格式。
@@ -113,7 +124,7 @@ macOS 当前发布包未宣称经过实际设备验证；正式使用前请先�
 
 ### Kindle 传输
 
-- 识别 USB 磁盘以及 WPD/MTP 模式连接的 Kindle，显示设备容量、书籍和封面，并自动记忆设备型号。
+- 识别 USB 磁盘以及 WPD/MTP 模式连接的 Kindle，显示设备容量、书籍和封面；首次运行向导支持选择默认设备型号，连接后会自动记忆具体设备型号。
 - 支持向设备发送书籍、安全删除、传输校验、断线清理和设备插拔监听；支持多选批量导出到电脑书库或从设备删除。
 - 仅访问 Kindle 的 `documents` 目录，不修改设备系统数据库。
 - Kindle 字体管理可读取、导入、导出和删除设备 `fonts` 目录中的 TTF、OTF 文件。

@@ -13,6 +13,6 @@ public static class ApplicationVersion
             .Trim();
         if (!string.IsNullOrWhiteSpace(informational)) return informational;
 
-        return assembly.GetName().Version?.ToString(3) ?? "未知";
+        return assembly.GetName().Version?.ToString(3) ?? UiText.Get("未知");
     }
 }

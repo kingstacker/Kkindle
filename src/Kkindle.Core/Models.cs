@@ -31,7 +31,9 @@ public sealed class Book
         ? string.Empty
         : string.Join(" · ", Files.Select(x => x.Format.ToUpperInvariant()).Distinct());
 
-    public string ProgressLabel => Files.Count == 0 ? string.Empty : $"{FormatSummary}  ·  {Files.Count} 个文件";
+    public string ProgressLabel => Files.Count == 0
+        ? string.Empty
+        : UiText.Get("{0}  ·  {1} 个文件", FormatSummary, Files.Count);
 }
 
 public sealed class BookCollection
@@ -64,8 +66,8 @@ public sealed class KindleDevice
     public string Identity => string.IsNullOrWhiteSpace(VolumeSerial)
         ? RootPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
         : VolumeSerial.Trim();
-    public string CapacityLabel => $"{FormatBytes(FreeBytes)} 可用 / {FormatBytes(TotalBytes)}";
-    public string ConnectionLabel => Transport == KindleTransport.Wpd ? "MTP" : "USB 磁盘";
+    public string CapacityLabel => UiText.Get("{0} 可用 / {1}", FormatBytes(FreeBytes), FormatBytes(TotalBytes));
+    public string ConnectionLabel => Transport == KindleTransport.Wpd ? "MTP" : UiText.Get("USB 磁盘");
 
     private static string FormatBytes(long bytes)
     {
@@ -308,10 +310,10 @@ public sealed class KindleClipping
     public KindleClipping? PairedNote { get; set; }
     public string TypeLabel => Type switch
     {
-        KindleClippingType.Highlight => "划线",
-        KindleClippingType.Note => "笔记",
-        KindleClippingType.Bookmark => "书签",
-        _ => "记录"
+        KindleClippingType.Highlight => UiText.Get("划线"),
+        KindleClippingType.Note => UiText.Get("笔记"),
+        KindleClippingType.Bookmark => UiText.Get("书签"),
+        _ => UiText.Get("记录")
     };
 }
 
@@ -380,13 +382,13 @@ public sealed class ZLibraryBook
     public string SizeLabel => Size >= 1024L * 1024
         ? $"{Size / 1024d / 1024:0.0} MB"
         : $"{Math.Max(0, Size) / 1024d:0} KB";
-    public string LanguageLabel => string.IsNullOrWhiteSpace(Language) ? "未知语言" : Language;
+    public string LanguageLabel => string.IsNullOrWhiteSpace(Language) ? UiText.Get("未知语言") : Language;
     public string InfoLabel => string.Join(" · ", new[]
     {
         FormatLabel,
         SizeLabel,
         LanguageLabel,
-        Pages is > 0 ? $"{Pages} 页" : string.Empty
+        Pages is > 0 ? UiText.Get("{0} 页", Pages) : string.Empty
     }.Where(label => label.Length > 0));
 }
 

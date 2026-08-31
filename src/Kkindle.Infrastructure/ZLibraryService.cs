@@ -41,12 +41,12 @@ public sealed class ZLibrarySettings
 
     public string? Validate()
     {
-        if (!TryCreateAddress(Email)) return "请输入有效的 Z-Library 账号邮箱地址。";
-        if (string.IsNullOrWhiteSpace(Password)) return "请输入 Z-Library 账号密码。";
+        if (!TryCreateAddress(Email)) return UiText.Get("请输入有效的 Z-Library 账号邮箱地址。");
+        if (string.IsNullOrWhiteSpace(Password)) return UiText.Get("请输入 Z-Library 账号密码。");
         var baseUrl = Normalize(this).BaseUrl;
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
             || (uri.Scheme != "http" && uri.Scheme != "https"))
-            return "请输入有效的 Z-Library API 服务地址。";
+            return UiText.Get("请输入有效的 Z-Library API 服务地址。");
         return null;
     }
 

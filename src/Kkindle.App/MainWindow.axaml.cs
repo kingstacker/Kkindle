@@ -99,7 +99,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _conversionCancellation;
     private BookCardViewModel? _conversionCard;
     private bool _conversionMinimized;
-    private FormatConversionProgress _conversionLastProgress = new(0, "正在转换…");
+    private FormatConversionProgress _conversionLastProgress = new(0, T("正在转换…"));
     private TaskCompletionSource<DoubanBookCandidate?>? _doubanCandidateCompletion;
     private TaskCompletionSource<DoubanUpdateChoices?>? _doubanApplyCompletion;
     private DoubanBookCandidate? _doubanSelectedCandidate;
@@ -164,6 +164,7 @@ public partial class MainWindow : Window
         ViewModel = new LibraryViewModel(library, paths.Data);
 
         InitializeComponent();
+        UiText.LanguageChanged += MainWindowLanguageChanged;
         ApplyApplicationIcon();
         InitializeTrayIcon();
         // Linux file managers can mark external drag events handled on the
@@ -351,6 +352,62 @@ public partial class MainWindow : Window
 
     public LibraryViewModel ViewModel { get; }
 
+    private static string T(string source, params object?[] args) => UiText.Get(source, args);
+
+    private void MainWindowLanguageChanged(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => MainWindowLanguageChanged(sender, e));
+            return;
+        }
+
+        RefreshInteractiveControlToolTips();
+        RefreshOnboardingLocalizedChoices();
+        if (_filterControlsReady)
+            RefreshLocalizedFilterItems();
+        ViewModel.RefreshView();
+        UpdateLibraryUi();
+        if (_selectedCard is not null)
+            UpdateDetailActionIcons(_selectedCard.Book.IsFavorite, _selectedCard.Book.ReadingStatus);
+        UpdateDeviceBookSelectionUi();
+        UpdateDeviceBookEmptyState();
+        UpdateReaderAiLanguageText();
+        ApplyReaderAiSettingsToControls();
+        UpdateCalibreDetectionStatus();
+        UpdateZLibraryAccountStatus();
+        if (!string.IsNullOrWhiteSpace(_pendingUpdateVersion))
+            ShowUpdateBadge(_pendingUpdateVersion, _appSettings.PendingUpdateReleaseNotes);
+        if (ReaderRoot.IsVisible)
+        {
+            UpdateReaderToolbar();
+            UpdateReaderZenTocToggle();
+            UpdateReaderLayoutSliderLabels();
+            UpdateReaderLayoutStatus();
+            UpdateReaderStatsDisplay();
+        }
+        if (_stage3Ready && ReadingMaterialsPage.IsVisible && !_readingMaterialsDirty)
+            ApplyReadingMaterialsFilter();
+    }
+
+    private void RefreshLocalizedFilterItems()
+    {
+        var readingStatusIndex = ReadingStatusFilterBox.SelectedIndex;
+        var sortIndex = LibrarySortBox.SelectedIndex;
+        _updatingFilterControls = true;
+        try
+        {
+            ReadingStatusFilterBox.ItemsSource = new[] { T("待读"), T("阅读中"), T("已读") };
+            LibrarySortBox.ItemsSource = new[] { T("最近更新"), T("标题升序"), T("作者升序"), T("创建时间"), T("进度优先") };
+            ReadingStatusFilterBox.SelectedIndex = readingStatusIndex;
+            LibrarySortBox.SelectedIndex = sortIndex;
+        }
+        finally
+        {
+            _updatingFilterControls = false;
+        }
+    }
+
     public ObservableCollection<BookCollectionFolderViewModel> CollectionFolders { get; } = [];
     public ObservableCollection<DoubanCandidateViewModel> DoubanCandidates { get; } = [];
 
@@ -391,7 +448,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            SetTaskStatus("正在准备本地书库…");
+            SetTaskStatus(T("正在准备本地书库…"));
             await _library.InitializeAsync(_lifetimeCancellation.Token);
             await InitializeStage3Async(_lifetimeCancellation.Token);
             await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
@@ -400,6 +457,7 @@ public partial class MainWindow : Window
             _filterControlsReady = true;
             UpdateLibraryUi();
             SetTaskStatus(ViewModel.StatusText);
+            ShowOnboardingIfNeeded();
             StartAutomaticUpdateCheck();
             if (Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1" && ViewModel.Books.Count > 0)
             {
@@ -452,9 +510,9 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"无法读取本地书库：{exception.Message}");
-            EmptyLibraryTitleText.Text = "本地书库暂时不可用";
-            EmptyLibraryMessageText.Text = "请检查数据目录后重启 Kkindle。";
+            SetTaskStatus(T("无法读取本地书库：{0}", UiText.Localize(exception.Message)));
+            EmptyLibraryTitleText.Text = T("本地书库暂时不可用");
+            EmptyLibraryMessageText.Text = T("请检查数据目录后重启 Kkindle。");
             EmptyLibraryState.IsVisible = true;
         }
     }
@@ -558,6 +616,8 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        UiText.LanguageChanged -= MainWindowLanguageChanged;
+        UiText.LanguageChanged -= TrayLanguageChanged;
         _stage3Timer.Stop();
         _transferToastTimer.Stop();
         _deviceStatusToastTimer.Stop();
@@ -599,14 +659,11 @@ public partial class MainWindow : Window
         _readerSessionCancellation?.Dispose();
         _readerActiveHost?.Dispose();
         _readerPreloadHost?.Dispose();
-        foreach (var card in ViewModel.Books)
-            card.CoverImage?.Dispose();
-        foreach (var folder in CollectionFolders)
-        {
-            folder.Cover1?.Dispose();
-            folder.Cover2?.Dispose();
-            folder.Cover3?.Dispose();
-        }
+        foreach (var folder in CollectionFolders) folder.Dispose();
+        foreach (var item in DoubanCandidates) item.Dispose();
+        foreach (var item in ZLibraryBooks) item.Dispose();
+        foreach (var item in _allStage3ReadingMaterials) item.Dispose();
+        ViewModel.Dispose();
     }
 
     private void SetupFilterControls()
@@ -625,8 +682,8 @@ public partial class MainWindow : Window
             TagFilterBox.ItemsSource = ViewModel.AvailableTags.ToArray();
             FormatFilterBox.ItemsSource = ViewModel.AvailableFormats.ToArray();
             CategoryFilterBox.ItemsSource = ViewModel.AvailableCategories.ToArray();
-            ReadingStatusFilterBox.ItemsSource = new[] { "待读", "阅读中", "已读" };
-            LibrarySortBox.ItemsSource = new[] { "最近更新", "标题升序", "作者升序", "创建时间", "进度优先" };
+            ReadingStatusFilterBox.ItemsSource = new[] { T("待读"), T("阅读中"), T("已读") };
+            LibrarySortBox.ItemsSource = new[] { T("最近更新"), T("标题升序"), T("作者升序"), T("创建时间"), T("进度优先") };
 
             AuthorFilterBox.SelectedIndex = -1;
             TagFilterBox.SelectedIndex = -1;
@@ -693,23 +750,23 @@ public partial class MainWindow : Window
 
         if (showingCollections && collectionsEmpty)
         {
-            EmptyLibraryTitleText.Text = "还没有收藏夹";
-            EmptyLibraryMessageText.Text = "点击“新建收藏夹”创建，之后可在书籍右键菜单中把书籍加入其中。";
+            EmptyLibraryTitleText.Text = T("还没有收藏夹");
+            EmptyLibraryMessageText.Text = T("点击“新建收藏夹”创建，之后可在书籍右键菜单中把书籍加入其中。");
         }
         else if (ViewModel.LibraryBooks.Count == 0)
         {
-            EmptyLibraryTitleText.Text = "电脑书库还是空的";
-            EmptyLibraryMessageText.Text = "导入 EPUB、PDF、MOBI 或 AZW3 文件开始阅读。";
+            EmptyLibraryTitleText.Text = T("电脑书库还是空的");
+            EmptyLibraryMessageText.Text = T("导入 EPUB、PDF、MOBI 或 AZW3 文件开始阅读。");
         }
         else
         {
-            EmptyLibraryTitleText.Text = "没有符合条件的书籍";
-            EmptyLibraryMessageText.Text = "试试清除筛选条件，或换一个搜索词。";
+            EmptyLibraryTitleText.Text = T("没有符合条件的书籍");
+            EmptyLibraryMessageText.Text = T("试试清除筛选条件，或换一个搜索词。");
         }
 
         CollectionHeader.IsVisible = _libraryViewMode is LibraryViewMode.Grid or LibraryViewMode.List
             && ViewModel.CollectionFilterId is not null;
-        ActiveCollectionTitleText.Text = ViewModel.CollectionFilterName ?? string.Empty;
+        ActiveCollectionTitleText.Text = UiText.Localize(ViewModel.CollectionFilterName ?? string.Empty);
         CreateCollectionButton.IsVisible = _libraryViewMode == LibraryViewMode.Collections;
 
         if (_selectedCard is not null)
@@ -731,7 +788,7 @@ public partial class MainWindow : Window
 
     private void SetTaskStatus(string message)
     {
-        TaskStatusText.Text = message;
+        TaskStatusText.Text = UiText.Localize(message);
         LibrarySummaryText.Text = ViewModel.StatusText;
     }
 
@@ -750,7 +807,7 @@ public partial class MainWindow : Window
             LibraryViewMode.Collections => LibraryCollectionsGlyphData,
             _ => LibraryGridGlyphData
         });
-        ToolTip.SetTip(LibraryViewToggleButton, $"当前：{DescribeLibraryViewMode(mode)}，点击切换到{DescribeLibraryViewMode(NextLibraryViewMode(mode))}");
+        ToolTip.SetTip(LibraryViewToggleButton, T("当前：{0}，点击切换到{1}", DescribeLibraryViewMode(mode), DescribeLibraryViewMode(NextLibraryViewMode(mode))));
         UpdateLibraryUi();
     }
 
@@ -764,9 +821,9 @@ public partial class MainWindow : Window
 
     private static string DescribeLibraryViewMode(LibraryViewMode mode) => mode switch
     {
-        LibraryViewMode.Grid => "网格视图",
-        LibraryViewMode.List => "列表视图",
-        _ => "收藏夹视图"
+        LibraryViewMode.Grid => T("网格视图"),
+        LibraryViewMode.List => T("列表视图"),
+        _ => T("收藏夹视图")
     };
 
     private void SelectBook(BookCardViewModel card)
@@ -778,7 +835,7 @@ public partial class MainWindow : Window
         DetailAuthorsText.Text = card.Authors;
         DetailDoubanRatingBox.Text = card.Book.DoubanRating is null
             ? string.Empty
-            : $"{card.Book.DoubanRating:0.0}（{card.Book.DoubanRatingCount ?? 0} 人评价）";
+            : T("{0:0.0}（{1} 人评价）", card.Book.DoubanRating, card.Book.DoubanRatingCount ?? 0);
         DetailStateText.Text = card.ReadingStateLabel;
         DetailOrganizationText.Text = card.OrganizationLabel;
         DetailPublicationText.Text = card.PublicationLabel;
@@ -802,7 +859,7 @@ public partial class MainWindow : Window
             DetailCollectionBox.ItemsSource = CollectionFolders;
             DetailCollectionBox.SelectedItem = CollectionFolders.FirstOrDefault(folder =>
                 card.Book.CollectionIds.Contains(folder.Collection.Id));
-            CollectionMembershipButton.Content = DetailCollectionBox.SelectedItem is null ? "加入收藏夹" : "移出收藏夹";
+            CollectionMembershipButton.Content = DetailCollectionBox.SelectedItem is null ? T("加入收藏夹") : T("移出收藏夹");
         }
         finally
         {
@@ -981,7 +1038,7 @@ public partial class MainWindow : Window
             LibraryRoot.ColumnDefinitions[2].Width = new GridLength(0);
         DetailCoverImage.Source = null;
         DetailCoverPlaceholder.IsVisible = true;
-        DetailTitleText.Text = "请选择一本书";
+        DetailTitleText.Text = T("请选择一本书");
         DetailAuthorsText.Text = string.Empty;
         DetailDoubanRatingBox.Text = string.Empty;
         DetailStateText.Text = string.Empty;
@@ -998,11 +1055,11 @@ public partial class MainWindow : Window
         DetailPageCountBox.Text = string.Empty;
         DetailBindingBox.Text = string.Empty;
         UpdateDetailActionIcons(false, LibraryReadingStatus.Unread);
-        DetailDescriptionText.Text = "暂无简介";
+        DetailDescriptionText.Text = T("暂无简介");
         DetailFiles.ItemsSource = Array.Empty<BookFile>();
         DetailCollectionBox.ItemsSource = CollectionFolders;
         DetailCollectionBox.SelectedItem = null;
-        CollectionMembershipButton.Content = "加入收藏夹";
+        CollectionMembershipButton.Content = T("加入收藏夹");
     }
 
     private void UpdateDetailActionIcons(bool isFavorite, LibraryReadingStatus readingStatus)
@@ -1010,7 +1067,7 @@ public partial class MainWindow : Window
         // Keep one minimal star silhouette; fill conveys the selected state
         // without changing the icon's optical footprint.
         DetailFavoriteIcon.Fill = isFavorite ? Brushes.Black : Brushes.Transparent;
-        var favoriteLabel = isFavorite ? "已收藏；点击取消收藏" : "未收藏；点击加入收藏";
+        var favoriteLabel = isFavorite ? T("已收藏；点击取消收藏") : T("未收藏；点击加入收藏");
         ToolTip.SetTip(DetailFavoriteButton, favoriteLabel);
         AutomationProperties.SetName(DetailFavoriteButton, favoriteLabel);
 
@@ -1019,13 +1076,13 @@ public partial class MainWindow : Window
         {
             LibraryReadingStatus.Reading => (
                 "M 3,6 L 12,9 L 21,6 V 19 L 12,22 L 3,19 Z M 12,9 V 22",
-                "阅读中；点击标记为已读"),
+                T("阅读中；点击标记为已读")),
             LibraryReadingStatus.Finished => (
                 "M 4,12 L 9,17 L 20,6",
-                "已读；点击重置为待读"),
+                T("已读；点击重置为待读")),
             _ => (
                 "M 12,4 A 8,8 0 1 0 12,20 A 8,8 0 1 0 12,4",
-                "待读；点击标记为阅读中")
+                T("待读；点击标记为阅读中"))
         };
         DetailReadingStatusIcon.Data = Geometry.Parse(data);
         ToolTip.SetTip(DetailReadingStatusButton, label);
@@ -1046,12 +1103,7 @@ public partial class MainWindow : Window
         var collections = await _library.GetCollectionsAsync(_lifetimeCancellation.Token);
         var books = ViewModel.LibraryBooks;
 
-        foreach (var folder in CollectionFolders)
-        {
-            folder.Cover1?.Dispose();
-            folder.Cover2?.Dispose();
-            folder.Cover3?.Dispose();
-        }
+        foreach (var folder in CollectionFolders) folder.Dispose();
         CollectionFolders.Clear();
 
         foreach (var collection in collections)
@@ -1082,7 +1134,7 @@ public partial class MainWindow : Window
             .ToArray();
         if (selectedPaths.Length == 0)
         {
-            SetTaskStatus("没有选择可导入的文件。");
+            SetTaskStatus(T("没有选择可导入的文件。"));
             return;
         }
 
@@ -1091,24 +1143,24 @@ public partial class MainWindow : Window
             var inputPaths = LibraryDropImportPolicy.ExpandImportableFiles(selectedPaths);
             if (inputPaths.Length == 0)
             {
-                SetTaskStatus("所选位置没有 EPUB、PDF、MOBI 或 AZW3 文件。");
-                await ShowMessageAsync("无法导入", "拖入的文件或文件夹中没有 EPUB、PDF、MOBI 或 AZW3 书籍文件。");
+                SetTaskStatus(T("所选位置没有 EPUB、PDF、MOBI 或 AZW3 文件。"));
+                await ShowMessageAsync(T("无法导入"), T("拖入的文件或文件夹中没有 EPUB、PDF、MOBI 或 AZW3 书籍文件。"));
                 return;
             }
             var requestedFormats = await ChooseImportFormatsAsync(inputPaths);
             if (requestedFormats is null)
             {
-                SetTaskStatus("已取消导入。");
+                SetTaskStatus(T("已取消导入。"));
                 return;
             }
-            SetTaskStatus($"正在导入 {inputPaths.Length} 个位置…");
+            SetTaskStatus(T("正在导入 {0} 个位置…", inputPaths.Length));
             ShowTaskProgressPopup();
-            TaskProgressPopupText.Text = $"正在导入 {inputPaths.Length} 个位置…";
+            TaskProgressPopupText.Text = T("正在导入 {0} 个位置…", inputPaths.Length);
             var progress = new Progress<TransferProgress>(value =>
             {
                 var message = string.IsNullOrWhiteSpace(value.Message)
-                    ? $"正在导入：{value.Percentage:0}%"
-                    : value.Message;
+                    ? T("正在导入：{0:0}%", value.Percentage)
+                    : UiText.Localize(value.Message);
                 SetTaskStatus(message);
                 TaskProgressPopupBar.Value = value.Percentage;
                 TaskProgressPopupText.Text = message;
@@ -1134,13 +1186,13 @@ public partial class MainWindow : Window
                     await RunDoubanBatchMatchAsync(importedCards);
             }
             var automaticSuffix = automaticFormats.Failures.Count > 0
-                ? $"；格式补齐失败 {automaticFormats.Failures.Count} 项"
+                ? T("；格式补齐失败 {0} 项", automaticFormats.Failures.Count)
                 : automaticFormats.GeneratedCount > 0
-                    ? $"；已补齐 {automaticFormats.GeneratedCount} 个 EPUB/AZW3 文件"
+                    ? T("；已补齐 {0} 个 EPUB/AZW3 文件", automaticFormats.GeneratedCount)
                     : string.Empty;
             SetTaskStatus(result.FailureCount == 0
-                ? $"已导入 {result.SuccessCount} 本书{automaticSuffix}。"
-                : $"已导入 {result.SuccessCount} 本书，{result.FailureCount} 项失败{automaticSuffix}。 ");
+                ? T("已导入 {0} 本书{1}。", result.SuccessCount, automaticSuffix)
+                : T("已导入 {0} 本书，{1} 项失败{2}。 ", result.SuccessCount, result.FailureCount, automaticSuffix));
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -1149,8 +1201,8 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             HideTaskProgressPopup();
-            SetTaskStatus($"导入失败：{exception.Message}");
-            await ShowMessageAsync("导入失败", exception.Message);
+            SetTaskStatus(T("导入失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("导入失败"), UiText.Localize(exception.Message));
         }
     }
 
@@ -1167,8 +1219,8 @@ public partial class MainWindow : Window
                 // Start consistent with the global "导入后补齐 EPUB 与 AZW3"
                 // preference; each row can still be overridden individually.
                 IsChecked = _appSettings.AutoGenerateEpubAndAzw3OnImport,
-                OnContent = "补齐",
-                OffContent = "仅导入"
+                OnContent = T("补齐"),
+                OffContent = T("仅导入")
             };
             var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 14 };
             row.Children.Add(new StackPanel
@@ -1191,7 +1243,7 @@ public partial class MainWindow : Window
             });
             _importFormatSelectionRows.Add((file, toggle));
         }
-        ImportFormatSelectionSummaryText.Text = $"共 {files.Count} 个文件。可逐项决定是否在导入后补齐 EPUB 与 AZW3；原始文件始终保留。";
+        ImportFormatSelectionSummaryText.Text = T("共 {0} 个文件。可逐项决定是否在导入后补齐 EPUB 与 AZW3；原始文件始终保留。", files.Count);
         ShowOverlay(ImportFormatSelectionOverlay);
         ImportFormatSelectionOverlay.Focus();
         _importFormatSelectionCompletion = new TaskCompletionSource<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?>(
@@ -1333,7 +1385,7 @@ public partial class MainWindow : Window
         if (paths.Length > 0)
             await ImportPathsAsync(paths);
         else
-            SetTaskStatus("无法读取拖入的文件或文件夹路径。");
+            SetTaskStatus(T("无法读取拖入的文件或文件夹路径。"));
     }
 
     private async Task OpenBookAsync(
@@ -1346,16 +1398,16 @@ public partial class MainWindow : Window
             _appSettings.PreferredOpenFormat);
         if (file is null)
         {
-            SetTaskStatus("这本书没有可打开的文件。");
-            await ShowMessageAsync("无法打开书籍", "所选格式文件不存在或已不再支持。");
+            SetTaskStatus(T("这本书没有可打开的文件。"));
+            await ShowMessageAsync(T("无法打开书籍"), T("所选格式文件不存在或已不再支持。"));
             return;
         }
 
         var path = ViewModel.GetAbsoluteFilePath(file);
         if (!File.Exists(path))
         {
-            SetTaskStatus($"找不到文件：{file.RelativePath}");
-            await ShowMessageAsync("无法打开书籍", "所选格式文件不存在或已被删除。");
+            SetTaskStatus(T("找不到文件：{0}", file.RelativePath));
+            await ShowMessageAsync(T("无法打开书籍"), T("所选格式文件不存在或已被删除。"));
             return;
         }
 
@@ -1376,7 +1428,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                SetTaskStatus($"正在准备《{card.Title}》的阅读缓存…");
+                SetTaskStatus(T("正在准备《{0}》的阅读缓存…", card.Title));
                 var cache = await _readerFormatCache.PrepareEpubAsync(
                     path,
                     file.Sha256,
@@ -1389,8 +1441,8 @@ public partial class MainWindow : Window
             }
             catch (Exception exception)
             {
-                SetTaskStatus($"准备阅读缓存失败：{exception.Message}");
-                await ShowMessageAsync("无法打开书籍", exception.Message);
+                SetTaskStatus(T("准备阅读缓存失败：{0}", UiText.Localize(exception.Message)));
+                await ShowMessageAsync(T("无法打开书籍"), UiText.Localize(exception.Message));
             }
             return;
         }
@@ -1398,12 +1450,12 @@ public partial class MainWindow : Window
         try
         {
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-            SetTaskStatus($"已用系统默认程序打开《{card.Title}》。");
+            SetTaskStatus(T("已用系统默认程序打开《{0}》。", card.Title));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"打开文件失败：{exception.Message}");
-            await ShowMessageAsync("无法打开书籍", exception.Message);
+            SetTaskStatus(T("打开文件失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法打开书籍"), UiText.Localize(exception.Message));
         }
     }
 
@@ -1413,10 +1465,10 @@ public partial class MainWindow : Window
         var card = _selectedCard;
         if (_readerDocument is not null || _readerIsPdf)
         {
-            await ShowMessageAsync("无法删除书籍", "当前正在阅读这本书，请先关闭阅读器。");
+            await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync("删除书籍", $"确定删除《{card.Title}》及其全部文件吗？")) return;
+        if (!await ConfirmAsync(T("删除书籍"), T("确定删除《{0}》及其全部文件吗？", card.Title))) return;
 
         try
         {
@@ -1431,8 +1483,8 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"删除失败：{exception.Message}");
-            await ShowMessageAsync("无法删除书籍", exception.Message);
+            SetTaskStatus(T("删除失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法删除书籍"), UiText.Localize(exception.Message));
         }
     }
 
@@ -1442,10 +1494,10 @@ public partial class MainWindow : Window
         var card = _selectedCard;
         if (_readerDocument is not null || _readerIsPdf)
         {
-            await ShowMessageAsync("无法删除格式", "当前正在阅读这本书，请先关闭阅读器。");
+            await ShowMessageAsync(T("无法删除格式"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync("删除文件", $"确定从《{card.Title}》中删除 {file.Format.ToUpperInvariant()} 文件吗？")) return;
+        if (!await ConfirmAsync(T("删除文件"), T("确定从《{0}》中删除 {1} 文件吗？", card.Title, file.Format.ToUpperInvariant()))) return;
 
         try
         {
@@ -1458,8 +1510,8 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"删除文件失败：{exception.Message}");
-            await ShowMessageAsync("无法删除格式", exception.Message);
+            SetTaskStatus(T("删除文件失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法删除格式"), UiText.Localize(exception.Message));
         }
     }
 
@@ -1478,7 +1530,7 @@ public partial class MainWindow : Window
         SyncCardSelectionVisuals();
         var selectedCount = GetSelectedCards().Count;
         MultiSelectionBar.IsVisible = selectedCount > 1;
-        MultiSelectionText.Text = selectedCount > 0 ? $"已选择 {selectedCount} 本书" : string.Empty;
+        MultiSelectionText.Text = selectedCount > 0 ? T("已选择 {0} 本书", selectedCount) : string.Empty;
     }
 
     private void SyncCardSelectionVisuals()
@@ -1497,7 +1549,7 @@ public partial class MainWindow : Window
     {
         var menu = new ContextMenu();
 
-        var openMenu = new MenuItem { Header = "打开书籍" };
+        var openMenu = new MenuItem { Header = T("打开书籍") };
         ApplyLegacyMenuItemSize(openMenu);
         openMenu.Resources["FlyoutThemeMinWidth"] = 0d;
         foreach (var format in new[] { "EPUB", "PDF", "AZW3" })
@@ -1519,7 +1571,7 @@ public partial class MainWindow : Window
         menu.Items.Add(openMenu);
         menu.Items.Add(new Separator());
 
-        var convertMenu = new MenuItem { Header = "转换为" };
+        var convertMenu = new MenuItem { Header = T("转换为") };
         ApplyLegacyMenuItemSize(convertMenu);
         convertMenu.Resources["FlyoutThemeMinWidth"] = 0d;
         foreach (var target in new[] { "epub", "azw3", "pdf" })
@@ -1538,10 +1590,10 @@ public partial class MainWindow : Window
         menu.Items.Add(convertMenu);
         menu.Items.Add(new Separator());
 
-        menu.Items.Add(CreateMenuItem("发送到 Kindle 设备", SendSelectedBookToKindleCoreAsync));
-        menu.Items.Add(CreateMenuItem("发送到 Kindle 邮箱", SendSelectedBooksByEmailAsync));
+        menu.Items.Add(CreateMenuItem(T("发送到 Kindle 设备"), SendSelectedBookToKindleCoreAsync));
+        menu.Items.Add(CreateMenuItem(T("发送到 Kindle 邮箱"), SendSelectedBooksByEmailAsync));
 
-        var collectionMenu = new MenuItem { Header = "收藏夹" };
+        var collectionMenu = new MenuItem { Header = T("收藏夹") };
         ApplyLegacyMenuItemSize(collectionMenu);
         collectionMenu.Resources["FlyoutThemeMinWidth"] = 0d;
         foreach (var folder in CollectionFolders)
@@ -1559,7 +1611,7 @@ public partial class MainWindow : Window
         }
         if (CollectionFolders.Count > 0)
             collectionMenu.Items.Add(new Separator());
-        collectionMenu.Items.Add(CreateMenuItem("新建收藏夹…", async () =>
+        collectionMenu.Items.Add(CreateMenuItem(T("新建收藏夹…"), async () =>
         {
             var name = await PromptCollectionNameAsync();
             if (string.IsNullOrWhiteSpace(name)) return;
@@ -1568,16 +1620,16 @@ public partial class MainWindow : Window
                 var collection = await _library.CreateCollectionAsync(name, _lifetimeCancellation.Token);
                 await _library.AddBookToCollectionAsync(card.Book.Id, collection.Id, _lifetimeCancellation.Token);
                 await RefreshLibraryAsync();
-                SetTaskStatus($"已创建并加入收藏夹“{name}”。");
+                SetTaskStatus(T("已创建并加入收藏夹“{0}”。", name));
             }
             catch (Exception exception)
             {
-                SetTaskStatus($"创建收藏夹失败：{exception.Message}");
+                SetTaskStatus(T("创建收藏夹失败：{0}", UiText.Localize(exception.Message)));
             }
         }));
         if (CollectionFolders.Count > 0)
         {
-            var deleteCollectionMenu = new MenuItem { Header = "删除收藏夹" };
+            var deleteCollectionMenu = new MenuItem { Header = T("删除收藏夹") };
             ApplyLegacyMenuItemSize(deleteCollectionMenu);
             foreach (var folder in CollectionFolders)
                 deleteCollectionMenu.Items.Add(CreateMenuItem(folder.Name, () => DeleteCollectionAsync(folder)));
@@ -1586,7 +1638,7 @@ public partial class MainWindow : Window
         menu.Items.Add(collectionMenu);
         menu.Items.Add(new Separator());
 
-        var deleteFormatMenu = new MenuItem { Header = "删除格式" };
+        var deleteFormatMenu = new MenuItem { Header = T("删除格式") };
         ApplyLegacyMenuItemSize(deleteFormatMenu);
         deleteFormatMenu.Resources["FlyoutThemeMinWidth"] = 0d;
         foreach (var format in new[] { "EPUB", "PDF", "MOBI", "AZW3" })
@@ -1612,7 +1664,7 @@ public partial class MainWindow : Window
         deleteFormatMenu.IsEnabled = deleteFormatMenu.Items.OfType<MenuItem>().Any(item => item.IsEnabled);
         menu.Items.Add(deleteFormatMenu);
         deleteFormatMenu.Items.Add(new Separator());
-        deleteFormatMenu.Items.Add(CreateMenuItem("全部", () => DeleteBookFromContextAsync(card)));
+        deleteFormatMenu.Items.Add(CreateMenuItem(T("全部"), () => DeleteBookFromContextAsync(card)));
 
         AttachInstantMenuHover(menu);
         return menu;
@@ -1625,7 +1677,7 @@ public partial class MainWindow : Window
                 string.Equals(candidate.Format, format, StringComparison.OrdinalIgnoreCase));
         if (file is null)
         {
-            SetTaskStatus("所选格式文件不存在或不支持。");
+            SetTaskStatus(T("所选格式文件不存在或不支持。"));
             return;
         }
 
@@ -1744,9 +1796,9 @@ public partial class MainWindow : Window
 
     private static string GetReadingStatusName(LibraryReadingStatus status) => status switch
     {
-        LibraryReadingStatus.Reading => "阅读中",
-        LibraryReadingStatus.Finished => "已读",
-        _ => "待读"
+        LibraryReadingStatus.Reading => T("阅读中"),
+        LibraryReadingStatus.Finished => T("已读"),
+        _ => T("待读")
     };
 
     private async Task DeleteSelectedBooksAsync()
@@ -1755,10 +1807,10 @@ public partial class MainWindow : Window
         if (cards.Count == 0) return;
         if (_readerDocument is not null || _readerIsPdf)
         {
-            await ShowMessageAsync("无法删除书籍", "当前正在阅读其中一本书，请先关闭阅读器。");
+            await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读其中一本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync("删除所选书籍", $"确定删除选中的 {cards.Count} 本书及其文件吗？")) return;
+        if (!await ConfirmAsync(T("删除所选书籍"), T("确定删除选中的 {0} 本书及其文件吗？", cards.Count))) return;
 
         try
         {
@@ -1767,12 +1819,12 @@ public partial class MainWindow : Window
             _selectedBookIds.Clear();
             ClearSelectedBook();
             await RefreshLibraryAsync();
-            SetTaskStatus($"已删除 {cards.Count} 本书。");
+            SetTaskStatus(T("已删除 {0} 本书。", cards.Count));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"批量删除失败：{exception.Message}");
-            await ShowMessageAsync("无法删除书籍", exception.Message);
+            SetTaskStatus(T("批量删除失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法删除书籍"), UiText.Localize(exception.Message));
         }
     }
 
@@ -1780,35 +1832,35 @@ public partial class MainWindow : Window
     {
         if (_readerDocument is not null || _readerIsPdf)
         {
-            await ShowMessageAsync("无法删除书籍", "当前正在阅读这本书，请先关闭阅读器。");
+            await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync("删除书籍", $"确定删除《{card.Title}》及其全部文件吗？")) return;
+        if (!await ConfirmAsync(T("删除书籍"), T("确定删除《{0}》及其全部文件吗？", card.Title))) return;
         try
         {
             await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
             _selectedBookIds.Remove(card.Book.Id);
             if (_selectedCard?.Book.Id == card.Book.Id) ClearSelectedBook();
             await RefreshLibraryAsync();
-            SetTaskStatus($"已删除《{card.Title}》。");
+            SetTaskStatus(T("已删除《{0}》。", card.Title));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"删除失败：{exception.Message}");
-            await ShowMessageAsync("无法删除书籍", exception.Message);
+            SetTaskStatus(T("删除失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法删除书籍"), UiText.Localize(exception.Message));
         }
     }
 
     private async Task ToggleFavoriteAsync(BookCardViewModel card)
     {
         card.Book.IsFavorite = !card.Book.IsFavorite;
-        await SaveBookMetadataAsync(card, card.Book.IsFavorite ? "已加入收藏。" : "已取消收藏。");
+        await SaveBookMetadataAsync(card, card.Book.IsFavorite ? T("已加入收藏。") : T("已取消收藏。"));
     }
 
     private async Task UpdateReadingStatusAsync(BookCardViewModel card, LibraryReadingStatus status)
     {
         card.Book.ReadingStatus = status;
-        await SaveBookMetadataAsync(card, $"已标记为“{GetReadingStatusName(status)}”。");
+        await SaveBookMetadataAsync(card, T("已标记为“{0}”。", GetReadingStatusName(status)));
     }
 
     private async Task ToggleBookCollectionAsync(BookCardViewModel card, BookCollectionFolderViewModel folder)
@@ -1820,12 +1872,12 @@ public partial class MainWindow : Window
             else
                 await _library.AddBookToCollectionAsync(card.Book.Id, folder.Collection.Id, _lifetimeCancellation.Token);
             await RefreshLibraryAsync();
-            SetTaskStatus($"已更新“{folder.Name}”中的书籍归属。");
+            SetTaskStatus(T("已更新“{0}”中的书籍归属。", folder.Name));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"更新收藏夹失败：{exception.Message}");
-            await ShowMessageAsync("无法更新收藏夹", exception.Message);
+            SetTaskStatus(T("更新收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法更新收藏夹"), UiText.Localize(exception.Message));
         }
     }
 
@@ -1839,7 +1891,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"保存书籍信息失败：{exception.Message}");
+            SetTaskStatus(T("保存书籍信息失败：{0}", UiText.Localize(exception.Message)));
         }
     }
 
@@ -1847,7 +1899,7 @@ public partial class MainWindow : Window
     {
         if (_conversionInProgress)
         {
-            await ShowMessageAsync("格式转换", "已有一本书正在转换，请稍候。");
+            await ShowMessageAsync(T("格式转换"), T("已有一本书正在转换，请稍候。"));
             return;
         }
 
@@ -1856,21 +1908,21 @@ public partial class MainWindow : Window
         if (card.Book.Files.Any(file =>
                 string.Equals(BookFormatConversionPolicy.Normalize(file.Format), target, StringComparison.OrdinalIgnoreCase)))
         {
-            await ShowMessageAsync("格式转换", $"这本书已经有 {target.ToUpperInvariant()} 格式。");
+            await ShowMessageAsync(T("格式转换"), T("这本书已经有 {0} 格式。", target.ToUpperInvariant()));
             return;
         }
 
         var sourceFile = BookFormatConversionPolicy.SelectSource(card.Book.Files, target);
         if (sourceFile is null)
         {
-            await ShowMessageAsync("格式转换", "需要 EPUB、AZW3、PDF 或 MOBI 作为转换源。");
+            await ShowMessageAsync(T("格式转换"), T("需要 EPUB、AZW3、PDF 或 MOBI 作为转换源。"));
             return;
         }
 
         var sourcePath = ViewModel.GetAbsoluteFilePath(sourceFile);
         if (!File.Exists(sourcePath))
         {
-            SetTaskStatus($"找不到转换来源：{sourceFile.RelativePath}");
+            SetTaskStatus(T("找不到转换来源：{0}", sourceFile.RelativePath));
             return;
         }
 
@@ -1881,10 +1933,10 @@ public partial class MainWindow : Window
         _conversionCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         var initialProgress = new FormatConversionProgress(
             0,
-            $"准备将 {sourceFile.Format.ToUpperInvariant()} 转换为 {target.ToUpperInvariant()}…");
+            T("准备将 {0} 转换为 {1}…", sourceFile.Format.ToUpperInvariant(), target.ToUpperInvariant()));
         _conversionLastProgress = initialProgress;
         ShowBookConversionPopup(card.Title, sourceFile.Format, target, initialProgress);
-        SetTaskStatus(initialProgress.Message);
+        SetTaskStatus(UiText.Localize(initialProgress.Message));
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "KkindleConversions", Guid.NewGuid().ToString("N"));
         var temporaryOutput = Path.Combine(
             temporaryDirectory,
@@ -1899,23 +1951,23 @@ public partial class MainWindow : Window
                 progress,
                 _conversionCancellation.Token,
                 new FormatConversionMetadata(card.Book.Title, card.Book.Authors));
-            ApplyBookConversionProgress(new FormatConversionProgress(100, "正在写入书库…"));
+            ApplyBookConversionProgress(new FormatConversionProgress(100, T("正在写入书库…")));
             await _library.AddFileToBookAsync(card.Book.Id, temporaryOutput, _conversionCancellation.Token);
             await RefreshLibraryAsync();
-            ApplyBookConversionProgress(new FormatConversionProgress(100, "转换完成。"));
-            SetTaskStatus($"已为《{card.Title}》添加 {target.ToUpperInvariant()} 格式。");
+            ApplyBookConversionProgress(new FormatConversionProgress(100, T("转换完成。")));
+            SetTaskStatus(T("已为《{0}》添加 {1} 格式。", card.Title, target.ToUpperInvariant()));
         }
         catch (OperationCanceledException) when (_conversionCancellation?.IsCancellationRequested == true)
         {
-            SetTaskStatus("格式转换已取消。");
+            SetTaskStatus(T("格式转换已取消。"));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"格式转换失败：{exception.Message}");
+            SetTaskStatus(T("格式转换失败：{0}", UiText.Localize(exception.Message)));
             ApplyBookConversionProgress(new FormatConversionProgress(
                 _conversionLastProgress.Percentage,
-                "格式转换失败。"));
-            await ShowMessageAsync("格式转换失败", exception.Message);
+                T("格式转换失败。")));
+            await ShowMessageAsync(T("格式转换失败"), UiText.Localize(exception.Message));
         }
         finally
         {
@@ -1972,7 +2024,7 @@ public partial class MainWindow : Window
         if (_conversionInProgress || _automaticReaderFormatGenerationInProgress)
             return new AutomaticReaderFormatGenerationResult(
                 0,
-                ["已有格式转换正在进行，未启动 EPUB/AZW3 自动补齐。"]);
+                [T("已有格式转换正在进行，未启动 EPUB/AZW3 自动补齐。")]);
 
         _automaticReaderFormatGenerationInProgress = true;
         var temporaryRoot = Path.Combine(Path.GetTempPath(), "Kkindle", "automatic-formats", Guid.NewGuid().ToString("N"));
@@ -1991,7 +2043,7 @@ public partial class MainWindow : Window
                     var sourceFile = BookFormatConversionPolicy.SelectSource(book.Files, targetFormat);
                     if (sourceFile is null)
                     {
-                        failures.Add($"《{book.Title}》没有可用于生成 {targetFormat.ToUpperInvariant()} 的源格式。");
+                        failures.Add(T("《{0}》没有可用于生成 {1} 的源格式。", book.Title, targetFormat.ToUpperInvariant()));
                         continue;
                     }
 
@@ -2003,12 +2055,12 @@ public partial class MainWindow : Window
                     {
                         Directory.CreateDirectory(bookTemporaryDirectory);
                         var sourcePath = _library.GetAbsoluteFilePath(sourceFile);
-                        SetTaskStatus($"正在为《{book.Title}》生成 {targetFormat.ToUpperInvariant()}…");
+                        SetTaskStatus(T("正在为《{0}》生成 {1}…", book.Title, targetFormat.ToUpperInvariant()));
                         await _formatConverter.ConvertAsync(
                             sourcePath,
                             temporaryOutput,
                             new Progress<FormatConversionProgress>(value =>
-                                SetTaskStatus($"正在生成 {targetFormat.ToUpperInvariant()}：{book.Title}（{value.RoundedPercentage}%）")),
+                                SetTaskStatus(T("正在生成 {0}：{1}（{2}%）", targetFormat.ToUpperInvariant(), book.Title, value.RoundedPercentage))),
                             cancellationToken,
                             new FormatConversionMetadata(book.Title, book.Authors));
                         var addedFile = await _library.AddFileToBookAsync(book.Id, temporaryOutput, cancellationToken);
@@ -2021,7 +2073,7 @@ public partial class MainWindow : Window
                     }
                     catch (Exception exception)
                     {
-                        failures.Add($"《{book.Title}》生成 {targetFormat.ToUpperInvariant()}：{exception.Message}");
+                        failures.Add(T("《{0}》生成 {1}：{2}", book.Title, targetFormat.ToUpperInvariant(), UiText.Localize(exception.Message)));
                     }
                     finally
                     {
@@ -2051,7 +2103,7 @@ public partial class MainWindow : Window
 
     private void ShowBookConversionPopup(string title, string sourceFormat, string targetFormat, FormatConversionProgress progress)
     {
-        BookConversionPopupTitleText.Text = $"转换《{title}》";
+        BookConversionPopupTitleText.Text = T("转换《{0}》", title);
         BookConversionPopupFormatText.Text = $"Calibre · {sourceFormat.ToUpperInvariant()} → {targetFormat.ToUpperInvariant()}";
         BookConversionPopup.IsVisible = true;
         ApplyBookConversionProgress(progress);
@@ -2066,14 +2118,14 @@ public partial class MainWindow : Window
         BookConversionPopupPercentageText.Text = $"{progress.RoundedPercentage}%";
         BookConversionPopupMessageText.Text = GetBookConversionPopupMessage(progress);
         _conversionCard?.SetConversionProgress(progress, _conversionMinimized);
-        SetTaskStatus($"格式转换：{progress.RoundedPercentage}%");
+        SetTaskStatus(T("格式转换：{0}%", progress.RoundedPercentage));
     }
 
     private static string GetBookConversionPopupMessage(FormatConversionProgress progress)
     {
         if (progress.Percentage <= 0 || progress.Percentage >= 100)
-            return progress.Message;
-        return "Calibre 正在转换…";
+            return UiText.Localize(progress.Message);
+        return T("Calibre 正在转换…");
     }
 
     private void MinimizeBookConversionPopup()
@@ -2082,7 +2134,7 @@ public partial class MainWindow : Window
         _conversionMinimized = true;
         _conversionCard?.SetConversionProgress(_conversionLastProgress, showIndicator: true);
         BookConversionPopup.IsVisible = false;
-        SetTaskStatus($"格式转换已在后台进行：{_conversionLastProgress.RoundedPercentage}%（点击书籍卡片可恢复进度）");
+        SetTaskStatus(T("格式转换已在后台进行：{0}%（点击书籍卡片可恢复进度）", _conversionLastProgress.RoundedPercentage));
     }
 
     private void RestoreBookConversionPopup()
@@ -2120,12 +2172,12 @@ public partial class MainWindow : Window
     {
         if (_doubanMatchCancellation is not null)
         {
-            SetTaskStatus("豆瓣匹配正在进行中，请稍候。");
+            SetTaskStatus(T("豆瓣匹配正在进行中，请稍候。"));
             return;
         }
         if (!_appSettings.NetworkEnabled)
         {
-            await ShowMessageAsync("网络功能已关闭", "请先在应用设置中允许网络功能，再使用豆瓣匹配。");
+            await ShowMessageAsync(T("网络功能已关闭"), T("请先在应用设置中允许网络功能，再使用豆瓣匹配。"));
             return;
         }
 
@@ -2142,10 +2194,10 @@ public partial class MainWindow : Window
         _doubanMatchCancellation = cancellation;
         try
         {
-            SetTaskStatus($"正在搜索《{searchTitle}》的豆瓣信息…");
+            SetTaskStatus(T("正在搜索《{0}》的豆瓣信息…", searchTitle));
             ShowTaskProgressPopup();
             TaskProgressPopupBar.IsIndeterminate = true;
-            TaskProgressPopupText.Text = $"正在搜索《{searchTitle}》的豆瓣信息…";
+            TaskProgressPopupText.Text = T("正在搜索《{0}》的豆瓣信息…", searchTitle);
             await SearchAndShowDoubanCandidatesAsync(searchTitle, searchAuthor, cancellation.Token);
 
             while (true)
@@ -2164,18 +2216,18 @@ public partial class MainWindow : Window
                 }
                 if (candidate is null)
                 {
-                    SetTaskStatus("已取消豆瓣匹配。");
+                    SetTaskStatus(T("已取消豆瓣匹配。"));
                     return;
                 }
                 _doubanSelectedCandidate = candidate;
 
-                SetTaskStatus($"正在读取《{candidate.Title}》的豆瓣详情…");
+                SetTaskStatus(T("正在读取《{0}》的豆瓣详情…", candidate.Title));
                 var metadata = await _douban.GetDetailsAsync(candidate, cancellation.Token);
                 var choices = await ConfirmDoubanMetadataAsync(metadata, candidate);
                 if (choices?.GoBack == true) continue;
                 if (choices is null)
                 {
-                    SetTaskStatus("已取消豆瓣匹配。");
+                    SetTaskStatus(T("已取消豆瓣匹配。"));
                     return;
                 }
 
@@ -2199,7 +2251,7 @@ public partial class MainWindow : Window
                 {
                     try
                     {
-                        SetTaskStatus("正在下载并保存豆瓣封面…");
+                        SetTaskStatus(T("正在下载并保存豆瓣封面…"));
                         var coverBytes = await _douban.DownloadCoverAsync(metadata.CoverUrl, cancellation.Token);
                         _paths.EnsureDirectories();
                         var coverName = $"{book.Id:N}-douban.jpg";
@@ -2211,24 +2263,24 @@ public partial class MainWindow : Window
                     }
                     catch (Exception exception)
                     {
-                        SetTaskStatus($"豆瓣信息已读取，但封面下载失败：{exception.Message}");
+                        SetTaskStatus(T("豆瓣信息已读取，但封面下载失败：{0}", UiText.Localize(exception.Message)));
                     }
                 }
 
                 await _library.UpdateMetadataAsync(book, _lifetimeCancellation.Token);
                 await RefreshLibraryAsync();
-                SetTaskStatus($"已用豆瓣信息更新《{book.Title}》。");
+                SetTaskStatus(T("已用豆瓣信息更新《{0}》。", book.Title));
                 return;
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            SetTaskStatus("豆瓣匹配已取消。");
+            SetTaskStatus(T("豆瓣匹配已取消。"));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"豆瓣匹配失败：{exception.Message}");
-            await ShowMessageAsync("豆瓣匹配失败", exception.Message);
+            SetTaskStatus(T("豆瓣匹配失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("豆瓣匹配失败"), UiText.Localize(exception.Message));
         }
         finally
         {
@@ -2258,8 +2310,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            TaskProgressPopupText.Text = $"正在搜索豆瓣“{title}”…";
-            SetTaskStatus($"正在搜索豆瓣“{title}”…");
+            TaskProgressPopupText.Text = T("正在搜索豆瓣“{0}”…", title);
+            SetTaskStatus(T("正在搜索豆瓣“{0}”…", title));
             var candidates = await _douban.SearchAsync(title, authors, cancellationToken);
             if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(authors))
             {
@@ -2272,14 +2324,14 @@ public partial class MainWindow : Window
                 DoubanCandidates.Add(new DoubanCandidateViewModel(item));
             if (candidates.Count > 0)
             {
-                TaskProgressPopupText.Text = "正在加载豆瓣候选封面…";
-                SetTaskStatus("正在加载豆瓣候选封面…");
+                TaskProgressPopupText.Text = T("正在加载豆瓣候选封面…");
+                SetTaskStatus(T("正在加载豆瓣候选封面…"));
                 await LoadDoubanCandidateCoversAsync(cancellationToken);
-                SetTaskStatus($"豆瓣返回 {candidates.Count} 条结果，请选择匹配条目。");
+                SetTaskStatus(T("豆瓣返回 {0} 条结果，请选择匹配条目。", candidates.Count));
             }
             else
             {
-                SetTaskStatus($"豆瓣没有返回“{title}”的结果，可修改关键词后重新搜索。");
+                SetTaskStatus(T("豆瓣没有返回“{0}”的结果，可修改关键词后重新搜索。", title));
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -2293,7 +2345,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"豆瓣搜索失败：{exception.Message}");
+            SetTaskStatus(T("豆瓣搜索失败：{0}", UiText.Localize(exception.Message)));
         }
     }
 
@@ -2330,7 +2382,7 @@ public partial class MainWindow : Window
         _doubanPreviewMetadata = metadata;
         DoubanCandidateOverlay.IsVisible = false;
         DoubanPreviewSummaryText.Text = BuildDoubanSummary(metadata);
-        DoubanPreviewStatusText.Text = "未勾选的本地字段不会被修改";
+        DoubanPreviewStatusText.Text = T("未勾选的本地字段不会被修改");
         DoubanPreviewCoverImage.Source = DoubanCandidates
             .FirstOrDefault(item => item.Candidate.SubjectId == candidate.SubjectId)
             ?.CoverImage;
@@ -2433,18 +2485,18 @@ public partial class MainWindow : Window
         static string Fallback(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();
         var rows = new List<string>
         {
-            $"书名：{metadata.Title}",
-            $"作者：{Fallback(metadata.Authors)}",
-            $"译者：{Fallback(metadata.Translators)}",
-            $"出版社：{Fallback(metadata.Publisher)}",
-            $"出版年：{Fallback(metadata.PublishDate)}",
-            $"ISBN：{Fallback(metadata.Isbn)}",
-            $"页数 / 装帧：{Fallback(metadata.Pages)} / {Fallback(metadata.Binding)}",
-            $"定价：{Fallback(metadata.Price)}",
-            $"系列：{Fallback(metadata.Series)}",
-            metadata.Rating is null ? "豆瓣评分：暂无" : $"豆瓣评分：{metadata.Rating:0.0}（{metadata.RatingCount} 人评价）",
+            T("书名：{0}", metadata.Title),
+            T("作者：{0}", Fallback(metadata.Authors)),
+            T("译者：{0}", Fallback(metadata.Translators)),
+            T("出版社：{0}", Fallback(metadata.Publisher)),
+            T("出版年：{0}", Fallback(metadata.PublishDate)),
+            T("ISBN：{0}", Fallback(metadata.Isbn)),
+            T("页数 / 装帧：{0} / {1}", Fallback(metadata.Pages), Fallback(metadata.Binding)),
+            T("定价：{0}", Fallback(metadata.Price)),
+            T("系列：{0}", Fallback(metadata.Series)),
+            metadata.Rating is null ? T("豆瓣评分：暂无") : T("豆瓣评分：{0:0.0}（{1} 人评价）", metadata.Rating, metadata.RatingCount),
             string.Empty,
-            $"简介：{Fallback(metadata.Description)}"
+            T("简介：{0}", Fallback(metadata.Description))
         };
         return string.Join(Environment.NewLine, rows);
     }
@@ -2495,7 +2547,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"无法打开豆瓣详情页：{exception.Message}");
+            SetTaskStatus(T("无法打开豆瓣详情页：{0}", UiText.Localize(exception.Message)));
         }
     }
 
@@ -2570,7 +2622,7 @@ public partial class MainWindow : Window
         ConfirmationTitleText.Text = title;
         ConfirmationMessageText.Text = message;
         ConfirmationOkButton.Content = primaryText
-            ?? (title.Contains("删除", StringComparison.Ordinal) ? "确认删除" : "应用");
+            ?? (title.Contains(T("删除"), StringComparison.Ordinal) ? T("确认删除") : T("应用"));
         ShowOverlay(ConfirmationOverlay);
         _confirmationCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var completion = _confirmationCompletion;
@@ -2602,8 +2654,8 @@ public partial class MainWindow : Window
     // when the user dismisses the dialog.
     private Task ShowMessageAsync(string title, string message)
     {
-        MessageTitleText.Text = title;
-        MessageBodyText.Text = message;
+        MessageTitleText.Text = UiText.Localize(title);
+        MessageBodyText.Text = UiText.Localize(message);
         ShowOverlay(MessageOverlay);
         MessageOverlay.Focus();
         _messageCompletion?.TrySetResult(true);
@@ -2662,18 +2714,18 @@ public partial class MainWindow : Window
             await _library.CreateCollectionAsync(name, _lifetimeCancellation.Token);
             await RefreshCollectionsAsync();
             SetLibraryViewMode(LibraryViewMode.Collections);
-            SetTaskStatus($"已创建收藏夹“{name.Trim()}”。");
+            SetTaskStatus(T("已创建收藏夹“{0}”。", name.Trim()));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"创建收藏夹失败：{exception.Message}");
-            await ShowMessageAsync("无法创建收藏夹", exception.Message);
+            SetTaskStatus(T("创建收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法创建收藏夹"), UiText.Localize(exception.Message));
         }
     }
 
     private async Task DeleteCollectionAsync(BookCollectionFolderViewModel folder)
     {
-        if (!await ConfirmAsync("删除收藏夹", $"确定删除收藏夹“{folder.Name}”吗？书籍文件不会被删除。")) return;
+        if (!await ConfirmAsync(T("删除收藏夹"), T("确定删除收藏夹“{0}”吗？书籍文件不会被删除。", folder.Name))) return;
 
         try
         {
@@ -2685,12 +2737,12 @@ public partial class MainWindow : Window
             }
             await RefreshLibraryAsync();
             SetLibraryViewMode(LibraryViewMode.Collections);
-            SetTaskStatus($"已删除收藏夹“{folder.Name}”。");
+            SetTaskStatus(T("已删除收藏夹“{0}”。", folder.Name));
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"删除收藏夹失败：{exception.Message}");
-            await ShowMessageAsync("无法删除收藏夹", exception.Message);
+            SetTaskStatus(T("删除收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法删除收藏夹"), UiText.Localize(exception.Message));
         }
     }
 
@@ -2699,7 +2751,7 @@ public partial class MainWindow : Window
         if (_selectedCard is null) return;
         if (DetailCollectionBox.SelectedItem is not BookCollectionFolderViewModel folder)
         {
-            SetTaskStatus("请先选择一个收藏夹。");
+            SetTaskStatus(T("请先选择一个收藏夹。"));
             return;
         }
 
@@ -2709,20 +2761,20 @@ public partial class MainWindow : Window
             if (_selectedCard.Book.CollectionIds.Contains(folder.Collection.Id))
             {
                 await _library.RemoveBookFromCollectionAsync(bookId, folder.Collection.Id, _lifetimeCancellation.Token);
-                SetTaskStatus($"已从“{folder.Name}”移出。 ");
+                SetTaskStatus(T("已从“{0}”移出。 ", folder.Name));
             }
             else
             {
                 await _library.AddBookToCollectionAsync(bookId, folder.Collection.Id, _lifetimeCancellation.Token);
-                SetTaskStatus($"已加入“{folder.Name}”。");
+                SetTaskStatus(T("已加入“{0}”。", folder.Name));
             }
 
             await RefreshLibraryAsync();
         }
         catch (Exception exception)
         {
-            SetTaskStatus($"更新收藏夹失败：{exception.Message}");
-            await ShowMessageAsync("无法更新收藏夹", exception.Message);
+            SetTaskStatus(T("更新收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法更新收藏夹"), UiText.Localize(exception.Message));
         }
     }
 
@@ -2773,11 +2825,11 @@ public partial class MainWindow : Window
     private void ImportButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         var menu = new ContextMenu();
-        var importFiles = new MenuItem { Header = "导入文件" };
+        var importFiles = new MenuItem { Header = T("导入文件") };
         importFiles.Click += ImportFilesButton_Click;
         menu.Items.Add(importFiles);
 
-        var importFolder = new MenuItem { Header = "导入文件夹" };
+        var importFolder = new MenuItem { Header = T("导入文件夹") };
         importFolder.Click += ImportFolderButton_Click;
         menu.Items.Add(importFolder);
 
@@ -2791,11 +2843,11 @@ public partial class MainWindow : Window
 
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "导入书籍文件",
+            Title = T("导入书籍文件"),
             AllowMultiple = true,
             FileTypeFilter =
             [
-                new FilePickerFileType("电子书")
+                new FilePickerFileType(T("电子书"))
                 {
                     Patterns = ["*.epub", "*.pdf", "*.mobi", "*.azw3"]
                 }
@@ -2814,7 +2866,7 @@ public partial class MainWindow : Window
 
         var folders = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "导入书籍文件夹",
+            Title = T("导入书籍文件夹"),
             AllowMultiple = false
         });
         await ImportPathsAsync(folders
@@ -3179,7 +3231,7 @@ public partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: BookCollectionFolderViewModel folder }) return;
         ViewModel.CollectionFilterId = folder.Collection.Id;
-        ViewModel.CollectionFilterName = folder.Name;
+        ViewModel.CollectionFilterName = folder.Collection.Name;
         ViewModel.RefreshView();
         SetLibraryViewMode(LibraryViewMode.Grid);
         e.Handled = true;
@@ -3192,7 +3244,7 @@ public partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: BookCollectionFolderViewModel folder } control) return;
         var menu = new ContextMenu();
-        menu.Items.Add(CreateMenuItem("删除收藏夹", () => DeleteCollectionAsync(folder)));
+        menu.Items.Add(CreateMenuItem(T("删除收藏夹"), () => DeleteCollectionAsync(folder)));
         menu.Open(control);
         e.Handled = true;
     }
@@ -3203,7 +3255,7 @@ public partial class MainWindow : Window
             return;
         if (sender is not Control source) return;
         var menu = new ContextMenu();
-        menu.Items.Add(CreateMenuItem("创建收藏夹", CreateCollectionAsync));
+        menu.Items.Add(CreateMenuItem(T("创建收藏夹"), CreateCollectionAsync));
         menu.Open(source);
         e.Handled = true;
     }
@@ -3280,7 +3332,7 @@ public partial class MainWindow : Window
         book.Isbn = DetailIsbnBox.Text?.Trim();
         book.PageCount = DetailPageCountBox.Text?.Trim();
         book.Binding = DetailBindingBox.Text?.Trim();
-        await SaveBookMetadataAsync(_selectedCard, "书籍信息已保存。");
+        await SaveBookMetadataAsync(_selectedCard, T("书籍信息已保存。"));
     }
 
     private async void DoubanMatchButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -3303,8 +3355,8 @@ public partial class MainWindow : Window
         var name = CollectionNameBox.Text?.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            SetTaskStatus("收藏夹名称不能为空。");
-            await ShowMessageAsync("名称不能为空", "请输入收藏夹名称。");
+            SetTaskStatus(T("收藏夹名称不能为空。"));
+            await ShowMessageAsync(T("名称不能为空"), T("请输入收藏夹名称。"));
             return;
         }
         CompleteCollectionName(name);
@@ -3347,7 +3399,7 @@ public partial class MainWindow : Window
     {
         var isMaximized = WindowState == WindowState.Maximized;
         MaximizeWindowGlyph.Data = Geometry.Parse(isMaximized ? RestoreGlyphData : MaximizeGlyphData);
-        AutomationProperties.SetName(MaximizeWindowButton, isMaximized ? "还原" : "最大化");
+        AutomationProperties.SetName(MaximizeWindowButton, isMaximized ? T("还原") : T("最大化"));
     }
 
     private void LibraryRoot_SizeChanged(object? sender, SizeChangedEventArgs e)
@@ -3440,6 +3492,7 @@ public partial class MainWindow : Window
     // Slider/ToggleSwitch/CheckBox without an explicit tool tip gets one built
     // from its accessible name, content text or placeholder.
     private bool _interactiveToolTipsApplied;
+    private readonly Dictionary<Control, string> _interactiveAutoToolTips = [];
 
     private void EnsureInteractiveControlToolTips()
     {
@@ -3448,7 +3501,7 @@ public partial class MainWindow : Window
         ApplyInteractiveControlToolTips(this);
     }
 
-    private static void ApplyInteractiveControlToolTips(Visual root)
+    private void ApplyInteractiveControlToolTips(Visual root)
     {
         if (root is Control control)
         {
@@ -3456,10 +3509,40 @@ public partial class MainWindow : Window
             {
                 var text = BuildControlToolTip(control);
                 if (!string.IsNullOrWhiteSpace(text))
+                {
                     ToolTip.SetTip(control, text);
+                    _interactiveAutoToolTips[control] = text;
+                }
             }
             foreach (var child in root.GetVisualChildren())
                 ApplyInteractiveControlToolTips(child);
+        }
+    }
+
+    private void RefreshInteractiveControlToolTips()
+    {
+        foreach (var entry in _interactiveAutoToolTips.ToArray())
+        {
+            var control = entry.Key;
+            if (ToolTip.GetTip(control) is not string current
+                || !string.Equals(current, entry.Value, StringComparison.Ordinal))
+            {
+                // A later feature-specific tooltip owns this control now.
+                _interactiveAutoToolTips.Remove(control);
+                continue;
+            }
+
+            var text = BuildControlToolTip(control);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                ToolTip.SetTip(control, null);
+                _interactiveAutoToolTips.Remove(control);
+            }
+            else
+            {
+                ToolTip.SetTip(control, text);
+                _interactiveAutoToolTips[control] = text;
+            }
         }
     }
 
@@ -3468,15 +3551,15 @@ public partial class MainWindow : Window
         var accessibleName = AutomationProperties.GetName(control);
         return control switch
         {
-            ToggleSwitch toggleSwitch => DescribeField(accessibleName, "切换开关"),
-            CheckBox checkBox => DescribeField(accessibleName, "切换选项"),
+            ToggleSwitch toggleSwitch => DescribeField(accessibleName, T("切换开关")),
+            CheckBox checkBox => DescribeField(accessibleName, T("切换选项")),
             Button button => FirstNonEmpty(accessibleName, ReadContentText(button.Content)),
-            ComboBox comboBox => DescribeField(accessibleName, "选择选项"),
-            NumericUpDown numberBox => DescribeField(accessibleName, "输入或调整数值"),
+            ComboBox comboBox => DescribeField(accessibleName, T("选择选项")),
+            NumericUpDown numberBox => DescribeField(accessibleName, T("输入或调整数值")),
             TextBox textBox => DescribeField(
                 accessibleName,
-                string.IsNullOrWhiteSpace(textBox.PlaceholderText) ? "输入文本" : textBox.PlaceholderText),
-            Slider slider => DescribeField(accessibleName, "拖动以调整数值"),
+                string.IsNullOrWhiteSpace(textBox.PlaceholderText) ? T("输入文本") : textBox.PlaceholderText),
+            Slider slider => DescribeField(accessibleName, T("拖动以调整数值")),
             _ => null
         };
     }

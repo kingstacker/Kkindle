@@ -15,6 +15,10 @@ public enum LibrarySortMode
 
 public sealed record AppSettings
 {
+    public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
+    public bool OnboardingCompleted { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultDeviceModel { get; init; }
     public string PreferredOpenFormat { get; init; } = "epub";
     public string CalibrePath { get; init; } = string.Empty;
     public bool AutoBackupEnabled { get; init; }
@@ -53,6 +57,10 @@ public sealed record AppSettings
         if (preferred is not ("epub" or "pdf" or "azw3" or "mobi")) preferred = "epub";
         return settings with
         {
+            UiLanguage = UiText.NormalizeLanguage(settings.UiLanguage),
+            DefaultDeviceModel = string.IsNullOrWhiteSpace(settings.DefaultDeviceModel)
+                ? null
+                : settings.DefaultDeviceModel.Trim(),
             PreferredOpenFormat = preferred,
             CalibrePath = (settings.CalibrePath ?? string.Empty).Trim(),
             AutoGenerateEpubAndAzw3OnImport = settings.AutoGenerateEpubAndAzw3OnImport

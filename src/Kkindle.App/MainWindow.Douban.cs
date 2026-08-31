@@ -14,23 +14,20 @@ public sealed class DoubanCandidateViewModel : INotifyPropertyChanged, IDisposab
     public DoubanCandidateViewModel(DoubanBookCandidate candidate)
     {
         Candidate = candidate;
-        Title = candidate.Title;
-        Abstract = string.IsNullOrWhiteSpace(candidate.Abstract)
-            ? "豆瓣未提供简要出版信息"
-            : candidate.Abstract;
-        SubjectText = candidate.SubjectId > 0
-            ? $"豆瓣条目 #{candidate.SubjectId}"
-            : "豆瓣图书条目";
-        RatingText = candidate.Rating is null
-            ? "暂无评分"
-            : $"{candidate.Rating:0.0} / {candidate.RatingCount} 人";
+        UiText.LanguageChanged += OnLanguageChanged;
     }
 
     public DoubanBookCandidate Candidate { get; }
-    public string Title { get; }
-    public string Abstract { get; }
-    public string SubjectText { get; }
-    public string RatingText { get; }
+    public string Title => Candidate.Title;
+    public string Abstract => string.IsNullOrWhiteSpace(Candidate.Abstract)
+        ? UiText.Get("豆瓣未提供简要出版信息")
+        : Candidate.Abstract;
+    public string SubjectText => Candidate.SubjectId > 0
+        ? UiText.Get("豆瓣条目 #{0}", Candidate.SubjectId)
+        : UiText.Get("豆瓣图书条目");
+    public string RatingText => Candidate.Rating is null
+        ? UiText.Get("暂无评分")
+        : UiText.Get("{0:0.0} / {1} 人", Candidate.Rating, Candidate.RatingCount);
 
     public Bitmap? CoverImage
     {
@@ -46,8 +43,16 @@ public sealed class DoubanCandidateViewModel : INotifyPropertyChanged, IDisposab
 
     public void Dispose()
     {
+        UiText.LanguageChanged -= OnLanguageChanged;
         _coverImage?.Dispose();
         _coverImage = null;
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Abstract)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SubjectText)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RatingText)));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -82,14 +87,14 @@ public partial class MainWindow
         var cards = ViewModel.Books.Where(card => card.Book is not null).ToArray();
         if (cards.Length == 0)
         {
-            SetTaskStatus("书库是空的，先导入书籍再使用一键豆瓣匹配。");
+            SetTaskStatus(T("书库是空的，先导入书籍再使用一键豆瓣匹配。"));
             return;
         }
 
         if (!await ConfirmAsync(
-                "一键豆瓣匹配",
-                $"将按书名和作者自动匹配并写入 {cards.Length} 本书的豆瓣信息。此功能不推荐频繁使用，可能触发豆瓣访问限制；是否继续？",
-                "继续匹配"))
+                T("一键豆瓣匹配"),
+                T("将按书名和作者自动匹配并写入 {0} 本书的豆瓣信息。此功能不推荐频繁使用，可能触发豆瓣访问限制；是否继续？", cards.Length),
+                T("继续匹配")))
             return;
         await RunDoubanBatchMatchAsync(cards);
     }
@@ -98,12 +103,12 @@ public partial class MainWindow
     {
         if (_doubanMatchCancellation is not null)
         {
-            SetTaskStatus("豆瓣匹配正在进行中，请稍候。");
+            SetTaskStatus(T("豆瓣匹配正在进行中，请稍候。"));
             return;
         }
         if (!_appSettings.NetworkEnabled)
         {
-            await ShowMessageAsync("网络功能已关闭", "请先在应用设置中允许网络功能，再使用豆瓣匹配。");
+            await ShowMessageAsync(T("网络功能已关闭"), T("请先在应用设置中允许网络功能，再使用豆瓣匹配。"));
             return;
         }
 
@@ -115,8 +120,8 @@ public partial class MainWindow
             {
                 var remaining = DoubanBatchCooldown - elapsed;
                 await ShowMessageAsync(
-                    "豆瓣匹配暂不可用",
-                    $"短时间内只能使用一次一键豆瓣匹配，请约 {Math.Ceiling(remaining.TotalSeconds)} 秒后再试。频繁请求可能触发豆瓣访问限制。");
+                    T("豆瓣匹配暂不可用"),
+                    T("短时间内只能使用一次一键豆瓣匹配，请约 {0} 秒后再试。频繁请求可能触发豆瓣访问限制。", Math.Ceiling(remaining.TotalSeconds)));
                 return;
             }
         }
@@ -152,11 +157,11 @@ public partial class MainWindow
                     || DoubanGuidRegex().IsMatch(book.Title)
                     || (normalizedSearchTitle.All(char.IsAsciiDigit) && normalizedSearchTitle.Length >= 3))
                 {
-                    missing.Add($"{book.Title}（本地书名无效，请先修正）");
+                    missing.Add(T("{0}（本地书名无效，请先修正）", book.Title));
                     continue;
                 }
-                TaskProgressPopupText.Text = $"({i + 1}/{cards.Count}) 正在匹配《{searchTitle}》…";
-                SetTaskStatus($"({i + 1}/{cards.Count}) 正在匹配《{searchTitle}》的豆瓣信息…");
+                TaskProgressPopupText.Text = T("({0}/{1}) 正在匹配《{2}》…", i + 1, cards.Count, searchTitle);
+                SetTaskStatus(T("({0}/{1}) 正在匹配《{2}》的豆瓣信息…", i + 1, cards.Count, searchTitle));
 
                 try
                 {
@@ -179,11 +184,11 @@ public partial class MainWindow
                         .First();
                     if (best.Score < DoubanAutoApplyScore)
                     {
-                        uncertain.Add($"{book.Title}（最接近：《{best.Candidate.Title}》）");
+                        uncertain.Add(T("{0}（最接近：《{1}》）", book.Title, best.Candidate.Title));
                         continue;
                     }
 
-                    TaskProgressPopupText.Text = $"({i + 1}/{cards.Count}) 正在读取《{best.Candidate.Title}》的详情…";
+                    TaskProgressPopupText.Text = T("({0}/{1}) 正在读取《{2}》的详情…", i + 1, cards.Count, best.Candidate.Title);
                     var metadata = await DoubanBatchService.GetDetailsAsync(best.Candidate, cancellation.Token);
                     await ApplyDoubanMetadataToBookAsync(book, metadata, cancellation.Token);
                     matched.Add(book.Title);
@@ -197,32 +202,32 @@ public partial class MainWindow
                 {
                     // Douban started challenging requests; hammering on would only
                     // extend the block, so stop the whole batch here.
-                    SetTaskStatus($"豆瓣触发访问验证，批量匹配已停止（已完成 {matched.Count} 本）。请稍后重试。");
+                    SetTaskStatus(T("豆瓣触发访问验证，批量匹配已停止（已完成 {0} 本）。请稍后重试。", matched.Count));
                     return;
                 }
                 catch (Exception exception)
                 {
-                    failed.Add($"{book.Title}（{exception.Message}）");
+                    failed.Add(T("{0}（{1}）", book.Title, UiText.Localize(exception.Message)));
                 }
             }
 
             TaskProgressPopupBar.Value = cards.Count;
             await RefreshLibraryAsync();
-            SetTaskStatus($"豆瓣批量匹配完成：自动匹配 {matched.Count} 本，待确认 {uncertain.Count} 本，未找到 {missing.Count} 本。");
+            SetTaskStatus(T("豆瓣批量匹配完成：自动匹配 {0} 本，待确认 {1} 本，未找到 {2} 本。", matched.Count, uncertain.Count, missing.Count));
             await ShowMessageAsync(
-                "一键豆瓣匹配完成",
+                T("一键豆瓣匹配完成"),
                 BuildDoubanBatchSummary(matched, uncertain, missing, failed, aborted: false));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             await RefreshLibraryAsync();
-            SetTaskStatus("豆瓣批量匹配已取消。");
+            SetTaskStatus(T("豆瓣批量匹配已取消。"));
         }
         catch (Exception exception)
         {
             await RefreshLibraryAsync();
-            SetTaskStatus($"豆瓣批量匹配失败：{exception.Message}");
-            await ShowMessageAsync("豆瓣批量匹配失败", exception.Message);
+            SetTaskStatus(T("豆瓣批量匹配失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("豆瓣批量匹配失败"), UiText.Localize(exception.Message));
         }
         finally
         {
@@ -242,14 +247,18 @@ public partial class MainWindow
     {
         string Section(string label, List<string> items) => items.Count == 0
             ? string.Empty
-            : $"\n\n{label}（{items.Count}）：\n{string.Join('\n', items.Take(8))}{(items.Count > 8 ? $"\n… 等共 {items.Count} 项" : string.Empty)}";
+            : T("\n\n{0}（{1}）：\n{2}{3}",
+                label,
+                items.Count,
+                string.Join('\n', items.Take(8)),
+                items.Count > 8 ? T("\n… 等共 {0} 项", items.Count) : string.Empty);
 
-        return $"自动匹配成功：{matched.Count} 本"
-            + Section("自动匹配", matched)
-            + Section("待人工确认（可右键书籍用「匹配豆瓣」逐本选择）", uncertain)
-            + Section("豆瓣未找到", missing)
-            + Section("请求失败", failed)
-            + (aborted ? "\n\n本次因触发豆瓣访问验证提前停止，其余书籍未处理。" : string.Empty);
+        return T("自动匹配成功：{0} 本", matched.Count)
+            + Section(T("自动匹配"), matched)
+            + Section(T("待人工确认（可右键书籍用「匹配豆瓣」逐本选择）"), uncertain)
+            + Section(T("豆瓣未找到"), missing)
+            + Section(T("请求失败"), failed)
+            + (aborted ? T("\n\n本次因触发豆瓣访问验证提前停止，其余书籍未处理。") : string.Empty);
     }
 
     private async Task ApplyDoubanMetadataToBookAsync(Book book, DoubanBookMetadata metadata, CancellationToken cancellationToken)

@@ -29,7 +29,7 @@ public partial class MainWindow
         var selectedText = (_readerPendingSelection ?? string.Empty).Trim();
         if (selectedText.Length == 0 && _selectedReaderAnnotation is null)
         {
-            ReaderStatusText.Text = "请先在正文中选择一段文字。";
+            ReaderStatusText.Text = T("请先在正文中选择一段文字。");
             return;
         }
 
@@ -64,7 +64,7 @@ public partial class MainWindow
                 && _readerPendingSelectionEndOffset > item.StartOffset);
             if (overlaps)
             {
-                ShowReaderTransientStatus("这段文字与已有划线重叠，请缩小选择范围");
+                ShowReaderTransientStatus(T("这段文字与已有划线重叠，请缩小选择范围"));
                 return;
             }
         }
@@ -113,11 +113,11 @@ public partial class MainWindow
             _readerPendingSelectionEndOffset = 0;
             _readerPendingSelectionPrefix = string.Empty;
             _readerPendingSelectionSuffix = string.Empty;
-            ShowReaderTransientStatus(string.IsNullOrWhiteSpace(annotation.Note) ? "划线已保存" : "批注已保存");
+            ShowReaderTransientStatus(string.IsNullOrWhiteSpace(annotation.Note) ? T("划线已保存") : T("批注已保存"));
         }
         catch (Exception exception)
         {
-            ReaderStatusText.Text = $"保存批注失败：{exception.Message}";
+            ReaderStatusText.Text = T("保存批注失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
@@ -230,7 +230,7 @@ public partial class MainWindow
         {
             await NavigateToReaderItemAsync(
                 new EpubReaderNavigationItem(
-                    $"第 {chapterIndex + 1} 章",
+                    T("第 {0} 章", chapterIndex + 1),
                     chapterUri.AbsoluteUri,
                     chapterIndex),
                 ReaderToken,
@@ -257,14 +257,14 @@ public partial class MainWindow
                 ApplyLinuxReaderTextFallbackAnnotationRanges();
             if (!_readerIsPdf && CurrentReaderHost is { } host)
                 await ApplySavedAnnotationsAsync(host, ReaderToken);
-            ShowReaderTransientStatus("批注已删除");
+            ShowReaderTransientStatus(T("批注已删除"));
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            ReaderStatusText.Text = $"删除批注失败：{exception.Message}";
+            ReaderStatusText.Text = T("删除批注失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
@@ -293,7 +293,7 @@ public partial class MainWindow
         _readerPendingSelectionEndOffset = 0;
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
-        ShowReaderTransientStatus("已复制选中文字");
+        ShowReaderTransientStatus(T("已复制选中文字"));
     }
 
     // The "划线 ▾" quick-style actions now arrive from the in-page selection
@@ -343,8 +343,8 @@ public partial class MainWindow
         var entries = await _dictionaryService.LookupAsync(term, ReaderToken);
         // Show every dictionary entry in a dialog, matching the WinUI
         // reference's ReaderSelectionDictionaryButton_Click.
-        await ShowMessageAsync($"词典 · {term}", entries.Count == 0
-            ? "没有找到释义。请先在“字典管理”中导入词典。"
+        await ShowMessageAsync(T("词典 · {0}", term), entries.Count == 0
+            ? T("没有找到释义。请先在“字典管理”中导入词典。")
             : string.Join("\n\n", entries.Select(entry => $"[{entry.DictionaryName}] {entry.Definition}")));
     }
 
@@ -370,9 +370,9 @@ public partial class MainWindow
             var extension = markdown ? "md" : "txt";
             var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
-                Title = markdown ? "导出 Kreader 批注 Markdown" : "导出 Kreader 批注文本",
-                SuggestedFileName = $"{_readerBookCard.Title}-批注.{extension}",
-                FileTypeChoices = [new FilePickerFileType(markdown ? "Markdown" : "文本") { Patterns = [$"*.{extension}"] }]
+                Title = markdown ? T("导出 Kreader 批注 Markdown") : T("导出 Kreader 批注文本"),
+                SuggestedFileName = T("{0}-批注.{1}", _readerBookCard.Title, extension),
+                FileTypeChoices = [new FilePickerFileType(markdown ? "Markdown" : T("文本")) { Patterns = [$"*.{extension}"] }]
             });
             var path = file?.TryGetLocalPath();
             if (string.IsNullOrWhiteSpace(path)) return;
@@ -388,14 +388,14 @@ public partial class MainWindow
                 ? ReaderAnnotationExport.BuildMarkdown(_readerBookCard.Title, _readerBookCard.Authors, ReaderAnnotations, resolver)
                 : ReaderAnnotationExport.BuildPlainText(_readerBookCard.Title, _readerBookCard.Authors, ReaderAnnotations, resolver);
             await File.WriteAllTextAsync(path, content, new UTF8Encoding(true), ReaderToken);
-            ReaderExportStatusText.Text = $"已导出 {ReaderAnnotations.Count} 条批注。";
+            ReaderExportStatusText.Text = T("已导出 {0} 条批注。", ReaderAnnotations.Count);
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            ReaderStatusText.Text = $"导出批注失败：{exception.Message}";
+            ReaderStatusText.Text = T("导出批注失败：{0}", UiText.Localize(exception.Message));
         }
     }
 }

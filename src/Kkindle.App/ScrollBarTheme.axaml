@@ -137,7 +137,7 @@
                                               MinWidth="{DynamicResource KkindleScrollBarSize}"
                                               Height="{DynamicResource KkindleScrollBarSize}"
                                               Theme="{StaticResource KkindleScrollBarLineButton}"
-                                              AutomationProperties.Name="向上滚动">
+                                              AutomationProperties.Name="{DynamicResource Ui.Auto.A1C2931850241896}">
                                     <PathIcon Data="M 10,4 L 4,10 L 5,11 L 10,6 L 15,11 L 16,10 Z"
                                               Width="6"
                                               Height="6" />
@@ -156,19 +156,19 @@
                                                       Classes="largeIncrease"
                                                       Focusable="False"
                                                       Theme="{StaticResource KkindleScrollBarPageButton}"
-                                                      AutomationProperties.Name="向上翻页" />
+                                                      AutomationProperties.Name="{DynamicResource Ui.Auto.D918C1A9A342DD02}" />
                                     </Track.DecreaseButton>
                                     <Track.IncreaseButton>
                                         <RepeatButton Name="PART_PageDownButton"
                                                       Classes="largeIncrease"
                                                       Focusable="False"
                                                       Theme="{StaticResource KkindleScrollBarPageButton}"
-                                                      AutomationProperties.Name="向下翻页" />
+                                                      AutomationProperties.Name="{DynamicResource Ui.Auto.F031682B9F295E32}" />
                                     </Track.IncreaseButton>
                                     <Thumb Theme="{StaticResource KkindleScrollBarThumb}"
                                            Width="{DynamicResource KkindleScrollBarSize}"
                                            MinHeight="{DynamicResource KkindleScrollBarSize}"
-                                           AutomationProperties.Name="滚动位置" />
+                                           AutomationProperties.Name="{DynamicResource Ui.Auto.B01EAEAC61FA05C7}" />
                                 </Track>
 
                                 <RepeatButton Name="PART_LineDownButton"
@@ -178,7 +178,7 @@
                                               MinWidth="{DynamicResource KkindleScrollBarSize}"
                                               Height="{DynamicResource KkindleScrollBarSize}"
                                               Theme="{StaticResource KkindleScrollBarLineButton}"
-                                              AutomationProperties.Name="向下滚动">
+                                              AutomationProperties.Name="{DynamicResource Ui.Auto.DBE66822E12D3B28}">
                                     <PathIcon Data="M 4,6 L 10,12 L 16,6 L 15,5 L 10,10 L 5,5 Z"
                                               Width="6"
                                               Height="6" />
@@ -218,7 +218,7 @@
                                               MinHeight="{DynamicResource KkindleScrollBarSize}"
                                               Width="{DynamicResource KkindleScrollBarSize}"
                                               Theme="{StaticResource KkindleScrollBarLineButton}"
-                                              AutomationProperties.Name="向左滚动">
+                                              AutomationProperties.Name="{DynamicResource Ui.Auto.F3FB0EC333960844}">
                                     <PathIcon Data="M 10,4 L 4,10 L 10,16 L 11,15 L 6,10 L 11,5 Z"
                                               Width="6"
                                               Height="6" />
@@ -236,19 +236,19 @@
                                                       Classes="largeIncrease"
                                                       Focusable="False"
                                                       Theme="{StaticResource KkindleScrollBarPageButton}"
-                                                      AutomationProperties.Name="向左翻页" />
+                                                      AutomationProperties.Name="{DynamicResource Ui.Auto.36CDC1A35EC4D971}" />
                                     </Track.DecreaseButton>
                                     <Track.IncreaseButton>
                                         <RepeatButton Name="PART_PageDownButton"
                                                       Classes="largeIncrease"
                                                       Focusable="False"
                                                       Theme="{StaticResource KkindleScrollBarPageButton}"
-                                                      AutomationProperties.Name="向右翻页" />
+                                                      AutomationProperties.Name="{DynamicResource Ui.Auto.4A615D188ACF04C3}" />
                                     </Track.IncreaseButton>
                                     <Thumb Theme="{StaticResource KkindleScrollBarThumb}"
                                            Height="{DynamicResource KkindleScrollBarSize}"
                                            MinWidth="{DynamicResource KkindleScrollBarSize}"
-                                           AutomationProperties.Name="滚动位置" />
+                                           AutomationProperties.Name="{DynamicResource Ui.Auto.B01EAEAC61FA05C7}" />
                                 </Track>
 
                                 <RepeatButton Name="PART_LineDownButton"
@@ -258,7 +258,7 @@
                                               MinHeight="{DynamicResource KkindleScrollBarSize}"
                                               Width="{DynamicResource KkindleScrollBarSize}"
                                               Theme="{StaticResource KkindleScrollBarLineButton}"
-                                              AutomationProperties.Name="向右滚动">
+                                              AutomationProperties.Name="{DynamicResource Ui.Auto.8071F3D80A537824}">
                                     <PathIcon Data="M 10,4 L 16,10 L 10,16 L 9,15 L 14,10 L 9,5 Z"
                                               Width="6"
                                               Height="6" />

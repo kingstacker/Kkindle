@@ -22,6 +22,8 @@ public sealed class ProductivityFeatureTests
             var store = new AppSettingsStore(paths);
             await store.SaveAsync(new AppSettings
             {
+                OnboardingCompleted = true,
+                DefaultDeviceModel = "  Kindle Paperwhite  ",
                 PreferredOpenFormat = ".MOBI",
                 CalibrePath = "  C:\\Calibre  ",
                 AutoBackupEnabled = true,
@@ -40,6 +42,8 @@ public sealed class ProductivityFeatureTests
             });
 
             var restored = await store.LoadAsync();
+            Assert.True(restored.OnboardingCompleted);
+            Assert.Equal("Kindle Paperwhite", restored.DefaultDeviceModel);
             Assert.Equal("mobi", restored.PreferredOpenFormat);
             Assert.Equal("C:\\Calibre", restored.CalibrePath);
             Assert.Equal(30, restored.AutoBackupRetention);
@@ -56,6 +60,7 @@ public sealed class ProductivityFeatureTests
 
             // Defaults start clean; a fresh install has never checked for updates.
             var freshSettings = new AppSettings();
+            Assert.False(freshSettings.OnboardingCompleted);
             Assert.Null(freshSettings.LastAutoUpdateCheckAt);
             Assert.Null(freshSettings.PendingUpdateVersion);
             Assert.InRange(restored.DefaultReaderLayout.FontScale, 0.75, 2.0);

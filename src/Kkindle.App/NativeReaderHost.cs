@@ -876,7 +876,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             (horizontalInset, verticalInset) = ReaderPlatformLayoutPolicy.GetVerticalPageInsets(
                 width,
                 height,
-                settings.BodyPadding);
+                settings.BodyPadding,
+                settings.MaxWidth);
         }
         else
         {

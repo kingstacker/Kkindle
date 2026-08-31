@@ -59,7 +59,7 @@ public partial class MainWindow
 
         _pendingUpdateVersion = storedVersion;
         ShowUpdateBadge(storedVersion, _appSettings.PendingUpdateReleaseNotes);
-        AboutUpdateStatusText.Text = $"发现新版本 {storedVersion}";
+        AboutUpdateStatusText.Text = T("发现新版本 {0}", storedVersion);
     }
 
     private async Task CheckForUpdatesAfterStartupAsync(CancellationToken cancellationToken)
@@ -82,12 +82,12 @@ public partial class MainWindow
     {
         if (_updateService is null)
         {
-            await ShowMessageAsync("检查更新", "当前平台暂不支持应用内更新。");
+            await ShowMessageAsync(T("检查更新"), T("当前平台暂不支持应用内更新。"));
             return;
         }
         if (!_appSettings.NetworkEnabled)
         {
-            await ShowMessageAsync("网络功能已关闭", "请先在常规设置中允许网络功能，再检查应用更新。");
+            await ShowMessageAsync(T("网络功能已关闭"), T("请先在常规设置中允许网络功能，再检查应用更新。"));
             return;
         }
         // A fresh lookup keeps package URLs and release notes accurate, then the
@@ -101,20 +101,20 @@ public partial class MainWindow
         if (_updateService is null)
         {
             if (userInitiated)
-                await ShowMessageAsync("检查更新", "当前平台暂不支持应用内更新。");
+                await ShowMessageAsync(T("检查更新"), T("当前平台暂不支持应用内更新。"));
             return;
         }
         if (!_appSettings.NetworkEnabled)
         {
             if (userInitiated)
-                await ShowMessageAsync("网络功能已关闭", "请先在常规设置中允许网络功能，再检查应用更新。");
+                await ShowMessageAsync(T("网络功能已关闭"), T("请先在常规设置中允许网络功能，再检查应用更新。"));
             return;
         }
 
         _updateCheckInProgress = true;
         var updateProgressVisible = false;
         CheckForUpdatesButton.IsEnabled = false;
-        AboutUpdateStatusText.Text = "正在检查更新…";
+        AboutUpdateStatusText.Text = T("正在检查更新…");
         try
         {
             var currentVersion = ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly);
@@ -129,13 +129,13 @@ public partial class MainWindow
 
             if (update is null)
             {
-                AboutUpdateStatusText.Text = $"当前 {currentVersion} 已是最新版本";
+                AboutUpdateStatusText.Text = T("当前 {0} 已是最新版本", currentVersion);
                 if (userInitiated)
-                    await ShowMessageAsync("检查更新", $"当前版本 {currentVersion} 已是最新版本。");
+                    await ShowMessageAsync(T("检查更新"), T("当前版本 {0} 已是最新版本。", currentVersion));
                 return;
             }
 
-            AboutUpdateStatusText.Text = $"发现新版本 {update.Version}";
+            AboutUpdateStatusText.Text = T("发现新版本 {0}", update.Version);
             if (!userInitiated) return;
 
             if (!await ConfirmUpdateInstallAsync(currentVersion, update)) return;
@@ -147,9 +147,9 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            AboutUpdateStatusText.Text = $"检查更新失败：{exception.Message}";
+            AboutUpdateStatusText.Text = T("检查更新失败：{0}", UiText.Localize(exception.Message));
             if (userInitiated)
-                await ShowMessageAsync("更新失败", exception.Message);
+                await ShowMessageAsync(T("更新失败"), UiText.Localize(exception.Message));
         }
         finally
         {
@@ -165,9 +165,9 @@ public partial class MainWindow
 
     private async Task<bool> ConfirmUpdateInstallAsync(string currentVersion, AppUpdateInfo update)
     {
-        var actionText = _updateService!.CanInstall ? "下载并安装" : "打开下载页";
+        var actionText = _updateService!.CanInstall ? T("下载并安装") : T("打开下载页");
         return await ConfirmAsync(
-            "发现新版本",
+            T("发现新版本"),
             BuildUpdatePrompt(currentVersion, update),
             actionText);
     }
@@ -185,7 +185,7 @@ public partial class MainWindow
         TaskProgressPopupBar.Minimum = 0;
         TaskProgressPopupBar.Maximum = 100;
         TaskProgressPopupBar.Value = 0;
-        TaskProgressPopupText.Text = $"正在下载 Kkindle {update.Version}…";
+        TaskProgressPopupText.Text = T("正在下载 Kkindle {0}…", update.Version);
         ShowTaskProgressPopup();
         var progress = new Progress<AppUpdateDownloadProgress>(value =>
         {
@@ -193,16 +193,16 @@ public partial class MainWindow
             if (value.TotalBytes is not null)
                 TaskProgressPopupBar.Value = value.Percentage;
             TaskProgressPopupText.Text = value.TotalBytes is > 0
-                ? $"正在下载 Kkindle {update.Version} · {value.Percentage:0}%"
-                : $"正在下载 Kkindle {update.Version}…";
+                ? T("正在下载 Kkindle {0} · {1:0}%", update.Version, value.Percentage)
+                : T("正在下载 Kkindle {0}…", update.Version);
         });
         var packagePath = await _updateService.DownloadAsync(
             update,
             progress,
             _lifetimeCancellation.Token);
         TaskProgressPopupBar.IsIndeterminate = true;
-        TaskProgressPopupText.Text = "校验完成，正在启动安装程序…";
-        AboutUpdateStatusText.Text = $"正在安装 {update.Version}";
+        TaskProgressPopupText.Text = T("校验完成，正在启动安装程序…");
+        AboutUpdateStatusText.Text = T("正在安装 {0}", update.Version);
         _updateService.LaunchInstaller(packagePath);
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             desktop.Shutdown();
@@ -258,19 +258,19 @@ public partial class MainWindow
         var tip = new StackPanel { Spacing = 6, MaxWidth = 380 };
         tip.Children.Add(new TextBlock
         {
-            Text = $"发现新版本 v{version}",
+            Text = T("发现新版本 v{0}", version),
             FontWeight = FontWeight.Bold
         });
         tip.Children.Add(new TextBlock
         {
             Text = TruncateNotes(releaseNotes, 600) is { Length: > 0 } notes
                 ? notes
-                : "本次更新未提供说明。",
+                : T("本次更新未提供说明。"),
             TextWrapping = TextWrapping.Wrap
         });
         tip.Children.Add(new TextBlock
         {
-            Text = "点击黄点即可下载并安装最新版",
+            Text = T("点击黄点即可下载并安装最新版"),
             FontSize = 11,
             Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x8A, 0x8A)),
             TextWrapping = TextWrapping.Wrap
@@ -294,8 +294,8 @@ public partial class MainWindow
     private static string BuildUpdatePrompt(string currentVersion, AppUpdateInfo update)
     {
         var notes = TruncateNotes(update.ReleaseNotes, 900);
-        if (notes.Length == 0) notes = "本次 Release 未提供更新说明。";
-        return $"当前版本：{currentVersion}\n最新版本：{update.Version}\n\n{notes}";
+        if (notes.Length == 0) notes = T("本次 Release 未提供更新说明。");
+        return T("当前版本：{0}\n最新版本：{1}\n\n{2}", currentVersion, update.Version, notes);
     }
 
     private static void OpenReleasePage(Uri releasePage)

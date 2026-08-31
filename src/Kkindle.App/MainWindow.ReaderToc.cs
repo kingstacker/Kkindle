@@ -412,7 +412,7 @@ public partial class MainWindow
         {
             var total = Math.Max(1, _readerPdfPages.Count);
             var page = Math.Clamp(index + 1, 1, total);
-            ReaderChapterPreviewTitleText.Text = $"第 {page} 页";
+            ReaderChapterPreviewTitleText.Text = T("第 {0} 页", page);
         }
         else
         {
@@ -421,7 +421,7 @@ public partial class MainWindow
             ReaderChapterPreviewTitleText.Text = _readerTocItems[index].Title;
             if (includeBodyPreview)
             {
-                ReaderChapterPreviewBodyText.Text = "正在读取正文…";
+                ReaderChapterPreviewBodyText.Text = T("正在读取正文…");
                 ReaderChapterPreviewBodyText.IsVisible = true;
             }
         }
@@ -633,7 +633,7 @@ public partial class MainWindow
 
     private void UpdateReaderZenTocToggle()
     {
-        var label = _readerTocMinimal ? "关闭极简目录" : "显示极简目录";
+        var label = _readerTocMinimal ? T("关闭极简目录") : T("显示极简目录");
         if (ReaderZenTocButton is not null)
             ReaderZenTocButton.Content = label;
         if (ReaderZenTitleTocText is not null)

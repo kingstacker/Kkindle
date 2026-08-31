@@ -230,10 +230,10 @@ public partial class MainWindow
 
         try
         {
-            SetTaskStatus($"正在准备《{card.Title}》的 PDF 阅读器…");
+            SetTaskStatus(T("正在准备《{0}》的 PDF 阅读器…", card.Title));
             var pages = await _pdfTextService.ExtractAsync(path, token);
             if (pages.Count == 0)
-                throw new InvalidDataException("PDF 没有可读取的页面文本。");
+                throw new InvalidDataException(T("PDF 没有可读取的页面文本。"));
 
             _readerBookCard = card;
             _readerBookFile = file;
@@ -273,7 +273,7 @@ public partial class MainWindow
 
             ReaderBookInfoText.Text = $"{card.Title} · PDF";
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
-            ReaderStatusText.Text = $"PDF · {pages.Count} 页";
+            ReaderStatusText.Text = T("PDF · {0} 页", pages.Count);
             ReaderRoot.IsVisible = true;
             LibraryRoot.IsVisible = false;
             WindowBrandText.IsVisible = true;
@@ -281,7 +281,7 @@ public partial class MainWindow
             // explanatory empty state; bookmarks still work per page.
             _readerTocExpanded = true;
             _readerTocMinimal = false;
-            ReaderTocEmptyText.Text = "PDF 使用内置查看器；Kkindle 已启用本地搜索、页码进度、书签和页面笔记。";
+            ReaderTocEmptyText.Text = T("PDF 使用内置查看器；Kkindle 已启用本地搜索、页码进度、书签和页面笔记。");
             ReaderTocEmptyText.IsVisible = true;
             ApplyReaderPanelLayout();
             ShowReaderTocTab();
@@ -304,10 +304,10 @@ public partial class MainWindow
             if (CurrentReaderHost is not { } host
                 || !await NavigateReaderHostAndWaitAsync(host, new Uri(pdfSource), token))
             {
-                throw new InvalidOperationException("PDF 阅读器页面加载失败。");
+                throw new InvalidOperationException(T("PDF 阅读器页面加载失败。"));
             }
 
-            ReaderStatusText.Text = $"PDF · {pages.Count} 页 · 可搜索文本已加载";
+            ReaderStatusText.Text = T("PDF · {0} 页 · 可搜索文本已加载", pages.Count);
             UpdateReaderToolbar();
             await UpdateReaderBookmarkIndicatorAsync();
             await SaveReaderProgressAsync(token);
@@ -318,7 +318,7 @@ public partial class MainWindow
         catch (Exception exception)
         {
             await CloseReaderAsync();
-            SetTaskStatus($"打开 PDF 阅读器失败：{exception.Message}");
+            SetTaskStatus(T("打开 PDF 阅读器失败：{0}", UiText.Localize(exception.Message)));
         }
     }
 
@@ -434,11 +434,11 @@ public partial class MainWindow
 
         ApplyReaderPanelLayout();
         ShowReaderSearchTab();
-        ReaderTocSearchBox.PlaceholderText = "搜索整本书…";
+        ReaderTocSearchBox.PlaceholderText = T("搜索整本书…");
         ReaderTocSearchBox.Text = _readerSearchQuery;
         ShowReaderSearchStatus(string.IsNullOrWhiteSpace(_readerSearchQuery)
-            ? "输入关键词，实时搜索整本书。"
-            : ReaderSearchResults.Count > 0 ? null : "正在本地搜索…");
+            ? T("输入关键词，实时搜索整本书。")
+            : ReaderSearchResults.Count > 0 ? null : T("正在本地搜索…"));
         ReaderTocSearchBox.Focus();
         if (!string.IsNullOrWhiteSpace(_readerSearchQuery) && ReaderSearchResults.Count == 0)
         {
@@ -482,7 +482,7 @@ public partial class MainWindow
             }
             catch (Exception exception)
             {
-                ReaderStatusText.Text = $"书签定位失败：{exception.Message}";
+                ReaderStatusText.Text = T("书签定位失败：{0}", UiText.Localize(exception.Message));
             }
             finally
             {
@@ -502,14 +502,14 @@ public partial class MainWindow
             await _readerData.DeleteBookmarkAsync(bookmark.Id, ReaderToken);
             await RefreshReaderBookmarksAsync(ReaderToken);
             await UpdateReaderBookmarkIndicatorAsync();
-            ShowReaderTransientStatus("书签已删除");
+            ShowReaderTransientStatus(T("书签已删除"));
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            ReaderStatusText.Text = $"删除书签失败：{exception.Message}";
+            ReaderStatusText.Text = T("删除书签失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
@@ -526,7 +526,7 @@ public partial class MainWindow
             ? null
             : location?.Fragment ?? _readerCurrentFragment;
         var quote = _readerIsPdf
-            ? $"PDF 第 {_readerPdfPage} 页"
+            ? T("PDF 第 {0} 页", _readerPdfPage)
             : await CaptureCurrentPageQuoteAsync();
         var currentPosition = location?.ScrollPosition;
         var currentFlowMode = location?.FlowMode ?? _readerLayout.FlowMode;
@@ -545,8 +545,8 @@ public partial class MainWindow
             if (existing is not null)
             {
                 await _readerData.DeleteBookmarkAsync(existing.Id, ReaderToken);
-                ShowReaderTransientStatus("已取消书签");
-                ShowReaderBookmarkFeedback("已取消书签");
+                ShowReaderTransientStatus(T("已取消书签"));
+                ShowReaderBookmarkFeedback(T("已取消书签"));
             }
             else
             {
@@ -563,8 +563,8 @@ public partial class MainWindow
                     Quote = quote ?? string.Empty,
                     CreatedAt = DateTimeOffset.UtcNow
                 }, ReaderToken);
-                ShowReaderTransientStatus("已添加书签");
-                ShowReaderBookmarkFeedback("已添加书签");
+                ShowReaderTransientStatus(T("已添加书签"));
+                ShowReaderBookmarkFeedback(T("已添加书签"));
             }
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
@@ -572,7 +572,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            ReaderStatusText.Text = $"书签保存失败：{exception.Message}";
+            ReaderStatusText.Text = T("书签保存失败：{0}", UiText.Localize(exception.Message));
         }
         await RefreshReaderBookmarksAsync(ReaderToken);
         await UpdateReaderBookmarkIndicatorAsync();
@@ -979,7 +979,7 @@ public partial class MainWindow
             await RefreshReaderWholeSearchAsync(query, sequence);
             return;
         }
-        ShowReaderSearchStatus("正在本地搜索…");
+        ShowReaderSearchStatus(T("正在本地搜索…"));
         await Task.Delay(180);
         if (sequence != _readerWholeSearchSequence) return;
         await RefreshReaderWholeSearchAsync(ReaderTocSearchBox.Text?.Trim() ?? string.Empty, sequence);
@@ -993,14 +993,14 @@ public partial class MainWindow
             ClearReaderSearchResultSelection();
             ReaderSearchResults.Clear();
             ReaderWholeSearchCountText.Text = string.Empty;
-            ShowReaderSearchStatus("输入关键词，实时搜索整本书。");
+            ShowReaderSearchStatus(T("输入关键词，实时搜索整本书。"));
             return;
         }
 
         ReaderSearchResults.Clear();
         ClearReaderSearchResultSelection();
         ReaderWholeSearchCountText.Text = string.Empty;
-        ShowReaderSearchStatus("正在本地搜索…");
+        ShowReaderSearchStatus(T("正在本地搜索…"));
         try
         {
             var pendingResults = new List<ReaderSearchResultViewModel>();
@@ -1009,7 +1009,7 @@ public partial class MainWindow
                 var results = PdfTextService.Search(_readerPdfPages, query, int.MaxValue);
                 foreach (var result in results)
                     pendingResults.Add(new ReaderSearchResultViewModel(
-                        $"第 {result.PageNumber} 页",
+                        T("第 {0} 页", result.PageNumber),
                         result.Excerpt,
                         result.PageNumber - 1,
                         $"pdf:page:{result.PageNumber}",
@@ -1043,11 +1043,11 @@ public partial class MainWindow
             foreach (var item in pendingResults)
                 ReaderSearchResults.Add(item);
             ReaderWholeSearchCountText.Text = _readerIsPdf
-                ? $"全书 {ReaderSearchResults.Count} 条结果 · PDF 本地文本索引"
-                : $"全书 {ReaderSearchResults.Count} 段结果";
+                ? T("全书 {0} 条结果 · PDF 本地文本索引", ReaderSearchResults.Count)
+                : T("全书 {0} 段结果", ReaderSearchResults.Count);
             ShowReaderSearchStatus(
                 ReaderSearchResults.Count == 0
-                    ? (_readerIsPdf ? "没有找到匹配的内容。" : "没有找到匹配的片段。")
+                    ? (_readerIsPdf ? T("没有找到匹配的内容。") : T("没有找到匹配的片段。"))
                     : null);
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
@@ -1057,7 +1057,7 @@ public partial class MainWindow
         {
             if (sequence is not null && sequence.Value != _readerWholeSearchSequence) return;
             ReaderWholeSearchCountText.Text = string.Empty;
-            ShowReaderSearchStatus($"搜索失败：{exception.Message}");
+            ShowReaderSearchStatus(T("搜索失败：{0}", UiText.Localize(exception.Message)));
         }
     }
 
@@ -1098,7 +1098,7 @@ public partial class MainWindow
             return;
         }
         if (_readerDocument is null || string.IsNullOrWhiteSpace(result.Target)) return;
-        ReaderSearchStatusText.Text = "正在跳转并定位关键词…";
+        ReaderSearchStatusText.Text = T("正在跳转并定位关键词…");
         var navigated = await NavigateToReaderItemAsync(
             new EpubReaderNavigationItem(result.Title, result.Target, result.ChapterIndex),
             ReaderToken,
@@ -1109,15 +1109,15 @@ public partial class MainWindow
             await ApplyReaderSearchAsync(result.Query, sequence);
         }
         ReaderSearchStatusText.Text = navigated
-            ? $"已跳转到《{result.Title}》相关位置。"
-            : "搜索结果定位失败，请重试。";
+            ? T("已跳转到《{0}》相关位置。", result.Title)
+            : T("搜索结果定位失败，请重试。");
     }
 
     private async Task<bool> NavigateToReaderChunkAsync(BookContentChunk source, string query)
     {
         if (_readerDocument is null)
         {
-            ShowReaderSearchStatus("无法定位正文：书籍内容尚未准备完成。");
+            ShowReaderSearchStatus(T("无法定位正文：书籍内容尚未准备完成。"));
             return false;
         }
 
@@ -1126,7 +1126,7 @@ public partial class MainWindow
             source.ChapterPath.Replace('/', Path.DirectorySeparatorChar)));
         if (!IsPathInside(_readerDocument.RootPath, targetPath) || !File.Exists(targetPath))
         {
-            ShowReaderSearchStatus("无法定位正文：对应章节文件不存在。");
+            ShowReaderSearchStatus(T("无法定位正文：对应章节文件不存在。"));
             return false;
         }
 
@@ -1138,7 +1138,7 @@ public partial class MainWindow
             matchOffset,
             query.Length);
 
-        ReaderSearchStatusText.Text = "正在跳转并定位关键词…";
+        ReaderSearchStatusText.Text = T("正在跳转并定位关键词…");
         var navigated = await NavigateToReaderItemAsync(
             new EpubReaderNavigationItem(
                 source.ChapterTitle,
@@ -1147,8 +1147,8 @@ public partial class MainWindow
             ReaderToken,
             ReaderNavigationIntent.Search);
         ReaderSearchStatusText.Text = navigated
-            ? $"已跳转到《{source.ChapterTitle}》相关位置。"
-            : "搜索结果定位失败，请重试。";
+            ? T("已跳转到《{0}》相关位置。", source.ChapterTitle)
+            : T("搜索结果定位失败，请重试。");
         return navigated;
     }
 
@@ -1434,8 +1434,8 @@ public partial class MainWindow
     private void ReaderLayoutSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
         ReaderVerticalWritingCheck.Content = OperatingSystem.IsLinux()
-            ? "竖排排版（全局，自绘单页）"
-            : "竖排排版（全局，仅支持单页）";
+            ? T("竖排排版（全局，自绘单页）")
+            : T("竖排排版（全局，仅支持单页）");
         _suppressReaderLayoutChange = true;
         try
         {
@@ -1519,15 +1519,15 @@ public partial class MainWindow
             await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
             await SaveReaderLayoutAsync(CancellationToken.None);
             ReaderLayoutSettingsStatusText.Text = _readerLayout.VerticalWriting
-                ? "竖排已全局开启；段首缩进也对所有书生效，自绘阅读器使用单页阅读。"
-                : "竖排已全局关闭；段首缩进仍对所有书生效，现在可选择滚动、单页或双栏。";
+                ? T("竖排已全局开启；段首缩进也对所有书生效，自绘阅读器使用单页阅读。")
+                : T("竖排已全局关闭；段首缩进仍对所有书生效，现在可选择滚动、单页或双栏。");
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
         {
         }
         catch
         {
-            ReaderLayoutSettingsStatusText.Text = "竖排设置保存失败，请重试。";
+            ReaderLayoutSettingsStatusText.Text = T("竖排设置保存失败，请重试。");
         }
     }
 
@@ -1552,15 +1552,15 @@ public partial class MainWindow
                 _readerSessionCancellation?.Token ?? CancellationToken.None);
             await _appSettingsStore.SaveAsync(_appSettings, CancellationToken.None);
             ReaderLayoutSettingsStatusText.Text = _readerVerticalDebugBoxesEnabled
-                ? "竖排调试外框已显示，字号缩放时会随字格同步更新。"
-                : "竖排调试外框已关闭。";
+                ? T("竖排调试外框已显示，字号缩放时会随字格同步更新。")
+                : T("竖排调试外框已关闭。");
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
         {
         }
         catch
         {
-            ReaderLayoutSettingsStatusText.Text = "竖排调试外框切换失败，请重试。";
+            ReaderLayoutSettingsStatusText.Text = T("竖排调试外框切换失败，请重试。");
         }
     }
 
@@ -1574,10 +1574,10 @@ public partial class MainWindow
     {
         var (flowMode, twoPageMode) = GetSelectedReaderFlowMode();
         ReaderLayoutSettingsStatusText.Text = ReaderVerticalWritingCheck.IsChecked == true
-            ? "竖排和段首缩进是全局设置；自绘阅读器固定使用单页阅读。"
+            ? T("竖排和段首缩进是全局设置；自绘阅读器固定使用单页阅读。")
             : twoPageMode && flowMode != 1
-            ? "双页仅用于分页模式；当前模式下暂不生效。"
-            : "设置立即生效；段首缩进为全局设置，其他排版参数按书保存。";
+            ? T("双页仅用于分页模式；当前模式下暂不生效。")
+            : T("设置立即生效；段首缩进为全局设置，其他排版参数按书保存。");
     }
 
     private void ScheduleReaderLayoutApply()
@@ -1651,7 +1651,7 @@ public partial class MainWindow
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
         await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
         await SaveReaderLayoutAsync(CancellationToken.None);
-        ReaderLayoutSettingsStatusText.Text = "已恢复默认排版。";
+        ReaderLayoutSettingsStatusText.Text = T("已恢复默认排版。");
     }
 
     private void UpdateReaderLayoutSliderLabels()

@@ -1237,7 +1237,7 @@ public partial class MainWindow
 
         public ReaderLinuxTextFallbackBlock(string footnoteLabel, string footnoteHref)
         {
-            FootnoteLabel = string.IsNullOrWhiteSpace(footnoteLabel) ? "注" : footnoteLabel.Trim();
+            FootnoteLabel = string.IsNullOrWhiteSpace(footnoteLabel) ? UiText.Get("注") : footnoteLabel.Trim();
             FootnoteHref = footnoteHref;
         }
 
@@ -1370,6 +1370,16 @@ public partial class MainWindow
     public ObservableCollection<ReaderAiMessageViewModel> ReaderAiMessages { get; } = [];
     public ObservableCollection<ReaderAiSourceViewModel> ReaderAiSources { get; } = [];
 
+    private void ClearReaderAiCollections()
+    {
+        foreach (var message in ReaderAiMessages)
+            message.Dispose();
+        foreach (var source in ReaderAiSources)
+            source.Dispose();
+        ReaderAiMessages.Clear();
+        ReaderAiSources.Clear();
+    }
+
     private async Task InitializeReaderInteractionAsync(
         EpubReaderDocument document,
         BookFile file,
@@ -1444,7 +1454,7 @@ public partial class MainWindow
         _readerActiveSeconds = 0;
         _readerSessionSeconds = 0;
         _readerStatsBaseSeconds = 0;
-        ReaderBookInfoText.Text = _readerBookCard?.Title ?? "目录";
+        ReaderBookInfoText.Text = _readerBookCard?.Title ?? UiText.Get("目录");
         ReaderTocList.ItemsSource = _readerTocItems;
         ReaderTocList.SelectedIndex = -1;
         ReaderTocPanel.IsVisible = false;
@@ -1461,8 +1471,7 @@ public partial class MainWindow
         HideReaderFootnotePopup();
         HideReaderAnnotationHoverPopup();
         ReaderBookmarkCornerMarker.IsVisible = false;
-        ReaderAiMessages.Clear();
-        ReaderAiSources.Clear();
+        ClearReaderAiCollections();
         ReaderAiEmptyState.IsVisible = true;
         ReaderAiView.IsVisible = true;
         ReaderNotesView.IsVisible = false;
@@ -1524,7 +1533,7 @@ public partial class MainWindow
         {
             return document.ChapterTitles[chapterIndex].Trim();
         }
-        return chapterIndex == 0 ? "封面" : $"第 {chapterIndex + 1} 章";
+        return chapterIndex == 0 ? UiText.Get("封面") : UiText.Get("第 {0} 章", chapterIndex + 1);
     }
 
     private async Task ConfigureReaderHostAsync(
@@ -2240,7 +2249,8 @@ public partial class MainWindow
         var pageInsets = ReaderPlatformLayoutPolicy.GetVerticalPageInsets(
             overlayWidth,
             overlayHeight,
-            _readerLayout.BodyPadding);
+            _readerLayout.BodyPadding,
+            _readerLayout.MaxWidth);
         ReaderLinuxTextFallbackPagedRoot.Padding = new Thickness(
             pageInsets.Horizontal,
             pageInsets.Vertical);
@@ -2861,7 +2871,7 @@ public partial class MainWindow
             }
             else
             {
-                AddRun("注");
+                AddRun(UiText.Get("注"));
             }
             textStart = index + 1;
         }
@@ -3148,7 +3158,7 @@ public partial class MainWindow
                     pendingOffset = textOffset;
                 pendingText.Append(ReaderLinuxTextFallbackFootnoteMarker);
                 pendingFootnotes.Add(new ReaderLinuxTextFallbackFootnote(
-                    string.IsNullOrWhiteSpace(rawBlock.FootnoteLabel) ? "注" : rawBlock.FootnoteLabel.Trim(),
+                    string.IsNullOrWhiteSpace(rawBlock.FootnoteLabel) ? UiText.Get("注") : rawBlock.FootnoteLabel.Trim(),
                     rawBlock.FootnoteHref));
                 continue;
             }
@@ -4702,7 +4712,7 @@ public partial class MainWindow
         // almost always an image alt/title containing the note body itself.
         return !string.IsNullOrWhiteSpace(label) && label.Length <= 8
             ? label
-            : "注";
+            : UiText.Get("注");
     }
 
     private static bool IsReaderFootnoteBacklink(XElement element)
@@ -5664,7 +5674,7 @@ public partial class MainWindow
             }
             catch (Exception exception)
             {
-                ReaderStatusText.Text = $"定位失败：{exception.Message}";
+                ReaderStatusText.Text = T("定位失败：{0}", UiText.Localize(exception.Message));
                 return false;
             }
             finally
@@ -5703,7 +5713,7 @@ public partial class MainWindow
             }
             var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(navigationToken);
             var loaded = await NavigateReaderHostAndWaitAsync(host, target, navigationToken);
-            if (!loaded) throw new InvalidOperationException("章节加载失败。");
+            if (!loaded) throw new InvalidOperationException(T("章节加载失败。"));
 
             await ApplySavedAnnotationsAsync(host, navigationToken);
             var direction = transitionDirection
@@ -5771,7 +5781,7 @@ public partial class MainWindow
                 _readerChapterIndex = previousChapterIndex;
                 _readerCurrentFragment = previousFragment;
             }
-            ReaderStatusText.Text = $"打开章节失败：{exception.Message}";
+            ReaderStatusText.Text = T("打开章节失败：{0}", UiText.Localize(exception.Message));
             return false;
         }
         finally
@@ -6637,14 +6647,14 @@ public partial class MainWindow
     {
         if (ReaderStatsText is null) return;
         var cumulative = _readerStatsBaseSeconds + _readerSessionSeconds;
-        ReaderStatsText.Text = $"累计阅读 {FormatReaderDuration(cumulative)} · 本次 {FormatReaderDuration(_readerSessionSeconds)}";
+        ReaderStatsText.Text = T("累计阅读 {0} · 本次 {1}", FormatReaderDuration(cumulative), FormatReaderDuration(_readerSessionSeconds));
     }
 
     private static string FormatReaderDuration(long seconds)
     {
-        if (seconds < 60) return $"{seconds} 秒";
-        if (seconds < 3600) return $"{seconds / 60} 分钟";
-        return $"{seconds / 3600.0:0.0} 小时";
+        if (seconds < 60) return UiText.Get("{0} 秒", seconds);
+        if (seconds < 3600) return UiText.Get("{0} 分钟", seconds / 60);
+        return UiText.Get("{0:0.0} 小时", seconds / 3600.0);
     }
 
     private void UpdateReaderZoomLabel()
@@ -6713,7 +6723,7 @@ public partial class MainWindow
             return false;
         var chapterIndex = match.index;
         var item = new EpubReaderNavigationItem(
-            $"第 {chapterIndex + 1} 章",
+            T("第 {0} 章", chapterIndex + 1),
             uri.AbsoluteUri,
             chapterIndex);
         HideReaderFootnotePopup();
@@ -6986,7 +6996,7 @@ public partial class MainWindow
 
     private void ShowReaderAnnotationHoverPopup(string quote, string note, Point? placementPoint)
     {
-        ReaderAnnotationHoverQuote.Text = string.IsNullOrWhiteSpace(quote) ? "批注" : quote;
+        ReaderAnnotationHoverQuote.Text = string.IsNullOrWhiteSpace(quote) ? T("批注") : quote;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
         if (placementPoint is { } point)
@@ -7045,7 +7055,7 @@ public partial class MainWindow
     private void ResetReaderStatusText()
     {
         ReaderStatusText.Text = _readerIsPdf
-            ? $"PDF · {_readerPdfPages.Count} 页"
+            ? T("PDF · {0} 页", _readerPdfPages.Count)
             : string.Empty;
     }
 
@@ -7743,7 +7753,7 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
         ShowReaderAiTab();
         _ = ObserveReaderTaskAsync(SendReaderAiQuestionAsync(
-            $"请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{_readerPendingSelection}"));
+            T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection)));
     }
 
     private void ReaderSelectionSearchButton_Click(object? sender, RoutedEventArgs e)
@@ -7785,7 +7795,7 @@ public partial class MainWindow
                 {
                     ShowReaderAiTab();
                     _ = ObserveReaderTaskAsync(SendReaderAiQuestionAsync(
-                        $"请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{_readerPendingSelection}"));
+                        T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection)));
                 }
                 break;
             case "search":
@@ -8109,7 +8119,7 @@ public partial class MainWindow
             else if (direction < 0 && _readerChapterIndex > 0)
                 await MoveReaderChapterAsync(-1);
             else
-                ReaderStatusText.Text = direction > 0 ? "已经是最后一章。" : "已经是第一章。";
+                ReaderStatusText.Text = direction > 0 ? T("已经是最后一章。") : T("已经是第一章。");
             return;
         }
 
@@ -8131,7 +8141,7 @@ public partial class MainWindow
             if (_readerChapterIndex + 1 < _readerDocument.Chapters.Count)
                 await MoveReaderChapterAsync(1);
             else
-                ReaderStatusText.Text = "已经是最后一章。";
+                ReaderStatusText.Text = T("已经是最后一章。");
             return;
         }
 
@@ -8144,7 +8154,7 @@ public partial class MainWindow
         if (_readerChapterIndex > 0)
             await MoveReaderChapterAsync(-1);
         else
-            ReaderStatusText.Text = "已经是第一章。";
+            ReaderStatusText.Text = T("已经是第一章。");
     }
 
     private void PositionLinuxReaderTextFallbackAtChapterEnd(bool requested)
@@ -8575,7 +8585,7 @@ public partial class MainWindow
         if (sender is not MenuItem { Tag: string tag }) return;
         if (_readerIsPdf)
         {
-            ReaderStatusText.Text = "PDF 使用页面模式，可用底部进度条或左右按钮翻页。";
+            ReaderStatusText.Text = T("PDF 使用页面模式，可用底部进度条或左右按钮翻页。");
             return;
         }
 
@@ -8584,7 +8594,7 @@ public partial class MainWindow
             && !string.Equals(tag, requiredVerticalMode, StringComparison.Ordinal))
         {
             SyncReaderFlowMenu();
-            ShowReaderTransientStatus("竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。");
+            ShowReaderTransientStatus(T("竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。"));
             return;
         }
         var flowMode = tag switch
@@ -8603,7 +8613,7 @@ public partial class MainWindow
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
         await SaveReaderLayoutAsync(CancellationToken.None);
         ShowReaderTransientStatus(
-            _readerLayout.FlowMode == 0 ? "已切换为滚动阅读。" : _readerLayout.TwoPageMode ? "已切换为双栏阅读。" : "已切换为单页阅读。");
+            _readerLayout.FlowMode == 0 ? T("已切换为滚动阅读。") : _readerLayout.TwoPageMode ? T("已切换为双栏阅读。") : T("已切换为单页阅读。"));
     }
 
     private void SyncReaderFlowMenu()
@@ -8629,7 +8639,7 @@ public partial class MainWindow
         ReaderTwoPageModeItem.IsEnabled = !vertical;
         ReaderSinglePageModeItem.IsEnabled = true;
         if (ReaderFlowButton is not null)
-            ReaderFlowButton.Content = flowMode == 0 ? "滚动" : twoPage ? "双栏" : "单页";
+            ReaderFlowButton.Content = flowMode == 0 ? T("滚动") : twoPage ? T("双栏") : T("单页");
     }
 
     private void ReaderZenMenuItem_Click(object? sender, RoutedEventArgs e)
@@ -8663,10 +8673,10 @@ public partial class MainWindow
         ReaderMoreButton.Flyout?.Hide();
         ShowReaderTransientStatus(_readerPageAnimation switch
         {
-            ReaderAnimationFade => "翻页动画：淡入淡出",
-            ReaderAnimationSlide => "翻页动画：左右滑动",
-            ReaderAnimationWave => "翻页动画：电子墨水刷新",
-            _ => "翻页动画：无动画"
+            ReaderAnimationFade => T("翻页动画：淡入淡出"),
+            ReaderAnimationSlide => T("翻页动画：左右滑动"),
+            ReaderAnimationWave => T("翻页动画：电子墨水刷新"),
+            _ => T("翻页动画：无动画")
         });
     }
 
@@ -9107,10 +9117,10 @@ public partial class MainWindow
         if (ReaderFlowButton is not null)
         {
             ReaderFlowButton.Content = _readerIsPdf
-                ? "PDF 页"
+                ? T("PDF 页")
                 : _readerLayout.FlowMode == 0
-                ? "滚动"
-                : _readerLayout.TwoPageMode ? "双栏" : "单页";
+                ? T("滚动")
+                : _readerLayout.TwoPageMode ? T("双栏") : T("单页");
             // The WinUI reference hides the flow selector entirely for PDF.
             ReaderFlowButton.IsVisible = !_readerIsPdf;
         }
@@ -9172,7 +9182,7 @@ public partial class MainWindow
     private string GetReaderReadingProgressLabel()
     {
         var (currentPage, totalPages) = GetReaderPagePosition();
-        return $"已读 {currentPage} / {totalPages} 页";
+        return T("已读 {0} / {1} 页", currentPage, totalPages);
     }
 
     private (double Width, double Height) GetReaderPageCountMeasure()
@@ -9299,10 +9309,18 @@ public partial class MainWindow
 
         var fontSize = Math.Max(10, 16d * layout.FontScale);
         var lineHeight = Math.Max(fontSize + 2, fontSize * layout.LineHeight);
+        var pageInsets = layout.VerticalWriting
+            ? ReaderPlatformLayoutPolicy.GetVerticalPageInsets(
+                viewportWidth,
+                viewportHeight,
+                layout.BodyPadding,
+                layout.MaxWidth)
+            : (Horizontal: Math.Max(0, layout.BodyPadding), Vertical: Math.Max(0, layout.BodyPadding));
+        var availablePageWidth = Math.Max(1, viewportWidth - pageInsets.Horizontal * 2);
         var pageWidth = layout.TwoPageMode
-            ? Math.Max(180, (viewportWidth - 24 - 24 - 28) / 2)
-            : Math.Max(240, Math.Min(layout.MaxWidth, viewportWidth - 48));
-        var pageHeight = Math.Max(180, viewportHeight - 36);
+            ? Math.Max(180, (availablePageWidth - 28) / 2)
+            : Math.Max(240, Math.Min(layout.MaxWidth, availablePageWidth));
+        var pageHeight = Math.Max(180, viewportHeight - pageInsets.Vertical * 2);
         var linesPerPage = Math.Max(4, (int)Math.Floor(pageHeight / lineHeight));
         var lineUnits = Math.Max(8, pageWidth / fontSize);
         var content = ExtractReaderFallbackContent(path);

@@ -47,4 +47,32 @@ public sealed class ReaderPlatformLayoutPolicyTests
         Assert.Equal(240, 320 - insets.Horizontal * 2);
         Assert.Equal(180, 320 - insets.Vertical * 2);
     }
+
+    [Fact]
+    public void VerticalPageCentersBodyWhenMaxWidthIsNarrowerThanViewport()
+    {
+        var insets = ReaderPlatformLayoutPolicy.GetVerticalPageInsets(
+            viewportWidth: 1200,
+            viewportHeight: 700,
+            requestedInset: 24,
+            requestedMaxWidth: 800);
+
+        Assert.Equal(200, insets.Horizontal);
+        Assert.Equal(24, insets.Vertical);
+        Assert.Equal(800, 1200 - insets.Horizontal * 2);
+    }
+
+    [Fact]
+    public void VerticalPageKeepsRequestedMarginsWhenMaxWidthExceedsAvailableBody()
+    {
+        var insets = ReaderPlatformLayoutPolicy.GetVerticalPageInsets(
+            viewportWidth: 1000,
+            viewportHeight: 700,
+            requestedInset: 68,
+            requestedMaxWidth: 1200);
+
+        Assert.Equal(68, insets.Horizontal);
+        Assert.Equal(68, insets.Vertical);
+        Assert.Equal(864, 1000 - insets.Horizontal * 2);
+    }
 }

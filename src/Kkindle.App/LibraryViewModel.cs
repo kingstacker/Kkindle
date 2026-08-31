@@ -11,10 +11,11 @@ namespace Kkindle;
 /// untouched; this class only turns paths and enum values into UI labels and a
 /// loadable Avalonia bitmap.
 /// </summary>
-public sealed class BookCardViewModel : ObservableObject
+public sealed class BookCardViewModel : ObservableObject, IDisposable
 {
     public BookCardViewModel(Book book, string dataRoot)
     {
+        UiText.LanguageChanged += OnLanguageChanged;
         Book = book;
         DataRoot = dataRoot;
         Refresh();
@@ -22,21 +23,21 @@ public sealed class BookCardViewModel : ObservableObject
 
     public Book Book { get; }
     public string DataRoot { get; }
-    public string Title => Book.Title;
-    public string Authors => Book.Authors;
+    public string Title => UiText.Localize(Book.Title);
+    public string Authors => UiText.Localize(Book.Authors);
     public string FormatLabel => Book.FormatSummary;
-    public string FileCountLabel => Book.Files.Count == 0 ? string.Empty : $"{Book.Files.Count} 个文件";
-    public string TotalSizeLabel => Book.Files.Count == 0 ? "暂无文件" : FormatSize(Book.Files.Sum(file => file.Size));
+    public string FileCountLabel => Book.Files.Count == 0 ? string.Empty : UiText.Get("{0} 个文件", Book.Files.Count);
+    public string TotalSizeLabel => Book.Files.Count == 0 ? UiText.Get("暂无文件") : FormatSize(Book.Files.Sum(file => file.Size));
     public string FileSummaryLabel => string.Join(" · ", new[] { FormatLabel, FileCountLabel, TotalSizeLabel }
         .Where(value => value.Length > 0));
     public string ReadingStatusLabel => Book.ReadingStatus switch
     {
-        LibraryReadingStatus.Reading => "阅读中",
-        LibraryReadingStatus.Finished => "已读",
-        _ => "待读"
+        LibraryReadingStatus.Reading => UiText.Get("阅读中"),
+        LibraryReadingStatus.Finished => UiText.Get("已读"),
+        _ => UiText.Get("待读")
     };
     public string ReadingStateLabel => Book.IsFavorite
-        ? $"{ReadingStatusLabel} · ★ 收藏"
+        ? UiText.Get("{0} · ★ 收藏", ReadingStatusLabel)
         : ReadingStatusLabel;
     public string OrganizationLabel
     {
@@ -44,10 +45,10 @@ public sealed class BookCardViewModel : ObservableObject
         {
             var labels = new[]
             {
-                string.IsNullOrWhiteSpace(Book.Category) ? string.Empty : $"分类：{Book.Category}",
-                string.IsNullOrWhiteSpace(Book.Tags) ? string.Empty : $"标签：{Book.Tags}"
+                string.IsNullOrWhiteSpace(Book.Category) ? string.Empty : UiText.Get("分类：{0}", Book.Category),
+                string.IsNullOrWhiteSpace(Book.Tags) ? string.Empty : UiText.Get("标签：{0}", Book.Tags)
             }.Where(value => value.Length > 0).ToArray();
-            return labels.Length == 0 ? "暂无分类或标签" : string.Join(" · ", labels);
+            return labels.Length == 0 ? UiText.Get("暂无分类或标签") : string.Join(" · ", labels);
         }
     }
     public string PublicationLabel
@@ -56,12 +57,12 @@ public sealed class BookCardViewModel : ObservableObject
         {
             var labels = new[]
             {
-                string.IsNullOrWhiteSpace(Book.Publisher) ? string.Empty : $"出版社：{Book.Publisher}",
-                string.IsNullOrWhiteSpace(Book.PublishDate) ? string.Empty : $"出版：{Book.PublishDate}",
-                string.IsNullOrWhiteSpace(Book.PageCount) ? string.Empty : $"页数：{Book.PageCount}",
-                string.IsNullOrWhiteSpace(Book.Binding) ? string.Empty : $"装帧：{Book.Binding}"
+                string.IsNullOrWhiteSpace(Book.Publisher) ? string.Empty : UiText.Get("出版社：{0}", Book.Publisher),
+                string.IsNullOrWhiteSpace(Book.PublishDate) ? string.Empty : UiText.Get("出版：{0}", Book.PublishDate),
+                string.IsNullOrWhiteSpace(Book.PageCount) ? string.Empty : UiText.Get("页数：{0}", Book.PageCount),
+                string.IsNullOrWhiteSpace(Book.Binding) ? string.Empty : UiText.Get("装帧：{0}", Book.Binding)
             }.Where(value => value.Length > 0).ToArray();
-            return labels.Length == 0 ? "暂无出版信息" : string.Join(" · ", labels);
+            return labels.Length == 0 ? UiText.Get("暂无出版信息") : string.Join(" · ", labels);
         }
     }
     public string IdentifierLabel
@@ -70,12 +71,12 @@ public sealed class BookCardViewModel : ObservableObject
         {
             var labels = new[]
             {
-                string.IsNullOrWhiteSpace(Book.Isbn) ? string.Empty : $"ISBN：{Book.Isbn}",
+                string.IsNullOrWhiteSpace(Book.Isbn) ? string.Empty : UiText.Get("ISBN：{0}", Book.Isbn),
                 Book.DoubanRating is { } rating
-                    ? $"豆瓣：{rating:0.0}（{Book.DoubanRatingCount ?? 0} 人评价）"
+                    ? UiText.Get("豆瓣：{0:0.0}（{1} 人评价）", rating, Book.DoubanRatingCount ?? 0)
                     : string.Empty
             }.Where(value => value.Length > 0).ToArray();
-            return labels.Length == 0 ? "暂无 ISBN 或评分" : string.Join(" · ", labels);
+            return labels.Length == 0 ? UiText.Get("暂无 ISBN 或评分") : string.Join(" · ", labels);
         }
     }
     public string DescriptionSummaryLabel
@@ -83,13 +84,13 @@ public sealed class BookCardViewModel : ObservableObject
         get
         {
             var description = string.IsNullOrWhiteSpace(Book.Description)
-                ? "暂无简介"
+                ? UiText.Get("暂无简介")
                 : Regex.Replace(Book.Description, @"\s+", " ").Trim();
             return description.Length <= 90 ? description : $"{description[..90]}…";
         }
     }
-    public string UpdatedLabel => $"更新于 {Book.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}";
-    public string DescriptionLabel => string.IsNullOrWhiteSpace(Book.Description) ? "暂无简介" : Book.Description;
+    public string UpdatedLabel => UiText.Get("更新于 {0:yyyy-MM-dd HH:mm}", Book.UpdatedAt.ToLocalTime());
+    public string DescriptionLabel => string.IsNullOrWhiteSpace(Book.Description) ? UiText.Get("暂无简介") : Book.Description;
     public Bitmap? CoverImage { get; private set; }
 
     // Keep selection on the card itself. The legacy WinUI shelf did not use
@@ -163,9 +164,9 @@ public sealed class BookCardViewModel : ObservableObject
 
     public string PresenceLabel => LibraryPresence switch
     {
-        BookLibraryPresence.Both => "电脑与 Kindle 书库都有",
-        BookLibraryPresence.KindleOnly => "仅 Kindle 书库有",
-        _ => "仅电脑书库有"
+        BookLibraryPresence.Both => UiText.Get("电脑与 Kindle 书库都有"),
+        BookLibraryPresence.KindleOnly => UiText.Get("仅 Kindle 书库有"),
+        _ => UiText.Get("仅电脑书库有")
     };
 
     // The presence badge sits in the card's text footer; when gallery mode
@@ -202,7 +203,7 @@ public sealed class BookCardViewModel : ObservableObject
     private bool _isConversionProgressVisible;
     private double _conversionProgress;
     private string _conversionProgressLabel = "0%";
-    private string _conversionProgressMessage = "正在转换…";
+    private string _conversionProgressMessage = UiText.Get("正在转换…");
 
     public bool IsConversionProgressVisible
     {
@@ -238,7 +239,7 @@ public sealed class BookCardViewModel : ObservableObject
     {
         ConversionProgress = Math.Clamp(progress.Percentage, 0, 100);
         ConversionProgressLabel = $"{progress.RoundedPercentage}%";
-        ConversionProgressMessage = progress.Message;
+        ConversionProgressMessage = UiText.Localize(progress.Message);
         IsConversionProgressVisible = showIndicator;
     }
 
@@ -247,7 +248,7 @@ public sealed class BookCardViewModel : ObservableObject
         IsConversionProgressVisible = false;
         ConversionProgress = 0;
         ConversionProgressLabel = "0%";
-        ConversionProgressMessage = "正在转换…";
+        ConversionProgressMessage = UiText.Get("正在转换…");
     }
 
     public void Refresh()
@@ -270,6 +271,32 @@ public sealed class BookCardViewModel : ObservableObject
         OnPropertyChanged(nameof(UpdatedLabel));
         OnPropertyChanged(nameof(DescriptionLabel));
         OnPropertyChanged(nameof(CoverImage));
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(Authors));
+        OnPropertyChanged(nameof(FileCountLabel));
+        OnPropertyChanged(nameof(TotalSizeLabel));
+        OnPropertyChanged(nameof(FileSummaryLabel));
+        OnPropertyChanged(nameof(ReadingStatusLabel));
+        OnPropertyChanged(nameof(ReadingStateLabel));
+        OnPropertyChanged(nameof(OrganizationLabel));
+        OnPropertyChanged(nameof(PublicationLabel));
+        OnPropertyChanged(nameof(IdentifierLabel));
+        OnPropertyChanged(nameof(DescriptionSummaryLabel));
+        OnPropertyChanged(nameof(UpdatedLabel));
+        OnPropertyChanged(nameof(DescriptionLabel));
+        OnPropertyChanged(nameof(PresenceLabel));
+        OnPropertyChanged(nameof(ConversionProgressMessage));
+    }
+
+    public void Dispose()
+    {
+        UiText.LanguageChanged -= OnLanguageChanged;
+        CoverImage?.Dispose();
+        CoverImage = null;
     }
 
     private static Bitmap? LoadCover(string dataRoot, string? relativePath)
@@ -295,7 +322,7 @@ public sealed class BookCardViewModel : ObservableObject
     }
 }
 
-public sealed class BookCollectionFolderViewModel
+public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposable
 {
     private readonly Bitmap?[] _covers = new Bitmap?[3];
 
@@ -305,6 +332,7 @@ public sealed class BookCollectionFolderViewModel
         string dataRoot,
         IReadOnlyList<string?> coverPaths)
     {
+        UiText.LanguageChanged += OnLanguageChanged;
         Collection = collection;
         BookCount = bookCount;
         for (var index = 0; index < _covers.Length; index++)
@@ -315,12 +343,29 @@ public sealed class BookCollectionFolderViewModel
     }
 
     public BookCollection Collection { get; }
-    public string Name => Collection.Name;
+    public string Name => string.Equals(
+        Collection.Name,
+        BookLibraryDefaults.UncollectedCollectionName,
+        StringComparison.Ordinal)
+        ? UiText.Get("未收藏")
+        : UiText.Localize(Collection.Name);
     public int BookCount { get; }
-    public string BookCountLabel => $"{BookCount} 本书";
+    public string BookCountLabel => UiText.Get("{0} 本书", BookCount);
     public Bitmap? Cover1 => _covers[0];
     public Bitmap? Cover2 => _covers[1];
     public Bitmap? Cover3 => _covers[2];
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(BookCountLabel));
+    }
+
+    public void Dispose()
+    {
+        UiText.LanguageChanged -= OnLanguageChanged;
+        foreach (var cover in _covers) cover?.Dispose();
+    }
 
     private static Bitmap? LoadCover(string dataRoot, string? relativePath)
     {
@@ -337,7 +382,7 @@ public sealed class BookCollectionFolderViewModel
     }
 }
 
-public sealed class LibraryViewModel : ObservableObject
+public sealed class LibraryViewModel : ObservableObject, IDisposable
 {
     private readonly IBookLibraryService _library;
     private readonly string _dataRoot;
@@ -353,12 +398,13 @@ public sealed class LibraryViewModel : ObservableObject
     private bool _favoritesOnly;
     private LibrarySortMode _sortMode;
     private bool _isBusy;
-    private string _statusText = "准备就绪";
+    private string _statusText = UiText.Get("准备就绪");
 
     public LibraryViewModel(IBookLibraryService library, string dataRoot)
     {
         _library = library;
         _dataRoot = dataRoot;
+        UiText.LanguageChanged += OnLanguageChanged;
     }
 
     public ObservableCollection<BookCardViewModel> Books { get; } = [];
@@ -455,6 +501,7 @@ public sealed class LibraryViewModel : ObservableObject
         {
             var allBooks = await _library.SearchAsync(cancellationToken: cancellationToken);
             LibraryBooks = allBooks;
+            foreach (var card in _bookCards.Values) card.Dispose();
             _bookCards.Clear();
             foreach (var book in allBooks)
                 _bookCards[book.Id] = new BookCardViewModel(book, _dataRoot);
@@ -495,6 +542,15 @@ public sealed class LibraryViewModel : ObservableObject
 
     public void RefreshView() => ApplyCurrentView();
 
+    public void Dispose()
+    {
+        UiText.LanguageChanged -= OnLanguageChanged;
+        foreach (var card in _bookCards.Values)
+            card.Dispose();
+        _bookCards.Clear();
+        Books.Clear();
+    }
+
     public async Task<ImportBatchResult> ImportAsync(
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
@@ -506,8 +562,8 @@ public sealed class LibraryViewModel : ObservableObject
             var result = await _library.ImportAsync(paths, progress, cancellationToken);
             await RefreshAsync(cancellationToken);
             StatusText = result.FailureCount == 0
-                ? $"已导入 {result.SuccessCount} 项"
-                : $"已导入 {result.SuccessCount} 项，{result.FailureCount} 项失败";
+                ? UiText.Get("已导入 {0} 项", result.SuccessCount)
+                : UiText.Get("已导入 {0} 项，{1} 项失败", result.SuccessCount, result.FailureCount);
             return result;
         }
         finally
@@ -520,14 +576,14 @@ public sealed class LibraryViewModel : ObservableObject
     {
         await _library.DeleteAsync(book.Id, cancellationToken);
         await RefreshAsync(cancellationToken);
-        StatusText = $"已删除《{book.Title}》";
+        StatusText = UiText.Get("已删除《{0}》", book.Title);
     }
 
     public async Task DeleteFileAsync(Book book, BookFile file, CancellationToken cancellationToken = default)
     {
         await _library.DeleteFileAsync(book.Id, file.Id, cancellationToken);
         await RefreshAsync(cancellationToken);
-        StatusText = $"已删除 {file.Format.ToUpperInvariant()} 文件";
+        StatusText = UiText.Get("已删除 {0} 文件", file.Format.ToUpperInvariant());
     }
 
     public string GetAbsoluteFilePath(BookFile file) => _library.GetAbsoluteFilePath(file);
@@ -556,14 +612,14 @@ public sealed class LibraryViewModel : ObservableObject
         }
 
         StatusText = books.Length == 0
-            ? LibraryBooks.Count == 0 ? "书库还是空的"
-                : CollectionFilterId is not null ? $"“{CollectionFilterName}”收藏夹还是空的"
-                : "没有符合条件的书籍"
+            ? LibraryBooks.Count == 0 ? UiText.Get("书库还是空的")
+                : CollectionFilterId is not null ? UiText.Get("“{0}”收藏夹还是空的", UiText.Localize(CollectionFilterName ?? string.Empty))
+                : UiText.Get("没有符合条件的书籍")
             : HasActiveFilters || !string.IsNullOrWhiteSpace(SearchText)
                 ? CollectionFilterId is not null
-                    ? $"{CollectionFilterName} · {books.Length} 本书"
-                    : $"找到 {books.Length} 本书"
-                : $"共 {books.Length} 本书";
+                    ? UiText.Get("{0} · {1} 本书", UiText.Localize(CollectionFilterName ?? string.Empty), books.Length)
+                    : UiText.Get("找到 {0} 本书", books.Length)
+                : UiText.Get("共 {0} 本书", books.Length);
 
         OnPropertyChanged(nameof(HasActiveFilters));
     }
@@ -597,4 +653,7 @@ public sealed class LibraryViewModel : ObservableObject
         if (!SetProperty(ref field, value, propertyName)) return;
         OnPropertyChanged(nameof(HasActiveFilters));
     }
+
+    private void OnLanguageChanged(object? sender, EventArgs e) =>
+        ApplyCurrentView();
 }
