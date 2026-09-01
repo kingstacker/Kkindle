@@ -1203,6 +1203,7 @@ public partial class MainWindow
                 ? T("{0} 已停止访问，现在可以安全移除你的设备", device.Name)
                 : T("{0} 已安全弹出，现在可以安全移除你的设备", device.Name);
             SetDisconnectedDeviceUi(disconnectedMessage);
+            DeviceStorageText.Text = isWpd ? T("设备已停止访问") : T("设备已弹出");
             ShowDeviceStatusToast(disconnectedMessage);
         }
         catch (Exception exception)
@@ -2632,26 +2633,76 @@ public partial class MainWindow
         }
     }
 
+    private async Task<bool> RefreshDeviceResourceCachesAsync(KindleDevice device)
+    {
+        if (_kindle is null || !ReferenceEquals(CurrentDevice, device)) return false;
+
+        try
+        {
+            if (_deviceWarmTask is not null)
+                await _deviceWarmTask;
+
+            IReadOnlyList<KindleDeviceResource>? fonts = null;
+            IReadOnlyList<KindleDeviceResource>? dictionaries = null;
+            const int maxAttempts = 3;
+            for (var attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                try
+                {
+                    fonts = await _kindle.ScanResourcesAsync(device, KindleResourceKind.Font, _lifetimeCancellation.Token);
+                    dictionaries = await _kindle.ScanResourcesAsync(device, KindleResourceKind.Dictionary, _lifetimeCancellation.Token);
+                    break;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
+                {
+                    if (attempt + 1 >= maxAttempts) throw;
+                    await Task.Delay(250, _lifetimeCancellation.Token);
+                }
+            }
+
+            if (fonts is null || dictionaries is null || !ReferenceEquals(CurrentDevice, device)) return false;
+
+            var cacheKey = BuildDeviceCacheKey(device);
+            _deviceResourceCache[(cacheKey, KindleResourceKind.Font)] = fonts;
+            _deviceResourceCache[(cacheKey, KindleResourceKind.Dictionary)] = dictionaries;
+            var current = _deviceResourceKind == KindleResourceKind.Font ? fonts : dictionaries;
+            ApplyDeviceResources(current, device);
+            await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            DeviceResourceStatusText.Text = T("刷新失败：{0}", UiText.Localize(exception.Message));
+            return false;
+        }
+    }
+
     private void ApplyDeviceResources(IReadOnlyList<KindleDeviceResource> resources, KindleDevice device)
     {
         DeviceResources.Clear();
         DeviceResourceList.SelectedItem = null;
         ExportDeviceResourceButton.IsEnabled = false;
         DeleteDeviceResourceButton.IsEnabled = false;
-            foreach (var resource in resources) DeviceResources.Add(resource);
-            DeviceResourceDeviceText.Text = device.Name;
-            DeviceResourceCountText.Text = T("{0} 个文件", resources.Count);
-            DeviceResourceStatusText.Text = T("已读取 {0} 个文件", resources.Count);
-            DeviceResourceEmptyText.IsVisible = resources.Count == 0;
+        foreach (var resource in resources) DeviceResources.Add(resource);
+        DeviceResourceDeviceText.Text = device.Name;
+        DeviceResourceCountText.Text = T("{0} 个文件", resources.Count);
+        DeviceResourceStatusText.Text = T("已读取 {0} 个文件", resources.Count);
+        DeviceResourceEmptyText.IsVisible = resources.Count == 0;
     }
 
     private static string BuildDeviceCacheKey(KindleDevice device) =>
         $"{device.Transport}:{device.Identity}:{Path.GetFullPath(device.RootPath)}";
 
-    private void InvalidateCurrentDeviceResourceCache()
+    private void InvalidateCurrentDeviceResourceCaches()
     {
         if (CurrentDevice is not { } device) return;
-        _deviceResourceCache.Remove((BuildDeviceCacheKey(device), _deviceResourceKind));
+        var cacheKey = BuildDeviceCacheKey(device);
+        _deviceResourceCache.Remove((cacheKey, KindleResourceKind.Font));
+        _deviceResourceCache.Remove((cacheKey, KindleResourceKind.Dictionary));
     }
 
     private async Task PersistDeviceAuxiliaryCacheAsync(KindleDevice device)
@@ -2695,7 +2746,10 @@ public partial class MainWindow
     private async void RefreshDeviceResourcesButton_Click(object? sender, RoutedEventArgs e)
     {
         await RefreshDevicesAsync(scanBooks: false);
-        await RefreshDeviceResourcesAsync(forceRefresh: true);
+        if (CurrentDevice is { } device)
+            await RefreshDeviceResourceCachesAsync(device);
+        else
+            await RefreshDeviceResourcesAsync(forceRefresh: true);
     }
 
     private async void ImportDeviceResourceButton_Click(object? sender, RoutedEventArgs e)
@@ -2865,20 +2919,21 @@ public partial class MainWindow
                 resourceChanged = true;
                 ShowTransferToast(T("导入 Kindle 资源"), T("正在导入 {0}…", Path.GetFileName(path)), progress: (index + 1) * 100 / paths.Length);
             }
-            InvalidateCurrentDeviceResourceCache();
-            await RefreshDeviceResourcesAsync(forceRefresh: true);
-            if (CurrentDevice is { } currentDevice)
-                await PersistDeviceAuxiliaryCacheBestEffortAsync(currentDevice);
+            InvalidateCurrentDeviceResourceCaches();
+            if (CurrentDevice is { } currentDevice && !await RefreshDeviceResourceCachesAsync(currentDevice))
+            {
+                DeviceResourceStatusText.Text = T("已导入 {0} 个文件，但设备资源缓存刷新失败，请点击刷新。", paths.Length);
+                return;
+            }
             ShowTransferToast(T("导入 Kindle 资源"), T("已导入 {0} 个文件。", paths.Length), progress: 100, autoHide: true);
         }
         catch (Exception exception)
         {
             if (resourceChanged)
             {
-                InvalidateCurrentDeviceResourceCache();
-                await RefreshDeviceResourcesAsync(forceRefresh: true);
+                InvalidateCurrentDeviceResourceCaches();
                 if (CurrentDevice is { } currentDevice)
-                    await PersistDeviceAuxiliaryCacheBestEffortAsync(currentDevice);
+                    await RefreshDeviceResourceCachesAsync(currentDevice);
             }
             DeviceResourceStatusText.Text = T("导入失败：{0}", UiText.Localize(exception.Message));
             await ShowMessageAsync(T("无法导入"), UiText.Localize(exception.Message));
@@ -2930,9 +2985,12 @@ public partial class MainWindow
             try
             {
                 await _kindle.RemoveResourceAsync(device, resource, _lifetimeCancellation.Token);
-                InvalidateCurrentDeviceResourceCache();
-                await RefreshDeviceResourcesAsync(forceRefresh: true);
-                await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
+                InvalidateCurrentDeviceResourceCaches();
+                if (!await RefreshDeviceResourceCachesAsync(device))
+                {
+                    DeviceResourceStatusText.Text = T("已删除 {0}，但设备资源缓存刷新失败，请点击刷新。", resource.FileName);
+                    return;
+                }
                 DeviceResourceStatusText.Text = T("已删除 {0}", resource.FileName);
                 ShowTransferToast(T("删除 Kindle 资源"), T("已删除 {0}", resource.FileName), progress: 100, autoHide: true);
             }
