@@ -46,15 +46,12 @@ internal static class EpubReaderNavigationPolicy
         if (document.Navigation.Count == 0)
             return CreateSpineFallback(document, chapterTitleFactory);
 
-        var orderedNavigation = document.Navigation
-            .Select((item, order) => (item, order))
-            .Where(entry => entry.item.ChapterIndex >= 0
-                && entry.item.ChapterIndex < document.Chapters.Count)
-            .OrderBy(entry => entry.item.ChapterIndex)
-            .ThenBy(entry => entry.order)
-            .Select(entry => entry.item)
-            .ToArray();
-        if (orderedNavigation.Length == 0)
+        var orderedNavigation = EpubReaderPreparationService.OrderNavigationTree(
+            document.Navigation
+                .Where(item => item.ChapterIndex >= 0
+                    && item.ChapterIndex < document.Chapters.Count)
+                .ToArray());
+        if (orderedNavigation.Count == 0)
             return CreateSpineFallback(document, chapterTitleFactory);
 
         var firstNavigationChapter = orderedNavigation[0].ChapterIndex;
@@ -86,13 +83,21 @@ internal static class EpubReaderNavigationPolicy
 
         // The parsed navigation is the book's authoritative chapter list. Do
         // not rebuild it from the spine: that is what previously pulled
-        // copyright pages, dedications and quotations into this rail.
-        result.AddRange(orderedNavigation.Where(item =>
-            (!hasOpeningCover || item.ChapterIndex > 0)
-            && item.ChapterIndex != tocPageIndex));
+        // copyright pages, dedications and quotations into this rail. Drop
+        // only leaf entries — removing a part heading would orphan every
+        // chapter nested under it.
+        result.AddRange(orderedNavigation.Where((item, index) =>
+            ((!hasOpeningCover || item.ChapterIndex > 0)
+                && item.ChapterIndex != tocPageIndex)
+            || HasNestedChildren(orderedNavigation, index)));
 
         return result;
     }
+
+    private static bool HasNestedChildren(
+        IReadOnlyList<EpubReaderNavigationItem> items,
+        int index) =>
+        index + 1 < items.Count && items[index + 1].Level > items[index].Level;
 
     private static IReadOnlyList<EpubReaderNavigationItem> CreateSpineFallback(
         EpubReaderDocument document,

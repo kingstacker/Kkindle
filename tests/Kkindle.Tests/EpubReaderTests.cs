@@ -834,8 +834,349 @@ public sealed class EpubReaderTests
             Assert.Contains("original chapter", html, StringComparison.Ordinal);
             Assert.DoesNotContain("kkindle-vertical-latin", html, StringComparison.Ordinal);
             Assert.DoesNotContain("stale transformed chapter", html, StringComparison.Ordinal);
-            Assert.EndsWith("\n69", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n70", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task RepairsMalformedChapterMarkupInsteadOfFailingTheBook()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "tag-soup.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="OEBPS/content.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/content.opf", """
+                    <package><manifest>
+                      <item id="one" href="one.xhtml" media-type="application/xhtml+xml" />
+                      <item id="two" href="two.xhtml" media-type="application/xhtml+xml" />
+                    </manifest><spine><itemref idref="one" /><itemref idref="two" /></spine></package>
+                    """);
+                // Unclosed <div> before </body>, plus an undeclared entity: the
+                // exact shapes that publisher tooling ships as ".xhtml".
+                TestHelpers.AddZipEntry(archive, "OEBPS/one.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body>
+                      <div class="colophon"><p>出版社：新星出版社
+                      <p>ISBN：9787513355735&nbsp;
+                      </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/two.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>第二章正文</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('a', 64));
+
+            Assert.Equal(2, document.Chapters.Count);
+            var repaired = await File.ReadAllTextAsync(document.Chapters[0]);
+            Assert.Contains("新星出版社", repaired, StringComparison.Ordinal);
+            Assert.Contains("9787513355735", repaired, StringComparison.Ordinal);
+            // Repaired, not degraded: the markup survived the HTML parser.
+            Assert.DoesNotContain("data-kkindle-degraded", repaired, StringComparison.Ordinal);
+            Assert.Contains("第二章正文", await File.ReadAllTextAsync(document.Chapters[1]), StringComparison.Ordinal);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task DegradesUnrepairableChapterToTextWithoutFailingTheBook()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "binary-chapter.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="OEBPS/content.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/content.opf", """
+                    <package><manifest>
+                      <item id="one" href="one.xhtml" media-type="application/xhtml+xml" />
+                      <item id="two" href="two.xhtml" media-type="application/xhtml+xml" />
+                    </manifest><spine><itemref idref="one" /><itemref idref="two" /></spine></package>
+                    """);
+                // No element at all: nothing for either parser to anchor on.
+                TestHelpers.AddZipEntry(archive, "OEBPS/one.xhtml", "损坏的前言正文 & < >");
+                TestHelpers.AddZipEntry(archive, "OEBPS/two.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>第二章正文</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('b', 64));
+
+            Assert.Equal(2, document.Chapters.Count);
+            var degraded = await File.ReadAllTextAsync(document.Chapters[0]);
+            Assert.Contains("data-kkindle-degraded", degraded, StringComparison.Ordinal);
+            Assert.Contains("损坏的前言正文", degraded, StringComparison.Ordinal);
+            Assert.Contains("第二章正文", await File.ReadAllTextAsync(document.Chapters[1]), StringComparison.Ordinal);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task ResolvesNavigationHrefsThatClimbOutOfThePackageDirectory()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "parent-relative-ncx.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="OEBPS/package.opf" /></rootfiles></container>
+                    """);
+                // The NCX sits at the archive root while the OPF lives in
+                // OEBPS/, so its manifest href legally starts with "../".
+                TestHelpers.AddZipEntry(archive, "OEBPS/package.opf", """
+                    <package><manifest>
+                      <item id="one" href="one.xhtml" media-type="application/xhtml+xml" />
+                      <item id="toc1" href="../toc.ncx" media-type="application/x-dtbncx+xml" />
+                    </manifest><spine toc="toc1"><itemref idref="one" /></spine></package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "toc.ncx", """
+                    <ncx><navMap><navPoint><navLabel><text>第一章</text></navLabel>
+                    <content src="OEBPS/one.xhtml" /></navPoint></navMap></ncx>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/one.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('c', 64));
+
+            Assert.Equal(["第一章"], document.Navigation.Select(item => item.Title));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task OpensArchivesWhoseEndOfCentralDirectoryCountIsWrong()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "broken-eocd.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="OEBPS/content.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/content.opf", """
+                    <package><manifest>
+                      <item id="one" href="one.xhtml" media-type="application/xhtml+xml" />
+                    </manifest><spine><itemref idref="one" /></spine></package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/one.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文</p></body></html>
+                    """);
+            }
+
+            // Overstate the entry count in the end-of-central-directory
+            // record. ZipArchive refuses the file; the reader must not.
+            var bytes = await File.ReadAllBytesAsync(epub);
+            var eocd = FindEndOfCentralDirectory(bytes);
+            bytes[eocd + 8]++;
+            bytes[eocd + 10]++;
+            await File.WriteAllBytesAsync(epub, bytes);
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('d', 64));
+
+            Assert.Single(document.Chapters);
+            Assert.Contains("正文", await File.ReadAllTextAsync(document.Chapters[0]), StringComparison.Ordinal);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PreservesNcxNestingAsNavigationLevels()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "nested-ncx.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="OEBPS/content.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/content.opf", """
+                    <package><manifest>
+                      <item id="p1" href="p1.xhtml" media-type="application/xhtml+xml" />
+                      <item id="c1" href="c1.xhtml" media-type="application/xhtml+xml" />
+                      <item id="c2" href="c2.xhtml" media-type="application/xhtml+xml" />
+                      <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+                    </manifest><spine toc="ncx">
+                      <itemref idref="p1" /><itemref idref="c1" /><itemref idref="c2" />
+                    </spine></package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/toc.ncx", """
+                    <ncx><navMap>
+                      <navPoint><navLabel><text>第一部</text></navLabel><content src="p1.xhtml" />
+                        <navPoint><navLabel><text>第一章</text></navLabel><content src="c1.xhtml" />
+                          <navPoint><navLabel><text>1</text></navLabel><content src="c1.xhtml#s1" /></navPoint>
+                        </navPoint>
+                        <navPoint><navLabel><text>第二章</text></navLabel><content src="c2.xhtml" /></navPoint>
+                      </navPoint>
+                    </navMap></ncx>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/p1.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p id="s1">p1</p></body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/c1.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p id="s1">c1</p></body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/c2.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p id="s1">c2</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('e', 64));
+
+            Assert.Equal(
+                [("第一部", 0), ("第一章", 1), ("1", 2), ("第二章", 1)],
+                document.Navigation.Select(item => (item.Title, item.Level)));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PrefersNestedNcxOverFlatGuideTocPage()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "guide-and-ncx.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="OEBPS/content.opf" /></rootfiles></container>
+                    """);
+                // Calibre-style output: a flat HTML TOC page named in the
+                // guide, alongside a properly nested NCX.
+                TestHelpers.AddZipEntry(archive, "OEBPS/content.opf", """
+                    <package><manifest>
+                      <item id="toc" href="toc.xhtml" media-type="application/xhtml+xml" />
+                      <item id="p1" href="p1.xhtml" media-type="application/xhtml+xml" />
+                      <item id="c1" href="c1.xhtml" media-type="application/xhtml+xml" />
+                      <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+                    </manifest><spine toc="ncx">
+                      <itemref idref="toc" /><itemref idref="p1" /><itemref idref="c1" />
+                    </spine>
+                    <guide><reference type="toc" title="Table of Contents" href="toc.xhtml" /></guide>
+                    </package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/toc.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><h1>目录</h1>
+                      <div><a href="p1.xhtml">第一部</a></div>
+                      <div><a href="c1.xhtml">第一章</a></div>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/toc.ncx", """
+                    <ncx><navMap>
+                      <navPoint><navLabel><text>第一部</text></navLabel><content src="p1.xhtml" />
+                        <navPoint><navLabel><text>第一章</text></navLabel><content src="c1.xhtml" /></navPoint>
+                      </navPoint>
+                    </navMap></ncx>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/p1.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>p1</p></body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "OEBPS/c1.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>c1</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('1', 64));
+
+            // The NCX nesting wins, and the guide page's flat copies of the
+            // same chapters must not be appended a second time.
+            Assert.Equal(
+                [("目录", 0), ("第一部", 0), ("第一章", 1)],
+                document.Navigation.Select(item => (item.Title, item.Level)));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PreservesNestedListDepthInEpub3NavDocument()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "nested-nav.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container><rootfiles><rootfile full-path="EPUB/package.opf" /></rootfiles></container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/package.opf", """
+                    <package><manifest>
+                      <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />
+                      <item id="one" href="one.xhtml" media-type="application/xhtml+xml" />
+                      <item id="two" href="two.xhtml" media-type="application/xhtml+xml" />
+                    </manifest><spine><itemref idref="one" /><itemref idref="two" /></spine></package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/nav.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body>
+                      <nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol>
+                        <li><a href="one.xhtml">第一部</a>
+                          <ol><li><a href="two.xhtml">第一章</a></li></ol>
+                        </li>
+                      </ol></nav>
+                    </body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/one.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>一</p></body></html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/two.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml"><body><p>二</p></body></html>
+                    """);
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('2', 64));
+
+            Assert.Equal(
+                [("第一部", 0), ("第一章", 1)],
+                document.Navigation.Select(item => (item.Title, item.Level)));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    private static int FindEndOfCentralDirectory(byte[] bytes)
+    {
+        for (var index = bytes.Length - 22; index >= 0; index--)
+        {
+            if (bytes[index] == 0x50 && bytes[index + 1] == 0x4B
+                && bytes[index + 2] == 0x05 && bytes[index + 3] == 0x06)
+                return index;
+        }
+        throw new InvalidOperationException("测试压缩包缺少中央目录结束记录。");
     }
 }

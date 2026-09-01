@@ -5,10 +5,19 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
+using HtmlAgilityPack;
 
 namespace Kkindle.Infrastructure;
 
-public sealed record EpubReaderNavigationItem(string Title, string Target, int ChapterIndex);
+// Level is the entry's depth in the book's own table of contents: 0 for a
+// top-level part or chapter, 1 for its children, and so on. The reader rail
+// indents and folds by this value, so it must survive extraction rather than
+// being flattened away.
+public sealed record EpubReaderNavigationItem(
+    string Title,
+    string Target,
+    int ChapterIndex,
+    int Level = 0);
 
 public sealed record EpubReaderDocument(
     string RootPath,
@@ -21,7 +30,7 @@ public sealed class EpubReaderPreparationService
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     // Bump whenever sanitization changes. Existing reader caches otherwise
     // keep stale sanitized markup indefinitely.
-    private const string ExtractionFormatVersion = "69";
+    private const string ExtractionFormatVersion = "70";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
         "connect-src 'none'; form-action 'none'; img-src 'self' file:; " +
@@ -37,6 +46,16 @@ public sealed class EpubReaderPreparationService
     private static readonly Regex HtmlNamedEntityPattern = new(
         "&[A-Za-z][A-Za-z0-9]+;",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex HiddenContentPattern = new(
+        @"<(script|style|noscript|svg|math|head)\b[^>]*>.*?</\1\s*>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex BlockBreakPattern = new(
+        @"<(br\s*/?|/p|/div|/li|/h[1-6]|/section|/tr|/blockquote)\s*>",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex HtmlTagPattern = new(
+        "<[^>]*>",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly XNamespace XhtmlNamespace = "http://www.w3.org/1999/xhtml";
     private readonly AppPaths _paths;
 
     public EpubReaderPreparationService(AppPaths paths)
@@ -114,8 +133,7 @@ public sealed class EpubReaderPreparationService
             if (item.MediaType is not ("application/xhtml+xml" or "text/html")) continue;
 
             var href = Uri.UnescapeDataString(item.Href!.Split('#')[0]);
-            var chapterPath = ResolveContainedPath(packageDirectory, href);
-            EnsureContainedPath(cacheRoot, chapterPath);
+            var chapterPath = ResolvePublicationPath(packageDirectory, cacheRoot, href);
             if (File.Exists(chapterPath)) chapters.Add(chapterPath);
         }
 
@@ -170,8 +188,10 @@ public sealed class EpubReaderPreparationService
             HasToken(item.Properties, "nav"));
         if (navItem is not null)
         {
-            var navPath = ResolveContainedPath(packageDirectory, Uri.UnescapeDataString(navItem.Href!.Split('#')[0]));
-            EnsureContainedPath(cacheRoot, navPath);
+            var navPath = ResolvePublicationPath(
+                packageDirectory,
+                cacheRoot,
+                Uri.UnescapeDataString(navItem.Href!.Split('#')[0]));
             if (File.Exists(navPath))
             {
                 var navDocument = await LoadXmlAsync(navPath, cancellationToken);
@@ -213,6 +233,39 @@ public sealed class EpubReaderPreparationService
             }
         }
 
+        // EPUB 2 offers two navigation sources and neither is reliably the
+        // better one: the NCX is the only source that carries nesting, but
+        // some producers ship an NCX whose targets are wrong while the page
+        // named by <guide type="toc"> is correct. Read both and keep the one
+        // that reaches more of the book, preferring the NCX on a tie so its
+        // hierarchy survives.
+        var ncxItems = new List<EpubReaderNavigationItem>();
+        var ncxCollisions = 0;
+        if (!hasNavigation)
+        {
+            var spineTocId = package.Descendants().FirstOrDefault(element => element.Name.LocalName == "spine")?
+                .Attribute("toc")?.Value;
+            if (spineTocId is not null && manifest.TryGetValue(spineTocId, out var ncxItem))
+            {
+                var ncxPath = ResolvePublicationPath(
+                    packageDirectory,
+                    cacheRoot,
+                    Uri.UnescapeDataString(ncxItem.Href!.Split('#')[0]));
+                if (File.Exists(ncxPath))
+                {
+                    var ncx = await LoadXmlAsync(ncxPath, cancellationToken);
+                    var navMap = ncx.Descendants()
+                        .FirstOrDefault(element => element.Name.LocalName == "navMap");
+                    ncxItems = CreateNavigationItems(
+                        navMap is null ? [] : ReadNcxNavigationLinks(navMap),
+                        ncxPath,
+                        cacheRoot,
+                        chapters,
+                        out ncxCollisions);
+                }
+            }
+        }
+
         if (!hasNavigation)
         {
             var guideToc = package.Descendants()
@@ -223,10 +276,10 @@ public sealed class EpubReaderPreparationService
             if (!string.IsNullOrWhiteSpace(guideHref))
             {
                 var guidePathPart = guideHref.Split('#', 2)[0].Split('?', 2)[0];
-                var guidePath = ResolveContainedPath(
+                var guidePath = ResolvePublicationPath(
                     packageDirectory,
+                    cacheRoot,
                     Uri.UnescapeDataString(guidePathPart));
-                EnsureContainedPath(cacheRoot, guidePath);
                 if (File.Exists(guidePath))
                 {
                     var guideDocument = await LoadXmlAsync(guidePath, cancellationToken);
@@ -234,45 +287,26 @@ public sealed class EpubReaderPreparationService
                         GetNavigationLinks(guideDocument.Root),
                         guidePath,
                         cacheRoot,
-                        chapters);
-                    if (guideItems.Count > 0)
+                        chapters,
+                        out var guideCollisions);
+                    if (IsBetterNavigationSource(
+                            guideItems,
+                            guideCollisions,
+                            ncxItems,
+                            ncxCollisions))
                     {
                         navigation = guideItems;
-                        hasNavigation = true;
+                        hasNavigation = guideItems.Count > 0;
+                        ncxItems = [];
                     }
                 }
             }
         }
 
-        if (!hasNavigation)
+        if (!hasNavigation && ncxItems.Count > 0)
         {
-            var spineTocId = package.Descendants().FirstOrDefault(element => element.Name.LocalName == "spine")?
-                .Attribute("toc")?.Value;
-            if (spineTocId is not null && manifest.TryGetValue(spineTocId, out var ncxItem))
-            {
-                var ncxPath = ResolveContainedPath(
-                    packageDirectory,
-                    Uri.UnescapeDataString(ncxItem.Href!.Split('#')[0]));
-                EnsureContainedPath(cacheRoot, ncxPath);
-                if (File.Exists(ncxPath))
-                {
-                    var ncx = await LoadXmlAsync(ncxPath, cancellationToken);
-                    navigation = CreateNavigationItems(
-                        ncx.Descendants().Where(element => element.Name.LocalName == "navPoint")
-                            .Select(element =>
-                            {
-                                var title = element.Descendants().FirstOrDefault(descendant => descendant.Name.LocalName == "navLabel")?
-                                    .Descendants().FirstOrDefault(descendant => descendant.Name.LocalName == "text")?.Value;
-                                var href = element.Elements().FirstOrDefault(child => child.Name.LocalName == "content")?
-                                    .Attribute("src")?.Value;
-                                return (Title: NormalizeTitle(title), Href: href);
-                            }),
-                        ncxPath,
-                        cacheRoot,
-                        chapters);
-                    hasNavigation = navigation.Count > 0;
-                }
-            }
+            navigation = ncxItems;
+            hasNavigation = true;
         }
 
         return await MergePhysicalTocNavigationAsync(
@@ -320,15 +354,50 @@ public sealed class EpubReaderPreparationService
 
         foreach (var tocPage in tocPages)
         {
+            // A TOC page that only repeats chapters the navigation already
+            // reaches contributes nothing: its links normally carry different
+            // anchors, so they survive deduplication and double the rail while
+            // flattening the nesting the NCX supplied. Merge a page only when
+            // it opens chapters the navigation misses, which is what makes
+            // per-volume sub-TOC pages worth reading.
+            var covered = result.Select(item => item.ChapterIndex).ToHashSet();
+            if (tocPage.Items.All(item => covered.Contains(item.ChapterIndex)))
+                continue;
+
             foreach (var item in tocPage.Items)
                 AddUniqueNavigationItem(result, keys, item);
         }
 
-        return result
-            .Select((item, order) => (item, order))
-            .OrderBy(entry => entry.item.ChapterIndex)
-            .ThenBy(entry => entry.order)
-            .Select(entry => entry.item)
+        return OrderNavigationTree(result);
+    }
+
+    // Ordering has to respect nesting: a part heading shares its chapter index
+    // with its first child, so a flat sort by chapter index would scatter
+    // parents into the middle of their own subtrees. Sort the top-level
+    // entries and carry each subtree along intact. A flat list (no entry above
+    // level 0) degenerates to exactly the previous chapter-index ordering.
+    internal static List<EpubReaderNavigationItem> OrderNavigationTree(
+        IReadOnlyList<EpubReaderNavigationItem> items)
+    {
+        if (items.Count == 0) return [];
+
+        var roots = new List<(int SortKey, int Order, List<EpubReaderNavigationItem> Subtree)>();
+        for (var index = 0; index < items.Count;)
+        {
+            var subtree = new List<EpubReaderNavigationItem> { items[index] };
+            var rootLevel = items[index].Level;
+            var next = index + 1;
+            while (next < items.Count && items[next].Level > rootLevel)
+                subtree.Add(items[next++]);
+
+            roots.Add((subtree.Min(item => item.ChapterIndex), roots.Count, subtree));
+            index = next;
+        }
+
+        return roots
+            .OrderBy(entry => entry.SortKey)
+            .ThenBy(entry => entry.Order)
+            .SelectMany(entry => entry.Subtree)
             .ToList();
     }
 
@@ -377,7 +446,7 @@ public sealed class EpubReaderPreparationService
 
     private static bool IsPhysicalTocPage(
         XDocument document,
-        IReadOnlyCollection<(string Title, string? Href)> links)
+        IReadOnlyCollection<(string Title, string? Href, int Level)> links)
     {
         if (links.Count < 2)
             return false;
@@ -424,11 +493,33 @@ public sealed class EpubReaderPreparationService
             || compact.Equals("tableofcontents", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static int CountDistinctChapters(IReadOnlyList<EpubReaderNavigationItem> items) =>
+        items.Select(item => item.ChapterIndex).Distinct().Count();
+
+    // Reaching more of the book decides it. Only when both sources open the
+    // same number of chapters does the collision count break the tie, and an
+    // exact tie keeps the NCX so its nesting survives.
+    private static bool IsBetterNavigationSource(
+        IReadOnlyList<EpubReaderNavigationItem> candidate,
+        int candidateCollisions,
+        IReadOnlyList<EpubReaderNavigationItem> incumbent,
+        int incumbentCollisions)
+    {
+        if (candidate.Count == 0) return false;
+        if (incumbent.Count == 0) return true;
+
+        var candidateChapters = CountDistinctChapters(candidate);
+        var incumbentChapters = CountDistinctChapters(incumbent);
+        if (candidateChapters != incumbentChapters)
+            return candidateChapters > incumbentChapters;
+        return candidateCollisions < incumbentCollisions;
+    }
+
     private static string GetNavigationKey(EpubReaderNavigationItem item)
     {
         if (Uri.TryCreate(item.Target, UriKind.Absolute, out var target))
-            return $"{item.ChapterIndex}\0{target.Fragment}";
-        return $"{item.ChapterIndex}\0{item.Target}";
+            return $"{item.ChapterIndex}\0{target.Fragment}\0{item.Level}";
+        return $"{item.ChapterIndex}\0{item.Target}\0{item.Level}";
     }
 
     private static void AddUniqueNavigationItem(
@@ -444,14 +535,27 @@ public sealed class EpubReaderPreparationService
     }
 
     private static List<EpubReaderNavigationItem> CreateNavigationItems(
-        IEnumerable<(string Title, string? Href)> source,
+        IEnumerable<(string Title, string? Href, int Level)> source,
         string navigationDocumentPath,
         string cacheRoot,
-        IReadOnlyList<string> chapters)
+        IReadOnlyList<string> chapters) =>
+        CreateNavigationItems(source, navigationDocumentPath, cacheRoot, chapters, out _);
+
+    // collidedEntries counts entries discarded because another entry already
+    // claimed the same target. A navigation source that keeps pointing several
+    // labels at one location is describing the book worse than one that does
+    // not, which is the tie-breaker between an EPUB 2 NCX and its guide page.
+    private static List<EpubReaderNavigationItem> CreateNavigationItems(
+        IEnumerable<(string Title, string? Href, int Level)> source,
+        string navigationDocumentPath,
+        string cacheRoot,
+        IReadOnlyList<string> chapters,
+        out int collidedEntries)
     {
+        collidedEntries = 0;
         var result = new List<EpubReaderNavigationItem>();
         var targets = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (title, href) in source)
+        foreach (var (title, href, level) in source)
         {
             if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(href)) continue;
             if (IsFootnoteNavigationEntry(title, href)) continue;
@@ -461,8 +565,10 @@ public sealed class EpubReaderPreparationService
             var pathPart = parts[0].Split('?', 2)[0];
             var targetPath = pathPart.Length == 0
                 ? navigationDocumentPath
-                : ResolveContainedPath(Path.GetDirectoryName(navigationDocumentPath)!, Uri.UnescapeDataString(pathPart));
-            EnsureContainedPath(cacheRoot, targetPath);
+                : ResolvePublicationPath(
+                    Path.GetDirectoryName(navigationDocumentPath)!,
+                    cacheRoot,
+                    Uri.UnescapeDataString(pathPart));
             var chapterIndex = chapters.ToList().FindIndex(chapter =>
                 Path.GetFullPath(chapter).Equals(Path.GetFullPath(targetPath), StringComparison.OrdinalIgnoreCase));
             if (chapterIndex < 0 || !File.Exists(targetPath)) continue;
@@ -470,21 +576,77 @@ public sealed class EpubReaderPreparationService
             var target = new Uri(targetPath).AbsoluteUri;
             if (parts.Length == 2 && parts[1].Length > 0) target += $"#{parts[1]}";
             var fragmentKey = parts.Length == 2 ? DecodeNavigationFragment(parts[1]) : string.Empty;
-            if (!targets.Add($"{chapterIndex}\0{fragmentKey}")) continue;
-            result.Add(new EpubReaderNavigationItem(title, target, chapterIndex));
+            // A part heading and its first chapter routinely share one target.
+            // Keying on depth as well keeps the child entry that a purely
+            // positional key would silently drop.
+            if (!targets.Add($"{chapterIndex}\0{fragmentKey}\0{level}"))
+            {
+                collidedEntries++;
+                continue;
+            }
+
+            result.Add(new EpubReaderNavigationItem(title, target, chapterIndex, level));
         }
         return result;
     }
 
-    private static IEnumerable<(string Title, string? Href)> GetNavigationLinks(XElement? navigation) =>
-        navigation?.Descendants()
+    private static IEnumerable<(string Title, string? Href, int Level)> GetNavigationLinks(XElement? navigation)
+    {
+        if (navigation is null) return [];
+        var anchors = navigation.Descendants()
             .Where(element => element.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase))
             .Where(element => !IsFootnoteLink(element))
-            .Select(element => (
-                Title: NormalizeTitle(element.Value),
-                Href: element.Attributes().FirstOrDefault(attribute =>
-                    attribute.Name.LocalName.Equals("href", StringComparison.OrdinalIgnoreCase))?.Value))
-        ?? [];
+            .ToArray();
+        if (anchors.Length == 0) return [];
+
+        // Nesting depth comes from the enclosing list elements, which is how
+        // both EPUB 3 nav documents and hand-authored TOC pages express
+        // hierarchy. Normalize against the shallowest link so a TOC wrapped in
+        // an extra <ol> still starts at level 0.
+        var depths = anchors.Select(anchor => CountListAncestors(anchor, navigation)).ToArray();
+        var baseline = depths.Min();
+        return anchors.Select((anchor, index) => (
+            Title: NormalizeTitle(anchor.Value),
+            Href: anchor.Attributes().FirstOrDefault(attribute =>
+                attribute.Name.LocalName.Equals("href", StringComparison.OrdinalIgnoreCase))?.Value,
+            Level: ClampNavigationLevel(depths[index] - baseline)));
+    }
+
+    private const int MaximumNavigationLevel = 4;
+
+    private static int ClampNavigationLevel(int level) =>
+        Math.Clamp(level, 0, MaximumNavigationLevel);
+
+    private static int CountListAncestors(XElement element, XElement root)
+    {
+        var depth = 0;
+        for (var ancestor = element.Parent; ancestor is not null && ancestor != root; ancestor = ancestor.Parent)
+        {
+            if (ancestor.Name.LocalName is "ol" or "ul") depth++;
+        }
+        return depth;
+    }
+
+    // NCX hierarchy lives in navPoint nesting. Walk it depth-first so the
+    // emitted order matches the printed table of contents.
+    private static IEnumerable<(string Title, string? Href, int Level)> ReadNcxNavigationLinks(
+        XElement container,
+        int level = 0)
+    {
+        foreach (var navPoint in container.Elements()
+            .Where(element => element.Name.LocalName == "navPoint"))
+        {
+            var title = navPoint.Elements()
+                .FirstOrDefault(child => child.Name.LocalName == "navLabel")?
+                .Descendants().FirstOrDefault(descendant => descendant.Name.LocalName == "text")?.Value;
+            var href = navPoint.Elements().FirstOrDefault(child => child.Name.LocalName == "content")?
+                .Attribute("src")?.Value;
+            yield return (NormalizeTitle(title), href, ClampNavigationLevel(level));
+
+            foreach (var child in ReadNcxNavigationLinks(navPoint, level + 1))
+                yield return child;
+        }
+    }
 
     private static bool IsFootnoteLink(XElement element)
     {
@@ -692,6 +854,68 @@ public sealed class EpubReaderPreparationService
         string destinationRoot,
         CancellationToken cancellationToken)
     {
+        try
+        {
+            await ExtractWithZipArchiveAsync(epubPath, destinationRoot, cancellationToken);
+            return;
+        }
+        catch (InvalidDataException)
+        {
+            // Some publisher and store pipelines ship EPUBs whose end-of-
+            // central-directory record disagrees with the actual entry count.
+            // The archive itself is readable, so fall back rather than
+            // rejecting the book outright.
+        }
+
+        try
+        {
+            await ExtractFromCentralDirectoryAsync(epubPath, destinationRoot, cancellationToken);
+            return;
+        }
+        catch (ICSharpCode.SharpZipLib.SharpZipBaseException)
+        {
+            // The central directory itself is unusable. Local file headers
+            // are self-describing, so read the members sequentially.
+        }
+
+        await ExtractSequentiallyAsync(epubPath, destinationRoot, cancellationToken);
+    }
+
+    private static async Task ExtractSequentiallyAsync(
+        string epubPath,
+        string destinationRoot,
+        CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(epubPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+        using var archive = new ICSharpCode.SharpZipLib.Zip.ZipInputStream(input);
+        var extracted = 0;
+        while (archive.GetNextEntry() is { } entry)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrEmpty(entry.Name)) continue;
+
+            var destination = ResolveContainedPath(destinationRoot, entry.Name);
+            if (entry.IsDirectory)
+            {
+                Directory.CreateDirectory(destination);
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
+            await archive.CopyToAsync(output, 81920, cancellationToken);
+            extracted++;
+        }
+
+        if (extracted == 0)
+            throw new InvalidDataException("EPUB 压缩包已损坏，无法读取。");
+    }
+
+    private static async Task ExtractWithZipArchiveAsync(
+        string epubPath,
+        string destinationRoot,
+        CancellationToken cancellationToken)
+    {
         await using var input = new FileStream(epubPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
         using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false);
         foreach (var entry in archive.Entries)
@@ -713,6 +937,62 @@ public sealed class EpubReaderPreparationService
         }
     }
 
+    private static async Task ExtractFromCentralDirectoryAsync(
+        string epubPath,
+        string destinationRoot,
+        CancellationToken cancellationToken)
+    {
+        // SharpZipLib addresses entries through the central directory, so a
+        // single unreadable member (a corrupt embedded font, a truncated
+        // image) can be skipped instead of aborting the whole book.
+        using var archive = new ICSharpCode.SharpZipLib.Zip.ZipFile(epubPath);
+        var extracted = 0;
+        foreach (ICSharpCode.SharpZipLib.Zip.ZipEntry entry in archive)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrEmpty(entry.Name)) continue;
+
+            var destination = ResolveContainedPath(destinationRoot, entry.Name);
+            if (entry.IsDirectory)
+            {
+                Directory.CreateDirectory(destination);
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            try
+            {
+                await using var source = archive.GetInputStream(entry);
+                await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
+                await source.CopyToAsync(output, 81920, cancellationToken);
+                extracted++;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception
+                is ICSharpCode.SharpZipLib.SharpZipBaseException
+                or InvalidDataException
+                or NotSupportedException)
+            {
+                // Leave nothing half-written: a truncated XHTML page would
+                // otherwise reach the sanitizer as plausible-looking markup.
+                TryDeleteFile(destination);
+            }
+        }
+
+        if (extracted == 0)
+            throw new InvalidDataException("EPUB 压缩包已损坏，无法读取。");
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     private static async Task<XDocument> LoadXmlAsync(string path, CancellationToken cancellationToken)
     {
         try
@@ -721,38 +1001,88 @@ public sealed class EpubReaderPreparationService
             using var reader = XmlReader.Create(stream, CreateSecureXmlReaderSettings());
             return await XDocument.LoadAsync(reader, LoadOptions.PreserveWhitespace, cancellationToken);
         }
-        catch (XmlException)
+        catch (XmlException originalFailure)
         {
+            var markup = await File.ReadAllTextAsync(path, cancellationToken);
+
             // A number of EPUB 2 generators emit HTML entities such as
             // &nbsp; while declaring XHTML. External DTD resolution stays
             // disabled; decode only entities known by the platform and retry.
-            var xml = await File.ReadAllTextAsync(path, cancellationToken);
-            var normalized = HtmlNamedEntityPattern.Replace(xml, match =>
+            var normalized = DecodeKnownHtmlEntities(markup);
+            if (!string.Equals(markup, normalized, StringComparison.Ordinal))
             {
-                var entityName = match.Value.AsSpan(1, match.Value.Length - 2);
-                if (entityName.Equals("amp", StringComparison.Ordinal)
-                    || entityName.Equals("lt", StringComparison.Ordinal)
-                    || entityName.Equals("gt", StringComparison.Ordinal)
-                    || entityName.Equals("quot", StringComparison.Ordinal)
-                    || entityName.Equals("apos", StringComparison.Ordinal))
-                    return match.Value;
+                try { return ParseXml(normalized); }
+                catch (XmlException) { }
+            }
 
-                var decoded = WebUtility.HtmlDecode(match.Value);
-                return string.Equals(decoded, match.Value, StringComparison.Ordinal)
-                    ? match.Value
-                    : decoded;
-            });
-            if (string.Equals(xml, normalized, StringComparison.Ordinal)) throw;
-
-            using var textReader = new StringReader(normalized);
-            using var reader = XmlReader.Create(textReader, CreateSecureXmlReaderSettings());
-            return await XDocument.LoadAsync(reader, LoadOptions.PreserveWhitespace, cancellationToken);
+            // Publisher tooling also ships genuine tag soup under an .xhtml
+            // extension: unclosed elements, stray end tags, unquoted
+            // attributes. Repair it with the HTML parser instead of failing
+            // the whole book because one auxiliary page is malformed.
+            return TryLoadRepairedHtml(normalized)
+                ?? throw new XmlException(originalFailure.Message, originalFailure);
         }
     }
 
-    private static XmlReaderSettings CreateSecureXmlReaderSettings() => new()
+    private static string DecodeKnownHtmlEntities(string markup) =>
+        HtmlNamedEntityPattern.Replace(markup, match =>
+        {
+            var entityName = match.Value.AsSpan(1, match.Value.Length - 2);
+            if (entityName.Equals("amp", StringComparison.Ordinal)
+                || entityName.Equals("lt", StringComparison.Ordinal)
+                || entityName.Equals("gt", StringComparison.Ordinal)
+                || entityName.Equals("quot", StringComparison.Ordinal)
+                || entityName.Equals("apos", StringComparison.Ordinal))
+                return match.Value;
+
+            var decoded = WebUtility.HtmlDecode(match.Value);
+            return string.Equals(decoded, match.Value, StringComparison.Ordinal)
+                ? match.Value
+                : decoded;
+        });
+
+    private static XDocument ParseXml(string markup)
     {
-        Async = true,
+        using var textReader = new StringReader(markup);
+        using var reader = XmlReader.Create(textReader, CreateSecureXmlReaderSettings(asynchronous: false));
+        return XDocument.Load(reader, LoadOptions.PreserveWhitespace);
+    }
+
+    private static XDocument? TryLoadRepairedHtml(string markup)
+    {
+        try
+        {
+            var html = new HtmlDocument
+            {
+                OptionOutputAsXml = true,
+                OptionFixNestedTags = true,
+                OptionAutoCloseOnEnd = true,
+                OptionWriteEmptyNodes = true
+            };
+            html.LoadHtml(markup);
+
+            // Serialize the document element alone: the XML writer needs a
+            // single root, and a DOCTYPE or trailing comment would otherwise
+            // travel with it.
+            var root = html.DocumentNode.SelectSingleNode("//html")
+                ?? html.DocumentNode.ChildNodes.FirstOrDefault(node =>
+                    node.NodeType == HtmlNodeType.Element);
+            if (root is null) return null;
+
+            var builder = new StringBuilder();
+            using (var writer = new StringWriter(builder, System.Globalization.CultureInfo.InvariantCulture))
+                root.WriteTo(writer);
+            return ParseXml(builder.ToString());
+        }
+        catch (Exception exception) when (exception is XmlException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static XmlReaderSettings CreateSecureXmlReaderSettings(bool asynchronous = true) => new()
+    {
+        Async = asynchronous,
         // Standard EPUB XHTML commonly carries a DOCTYPE. Ignore it
         // without resolving entities; the null resolver keeps external
         // DTDs and entities out of the reader process.
@@ -785,7 +1115,7 @@ public sealed class EpubReaderPreparationService
         foreach (var path in htmlFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await SanitizeHtmlFileAsync(path, cacheRoot, cancellationToken);
+            await SanitizeHtmlFileSafelyAsync(path, cacheRoot, cancellationToken);
         }
 
         var cssFiles = Directory.EnumerateFiles(cacheRoot, "*.css", SearchOption.AllDirectories).ToArray();
@@ -794,6 +1124,68 @@ public sealed class EpubReaderPreparationService
             cancellationToken.ThrowIfCancellationRequested();
             await SanitizeCssFileAsync(path, cacheRoot, cancellationToken);
         }
+    }
+
+    // One unrepairable page must never cost the reader the whole book. The
+    // extraction marker is only written after sanitization completes, so a
+    // rethrow here would also make the failure permanent: every later open
+    // re-extracts and fails again at the same file.
+    private static async Task SanitizeHtmlFileSafelyAsync(
+        string path,
+        string cacheRoot,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SanitizeHtmlFileAsync(path, cacheRoot, cancellationToken);
+            return;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is XmlException or InvalidDataException)
+        {
+        }
+
+        // The renderer parses the cached XHTML directly, so leaving the
+        // original markup in place would only move the failure downstream.
+        // Replace it with a well-formed, script-free text rendition.
+        await WriteDegradedTextDocumentAsync(path, cancellationToken);
+    }
+
+    private static async Task WriteDegradedTextDocumentAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        string markup;
+        try { markup = await File.ReadAllTextAsync(path, cancellationToken); }
+        catch (IOException) { markup = string.Empty; }
+
+        var text = HiddenContentPattern.Replace(markup, " ");
+        text = BlockBreakPattern.Replace(text, "\n");
+        text = HtmlTagPattern.Replace(text, " ");
+        text = WebUtility.HtmlDecode(text).Replace(' ', ' ');
+
+        var body = new XElement(XhtmlNamespace + "body");
+        foreach (var line in text.Split('\n'))
+        {
+            var paragraph = string.Join(
+                ' ',
+                line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            if (paragraph.Length == 0) continue;
+            body.Add(new XElement(XhtmlNamespace + "p", paragraph));
+        }
+
+        var document = new XDocument(
+            new XElement(
+                XhtmlNamespace + "html",
+                new XElement(XhtmlNamespace + "head"),
+                body));
+        document.Root!.Element(XhtmlNamespace + "body")!
+            .SetAttributeValue("data-kkindle-degraded", "html-parse-failed");
+        MarkVerticalInlineRuns(document.Root!);
+        await WriteXmlAsync(document, path, cancellationToken);
     }
 
     private static async Task SanitizeHtmlFileAsync(
@@ -1015,6 +1407,22 @@ public sealed class EpubReaderPreparationService
         var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
         var fullPath = Path.GetFullPath(Path.Combine(root, normalized));
         EnsureContainedPath(root, fullPath);
+        return fullPath;
+    }
+
+    // Manifest and navigation hrefs are relative to the document that
+    // declares them, and legally climb out of the package directory: an OPF
+    // under OEBPS/ may reference "../toc.ncx" at the archive root. Only the
+    // extraction root is a real security boundary, so resolve against the
+    // declaring document and verify containment against the cache root.
+    private static string ResolvePublicationPath(
+        string baseDirectory,
+        string cacheRoot,
+        string relativePath)
+    {
+        var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(baseDirectory, normalized));
+        EnsureContainedPath(cacheRoot, fullPath);
         return fullPath;
     }
 

@@ -1455,8 +1455,9 @@ public partial class MainWindow
         _readerSessionSeconds = 0;
         _readerStatsBaseSeconds = 0;
         ReaderBookInfoText.Text = _readerBookCard?.Title ?? UiText.Get("目录");
-        ReaderTocList.ItemsSource = _readerTocItems;
-        ReaderTocList.SelectedIndex = -1;
+        BuildReaderTocRows();
+        CollapseReaderTocToCurrentChapter(_readerChapterIndex);
+        ReaderTocList.SelectedItem = null;
         ReaderTocPanel.IsVisible = false;
         ReaderTocView.IsVisible = true;
         ReaderBookmarkPane.IsVisible = false;
@@ -5952,17 +5953,26 @@ public partial class MainWindow
     private void SetReaderTocSelection(EpubReaderNavigationItem? item)
     {
         var index = item is null ? -1 : FindReaderTocIndex(item);
+        // A selected entry nested under a collapsed parent would be invisible
+        // and unreachable, so open its branch before selecting it.
+        if (index >= 0)
+        {
+            ExpandReaderTocAncestors(index);
+            RefreshReaderTocRows();
+        }
+
+        var row = index >= 0 && index < _readerTocRows.Length ? _readerTocRows[index] : null;
         _suppressReaderTocSelectionNavigation = true;
         try
         {
-            ReaderTocList.SelectedIndex = index;
+            ReaderTocList.SelectedItem = row;
         }
         finally
         {
             _suppressReaderTocSelectionNavigation = false;
         }
-        if (item is not null)
-            ReaderTocList.ScrollIntoView(item);
+        if (row is not null)
+            ReaderTocList.ScrollIntoView(row);
         SetReaderCompactSelectedItem(item);
     }
 
@@ -8521,7 +8531,7 @@ public partial class MainWindow
     private void ReaderTocList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressReaderTocSelectionNavigation) return;
-        if (e.AddedItems.Count > 0 && e.AddedItems[0] is EpubReaderNavigationItem item)
+        if (e.AddedItems.Count > 0 && e.AddedItems[0] is ReaderTocRow { Item: var item })
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(
                     item,

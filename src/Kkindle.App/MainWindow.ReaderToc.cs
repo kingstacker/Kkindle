@@ -75,6 +75,105 @@ public partial class MainWindow
         QueueReaderTocScrollBarAttach();
     }
 
+    // ---- Folding ------------------------------------------------------
+    // _readerTocItems stays the flat, authoritative navigation list: the
+    // progress slider, previous/next chapter and search all index into it.
+    // _readerTocRows is index-aligned with it and carries only presentation
+    // state, so folding can never change what those features see.
+    private ReaderTocRow[] _readerTocRows = [];
+
+    private void BuildReaderTocRows()
+    {
+        _readerTocRows = _readerTocItems
+            .Select((item, index) => new ReaderTocRow(
+                item,
+                HasReaderTocChildren(index),
+                isExpanded: false))
+            .ToArray();
+    }
+
+    private bool HasReaderTocChildren(int index) =>
+        index + 1 < _readerTocItems.Count
+        && _readerTocItems[index + 1].Level > _readerTocItems[index].Level;
+
+    private bool IsReaderTocRowVisible(int index)
+    {
+        // A row shows when every ancestor above it is expanded. Walk back to
+        // the nearest shallower entry, which is that row's parent.
+        var level = _readerTocRows[index].Level;
+        for (var scan = index - 1; scan >= 0 && level > 0; scan--)
+        {
+            if (_readerTocRows[scan].Level >= level) continue;
+            if (!_readerTocRows[scan].IsExpanded) return false;
+            level = _readerTocRows[scan].Level;
+        }
+        return true;
+    }
+
+    private void ExpandReaderTocAncestors(int index)
+    {
+        if (index < 0 || index >= _readerTocRows.Length) return;
+        var level = _readerTocRows[index].Level;
+        for (var scan = index - 1; scan >= 0 && level > 0; scan--)
+        {
+            if (_readerTocRows[scan].Level >= level) continue;
+            _readerTocRows[scan].IsExpanded = true;
+            level = _readerTocRows[scan].Level;
+        }
+    }
+
+    private void RefreshReaderTocRows()
+    {
+        var selected = ReaderTocList.SelectedItem as ReaderTocRow;
+        var visible = _readerTocRows
+            .Select((row, index) => (row, index))
+            .Where(entry => IsReaderTocRowVisible(entry.index))
+            .Select(entry => entry.row)
+            .ToArray();
+
+        _suppressReaderTocSelectionNavigation = true;
+        try
+        {
+            ReaderTocList.ItemsSource = visible;
+            // Replacing the source drops the selection; restore it when the
+            // row survived the fold so the current chapter stays marked.
+            ReaderTocList.SelectedItem = selected is not null && visible.Contains(selected)
+                ? selected
+                : null;
+        }
+        finally
+        {
+            _suppressReaderTocSelectionNavigation = false;
+        }
+    }
+
+    // Opening a book with every branch expanded buries the structure the fold
+    // exists to expose (one library book yields 380 entries). Show the top
+    // level plus the branch that contains the restored reading position.
+    private void CollapseReaderTocToCurrentChapter(int chapterIndex)
+    {
+        foreach (var row in _readerTocRows) row.IsExpanded = false;
+
+        var current = -1;
+        for (var index = 0; index < _readerTocItems.Count; index++)
+        {
+            if (_readerTocItems[index].ChapterIndex > chapterIndex) break;
+            current = index;
+        }
+
+        if (current >= 0) ExpandReaderTocAncestors(current);
+        RefreshReaderTocRows();
+    }
+
+    private void ReaderTocToggle_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ReaderTocRow row } || !row.HasChildren) return;
+        row.IsExpanded = !row.IsExpanded;
+        RefreshReaderTocRows();
+        // The row itself must not navigate: folding is a view action.
+        e.Handled = true;
+    }
+
     private void ReaderTocList_TemplateApplied(object? sender, TemplateAppliedEventArgs e)
     {
         QueueReaderTocScrollBarAttach();

@@ -3388,15 +3388,36 @@
                                      TemplateApplied="ReaderTocList_TemplateApplied"
                                      SelectionChanged="ReaderTocList_SelectionChanged">
                                 <ListBox.ItemTemplate>
-                                    <DataTemplate x:DataType="infra:EpubReaderNavigationItem">
+                                    <DataTemplate x:DataType="local:ReaderTocRow">
                                         <Grid ColumnDefinitions="3,*">
                                             <Rectangle Fill="#5E5E5E"
                                                        IsVisible="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" />
-                                            <TextBlock Grid.Column="1"
-                                                       Margin="13,9,11,9"
-                                                       Text="{Binding Title}"
-                                                       FontSize="12"
-                                                       TextWrapping="Wrap" />
+                                            <Grid Grid.Column="1"
+                                                  Margin="{Binding Indent}"
+                                                  ColumnDefinitions="27,*">
+                                                <Button Classes="readerTocToggle"
+                                                        Width="18"
+                                                        Height="18"
+                                                        Margin="9,9,0,9"
+                                                        Padding="0"
+                                                        VerticalAlignment="Top"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Focusable="False"
+                                                        IsVisible="{Binding HasChildren}"
+                                                        Click="ReaderTocToggle_Click">
+                                                    <TextBlock Text="{Binding ToggleGlyph}"
+                                                               FontSize="9"
+                                                               Foreground="#8A8A8A"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" />
+                                                </Button>
+                                                <TextBlock Grid.Column="1"
+                                                           Margin="4,9,11,9"
+                                                           Text="{Binding Title}"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap" />
+                                            </Grid>
                                         </Grid>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
