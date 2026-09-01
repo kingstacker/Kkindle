@@ -381,7 +381,7 @@ public partial class MainWindow
             _ when ReferenceEquals(page, DeviceResourcePage) =>
                 _deviceResourceKind == KindleResourceKind.Font ? FontManagementButton : DictionaryManagementButton,
             _ when ReferenceEquals(page, ReadingMaterialsPage) =>
-                _readingMaterialsExportMode ? ReaderExportNavigationButton : ReaderNotesNavigationButton,
+                ReaderNotesNavigationButton,
             _ when ReferenceEquals(page, ReadingDashboardPage) => ReadingDashboardButton,
             _ when ReferenceEquals(page, ZLibraryPage) => ZLibraryBooksButton,
             _ => SettingsNavigationButton
@@ -437,7 +437,6 @@ public partial class MainWindow
             FontManagementButton,
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
-            ReaderExportNavigationButton,
             ReadingDashboardButton,
             SettingsNavigationButton,
             KindleEmailSettingsNavigationButton,
@@ -453,7 +452,6 @@ public partial class MainWindow
             _ when ReferenceEquals(activeButton, FontManagementButton)
                 || ReferenceEquals(activeButton, DictionaryManagementButton) => DeviceManagementSectionButton,
             _ when ReferenceEquals(activeButton, ReaderNotesNavigationButton)
-                || ReferenceEquals(activeButton, ReaderExportNavigationButton)
                 || ReferenceEquals(activeButton, ReadingDashboardButton) => ReadingSectionButton,
             _ when ReferenceEquals(activeButton, SettingsNavigationButton)
                 || ReferenceEquals(activeButton, KindleEmailSettingsNavigationButton)
@@ -491,7 +489,7 @@ public partial class MainWindow
             // explicitly refreshes or taps the device card (WinUI reference).
             if (_manuallyDisconnectedDeviceId is not null)
             {
-                SetDisconnectedDeviceUi(T("设备已手动断开；点击“刷新”重新检测"));
+                SetDisconnectedDeviceUi(T("已断开"));
                 return;
             }
 
@@ -1202,7 +1200,7 @@ public partial class MainWindow
             var disconnectedMessage = isWpd
                 ? T("{0} 已停止访问，现在可以安全移除你的设备", device.Name)
                 : T("{0} 已安全弹出，现在可以安全移除你的设备", device.Name);
-            SetDisconnectedDeviceUi(disconnectedMessage);
+            SetDisconnectedDeviceUi(T("已断开"));
             DeviceStorageText.Text = isWpd ? T("设备已停止访问") : T("设备已弹出");
             ShowDeviceStatusToast(disconnectedMessage);
         }
@@ -1970,6 +1968,18 @@ public partial class MainWindow
             return;
         }
 
+        if (pending.Any(card => BookFormatConversionPolicy.Normalize(card.Book.Format) == "kfx"))
+        {
+            using var calibreSetup = new CalibreSetupService();
+            if (string.IsNullOrWhiteSpace(calibreSetup.LocateCalibre(_appSettings.CalibrePath)))
+            {
+                var message = T("未安装 Calibre，无法完成此导出。请先安装 Calibre，或在设置中指定 ebook-convert.exe 后重试。");
+                DevicePageStatusText.Text = message;
+                await ShowMessageAsync(T("未安装 Calibre"), message);
+                return;
+            }
+        }
+
         var titleLines = string.Join(Environment.NewLine, pending.Take(3).Select(card => T("《{0}》", card.Title)));
         if (pending.Length > 3) titleLines += T("{0}…等 {1} 本", Environment.NewLine, pending.Length);
         if (!await ConfirmAsync(
@@ -1981,6 +1991,8 @@ public partial class MainWindow
         Directory.CreateDirectory(temporaryDirectory);
         var importPaths = new List<string>();
         var failed = 0;
+        var calibreMissing = false;
+        var failureDetails = new List<string>();
         TaskProgressPopupBar.Value = 0;
         ShowTaskProgressPopup();
         ShowTransferToast(T("导出到电脑书库"), T("正在从 Kindle 导出 {0} 本书…", pending.Length), progress: 0);
@@ -2033,7 +2045,13 @@ public partial class MainWindow
                 catch (Exception exception)
                 {
                     failed++;
-                    DevicePageStatusText.Text = T("《{0}》导出失败：{1}", card.Title, UiText.Localize(exception.Message));
+                    var detail = UiText.Localize(exception.Message);
+                    var isCalibreMissing = IsCalibreMissingMessage(detail);
+                    calibreMissing |= isCalibreMissing;
+                    failureDetails.Add(T("《{0}》导出失败：{1}", card.Title, detail));
+                    DevicePageStatusText.Text = isCalibreMissing
+                        ? T("《{0}》导出失败：未检测到 Calibre。", card.Title)
+                        : T("《{0}》导出失败：{1}", card.Title, detail);
                 }
             }
 
@@ -2045,6 +2063,13 @@ public partial class MainWindow
                 var automaticFormats = await AutoGenerateReaderFormatsForImportsAsync(result, _lifetimeCancellation.Token);
                 imported = result.SuccessCount;
                 failed += result.FailureCount + automaticFormats.Failures.Count;
+                foreach (var item in result.Items.Where(item => !item.Succeeded))
+                {
+                    if (!string.IsNullOrWhiteSpace(item.Message))
+                        failureDetails.Add(UiText.Localize(item.Message));
+                }
+                failureDetails.AddRange(automaticFormats.Failures);
+                calibreMissing |= automaticFormats.Failures.Any(IsCalibreMissingMessage);
                 await RefreshCollectionsAsync();
                 UpdateLibraryUi();
             }
@@ -2054,7 +2079,26 @@ public partial class MainWindow
             DevicePageStatusText.Text = completionMessage;
             ShowTransferToast(T("导出到电脑书库"), completionMessage, progress: 100);
             if (failed > 0)
-                await ShowMessageAsync(T("导出到电脑书库失败"), T("成功 {0} 本，失败 {1} 本。", imported, failed));
+            {
+                if (calibreMissing)
+                {
+                    await ShowMessageAsync(
+                        T("未安装 Calibre"),
+                        T("未安装 Calibre，无法完成此导出。请先安装 Calibre，或在设置中指定 ebook-convert.exe 后重试。"));
+                }
+                else
+                {
+                    var message = T("成功 {0} 本，失败 {1} 本。", imported, failed);
+                    var details = failureDetails
+                        .Where(detail => !string.IsNullOrWhiteSpace(detail))
+                        .Distinct(StringComparer.CurrentCulture)
+                        .Take(3)
+                        .ToArray();
+                    if (details.Length > 0)
+                        message += Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, details);
+                    await ShowMessageAsync(T("导出到电脑书库失败"), message);
+                }
+            }
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -2069,6 +2113,13 @@ public partial class MainWindow
             catch (UnauthorizedAccessException) { }
         }
     }
+
+    private static bool IsCalibreMissingMessage(string? message) =>
+        !string.IsNullOrWhiteSpace(message)
+        && (message.Contains("未找到 Calibre", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Calibre converter was not found", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Calibre was not found", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Calibre not found", StringComparison.OrdinalIgnoreCase));
 
     private async void DeleteSelectedDeviceBooksButton_Click(object? sender, RoutedEventArgs e)
         => await DeleteSelectedDeviceBooksAsync();
@@ -2142,28 +2193,31 @@ public partial class MainWindow
     {
         _readingMaterialsExportMode = false;
         ShowStage3Page(ReadingMaterialsPage);
-        ReadingMaterialsPageTitle.Text = T("笔记与标注");
+        ReadingMaterialsPageTitle.Text = T("笔记管理");
         ReadingMaterialsStatusText.Text = T("统一浏览本地书籍与 Kindle 的划线、笔记和批注。");
         ReadingMaterialsNotesActions.IsVisible = true;
-        ReadingMaterialsExportActions.IsVisible = false;
+        SelectAllReadingMaterialsButton.IsVisible = false;
+        ExportReadingMaterialsToggleButton.Content = T("导出记录");
         ReadingMaterialsSummaryBorder.IsVisible = true;
         ReadingMaterialsExportPanel.IsVisible = false;
         ReadingMaterialsExportSummaryBorder.IsVisible = false;
         await RefreshReadingMaterialsAsync();
     }
 
-    private async void ReaderExportNavigationButton_Click(object? sender, RoutedEventArgs e)
+    private void ExportReadingMaterialsToggleButton_Click(object? sender, RoutedEventArgs e)
     {
-        _readingMaterialsExportMode = true;
-        ShowStage3Page(ReadingMaterialsPage);
-        ReadingMaterialsPageTitle.Text = T("导出记录");
-        ReadingMaterialsStatusText.Text = T("先筛选要导出的阅读资料，再选择文件格式保存到电脑。");
-        ReadingMaterialsNotesActions.IsVisible = false;
-        ReadingMaterialsExportActions.IsVisible = true;
-        ReadingMaterialsSummaryBorder.IsVisible = false;
-        ReadingMaterialsExportPanel.IsVisible = true;
-        ReadingMaterialsExportSummaryBorder.IsVisible = true;
-        await RefreshReadingMaterialsAsync();
+        _readingMaterialsExportMode = !_readingMaterialsExportMode;
+        ExportReadingMaterialsToggleButton.Content = _readingMaterialsExportMode
+            ? T("取消")
+            : T("导出记录");
+        SelectAllReadingMaterialsButton.IsVisible = _readingMaterialsExportMode;
+        ReadingMaterialsSummaryBorder.IsVisible = !_readingMaterialsExportMode;
+        ReadingMaterialsExportPanel.IsVisible = _readingMaterialsExportMode;
+        ReadingMaterialsExportSummaryBorder.IsVisible = _readingMaterialsExportMode;
+        ReadingMaterialsStatusText.Text = _readingMaterialsExportMode
+            ? T("先勾选要导出的记录，再选择文件格式保存到电脑。")
+            : T("统一浏览本地书籍与 Kindle 的划线、笔记和批注。");
+        ApplyReadingMaterialsFilter();
     }
 
     private async Task RefreshReadingMaterialsAsync()
@@ -2642,32 +2696,48 @@ public partial class MainWindow
             if (_deviceWarmTask is not null)
                 await _deviceWarmTask;
 
+            var cacheKey = BuildDeviceCacheKey(device);
             IReadOnlyList<KindleDeviceResource>? fonts = null;
             IReadOnlyList<KindleDeviceResource>? dictionaries = null;
-            const int maxAttempts = 3;
-            for (var attempt = 0; attempt < maxAttempts; attempt++)
+            Exception? firstFailure = null;
+
+            try
             {
-                try
-                {
-                    fonts = await _kindle.ScanResourcesAsync(device, KindleResourceKind.Font, _lifetimeCancellation.Token);
-                    dictionaries = await _kindle.ScanResourcesAsync(device, KindleResourceKind.Dictionary, _lifetimeCancellation.Token);
-                    break;
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
-                {
-                    if (attempt + 1 >= maxAttempts) throw;
-                    await Task.Delay(250, _lifetimeCancellation.Token);
-                }
+                fonts = await ScanDeviceResourcesWithRetryAsync(device, KindleResourceKind.Font);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
+            {
+                firstFailure = exception;
+                _deviceResourceCache.Remove((cacheKey, KindleResourceKind.Font));
             }
 
-            if (fonts is null || dictionaries is null || !ReferenceEquals(CurrentDevice, device)) return false;
+            try
+            {
+                dictionaries = await ScanDeviceResourcesWithRetryAsync(device, KindleResourceKind.Dictionary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
+            {
+                firstFailure ??= exception;
+                _deviceResourceCache.Remove((cacheKey, KindleResourceKind.Dictionary));
+            }
 
-            var cacheKey = BuildDeviceCacheKey(device);
-            _deviceResourceCache[(cacheKey, KindleResourceKind.Font)] = fonts;
-            _deviceResourceCache[(cacheKey, KindleResourceKind.Dictionary)] = dictionaries;
+            if (!ReferenceEquals(CurrentDevice, device)) return false;
+            if (fonts is not null)
+                _deviceResourceCache[(cacheKey, KindleResourceKind.Font)] = fonts;
+            if (dictionaries is not null)
+                _deviceResourceCache[(cacheKey, KindleResourceKind.Dictionary)] = dictionaries;
+
             var current = _deviceResourceKind == KindleResourceKind.Font ? fonts : dictionaries;
+            if (current is null)
+            {
+                if (_deviceResourceCache.TryGetValue((cacheKey, _deviceResourceKind), out var cachedCurrent))
+                    ApplyDeviceResources(cachedCurrent, device);
+                throw firstFailure ?? new IOException("无法读取 Kindle 资源目录。");
+            }
+
             ApplyDeviceResources(current, device);
-            await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
+            if (fonts is not null && dictionaries is not null)
+                await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
             return true;
         }
         catch (OperationCanceledException)
@@ -2679,6 +2749,31 @@ public partial class MainWindow
             DeviceResourceStatusText.Text = T("刷新失败：{0}", UiText.Localize(exception.Message));
             return false;
         }
+    }
+
+    private async Task<IReadOnlyList<KindleDeviceResource>> ScanDeviceResourcesWithRetryAsync(
+        KindleDevice device,
+        KindleResourceKind kind)
+    {
+        if (_kindle is null) throw new InvalidOperationException("Kindle 服务不可用。");
+
+        Exception? lastFailure = null;
+        const int maxAttempts = 5;
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            try
+            {
+                return await _kindle.ScanResourcesAsync(device, kind, _lifetimeCancellation.Token);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
+            {
+                lastFailure = exception;
+                if (attempt + 1 >= maxAttempts) throw;
+                await Task.Delay(TimeSpan.FromMilliseconds(350 + attempt * 350), _lifetimeCancellation.Token);
+            }
+        }
+
+        throw lastFailure ?? new IOException("无法读取 Kindle 资源目录。");
     }
 
     private void ApplyDeviceResources(IReadOnlyList<KindleDeviceResource> resources, KindleDevice device)
@@ -2703,6 +2798,22 @@ public partial class MainWindow
         var cacheKey = BuildDeviceCacheKey(device);
         _deviceResourceCache.Remove((cacheKey, KindleResourceKind.Font));
         _deviceResourceCache.Remove((cacheKey, KindleResourceKind.Dictionary));
+    }
+
+    private void RemoveDeletedDeviceResourceFromCacheAndView(
+        KindleDevice device,
+        KindleDeviceResource deletedResource)
+    {
+        var cacheKey = BuildDeviceCacheKey(device);
+        var remaining = DeviceResources
+            .Where(resource => !string.Equals(
+                resource.RelativePath,
+                deletedResource.RelativePath,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        _deviceResourceCache[(cacheKey, deletedResource.Kind)] = remaining;
+        if (_deviceResourceKind == deletedResource.Kind)
+            ApplyDeviceResources(remaining, device);
     }
 
     private async Task PersistDeviceAuxiliaryCacheAsync(KindleDevice device)
@@ -2986,11 +3097,9 @@ public partial class MainWindow
             {
                 await _kindle.RemoveResourceAsync(device, resource, _lifetimeCancellation.Token);
                 InvalidateCurrentDeviceResourceCaches();
-                if (!await RefreshDeviceResourceCachesAsync(device))
-                {
-                    DeviceResourceStatusText.Text = T("已删除 {0}，但设备资源缓存刷新失败，请点击刷新。", resource.FileName);
-                    return;
-                }
+                RemoveDeletedDeviceResourceFromCacheAndView(device, resource);
+                await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
+                await RefreshDeviceResourceCachesAsync(device);
                 DeviceResourceStatusText.Text = T("已删除 {0}", resource.FileName);
                 ShowTransferToast(T("删除 Kindle 资源"), T("已删除 {0}", resource.FileName), progress: 100, autoHide: true);
             }

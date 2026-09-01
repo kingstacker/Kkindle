@@ -694,6 +694,98 @@
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
             <Setter Property="RenderTransform" Value="scale(0.96)" />
         </Style>
+
+        <!-- Kindle resource pages use one filled primary action and flat text
+             actions. Keep this language local to the resource toolbar so
+             dialogs and other library pages retain their own hierarchy. -->
+        <Style Selector="Grid.libraryShell Button.deviceResourcePrimary">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="13,5" />
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourcePrimary:pointerover">
+            <Setter Property="Background" Value="#2A2A2A" />
+            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourcePrimary:pressed">
+            <Setter Property="Background" Value="#000000" />
+            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourcePrimary:disabled">
+            <Setter Property="Opacity" Value="0.35" />
+        </Style>
+
+        <Style Selector="Grid.libraryShell Button.deviceResourceAction">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourceAction:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourceAction:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourceAction:disabled">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Opacity" Value="0.45" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourceDestructive:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="#B3261E" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourceDestructive:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="#8F1D17" />
+        </Style>
+
+        <Style Selector="Grid.libraryShell Button.deviceResourceBack">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="4,5" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourceBack:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.deviceResourceBack:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+
         <Style Selector="Grid.libraryShell Button.icon">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
@@ -988,48 +1080,47 @@
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
-        <!-- WinUI's ToggleSwitch is the settings control, not a text
-             checkbox. Keep it as a compact track and thumb: the setting label
-             already provides the meaning, so an extra "开/关" caption only
-             adds noise. Fluent's accent colour must not enter the control. -->
+        <!-- The setting label already provides the meaning, so the switch stays
+             deliberately minimal: a thin grey line with a circular thumb. -->
         <Style Selector="ToggleSwitch">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{StaticResource SidebarIndicatorBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="IsThreeState" Value="False" />
+            <Setter Property="Width" Value="36" />
+            <Setter Property="MinWidth" Value="36" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="MinHeight" Value="18" />
+            <Setter Property="Padding" Value="0" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Grid ColumnDefinitions="36" MinHeight="20">
+                    <Grid Width="36" Height="18">
                         <Border x:Name="SwitchTrack"
-                                Width="36"
-                                Height="20"
+                                Width="24"
+                                Height="1"
                                 Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="10">
-                            <Grid x:Name="PART_MovingKnobs">
-                                <Border x:Name="SwitchThumb"
-                                        Width="14"
-                                        Height="14"
-                                        Margin="2"
-                                        Background="{StaticResource InkBrush}"
-                                        CornerRadius="7"
-                                        HorizontalAlignment="Left"
-                                        VerticalAlignment="Center" />
-                            </Grid>
-                        </Border>
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        <Grid x:Name="PART_MovingKnobs" Width="36" Height="18">
+                            <Border x:Name="SwitchThumb"
+                                    Width="12"
+                                    Height="12"
+                                    Background="{StaticResource SidebarIndicatorBrush}"
+                                    CornerRadius="6"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center" />
+                        </Grid>
                     </Grid>
                 </ControlTemplate>
             </Setter>
         </Style>
         <Style Selector="ToggleSwitch:checked">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:checked /template/ Border#SwitchThumb">
             <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />

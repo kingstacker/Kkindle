@@ -343,11 +343,6 @@
                                             Content="{DynamicResource Ui.Auto.8A7525B1492FB848}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.910C576626CD0BAA}"
                                             Click="ReaderNotesNavigationButton_Click" />
-                                    <Button x:Name="ReaderExportNavigationButton"
-                                            Classes="sidebarItem"
-                                            Content="{DynamicResource Ui.Auto.B4FBE589C50EE54E}"
-                                            ToolTip.Tip="{DynamicResource Ui.Auto.79C2AA25294BFC84}"
-                                            Click="ReaderExportNavigationButton_Click" />
                                     <Button x:Name="ReadingDashboardButton"
                                             Classes="sidebarItem"
                                             Content="{DynamicResource Ui.Auto.440C143379A34160}"
@@ -417,10 +412,12 @@
                                            Tapped="DeviceStatusBox_Tapped"
                                            ToolTip.Tip="{DynamicResource Ui.Auto.7A64BC5E494194A4}" />
                                 <TextBlock x:Name="KindleConnectionText"
-                                           Grid.Row="1"
-                                           Margin="0,2,0,0"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           FontSize="10" />
+                                            Grid.Row="1"
+                                            Margin="0,2,0,0"
+                                            Foreground="{StaticResource MutedInkBrush}"
+                                            FontSize="10"
+                                            TextWrapping="Wrap"
+                                            HorizontalAlignment="Stretch" />
                                 <Border Grid.Column="1"
                                         Grid.Row="0"
                                         Classes="ejectHoverArea"
@@ -1380,13 +1377,34 @@
                         </StackPanel>
                         <TextBlock x:Name="DeviceResourceStatusText" Text="{DynamicResource Ui.Auto.B5B59EF7D3AF6071}" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                     </StackPanel>
-                    <WrapPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button x:Name="ImportDeviceResourceButton" Content="{DynamicResource Ui.Auto.3C652C6EFD4EB3F8}" Margin="0,0,8,0" Padding="11,6" Click="ImportDeviceResourceButton_Click" />
-                        <Button x:Name="ExportDeviceResourceButton" Content="{DynamicResource Ui.Auto.DAB0F7CAA4DEA42D}" Classes="quiet" IsEnabled="False" Margin="0,0,8,0" Padding="11,6" Click="ExportDeviceResourceButton_Click" />
-                        <Button x:Name="DeleteDeviceResourceButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" Classes="quiet" IsEnabled="False" Margin="0,0,8,0" Padding="11,6" Click="DeleteDeviceResourceButton_Click" />
-                        <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}" Classes="quiet" Margin="0,0,8,0" Padding="11,6" Click="RefreshDeviceResourcesButton_Click" />
-                        <Button Content="{DynamicResource Ui.Auto.A51CE8191584FCF7}" Padding="11,6" Click="ShowAllBooksButton_Click" />
-                    </WrapPanel>
+                    <Grid Grid.Row="1" ColumnDefinitions="*">
+                        <StackPanel
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Spacing="4">
+                            <Button x:Name="ImportDeviceResourceButton"
+                                    Classes="deviceResourcePrimary"
+                                    Background="{StaticResource InkBrush}"
+                                    Foreground="{StaticResource PaperBrush}"
+                                    Click="ImportDeviceResourceButton_Click">
+                                <TextBlock Text="{DynamicResource Ui.Auto.3C652C6EFD4EB3F8}"
+                                           Foreground="{StaticResource PaperBrush}" />
+                            </Button>
+                            <Button x:Name="ExportDeviceResourceButton"
+                                    Content="{DynamicResource Ui.Auto.DAB0F7CAA4DEA42D}"
+                                    Classes="deviceResourceAction"
+                                    IsEnabled="False"
+                                    Click="ExportDeviceResourceButton_Click" />
+                            <Button x:Name="DeleteDeviceResourceButton"
+                                    Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}"
+                                    Classes="deviceResourceAction deviceResourceDestructive"
+                                    IsEnabled="False"
+                                    Click="DeleteDeviceResourceButton_Click" />
+                            <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}"
+                                    Classes="deviceResourceAction"
+                                    Click="RefreshDeviceResourcesButton_Click" />
+                        </StackPanel>
+                    </Grid>
                 </Grid>
                 <Grid Grid.Row="1" Margin="0,20,0,0">
                     <ListBox x:Name="DeviceResourceList"
@@ -1402,6 +1420,22 @@
                                 <Setter Property="Margin" Value="0,0,0,10" />
                                 <Setter Property="Background" Value="Transparent" />
                                 <Setter Property="BorderThickness" Value="0" />
+                            </Style>
+                            <!-- Selected Kindle resources stay paper-white and
+                                 use a hollow ink rectangle instead of
+                                 Fluent's accent selection fill. -->
+                            <Style Selector="ListBoxItem:selected,
+                                             ListBoxItem:selected:pointerover,
+                                             ListBoxItem:selected:focus">
+                                <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected Border.flatRow,
+                                             ListBoxItem:selected:pointerover Border.flatRow,
+                                             ListBoxItem:selected:focus Border.flatRow">
+                                <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+                                <Setter Property="BorderThickness" Value="1" />
                             </Style>
                         </ListBox.Styles>
                         <ListBox.ItemTemplate>
@@ -1446,16 +1480,19 @@
                         </StackPanel>
                         <TextBlock x:Name="ReadingMaterialsStatusText" Text="{DynamicResource Ui.Auto.D406419777B46CF3}" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                     </StackPanel>
-                    <StackPanel x:Name="ReadingMaterialsNotesActions" Grid.Column="1" Margin="0,46,0,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                        <Button x:Name="ReadingMaterialsLocateButton" Content="{DynamicResource Ui.Auto.6F789DCD99E5FE34}" Classes="quiet" IsEnabled="False" Padding="11,6" Click="ReadingMaterialsLocateButton_Click" />
-                        <Button x:Name="DeleteReadingMaterialsButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" Classes="quiet" IsEnabled="False" Padding="11,6" Click="DeleteReadingMaterialsButton_Click" />
-                        <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}" Classes="quiet" Padding="11,6" Click="RefreshReadingMaterialsButton_Click" />
-                        <Button x:Name="ReadingMaterialsBackButton" Content="{DynamicResource Ui.Auto.A51CE8191584FCF7}" Padding="11,6" Click="ShowAllBooksButton_Click" />
-                    </StackPanel>
-                    <StackPanel x:Name="ReadingMaterialsExportActions" Grid.Column="1" Margin="0,46,0,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top" IsVisible="False">
-                        <Button x:Name="SelectAllReadingMaterialsButton" Content="{DynamicResource Ui.Auto.3A5040B68ABF75F9}" Classes="quiet" Padding="11,6" Click="SelectAllReadingMaterialsButton_Click" />
-                        <Button Content="{DynamicResource Ui.Auto.E604A9509264DE7F}" Classes="quiet" Padding="11,6" Click="RefreshReadingMaterialsButton_Click" />
-                        <Button Content="{DynamicResource Ui.Auto.A51CE8191584FCF7}" Padding="11,6" Click="ShowAllBooksButton_Click" />
+                    <StackPanel x:Name="ReadingMaterialsNotesActions" Grid.Column="1" Margin="0,46,0,0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                        <Button x:Name="ExportReadingMaterialsToggleButton"
+                                Content="{DynamicResource Ui.Auto.B4FBE589C50EE54E}"
+                                Classes="deviceResourceAction"
+                                Click="ExportReadingMaterialsToggleButton_Click" />
+                        <Button x:Name="SelectAllReadingMaterialsButton"
+                                Content="{DynamicResource Ui.Auto.3A5040B68ABF75F9}"
+                                Classes="deviceResourceAction"
+                                IsVisible="False"
+                                Click="SelectAllReadingMaterialsButton_Click" />
+                        <Button x:Name="ReadingMaterialsLocateButton" Content="{DynamicResource Ui.Auto.6F789DCD99E5FE34}" Classes="deviceResourceAction" IsEnabled="False" Click="ReadingMaterialsLocateButton_Click" />
+                        <Button x:Name="DeleteReadingMaterialsButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" Classes="deviceResourceAction deviceResourceDestructive" IsEnabled="False" Click="DeleteReadingMaterialsButton_Click" />
+                        <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}" Classes="deviceResourceAction" Click="RefreshReadingMaterialsButton_Click" />
                     </StackPanel>
                 </Grid>
                 <Grid Grid.Row="1" Margin="0,14,0,14" ColumnDefinitions="*,Auto" ColumnSpacing="14">
@@ -1503,8 +1540,8 @@
                                     Orientation="Horizontal"
                                     Spacing="8"
                                     VerticalAlignment="Center">
-                            <Button Content="{DynamicResource Ui.Auto.AC8B027CC1E3A493}" Padding="11,6" Click="ExportReadingMaterialsMarkdownButton_Click" />
-                            <Button Content="{DynamicResource Ui.Auto.8E1B126E634DCA98}" Classes="quiet" Padding="11,6" Click="ExportReadingMaterialsTextButton_Click" />
+                            <Button Content="{DynamicResource Ui.Auto.AC8B027CC1E3A493}" Classes="deviceResourcePrimary" Click="ExportReadingMaterialsMarkdownButton_Click" />
+                            <Button Content="{DynamicResource Ui.Auto.8E1B126E634DCA98}" Classes="deviceResourceAction" Click="ExportReadingMaterialsTextButton_Click" />
                         </StackPanel>
                     </Grid>
                 </Border>

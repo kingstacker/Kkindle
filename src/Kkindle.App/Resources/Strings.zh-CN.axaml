@@ -13,7 +13,7 @@
     <x:String x:Key="Ui.Auto.DEC3634BEDD23D3D">Z-Library 账号</x:String>
     <x:String x:Key="Ui.Auto.A654447A8C906AB1">字体管理</x:String>
     <x:String x:Key="Ui.Auto.8B62411F753D8465">字典管理</x:String>
-    <x:String x:Key="Ui.Auto.8A7525B1492FB848">笔记</x:String>
+    <x:String x:Key="Ui.Auto.8A7525B1492FB848">笔记管理</x:String>
     <x:String x:Key="Ui.Auto.ECDD3E4A16F4CD30">目录</x:String>
     <x:String x:Key="Ui.Auto.65479E3E408A6E35">书签</x:String>
     <x:String x:Key="Ui.Auto.5E23EC6A300DC60A">模式</x:String>
@@ -253,6 +253,9 @@
     <x:String x:Key="Ui.Auto.914F86CA5C6739D9">最近阅读记录</x:String>
     <x:String x:Key="Ui.Auto.EC309AB207EF7FA3">服务</x:String>
     <x:String x:Key="Ui.Auto.FE66F3C4D3165B5D">未检测到 Calibre</x:String>
+    <x:String x:Key="Ui.Auto.5F7E384B2A93581D">未检测到 Calibre，无法导出 KFX 书籍。请先安装 Calibre，或在设置中指定 ebook-convert.exe 后重试。</x:String>
+    <x:String x:Key="Ui.Auto.E585C547F9C8D1A8">未安装 Calibre</x:String>
+    <x:String x:Key="Ui.Auto.32A2D6B61F3E42D9">未安装 Calibre，无法完成此导出。请先安装 Calibre，或在设置中指定 ebook-convert.exe 后重试。</x:String>
     <x:String x:Key="Ui.Auto.9514487168A00698">未检测到设备</x:String>
     <x:String x:Key="Ui.Auto.73238927F76F6BD2">未连接设备</x:String>
     <x:String x:Key="Ui.Auto.646F56BD61A92E84">未选择书籍</x:String>
@@ -321,7 +324,7 @@
     <x:String x:Key="Ui.Auto.FA133D5DE7088336">竖排排版（全局，仅支持单页）</x:String>
     <x:String x:Key="Ui.Auto.E0119B0BA5ACFA0F">竖排模式（全局）</x:String>
     <x:String x:Key="Ui.Auto.E71AC32B544B0EBF">端口</x:String>
-    <x:String x:Key="Ui.Auto.9CD1F9CD7B9AC663">笔记与标注</x:String>
+    <x:String x:Key="Ui.Auto.9CD1F9CD7B9AC663">笔记管理</x:String>
     <x:String x:Key="Ui.Auto.737AC585CF7AD245">笔记批注默认收起</x:String>
     <x:String x:Key="Ui.Auto.94CC5EA6C71365C7">等线 DengXian</x:String>
     <x:String x:Key="Ui.Auto.B5F15473FDC0FEFE">筛选</x:String>
@@ -993,6 +996,7 @@
     <x:String x:Key="Ui.Auto.4B920249FBD3D8E9">设备信息已读取部分内容：{0}</x:String>
     <x:String x:Key="Ui.Auto.A4E64B6F615C9B7A">设备功能将在 Windows 平台启动头中启用。</x:String>
     <x:String x:Key="Ui.Auto.6E1334C20A09844F">设备已手动断开；点击“刷新”重新检测</x:String>
+    <x:String x:Key="Ui.Auto.1F0AC6953E0411C0">已断开</x:String>
     <x:String x:Key="Ui.Auto.C60DDD6D5BBBCD6A">设备已连接。</x:String>
     <x:String x:Key="Ui.Auto.8F628399C68C6007">设备已连接，正在准备设备信息…</x:String>
     <x:String x:Key="Ui.Auto.78F36737ECB6B7D0">设备检测失败：{0}</x:String>

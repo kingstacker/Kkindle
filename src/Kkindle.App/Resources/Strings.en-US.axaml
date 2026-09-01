@@ -13,7 +13,7 @@
     <x:String x:Key="Ui.Auto.DEC3634BEDD23D3D">Z-Library account</x:String>
     <x:String x:Key="Ui.Auto.A654447A8C906AB1">Fonts</x:String>
     <x:String x:Key="Ui.Auto.8B62411F753D8465">Dictionaries</x:String>
-    <x:String x:Key="Ui.Auto.8A7525B1492FB848">Notes</x:String>
+    <x:String x:Key="Ui.Auto.8A7525B1492FB848">Note management</x:String>
     <x:String x:Key="Ui.Auto.ECDD3E4A16F4CD30">TOC</x:String>
     <x:String x:Key="Ui.Auto.65479E3E408A6E35">Marks</x:String>
     <x:String x:Key="Ui.Auto.5E23EC6A300DC60A">Mode</x:String>
@@ -253,6 +253,9 @@
     <x:String x:Key="Ui.Auto.914F86CA5C6739D9">Recent reading records</x:String>
     <x:String x:Key="Ui.Auto.EC309AB207EF7FA3">Service</x:String>
     <x:String x:Key="Ui.Auto.FE66F3C4D3165B5D">Calibre not found</x:String>
+    <x:String x:Key="Ui.Auto.5F7E384B2A93581D">Calibre was not detected, so this KFX book cannot be exported. Install Calibre or choose ebook-convert.exe in Settings, then try again.</x:String>
+    <x:String x:Key="Ui.Auto.E585C547F9C8D1A8">Calibre not installed</x:String>
+    <x:String x:Key="Ui.Auto.32A2D6B61F3E42D9">Calibre is not installed, so this export cannot be completed. Install Calibre or choose ebook-convert.exe in Settings, then try again.</x:String>
     <x:String x:Key="Ui.Auto.9514487168A00698">No device detected</x:String>
     <x:String x:Key="Ui.Auto.73238927F76F6BD2">No device connected</x:String>
     <x:String x:Key="Ui.Auto.646F56BD61A92E84">No book selected</x:String>
@@ -321,7 +324,7 @@
     <x:String x:Key="Ui.Auto.FA133D5DE7088336">Vertical layout (global; single-page mode only)</x:String>
     <x:String x:Key="Ui.Auto.E0119B0BA5ACFA0F">Vertical writing mode (global)</x:String>
     <x:String x:Key="Ui.Auto.E71AC32B544B0EBF">Port</x:String>
-    <x:String x:Key="Ui.Auto.9CD1F9CD7B9AC663">Notes and annotations</x:String>
+    <x:String x:Key="Ui.Auto.9CD1F9CD7B9AC663">Note management</x:String>
     <x:String x:Key="Ui.Auto.737AC585CF7AD245">Collapse notes and annotations by default</x:String>
     <x:String x:Key="Ui.Auto.94CC5EA6C71365C7">DengXian</x:String>
     <x:String x:Key="Ui.Auto.B5F15473FDC0FEFE">Filter</x:String>
@@ -993,6 +996,7 @@
     <x:String x:Key="Ui.Auto.4B920249FBD3D8E9">Device information was partially read: {0}</x:String>
     <x:String x:Key="Ui.Auto.A4E64B6F615C9B7A">Device features will be enabled in the Windows platform host.</x:String>
     <x:String x:Key="Ui.Auto.6E1334C20A09844F">Device disconnected manually; click “Refresh” to detect it again</x:String>
+    <x:String x:Key="Ui.Auto.1F0AC6953E0411C0">Disconnected</x:String>
     <x:String x:Key="Ui.Auto.C60DDD6D5BBBCD6A">Device connected.</x:String>
     <x:String x:Key="Ui.Auto.8F628399C68C6007">Device connected; preparing device information...</x:String>
     <x:String x:Key="Ui.Auto.78F36737ECB6B7D0">Device detection failed: {0}</x:String>

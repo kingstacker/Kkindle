@@ -5,8 +5,9 @@ using Kkindle.Core;
 namespace Kkindle.Platform.Windows;
 
 /// <summary>
-/// Sends a file through the native WPD stream API instead of Shell.Application.CopyHere.
-/// The latter is allowed to ignore its "no UI" flag and can show the Windows copy dialog.
+/// Transfers file data through the native WPD stream API instead of
+/// Shell.Application.CopyHere. The latter is allowed to ignore its "no UI"
+/// flag and can show the Windows copy dialog.
 /// </summary>
 internal static class WpdNativeTransfer
 {
@@ -18,6 +19,83 @@ internal static class WpdNativeTransfer
     private static readonly PropertyKey WpdObjectName = new(WpdObjectPropertySet, 4);
     private static readonly PropertyKey WpdObjectSize = new(WpdObjectPropertySet, 11);
     private static readonly PropertyKey WpdObjectOriginalFileName = new(WpdObjectPropertySet, 12);
+    private static readonly PropertyKey WpdResourceDefault = new(
+        new Guid("E81E79BE-34F0-41BF-ACF9-FD6A0A438717"),
+        0);
+    private const uint StgmRead = 0;
+
+    /// <summary>
+    /// Reads a WPD object's default resource directly into a local file.
+    /// Shell.Application.CopyHere is intentionally avoided here: WPD Shell
+    /// providers may display the Windows copy-progress dialog even when the
+    /// no-UI flag is supplied.
+    /// </summary>
+    public static void CopyFileToLocal(
+        string shellPath,
+        string objectId,
+        string destinationPath,
+        long expectedSize,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(objectId))
+            throw new IOException("Kindle 源文件的 WPD 对象 ID 为空。");
+
+        var devicePath = GetPortableDevicePath(shellPath);
+        var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.kkindle-part";
+        IPortableDevice? device = null;
+        IPortableDeviceValues? clientInfo = null;
+        IPortableDeviceContent? content = null;
+        IPortableDeviceResources? resources = null;
+        IStream? source = null;
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            device = CreateComObject<IPortableDevice>(PortableDeviceClassId);
+            clientInfo = CreateComObject<IPortableDeviceValues>(PortableDeviceValuesClassId);
+            ThrowIfFailed(device.Open(devicePath, clientInfo), "打开 Kindle 的原生 WPD 会话");
+
+            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfFailed(device.Content(out content), "获取 Kindle 的 WPD 内容接口");
+            if (content is null)
+                throw new IOException("Kindle 未返回 WPD 内容接口。");
+            ThrowIfFailed(content.Transfer(out resources), "获取 Kindle 的 WPD 资源接口");
+            if (resources is null)
+                throw new IOException("Kindle 未返回 WPD 资源接口。");
+
+            uint optimalReadBufferSize = 0;
+            var resourceKey = WpdResourceDefault;
+            ThrowIfFailed(
+                resources.GetStream(
+                    objectId,
+                    ref resourceKey,
+                    StgmRead,
+                    ref optimalReadBufferSize,
+                    out source),
+                "打开 Kindle 资源读取流");
+            if (source is null)
+                throw new IOException("Kindle 未返回资源读取流。");
+
+            CopyFromDevice(
+                source,
+                temporaryPath,
+                expectedSize,
+                optimalReadBufferSize,
+                cancellationToken);
+            File.Move(temporaryPath, destinationPath, true);
+        }
+        finally
+        {
+            Release(source);
+            Release(resources);
+            Release(content);
+            Release(clientInfo);
+            Release(device);
+            try { File.Delete(temporaryPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
 
     public static void SendFile(
         string shellPath,
@@ -136,6 +214,53 @@ internal static class WpdNativeTransfer
         finally
         {
             Marshal.FreeHGlobal(bytesWritten);
+        }
+    }
+
+    private static void CopyFromDevice(
+        IStream source,
+        string destinationPath,
+        long expectedSize,
+        uint optimalReadBufferSize,
+        CancellationToken cancellationToken)
+    {
+        var bufferSize = optimalReadBufferSize is >= 4 * 1024 and <= 4 * 1024 * 1024
+            ? checked((int)optimalReadBufferSize)
+            : 256 * 1024;
+        var buffer = new byte[bufferSize];
+        var bytesRead = Marshal.AllocHGlobal(sizeof(int));
+        try
+        {
+            using var destination = new FileStream(
+                destinationPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize,
+                FileOptions.SequentialScan);
+            long copied = 0;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Marshal.WriteInt32(bytesRead, 0);
+                source.Read(buffer, buffer.Length, bytesRead);
+                var read = Marshal.ReadInt32(bytesRead);
+                if (read < 0 || read > buffer.Length)
+                    throw new IOException($"Kindle 数据流读取长度无效（{read} 字节）。");
+                if (read == 0) break;
+
+                destination.Write(buffer, 0, read);
+                copied = checked(copied + read);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            destination.Flush(true);
+            if (expectedSize > 0 && copied != expectedSize)
+                throw new IOException($"Kindle 资源读取不完整（预计 {expectedSize} 字节，实际 {copied} 字节）。");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(bytesRead);
         }
     }
 
@@ -258,7 +383,8 @@ internal static class WpdNativeTransfer
             IntPtr enumObjectIds);
 
         [PreserveSig] int Properties(out IntPtr properties);
-        [PreserveSig] int Transfer(out IntPtr resources);
+        [PreserveSig]
+        int Transfer([MarshalAs(UnmanagedType.Interface)] out IPortableDeviceResources resources);
         [PreserveSig] int CreateObjectWithPropertiesOnly(IntPtr values, IntPtr objectId);
 
         [PreserveSig]
@@ -273,6 +399,43 @@ internal static class WpdNativeTransfer
         [PreserveSig] int Cancel();
         [PreserveSig] int Move(IntPtr ids, [MarshalAs(UnmanagedType.LPWStr)] string destinationId, out IntPtr results);
         [PreserveSig] int Copy(IntPtr ids, [MarshalAs(UnmanagedType.LPWStr)] string destinationId, out IntPtr results);
+    }
+
+    [ComImport, Guid("FD8878AC-D841-4D17-891C-E6829CDB6934"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPortableDeviceResources
+    {
+        [PreserveSig]
+        int GetSupportedResources(
+            [MarshalAs(UnmanagedType.LPWStr)] string objectId,
+            out IntPtr resources);
+
+        [PreserveSig]
+        int GetResourceAttributes(
+            [MarshalAs(UnmanagedType.LPWStr)] string objectId,
+            ref PropertyKey resourceKey,
+            out IntPtr attributes);
+
+        [PreserveSig]
+        int GetStream(
+            [MarshalAs(UnmanagedType.LPWStr)] string objectId,
+            ref PropertyKey resourceKey,
+            uint mode,
+            ref uint optimalReadBufferSize,
+            [MarshalAs(UnmanagedType.Interface)] out IStream stream);
+
+        [PreserveSig]
+        int Delete(
+            [MarshalAs(UnmanagedType.LPWStr)] string objectId,
+            IntPtr resourceKeys);
+
+        [PreserveSig] int Cancel();
+
+        [PreserveSig]
+        int CreateResource(
+            [MarshalAs(UnmanagedType.Interface)] IPortableDeviceValues attributes,
+            [MarshalAs(UnmanagedType.Interface)] out IStream resourceStream,
+            ref uint optimalWriteBufferSize,
+            out IntPtr cookie);
     }
 
     [ComImport, Guid("6848F6F2-3155-4F86-B6F5-263EEEAB3143"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
