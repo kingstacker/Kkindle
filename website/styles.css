@@ -602,8 +602,8 @@ h1 {
 .download-section {
   margin: 0 -34px;
   padding: 110px 34px 120px;
-  color: #f7f4ed;
-  background: #171817;
+  color: var(--ink);
+  background: var(--paper-deep);
 }
 
 .download-inner {
@@ -613,11 +613,11 @@ h1 {
 
 .download-heading h2 {
   max-width: 720px;
-  color: #f7f4ed;
+  color: var(--ink);
 }
 
 .download-heading > p:last-child {
-  color: #aaa9a1;
+  color: var(--muted);
 }
 
 .release-banner {
@@ -627,13 +627,13 @@ h1 {
   gap: 20px;
   margin: 47px 0 21px;
   padding: 20px 0;
-  border-top: 1px solid var(--line-dark);
-  border-bottom: 1px solid var(--line-dark);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .release-label {
   margin: 0 0 4px;
-  color: #a8a69d;
+  color: var(--muted);
   font-size: 10px;
   letter-spacing: 0.14em;
 }
@@ -641,19 +641,20 @@ h1 {
 #latest-version {
   display: inline-block;
   margin-right: 11px;
+  color: var(--ink);
   font-family: var(--serif);
   font-size: 24px;
   font-weight: 500;
 }
 
 #release-published {
-  color: #89877f;
+  color: var(--muted);
   font-size: 12px;
 }
 
 .release-link,
 .checksum-link {
-  color: #e0a58d;
+  color: var(--accent);
   font-size: 12px;
 }
 
@@ -661,7 +662,7 @@ h1 {
 .release-link:focus-visible,
 .checksum-link:hover,
 .checksum-link:focus-visible {
-  color: #fff;
+  color: var(--accent-dark);
 }
 
 .download-grid {
@@ -676,8 +677,8 @@ h1 {
   min-height: 390px;
   flex-direction: column;
   padding: 25px;
-  border: 1px solid var(--line-dark);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.42);
   transition: border-color 180ms ease, transform 180ms ease;
 }
 
@@ -698,8 +699,8 @@ h1 {
   width: 25px;
   height: 25px;
   place-items: center;
-  border: 1px solid #8c8a81;
-  color: #dedbd2;
+  border: 1px solid #a8a49a;
+  color: var(--ink);
   font-family: var(--serif);
   font-size: 16px;
 }
@@ -710,22 +711,22 @@ h1 {
 
 .platform-badge {
   padding: 3px 7px;
-  color: #f1b59d;
-  border: 1px solid #74422f;
+  color: var(--accent-dark);
+  border: 1px solid #c48b75;
   font-size: 9px;
   letter-spacing: 0.08em;
 }
 
 .download-card h3 {
   margin: 38px 0 5px;
-  color: #f7f4ed;
+  color: var(--ink);
   font-size: 34px;
 }
 
 .download-card > p {
   min-height: 51px;
   margin-bottom: 22px;
-  color: #94928b;
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.7;
 }
@@ -734,7 +735,7 @@ h1 {
   display: flex;
   flex-direction: column;
   margin-top: auto;
-  border-top: 1px solid var(--line-dark);
+  border-top: 1px solid var(--line);
 }
 
 .download-option {
@@ -743,8 +744,8 @@ h1 {
   justify-content: space-between;
   gap: 14px;
   min-height: 55px;
-  border-bottom: 1px solid var(--line-dark);
-  color: #b6b4ac;
+  border-bottom: 1px solid var(--line);
+  color: #5f5d56;
   font-size: 13px;
   transition: color 180ms ease, padding 180ms ease, background 180ms ease;
 }
@@ -752,8 +753,8 @@ h1 {
 .download-option:hover,
 .download-option:focus-visible {
   padding: 0 9px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  background: rgba(23, 24, 23, 0.05);
 }
 
 .download-option strong,
@@ -767,7 +768,7 @@ h1 {
 
 .download-option small {
   margin-top: 2px;
-  color: #797870;
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -776,7 +777,7 @@ h1 {
 }
 
 .primary-option {
-  color: #f0b19a;
+  color: var(--accent-dark);
 }
 
 .download-footer {
@@ -789,7 +790,7 @@ h1 {
 
 .release-status {
   margin: 0;
-  color: #797870;
+  color: var(--muted);
   font-size: 11px;
 }
 
