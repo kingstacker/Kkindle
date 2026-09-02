@@ -380,7 +380,7 @@ async function loadLatestRelease() {
   try {
     const response = await fetch(RELEASE_API, {
       headers: { Accept: "application/vnd.github+json" },
-      cache: "no-store"
+      cache: "default"
     });
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
     const release = await response.json();
