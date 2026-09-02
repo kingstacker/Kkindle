@@ -4,10 +4,12 @@ const RELEASE_API = `https://api.github.com/repos/${REPOSITORY}/releases/latest`
 
 const translations = {
   zh: {
-    brandDescriptor: "个人电子书与 Kindle 工作台",
+    skipToContent: "跳到主要内容",
+    menuLabel: "打开菜单",
     navProduct: "产品",
     navFeatures: "功能",
     navDownload: "下载",
+    navChangelog: "更新日志",
     navAbout: "关于",
     headerGitHub: "GitHub",
     heroKicker: "KINDLE, WITHOUT THE FRICTION.",
@@ -18,8 +20,6 @@ const translations = {
     heroFactPlatforms: "桌面平台",
     heroFactFormats: "常用格式",
     heroFactLicense: "开源许可",
-    heroVisualLabel: "YOUR LIBRARY, YOUR WAY",
-    heroVisualNote: "A quiet place for a busy library.",
     signalLocal: "LOCAL-FIRST",
     signalFormats: "EPUB / PDF / MOBI / AZW3",
     signalKindle: "KINDLE READY",
@@ -51,18 +51,20 @@ const translations = {
     aiTag1: "AI 阅读助手",
     aiTag2: "词典查询",
     aiTag3: "阅读数据",
-    philosophyKicker: "A SMALL TOOL WITH A LONG VIEW",
-    philosophyTitle: "本地优先，安静可靠，属于你的阅读空间。",
-    philosophyBody: "Kkindle 将书籍、封面、阅读进度和批注保存在本机。网络功能按需开启，AI 只发送相关片段，不上传整本书。",
-    philosophyPoint1: "跨平台桌面应用",
-    philosophyPoint2: "开放格式与开源许可",
-    philosophyPoint3: "数据留在你的设备上",
+    aboutKicker: "ABOUT KKINDLE",
+    aboutTitle: "面向个人阅读的开源桌面工作台。",
+    aboutBody: "Kkindle 是一款面向 Windows、Linux 和 macOS 的开源电子书书库与 Kindle 管理工具。它将书库整理、阅读、批注和设备传输放在同一个本地优先的工作流中。",
+    aboutPoint1: "Windows / Linux / macOS",
+    aboutPoint2: "EPUB / PDF / MOBI / AZW3",
+    aboutPoint3: "MIT 开源许可",
+    aboutSource: "查看 GitHub 项目",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "选一个平台，开始建立你的书库。",
     downloadLead: "官网只负责展示与指路，安装包来自 GitHub Releases。下载区会自动选择最新稳定版本。",
     stableLabel: "最新稳定版本",
     checking: "正在获取…",
     releasePage: "查看完整 Release ↗",
+    releaseUnavailable: "暂无版本信息",
     recommended: "推荐",
     windowsTitle: "Windows",
     windowsNote: "Windows 11 / x64，自带运行时。",
@@ -84,6 +86,27 @@ const translations = {
     releaseLoaded: "下载地址已同步自 GitHub Releases。",
     releaseFallback: "暂时无法读取版本信息，请打开 Release 页面选择下载文件。",
     unavailable: "当前版本未提供",
+    changelogKicker: "CHANGELOG",
+    changelogTitle: "每一次更新，都让阅读更顺手。",
+    changelogLead: "这里记录 Kkindle 的重要变化。网页展示重点，完整内容保留在项目仓库。",
+    changelogFull: "查看完整更新日志",
+    changelogLatest: "最新",
+    changelogImproved: "优化",
+    changelogFixed: "修复",
+    changelogAdded: "新增",
+    changelog077Date: "2026 年 9 月 2 日",
+    changelog077Title: "阅读器动画与目录体验",
+    changelog077Point1: "优化阅读器翻页动画与章节切换的衔接，减少过渡过程中的跳动与闪烁。",
+    changelog077Point2: "改进目录滚动策略与当前章节定位，长目录浏览更稳定。",
+    changelog076Date: "2026 年 9 月 1 日",
+    changelog076Title: "更可靠的 EPUB 目录与章节导航",
+    changelog076Point1: "目录支持按 EPUB 原始层级缩进、展开和折叠，并自动展开当前章节所在分支。",
+    changelog076Point2: "修复复杂 EPUB 的目录优先级、重复条目、层级丢失和章节定位问题。",
+    changelog076Point3: "优化 EPUB 内容清洗与阅读内容缓存，规则变化后会自动重建。",
+    changelog075Date: "2026 年 9 月 1 日",
+    changelog075Title: "更稳定的 Kindle 设备工作流",
+    changelog075Point1: "修复 Kindle 资源缓存、Windows WPD 传输和词典弹窗相关问题。",
+    changelog075Point2: "优化设备传输与阅读资料导出的进度、重试和状态反馈。",
     faqKicker: "BEFORE YOU START",
     faqTitle: "下载前，先知道这几件事。",
     faq1Question: "Kkindle 支持哪些文件格式？",
@@ -106,10 +129,12 @@ const translations = {
     aiAlt: "Kkindle AI 阅读助手"
   },
   en: {
-    brandDescriptor: "Personal ebook & Kindle workspace",
+    skipToContent: "Skip to content",
+    menuLabel: "Open menu",
     navProduct: "Product",
     navFeatures: "Features",
     navDownload: "Download",
+    navChangelog: "Changelog",
     navAbout: "About",
     headerGitHub: "GitHub",
     heroKicker: "KINDLE, WITHOUT THE FRICTION.",
@@ -120,8 +145,6 @@ const translations = {
     heroFactPlatforms: "desktop platforms",
     heroFactFormats: "common formats",
     heroFactLicense: "open-source license",
-    heroVisualLabel: "YOUR LIBRARY, YOUR WAY",
-    heroVisualNote: "A quiet place for a busy library.",
     signalLocal: "LOCAL-FIRST",
     signalFormats: "EPUB / PDF / MOBI / AZW3",
     signalKindle: "KINDLE READY",
@@ -153,18 +176,20 @@ const translations = {
     aiTag1: "AI reading assistant",
     aiTag2: "Dictionary lookup",
     aiTag3: "Reading data",
-    philosophyKicker: "A SMALL TOOL WITH A LONG VIEW",
-    philosophyTitle: "Local-first, quiet, reliable—and yours.",
-    philosophyBody: "Kkindle keeps books, covers, reading progress, and annotations on your machine. Network features are opt-in, and AI receives relevant excerpts—not entire books.",
-    philosophyPoint1: "Cross-platform desktop app",
-    philosophyPoint2: "Open formats and license",
-    philosophyPoint3: "Your data stays with you",
+    aboutKicker: "ABOUT KKINDLE",
+    aboutTitle: "An open-source desktop workspace for personal reading.",
+    aboutBody: "Kkindle is an open-source ebook library and Kindle management tool for Windows, Linux, and macOS. It brings library organization, reading, annotations, and device transfer into one local-first workflow.",
+    aboutPoint1: "Windows / Linux / macOS",
+    aboutPoint2: "EPUB / PDF / MOBI / AZW3",
+    aboutPoint3: "MIT License",
+    aboutSource: "View the project on GitHub",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "Choose a platform. Start your library.",
     downloadLead: "The site points the way; GitHub Releases hosts the packages. The download area selects the latest stable release automatically.",
     stableLabel: "Latest stable release",
     checking: "Loading…",
     releasePage: "View full Release ↗",
+    releaseUnavailable: "Release unavailable",
     recommended: "Recommended",
     windowsTitle: "Windows",
     windowsNote: "Windows 11 / x64, runtime included.",
@@ -186,6 +211,27 @@ const translations = {
     releaseLoaded: "Download links are synced from GitHub Releases.",
     releaseFallback: "Release data is temporarily unavailable. Open the Release page to choose a file.",
     unavailable: "Not provided in this release",
+    changelogKicker: "CHANGELOG",
+    changelogTitle: "Every update makes reading feel easier.",
+    changelogLead: "A concise record of important Kkindle changes. The full history remains in the repository.",
+    changelogFull: "View the full changelog",
+    changelogLatest: "Latest",
+    changelogImproved: "Improved",
+    changelogFixed: "Fixed",
+    changelogAdded: "Added",
+    changelog077Date: "September 2, 2026",
+    changelog077Title: "Reader motion and table of contents",
+    changelog077Point1: "Refined reader page-turn animations and chapter transitions to reduce jumps and flashes.",
+    changelog077Point2: "Improved table-of-contents scrolling and current-chapter positioning for long books.",
+    changelog076Date: "September 1, 2026",
+    changelog076Title: "More reliable EPUB navigation",
+    changelog076Point1: "The table of contents now keeps EPUB hierarchy, indentation, expansion, and the current chapter branch.",
+    changelog076Point2: "Fixed priority, duplicate-entry, hierarchy, and chapter-targeting issues in complex EPUBs.",
+    changelog076Point3: "Refined EPUB content cleanup and reading caches so rule changes rebuild old data automatically.",
+    changelog075Date: "September 1, 2026",
+    changelog075Title: "A steadier Kindle device workflow",
+    changelog075Point1: "Fixed Kindle resource caches, Windows WPD transfers, and long dictionary dialogs.",
+    changelog075Point2: "Improved progress, retry, and device-state feedback for transfers and reading-material exports.",
     faqKicker: "BEFORE YOU START",
     faqTitle: "A few things to know before downloading.",
     faq1Question: "Which file formats does Kkindle support?",
@@ -249,6 +295,10 @@ function applyLanguage(language) {
     const key = element.dataset.i18nAlt;
     if (copy[key]) element.alt = copy[key];
   });
+  document.querySelectorAll("[data-i18n-label]").forEach((element) => {
+    const key = element.dataset.i18nLabel;
+    if (copy[key]) element.setAttribute("aria-label", copy[key]);
+  });
 
   const languageToggle = document.querySelector("#language-toggle");
   if (languageToggle) {
@@ -272,6 +322,20 @@ function setStatus(key) {
   if (!status) return;
   status.dataset.i18n = key;
   status.textContent = translations[currentLanguage][key] || key;
+}
+
+function resyncHashTarget() {
+  const id = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+  if (!id) return;
+
+  const target = document.getElementById(id);
+  if (!target) return;
+
+  window.requestAnimationFrame(() => {
+    const headerHeight = document.querySelector(".site-header")?.getBoundingClientRect().height || 0;
+    const targetTop = target.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: Math.max(0, targetTop - headerHeight - 16), behavior: "auto" });
+  });
 }
 
 function formatBytes(bytes) {
@@ -299,6 +363,11 @@ function formatReleaseDate(value) {
 
 function setFallbackLinks() {
   releaseFailed = true;
+  const versionElement = document.querySelector("#latest-version");
+  if (versionElement) {
+    versionElement.removeAttribute("data-i18n");
+    versionElement.textContent = translations[currentLanguage].releaseUnavailable;
+  }
   document.querySelectorAll("[data-download-key]").forEach((link) => {
     link.href = RELEASE_PAGE;
     link.classList.remove("disabled");
@@ -312,6 +381,7 @@ function setFallbackLinks() {
     link.href = RELEASE_PAGE;
   });
   setStatus("releaseFallback");
+  resyncHashTarget();
 }
 
 function detectPlatform() {
@@ -374,6 +444,7 @@ function renderRelease(release) {
   const installer = assets.find((item) => assetMatchers["windows-installer"].test(item.name || ""));
   if (primary) primary.href = installer?.browser_download_url || "#downloads";
   setStatus("releaseLoaded");
+  resyncHashTarget();
 }
 
 async function loadLatestRelease() {
@@ -418,7 +489,9 @@ document.addEventListener("DOMContentLoaded", () => {
     markRecommendedPlatform();
     if (latestRelease) renderRelease(latestRelease);
     else if (releaseFailed) setFallbackLinks();
+    else resyncHashTarget();
   });
 
+  window.addEventListener("hashchange", resyncHashTarget);
   loadLatestRelease();
 });
