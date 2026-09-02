@@ -43,9 +43,13 @@ internal static class Program
         // exercise resize/maximize regressions while the user's app stays open.
 #if DEBUG
         var isolateValidation = string.Equals(
-            Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE"),
-            "1",
-            StringComparison.Ordinal);
+                Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE"),
+                "1",
+                StringComparison.Ordinal)
+            || string.Equals(
+                Environment.GetEnvironmentVariable("KKINDLE_ANIMATION_PROBE"),
+                "1",
+                StringComparison.Ordinal);
 #else
         const bool isolateValidation = false;
 #endif

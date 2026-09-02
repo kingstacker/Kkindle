@@ -14,6 +14,7 @@ namespace Kkindle;
 public sealed class ReaderTocRow : INotifyPropertyChanged
 {
     private bool _isExpanded;
+    private bool _isCurrent;
 
     public ReaderTocRow(EpubReaderNavigationItem item, bool hasChildren, bool isExpanded)
     {
@@ -40,13 +41,28 @@ public sealed class ReaderTocRow : INotifyPropertyChanged
             if (_isExpanded == value) return;
             _isExpanded = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(ToggleGlyph));
+            OnPropertyChanged(nameof(ToggleRotation));
         }
     }
 
-    // A leaf keeps the glyph column empty rather than dropping it, so titles
-    // stay aligned with their siblings that do fold.
-    public string ToggleGlyph => HasChildren ? (IsExpanded ? "▾" : "▸") : string.Empty;
+    // Keep the current-row marker in the data item rather than reading
+    // ListBoxItem.IsSelected. The latter is a recycled container state and can
+    // briefly describe more than one visual row while a folded source changes.
+    public bool IsCurrent
+    {
+        get => _isCurrent;
+        set
+        {
+            if (_isCurrent == value) return;
+            _isCurrent = value;
+            OnPropertyChanged();
+        }
+    }
+
+    // The vector arrow points right when collapsed and rotates clockwise to
+    // point down when the branch is open. A numeric property keeps the
+    // rotation animatable without changing the row's layout or font size.
+    public double ToggleRotation => IsExpanded ? 90d : 0d;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

@@ -1457,7 +1457,9 @@ public partial class MainWindow
         ReaderBookInfoText.Text = _readerBookCard?.Title ?? UiText.Get("目录");
         BuildReaderTocRows();
         CollapseReaderTocToCurrentChapter(_readerChapterIndex);
-        ReaderTocList.SelectedItem = null;
+        // A new book gets a new row array; remove every old programmatic
+        // selection instead of clearing only SelectedItem.
+        ReaderTocList.SelectedItems?.Clear();
         ReaderTocPanel.IsVisible = false;
         ReaderTocView.IsVisible = true;
         ReaderBookmarkPane.IsVisible = false;
@@ -5962,16 +5964,37 @@ public partial class MainWindow
         }
 
         var row = index >= 0 && index < _readerTocRows.Length ? _readerTocRows[index] : null;
-        _suppressReaderTocSelectionNavigation = true;
-        try
+        SetReaderTocCurrentRow(row);
+        var selectedItems = ReaderTocList.SelectedItems;
+        var hasOnlyExpectedSelection = row is null
+            ? selectedItems is null || selectedItems.Count == 0
+            : selectedItems is { Count: 1 }
+                && ReferenceEquals(selectedItems[0], row);
+        if (!hasOnlyExpectedSelection)
         {
-            ReaderTocList.SelectedItem = row;
+            _suppressReaderTocSelectionNavigation = true;
+            try
+            {
+                // SelectionMode only constrains pointer input in Avalonia;
+                // programmatic SelectedItem assignments can otherwise retain
+                // old rows. Keep exactly one visual current-row state.
+                if (selectedItems is not null)
+                {
+                    selectedItems.Clear();
+                    if (row is not null)
+                        selectedItems.Add(row);
+                }
+            }
+            finally
+            {
+                _suppressReaderTocSelectionNavigation = false;
+            }
         }
-        finally
-        {
-            _suppressReaderTocSelectionNavigation = false;
-        }
-        if (row is not null)
+
+        // Scrolling a row that is already on screen is what made the rail
+        // creep: the virtualizing panel re-anchors from estimated heights and
+        // settles a little lower each time. Only chase a row that is off-screen.
+        if (row is not null && ShouldScrollReaderTocRowIntoView(row))
             ReaderTocList.ScrollIntoView(row);
         SetReaderCompactSelectedItem(item);
     }
@@ -8359,7 +8382,6 @@ public partial class MainWindow
         return new ReaderTransitionSurface(
             nativeView,
             ReaderNativeTransitionSnapshot,
-            ReaderNativeTransitionGhost,
             ReaderNativeTransitionTrail,
             ReaderNativeTransitionFront,
             ReaderNativeTransitionEdge,
@@ -8376,7 +8398,6 @@ public partial class MainWindow
         return new ReaderTransitionSurface(
             ReaderLinuxTextFallbackContent,
             ReaderLinuxTextFallbackTransitionSnapshot,
-            ReaderLinuxTextFallbackTransitionGhost,
             ReaderLinuxTextFallbackTransitionTrail,
             ReaderLinuxTextFallbackTransitionFront,
             ReaderLinuxTextFallbackTransitionEdge,
@@ -8410,97 +8431,6 @@ public partial class MainWindow
             cancellationToken);
     }
 
-    private const int ReaderTransitionOutDurationMs = 300;
-    private const int ReaderTransitionInDurationMs = 360;
-    private const int ReaderSlideDurationMs = 430;
-    // 墨水屏刷新波前传播时长（普通文本翻页约 200~250ms）；残影在波形结束后
-    // 还要保持并消退，因此覆盖层需要多停留 ReaderWaveScripts.GhostTailMs。
-    private const int ReaderWaveDurationMs = 230;
-
-    private static async Task<bool> WaitForReaderOverlayReadyAsync(
-        IReaderHost host,
-        string readyScript,
-        CancellationToken cancellationToken)
-    {
-        for (var attempt = 0; attempt < 40; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (await TryInvokeReaderBooleanScriptAsync(host, readyScript))
-                return true;
-            await Task.Delay(10, cancellationToken);
-        }
-        return false;
-    }
-
-    private static async Task TryInvokeReaderTransitionAsync(IReaderHost host, string script)
-    {
-        try
-        {
-            await host.InvokeScriptAsync(script);
-        }
-        catch
-        {
-            // Animations are decorative and must never block navigation.
-        }
-    }
-
-    private static async Task<bool> TryInvokeReaderBooleanScriptAsync(
-        IReaderHost host,
-        string script)
-    {
-        try
-        {
-            var result = await host.InvokeScriptAsync(script);
-            return string.Equals(
-                result?.Trim().Trim('"'),
-                "true",
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static string CreateReaderFadeTransitionScript(int phase) =>
-        $$"""
-            (() => {
-              const surface = document.body || document.documentElement;
-              if (!surface) return false;
-              surface.style.willChange = 'opacity';
-              const phase = {{phase}};
-              if (phase === 0) {
-                surface.style.transition = 'opacity {{ReaderTransitionOutDurationMs}}ms cubic-bezier(.4,0,.6,1)';
-                surface.style.opacity = '0';
-              } else if (phase === 1) {
-                surface.style.transition = 'none';
-                surface.style.opacity = '0';
-              } else {
-                surface.style.transition = 'none';
-                void surface.offsetWidth;
-                surface.style.transition = 'opacity {{ReaderTransitionInDurationMs}}ms cubic-bezier(.4,0,.2,1)';
-                surface.style.opacity = '1';
-              }
-              return true;
-            })();
-            """;
-
-    private static string CreateReaderFadeTransitionCleanupScript() =>
-        """
-        (() => {
-          const surface = document.body || document.documentElement;
-          if (!surface) return false;
-          surface.style.transition = 'none';
-          surface.style.opacity = '1';
-          surface.style.removeProperty('will-change');
-          window.requestAnimationFrame?.(() => {
-            surface.style.removeProperty('transition');
-            surface.style.removeProperty('opacity');
-          });
-          return true;
-        })();
-        """;
-
     private void ReaderTocButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_readerSearchVisible)
@@ -8531,12 +8461,16 @@ public partial class MainWindow
     private void ReaderTocList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressReaderTocSelectionNavigation) return;
-        if (e.AddedItems.Count > 0 && e.AddedItems[0] is ReaderTocRow { Item: var item })
+        if (e.AddedItems.Count > 0 && e.AddedItems[0] is ReaderTocRow row)
+        {
+            SetReaderTocCurrentRow(row);
+            var item = row.Item;
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(
                     item,
                     _readerSessionCancellation?.Token ?? CancellationToken.None,
                     ReaderNavigationIntent.Toc));
+        }
     }
 
     private async void ReaderSearchButton_Click(object? sender, RoutedEventArgs e)

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -122,24 +123,46 @@ public partial class MainWindow
         }
     }
 
+    private void SetReaderTocCurrentRow(ReaderTocRow? current)
+    {
+        foreach (var row in _readerTocRows)
+            row.IsCurrent = ReferenceEquals(row, current);
+    }
+
     private void RefreshReaderTocRows()
     {
-        var selected = ReaderTocList.SelectedItem as ReaderTocRow;
         var visible = _readerTocRows
             .Select((row, index) => (row, index))
             .Where(entry => IsReaderTocRowVisible(entry.index))
             .Select(entry => entry.row)
             .ToArray();
 
+        // Replacing ItemsSource resets the virtualizing panel, which throws
+        // away the measured row heights it estimates scroll offsets from. Rows
+        // wrap, so re-estimating lands the rail a few pixels off and the list
+        // creeps downward each time. Selecting a row inside an already open
+        // branch changes nothing here, so leave the panel alone.
+        if (!ReaderTocScrollPolicy.RequiresRowRebuild(
+                ReaderTocList.ItemsSource as IReadOnlyList<ReaderTocRow>,
+                visible))
+        {
+            return;
+        }
+
+        var selected = ReaderTocList.SelectedItem as ReaderTocRow;
         _suppressReaderTocSelectionNavigation = true;
         try
         {
+            // Avalonia allows multiple programmatic selections even when the
+            // control is single-select for pointer input. Clear the old set
+            // before rebuilding the folded source, otherwise recycled item
+            // containers can keep painting every previously visited row.
+            ReaderTocList.SelectedItems?.Clear();
             ReaderTocList.ItemsSource = visible;
             // Replacing the source drops the selection; restore it when the
             // row survived the fold so the current chapter stays marked.
-            ReaderTocList.SelectedItem = selected is not null && visible.Contains(selected)
-                ? selected
-                : null;
+            if (selected is not null && visible.Contains(selected))
+                ReaderTocList.SelectedItems?.Add(selected);
         }
         finally
         {
@@ -172,6 +195,43 @@ public partial class MainWindow
         RefreshReaderTocRows();
         // The row itself must not navigate: folding is a view action.
         e.Handled = true;
+    }
+
+    // Read-only lookup: the auto-hide scroll bar owns _readerTocScrollViewer
+    // together with its event subscriptions, so never assign it from here.
+    private ScrollViewer? GetReaderTocScrollViewer() =>
+        _readerTocScrollViewer ?? FindDescendants<ScrollViewer>(ReaderTocList).FirstOrDefault();
+
+    private bool ShouldScrollReaderTocRowIntoView(ReaderTocRow row)
+    {
+        // The presenter's bounds are the viewport itself, so measuring the row
+        // in its coordinate space keeps any template padding out of the sum.
+        if (GetReaderTocScrollViewer() is not { } scrollViewer
+            || FindDescendants<ScrollContentPresenter>(scrollViewer).FirstOrDefault() is not { } viewport)
+        {
+            // Nothing to scroll before the rail is templated; opening the TOC
+            // re-syncs the selection and places the row then.
+            return false;
+        }
+
+        // No container means the panel virtualized the row away, so it is
+        // off-screen by definition.
+        if (ReaderTocList.ContainerFromItem(row) is not { } container) return true;
+
+        try
+        {
+            if (container.TranslatePoint(default, viewport) is not { } origin) return true;
+            return ReaderTocScrollPolicy.RequiresScrollIntoView(
+                origin.Y,
+                container.Bounds.Height,
+                viewport.Bounds.Height);
+        }
+        catch (InvalidOperationException)
+        {
+            // The row may be between visual trees during a layout pass; the
+            // next selection update will place it.
+            return false;
+        }
     }
 
     private void ReaderTocList_TemplateApplied(object? sender, TemplateAppliedEventArgs e)

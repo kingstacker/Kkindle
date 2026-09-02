@@ -1445,7 +1445,6 @@ public partial class MainWindow
             ReaderMaxWidthSlider.Value = _readerLayout.MaxWidth;
             ReaderBodyPaddingSlider.Value = _readerLayout.BodyPadding;
             ReaderVerticalWritingCheck.IsChecked = _readerLayout.VerticalWriting;
-            ReaderVerticalDebugBoxesCheck.IsChecked = _readerVerticalDebugBoxesEnabled;
             ReaderParagraphIndentCheck.IsChecked = _readerLayout.ParagraphIndent;
             SelectReaderFontFamily(_readerLayout.FontFamily);
             SelectReaderFlowMode(_readerLayout.FlowMode, _readerLayout.TwoPageMode);
@@ -1456,7 +1455,6 @@ public partial class MainWindow
             _suppressReaderLayoutChange = false;
         }
         UpdateReaderLayoutSliderLabels();
-        UpdateReaderVerticalDebugBoxesControlAvailability();
         UpdateReaderLayoutStatus();
         ReaderLayoutSettingsPopup.PlacementTarget = ReaderRoot;
         ReaderLayoutSettingsPopup.Placement = PlacementMode.AnchorAndGravity;
@@ -1481,7 +1479,6 @@ public partial class MainWindow
         && ReaderBodyPaddingSlider is not null
         && ReaderFontFamilyBox is not null
         && ReaderVerticalWritingCheck is not null
-        && ReaderVerticalDebugBoxesCheck is not null
         && ReaderParagraphIndentCheck is not null;
 
     private bool _suppressReaderLayoutChange;
@@ -1511,7 +1508,6 @@ public partial class MainWindow
 
         _readerLayout = NormalizeReaderLayoutForPlatform(ReadReaderLayoutFromControls());
         SyncReaderFlowMenu();
-        UpdateReaderVerticalDebugBoxesControlAvailability();
         UpdateReaderLayoutStatus();
         try
         {
@@ -1537,38 +1533,6 @@ public partial class MainWindow
         if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
         UpdateReaderLayoutStatus();
         ScheduleReaderLayoutApply();
-    }
-
-    private async void ReaderVerticalDebugBoxesCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
-        _readerVerticalDebugBoxesEnabled = ReaderVerticalDebugBoxesCheck.IsChecked == true;
-        _appSettings = AppSettings.Normalize(_appSettings with
-        {
-            ReaderVerticalDebugBoxesEnabled = _readerVerticalDebugBoxesEnabled
-        });
-        try
-        {
-            await ApplyReaderLayoutToHostsAsync(
-                _readerSessionCancellation?.Token ?? CancellationToken.None);
-            await _appSettingsStore.SaveAsync(_appSettings, CancellationToken.None);
-            ReaderLayoutSettingsStatusText.Text = _readerVerticalDebugBoxesEnabled
-                ? T("竖排调试外框已显示，字号缩放时会随字格同步更新。")
-                : T("竖排调试外框已关闭。");
-        }
-        catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
-        {
-        }
-        catch
-        {
-            ReaderLayoutSettingsStatusText.Text = T("竖排调试外框切换失败，请重试。");
-        }
-    }
-
-    private void UpdateReaderVerticalDebugBoxesControlAvailability()
-    {
-        ReaderVerticalDebugBoxesPanel.IsVisible = true;
-        ReaderVerticalDebugBoxesCheck.IsEnabled = ReaderVerticalWritingCheck.IsChecked == true;
     }
 
     private void UpdateReaderLayoutStatus()

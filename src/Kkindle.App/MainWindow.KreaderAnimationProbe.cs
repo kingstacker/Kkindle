@@ -35,8 +35,14 @@ public partial class MainWindow
             var importResult = await ViewModel.ImportAsync([epubPath], cancellationToken: _lifetimeCancellation.Token);
             if (importResult.FailureCount != 0)
                 throw new InvalidOperationException("import failed");
-            var epubCard = ViewModel.Books.First(card => card.Title.Contains("Linux Kreader Validation", StringComparison.OrdinalIgnoreCase));
-            var epubFile = epubCard.Book.Files.First(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase));
+            // Older probe runs can merge the same title into an existing card;
+            // resolve the bytes we just imported so the animation frames always
+            // come from today's fixture.
+            var epubCard = await ResolveImportedValidationBookAsync(
+                importResult,
+                epubPath,
+                titleHint: "Linux Kreader Validation Long Numbers");
+            var epubFile = await ResolveImportedValidationFile(epubCard, epubPath, log);
             await OpenBookAsync(epubCard, epubFile);
             if (CurrentReaderHost is not NativeReaderHost nativeHost)
                 throw new InvalidOperationException("reader host is not the native surface");
@@ -64,6 +70,43 @@ public partial class MainWindow
                 {
                     await Task.Delay(50);
                     await SaveAnimationProbeFrameAsync(name, sample);
+                    if (sample == 0)
+                    {
+                        var hostBounds = nativeHost.Bounds;
+                        var layerBounds = ReaderNativeTransitionLayer.Bounds;
+                        var snapshotBounds = ReaderNativeTransitionSnapshot.Bounds;
+                        var scaling = TopLevel.GetTopLevel(nativeHost)?.RenderScaling ?? 1;
+                        var hostOrigin = nativeHost.TranslatePoint(
+                            new Point(0, 0),
+                            ReaderNativeTransitionLayer);
+                        var layerOrigin = ReaderNativeTransitionLayer.TranslatePoint(
+                            new Point(0, 0),
+                            ReaderWebViewHost);
+                        var snapshotOrigin = ReaderNativeTransitionSnapshot.TranslatePoint(
+                            new Point(0, 0),
+                            ReaderWebViewHost);
+                        await log.WriteLineAsync(
+                            $"METRICS {name}: host={hostBounds.Width:F2}x{hostBounds.Height:F2} "
+                            + $"layer={layerBounds.Width:F2}x{layerBounds.Height:F2} "
+                            + $"snapshot={snapshotBounds.Width:F2}x{snapshotBounds.Height:F2} "
+                            + $"assigned={ReaderNativeTransitionSnapshot.Width:F2}x{ReaderNativeTransitionSnapshot.Height:F2} "
+                            + $"scaling={scaling:F3} stretch={ReaderNativeTransitionSnapshot.Stretch} "
+                            + $"origins hostInLayer={FormatPoint(hostOrigin)} "
+                            + $"layerInHost={FormatPoint(layerOrigin)} "
+                            + $"snapshotInHost={FormatPoint(snapshotOrigin)}");
+                        if (ReaderNativeTransitionSnapshot.Source is RenderTargetBitmap captured)
+                        {
+                            using var snapshotStream = new MemoryStream();
+                            captured.Save(snapshotStream, PngBitmapEncoderOptions.Default);
+                            var capturedLogPath = Environment.GetEnvironmentVariable("KKINDLE_ANIMATION_PROBE_LOG");
+                            var directory = string.IsNullOrWhiteSpace(capturedLogPath)
+                                ? _paths.Logs
+                                : Path.GetDirectoryName(capturedLogPath)!;
+                            await File.WriteAllBytesAsync(
+                                Path.Combine(directory, $"kreader-animation-snapshot-{name}.png"),
+                                snapshotStream.ToArray());
+                        }
+                    }
                 }
                 await turn;
                 await log.WriteLineAsync($"PASS {name} turn completed");
@@ -112,7 +155,7 @@ public partial class MainWindow
                 new Vector(96 * scaling, 96 * scaling));
             bitmap.Render(visual);
             using var stream = new MemoryStream();
-            bitmap.Save(stream);
+            bitmap.Save(stream, PngBitmapEncoderOptions.Default);
             var logPath = Environment.GetEnvironmentVariable("KKINDLE_ANIMATION_PROBE_LOG");
             var directory = string.IsNullOrWhiteSpace(logPath)
                 ? _paths.Logs
@@ -126,5 +169,9 @@ public partial class MainWindow
             // Diagnostics must never affect reading or navigation.
         }
     }
+
+    private static string FormatPoint(Point? point) => point is { } value
+        ? $"{value.X:F2},{value.Y:F2}"
+        : "n/a";
 }
 #endif

@@ -1492,8 +1492,10 @@
             <Setter Property="Background" Value="#D9D9D5" />
         </Style>
 
-        <!-- TOC list items: soft grey hover/selected layers with the text
-             staying dark ink, exactly the WinUI ReaderTocItemStyle states. -->
+        <!-- TOC rows stay paper-white in every interaction state. The current
+             row is identified by the narrow marker in the item template;
+             filling the whole row makes recycled selection state look like
+             several chapters are active at once. -->
         <Style Selector="ListBox.readerTocList ListBoxItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Padding" Value="0" />
@@ -1519,22 +1521,30 @@
             </Setter>
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:pointerover">
-            <Setter Property="Background" Value="#EFEFED" />
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:pressed">
-            <Setter Property="Background" Value="#DDDDDA" />
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected">
-            <Setter Property="Background" Value="#E6E6E6" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#000000" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected:pointerover">
-            <Setter Property="Background" Value="#E6E6E6" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#000000" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected:pressed">
-            <Setter Property="Background" Value="#E6E6E6" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#000000" />
+        </Style>
+        <!-- A folded TOC can be shorter than the left rail. Fluent's default
+             ItemsPresenter alignment centers short lists, which makes the
+             whole directory appear to drift downward whenever a chapter
+             switch rebuilds the visible branch. Keep the TOC anchored at the
+             top while allowing long lists to scroll normally. -->
+        <Style Selector="ListBox.readerTocList /template/ ItemsPresenter">
+            <Setter Property="VerticalAlignment" Value="Top" />
         </Style>
 
         <!-- Glyphs are drawn as vectors rather than Segoe MDL2 Assets glyphs:
@@ -1632,17 +1642,17 @@
             <Setter Property="Foreground" Value="#000000" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:pointerover">
-            <Setter Property="Background" Value="#EFEFED" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#000000" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:pressed">
-            <Setter Property="Background" Value="#DDDDDA" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#000000" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected,
                          ListBox.readerTocList ListBoxItem:selected:pointerover,
                          ListBox.readerTocList ListBoxItem:selected:pressed">
-            <Setter Property="Background" Value="#E6E6E6" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#000000" />
         </Style>
 

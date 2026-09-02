@@ -3384,14 +3384,20 @@
                             <ListBox x:Name="ReaderTocList"
                                      Classes="readerTocList"
                                      Background="#FFFFFF"
+                                     SelectionMode="Single"
+                                     AutoScrollToSelectedItem="False"
                                      AttachedToVisualTree="ReaderTocList_AttachedToVisualTree"
                                      TemplateApplied="ReaderTocList_TemplateApplied"
                                      SelectionChanged="ReaderTocList_SelectionChanged">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate x:DataType="local:ReaderTocRow">
                                         <Grid ColumnDefinitions="3,*">
+                                            <Border Grid.ColumnSpan="2"
+                                                    Background="#E6E6E6"
+                                                    IsVisible="{Binding IsCurrent}"
+                                                    IsHitTestVisible="False" />
                                             <Rectangle Fill="#5E5E5E"
-                                                       IsVisible="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" />
+                                                       IsVisible="{Binding IsCurrent}" />
                                             <Grid Grid.Column="1"
                                                   Margin="{Binding Indent}"
                                                   ColumnDefinitions="27,*">
@@ -3406,11 +3412,29 @@
                                                         Focusable="False"
                                                         IsVisible="{Binding HasChildren}"
                                                         Click="ReaderTocToggle_Click">
-                                                    <TextBlock Text="{Binding ToggleGlyph}"
-                                                               FontSize="9"
-                                                               Foreground="#8A8A8A"
-                                                               HorizontalAlignment="Center"
-                                                               VerticalAlignment="Center" />
+                                                    <Path Data="M 3,1.5 L 9,6 L 3,10.5"
+                                                          Width="12"
+                                                          Height="12"
+                                                          Stretch="None"
+                                                          Stroke="#8A8A8A"
+                                                          StrokeThickness="0.85"
+                                                          StrokeLineCap="Square"
+                                                          StrokeJoin="Miter"
+                                                          Fill="Transparent"
+                                                          RenderTransformOrigin="50%,50%"
+                                                          IsHitTestVisible="False">
+                                                        <Path.RenderTransform>
+                                                            <RotateTransform Angle="{Binding ToggleRotation}">
+                                                                <RotateTransform.Transitions>
+                                                                    <Transitions>
+                                                                        <DoubleTransition Property="Angle"
+                                                                                           Duration="0:0:0.18"
+                                                                                           Easing="CubicEaseOut" />
+                                                                    </Transitions>
+                                                                </RotateTransform.Transitions>
+                                                            </RotateTransform>
+                                                        </Path.RenderTransform>
+                                                    </Path>
                                                 </Button>
                                                 <TextBlock Grid.Column="1"
                                                            Margin="4,9,11,9"
@@ -3863,11 +3887,9 @@
                                IsHitTestVisible="False"
                                ClipToBounds="True"
                                ZIndex="25">
-                            <Image x:Name="ReaderNativeTransitionGhost"
-                                   IsHitTestVisible="False"
-                                   IsVisible="False" />
                             <Image x:Name="ReaderNativeTransitionSnapshot"
                                    IsHitTestVisible="False"
+                                   Stretch="None"
                                    IsVisible="False" />
                             <Rectangle x:Name="ReaderNativeTransitionTrail"
                                        IsHitTestVisible="False"
@@ -4036,11 +4058,9 @@
                                    IsVisible="True"
                                    IsHitTestVisible="False"
                                    ClipToBounds="True">
-                                <Image x:Name="ReaderLinuxTextFallbackTransitionGhost"
-                                       IsHitTestVisible="False"
-                                       IsVisible="False" />
                                 <Image x:Name="ReaderLinuxTextFallbackTransitionSnapshot"
                                        IsHitTestVisible="False"
+                                       Stretch="None"
                                        IsVisible="False" />
                                 <Rectangle x:Name="ReaderLinuxTextFallbackTransitionTrail"
                                            IsHitTestVisible="False"
@@ -4622,18 +4642,6 @@
                                           Content="{DynamicResource Ui.Auto.FA133D5DE7088336}"
                                           FontSize="12"
                                           IsCheckedChanged="ReaderVerticalWritingCheck_IsCheckedChanged" />
-                                <StackPanel x:Name="ReaderVerticalDebugBoxesPanel" Spacing="2">
-                                    <CheckBox x:Name="ReaderVerticalDebugBoxesCheck"
-                                              Classes="readerLayoutCheck"
-                                              Content="{DynamicResource Ui.Auto.E0467D21F32857C0}"
-                                              FontSize="12"
-                                              IsCheckedChanged="ReaderVerticalDebugBoxesCheck_IsCheckedChanged" />
-                                    <TextBlock Margin="26,0,0,0"
-                                               Text="{DynamicResource Ui.Auto.53526B79F9CAAB14}"
-                                               FontSize="10"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
                                 <CheckBox x:Name="ReaderParagraphIndentCheck"
                                           Classes="readerLayoutCheck"
                                           Content="{DynamicResource Ui.Auto.F7044E3D685ABD03}"

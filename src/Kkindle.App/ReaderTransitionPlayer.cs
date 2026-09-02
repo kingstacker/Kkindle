@@ -11,14 +11,12 @@ namespace Kkindle;
 /// <summary>Named overlay elements the reader transition player drives.</summary>
 /// <param name="SnapshotSource">The live reader surface to photograph.</param>
 /// <param name="Snapshot">Image showing the outgoing frame.</param>
-/// <param name="Ghost">Reserved for future cross-fade layering.</param>
-/// <param name="Trail">Wave trailing band; doubles as fade backdrop veil.</param>
+/// <param name="Trail">Wave trail or fade-through backdrop veil.</param>
 /// <param name="Front">Wave leading band.</param>
 /// <param name="Edge">Slide edge shadow.</param>
 internal sealed record ReaderTransitionSurface(
     Visual SnapshotSource,
     Image Snapshot,
-    Image Ghost,
     Rectangle Trail,
     Rectangle Front,
     Rectangle Edge,
@@ -27,10 +25,10 @@ internal sealed record ReaderTransitionSurface(
 /// <summary>
 /// Native playback of the three reader page-turn animations: a
 /// RenderTargetBitmap of the outgoing frame is layered over the freshly
-/// rendered incoming frame and animated away with timings lifted from the
-/// WebView implementations — fade 300ms out / 360ms in, slide 430ms
-/// cubic-bezier(.38,0,.2,1), wave sweep 230 ms plus a ghost residue. Used by
-/// both the self-drawn reader surface and the Linux text-fallback surface.
+/// rendered incoming frame and animated away — a quiet 495ms fade-through, a
+/// 495ms soft-edged slide, or a 368ms e-ink wave. All three are eased on one
+/// shared gentle curve and used by both the self-drawn reader surface and the
+/// Linux text-fallback surface.
 ///
 /// Snapshot capture failure degrades silently to an instant switch so a
 /// cosmetic hiccup can never block navigation.
@@ -44,19 +42,34 @@ internal static class ReaderTransitionPlayer
     internal const int AnimationWave = 3;
 
     private const int FrameIntervalMs = 15;
-    private const double FadeOutMs = 300;
-    private const double FadeInMs = 360;
-    private const double SlideDurationMs = 430;
-    private const double SlideShadowWidthRatio = 0.05;
-    private const double WaveSweepMs = 230; // was ReaderWaveScripts.TotalDurationMs
-    private const double WaveBandWidthRatio = 0.125;
-    private const double WaveGhostOpacity = 0.022;
-    private const double WaveGhostHoldMs = 60;
-    private const double WaveGhostFadeMs = 260;
 
-    // Canonical sibling Z order restored by Reset(): content < ghost <
-    // snapshot < trail/front bands + slide shadow on top.
-    private const int ZGhost = 10;
+    // Softening follows three rules across all three animations: ease with a
+    // curve that never sits still at the start, keep overlays wide but faint
+    // (a broad pale shadow reads gentler than a narrow dark one), and give the
+    // motion enough time that it never snaps. cubic-bezier(.25,.1,.25,1) is the
+    // shared gentle curve — it leaves immediately and lands on a long tail.
+    private const double SoftX1 = 0.25;
+    private const double SoftY1 = 0.1;
+    private const double SoftX2 = 0.25;
+    private const double SoftY2 = 1d;
+
+    private const double FadeOutMs = 232.5;
+    private const double FadeInMs = 262.5;
+    // A restrained paper veil hides the doubled glyphs at the hand-off without
+    // turning the middle of the transition into a white flash.
+    private const double FadeVeilMaxOpacity = 0.48;
+    private const double SlideDurationMs = 495;
+    private const double SlideShadowWidthRatio = 0.02;
+    private const double SlideShadowMinWidth = 4;
+    private const double SlideShadowMaxWidth = 14;
+    private const byte SlideShadowAlpha = 24;
+    private const double WaveSweepMs = 367.5;
+    private const double WaveBandWidthRatio = 0.11;
+    private const double WaveSoftEdgeWidthRatio = 0.035;
+    private const double WaveLeadBandAlpha = 0.055;
+
+    // Canonical sibling Z order restored by Reset(): content < snapshot <
+    // trail/front bands + slide shadow on top.
     private const int ZSnapshot = 20;
     private const int ZTrail = 30;
     private const int ZTop = 40;
@@ -85,15 +98,17 @@ internal static class ReaderTransitionPlayer
         try
         {
             Begin(surface, snapshot, animation);
-            // The incoming content renders underneath while the outgoing
-            // frame plays out on top of it.
-            var pendingChange = changeContentAsync();
+            // Keep the outgoing snapshot visible while the new content is
+            // being composed/configured. Starting the clock before this task
+            // completes could expose a blank or partially laid-out page on a
+            // slow chapter switch.
+            var changedContent = await changeContentAsync();
             await PlayFramesAsync(
                 surface,
                 animation,
                 visualDirection,
                 cancellationToken);
-            return await pendingChange;
+            return changedContent;
         }
         finally
         {
@@ -155,26 +170,29 @@ internal static class ReaderTransitionPlayer
         };
     }
 
-    /// <summary>Fade-through-background: old page dissolves over the veil,
-    /// then the veil dissolves over the new page — same two beats as the
-    /// WebView opacity transitions.</summary>
+    /// <summary>Fade-through-background: the outgoing page dissolves into a
+    /// restrained paper veil, then the new page is revealed underneath. This
+    /// avoids stacking two pages of glyphs through the whole transition.</summary>
     private static bool DrawFadeFrame(ReaderTransitionSurface surface, double elapsed)
     {
         if (elapsed < FadeOutMs)
         {
-            // Trail rectangle sits below the snapshot as an opaque veil in
-            // the reader background colour (arranged in Begin).
-            surface.Snapshot.Opacity = 1d - EaseCubicBezier(elapsed / FadeOutMs, 0.4, 0, 0.6, 1);
+            var progress = EaseSoft(elapsed / FadeOutMs);
+            surface.Snapshot.Opacity = 1d - progress;
+            surface.Trail.Opacity = FadeVeilMaxOpacity * progress;
             return true;
         }
 
         surface.Snapshot.IsVisible = false;
-        if (elapsed < FadeOutMs + FadeInMs)
+        var revealElapsed = elapsed - FadeOutMs;
+        if (revealElapsed < FadeInMs)
         {
-            surface.Trail.Opacity = 1d - EaseCubicBezier((elapsed - FadeOutMs) / FadeInMs, 0.4, 0, 0.2, 1);
+            surface.Trail.Opacity = FadeVeilMaxOpacity
+                * (1d - EaseSoft(revealElapsed / FadeInMs));
             return true;
         }
 
+        surface.Trail.Opacity = 0;
         return false;
     }
 
@@ -187,14 +205,17 @@ internal static class ReaderTransitionPlayer
             return false;
 
         var forward = visualDirection >= 0;
-        var p = EaseCubicBezier(elapsed / SlideDurationMs, 0.38, 0, 0.2, 1);
+        var p = EaseSoft(elapsed / SlideDurationMs);
         var width = surface.SnapshotSource.Bounds.Width;
         var height = surface.SnapshotSource.Bounds.Height;
         var offsetX = (forward ? -width : width) * p;
         surface.Snapshot.RenderTransform = new TranslateTransform(offsetX, 0);
 
         // Shadow hugs the page's trailing edge and falls onto the new page.
-        var shadowWidth = Math.Max(18, width * SlideShadowWidthRatio);
+        var shadowWidth = Math.Clamp(
+            width * SlideShadowWidthRatio,
+            SlideShadowMinWidth,
+            SlideShadowMaxWidth);
         var edge = surface.Edge;
         edge.Fill = CreateHorizontalShadowGradient(forward);
         edge.Width = shadowWidth;
@@ -217,35 +238,32 @@ internal static class ReaderTransitionPlayer
 
         if (elapsed < WaveSweepMs)
         {
-            var p = EaseCubicBezier(elapsed / WaveSweepMs, 0.3, 0.08, 0.35, 0.96);
+            var p = EaseSoft(elapsed / WaveSweepMs);
             var boundary = forward ? width * (1d - p) : width * p;
-            surface.Snapshot.Clip = new RectangleGeometry(forward
-                ? new Rect(0, 0, Math.Max(0, boundary), height)
-                : new Rect(boundary, 0, Math.Max(0, width - boundary), height));
-
+            // A hard RectangleGeometry edge reads like a wipe. An opacity
+            // mask gives the refresh front a small antialiased ramp while
+            // leaving the page geometry fixed underneath.
             var bandWidth = Math.Max(24, width * WaveBandWidthRatio);
-            ConfigureWaveBand(surface.Front, boundary, bandWidth, 0.16, forward, lead: true);
-            ConfigureWaveBand(surface.Trail, boundary, bandWidth, 0.08, forward, lead: false);
+            var softEdgeWidth = Math.Max(16, width * WaveSoftEdgeWidthRatio);
+            surface.Snapshot.Clip = null;
+            surface.Snapshot.OpacityMask = CreateWaveOpacityMask(
+                boundary,
+                width,
+                softEdgeWidth,
+                forward);
+
+            ConfigureWaveBand(surface.Front, boundary, bandWidth, height, WaveLeadBandAlpha, forward);
+            surface.Trail.IsVisible = false;
             return true;
         }
 
-        // Sweep finished: bands drop, a faint ink residue lingers briefly
-        // then lifts — mirrors the WebView ghost canvas tail.
+        // Sweep finished: remove every effect in the same frame so the new page
+        // lands cleanly without an afterimage.
         surface.Front.IsVisible = false;
         surface.Trail.IsVisible = false;
         surface.Snapshot.Clip = null;
-        var tail = elapsed - WaveSweepMs;
-        if (tail < WaveGhostHoldMs)
-        {
-            surface.Snapshot.Opacity = WaveGhostOpacity;
-            return true;
-        }
-        if (tail < WaveGhostHoldMs + WaveGhostFadeMs)
-        {
-            surface.Snapshot.Opacity = WaveGhostOpacity
-                * (1d - (tail - WaveGhostHoldMs) / WaveGhostFadeMs);
-            return true;
-        }
+        surface.Snapshot.OpacityMask = null;
+        surface.Snapshot.IsVisible = false;
         return false;
     }
 
@@ -253,19 +271,99 @@ internal static class ReaderTransitionPlayer
         Rectangle band,
         double boundary,
         double bandWidth,
+        double height,
         double alpha,
-        bool forward,
-        bool lead)
+        bool forward)
     {
-        // Bands travel on the newly revealed side of the sweep boundary; the
-        // trailing band lags behind the leading one.
-        var x = forward == lead
-            ? boundary + (lead ? 0 : bandWidth * 0.45)
-            : boundary - bandWidth * (lead ? 1d : 1.45d);
-        band.Fill = new SolidColorBrush(Color.FromArgb((byte)Math.Round(alpha * 255), 0, 0, 0));
+        // The single band travels on the newly revealed side of the sweep
+        // boundary and fades at both edges.
+        var x = forward ? boundary : boundary - bandWidth;
+        band.Fill = CreateWaveBandBrush(alpha);
         band.Width = bandWidth;
+        // Pin() aligns the band to the top, so its height must be explicit.
+        band.Height = height;
         band.RenderTransform = new TranslateTransform(x, 0);
         band.IsVisible = true;
+    }
+
+    private static LinearGradientBrush CreateWaveBandBrush(double peakAlpha)
+    {
+        var peak = (byte)Math.Round(Math.Clamp(peakAlpha, 0, 1) * 255);
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0.5, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(1, 0.5, RelativeUnit.Relative)
+        };
+        // Transparent edges keep the two overlapping bands from becoming a
+        // pair of hard grey bars. The small shoulder gives the wave a visible
+        // centre without making it heavier than the page shadow.
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 0, 0), 0));
+        brush.GradientStops.Add(new GradientStop(
+            Color.FromArgb((byte)Math.Round(peak * 0.35), 0, 0, 0), 0.22));
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(peak, 0, 0, 0), 0.5));
+        brush.GradientStops.Add(new GradientStop(
+            Color.FromArgb((byte)Math.Round(peak * 0.35), 0, 0, 0), 0.78));
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 0, 0), 1));
+        return brush;
+    }
+
+    private static LinearGradientBrush CreateWaveOpacityMask(
+        double boundary,
+        double width,
+        double softEdgeWidth,
+        bool forward)
+    {
+        var safeWidth = Math.Max(1, width);
+        var halfEdge = Math.Clamp(softEdgeWidth / 2, 1, safeWidth / 2);
+        var left = Math.Clamp((boundary - halfEdge) / safeWidth, 0, 1);
+        var right = Math.Clamp((boundary + halfEdge) / safeWidth, 0, 1);
+        var stops = new List<(double Offset, double Opacity)>();
+
+        void AddStop(double offset, double opacity)
+        {
+            var safeOffset = Math.Clamp(offset, 0, 1);
+            var safeOpacity = Math.Clamp(opacity, 0, 1);
+            if (stops.Count > 0 && Math.Abs(stops[^1].Offset - safeOffset) < 0.0001)
+            {
+                stops[^1] = (safeOffset, safeOpacity);
+                return;
+            }
+
+            stops.Add((safeOffset, safeOpacity));
+        }
+
+        if (forward)
+        {
+            // Next page reveals from right to left; the outgoing page remains
+            // opaque on the left and fades out across the moving front.
+            AddStop(0, 1);
+            AddStop(left, 1);
+            AddStop(right, 0);
+            AddStop(1, 0);
+        }
+        else
+        {
+            // Previous page is the mirror image: the old page remains on the
+            // right while the new page arrives from the left.
+            AddStop(0, 0);
+            AddStop(left, 0);
+            AddStop(right, 1);
+            AddStop(1, 1);
+        }
+
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0.5, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(1, 0.5, RelativeUnit.Relative)
+        };
+        foreach (var (offset, opacity) in stops)
+        {
+            brush.GradientStops.Add(new GradientStop(
+                Color.FromArgb((byte)Math.Round(opacity * 255), 255, 255, 255),
+                offset));
+        }
+
+        return brush;
     }
 
     private static LinearGradientBrush CreateHorizontalShadowGradient(bool opaqueAtStart)
@@ -275,10 +373,20 @@ internal static class ReaderTransitionPlayer
             StartPoint = new RelativePoint(0, 0.5, RelativeUnit.Relative),
             EndPoint = new RelativePoint(1, 0.5, RelativeUnit.Relative)
         };
+        var transparent = Color.FromArgb(0, 0, 0, 0);
+        var shadow = Color.FromArgb(SlideShadowAlpha, 0, 0, 0);
+        brush.GradientStops.Add(new GradientStop(opaqueAtStart ? shadow : transparent, 0));
         brush.GradientStops.Add(new GradientStop(
-            Color.FromArgb((byte)(opaqueAtStart ? 70 : 0), 0, 0, 0), 0));
+            opaqueAtStart
+                ? Color.FromArgb((byte)Math.Round(SlideShadowAlpha * 0.55), 0, 0, 0)
+                : Color.FromArgb((byte)Math.Round(SlideShadowAlpha * 0.12), 0, 0, 0),
+            0.38));
         brush.GradientStops.Add(new GradientStop(
-            Color.FromArgb((byte)(opaqueAtStart ? 0 : 70), 0, 0, 0), 1));
+            opaqueAtStart
+                ? Color.FromArgb((byte)Math.Round(SlideShadowAlpha * 0.12), 0, 0, 0)
+                : Color.FromArgb((byte)Math.Round(SlideShadowAlpha * 0.55), 0, 0, 0),
+            0.72));
+        brush.GradientStops.Add(new GradientStop(opaqueAtStart ? transparent : shadow, 1));
         return brush;
     }
 
@@ -296,6 +404,11 @@ internal static class ReaderTransitionPlayer
         surface.Snapshot.Source = snapshot;
         surface.Snapshot.Width = width;
         surface.Snapshot.Height = height;
+        // Capture() already uses the reader's logical-DIP size, so the
+        // snapshot is a 1:1 page image. Keeping Stretch.None here prevents
+        // Avalonia from moving the page's text toward the overlay's top-left
+        // corner while it calculates a second fit.
+        surface.Snapshot.Stretch = Stretch.None;
         surface.Snapshot.Clip = null;
         surface.Snapshot.RenderTransform = null;
         surface.Snapshot.Opacity = 1;
@@ -309,7 +422,7 @@ internal static class ReaderTransitionPlayer
             surface.Trail.Fill = surface.Backdrop ?? Brushes.White;
             surface.Trail.Width = width;
             surface.Trail.Height = height;
-            surface.Trail.Opacity = 1;
+            surface.Trail.Opacity = 0;
             surface.Trail.IsVisible = true;
         }
     }
@@ -324,7 +437,6 @@ internal static class ReaderTransitionPlayer
     private static void Reset(ReaderTransitionSurface surface)
     {
         ResetImage(surface.Snapshot, ZSnapshot);
-        ResetImage(surface.Ghost, ZGhost);
         ResetRectangle(surface.Trail, ZTrail);
         ResetRectangle(surface.Front, ZTop);
         ResetRectangle(surface.Edge, ZTop);
@@ -335,6 +447,7 @@ internal static class ReaderTransitionPlayer
         image.Source = null;
         image.IsVisible = false;
         image.Opacity = 1;
+        image.OpacityMask = null;
         image.Clip = null;
         image.RenderTransform = null;
         image.Width = double.NaN;
@@ -359,15 +472,24 @@ internal static class ReaderTransitionPlayer
         try
         {
             var bounds = source.Bounds;
-            var scaling = TopLevel.GetTopLevel(source)?.RenderScaling ?? 1;
-            var pixelWidth = (int)Math.Ceiling(bounds.Width * scaling);
-            var pixelHeight = (int)Math.Ceiling(bounds.Height * scaling);
+            // The reader host has its own high-DPI backing bitmap. Capturing
+            // at the host's logical size lets its normal Render() path do the
+            // one required downsample, keeping the transition image in the
+            // same coordinate system as the live page.
+            var pixelWidth = (int)Math.Ceiling(bounds.Width);
+            var pixelHeight = (int)Math.Ceiling(bounds.Height);
             if (pixelWidth < 16 || pixelHeight < 16)
                 return null;
 
+            // RenderTargetBitmap's pixel size is intentionally kept at the
+            // monitor resolution, but its logical coordinate system must stay
+            // at 96 DPI. NativeReaderHost already accounts for RenderScaling
+            // when it paints its backing bitmap; tagging this target as
+            // high-DPI makes that physical bitmap look 1.25x/1.5x when it is
+            // later shown in the transition Image.
             var bitmap = new RenderTargetBitmap(
                 new PixelSize(pixelWidth, pixelHeight),
-                new Vector(96 * scaling, 96 * scaling));
+                new Vector(96, 96));
             bitmap.Render(source);
             return bitmap;
         }
@@ -377,9 +499,12 @@ internal static class ReaderTransitionPlayer
         }
     }
 
+    /// <summary>The one gentle curve all three animations ease on.</summary>
+    private static double EaseSoft(double t) =>
+        EaseCubicBezier(t, SoftX1, SoftY1, SoftX2, SoftY2);
+
     /// <summary>CSS cubic-bezier(x1,y1,x2,y2) progress evaluator via binary
-    /// search on the curve parameter — keeps native timing curves identical
-    /// to the WebView transition styles.</summary>
+    /// search on the curve parameter.</summary>
     private static double EaseCubicBezier(double t, double x1, double y1, double x2, double y2)
     {
         t = Math.Clamp(t, 0, 1);
