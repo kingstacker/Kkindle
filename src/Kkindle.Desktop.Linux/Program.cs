@@ -50,6 +50,9 @@ internal static class Program
 
     private static AppServices BuildServices(AppPaths paths, string configurationDirectory)
     {
+        var ttsEngine = new EdgeTtsEngine(
+            executablePath: TtsRuntimePaths.PreferredEdgeTtsPath(paths));
+        var ttsPlayer = new LinuxTtsAudioPlayer();
         return new AppServices(
             SecretProtector: new LinuxSecretProtector(),
             CreateDeviceChangeNotifier: _ => null,
@@ -58,6 +61,12 @@ internal static class Program
                 new BookMetadataService(),
                 eject: LinuxKindleEjector.EjectAsync),
             ReaderHostFactory: () => new NativeWebViewReaderHost(),
+            TtsEngine: ttsEngine,
+            TtsAudioPlayer: ttsPlayer,
+            TtsEnvironmentSetup: new TtsEnvironmentSetupService(
+                paths,
+                ttsEngine,
+                ttsPlayer),
             Paths: paths,
             RootConfigurationDirectory: configurationDirectory);
     }

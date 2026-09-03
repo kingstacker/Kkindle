@@ -1492,6 +1492,7 @@ public partial class MainWindow
         await RefreshReaderBookmarksAsync(cancellationToken);
         await RefreshReaderAnnotationsAsync(cancellationToken);
         await InitializeReaderAiAsync(cancellationToken);
+        await InitializeReaderTtsAsync(cancellationToken);
         UpdateReaderToolbar();
         await LoadReaderStatsBaseAsync();
         StartReaderStatsTimer();
@@ -5582,6 +5583,8 @@ public partial class MainWindow
         ReaderNavigationIntent intent = ReaderNavigationIntent.None,
         int? transitionDirection = null)
     {
+        if (!_readerTtsAutoNavigation)
+            await _readerTts.StopAsync();
         if (_readerDocument is null || CurrentReaderHost is null) return false;
         if (item.ChapterIndex < 0 || item.ChapterIndex >= _readerDocument.Chapters.Count) return false;
         if (!Uri.TryCreate(item.Target, UriKind.Absolute, out var target) || !target.IsFile) return false;
@@ -6558,6 +6561,7 @@ public partial class MainWindow
         }
 
         await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
+        HandleLocalDataChanged(LocalDataChangeKind.Settings);
     }
 
     // ------------------------------------------------------------------
@@ -7216,12 +7220,15 @@ public partial class MainWindow
                             }
                             else
                             {
-                                // Native footnote definitions are part of the
-                                // composed chapter now. A click is therefore
-                                // a real fragment navigation; hover remains
-                                // the lightweight preview interaction.
+                                // Native footnote definitions are kept in the
+                                // offset stream but are not composed. Resolve
+                                // the definition here so click and hover both
+                                // show the same popup content.
                                 _ = ObserveReaderTaskAsync(
-                                    HandleReaderLinkAsync(hrefText, showFootnote: true));
+                                    HandleReaderFootnoteHoverAsync(
+                                        hrefText,
+                                        isFootnote: true,
+                                        placementPoint: placementPoint));
                             }
                         }
                         else
@@ -9088,6 +9095,7 @@ public partial class MainWindow
                     && tocIndex >= 0
                     && tocIndex + 1 < _readerTocItems.Count;
         UpdateReaderSearchCount();
+        UpdateReaderTtsUi();
     }
 
     private string GetReaderReadingProgressLabel()

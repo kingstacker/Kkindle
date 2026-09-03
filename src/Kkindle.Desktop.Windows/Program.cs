@@ -122,12 +122,21 @@ internal static class Program
     private static AppServices BuildServices()
     {
         var paths = new AppPaths(AppRootConfiguration.ResolveRoot(AppContext.BaseDirectory));
+        var ttsEngine = new EdgeTtsEngine(
+            executablePath: TtsRuntimePaths.PreferredEdgeTtsPath(paths));
+        var ttsPlayer = new WindowsTtsAudioPlayer();
         return new AppServices(
             SecretProtector: new WindowsSecretProtector(),
             CreateDeviceChangeNotifier: handle => new WindowsDeviceChangeNotifier(handle),
             KindleDeviceService: new KindleDeviceService(paths, new BookMetadataService()),
             ReaderHostFactory: () => new NativeWebViewReaderHost(ConfigureWebView2),
-            UpdateInstaller: new WindowsAppUpdateInstaller());
+            UpdateInstaller: new WindowsAppUpdateInstaller(),
+            TtsEngine: ttsEngine,
+            TtsAudioPlayer: ttsPlayer,
+            TtsEnvironmentSetup: new TtsEnvironmentSetupService(
+                paths,
+                ttsEngine,
+                ttsPlayer));
     }
 
     private static void ConfigureWebView2(IntPtr coreWebView2Pointer)

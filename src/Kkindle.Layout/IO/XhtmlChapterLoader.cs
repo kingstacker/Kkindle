@@ -11,14 +11,23 @@ namespace Kkindle.Layout;
 /// offsets follow the same convention the WebKit bridge used: the verbatim
 /// concatenation of every body text node in document order, so annotations
 /// and search jumps captured against the live document keep pointing at the
-/// same characters. Footnote definitions stay in the offset stream and are
-/// laid out at their XHTML position so fragment links can jump to them;
+/// same characters. Footnote definitions stay in the offset stream, but are
+/// skipped by layout so their references can show the definition in a popup;
 /// ruby phonetics remain marked ghost / skipped.
 /// </summary>
 public sealed class XhtmlChapterLoader
 {
     private static readonly Regex FootnoteReferencePattern = new(
         @"(?:noteref|doc-noteref|footnote(?:[-_ ]?ref)?|endnote(?:[-_ ]?ref)?|note[-_ ]?ref|fn[-_ ]?ref)|(?:^|[#\s_-])(?:notes?|fn|ftn|footnotes?|zww?)[-_:]?\d*(?:n|ref)?(?:$|[\s#_-])",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FootnoteDefinitionTypePattern = new(
+        @"(?:^|[\s:])(?:doc-)?(?:footnote|endnote)(?:$|[\s:])",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FootnoteDefinitionIdentityPattern = new(
+        @"(?:^|[\s_-])(?:duokan-)?(?:footnotes?|endnotes?|fnote|notes?)(?:[\s_-]|\d|$)",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FootnoteReferenceIdentityPattern = new(
+        @"(?:noteref|doc-noteref|footnote[-_ ]?(?:ref|reference)|endnote[-_ ]?(?:ref|reference)|note[-_ ]?ref|fn[-_ ]?ref)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FormulaImageNamePattern = new(
         @"^w\d+$",
@@ -288,6 +297,13 @@ public sealed class XhtmlChapterLoader
     private void HandleFlowElement(XElement element, FlowContext ctx)
     {
         var local = element.Name.LocalName.ToLowerInvariant();
+        if (IsFootnoteDefinition(element))
+        {
+            FlushParagraph(ctx);
+            PreserveFootnoteDefinition(element);
+            return;
+        }
+
         switch (local)
         {
             case "p":
@@ -470,6 +486,12 @@ public sealed class XhtmlChapterLoader
     private void WalkInlineElement(XElement element, FlowContext ctx)
     {
         var local = element.Name.LocalName.ToLowerInvariant();
+        if (IsFootnoteDefinition(element))
+        {
+            FlushParagraph(ctx);
+            PreserveFootnoteDefinition(element);
+            return;
+        }
 
         switch (local)
         {
@@ -617,6 +639,37 @@ public sealed class XhtmlChapterLoader
                 AppendBodyText(text.Value);
             }
         }
+    }
+
+    private void PreserveFootnoteDefinition(XElement element)
+    {
+        var start = _body.Length;
+
+        // An id can be pending because it belongs to the body or to a
+        // wrapper immediately before the hidden definition. Keep those
+        // anchors resolvable even though no visible block consumes them.
+        foreach (var fragmentId in _pendingFragmentIds)
+        {
+            _fragmentTextOffsets.TryAdd(fragmentId, start);
+        }
+
+        var definitionIds = element
+            .DescendantsAndSelf()
+            .Select(Id)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        foreach (var fragmentId in definitionIds)
+        {
+            _fragmentIds.Add(fragmentId);
+            _fragmentTextOffsets.TryAdd(fragmentId, start);
+        }
+
+        // Keep the exact text coordinate space used by annotations and
+        // search, without creating any InlineItems for the footnote body.
+        WalkGhost(element);
+        _pendingFragmentIds.Clear();
     }
 
     private int AppendBodyText(string value)
@@ -994,6 +1047,38 @@ public sealed class XhtmlChapterLoader
             || value.Equals("fnote", StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool IsFootnoteDefinition(XElement element)
+    {
+        var semanticType = string.Join(
+            " ",
+            element.Attributes()
+                .Where(attribute => attribute.Name.LocalName is "type" or "role")
+                .Select(attribute => attribute.Value));
+        if (FootnoteDefinitionTypePattern.IsMatch(semanticType))
+        {
+            return true;
+        }
+
+        var local = element.Name.LocalName;
+        if (local is not ("aside" or "section" or "div" or "ol" or "ul" or "li"
+            or "p" or "blockquote" or "article"))
+        {
+            return false;
+        }
+
+        var identity = string.Join(
+            " ",
+            element.Attributes()
+                .Where(attribute => attribute.Name.LocalName is "class" or "id")
+                .Select(attribute => attribute.Value));
+        if (FootnoteReferenceIdentityPattern.IsMatch(identity))
+        {
+            return false;
+        }
+
+        return FootnoteDefinitionIdentityPattern.IsMatch(identity);
+    }
+
     private void TrackId(XElement element)
     {
         var id = Id(element);
@@ -1171,12 +1256,14 @@ public sealed class XhtmlChapterLoader
                     .Where(attribute => attribute.Name.LocalName is "type" or "role" or "rel" or "class" or "id")
                     .Select(attribute => attribute.Value));
             var reference = string.Join(" ", href, metadata);
-            if (string.IsNullOrWhiteSpace(href) && !XhtmlChapterLoader.IsFootnoteReference(reference))
+            var isFootnoteReference = XhtmlChapterLoader.IsFootnoteReference(reference)
+                || XhtmlChapterLoader.IsLegacyFootnoteReference(href, element);
+            if (string.IsNullOrWhiteSpace(href) && !isFootnoteReference)
             {
                 return this;
             }
 
-            if (!XhtmlChapterLoader.IsFootnoteReference(reference))
+            if (!isFootnoteReference)
             {
                 return this with { LinkHref = href };
             }
@@ -1216,6 +1303,35 @@ public sealed class XhtmlChapterLoader
 
     private static bool IsFootnoteReference(string value) =>
         !string.IsNullOrWhiteSpace(value) && FootnoteReferencePattern.IsMatch(value);
+
+    private static bool IsLegacyFootnoteReference(string? href, XElement element)
+    {
+        var targetFragment = GetHrefFragment(href);
+        if (!HasNumericIdPrefix(targetFragment, 'm'))
+        {
+            return false;
+        }
+
+        if (HasNumericIdPrefix(Id(element), 'w'))
+        {
+            return true;
+        }
+
+        // Some converted EPUBs put the body anchor in an empty sibling just
+        // before the actual link, for example: <a id="w1"></a><a
+        // href="#m1"><sup>[1]</sup></a>.
+        var previousAnchor = element.ElementsBeforeSelf()
+            .Reverse()
+            .FirstOrDefault(candidate => candidate.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase));
+        return previousAnchor is not null && HasNumericIdPrefix(Id(previousAnchor), 'w');
+    }
+
+    private static bool HasNumericIdPrefix(string? value, char prefix)
+    {
+        return value is { Length: > 1 }
+            && value[0] == prefix
+            && value[1..].All(char.IsDigit);
+    }
 
     private static bool IsFootnoteDefinitionBacklink(string? href, XElement element)
     {

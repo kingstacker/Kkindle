@@ -927,7 +927,7 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     }
 
     [Fact]
-    public void Loader_RendersFnoteDefinitionsAndKeepsTheirBacklinkInteractive()
+    public void Loader_HidesFnoteDefinitionsButKeepsTheirReferenceInteractive()
     {
         var path = WriteChapter(
             "<p>正文<sup><a href=\"#note1n\" id=\"note1\">[1]</a></sup>之后。</p>"
@@ -935,14 +935,10 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         var content = new XhtmlChapterLoader().Load(path);
 
         Assert.Contains("这是脚注定义", content.BodyText);
-        var definition = Assert.Single(content.Blocks, block =>
-            block.Items.Any(item => item.Text.Contains("脚注定义", StringComparison.Ordinal)));
-        Assert.Contains("note1n", definition.FragmentIds);
-        var definitionBacklink = Assert.Single(definition.Items, item => item.Text == "[1]");
-        Assert.Equal(InlineKind.Text, definitionBacklink.Kind);
-        Assert.True(definitionBacklink.Style.NoWrap);
-        Assert.False(definitionBacklink.Style.Superscript);
-        Assert.Contains("#note1", definitionBacklink.LinkHref, StringComparison.Ordinal);
+        Assert.DoesNotContain(content.Blocks.SelectMany(block => block.Items), item =>
+            item.Text.Contains("脚注定义", StringComparison.Ordinal));
+        Assert.Contains("note1n", content.FragmentIds);
+        Assert.True(content.FragmentTextOffsets.ContainsKey("note1n"));
 
         using var engine = CreateEngine();
         foreach (var mode in new[] { TypesetWritingMode.HorizontalTb, TypesetWritingMode.VerticalRl })
@@ -958,6 +954,29 @@ public sealed class KkindleLayoutEngineTests : IDisposable
                 layout.GetPageIndexOfOffset(content.BodyText.IndexOf("这是脚注定义", StringComparison.Ordinal)),
                 layout.GetPageIndexOfFragment("note1n"));
         }
+    }
+
+    [Fact]
+    public void Loader_RecognizesReciprocalMAnchorFootnotes()
+    {
+        var path = WriteChapter(
+            "<p>正文<a id=\"w1\"></a><a href=\"#m1\"><sup>[1]</sup></a>之后。</p>"
+            + "<p class=\"note\"><a id=\"m1\"></a><a href=\"#w1\">[1]</a>脚注定义。</p>");
+        var content = new XhtmlChapterLoader().Load(path);
+
+        var marker = Assert.Single(content.Blocks.SelectMany(block => block.Items), item =>
+            item.Kind == InlineKind.FootnoteMarker);
+        Assert.Equal("[1]", marker.Text);
+        Assert.Contains("#m1", marker.FootnoteHref, StringComparison.Ordinal);
+        Assert.Contains("脚注定义", content.BodyText);
+        Assert.DoesNotContain(content.Blocks.SelectMany(block => block.Items), item =>
+            item.Text.Contains("脚注定义", StringComparison.Ordinal));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(content, Options(TypesetWritingMode.HorizontalTb));
+        var hotZone = Assert.Single(layout.Pages.SelectMany(page => page.HotZones));
+        Assert.Equal(HotZoneKind.FootnoteMarker, hotZone.Kind);
+        Assert.Contains("#m1", hotZone.Href, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1003,6 +1022,9 @@ public sealed class KkindleLayoutEngineTests : IDisposable
             Assert.Equal(HotZoneKind.FootnoteMarker, hotZone.Kind);
             Assert.Contains("#note3n", hotZone.Href, StringComparison.Ordinal);
         }
+
+        Assert.DoesNotContain(content.Blocks.SelectMany(block => block.Items), item =>
+            item.Text.Contains("这是脚注定义", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1100,7 +1122,7 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     }
 
     [Fact]
-    public void Loader_FootnoteDefinitionsStayInOffsetStreamAndAreRendered()
+    public void Loader_FootnoteDefinitionsStayInOffsetStreamButAreNotRendered()
     {
         var path = WriteChapter(
             "<p>正文引用了一个注<sup>1</sup>。</p>"
@@ -1109,9 +1131,10 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         var content = loader.Load(path);
 
         Assert.Contains("脚注的定义内容", content.BodyText);
-        var definition = Assert.Single(content.Blocks, b => b.Items.Any(i =>
-            i.Text.Contains("脚注的定义", StringComparison.Ordinal)));
-        Assert.Contains("footnote-1", definition.FragmentIds);
+        Assert.DoesNotContain(content.Blocks.SelectMany(block => block.Items), item =>
+            item.Text.Contains("脚注的定义", StringComparison.Ordinal));
+        Assert.Contains("footnote-1", content.FragmentIds);
+        Assert.True(content.FragmentTextOffsets.ContainsKey("footnote-1"));
 
         using var engine = CreateEngine();
         var layout = engine.Compose(content, Options(TypesetWritingMode.HorizontalTb));

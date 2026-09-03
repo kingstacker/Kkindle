@@ -10,9 +10,24 @@ public sealed partial class ReaderDataService
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
     private bool _ftsAvailable;
 
+    public event EventHandler<LocalDataChangedEventArgs>? DataChanged;
+
     public ReaderDataService(AppPaths paths)
     {
         _paths = paths;
+    }
+
+    private void NotifyDataChanged(LocalDataChangeKind kind)
+    {
+        try
+        {
+            DataChanged?.Invoke(this, new LocalDataChangedEventArgs(kind));
+        }
+        catch
+        {
+            // Persistence must remain successful even if a UI observer is
+            // already shutting down or otherwise unable to accept a notice.
+        }
     }
 
     private string ConnectionString => new SqliteConnectionStringBuilder
@@ -240,6 +255,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$createdAt", annotation.CreatedAt.ToString("O"));
             command.Parameters.AddWithValue("$updatedAt", annotation.UpdatedAt.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged(LocalDataChangeKind.Annotation);
         }
         finally
         {
@@ -256,7 +272,9 @@ public sealed partial class ReaderDataService
             var command = connection.CreateCommand();
             command.CommandText = "DELETE FROM ReaderAnnotations WHERE Id = $id;";
             command.Parameters.AddWithValue("$id", annotationId.ToString());
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (changed > 0)
+                NotifyDataChanged(LocalDataChangeKind.Annotation);
         }
         finally
         {
@@ -326,6 +344,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$flowMode", progress.FlowMode);
             command.Parameters.AddWithValue("$updatedAt", progress.UpdatedAt.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged(LocalDataChangeKind.ReadingProgress);
         }
         finally
         {
@@ -403,7 +422,9 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$title", bookmark.Title);
             command.Parameters.AddWithValue("$quote", bookmark.Quote);
             command.Parameters.AddWithValue("$createdAt", bookmark.CreatedAt.ToString("O"));
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (changed > 0)
+                NotifyDataChanged(LocalDataChangeKind.Bookmark);
         }
         finally
         {
@@ -420,7 +441,9 @@ public sealed partial class ReaderDataService
             var command = connection.CreateCommand();
             command.CommandText = "DELETE FROM ReaderBookmarks WHERE Id = $id;";
             command.Parameters.AddWithValue("$id", bookmarkId.ToString());
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (changed > 0)
+                NotifyDataChanged(LocalDataChangeKind.Bookmark);
         }
         finally
         {
@@ -607,6 +630,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$paragraphIndent", settings.ParagraphIndent ? 1 : 0);
             command.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged(LocalDataChangeKind.ReadingLayout);
         }
         finally
         {
@@ -668,6 +692,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$totalChapters", stats.TotalChapters);
             command.Parameters.AddWithValue("$updatedAt", stats.UpdatedAt.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged(LocalDataChangeKind.ReadingStats);
         }
         finally
         {
@@ -808,6 +833,7 @@ public sealed partial class ReaderDataService
             session.Parameters.AddWithValue("$progressPercent", progressPercent);
             session.Parameters.AddWithValue("$recordedAt", DateTimeOffset.UtcNow.ToString("O"));
             await session.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged(LocalDataChangeKind.ReadingStats);
         }
         finally
         {

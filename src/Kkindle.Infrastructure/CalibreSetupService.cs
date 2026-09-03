@@ -390,12 +390,31 @@ public sealed class CalibreSetupService : IDisposable
 
     private static async Task VerifyWindowsSignatureAsync(string path, CancellationToken cancellationToken)
     {
-        const string command = "$s=Get-AuthenticodeSignature -LiteralPath $args[0]; if($s.Status -ne 'Valid'){Write-Error $s.Status; exit 2}";
         var result = await RunCommandAsync(
             "powershell.exe",
-            ["-NoProfile", "-NonInteractive", "-Command", command, path],
+            BuildWindowsSignatureVerificationArguments(path),
             cancellationToken);
         if (result.ExitCode != 0) throw new InvalidDataException($"Calibre MSI 数字签名无效：{result.Detail}");
+    }
+
+    internal static IReadOnlyList<string> BuildWindowsSignatureVerificationArguments(string path)
+    {
+        // With -Command, arguments appended after the command are parsed as
+        // part of the command text by Windows PowerShell. That loses paths
+        // containing spaces and leaves the old $args[0] expression empty.
+        // Encode the complete script so the MSI path is passed as data.
+        var escapedPath = path.Replace("'", "''");
+        var securityModule = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "Modules",
+            "Microsoft.PowerShell.Security",
+            "Microsoft.PowerShell.Security.psd1");
+        var escapedModule = securityModule.Replace("'", "''");
+        var command = $"Import-Module -Name '{escapedModule}' -ErrorAction Stop; $s=Get-AuthenticodeSignature -LiteralPath '{escapedPath}'; if($s.Status -ne 'Valid'){{Write-Error $s.Status; exit 2}}";
+        var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
+        return ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodedCommand];
     }
 
     private static void EnsureTrustedDownloadUri(Uri uri)

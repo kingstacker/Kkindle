@@ -195,6 +195,7 @@ public partial class MainWindow
                 ApiKey = apiKey
             };
             await _aiSettingsStore.SaveAsync(_readerAiSettings, ReaderToken);
+            HandleLocalDataChanged(LocalDataChangeKind.Settings);
             ApplyReaderAiSettingsToControls();
             ReaderAiSettingsStatusText.Text = T("AI 设置已保存。");
             ShowReaderAiTab();

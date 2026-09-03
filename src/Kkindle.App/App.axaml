@@ -45,6 +45,7 @@
                     BorderThickness="{TemplateBinding BorderThickness}"
                     CornerRadius="{TemplateBinding CornerRadius}">
                 <ContentPresenter Content="{TemplateBinding Content}"
+                                  ContentTemplate="{TemplateBinding ContentTemplate}"
                                   Foreground="{TemplateBinding Foreground}"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
@@ -52,6 +53,21 @@
                                   VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
             </Border>
         </ControlTemplate>
+
+        <DataTemplate x:Key="ReaderTtsButtonTextTemplate">
+            <TextBlock Text="{Binding}"
+                       Foreground="{Binding $parent[Button].Foreground}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="ReaderTtsFloatingGlyphTemplate">
+            <TextBlock Text="{Binding}"
+                       Foreground="{Binding $parent[Button].Foreground}"
+                       FontSize="{Binding $parent[Button].FontSize}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+        </DataTemplate>
 
         <!-- Search result rows keep the WinUI OutlinedListItem behaviour:
              hovering darkens the outline to black while the fill stays
@@ -267,12 +283,16 @@
         </Style>
         <Style Selector="Button">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="Background" Value="{StaticResource InkBrush}" />
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Transitions">
                 <Transitions>
                     <BrushTransition Property="Background" Duration="0:0:0.15" />
@@ -282,13 +302,14 @@
             </Setter>
         </Style>
         <Style Selector="Button:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="#1F1F1F" />
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="#1F1F1F" />
         </Style>
         <Style Selector="Button:pressed">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="#3F3F3F" />
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="#3F3F3F" />
         </Style>
         <Style Selector="Button.readerSelectionAction">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
@@ -402,20 +423,77 @@
              read like the reference instead of relying on Fluent defaults. -->
         <Style Selector="Button.quiet">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="Background" Value="{StaticResource PaperBrush}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.quiet:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Button.quiet:pressed">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="#D9D9D9" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+
+        <!-- Settings actions follow the onboarding button language: a white
+             outlined secondary action beside a black filled primary action. -->
+        <Style Selector="Button.settingsActionSave">
+            <Setter Property="MinWidth" Value="84" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Background" Value="#000000" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.settingsActionSave:pointerover">
+            <Setter Property="Background" Value="#2A2A2A" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#2A2A2A" />
+        </Style>
+        <Style Selector="Button.settingsActionSave:pressed">
+            <Setter Property="Background" Value="#444444" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#444444" />
+        </Style>
+        <Style Selector="Button.settingsActionCancel">
+            <Setter Property="MinWidth" Value="84" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.settingsActionCancel:pointerover">
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="BorderBrush" Value="#000000" />
+        </Style>
+        <Style Selector="Button.settingsActionCancel:pressed">
+            <Setter Property="Background" Value="#D9D9D9" />
+            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="BorderBrush" Value="#000000" />
         </Style>
 
         <!-- Destructive action: the detail-pane delete button uses the
@@ -441,39 +519,39 @@
         <Style Selector="ScrollViewer.readerTocScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
             <Setter Property="Opacity" Value="1" />
         </Style>
-        <!-- The detail pane's save button rests grey (a secondary action next to
-             the destructive delete) and turns ink-black on hover. Fluent paints
-             hover on the template's ContentPresenter, so the overrides must
-             target that part or the theme's light-grey hover wins. -->
+        <!-- Detail-pane actions use the same monochrome primary/secondary
+             pairing as every other ordinary action button. Fluent paints
+             hover on the template's ContentPresenter, so these overrides keep
+             the pair consistent there too. -->
         <Style Selector="Button.detailSave">
-            <Setter Property="Background" Value="{StaticResource HairlineBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
-        </Style>
-        <Style Selector="Button.detailSave:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{StaticResource InkBrush}" />
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
-        <Style Selector="Button.detailSave:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#333333" />
+        <Style Selector="Button.detailSave:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1F1F1F" />
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="#333333" />
+            <Setter Property="BorderBrush" Value="#1F1F1F" />
+        </Style>
+        <Style Selector="Button.detailSave:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#3F3F3F" />
+            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="#3F3F3F" />
         </Style>
         <Style Selector="Button.detailDelete">
             <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="#B3261E" />
-            <Setter Property="BorderBrush" Value="#B3261E" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Button.detailDelete:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#B3261E" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="#B3261E" />
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Button.detailDelete:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#8F1D17" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="#8F1D17" />
+            <Setter Property="Background" Value="#D9D9D9" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
         <Style Selector="Button.icon">
@@ -502,6 +580,39 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+
+        <!-- The cloud in the library header is an unobtrusive icon action:
+             it keeps the header paper-white, while its state is drawn inside
+             the cloud with a spinner or a monochrome result glyph. -->
+        <Style Selector="Button.syncIndicator">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Width" Value="31" />
+            <Setter Property="MinWidth" Value="31" />
+            <Setter Property="Height" Value="31" />
+            <Setter Property="MinHeight" Value="31" />
+            <Setter Property="Padding" Value="1" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.syncIndicator:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.syncIndicator:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
 
         <!-- Section headers: same size as items but semibold gray, so the
@@ -562,9 +673,8 @@
         <Style Selector="Button.sidebarSection:pressed Path, Button.sidebarSection.active Path">
             <Setter Property="Stroke" Value="{StaticResource InkBrush}" />
         </Style>
-        <!-- Sidebar entries: quiet “ink dot” selection — no filled rows, only
-             a 6 px dot beside the active item, with a faint rounded wash on
-             hover so the rail reads like a paper table of contents. -->
+        <!-- Sidebar entries: a restrained black bar and light-gray rectangular
+             wash mark the active item without changing its font weight. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Height" Value="34" />
@@ -582,17 +692,18 @@
             <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{TemplateBinding Background}" CornerRadius="6">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="0">
                         <Border.Transitions>
                             <Transitions>
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
                             </Transitions>
                         </Border.Transitions>
-                        <Grid ColumnDefinitions="6,5,*">
-                            <Ellipse Width="6"
-                                     Height="6"
-                                     Fill="{TemplateBinding BorderBrush}"
-                                     VerticalAlignment="Center" />
+                        <Grid ColumnDefinitions="3,9,*">
+                            <Border Width="3"
+                                    Height="22"
+                                    Background="{TemplateBinding BorderBrush}"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center" />
                             <ContentPresenter Grid.Column="2"
                                               Content="{TemplateBinding Content}"
                                               Foreground="{TemplateBinding Foreground}"
@@ -612,8 +723,9 @@
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarItem.active">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
@@ -666,49 +778,46 @@
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
-        <!-- The library shell and its feature pages share the sidebar's flat
-             interaction language. Inputs are underline-only, secondary
-             actions have no permanent box, and hover supplies the surface
-             feedback. ReaderRoot is a sibling, so these rules never alter the
-             reading canvas or its toolbars. -->
+        <!-- The library shell and its feature pages use the same black/white
+             primary and secondary action language as the settings pages.
+             ReaderRoot is a sibling, so these rules never alter the reading
+             canvas or its toolbars. -->
         <Style Selector="Grid.libraryShell Button.quiet">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="RenderTransformOrigin" Value="50%,50%" />
-            <Setter Property="RenderTransform" Value="scale(1)" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.14" />
-                </Transitions>
-            </Setter>
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Grid.libraryShell Button.quiet:pointerover">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="#F0F0F0" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="RenderTransform" Value="scale(1.12)" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.quiet:pressed">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="#D9D9D9" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="RenderTransform" Value="scale(0.96)" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
-        <!-- Kindle resource pages use one filled primary action and flat text
-             actions. Keep this language local to the resource toolbar so
-             dialogs and other library pages retain their own hierarchy. -->
+        <!-- Kindle resource pages use the same filled primary and outlined
+             secondary actions, while retaining their compact toolbar layout. -->
         <Style Selector="Grid.libraryShell Button.deviceResourcePrimary">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinWidth" Value="0" />
-            <Setter Property="Height" Value="32" />
-            <Setter Property="Padding" Value="13,5" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="Padding" Value="14,7" />
             <Setter Property="Background" Value="{StaticResource InkBrush}" />
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
@@ -728,25 +837,27 @@
         <Style Selector="Grid.libraryShell Button.deviceResourceAction">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinWidth" Value="0" />
-            <Setter Property="Height" Value="32" />
-            <Setter Property="Padding" Value="6,5" />
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceAction:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="#F0F0F0" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceAction:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Background" Value="#D9D9D9" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceAction:disabled">
             <Setter Property="Background" Value="Transparent" />
@@ -754,36 +865,40 @@
             <Setter Property="Opacity" Value="0.45" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceDestructive:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="#B3261E" />
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceDestructive:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="#8F1D17" />
+            <Setter Property="Background" Value="#D9D9D9" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
         <Style Selector="Grid.libraryShell Button.deviceResourceBack">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinWidth" Value="0" />
-            <Setter Property="Height" Value="32" />
-            <Setter Property="Padding" Value="4,5" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceBack:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="#F0F0F0" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceBack:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Background" Value="#D9D9D9" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
         <Style Selector="Grid.libraryShell Button.icon">
@@ -899,6 +1014,52 @@
         <Style Selector="CheckBox:pointerover">
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
+        <!-- The TTS popup is a separate native popup tree, so give its
+             auto-advance checkbox the same explicit monochrome indicator as
+             the reader layout switch. This prevents Fluent's blue accent from
+             leaking into the checked state. -->
+        <Style Selector="CheckBox.readerTtsCheck">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Grid ColumnDefinitions="18,Auto" ColumnSpacing="8" MinHeight="22">
+                        <Border x:Name="ReaderTtsCheckIndicator"
+                                Width="18"
+                                Height="18"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                VerticalAlignment="Center">
+                            <Path x:Name="ReaderTtsCheckGlyph"
+                                  Data="M 3,8 L 7,12 L 15,4"
+                                  Stroke="{StaticResource PaperBrush}"
+                                  StrokeThickness="2"
+                                  IsVisible="False" />
+                        </Border>
+                        <ContentPresenter Grid.Column="1"
+                                          Content="{TemplateBinding Content}"
+                                          ContentTemplate="{TemplateBinding ContentTemplate}"
+                                          Foreground="{TemplateBinding Foreground}"
+                                          VerticalAlignment="Center" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="CheckBox.readerTtsCheck:pointerover /template/ Border#ReaderTtsCheckIndicator">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="CheckBox.readerTtsCheck:checked /template/ Border#ReaderTtsCheckIndicator">
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="CheckBox.readerTtsCheck:checked /template/ Path#ReaderTtsCheckGlyph">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
+        <Style Selector="CheckBox.readerTtsCheck:disabled">
+            <Setter Property="Opacity" Value="0.45" />
+        </Style>
         <!-- Reader layout switches use an explicit monochrome template so
              Fluent's blue system accent cannot leak into the checked state. -->
         <Style Selector="CheckBox.readerLayoutCheck">
@@ -949,6 +1110,21 @@
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <!-- Voice selection is a list, not a free-form text field. Keep the
+             popup's selected and focused visuals on the product's black/white
+             palette even when the native theme has a blue accent. -->
+        <Style Selector="ComboBox.readerTtsVoice">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="ComboBox.readerTtsVoice /template/ TextBox">
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="SelectionBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{StaticResource PaperBrush}" />
         </Style>
         <!-- Long selected text (e.g. author names in a 145px filter box) must
              trim instead of pushing the dropdown chevron out of the border. -->
@@ -1081,46 +1257,46 @@
         </Style>
 
         <!-- The setting label already provides the meaning, so the switch stays
-             deliberately minimal: a thin grey line with a circular thumb. -->
+             compact: a monochrome pill track with a circular thumb. Fluent's
+             accent colour must not enter the control. -->
         <Style Selector="ToggleSwitch">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource SidebarIndicatorBrush}" />
-            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="IsThreeState" Value="False" />
-            <Setter Property="Width" Value="36" />
-            <Setter Property="MinWidth" Value="36" />
-            <Setter Property="Height" Value="18" />
-            <Setter Property="MinHeight" Value="18" />
-            <Setter Property="Padding" Value="0" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Grid Width="36" Height="18">
+                    <Grid ColumnDefinitions="36" MinHeight="20">
                         <Border x:Name="SwitchTrack"
-                                Width="24"
-                                Height="1"
+                                Width="36"
+                                Height="20"
                                 Background="{TemplateBinding Background}"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center" />
-                        <Grid x:Name="PART_MovingKnobs" Width="36" Height="18">
-                            <Border x:Name="SwitchThumb"
-                                    Width="12"
-                                    Height="12"
-                                    Background="{StaticResource SidebarIndicatorBrush}"
-                                    CornerRadius="6"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center" />
-                        </Grid>
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10">
+                            <Grid x:Name="PART_MovingKnobs">
+                                <Border x:Name="SwitchThumb"
+                                        Width="14"
+                                        Height="14"
+                                        Margin="2"
+                                        Background="{StaticResource InkBrush}"
+                                        CornerRadius="7"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
                     </Grid>
                 </ControlTemplate>
             </Setter>
         </Style>
         <Style Selector="ToggleSwitch:checked">
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:checked /template/ Border#SwitchThumb">
             <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />
@@ -1468,6 +1644,196 @@
         <Style Selector="Button.readerHeader:pressed">
             <Setter Property="Background" Value="#D9D9D5" />
         </Style>
+        <!-- TTS lives in a Popup outside LibraryRoot, so it cannot inherit the
+             libraryShell action selectors. Keep its three actions explicit. -->
+        <Style Selector="Button.readerTtsAction">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="35" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerTtsAction.primary">
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsAction.primary:disabled">
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsAction:pointerover">
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsAction.primary:pointerover">
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsAction:pressed">
+            <Setter Property="Background" Value="#D9D9D9" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsAction.primary:pressed">
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsAction:disabled">
+            <Setter Property="Opacity" Value="0.35" />
+        </Style>
+
+        <!-- Compact in-page TTS controls. They deliberately stay monochrome
+             and use circular hit targets so the reader chrome remains quiet. -->
+        <Style Selector="Button.readerTtsFloatingToggle">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Width" Value="48" />
+            <Setter Property="MinWidth" Value="48" />
+            <Setter Property="Height" Value="48" />
+            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="24" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerTtsFloatingToggle:pointerover">
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsFloatingToggle:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsFloatingToggle:disabled">
+            <Setter Property="Opacity" Value="0.45" />
+        </Style>
+
+        <Style Selector="Button.readerTtsFloatingStop">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Width" Value="38" />
+            <Setter Property="MinWidth" Value="38" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="MinHeight" Value="38" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="19" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerTtsFloatingStop:pointerover">
+            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsFloatingStop:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerTtsFloatingStop:disabled">
+            <Setter Property="Opacity" Value="0.45" />
+        </Style>
+
+        <Style Selector="Button.readerTtsWheelButton">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Width" Value="36" />
+            <Setter Property="MinWidth" Value="36" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="MinHeight" Value="20" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+            <Setter Property="RenderTransform" Value="scale(1)" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform"
+                                                    Duration="0:0:0.14"
+                                                    Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerTtsWheelButton:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="RenderTransform" Value="scale(1.18)" />
+        </Style>
+        <Style Selector="Button.readerTtsWheelButton:pressed">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="RenderTransform" Value="scale(0.92)" />
+        </Style>
+
+        <Style Selector="Button.readerTtsWheelCenter">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Width" Value="46" />
+            <Setter Property="MinWidth" Value="46" />
+            <Setter Property="Height" Value="46" />
+            <Setter Property="MinHeight" Value="46" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="#E5E5E5" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="#D0D0D0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="23" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+            <Setter Property="RenderTransform" Value="scale(1)" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform"
+                                                    Duration="0:0:0.14"
+                                                    Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerTtsWheelCenter:pointerover">
+            <Setter Property="Background" Value="#DCDCDC" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="RenderTransform" Value="scale(1.10)" />
+        </Style>
+        <Style Selector="Button.readerTtsWheelCenter:pressed">
+            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="RenderTransform" Value="scale(0.94)" />
+        </Style>
+        <Style Selector="Button.readerTtsWheelCenter:disabled">
+            <Setter Property="Opacity" Value="0.45" />
+        </Style>
+
         <Style Selector="Button.readerHeaderIcon">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Width" Value="38" />

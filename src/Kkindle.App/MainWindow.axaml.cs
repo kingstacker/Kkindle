@@ -68,16 +68,23 @@ public partial class MainWindow : Window
     private readonly PdfTextService _pdfTextService;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly AiChatClient _aiChatClient;
+    private readonly TtsSettingsStore _ttsSettingsStore;
+    private readonly TtsCacheManager _ttsCacheManager;
+    private readonly TtsService _readerTts;
     private readonly EpubReaderPreparationService _epubReader;
     private readonly Func<IReaderHost> _readerHostFactory;
     private readonly ZLibraryService _zLibraryService;
     private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
     private readonly KindleEmailSender _kindleEmailSender;
+    private readonly S3SyncService _s3SyncService;
     private readonly UpdateService? _updateService;
     private AppSettings _appSettings = new();
     private ZLibrarySettings _zLibrarySettings = new();
     private KindleEmailSettings _kindleEmailSettings = new();
+    private S3SyncStoredSettings _s3SyncStoredSettings = new(
+        Guid.NewGuid().ToString("N"),
+        new S3SyncSettings());
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private string? _deviceDisplayName;
     private Button? _activeNavigationSectionButton;
@@ -154,18 +161,34 @@ public partial class MainWindow : Window
         _pdfTextService = new PdfTextService();
         _aiSettingsStore = new AiSettingsStore(paths, _secretProtector);
         _aiChatClient = new AiChatClient();
+        _ttsSettingsStore = new TtsSettingsStore(paths);
+        _ttsCacheManager = new TtsCacheManager();
+        _readerTts = new TtsService(
+            services?.TtsEngine,
+            _ttsCacheManager,
+            services?.TtsAudioPlayer,
+            GetCurrentReaderTtsDocument,
+            AdvanceReaderForTtsAsync,
+            services?.TtsEnvironmentSetup,
+            GetNextReaderTtsDocumentAsync);
+        _readerTts.StateChanged += ReaderTts_StateChanged;
+        _readerTts.EnvironmentChanged += ReaderTts_EnvironmentChanged;
         _epubReader = new EpubReaderPreparationService(paths);
         _readerHostFactory = services?.ReaderHostFactory ?? (() => new NativeWebViewReaderHost());
         _zLibraryService = new ZLibraryService();
         _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, _secretProtector);
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, _secretProtector);
         _kindleEmailSender = new KindleEmailSender();
+        _s3SyncService = new S3SyncService(paths, _secretProtector);
         _updateService = services?.UpdateInstaller is { } updateInstaller
             ? new UpdateService(updateInstaller)
             : null;
         ViewModel = new LibraryViewModel(library, paths.Data);
 
         InitializeComponent();
+        _library.DataChanged += LocalLibraryDataChanged;
+        _readerData.DataChanged += LocalReaderDataChanged;
+        InitializeS3SyncIndicator();
         if (startupSettings is not null && !_appSettings.OnboardingCompleted)
         {
             // Choose the first-run surface before the window is presented. The
@@ -443,6 +466,7 @@ public partial class MainWindow : Window
             UpdateReaderLayoutSliderLabels();
             UpdateReaderLayoutStatus();
             UpdateReaderStatsDisplay();
+            UpdateReaderTtsUi();
         }
         if (_stage3Ready && ReadingMaterialsPage.IsVisible && !_readingMaterialsDirty)
             ApplyReadingMaterialsFilter();
@@ -717,7 +741,7 @@ public partial class MainWindow : Window
     // bar, so this is the only path besides CloseWindowButton_Click).
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
     {
-        if (_allowWindowCloseForPendingUpdate) return;
+        if (_allowWindowCloseForPendingUpdate || _allowWindowCloseForS3Sync) return;
         if (ReaderRoot.IsVisible)
         {
             e.Cancel = true;
@@ -733,14 +757,30 @@ public partial class MainWindow : Window
             if (MessageOverlay.IsVisible)
                 CompleteMessage();
             _ = PromptPendingUpdateInstallAsync(packagePath, version);
+            return;
+        }
+
+        if (_stage3Ready)
+        {
+            e.Cancel = true;
+            if (!_s3SyncExitInProgress)
+            {
+                _s3SyncExitInProgress = true;
+                _ = CompleteWindowCloseAfterS3SyncAsync();
+            }
         }
     }
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _library.DataChanged -= LocalLibraryDataChanged;
+        _readerData.DataChanged -= LocalReaderDataChanged;
+        _s3LocalChangeSyncTimer.Stop();
         UiText.LanguageChanged -= MainWindowLanguageChanged;
         UiText.LanguageChanged -= TrayLanguageChanged;
         _stage3Timer.Stop();
+        _s3SyncTimer.Stop();
+        StopS3SyncIndicatorAnimation();
         _transferToastTimer.Stop();
         _deviceStatusToastTimer.Stop();
         _appSettingsAutoSaveCancellation?.Cancel();
@@ -776,6 +816,9 @@ public partial class MainWindow : Window
         _doubanBatchService?.Dispose();
         _zLibraryService.Dispose();
         _aiChatClient.Dispose();
+        _readerTts.EnvironmentChanged -= ReaderTts_EnvironmentChanged;
+        _readerTts.StateChanged -= ReaderTts_StateChanged;
+        _readerTts.Dispose();
         _updateService?.Dispose();
         _readerNavigationCancellation?.Dispose();
         _readerSessionCancellation?.Dispose();

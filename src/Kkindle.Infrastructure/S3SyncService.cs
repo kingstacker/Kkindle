@@ -1,0 +1,715 @@
+using System.Collections.Concurrent;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Amazon;
+using Amazon.Runtime;
+using Amazon.S3;
+using Amazon.S3.Model;
+using Kkindle.Core;
+
+namespace Kkindle.Infrastructure;
+
+/// <summary>
+/// S3-compatible synchronisation for Kkindle's logical data.
+///
+/// The live SQLite database is never placed in the bucket. Each device owns a
+/// compressed snapshot and book bytes are stored as content-addressed objects:
+/// <c>objects/{sha256}</c>. Snapshots are merged by stable IDs/content hashes,
+/// and timestamped tombstones carry deletions between devices. This follows
+/// the important part of SiYuan/dejavu's design while keeping Kkindle's
+/// existing SQLite schema and reader services intact.
+/// </summary>
+public sealed partial class S3SyncService
+{
+    private const int SnapshotVersion = 1;
+    private const long MaxSnapshotBytes = 256L * 1024 * 1024;
+    private const int EncryptionSaltBytes = 16;
+    private const int EncryptionNonceBytes = 12;
+    private const int EncryptionTagBytes = 16;
+    private const int EncryptionKeyBytes = 32;
+    private const int EncryptionIterations = 120_000;
+    private static readonly byte[] EncryptionMagic = Encoding.ASCII.GetBytes("KKINDLE-SYNC1");
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = false
+    };
+
+    private readonly AppPaths _paths;
+    private readonly S3SyncSettingsStore _settingsStore;
+    private readonly AppSettingsStore _appSettingsStore;
+    private readonly AiSettingsStore _aiSettingsStore;
+    private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
+    private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
+    private readonly SemaphoreSlim _syncGate = new(1, 1);
+
+    public S3SyncService(AppPaths paths, ISecretProtector protector)
+    {
+        _paths = paths;
+        _settingsStore = new S3SyncSettingsStore(paths, protector);
+        _appSettingsStore = new AppSettingsStore(paths);
+        _aiSettingsStore = new AiSettingsStore(paths, protector);
+        _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, protector);
+        _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, protector);
+    }
+
+    public Task<S3SyncStoredSettings> LoadSettingsAsync(CancellationToken cancellationToken = default) =>
+        _settingsStore.LoadAsync(cancellationToken);
+
+    public Task SaveSettingsAsync(
+        string deviceId,
+        S3SyncSettings settings,
+        CancellationToken cancellationToken = default) =>
+        _settingsStore.SaveAsync(deviceId, S3SyncSettings.Normalize(settings), cancellationToken);
+
+    /// <summary>
+    /// Clears the local change-detection baseline after a portable backup has
+    /// replaced the database and library. The next sync treats the imported
+    /// package as the current local state instead of turning package omissions
+    /// into deletion tombstones.
+    /// </summary>
+    public async Task ResetLocalBaselineAsync(
+        string deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        deviceId = NormalizeDeviceId(deviceId);
+        await _syncGate.WaitAsync(cancellationToken);
+        try
+        {
+            await SaveStateAsync(new S3SyncState
+            {
+                DeviceId = deviceId,
+                StorageIdentity = string.Empty,
+                LastUploadedSnapshot = null,
+                Tombstones = []
+            }, cancellationToken);
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    public async Task TestConnectionAsync(
+        S3SyncSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = S3SyncSettings.Normalize(settings);
+        ThrowIfInvalid(normalized);
+
+        using var client = CreateClient(normalized);
+        await ListSnapshotKeysAsync(client, normalized, cancellationToken);
+    }
+
+    public async Task<S3SyncResult> SyncAsync(
+        string deviceId,
+        S3SyncSettings settings,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = S3SyncSettings.Normalize(settings);
+        ThrowIfInvalid(normalized);
+        deviceId = NormalizeDeviceId(deviceId);
+
+        await _syncGate.WaitAsync(cancellationToken);
+        try
+        {
+            _paths.EnsureDirectories();
+            var storageIdentity = BuildStorageIdentity(normalized);
+            var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
+            var local = await CaptureSnapshotAsync(deviceId, state.Tombstones, cancellationToken);
+            local.Tombstones = MergeTombstones(
+                state.Tombstones,
+                DetectDeletedEntities(state.LastUploadedSnapshot, local));
+
+            progress?.Report("正在连接 S3…");
+            using var client = CreateClient(normalized);
+            var snapshotKeys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
+
+            progress?.Report("正在上传本地书籍文件…");
+            var uploadWarning = await UploadLocalObjectsAsync(
+                client,
+                normalized,
+                local,
+                progress,
+                cancellationToken);
+
+            progress?.Report("正在读取其他设备的同步快照…");
+            var remoteSnapshots = await DownloadRemoteSnapshotsAsync(
+                client,
+                normalized,
+                snapshotKeys,
+                progress,
+                cancellationToken);
+
+            var remoteTombstones = remoteSnapshots.SelectMany(snapshot => snapshot.Tombstones);
+            local.Tombstones = MergeTombstones(local.Tombstones, remoteTombstones);
+
+            progress?.Report("正在合并书籍和阅读数据…");
+            var databaseResult = await ApplyRemoteSnapshotsAsync(
+                client,
+                normalized,
+                local,
+                remoteSnapshots,
+                progress,
+                cancellationToken);
+
+            progress?.Report("正在合并同步设置…");
+            var settingsChanged = await ApplyRemoteSettingsAsync(
+                local.Settings,
+                remoteSnapshots,
+                cancellationToken);
+
+            // Capture again after the merge. This makes this device's snapshot
+            // a complete converged view, so a third device can catch up from it
+            // without having to contact every previous device forever.
+            var finalSnapshot = await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
+            finalSnapshot.Tombstones = local.Tombstones;
+
+            progress?.Report("正在保存同步快照…");
+            await UploadSnapshotAsync(client, normalized, finalSnapshot, cancellationToken);
+
+            state.DeviceId = deviceId;
+            state.StorageIdentity = storageIdentity;
+            state.LastSyncAt = DateTimeOffset.UtcNow;
+            state.LastUploadedSnapshot = finalSnapshot;
+            state.Tombstones = finalSnapshot.Tombstones;
+            await SaveStateAsync(state, cancellationToken);
+
+            var warning = string.Join(
+                " ",
+                new[] { uploadWarning, databaseResult.Warning }
+                    .Where(message => !string.IsNullOrWhiteSpace(message)));
+            progress?.Report("S3 同步完成。");
+            return new S3SyncResult(
+                remoteSnapshots.Select(snapshot => snapshot.DeviceId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                databaseResult.BooksAdded,
+                databaseResult.FilesDownloaded,
+                databaseResult.AnnotationsApplied,
+                settingsChanged ? 1 : 0,
+                databaseResult.Changed || settingsChanged,
+                warning.Length == 0 ? null : warning);
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    private static void ThrowIfInvalid(S3SyncSettings settings)
+    {
+        var validation = settings.Validate();
+        if (validation is not null)
+            throw new InvalidOperationException(validation);
+    }
+
+    private static string NormalizeDeviceId(string deviceId) =>
+        Guid.TryParse(deviceId, out var parsed)
+            ? parsed.ToString("N")
+            : Guid.NewGuid().ToString("N");
+
+    private static string BuildStorageIdentity(S3SyncSettings settings) =>
+        string.Join(
+            "|",
+            settings.Endpoint,
+            settings.Bucket,
+            settings.Region,
+            settings.Prefix,
+            settings.EncryptionKey.Length > 0
+                ? $"encrypted:{EncryptionKeyFingerprint(settings.EncryptionKey)}"
+                : "plain");
+
+    private string StatePath => Path.Combine(_paths.Data, "s3-sync-state.json");
+
+    private async Task<S3SyncState> LoadStateAsync(
+        string deviceId,
+        string storageIdentity,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(StatePath))
+            return new S3SyncState { DeviceId = deviceId, StorageIdentity = storageIdentity };
+
+        try
+        {
+            await using var stream = new FileStream(
+                StatePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                81920,
+                useAsync: true);
+            var state = await JsonSerializer.DeserializeAsync<S3SyncState>(stream, JsonOptions, cancellationToken)
+                ?? new S3SyncState();
+            if (!string.Equals(state.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(state.StorageIdentity, storageIdentity, StringComparison.Ordinal))
+            {
+                return new S3SyncState { DeviceId = deviceId, StorageIdentity = storageIdentity };
+            }
+
+            state.Tombstones ??= [];
+            return state;
+        }
+        catch (Exception exception) when (exception is IOException or JsonException)
+        {
+            return new S3SyncState { DeviceId = deviceId, StorageIdentity = storageIdentity };
+        }
+    }
+
+    private async Task SaveStateAsync(S3SyncState state, CancellationToken cancellationToken)
+    {
+        _paths.EnsureDirectories();
+        var temporaryPath = StatePath + ".tmp";
+        await using (var stream = new FileStream(
+            temporaryPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            81920,
+            useAsync: true))
+        {
+            await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+        }
+
+        File.Move(temporaryPath, StatePath, overwrite: true);
+    }
+
+    private static string SnapshotKey(S3SyncSettings settings, string deviceId) =>
+        $"{settings.Prefix}/devices/{deviceId}/snapshot.bin";
+
+    private static string BlobKey(S3SyncSettings settings, string hash) =>
+        $"{settings.Prefix}/objects/"
+        + (settings.EncryptionKey.Length > 0
+            ? $"encrypted/{EncryptionKeyFingerprint(settings.EncryptionKey)}"
+            : "plain")
+        + $"/{hash.ToLowerInvariant()}";
+
+    private static string EncryptionKeyFingerprint(string encryptionKey) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(encryptionKey))).ToLowerInvariant();
+
+    private static AmazonS3Client CreateClient(S3SyncSettings settings)
+    {
+        var config = new AmazonS3Config
+        {
+            ForcePathStyle = settings.PathStyle,
+            Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds),
+            AuthenticationRegion = settings.Region,
+            // Alibaba Cloud OSS accepts the S3 API but does not accept the
+            // optional trailer checksum that the AWS SDK 4.x sends by
+            // default. Only relax optional checksum generation for a custom
+            // S3-compatible endpoint; native AWS S3 keeps its normal defaults.
+            RequestChecksumCalculation = string.IsNullOrWhiteSpace(settings.Endpoint)
+                ? RequestChecksumCalculation.WHEN_SUPPORTED
+                : RequestChecksumCalculation.WHEN_REQUIRED,
+            ResponseChecksumValidation = string.IsNullOrWhiteSpace(settings.Endpoint)
+                ? ResponseChecksumValidation.WHEN_SUPPORTED
+                : ResponseChecksumValidation.WHEN_REQUIRED
+        };
+
+        // AWS SDK treats a custom ServiceURL and RegionEndpoint as mutually
+        // exclusive. AuthenticationRegion still controls SigV4 for MinIO,
+        // Cloudflare R2, Wasabi and other S3-compatible endpoints.
+        if (string.IsNullOrWhiteSpace(settings.Endpoint))
+            config.RegionEndpoint = RegionEndpoint.GetBySystemName(settings.Region);
+        else
+            config.ServiceURL = settings.Endpoint;
+
+        if (settings.SkipTlsVerify)
+            config.HttpClientFactory = new InsecureHttpClientFactory();
+
+        return new AmazonS3Client(settings.AccessKey, settings.SecretKey, config);
+    }
+
+    private sealed class InsecureHttpClientFactory : HttpClientFactory
+    {
+        public override HttpClient CreateHttpClient(IClientConfig clientConfig)
+        {
+            var handler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            };
+            return new HttpClient(handler, disposeHandler: true);
+        }
+
+        public override bool UseSDKHttpClientCaching(IClientConfig clientConfig) => false;
+
+        public override bool DisposeHttpClientsAfterUse(IClientConfig clientConfig) => true;
+    }
+
+    private static async Task<List<string>> ListSnapshotKeysAsync(
+        AmazonS3Client client,
+        S3SyncSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<string>();
+        string? continuation = null;
+        do
+        {
+            var request = new ListObjectsV2Request
+            {
+                BucketName = settings.Bucket,
+                Prefix = $"{settings.Prefix}/devices/",
+                ContinuationToken = continuation,
+                MaxKeys = 1000
+            };
+            var response = await client.ListObjectsV2Async(request, cancellationToken);
+            // Some S3-compatible services omit <Contents> completely for an
+            // empty prefix. The AWS SDK then exposes a null collection.
+            result.AddRange((response.S3Objects ?? [])
+                .Select(item => item.Key)
+                .Where(key => key.EndsWith("/snapshot.bin", StringComparison.OrdinalIgnoreCase)));
+            continuation = response.IsTruncated == true ? response.NextContinuationToken : null;
+        }
+        while (!string.IsNullOrWhiteSpace(continuation));
+
+        return result;
+    }
+
+    private async Task<string?> UploadLocalObjectsAsync(
+        AmazonS3Client client,
+        S3SyncSettings settings,
+        S3SyncSnapshot snapshot,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var objects = new List<LocalSyncObject>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var missing = new ConcurrentBag<string>();
+
+        foreach (var file in snapshot.Files)
+        {
+            if (!IsSha256(file.Sha256)) continue;
+            var path = ResolveDataPath(Path.Combine("library", file.BookId.ToString("N"), file.FileName));
+            // The path stored in SQLite is authoritative; the portable
+            // snapshot only retains the filename. Resolve it again from the
+            // database below when the normal relative path is available.
+            path = await ResolveBookFilePathAsync(file.Id, path, cancellationToken);
+            if (path is null || !File.Exists(path))
+            {
+                missing.Add(file.FileName);
+                continue;
+            }
+            if (seen.Add(file.Sha256))
+                objects.Add(new LocalSyncObject(file.Sha256, path, "application/octet-stream"));
+        }
+
+        foreach (var book in snapshot.Books)
+        {
+            if (!IsSha256(book.CoverHash) || string.IsNullOrWhiteSpace(book.CoverFileName)) continue;
+            var path = ResolveDataPath(Path.Combine("covers", book.CoverFileName));
+            if (path is null || !File.Exists(path))
+            {
+                missing.Add(book.CoverFileName);
+                continue;
+            }
+            if (seen.Add(book.CoverHash!))
+                objects.Add(new LocalSyncObject(book.CoverHash!, path, "image/*"));
+        }
+
+        var uploaded = 0;
+        await Parallel.ForEachAsync(
+            objects,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = settings.ConcurrentRequests,
+                CancellationToken = cancellationToken
+            },
+            async (item, token) =>
+            {
+                await UploadObjectIfMissingAsync(client, settings, item, token);
+                var count = Interlocked.Increment(ref uploaded);
+                if (count == objects.Count || count % 10 == 0)
+                    progress?.Report($"已处理 {count}/{objects.Count} 个同步对象…");
+            });
+
+        return missing.IsEmpty
+            ? null
+            : $"有 {missing.Distinct(StringComparer.OrdinalIgnoreCase).Count()} 个本地文件缺失，已跳过上传。";
+    }
+
+    private async Task<string?> ResolveBookFilePathAsync(
+        Guid bookFileId,
+        string? fallback,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT RelativePath FROM BookFiles WHERE Id = $id LIMIT 1;";
+        command.Parameters.AddWithValue("$id", bookFileId.ToString());
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is string relative ? ResolveDataPath(relative) : fallback;
+    }
+
+    private async Task UploadObjectIfMissingAsync(
+        AmazonS3Client client,
+        S3SyncSettings settings,
+        LocalSyncObject item,
+        CancellationToken cancellationToken)
+    {
+        var key = BlobKey(settings, item.Hash);
+        if (await ObjectExistsAsync(client, settings.Bucket, key, cancellationToken)) return;
+
+        PutObjectRequest request;
+        if (settings.EncryptionKey.Length == 0)
+        {
+            request = new PutObjectRequest
+            {
+                BucketName = settings.Bucket,
+                Key = key,
+                FilePath = item.Path,
+                ContentType = item.ContentType,
+                AutoCloseStream = true
+            };
+            ConfigureCompatibleUpload(request, settings, new FileInfo(item.Path).Length);
+        }
+        else
+        {
+            var bytes = await File.ReadAllBytesAsync(item.Path, cancellationToken);
+            var protectedPayload = ProtectPayload(bytes, settings.EncryptionKey);
+            request = new PutObjectRequest
+            {
+                BucketName = settings.Bucket,
+                Key = key,
+                InputStream = new MemoryStream(protectedPayload, writable: false),
+                ContentType = item.ContentType,
+                AutoCloseStream = true
+            };
+            ConfigureCompatibleUpload(request, settings, protectedPayload.LongLength);
+        }
+
+        await client.PutObjectAsync(request, cancellationToken);
+    }
+
+    private static async Task<bool> ObjectExistsAsync(
+        AmazonS3Client client,
+        string bucket,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await client.GetObjectMetadataAsync(
+                new GetObjectMetadataRequest { BucketName = bucket, Key = key },
+                cancellationToken);
+            return true;
+        }
+        catch (AmazonS3Exception exception) when (IsNotFound(exception))
+        {
+            return false;
+        }
+    }
+
+    private async Task UploadSnapshotAsync(
+        AmazonS3Client client,
+        S3SyncSettings settings,
+        S3SyncSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        var compressed = await CompressSnapshotAsync(snapshot, cancellationToken);
+        var payload = settings.EncryptionKey.Length == 0
+            ? compressed
+            : ProtectPayload(compressed, settings.EncryptionKey);
+        using var stream = new MemoryStream(payload, writable: false);
+        var request = new PutObjectRequest
+        {
+            BucketName = settings.Bucket,
+            Key = SnapshotKey(settings, snapshot.DeviceId),
+            InputStream = stream,
+            ContentType = "application/octet-stream",
+            AutoCloseStream = false
+        };
+        ConfigureCompatibleUpload(request, settings, payload.LongLength);
+        await client.PutObjectAsync(request, cancellationToken);
+    }
+
+    private static void ConfigureCompatibleUpload(
+        PutObjectRequest request,
+        S3SyncSettings settings,
+        long contentLength)
+    {
+        // OSS requires a regular HTTP request with Content-Length. Its S3
+        // compatibility layer rejects AWS's streaming chunk signature and
+        // trailing checksum format (STREAMING-AWS4-*-PAYLOAD-TRAILER).
+        request.Headers.ContentLength = contentLength;
+        if (string.IsNullOrWhiteSpace(settings.Endpoint)) return;
+
+        request.UseChunkEncoding = false;
+        request.DisableDefaultChecksumValidation = true;
+    }
+
+    private async Task<List<S3SyncSnapshot>> DownloadRemoteSnapshotsAsync(
+        AmazonS3Client client,
+        S3SyncSettings settings,
+        IReadOnlyList<string> snapshotKeys,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = new List<S3SyncSnapshot>();
+        var processed = 0;
+        foreach (var key in snapshotKeys)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var payload = await DownloadObjectBytesAsync(client, settings.Bucket, key, cancellationToken);
+            var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, cancellationToken);
+            if (snapshot.Version > SnapshotVersion)
+                throw new InvalidDataException($"同步快照版本 {snapshot.Version} 高于当前版本。请先升级 Kkindle。");
+            if (!Guid.TryParse(snapshot.DeviceId, out _))
+                throw new InvalidDataException("同步快照缺少有效的设备 ID。");
+            snapshot.Tombstones ??= [];
+            snapshots.Add(snapshot);
+            progress?.Report($"已读取 {++processed}/{snapshotKeys.Count} 台设备的快照…");
+        }
+        return snapshots;
+    }
+
+    private static async Task<byte[]> DownloadObjectBytesAsync(
+        AmazonS3Client client,
+        string bucket,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        using var response = await client.GetObjectAsync(
+            new GetObjectRequest { BucketName = bucket, Key = key },
+            cancellationToken);
+        if (response.ContentLength > MaxSnapshotBytes)
+            throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
+
+        using var memory = new MemoryStream(
+            response.ContentLength is > 0 and <= int.MaxValue
+                ? (int)response.ContentLength
+                : 64 * 1024);
+        await response.ResponseStream.CopyToAsync(memory, cancellationToken);
+        if (memory.Length > MaxSnapshotBytes)
+            throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
+        return memory.ToArray();
+    }
+
+    private static async Task<byte[]> CompressSnapshotAsync(
+        S3SyncSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions);
+        await using var output = new MemoryStream();
+        await using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, leaveOpen: true))
+            await gzip.WriteAsync(json, cancellationToken);
+        return output.ToArray();
+    }
+
+    private static async Task<S3SyncSnapshot> DecodeSnapshotAsync(
+        byte[] payload,
+        string encryptionKey,
+        CancellationToken cancellationToken)
+    {
+        if (HasMagic(payload) && encryptionKey.Length == 0)
+            throw new InvalidDataException("S3 同步对象已加密，请配置相同的加密密钥。");
+
+        var compressed = HasMagic(payload)
+            ? UnprotectPayload(payload, encryptionKey)
+            : payload;
+        await using var input = new MemoryStream(compressed, writable: false);
+        await using var gzip = new GZipStream(input, CompressionMode.Decompress);
+        await using var json = new MemoryStream();
+        await gzip.CopyToAsync(json, cancellationToken);
+        if (json.Length > MaxSnapshotBytes)
+            throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
+        return JsonSerializer.Deserialize<S3SyncSnapshot>(json.ToArray(), JsonOptions)
+            ?? throw new InvalidDataException("S3 同步快照为空。");
+    }
+
+    private static byte[] ProtectPayload(byte[] value, string passphrase)
+    {
+        var salt = RandomNumberGenerator.GetBytes(EncryptionSaltBytes);
+        var nonce = RandomNumberGenerator.GetBytes(EncryptionNonceBytes);
+        var key = Rfc2898DeriveBytes.Pbkdf2(
+            passphrase,
+            salt,
+            EncryptionIterations,
+            HashAlgorithmName.SHA256,
+            EncryptionKeyBytes);
+        var ciphertext = new byte[value.Length];
+        var tag = new byte[EncryptionTagBytes];
+        using var aes = new AesGcm(key, EncryptionTagBytes);
+        aes.Encrypt(nonce, value, ciphertext, tag, EncryptionMagic);
+
+        var result = new byte[
+            EncryptionMagic.Length
+            + EncryptionSaltBytes
+            + EncryptionNonceBytes
+            + EncryptionTagBytes
+            + ciphertext.Length];
+        var offset = 0;
+        EncryptionMagic.CopyTo(result, offset);
+        offset += EncryptionMagic.Length;
+        salt.CopyTo(result, offset);
+        offset += EncryptionSaltBytes;
+        nonce.CopyTo(result, offset);
+        offset += EncryptionNonceBytes;
+        tag.CopyTo(result, offset);
+        offset += EncryptionTagBytes;
+        ciphertext.CopyTo(result, offset);
+        return result;
+    }
+
+    private static byte[] UnprotectPayload(byte[] value, string passphrase)
+    {
+        var minimum = EncryptionMagic.Length
+            + EncryptionSaltBytes
+            + EncryptionNonceBytes
+            + EncryptionTagBytes;
+        if (value.Length < minimum || !HasMagic(value))
+            throw new InvalidDataException("S3 同步对象的加密头无效。");
+
+        var offset = EncryptionMagic.Length;
+        var salt = value.AsSpan(offset, EncryptionSaltBytes).ToArray();
+        offset += EncryptionSaltBytes;
+        var nonce = value.AsSpan(offset, EncryptionNonceBytes).ToArray();
+        offset += EncryptionNonceBytes;
+        var tag = value.AsSpan(offset, EncryptionTagBytes).ToArray();
+        offset += EncryptionTagBytes;
+        var ciphertext = value.AsSpan(offset).ToArray();
+        var key = Rfc2898DeriveBytes.Pbkdf2(
+            passphrase,
+            salt,
+            EncryptionIterations,
+            HashAlgorithmName.SHA256,
+            EncryptionKeyBytes);
+        var plaintext = new byte[ciphertext.Length];
+        try
+        {
+            using var aes = new AesGcm(key, EncryptionTagBytes);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext, EncryptionMagic);
+            return plaintext;
+        }
+        catch (CryptographicException exception)
+        {
+            throw new InvalidDataException("S3 同步加密密钥不匹配，或同步对象已损坏。", exception);
+        }
+    }
+
+    private static bool HasMagic(byte[] value) =>
+        value.Length >= EncryptionMagic.Length
+        && value.AsSpan(0, EncryptionMagic.Length).SequenceEqual(EncryptionMagic);
+
+    private static bool IsNotFound(AmazonS3Exception exception) =>
+        exception.StatusCode is System.Net.HttpStatusCode.NotFound
+        || string.Equals(exception.ErrorCode, "NoSuchKey", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(exception.ErrorCode, "NotFound", StringComparison.OrdinalIgnoreCase);
+
+    private string? ResolveDataPath(string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) return null;
+        var dataRoot = Path.GetFullPath(_paths.Data)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(Path.Combine(_paths.Data, relativePath));
+        return fullPath.StartsWith(dataRoot, StringComparison.OrdinalIgnoreCase)
+            ? fullPath
+            : null;
+    }
+
+    private static bool IsSha256(string? value) =>
+        value is { Length: 64 } && value.All(Uri.IsHexDigit);
+
+    private sealed record LocalSyncObject(string Hash, string Path, string ContentType);
+}

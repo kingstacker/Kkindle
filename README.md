@@ -98,6 +98,7 @@ The current macOS packages are not advertised as physically validated. Before re
 - PDF supports a local text index, full-text search, page progress, bookmarks, page notes, and AI context retrieval.
 - Save typography per book, including font size, line height, text width, margins, and CJK font. New books default to `1.20×` font size, `1.80` line height, `1200 px` text width, and `24 px` side margins.
 - Create EPUB highlights and notes, use quick annotation tools, jump back to the source, and export annotations. The annotation list shows chapter, selected text, and note, and refreshes after new annotations are added.
+- On Windows 11, Kreader supports Read aloud with installed Microsoft Windows voices. The current text range is highlighted during playback, with optional automatic chapter advance. See the [TTS setup note](docs/Kreader听书.md).
 - The built-in AI reading assistant can summarize chapters, explain selections, provide a whole-book overview, and hold a free-form conversation using the current selection and local book index. It supports reasoning-depth and model selection and works with DeepSeek, OpenAI, and compatible endpoints.
 
 ### Reading productivity tools

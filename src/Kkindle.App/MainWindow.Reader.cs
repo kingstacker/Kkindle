@@ -86,6 +86,16 @@ public partial class MainWindow
                 _readerCurrentFragment = DecodeReaderFragment(progress.Fragment);
             }
 
+            // The interaction shell is initialized before the persisted
+            // position is read, so its first TOC state is based on chapter 0.
+            // Synchronize the folded/selected rows before revealing the reader
+            // instead of waiting for the WebView navigation to finish. This
+            // prevents a visible intermediate TOC that corrects itself later.
+            CollapseReaderTocToCurrentChapter(_readerChapterIndex);
+            SetReaderTocSelectionForLocation(
+                _readerChapterIndex,
+                _readerCurrentFragment);
+
             ReaderBookInfoText.Text = $"{card.Title} · {file.Format.ToUpperInvariant()}";
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
             ReaderStatusText.Text = string.Empty;
@@ -478,8 +488,13 @@ public partial class MainWindow
         }
     }
 
-    private async Task MoveReaderChapterAsync(int offset, bool startAtChapterTitle = false)
+    private async Task MoveReaderChapterAsync(
+        int offset,
+        bool startAtChapterTitle = false,
+        bool positionAtStart = false)
     {
+        if (!_readerTtsAutoNavigation)
+            await _readerTts.StopAsync();
         var chapterTiming = Stopwatch.StartNew();
         await ResetReaderInPageSearchForNavigationAsync();
         _readerPendingBookmarkQuote = null;
@@ -507,7 +522,7 @@ public partial class MainWindow
             && OperatingSystem.IsLinux()
             && !_readerIsPdf
             && offset < 0
-            && !startAtChapterTitle;
+            && !positionAtStart;
         _readerLinuxTextFallbackTargetTitle = null;
         if (UseLinuxPlainTextRecoveryFallback
             && OperatingSystem.IsLinux()
@@ -548,7 +563,7 @@ public partial class MainWindow
             await ApplySavedAnnotationsAsync(host, token);
             await PositionReaderChapterBoundaryAsync(
                 host,
-                moveToEnd: offset < 0 && !startAtChapterTitle,
+                moveToEnd: offset < 0 && !positionAtStart,
                 token);
             LogReaderChapterTiming("move.boundary", chapterTiming);
             var outgoingHost = CurrentReaderHost;
@@ -633,6 +648,8 @@ public partial class MainWindow
     {
         direction = Math.Sign(direction);
         if (direction == 0) return;
+        if (!_readerTtsAutoNavigation)
+            await _readerTts.StopAsync();
         if (_readerIsPdf)
         {
             await NavigatePdfPageAsync(_readerPdfPage + direction, ReaderToken);
@@ -800,6 +817,9 @@ public partial class MainWindow
         Interlocked.Increment(ref _readerProgressSaveSequence);
         try
         {
+            _readerTtsFloatingRequested = false;
+            await _readerTts.StopAsync();
+            ReaderTtsPopup.IsOpen = false;
         // Return-to-bookshelf is the authoritative checkpoint. Wait for a
         // page turn and any side-panel reflow to settle, then read the native
         // WebView position directly instead of trusting the last asynchronous

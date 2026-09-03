@@ -6,5 +6,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Kkindle.Core\Kkindle.Core.csproj" />
     <ProjectReference Include="..\Kkindle.Infrastructure\Kkindle.Infrastructure.csproj" />
+    <PackageReference Include="NAudio" Version="3.0.1" />
   </ItemGroup>
 </Project>

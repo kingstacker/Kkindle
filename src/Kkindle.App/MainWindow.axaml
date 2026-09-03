@@ -193,7 +193,7 @@
                     BorderBrush="{StaticResource HairlineBrush}"
                     BorderThickness="0,0,1,0">
                 <Grid RowDefinitions="Auto,*,Auto" Margin="18,24,18,18">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
                         <Border Width="34" Height="34" Background="{StaticResource InkBrush}">
                             <TextBlock Text="K"
                                        Foreground="{StaticResource PaperBrush}"
@@ -219,13 +219,67 @@
                                         BorderThickness="0"
                                         VerticalAlignment="Center"
                                         Focusable="False">
-                                    <Ellipse Width="8" Height="8" Fill="#E0A100" />
-                                </Button>
+                                        <Ellipse Width="8" Height="8" Fill="#E0A100" />
+                                    </Button>
                             </StackPanel>
                             <TextBlock Text="{DynamicResource Ui.Auto.61CD63ABFA7D1DAD}"
                                        FontSize="11"
                                        Foreground="{StaticResource MutedInkBrush}" />
                         </StackPanel>
+                        <Button x:Name="S3SyncIndicatorButton"
+                                Classes="syncIndicator"
+                                Click="S3SyncIndicatorButton_Click"
+                                Cursor="Hand"
+                                ToolTip.Tip="S3 同步未配置；点击打开设置"
+                                AutomationProperties.Name="S3 同步状态"
+                                VerticalAlignment="Center">
+                            <Grid Width="28" Height="28">
+                                <Path x:Name="S3SyncCloudIcon"
+                                      Data="M 4.6,18.5 H 18.4 C 21.1,18.5 23.2,16.5 23.2,14 C 23.2,11.7 21.4,9.8 19.1,9.5 C 18.4,6.4 15.7,4.1 12.3,4.1 C 8.5,4.1 5.4,6.8 4.9,10.4 C 2.4,10.7 0.5,12.4 0.5,14.6 C 0.5,16.8 2.3,18.5 4.6,18.5 Z"
+                                      Width="25"
+                                      Height="22"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Stretch="Uniform"
+                                      Fill="#F2F2F2"
+                                      Stroke="{StaticResource MutedInkBrush}"
+                                      StrokeThickness="1.75"
+                                      StrokeLineCap="Round"
+                                      StrokeJoin="Round"
+                                      RenderTransformOrigin="50%,50%" />
+                                <Path x:Name="S3SyncSpinnerIcon"
+                                      Data="M 17.65,6.35 C 16.2,4.9 14.21,4 12,4 C 7.58,4 4.01,7.58 4.01,12 C 4.01,16.42 7.58,20 12,20 C 15.73,20 18.84,17.45 19.73,14 H 17.65 C 16.83,16.33 14.61,18 12,18 C 8.69,18 6,15.31 6,12 C 6,8.69 8.69,6 12,6 C 13.66,6 15.14,6.69 16.22,7.78 L 13,11 H 20 V 4 Z"
+                                      Width="15"
+                                      Height="15"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Stretch="Uniform"
+                                      Fill="{StaticResource InkBrush}"
+                                      RenderTransformOrigin="50%,50%"
+                                      IsVisible="False"
+                                      IsHitTestVisible="False" />
+                                <Path x:Name="S3SyncSuccessGlyph"
+                                      Data="M 9,16.17 L 4.83,12 L 3.41,13.41 L 9,19 L 21,7 L 19.59,5.59 Z"
+                                      Width="15"
+                                      Height="15"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Stretch="Uniform"
+                                      Fill="{StaticResource InkBrush}"
+                                      IsVisible="False"
+                                      IsHitTestVisible="False" />
+                                <Path x:Name="S3SyncFailureGlyph"
+                                      Data="M 6,1 H 10 L 9.4,10 H 6.6 Z M 6,12 H 10 V 16 H 6 Z"
+                                      Width="15"
+                                      Height="15"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Stretch="Uniform"
+                                      Fill="{StaticResource InkBrush}"
+                                      IsVisible="False"
+                                      IsHitTestVisible="False" />
+                            </Grid>
+                        </Button>
                     </StackPanel>
 
                     <ScrollViewer Grid.Row="1"
@@ -389,6 +443,14 @@
                                             Content="{DynamicResource Ui.Auto.377C481D3C31ACE2}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.59D7AD70A4016DE6}"
                                             Click="ReaderAiSettingsButton_Click" />
+                                    <Button x:Name="SystemS3SyncNavigationButton"
+                                            Classes="sidebarItem"
+                                            Content="S3 同步"
+                                            Click="SystemS3SyncNavigationButton_Click" />
+                                    <Button x:Name="SystemBackupNavigationButton"
+                                            Classes="sidebarItem"
+                                            Content="{DynamicResource Ui.Auto.70E372ABBAE5F619}"
+                                            Click="SystemBackupNavigationButton_Click" />
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>
@@ -2098,11 +2160,6 @@
                                     Content="Kindle"
                                     Tag="Kindle"
                                     Click="SettingsCategoryButton_Click" />
-                            <Button x:Name="SettingsBackupButton"
-                                    Classes="settingsCategory"
-                                    Content="{DynamicResource Ui.Auto.70E372ABBAE5F619}"
-                                    Tag="Backup"
-                                    Click="SettingsCategoryButton_Click" />
                             <Button x:Name="SettingsAboutButton"
                                     Classes="settingsCategory"
                                     Content="{DynamicResource Ui.Auto.52D25A9E30BA94F1}"
@@ -2314,38 +2371,6 @@
                                 </StackPanel>
                             </Border>
 
-                <Border x:Name="SettingsBackupSection"
-                        Classes="flatPanel"
-                        BorderThickness="0"
-                        IsVisible="False"
-                        Padding="18"
-                        Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="14">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.4F5B1DE92F8004CA}" FontSize="18" FontWeight="SemiBold" />
-                                    <TextBlock Text="{DynamicResource Ui.Auto.9DD9F8A0E4DE0220}"
-                                               FontSize="11"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <TextBlock Text="{DynamicResource Ui.Auto.330BB890965835F9}"
-                                               FontSize="11"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.E4AD8CC2EC98305C}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="AutoBackupCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D4B94B23423B837F}" />
-                                    </Grid>
-                                    <Grid ColumnDefinitions="*,160" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.E5243ABDEA37FB82}" FontSize="13" VerticalAlignment="Center" />
-                                        <NumericUpDown x:Name="AutoBackupRetentionBox" Grid.Column="1" Minimum="1" Maximum="30" Increment="1" Value="5" />
-                                    </Grid>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button Content="{DynamicResource Ui.Auto.E9D3DD690A4E2593}" Click="ExportBackupButton_Click" />
-                                        <Button Content="{DynamicResource Ui.Auto.EC217804074AC0BD}" Classes="quiet" Click="ImportBackupButton_Click" />
-                                    </StackPanel>
-                                    <TextBlock x:Name="SettingsBackupStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-
                             <StackPanel x:Name="SettingsAboutSection"
                                         IsVisible="False"
                                         Spacing="16">
@@ -2455,8 +2480,189 @@
                 </Grid>
             </Grid>
 
-            <!-- The three system-setting forms are separate right-side panes in
-                 the reference UI. Keeping them outside the Kindle category
+            <!-- Backup and S3 are separate right-side system-setting panes,
+                 following the same interaction pattern as the AI assistant. -->
+            <Border x:Name="SystemSettingsPane"
+                    Grid.Column="2"
+                    Background="{StaticResource PaperBrush}"
+                    BorderBrush="{StaticResource HairlineBrush}"
+                    BorderThickness="1,0,0,0"
+                    IsVisible="False">
+                <Grid RowDefinitions="Auto,*">
+                <StackPanel Spacing="3">
+                    <TextBlock x:Name="SystemSettingsPaneTitle"
+                               Text="系统设置"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Margin="20,50,20,12" />
+                </StackPanel>
+
+                <Grid Grid.Row="1" Margin="0" RowDefinitions="*" ColumnDefinitions="0,*">
+                    <ScrollViewer x:Name="SystemSettingsScrollViewer"
+                                  Grid.Row="0"
+                                  Grid.Column="1"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="20,16,20,14" Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
+                            <Border x:Name="SettingsBackupSection"
+                                    Classes="flatPanel"
+                                    BorderThickness="0"
+                                    IsVisible="False"
+                                    Padding="18"
+                                    Background="{StaticResource PaperBrush}">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Text="{DynamicResource Ui.Auto.4F5B1DE92F8004CA}" FontSize="18" FontWeight="SemiBold" IsVisible="False" />
+                                    <TextBlock Text="{DynamicResource Ui.Auto.9DD9F8A0E4DE0220}"
+                                               FontSize="11"
+                                               Foreground="{StaticResource MutedInkBrush}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{DynamicResource Ui.Auto.330BB890965835F9}"
+                                               FontSize="11"
+                                               Foreground="{StaticResource MutedInkBrush}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="本地备份会包含 S3 的非敏感连接参数，但不会包含 Access Key、Secret Key 和本地加密密钥。需要迁移 S3 凭据时，请使用 S3 设置中的独立配置导出。"
+                                               FontSize="11"
+                                               Foreground="{StaticResource MutedInkBrush}"
+                                               TextWrapping="Wrap" />
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.E4AD8CC2EC98305C}" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="AutoBackupCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D4B94B23423B837F}" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,160" ColumnSpacing="12">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.E5243ABDEA37FB82}" FontSize="13" VerticalAlignment="Center" />
+                                        <NumericUpDown x:Name="AutoBackupRetentionBox" Grid.Column="1" Minimum="1" Maximum="30" Increment="1" Value="5" />
+                                    </Grid>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button Content="{DynamicResource Ui.Auto.E9D3DD690A4E2593}" Click="ExportBackupButton_Click" />
+                                        <Button Content="{DynamicResource Ui.Auto.EC217804074AC0BD}" Classes="quiet" Click="ImportBackupButton_Click" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="SettingsBackupStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="SettingsSyncSection"
+                                    Classes="flatPanel"
+                                    BorderThickness="0"
+                                    IsVisible="False"
+                                    Padding="18"
+                                    Background="{StaticResource PaperBrush}">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Text="S3 同步" FontSize="18" FontWeight="SemiBold" IsVisible="False" />
+                                    <TextBlock Text="同步本地书籍、封面、批注、书签、阅读进度和可同步的应用设置。书籍文件按 SHA-256 去重，数据库文件本身不会上传。"
+                                               FontSize="11"
+                                               Foreground="{StaticResource MutedInkBrush}"
+                                               TextWrapping="Wrap" />
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <TextBlock Text="启用 S3 同步" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="S3SyncEnabledCheck"
+                                                      Grid.Column="1"
+                                                      VerticalAlignment="Center"
+                                                      IsCheckedChanged="S3SyncEnabledCheck_IsCheckedChanged" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <TextBlock Text="自动同步（启动、退出、变更后及按间隔执行）" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                        <ToggleSwitch x:Name="S3AutomaticSyncCheck" Grid.Column="1" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,150" ColumnSpacing="12">
+                                        <TextBlock Text="自动同步间隔（分钟）" FontSize="13" VerticalAlignment="Center" />
+                                        <NumericUpDown x:Name="S3SyncIntervalBox" Grid.Column="1" Minimum="5" Maximum="1440" Increment="5" Value="30" />
+                                    </Grid>
+
+                                    <Border Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
+                                        <StackPanel Spacing="9">
+                                            <TextBlock Text="连接参数" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock Text="Endpoint 留空使用 AWS S3；使用 MinIO、Cloudflare R2、Wasabi 等服务时填写其 S3 Endpoint。"
+                                                       FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="Endpoint" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBox x:Name="S3EndpointBox" Grid.Column="1" PlaceholderText="https://s3.example.com（AWS 可留空）" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="Access Key" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBox x:Name="S3AccessKeyBox" Grid.Column="1" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="Secret Key" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBox x:Name="S3SecretKeyBox" Grid.Column="1" PasswordChar="●" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="Bucket" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBox x:Name="S3BucketBox" Grid.Column="1" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="Region" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBox x:Name="S3RegionBox" Grid.Column="1" Text="us-east-1" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="对象前缀" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBox x:Name="S3PrefixBox" Grid.Column="1" Text="kkindle" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                <TextBlock Text="使用 Path-style 地址（多数 S3 兼容服务需要）" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <ToggleSwitch x:Name="S3PathStyleCheck" Grid.Column="1" IsChecked="False" VerticalAlignment="Center" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                <TextBlock Text="跳过 TLS 证书校验（仅限本地测试）" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <ToggleSwitch x:Name="S3SkipTlsVerifyCheck" Grid.Column="1" VerticalAlignment="Center" />
+                                            </Grid>
+                                            <Border Classes="flatSubsection" Padding="0,10,0,0" Margin="0,4,0,0">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="连接参数文件" FontSize="13" FontWeight="SemiBold" />
+                                                    <TextBlock Text="独立文件包含 Endpoint、Access Key、Secret Key、Bucket 等连接参数，但不包含本地加密密钥和自动同步开关。文件包含敏感凭据，请妥善保管。"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource MutedInkBrush}"
+                                                               TextWrapping="Wrap" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <Button Content="导出连接参数" Click="ExportS3ConnectionProfileButton_Click" />
+                                                        <Button Content="导入连接参数" Classes="quiet" Click="ImportS3ConnectionProfileButton_Click" />
+                                                    </StackPanel>
+                                                    <TextBlock x:Name="S3ConnectionProfileStatusText"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource MutedInkBrush}"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Classes="flatSubsection" Padding="0,12,0,0">
+                                        <StackPanel Spacing="9">
+                                            <TextBlock Text="本地加密（可选）" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock Text="填写同一个密钥后，快照和书籍对象会在上传前使用 AES-GCM 加密；请在所有设备上手动配置相同密钥，忘记后无法恢复云端数据。"
+                                                       FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="加密密钥" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBox x:Name="S3EncryptionKeyBox" Grid.Column="1" PasswordChar="●" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
+                                                <TextBlock Text="请求超时（秒）" FontSize="12" VerticalAlignment="Center" />
+                                                <NumericUpDown x:Name="S3TimeoutBox" Grid.Column="1" Minimum="10" Maximum="600" Increment="10" Value="60" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
+                                                <TextBlock Text="并发请求数" FontSize="12" VerticalAlignment="Center" />
+                                                <NumericUpDown x:Name="S3ConcurrencyBox" Grid.Column="1" Minimum="1" Maximum="32" Increment="1" Value="4" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button x:Name="S3SaveSettingsButton" Content="保存设置" Click="S3SaveSettingsButton_Click" />
+                                        <Button x:Name="S3TestConnectionButton" Content="测试连接" Classes="quiet" Click="S3TestConnectionButton_Click" />
+                                        <Button x:Name="S3SyncNowButton" Content="立即同步" Classes="quiet" Click="S3SyncNowButton_Click" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="S3SyncDeviceText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="S3SyncStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+                </Grid>
+            </Border>
+
+            <!-- The system-setting forms are separate right-side panes in
+                 the reference UI. Keeping them outside the settings pages
                  preserves the same navigation flow on Avalonia. -->
             <Border x:Name="KindleEmailSettingsPane"
                     Grid.Column="2"
@@ -2464,7 +2670,7 @@
                     BorderBrush="{StaticResource HairlineBrush}"
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
-                <Grid RowDefinitions="Auto,*,Auto">
+                <Grid RowDefinitions="Auto,*">
                     <Grid Margin="20,50,20,12">
                         <TextBlock Text="{DynamicResource Ui.Auto.5F52884AFBDA326B}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,0" />
                     </Grid>
@@ -2513,20 +2719,20 @@
                                 <TextBox x:Name="KindleEmailPasswordBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.8CB9B8C5CF47397A}" />
                             </StackPanel>
                             <CheckBox x:Name="KindleEmailSslCheck" Content="{DynamicResource Ui.Auto.98BFA63342D1FDA2}" IsChecked="True" />
+                            <Grid Margin="0,4,0,0"
+                                  ColumnDefinitions="Auto,Auto,*"
+                                  ColumnSpacing="8">
+                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="KindleEmailSettingsCancelButton_Click" />
+                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="KindleEmailSettingsSaveButton_Click" />
+                                <TextBlock x:Name="KindleEmailSettingsStatusText"
+                                           Grid.Column="2"
+                                           FontSize="10"
+                                           Foreground="{StaticResource MutedInkBrush}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </Grid>
                         </StackPanel>
                     </ScrollViewer>
-                    <Grid Grid.Row="2"
-                          Margin="20,12,20,20"
-                          ColumnDefinitions="*,Auto,Auto"
-                          ColumnSpacing="8">
-                        <TextBlock x:Name="KindleEmailSettingsStatusText"
-                                   FontSize="10"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   VerticalAlignment="Center"
-                                   TextWrapping="Wrap" />
-                        <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Click="KindleEmailSettingsCancelButton_Click" />
-                        <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Click="KindleEmailSettingsSaveButton_Click" />
-                    </Grid>
                 </Grid>
             </Border>
 
@@ -2536,7 +2742,7 @@
                     BorderBrush="{StaticResource HairlineBrush}"
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
-                <Grid RowDefinitions="Auto,*,Auto">
+                <Grid RowDefinitions="Auto,*">
                     <Grid Margin="20,50,20,12">
                         <TextBlock Text="{DynamicResource Ui.Auto.04C7E918A97AA2D2}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </Grid>
@@ -2562,20 +2768,20 @@
                                            Foreground="{StaticResource MutedInkBrush}"
                                            TextWrapping="Wrap" />
                             </StackPanel>
+                            <Grid Margin="0,4,0,0"
+                                  ColumnDefinitions="Auto,Auto,*"
+                                  ColumnSpacing="8">
+                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="ZLibraryAccountCancelButton_Click" />
+                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.31C1468A6EA3BBF1}" Classes="settingsActionSave" Click="ZLibraryAccountSaveButton_Click" />
+                                <TextBlock x:Name="ZLibraryAccountStatusText"
+                                           Grid.Column="2"
+                                           FontSize="10"
+                                           Foreground="{StaticResource MutedInkBrush}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </Grid>
                         </StackPanel>
                     </ScrollViewer>
-                    <Grid Grid.Row="2"
-                          Margin="20,12,20,20"
-                          ColumnDefinitions="*,Auto,Auto"
-                          ColumnSpacing="8">
-                        <TextBlock x:Name="ZLibraryAccountStatusText"
-                                   FontSize="10"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   VerticalAlignment="Center"
-                                   TextWrapping="Wrap" />
-                        <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Click="ZLibraryAccountCancelButton_Click" />
-                        <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.31C1468A6EA3BBF1}" Click="ZLibraryAccountSaveButton_Click" />
-                    </Grid>
                 </Grid>
             </Border>
 
@@ -2585,7 +2791,7 @@
                     BorderBrush="{StaticResource HairlineBrush}"
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
-                <Grid RowDefinitions="Auto,*,Auto">
+                <Grid RowDefinitions="Auto,*">
                     <Grid Margin="20,50,20,12">
                         <TextBlock Text="{DynamicResource Ui.Auto.6F5D72AA32F2C95E}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </Grid>
@@ -2621,20 +2827,20 @@
                                        FontSize="10"
                                        Foreground="{StaticResource MutedInkBrush}"
                                        TextWrapping="Wrap" />
+                            <Grid Margin="0,4,0,0"
+                                  ColumnDefinitions="Auto,Auto,*"
+                                  ColumnSpacing="8">
+                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="MainReaderAiSettingsCancelButton_Click" />
+                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="MainReaderAiSettingsSaveButton_Click" />
+                                <TextBlock x:Name="MainReaderAiSettingsStatusText"
+                                           Grid.Column="2"
+                                           FontSize="10"
+                                           Foreground="{StaticResource MutedInkBrush}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </Grid>
                         </StackPanel>
                     </ScrollViewer>
-                    <Grid Grid.Row="2"
-                          Margin="20,12,20,20"
-                          ColumnDefinitions="*,Auto,Auto"
-                          ColumnSpacing="8">
-                        <TextBlock x:Name="MainReaderAiSettingsStatusText"
-                                   FontSize="10"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   VerticalAlignment="Center"
-                                   TextWrapping="Wrap" />
-                        <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Click="MainReaderAiSettingsCancelButton_Click" />
-                        <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Click="MainReaderAiSettingsSaveButton_Click" />
-                    </Grid>
                 </Grid>
             </Border>
 
@@ -2906,7 +3112,7 @@
                         <TextBlock x:Name="ConfirmationTitleText" FontSize="18" FontWeight="Bold" />
                         <TextBlock x:Name="ConfirmationMessageText" TextWrapping="Wrap" Foreground="#555555" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="7" Margin="0,8,0,0">
-                            <Button Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Padding="13,7" Click="ConfirmationCancelButton_Click" />
+                            <Button Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Padding="13,7" Click="ConfirmationCancelButton_Click" />
                             <Button x:Name="ConfirmationOkButton" Content="{DynamicResource Ui.Auto.A3EA3C17B401BD2F}" Padding="13,7" Click="ConfirmationOkButton_Click" />
                         </StackPanel>
                     </StackPanel>
@@ -2935,7 +3141,7 @@
                         <TextBlock Text="{DynamicResource Ui.Auto.FDF0B569D820ADE8}" FontSize="18" FontWeight="Bold" />
                         <TextBox x:Name="CollectionNameBox" PlaceholderText="{DynamicResource Ui.Auto.B161B3F76A603FB9}" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="7" Margin="0,8,0,0">
-                            <Button Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Padding="13,7" Click="CollectionNameCancelButton_Click" />
+                            <Button Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Padding="13,7" Click="CollectionNameCancelButton_Click" />
                             <Button Content="{DynamicResource Ui.Auto.CDE2CD071D25BBAB}" Padding="13,7" Click="CollectionNameOkButton_Click" />
                         </StackPanel>
                     </StackPanel>
@@ -3404,6 +3610,7 @@
                                                 <Button Classes="readerTocToggle"
                                                         Width="18"
                                                         Height="18"
+                                                        MinHeight="0"
                                                         Margin="9,9,0,9"
                                                         Padding="0"
                                                         VerticalAlignment="Top"
@@ -3748,6 +3955,11 @@
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.D40E1B4E4A622EB2}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.43A641217D7F134F}"
                                     Click="ReaderSearchToolbarButton_Click" />
+                            <Button x:Name="ReaderTtsButton"
+                                    Classes="readerHeader"
+                                    Content="{DynamicResource Ui.Auto.50E6C34A9A5257C7}"
+                                    ToolTip.Tip="{DynamicResource Ui.Auto.57E9D77DA9EFA036}"
+                                    Click="ReaderTtsButton_Click" />
                         </StackPanel>
                         <TextBlock x:Name="ReaderStatusText"
                                    Grid.Column="1"
@@ -4183,6 +4395,70 @@
                                     Click="CloseReaderButton_Click" />
                         </StackPanel>
                     </Border>
+                    <!-- iPod-style click wheel for in-page playback. Once shown,
+                         it remains until the user presses stop. -->
+                    <Canvas x:Name="ReaderTtsFloatingPanel"
+                            Width="128"
+                            Height="128"
+                            Margin="0,0,22,20"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            IsVisible="False"
+                            ZIndex="80">
+                    <Ellipse Width="128"
+                             Height="128"
+                             Fill="{StaticResource PaperBrush}"
+                             Stroke="#D8D8D8"
+                             StrokeThickness="1"
+                             IsHitTestVisible="False" />
+                    <Button x:Name="ReaderTtsFloatingMenuButton"
+                            Canvas.Left="46"
+                            Canvas.Top="6"
+                            Classes="readerTtsWheelButton"
+                            Content="MENU"
+                            ContentTemplate="{StaticResource ReaderTtsFloatingGlyphTemplate}"
+                            FontSize="10"
+                            ToolTip.Tip="听书菜单"
+                            Click="ReaderTtsFloatingMenuButton_Click" />
+                    <Button x:Name="ReaderTtsFloatingPreviousButton"
+                            Canvas.Left="5"
+                            Canvas.Top="53"
+                            Classes="readerTtsWheelButton"
+                            Content="‹‹"
+                            ContentTemplate="{StaticResource ReaderTtsFloatingGlyphTemplate}"
+                            FontSize="15"
+                            ToolTip.Tip="上一章"
+                            IsEnabled="False"
+                            Click="ReaderTtsFloatingPreviousButton_Click" />
+                    <Button x:Name="ReaderTtsFloatingNextButton"
+                            Canvas.Left="91"
+                            Canvas.Top="53"
+                            Classes="readerTtsWheelButton"
+                            Content="››"
+                            ContentTemplate="{StaticResource ReaderTtsFloatingGlyphTemplate}"
+                            FontSize="15"
+                            ToolTip.Tip="下一章"
+                            IsEnabled="False"
+                            Click="ReaderTtsFloatingNextButton_Click" />
+                    <Button x:Name="ReaderTtsFloatingToggleButton"
+                            Canvas.Left="46"
+                            Canvas.Top="102"
+                            Classes="readerTtsWheelButton"
+                            Content="Ⅱ"
+                            ContentTemplate="{StaticResource ReaderTtsFloatingGlyphTemplate}"
+                            FontSize="12"
+                            ToolTip.Tip="暂停/继续"
+                            Click="ReaderTtsFloatingToggleButton_Click" />
+                    <Button x:Name="ReaderTtsFloatingStopButton"
+                            Canvas.Left="41"
+                            Canvas.Top="41"
+                            Classes="readerTtsWheelCenter"
+                            Content="■"
+                            ContentTemplate="{StaticResource ReaderTtsFloatingGlyphTemplate}"
+                            ToolTip.Tip="停止听书"
+                            Click="ReaderTtsFloatingStopButton_Click" />
+                </Canvas>
+
                 </Grid>
 
                 <Border x:Name="ReaderFooterBar"
@@ -4532,6 +4808,165 @@
                     </Border>
                 </Grid>
             </Border>
+
+            <!-- TTS controls backed by the cross-platform edge-tts engine. -->
+            <Popup x:Name="ReaderTtsPopup"
+                   IsOpen="False"
+                   IsLightDismissEnabled="True"
+                   ShouldUseOverlayLayer="False"
+                   TakesFocusFromNativeControl="True">
+                <Border Width="480"
+                        MaxHeight="640"
+                        Background="{StaticResource PaperBrush}"
+                        BorderBrush="#000000"
+                        BorderThickness="1"
+                        Padding="18">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="10"
+                                    Margin="0,0,18,0">
+                            <TextBlock x:Name="ReaderTtsTitleText"
+                                       Text="听书"
+                                       FontSize="18"
+                                       FontWeight="SemiBold" />
+                            <TextBlock x:Name="ReaderTtsDescriptionText"
+                                       Text="按句朗读当前 EPUB；edge-tts 需要联网。"
+                                       FontSize="11"
+                                       Foreground="#666666"
+                                       TextWrapping="Wrap" />
+                            <StackPanel Spacing="4">
+                                <TextBlock x:Name="ReaderTtsProviderLabelText"
+                                           Text="语音引擎"
+                                           FontSize="11" />
+                                <TextBlock x:Name="ReaderTtsEngineText"
+                                           Text="edge-tts"
+                                           FontSize="13" />
+                            </StackPanel>
+
+                            <StackPanel x:Name="ReaderTtsVoicePanel" Spacing="4">
+                                <TextBlock x:Name="ReaderTtsVoiceLabelText"
+                                           Text="声音"
+                                           FontSize="11" />
+                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                                    <ComboBox x:Name="ReaderTtsVoiceBox"
+                                              Classes="readerTtsVoice"
+                                              PlaceholderText="选择 edge-tts 语音" />
+                                    <Button x:Name="ReaderTtsPreviewButton"
+                                            Grid.Column="1"
+                                            Classes="quiet"
+                                            Content="试听"
+                                            Click="ReaderTtsPreviewButton_Click" />
+                                    <Button x:Name="ReaderTtsRefreshVoicesButton"
+                                            Grid.Column="2"
+                                            Classes="quiet"
+                                            Content="刷新语音"
+                                            Click="ReaderTtsRefreshVoicesButton_Click" />
+                                </Grid>
+                                <TextBlock x:Name="ReaderTtsPreviewSampleText"
+                                           Text="试听内容：你好，这是声音试听。"
+                                           FontSize="11"
+                                           Foreground="#666666"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <TextBlock x:Name="ReaderTtsSpeedLabelText"
+                                               Text="语速"
+                                               FontSize="11" />
+                                    <TextBlock x:Name="ReaderTtsSpeedValueText"
+                                               Grid.Column="1"
+                                               FontSize="11"
+                                               Foreground="#5A5A5A" />
+                                </Grid>
+                                <Slider x:Name="ReaderTtsSpeedSlider"
+                                        Minimum="0.5"
+                                        Maximum="2"
+                                        TickFrequency="0.1"
+                                        IsSnapToTickEnabled="True"
+                                        Value="1"
+                                        ValueChanged="ReaderTtsSpeedSlider_ValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <TextBlock x:Name="ReaderTtsVolumeLabelText"
+                                               Text="音量"
+                                               FontSize="11" />
+                                    <TextBlock x:Name="ReaderTtsVolumeValueText"
+                                               Grid.Column="1"
+                                               FontSize="11"
+                                               Foreground="#5A5A5A" />
+                                </Grid>
+                                <Slider x:Name="ReaderTtsVolumeSlider"
+                                        Minimum="0"
+                                        Maximum="200"
+                                        TickFrequency="10"
+                                        IsSnapToTickEnabled="True"
+                                        Value="100"
+                                        ValueChanged="ReaderTtsVolumeSlider_ValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <TextBlock x:Name="ReaderTtsPitchLabelText"
+                                               Text="音调"
+                                               FontSize="11" />
+                                    <TextBlock x:Name="ReaderTtsPitchValueText"
+                                               Grid.Column="1"
+                                               FontSize="11"
+                                               Foreground="#5A5A5A" />
+                                </Grid>
+                                <Slider x:Name="ReaderTtsPitchSlider"
+                                        Minimum="-100"
+                                        Maximum="100"
+                                        TickFrequency="10"
+                                        IsSnapToTickEnabled="True"
+                                        Value="0"
+                                        ValueChanged="ReaderTtsPitchSlider_ValueChanged" />
+                            </StackPanel>
+                            <CheckBox x:Name="ReaderTtsAutoAdvanceCheck"
+                                      Classes="readerTtsCheck"
+                                      Content="自动朗读下一章"
+                                      IsChecked="True"
+                                      FontSize="12" />
+                            <TextBlock x:Name="ReaderTtsStatusText"
+                                       FontSize="10"
+                                       Foreground="{StaticResource MutedInkBrush}"
+                                       TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
+                                  ColumnSpacing="8"
+                                  HorizontalAlignment="Center">
+                                <Button x:Name="ReaderTtsApplyButton"
+                                        Classes="readerTtsAction"
+                                        Content="应用设置"
+                                        Click="ReaderTtsApplyButton_Click" />
+                                <Button x:Name="ReaderTtsPlayButton"
+                                        Grid.Column="1"
+                                        Classes="readerTtsAction primary"
+                                        Background="{StaticResource PaperBrush}"
+                                        Foreground="{StaticResource InkBrush}"
+                                        BorderBrush="{StaticResource InkBrush}"
+                                        ContentTemplate="{StaticResource ReaderTtsButtonTextTemplate}"
+                                        Content="播放"
+                                        Click="ReaderTtsPlayButton_Click" />
+                                <Button x:Name="ReaderTtsPreviousSegmentButton"
+                                        Grid.Column="2"
+                                        Classes="readerTtsAction"
+                                        Content="上一段"
+                                        Click="ReaderTtsPreviousSegmentButton_Click" />
+                                <Button x:Name="ReaderTtsNextSegmentButton"
+                                        Grid.Column="3"
+                                        Classes="readerTtsAction"
+                                        Content="下一段"
+                                        Click="ReaderTtsNextSegmentButton_Click" />
+                                <Button x:Name="ReaderTtsStopButton"
+                                        Grid.Column="4"
+                                        Classes="readerTtsAction"
+                                        Content="停止"
+                                        Click="ReaderTtsStopButton_Click" />
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Popup>
 
             <!-- Reading layout settings. Typography remains per book while
                  the vertical-writing switch is global. A native popup is required:

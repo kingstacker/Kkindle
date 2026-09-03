@@ -2,6 +2,7 @@ namespace Kkindle.Core;
 
 public interface IBookLibraryService
 {
+    event EventHandler<LocalDataChangedEventArgs>? DataChanged;
     Task InitializeAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Book>> SearchAsync(string? query = null, CancellationToken cancellationToken = default);
     Task<ImportBatchResult> ImportAsync(IEnumerable<string> paths, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default);

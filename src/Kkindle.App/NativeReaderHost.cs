@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
@@ -104,6 +105,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private int _annotationHoverBandsVersion = -1;
     private List<(int Start, int Length)>? _searchHits;
     private int? _focusSearchHit;
+    private (int Start, int Length)? _speechHighlight;
+    private ReaderTtsTextSnapshot? _speechTextSnapshot;
+    private ChapterContent? _speechTextSnapshotContent;
+    private ChapterLayout? _speechTextSnapshotLayout;
 
     // Selection state in body-text offsets.
     private bool _selecting;
@@ -204,6 +209,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
         _layout = null;
         _content = null;
+        _speechHighlight = null;
+        InvalidateSpeechTextSnapshot();
         _bitmap?.Dispose();
         _bitmap = null;
     }
@@ -671,6 +678,223 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public string? BodyText => _content?.BodyText;
 
+    /// <summary>
+    /// Returns the text that is actually represented by visible content
+    /// blocks. The raw chapter stream also contains ruby/footnote text that
+    /// the native painter intentionally omits, so using it directly for TTS
+    /// makes the voice advance through text that has no corresponding glyph
+    /// on screen.
+    /// </summary>
+    public ReaderTtsTextSnapshot? GetSpeechText()
+    {
+        if (_content is null || _layout is null || _content.BodyText.Length == 0)
+        {
+            return null;
+        }
+
+        if (ReferenceEquals(_speechTextSnapshotContent, _content)
+            && ReferenceEquals(_speechTextSnapshotLayout, _layout))
+        {
+            return _speechTextSnapshot;
+        }
+
+        _speechTextSnapshotContent = _content;
+        _speechTextSnapshotLayout = _layout;
+        _speechTextSnapshot = BuildSpeechTextSnapshot(
+            _content,
+            GetSpeechStartOffset());
+        return _speechTextSnapshot;
+    }
+
+    /// <summary>
+    /// Loads the same visible-text stream used by the native reader without
+    /// creating another control or requiring a visible viewport. This lets
+    /// the TTS service prepare the next chapter on both Windows and Linux.
+    /// </summary>
+    internal static ReaderTtsTextSnapshot? LoadSpeechTextSnapshot(
+        string chapterPath,
+        bool paragraphIndent,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var content = new XhtmlChapterLoader(paragraphIndent).Load(chapterPath);
+        cancellationToken.ThrowIfCancellationRequested();
+        return BuildSpeechTextSnapshot(content, 0);
+    }
+
+    private static ReaderTtsTextSnapshot? BuildSpeechTextSnapshot(
+        ChapterContent content,
+        int speechStartOffset)
+    {
+        if (content.BodyText.Length == 0) return null;
+
+        var ranges = new List<(int Start, int End)>();
+        foreach (var block in content.Blocks)
+        {
+            foreach (var item in block.Items)
+            {
+                // Ghost items (ruby phonetics) and generated markers/images
+                // have no visible source range and must not be spoken.
+                if (item.Ghost || item.TextStart < 0 || item.Text.Length == 0)
+                    continue;
+
+                var itemStart = Math.Clamp(item.TextStart, 0, content.BodyText.Length);
+                var end = Math.Clamp(
+                    (long)item.TextStart + item.Text.Length,
+                    (long)itemStart,
+                    content.BodyText.Length);
+                if (end > itemStart)
+                    ranges.Add((itemStart, (int)end));
+            }
+        }
+
+        ranges.Sort(static (left, right) =>
+        {
+            var result = left.Start.CompareTo(right.Start);
+            return result != 0 ? result : left.End.CompareTo(right.End);
+        });
+
+        var merged = new List<(int Start, int End)>(ranges.Count);
+        foreach (var range in ranges)
+        {
+            if (merged.Count > 0 && range.Start <= merged[^1].End)
+            {
+                var previous = merged[^1];
+                merged[^1] = (previous.Start, Math.Max(previous.End, range.End));
+            }
+            else
+            {
+                merged.Add(range);
+            }
+        }
+
+        if (merged.Count == 0) return null;
+
+        var text = new StringBuilder();
+        var sourceOffsets = new List<int>();
+        var previousEnd = -1;
+        foreach (var range in merged)
+        {
+            if (previousEnd >= 0 && range.Start > previousEnd)
+                AppendSpeechSeparator(
+                    content.BodyText,
+                    previousEnd,
+                    range.Start,
+                    text,
+                    sourceOffsets);
+
+            AppendSpeechSourceRange(
+                content.BodyText,
+                range.Start,
+                range.End,
+                text,
+                sourceOffsets);
+            previousEnd = Math.Max(previousEnd, range.End);
+        }
+
+        if (text.Length == 0) return null;
+
+        var snapshot = new ReaderTtsTextSnapshot(
+            text.ToString(),
+            0,
+            sourceOffsets);
+        var start = snapshot.GetTextOffsetAtOrAfterSource(
+            Math.Max(0, speechStartOffset));
+        return start == 0
+            ? snapshot
+            : new ReaderTtsTextSnapshot(snapshot.Text, start, sourceOffsets);
+    }
+
+    private static void AppendSpeechSourceRange(
+        string source,
+        int start,
+        int end,
+        StringBuilder text,
+        List<int> sourceOffsets)
+    {
+        for (var offset = start; offset < end; offset++)
+        {
+            text.Append(source[offset]);
+            sourceOffsets.Add(offset);
+        }
+    }
+
+    private static void AppendSpeechSeparator(
+        string source,
+        int start,
+        int end,
+        StringBuilder text,
+        List<int> sourceOffsets)
+    {
+        var firstWhitespace = -1;
+        var hasLineBreak = false;
+        for (var offset = start; offset < end; offset++)
+        {
+            if (!char.IsWhiteSpace(source[offset]))
+            {
+                continue;
+            }
+
+            firstWhitespace = firstWhitespace < 0 ? offset : firstWhitespace;
+            hasLineBreak |= source[offset] is '\r' or '\n';
+        }
+
+        if (firstWhitespace < 0)
+        {
+            return;
+        }
+
+        text.Append(hasLineBreak ? '\n' : ' ');
+        sourceOffsets.Add(firstWhitespace);
+    }
+
+    private void InvalidateSpeechTextSnapshot()
+    {
+        _speechTextSnapshot = null;
+        _speechTextSnapshotContent = null;
+        _speechTextSnapshotLayout = null;
+    }
+
+    /// <summary>Character offset of the first visible text, for starting TTS.</summary>
+    public int GetSpeechStartOffset()
+    {
+        if (_layout is null || _layout.Pages.Count == 0) return 0;
+        var pageIndex = Math.Clamp(VisibleFirstPageIndex, 0, _layout.Pages.Count - 1);
+        return Math.Max(0, _layout.Pages[pageIndex].TextStartOffset);
+    }
+
+    /// <summary>Paints and scrolls the currently spoken text range.</summary>
+    public void SetSpeechHighlight(int start, int length)
+    {
+        if (_content is null || _layout is null || length <= 0)
+        {
+            ClearSpeechHighlight();
+            return;
+        }
+
+        var maximum = Math.Max(0, _content.BodyText.Length);
+        var normalizedStart = Math.Clamp(start, 0, maximum);
+        var normalizedLength = Math.Clamp(length, 0, maximum - normalizedStart);
+        if (normalizedLength <= 0)
+        {
+            ClearSpeechHighlight();
+            return;
+        }
+
+        _speechHighlight = (normalizedStart, normalizedLength);
+        ScrollToOffset(normalizedStart);
+        _bitmapDirty = true;
+        InvalidateVisual();
+    }
+
+    public void ClearSpeechHighlight()
+    {
+        if (_speechHighlight is null) return;
+        _speechHighlight = null;
+        _bitmapDirty = true;
+        InvalidateVisual();
+    }
+
     /// <summary>Returns a short quote from the first visible composed page.</summary>
     public string? GetCurrentPageQuote(int maxLength = 72)
     {
@@ -742,6 +966,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _selectionActiveOffset = _selectionStart = _selectionEnd = _selectionAnchor = -1;
         _hasLastPointerPosition = false;
         _searchHits = null;
+        _speechHighlight = null;
+        InvalidateSpeechTextSnapshot();
         _pageIndex = 0;
         _scrollOffset = 0;
         _pendingScrollOffset = null;
@@ -784,6 +1010,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 _content = composed.content;
                 _options = composed.options;
                 _layout = composed.layout;
+                InvalidateSpeechTextSnapshot();
                 _loadedParagraphIndent = settings.ParagraphIndent;
                 _composePending = false;
                 _bitmapDirty = true;
@@ -1129,6 +1356,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var options = BuildOptions(_settings, width, height);
         _options = options;
         _layout = Compose(_content, options);
+        InvalidateSpeechTextSnapshot();
         _composePending = false;
 
         if (IsScroll)
@@ -1270,7 +1498,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 canvas,
                 page,
                 selectionBands,
-                highlightBands: null,
+                highlightBands: SpeechBandsFor(page),
                 searchBands: searchBands,
                 annotationOverlays: annotationOverlays,
                 showVerticalDebugBoxes: _showVerticalDebugBoxes,
@@ -1406,6 +1634,17 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             bands.AddRange(_layout.GetOverlayRects(page.Index, _searchHits[index].Start, _searchHits[index].Length));
         }
 
+        return bands.Count > 0 ? bands : null;
+    }
+
+    private IReadOnlyList<SKRect>? SpeechBandsFor(LayoutPage page)
+    {
+        if (_speechHighlight is not { } highlight || _layout is null)
+        {
+            return null;
+        }
+
+        var bands = _layout.GetOverlayRects(page.Index, highlight.Start, highlight.Length);
         return bands.Count > 0 ? bands : null;
     }
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Text;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 
@@ -358,5 +359,18 @@ public sealed class BookFormatConversionServiceTests
         bool expected)
     {
         Assert.Equal(expected, CalibreSetupService.IsKfxInputListed(exitCode, output, error));
+    }
+
+    [Fact]
+    public void WindowsSignatureVerificationKeepsMsiPathInsideEncodedPowerShellCommand()
+    {
+        const string path = @"C:\Users\Test User\calibre installer's.msi";
+        var arguments = CalibreSetupService.BuildWindowsSignatureVerificationArguments(path);
+        var command = Encoding.Unicode.GetString(Convert.FromBase64String(arguments[3]));
+
+        Assert.Equal(["-NoProfile", "-NonInteractive", "-EncodedCommand"], arguments.Take(3));
+        Assert.Contains("Microsoft.PowerShell.Security.psd1", command);
+        Assert.Contains("calibre installer''s.msi", command);
+        Assert.DoesNotContain("$args[0]", command);
     }
 }

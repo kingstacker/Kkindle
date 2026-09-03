@@ -327,6 +327,8 @@ public partial class MainWindow
         CancellationToken cancellationToken,
         bool saveProgress = true)
     {
+        if (!_readerTtsAutoNavigation)
+            await _readerTts.StopAsync();
         if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not { } host) return;
         if (string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return;
         _readerPdfPage = Math.Clamp(page, 1, _readerPdfPages.Count);

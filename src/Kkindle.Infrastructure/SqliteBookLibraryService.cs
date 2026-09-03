@@ -15,10 +15,27 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     private readonly IMetadataService _metadata;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
 
+    public event EventHandler<LocalDataChangedEventArgs>? DataChanged;
+
     public SqliteBookLibraryService(AppPaths paths, IMetadataService metadata)
     {
         _paths = paths;
         _metadata = metadata;
+    }
+
+    private void NotifyDataChanged()
+    {
+        try
+        {
+            DataChanged?.Invoke(
+                this,
+                new LocalDataChangedEventArgs(LocalDataChangeKind.Library));
+        }
+        catch
+        {
+            // A notification must never turn a completed local write into a
+            // failed library operation while the UI is shutting down.
+        }
     }
 
     private string ConnectionString => new SqliteConnectionStringBuilder
@@ -292,6 +309,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     newBook ? "已导入" : "已添加新格式",
                     book,
                     Added: true));
+                NotifyDataChanged();
                 completedBytes += file.Length;
                 progress?.Report(new TransferProgress(completedBytes, totalBytes, $"已导入 {file.Name}"));
             }
@@ -367,6 +385,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 };
                 await InsertFileAsync(connection, bookFile, cancellationToken);
                 fileRowCreated = true;
+                NotifyDataChanged();
                 return bookFile;
             }
             finally
@@ -388,6 +407,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         book.UpdatedAt = DateTimeOffset.UtcNow;
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await UpdateBookRowAsync(connection, book, cancellationToken);
+        NotifyDataChanged();
     }
 
     public async Task DeleteFileAsync(
@@ -455,6 +475,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 updateBook.Parameters.AddWithValue("$bookId", bookId.ToString());
                 await updateBook.ExecuteNonQueryAsync(cancellationToken);
             }
+            NotifyDataChanged();
         }
         finally { _databaseGate.Release(); }
     }
@@ -478,6 +499,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             command.CommandText = "DELETE FROM Books WHERE Id = $id;";
             command.Parameters.AddWithValue("$id", bookId.ToString());
             await command.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged();
         }
         finally { _databaseGate.Release(); }
     }
@@ -533,6 +555,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             insert.Parameters.AddWithValue("$name", collection.Name);
             insert.Parameters.AddWithValue("$createdAt", collection.CreatedAt.ToString("O"));
             await insert.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged();
             return collection;
         }
         finally { _databaseGate.Release(); }
@@ -559,6 +582,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 deleteCollection.Parameters.AddWithValue("$id", collectionId.ToString());
                 await deleteCollection.ExecuteNonQueryAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
+                NotifyDataChanged();
             }
             catch
             {
@@ -604,6 +628,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             command.Parameters.AddWithValue("$bookId", bookId.ToString());
             if (add) command.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
             var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (changed > 0)
+                NotifyDataChanged();
             if (add && changed == 0)
             {
                 var verify = connection.CreateCommand();

@@ -8,9 +8,10 @@ namespace Kkindle.Infrastructure;
 /// <summary>
 /// Creates and restores a portable Kkindle backup package.
 ///
-/// The package deliberately contains only non-secret settings. API keys and
-/// SMTP passwords stay protected by Windows on the current machine and are
-/// never written to an export file.
+/// The package deliberately contains only non-secret settings. API keys, S3
+/// credentials, the S3 client-side encryption key and SMTP passwords stay
+/// protected by Windows on the current machine and are never written to an
+/// export file.
 /// </summary>
 public sealed class AppBackupService
 {
@@ -25,6 +26,7 @@ public sealed class AppBackupService
     private const string BackupFormat = "KkindleBackup";
     private const string AiSettingsPath = "ai-settings.json";
     private const string KindleEmailSettingsPath = "kindle-email-settings.json";
+    private const string S3SyncSettingsPath = "s3-sync-settings.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -36,12 +38,14 @@ public sealed class AppBackupService
     private readonly AppPaths _paths;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
+    private readonly S3SyncSettingsStore _s3SyncSettingsStore;
 
     public AppBackupService(AppPaths paths, ISecretProtector protector)
     {
         _paths = paths;
         _aiSettingsStore = new AiSettingsStore(paths, protector);
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, protector);
+        _s3SyncSettingsStore = new S3SyncSettingsStore(paths, protector);
     }
 
     public async Task<AppBackupExportResult> ExportAsync(
@@ -139,10 +143,12 @@ public sealed class AppBackupService
 
             var currentAiSettings = await _aiSettingsStore.LoadAsync(cancellationToken);
             var currentKindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
+            var currentS3Settings = await _s3SyncSettingsStore.LoadAsync(cancellationToken);
             var importedAiSettings = BuildImportedAiSettings(backupSettings?.Ai, currentAiSettings);
             var importedKindleEmailSettings = BuildImportedKindleEmailSettings(
                 backupSettings?.KindleEmail,
                 currentKindleEmailSettings);
+            var importedS3Settings = BuildImportedS3Settings(backupSettings?.S3, currentS3Settings);
 
             var stagedLibraryPath = Path.Combine(stagingRoot, "library");
             var stagedCoversPath = Path.Combine(stagingRoot, "covers");
@@ -164,13 +170,20 @@ public sealed class AppBackupService
 
                 await _aiSettingsStore.SaveAsync(importedAiSettings, cancellationToken);
                 await _kindleEmailSettingsStore.SaveAsync(importedKindleEmailSettings, cancellationToken);
+                await _s3SyncSettingsStore.SaveAsync(
+                    currentS3Settings.DeviceId,
+                    importedS3Settings,
+                    cancellationToken);
 
                 TryDeleteDirectory(rollbackRoot);
                 return new AppBackupImportResult(
                     summary.BookCount,
                     summary.FileCount,
                     importedAiSettings,
-                    importedKindleEmailSettings);
+                    importedKindleEmailSettings)
+                {
+                    S3Settings = importedS3Settings
+                };
             }
             catch
             {
@@ -204,6 +217,7 @@ public sealed class AppBackupService
     {
         var ai = await _aiSettingsStore.LoadAsync(cancellationToken);
         var kindleEmail = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
+        var s3 = await _s3SyncSettingsStore.LoadAsync(cancellationToken);
         return new BackupSettings
         {
             Ai = new BackupAiSettings
@@ -220,6 +234,21 @@ public sealed class AppBackupService
                 SmtpPort = kindleEmail.SmtpPort,
                 SmtpUsername = kindleEmail.SmtpUsername,
                 EnableSsl = kindleEmail.EnableSsl
+            },
+            S3 = new BackupS3Settings
+            {
+                Enabled = s3.Settings.Enabled,
+                AutomaticSyncEnabled = s3.Settings.AutomaticSyncEnabled,
+                IntervalMinutes = s3.Settings.IntervalMinutes,
+                Endpoint = s3.Settings.Endpoint,
+                Bucket = s3.Settings.Bucket,
+                Region = s3.Settings.Region,
+                PathStyle = s3.Settings.PathStyle,
+                SkipTlsVerify = s3.Settings.SkipTlsVerify,
+                TimeoutSeconds = s3.Settings.TimeoutSeconds,
+                ConcurrentRequests = s3.Settings.ConcurrentRequests,
+                Prefix = s3.Settings.Prefix,
+                EncryptionEnabled = !string.IsNullOrWhiteSpace(s3.Settings.EncryptionKey)
             }
         };
     }
@@ -393,6 +422,36 @@ public sealed class AppBackupService
         });
     }
 
+    private static S3SyncSettings BuildImportedS3Settings(
+        BackupS3Settings? imported,
+        S3SyncStoredSettings current)
+    {
+        if (imported is null) return current.Settings;
+
+        var currentSettings = current.Settings;
+        var credentialsReady = !string.IsNullOrWhiteSpace(currentSettings.AccessKey)
+            && !string.IsNullOrWhiteSpace(currentSettings.SecretKey);
+        var encryptionReady = !imported.EncryptionEnabled
+            || !string.IsNullOrWhiteSpace(currentSettings.EncryptionKey);
+        return S3SyncSettings.Normalize(currentSettings with
+        {
+            // A portable package does not contain credentials. Keep an
+            // imported endpoint/configuration visible, but avoid enabling an
+            // automatic sync that cannot authenticate on a new machine.
+            Enabled = imported.Enabled && credentialsReady && encryptionReady,
+            AutomaticSyncEnabled = imported.AutomaticSyncEnabled,
+            IntervalMinutes = imported.IntervalMinutes,
+            Endpoint = imported.Endpoint ?? string.Empty,
+            Bucket = imported.Bucket ?? string.Empty,
+            Region = imported.Region ?? "us-east-1",
+            PathStyle = imported.PathStyle,
+            SkipTlsVerify = imported.SkipTlsVerify,
+            TimeoutSeconds = imported.TimeoutSeconds,
+            ConcurrentRequests = imported.ConcurrentRequests,
+            Prefix = imported.Prefix ?? "kkindle"
+        });
+    }
+
     private void MoveCurrentDataToRollback(string rollbackRoot)
     {
         try
@@ -401,6 +460,7 @@ public sealed class AppBackupService
             MoveIfExists(_paths.Covers, Path.Combine(rollbackRoot, "covers"));
             MoveIfExists(Path.Combine(_paths.Data, AiSettingsPath), Path.Combine(rollbackRoot, AiSettingsPath));
             MoveIfExists(Path.Combine(_paths.Data, KindleEmailSettingsPath), Path.Combine(rollbackRoot, KindleEmailSettingsPath));
+            MoveIfExists(Path.Combine(_paths.Data, S3SyncSettingsPath), Path.Combine(rollbackRoot, S3SyncSettingsPath));
         }
         catch
         {
@@ -415,6 +475,7 @@ public sealed class AppBackupService
         MoveIfExists(Path.Combine(rollbackRoot, "covers"), _paths.Covers);
         MoveIfExists(Path.Combine(rollbackRoot, AiSettingsPath), Path.Combine(_paths.Data, AiSettingsPath));
         MoveIfExists(Path.Combine(rollbackRoot, KindleEmailSettingsPath), Path.Combine(_paths.Data, KindleEmailSettingsPath));
+        MoveIfExists(Path.Combine(rollbackRoot, S3SyncSettingsPath), Path.Combine(_paths.Data, S3SyncSettingsPath));
     }
 
     private async Task RestoreCurrentDataFromRollbackAsync(
@@ -425,11 +486,13 @@ public sealed class AppBackupService
         DeletePath(_paths.Covers);
         DeletePath(Path.Combine(_paths.Data, AiSettingsPath));
         DeletePath(Path.Combine(_paths.Data, KindleEmailSettingsPath));
+        DeletePath(Path.Combine(_paths.Data, S3SyncSettingsPath));
 
         MoveIfExists(Path.Combine(rollbackRoot, "library"), _paths.Library);
         MoveIfExists(Path.Combine(rollbackRoot, "covers"), _paths.Covers);
         MoveIfExists(Path.Combine(rollbackRoot, AiSettingsPath), Path.Combine(_paths.Data, AiSettingsPath));
         MoveIfExists(Path.Combine(rollbackRoot, KindleEmailSettingsPath), Path.Combine(_paths.Data, KindleEmailSettingsPath));
+        MoveIfExists(Path.Combine(rollbackRoot, S3SyncSettingsPath), Path.Combine(_paths.Data, S3SyncSettingsPath));
         await ReplaceDatabaseFromSnapshotAsync(
             Path.Combine(rollbackRoot, "kkindle.db"),
             cancellationToken);
@@ -631,6 +694,7 @@ public sealed class AppBackupService
     {
         public BackupAiSettings? Ai { get; set; }
         public BackupKindleEmailSettings? KindleEmail { get; set; }
+        public BackupS3Settings? S3 { get; set; }
     }
 
     private sealed class BackupAiSettings
@@ -649,6 +713,22 @@ public sealed class AppBackupService
         public string? SmtpUsername { get; set; }
         public bool EnableSsl { get; set; } = true;
     }
+
+    private sealed class BackupS3Settings
+    {
+        public bool Enabled { get; set; }
+        public bool AutomaticSyncEnabled { get; set; } = true;
+        public int IntervalMinutes { get; set; } = 30;
+        public string? Endpoint { get; set; }
+        public string? Bucket { get; set; }
+        public string? Region { get; set; }
+        public bool PathStyle { get; set; }
+        public bool SkipTlsVerify { get; set; }
+        public int TimeoutSeconds { get; set; } = 60;
+        public int ConcurrentRequests { get; set; } = 4;
+        public string? Prefix { get; set; }
+        public bool EncryptionEnabled { get; set; }
+    }
 }
 
 public sealed record AppBackupExportResult(int BookCount, int FileCount, long ArchiveSize);
@@ -657,4 +737,7 @@ public sealed record AppBackupImportResult(
     int BookCount,
     int FileCount,
     AiConnectionSettings AiSettings,
-    KindleEmailSettings KindleEmailSettings);
+    KindleEmailSettings KindleEmailSettings)
+{
+    public S3SyncSettings? S3Settings { get; init; }
+}

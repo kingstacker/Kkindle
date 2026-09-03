@@ -52,6 +52,10 @@ public partial class App : Application
                 services: _services,
                 startupSettings: startupSettings);
             desktop.MainWindow = window;
+            // Prepare TTS in the background while the library opens. If the
+            // user enters a reader before setup finishes, the reader awaits
+            // this same task instead of starting a second installer.
+            _ = window.InitializeTtsEnvironmentAsync();
             _ = window.InitializeLibraryAsync();
         }
 
@@ -74,6 +78,12 @@ public partial class App : Application
 /// Creates a reader webview host. A platform head may replace the default
 /// Avalonia NativeWebView implementation when it needs a different engine.
 /// </param>
+/// <param name="TtsEngine">Optional platform-independent TTS engine.</param>
+/// <param name="TtsAudioPlayer">Optional platform audio output.</param>
+/// <param name="TtsEnvironmentSetup">
+/// Optional platform-specific dependency bootstrapper. It may install the
+/// engine and audio prerequisites before the first utterance.
+/// </param>
 public sealed record AppServices(
     ISecretProtector SecretProtector,
     Func<IntPtr, IDeviceChangeNotifier?> CreateDeviceChangeNotifier,
@@ -81,4 +91,7 @@ public sealed record AppServices(
     Func<IReaderHost>? ReaderHostFactory = null,
     AppPaths? Paths = null,
     string? RootConfigurationDirectory = null,
-    IAppUpdateInstaller? UpdateInstaller = null);
+    IAppUpdateInstaller? UpdateInstaller = null,
+    ITtsEngine? TtsEngine = null,
+    ITtsAudioPlayer? TtsAudioPlayer = null,
+    ITtsEnvironmentSetup? TtsEnvironmentSetup = null);

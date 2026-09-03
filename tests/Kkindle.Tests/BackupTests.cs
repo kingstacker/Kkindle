@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using Kkindle.Infrastructure;
+using Kkindle.Core;
 
 namespace Kkindle.Tests;
 
@@ -38,6 +39,20 @@ public sealed class BackupTests
                 SmtpPassword = "source-smtp-password",
                 EnableSsl = true
             });
+            var sourceS3Store = new S3SyncSettingsStore(sourcePaths, protector);
+            var sourceS3Stored = await sourceS3Store.LoadAsync();
+            await sourceS3Store.SaveAsync(sourceS3Stored.DeviceId, new S3SyncSettings
+            {
+                Enabled = true,
+                AutomaticSyncEnabled = false,
+                Endpoint = "https://s3.example.com",
+                AccessKey = "source-s3-access-key",
+                SecretKey = "source-s3-secret-key",
+                Bucket = "source-books",
+                Region = "eu-west-1",
+                Prefix = "source/kkindle",
+                EncryptionKey = "source-s3-encryption-key"
+            });
 
             var backupPath = Path.Combine(root, "Kkindle.kkindle");
             var sourceBackup = new AppBackupService(sourcePaths, protector);
@@ -54,7 +69,12 @@ public sealed class BackupTests
                 var settingsJson = await reader.ReadToEndAsync();
                 Assert.DoesNotContain("source-api-key", settingsJson, StringComparison.Ordinal);
                 Assert.DoesNotContain("source-smtp-password", settingsJson, StringComparison.Ordinal);
+                Assert.DoesNotContain("source-s3-access-key", settingsJson, StringComparison.Ordinal);
+                Assert.DoesNotContain("source-s3-secret-key", settingsJson, StringComparison.Ordinal);
+                Assert.DoesNotContain("source-s3-encryption-key", settingsJson, StringComparison.Ordinal);
                 Assert.Contains("example-model", settingsJson, StringComparison.Ordinal);
+                Assert.Contains("s3.example.com", settingsJson, StringComparison.Ordinal);
+                Assert.Contains("source-books", settingsJson, StringComparison.Ordinal);
             }
 
             var targetPaths = new AppPaths(Path.Combine(root, "target-app"));
@@ -66,6 +86,14 @@ public sealed class BackupTests
             await new KindleEmailSettingsStore(targetPaths, protector).SaveAsync(new KindleEmailSettings
             {
                 SmtpPassword = "target-smtp-password"
+            });
+            var targetS3Store = new S3SyncSettingsStore(targetPaths, protector);
+            var targetS3Stored = await targetS3Store.LoadAsync();
+            await targetS3Store.SaveAsync(targetS3Stored.DeviceId, new S3SyncSettings
+            {
+                AccessKey = "target-s3-access-key",
+                SecretKey = "target-s3-secret-key",
+                EncryptionKey = "source-s3-encryption-key"
             });
 
             var imported = await new AppBackupService(targetPaths, protector).ImportAsync(backupPath);
@@ -79,6 +107,15 @@ public sealed class BackupTests
             Assert.Equal("target-api-key", imported.AiSettings.ApiKey);
             Assert.Equal("target-smtp-password", imported.KindleEmailSettings.SmtpPassword);
             Assert.Equal("smtp.example.com", imported.KindleEmailSettings.SmtpHost);
+            Assert.NotNull(imported.S3Settings);
+            Assert.True(imported.S3Settings!.Enabled);
+            Assert.Equal("https://s3.example.com", imported.S3Settings.Endpoint);
+            Assert.Equal("source-books", imported.S3Settings.Bucket);
+            Assert.Equal("target-s3-access-key", imported.S3Settings.AccessKey);
+            Assert.Equal("target-s3-secret-key", imported.S3Settings.SecretKey);
+            Assert.Equal("source-s3-encryption-key", imported.S3Settings.EncryptionKey);
+            var restoredS3 = await targetS3Store.LoadAsync();
+            Assert.Equal(imported.S3Settings, restoredS3.Settings);
         }
         finally
         {
