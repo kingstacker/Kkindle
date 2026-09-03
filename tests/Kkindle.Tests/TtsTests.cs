@@ -79,6 +79,39 @@ public sealed class TtsTests
     }
 
     [Fact]
+    public void SentenceSegmenterSplitsCrossPageSentenceAtThePageBreak()
+    {
+        const string source = "本页末尾，下一页继续说完。";
+        var pageBreak = source.IndexOf("下一", StringComparison.Ordinal);
+
+        var segments = TtsTextSegmenter.SplitSentencesAtPageBreaks(
+            source,
+            [pageBreak],
+            maxCharacters: 120);
+
+        Assert.Equal(
+            ["本页末尾，", "下一页继续说完。"],
+            segments.Select(segment => segment.Text).ToArray());
+        Assert.Equal([0, pageBreak], segments.Select(segment => segment.Start).ToArray());
+    }
+
+    [Fact]
+    public void SentenceSegmenterDoesNotDuplicateAVisiblePageBoundary()
+    {
+        const string source = "第一页句子。第二页句子。";
+        var pageBreak = source.IndexOf("第二", StringComparison.Ordinal);
+
+        var segments = TtsTextSegmenter.SplitSentencesAtPageBreaks(
+            source,
+            [pageBreak],
+            maxCharacters: 120);
+
+        Assert.Equal(
+            ["第一页句子。", "第二页句子。"],
+            segments.Select(segment => segment.Text).ToArray());
+    }
+
+    [Fact]
     public void SettingsConvertToEdgeArgumentsAndNormalize()
     {
         var settings = TtsSettings.Normalize(new TtsSettings
@@ -191,6 +224,62 @@ public sealed class TtsTests
             // one SHA256 cache entry.
             Assert.Equal(2, engine.SynthesisCount);
             Assert.Equal(TtsPlaybackState.Stopped, service.State);
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task ServiceHighlightsTheNextPageBeforePlayingItsFragment()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            const string text = "本页末尾，下一页继续说完。";
+            var pageBreak = text.IndexOf("下一", StringComparison.Ordinal);
+            var engine = new FakeEngine();
+            var player = new FakePlayer();
+            var highlights = new List<(int Start, int Length)>();
+            var document = new ReaderTtsDocument(
+                "book:chapter",
+                text,
+                0,
+                (start, length) =>
+                {
+                    highlights.Add((start, length));
+                    return Task.CompletedTask;
+                },
+                () => { },
+                BookKey: "book",
+                ChapterKey: "chapter",
+                PageBreakOffsets: [pageBreak]);
+            var stopped = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            using var service = new TtsService(
+                engine,
+                new TtsCacheManager(root),
+                player,
+                () => document);
+            service.StateChanged += (_, args) =>
+            {
+                if (args.State == TtsPlaybackState.Stopped)
+                    stopped.TrySetResult(true);
+            };
+
+            await service.StartAsync(new TtsSettings
+            {
+                AutoAdvance = false,
+                MaxCharactersPerRequest = 120,
+            });
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+            Assert.Equal(2, player.PlayCount);
+            Assert.Equal(2, highlights.Count);
+            Assert.Equal(0, highlights[0].Start);
+            Assert.Equal(pageBreak, highlights[1].Start);
         }
         finally
         {

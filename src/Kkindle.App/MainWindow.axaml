@@ -4395,8 +4395,23 @@
                                     Click="CloseReaderButton_Click" />
                         </StackPanel>
                     </Border>
-                    <!-- iPod-style click wheel for in-page playback. Once shown,
-                         it remains until the user presses stop. -->
+                    <!-- iPod-style click wheel for in-page playback. It rests
+                         just beyond the right edge while listening and slides
+                         out when the pointer reaches the edge handle. -->
+                    <Border x:Name="ReaderTtsFloatingEdgeActivationRegion"
+                            Width="36"
+                            Height="160"
+                            Margin="0,0,0,10"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Background="Transparent"
+                            IsVisible="False"
+                            IsHitTestVisible="False"
+                            Cursor="Hand"
+                            ZIndex="79"
+                            PointerEntered="ReaderTtsFloatingEdgeActivationRegion_PointerEntered"
+                            PointerExited="ReaderTtsFloatingEdgeActivationRegion_PointerExited"
+                            PointerMoved="ReaderTtsFloatingEdgeActivationRegion_PointerMoved" />
                     <Canvas x:Name="ReaderTtsFloatingPanel"
                             Width="128"
                             Height="128"
@@ -4404,7 +4419,30 @@
                             HorizontalAlignment="Right"
                             VerticalAlignment="Bottom"
                             IsVisible="False"
+                            PointerEntered="ReaderTtsFloatingPanel_PointerEntered"
+                            PointerExited="ReaderTtsFloatingPanel_PointerExited"
+                            PointerMoved="ReaderTtsFloatingPanel_PointerMoved"
+                            RenderTransformOrigin="50%,50%"
                             ZIndex="80">
+                    <Canvas.RenderTransform>
+                        <TranslateTransform X="134">
+                            <TranslateTransform.Transitions>
+                                <Transitions>
+                                    <DoubleTransition Property="X"
+                                                       Duration="0:0:0.28"
+                                                       Easing="CubicEaseOut" />
+                                </Transitions>
+                            </TranslateTransform.Transitions>
+                        </TranslateTransform>
+                    </Canvas.RenderTransform>
+                    <!-- Transparent input surface keeps the gaps between the
+                         wheel buttons part of the hover target. -->
+                    <Border Width="128"
+                            Height="128"
+                            Background="Transparent"
+                            PointerEntered="ReaderTtsFloatingPanel_PointerEntered"
+                            PointerExited="ReaderTtsFloatingPanel_PointerExited"
+                            PointerMoved="ReaderTtsFloatingPanel_PointerMoved" />
                     <Ellipse Width="128"
                              Height="128"
                              Fill="{StaticResource PaperBrush}"
@@ -4814,7 +4852,8 @@
                    IsOpen="False"
                    IsLightDismissEnabled="True"
                    ShouldUseOverlayLayer="False"
-                   TakesFocusFromNativeControl="True">
+                   TakesFocusFromNativeControl="True"
+                   Closed="ReaderTtsPopup_Closed">
                 <Border Width="480"
                         MaxHeight="640"
                         Background="{StaticResource PaperBrush}"

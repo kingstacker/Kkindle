@@ -702,7 +702,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _speechTextSnapshotLayout = _layout;
         _speechTextSnapshot = BuildSpeechTextSnapshot(
             _content,
-            GetSpeechStartOffset());
+            GetSpeechStartOffset(),
+            _layout);
         return _speechTextSnapshot;
     }
 
@@ -724,7 +725,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private static ReaderTtsTextSnapshot? BuildSpeechTextSnapshot(
         ChapterContent content,
-        int speechStartOffset)
+        int speechStartOffset,
+        ChapterLayout? layout = null)
     {
         if (content.BodyText.Length == 0) return null;
 
@@ -797,12 +799,48 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var snapshot = new ReaderTtsTextSnapshot(
             text.ToString(),
             0,
-            sourceOffsets);
+            sourceOffsets,
+            layout is null
+                ? null
+                : GetSpeechPageBreakOffsets(
+                    text.ToString(),
+                    sourceOffsets,
+                    layout));
         var start = snapshot.GetTextOffsetAtOrAfterSource(
             Math.Max(0, speechStartOffset));
         return start == 0
             ? snapshot
-            : new ReaderTtsTextSnapshot(snapshot.Text, start, sourceOffsets);
+            : new ReaderTtsTextSnapshot(
+                snapshot.Text,
+                start,
+                sourceOffsets,
+                snapshot.PageBreakOffsets);
+    }
+
+    private static IReadOnlyList<int> GetSpeechPageBreakOffsets(
+        string speechText,
+        IReadOnlyList<int> sourceOffsets,
+        ChapterLayout layout)
+    {
+        if (layout.Pages.Count < 2 || speechText.Length == 0)
+            return [];
+
+        var snapshot = new ReaderTtsTextSnapshot(
+            speechText,
+            0,
+            sourceOffsets);
+        var pageBreaks = new List<int>();
+        for (var pageIndex = 1; pageIndex < layout.Pages.Count; pageIndex++)
+        {
+            var sourceOffset = layout.Pages[pageIndex].TextStartOffset;
+            if (sourceOffset < 0) continue;
+
+            var textOffset = snapshot.GetTextOffsetAtOrAfterSource(sourceOffset);
+            if (textOffset > 0 && textOffset < speechText.Length)
+                pageBreaks.Add(textOffset);
+        }
+
+        return pageBreaks;
     }
 
     private static void AppendSpeechSourceRange(

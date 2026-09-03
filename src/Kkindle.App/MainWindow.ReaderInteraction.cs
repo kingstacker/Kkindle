@@ -8779,7 +8779,7 @@ public partial class MainWindow
         ReaderZenTitleExitButton.IsVisible = false;
         ReaderZenActivationRegion.IsVisible = false;
         ReaderZenControlsPopup.IsOpen = false;
-        _readerZenPointerWatchTimer?.Stop();
+        UpdateReaderTtsFloatingPointerWatch();
         MinimizeWindowButton.IsVisible = true;
         MaximizeWindowButton.IsVisible = true;
         CloseWindowButton.IsVisible = true;
@@ -8892,15 +8892,17 @@ public partial class MainWindow
         {
             Interval = TimeSpan.FromMilliseconds(80)
         };
-        _readerZenPointerWatchTimer.Stop();
         _readerZenPointerWatchTimer.Tick -= ReaderZenPointerWatchTimer_Tick;
         _readerZenPointerWatchTimer.Tick += ReaderZenPointerWatchTimer_Tick;
-        _readerZenPointerWatchTimer.Start();
+        if (!_readerZenPointerWatchTimer.IsEnabled)
+            _readerZenPointerWatchTimer.Start();
     }
 
     private void ReaderZenPointerWatchTimer_Tick(object? sender, EventArgs e)
     {
-        if (!_readerZenMode || !OperatingSystem.IsWindows())
+        var ttsFloatingActive = IsReaderTtsFloatingActive();
+        if ((!_readerZenMode && !ttsFloatingActive)
+            || !OperatingSystem.IsWindows())
         {
             _readerZenPointerWatchTimer?.Stop();
             return;
@@ -8915,14 +8917,28 @@ public partial class MainWindow
         }
 
         var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1d;
-        var activationWidth = ReaderZenActivationWidth * scaling;
-        var activationHeight = ReaderZenActivationHeight * scaling;
-        var insideTopRight = cursor.X >= window.Right - activationWidth
-            && cursor.X <= window.Right
-            && cursor.Y >= window.Top
-            && cursor.Y <= window.Top + activationHeight;
-        if (insideTopRight != _readerZenChromeVisible)
-            UpdateReaderZenChrome(insideTopRight);
+        if (_readerZenMode)
+        {
+            var activationWidth = ReaderZenActivationWidth * scaling;
+            var activationHeight = ReaderZenActivationHeight * scaling;
+            var insideTopRight = cursor.X >= window.Right - activationWidth
+                && cursor.X <= window.Right
+                && cursor.Y >= window.Top
+                && cursor.Y <= window.Top + activationHeight;
+            if (insideTopRight != _readerZenChromeVisible)
+                UpdateReaderZenChrome(insideTopRight);
+        }
+
+        if (ttsFloatingActive)
+        {
+            var surfaceWidth = (window.Right - window.Left) / scaling;
+            var surfaceHeight = (window.Bottom - window.Top) / scaling;
+            UpdateReaderTtsFloatingForPointer(
+                (cursor.X - window.Left) / scaling,
+                (cursor.Y - window.Top) / scaling,
+                surfaceWidth,
+                surfaceHeight);
+        }
     }
 
     private void ReaderRoot_PointerMoved(object? sender, PointerEventArgs e)
@@ -8931,11 +8947,19 @@ public partial class MainWindow
         // Avalonia surface and the child WebView HWND. Mixing its physical
         // pixels with these DIP coordinates makes the two paths fight at
         // non-100% display scaling and repeatedly opens/closes the popup.
-        if (!_readerZenMode || OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows()) return;
+
+        var point = e.GetPosition(ReaderRoot);
+        UpdateReaderTtsFloatingForPointer(
+            point.X,
+            point.Y,
+            ReaderRoot.Bounds.Width,
+            ReaderRoot.Bounds.Height);
+
+        if (!_readerZenMode) return;
         var now = Environment.TickCount64;
         if (now - _readerZenLastMouseMoveTick <= 80) return;
         _readerZenLastMouseMoveTick = now;
-        var point = e.GetPosition(ReaderRoot);
         UpdateReaderZenChromeForPointer(point.X, point.Y, ReaderRoot.Bounds.Width);
     }
 

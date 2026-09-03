@@ -589,8 +589,9 @@ public sealed class TtsService : IDisposable
                 if (document is null || string.IsNullOrWhiteSpace(document.Text))
                     throw new InvalidOperationException("当前章节没有可朗读的正文。");
 
-                var segments = TtsTextSegmenter.SplitSentences(
+                var segments = TtsTextSegmenter.SplitSentencesAtPageBreaks(
                     document.Text,
+                    document.PageBreakOffsets,
                     settings.MaxCharactersPerRequest);
                 if (segments.Count == 0)
                     throw new InvalidOperationException("当前章节没有可朗读的正文。");
@@ -778,8 +779,9 @@ public sealed class TtsService : IDisposable
                 return;
             }
 
-            var nextSegments = TtsTextSegmenter.SplitSentences(
+            var nextSegments = TtsTextSegmenter.SplitSentencesAtPageBreaks(
                 nextDocument.Text,
+                nextDocument.PageBreakOffsets,
                 settings.MaxCharactersPerRequest);
             var options = settings.ToOptions();
             _queue?.Prefetch(

@@ -12,7 +12,8 @@ public sealed class ReaderTtsTextSnapshot
     public ReaderTtsTextSnapshot(
         string text,
         int startOffset,
-        IReadOnlyList<int> sourceOffsets)
+        IReadOnlyList<int> sourceOffsets,
+        IReadOnlyList<int>? pageBreakOffsets = null)
     {
         Text = text ?? throw new ArgumentNullException(nameof(text));
         ArgumentNullException.ThrowIfNull(sourceOffsets);
@@ -25,11 +26,19 @@ public sealed class ReaderTtsTextSnapshot
 
         _sourceOffsets = sourceOffsets.ToArray();
         StartOffset = Math.Clamp(startOffset, 0, text.Length);
+        PageBreakOffsets = NormalizePageBreakOffsets(pageBreakOffsets, text.Length);
     }
 
     public string Text { get; }
 
     public int StartOffset { get; }
+
+    /// <summary>
+    /// Text offsets where the composed reader moves to the next page. They are
+    /// kept in the same coordinate space as <see cref="Text"/> so TTS can split
+    /// a spoken sentence without losing the source-text mapping.
+    /// </summary>
+    public IReadOnlyList<int> PageBreakOffsets { get; }
 
     public (int Start, int Length) MapToSource(int start, int length)
     {
@@ -68,6 +77,19 @@ public sealed class ReaderTtsTextSnapshot
 
         return low;
     }
+
+    private static IReadOnlyList<int> NormalizePageBreakOffsets(
+        IReadOnlyList<int>? offsets,
+        int textLength)
+    {
+        if (offsets is null || offsets.Count == 0) return [];
+
+        return offsets
+            .Where(offset => offset > 0 && offset < textLength)
+            .Distinct()
+            .OrderBy(offset => offset)
+            .ToArray();
+    }
 }
 
 /// <summary>
@@ -81,4 +103,9 @@ public sealed record ReaderTtsDocument(
     Action ClearHighlight,
     Func<int, int, (int Start, int Length)>? MapHighlight = null,
     string? BookKey = null,
-    string? ChapterKey = null);
+    string? ChapterKey = null,
+    /// <summary>
+    /// Plain-text offsets at which a composed reader page begins. TTS uses
+    /// these only to split a cross-page sentence before playback.
+    /// </summary>
+    IReadOnlyList<int>? PageBreakOffsets = null);

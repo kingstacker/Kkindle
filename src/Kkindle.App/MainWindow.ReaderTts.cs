@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Kkindle.Core;
 
@@ -8,6 +10,16 @@ namespace Kkindle;
 
 public partial class MainWindow
 {
+    private const double ReaderTtsFloatingPanelWidth = 128;
+    private const double ReaderTtsFloatingPanelHeight = 128;
+    private const double ReaderTtsFloatingPanelRightMargin = 22;
+    private const double ReaderTtsFloatingPanelBottomMargin = 20;
+    private const double ReaderTtsFloatingCollapsedOffset = 134;
+    private const double ReaderTtsFloatingEdgeActivationWidth = 36;
+    private const double ReaderTtsFloatingEdgeActivationTopPadding = 22;
+    private const double ReaderTtsFloatingEdgeActivationBottomPadding = 10;
+    private const int ReaderTtsFloatingCollapseDelayMs = 700;
+
     private sealed record ReaderTtsPrefetchRequest(
         int ChapterIndex,
         string ChapterPath,
@@ -21,11 +33,13 @@ public partial class MainWindow
     private int _readerTtsVoicesRequest;
     private bool _readerTtsAutoNavigation;
     private bool _readerTtsFloatingRequested;
+    private bool _readerTtsFloatingExpanded;
     private bool _readerTtsEnvironmentChecked;
     private bool _readerTtsPreviewInProgress;
     private long _readerTtsHighlightVersion;
     private string? _readerTtsNotice;
     private Task? _readerTtsEnvironmentTask;
+    private DispatcherTimer? _readerTtsFloatingCollapseTimer;
 
     private static bool IsZhCnVoice(TtsVoiceInfo voice)
     {
@@ -75,7 +89,8 @@ public partial class MainWindow
             () => ClearReaderTtsHighlight(host),
             speech.MapToSource,
             _readerBookFile?.Id.ToString("N"),
-            $"{_readerChapterIndex}:{host.Source?.AbsoluteUri}");
+            $"{_readerChapterIndex}:{host.Source?.AbsoluteUri}",
+            speech.PageBreakOffsets);
     }
 
     private async Task<ReaderTtsDocument?> GetNextReaderTtsDocumentAsync(
@@ -108,7 +123,8 @@ public partial class MainWindow
                 static () => { },
                 snapshot.MapToSource,
                 request.BookKey,
-                request.ChapterKey);
+                request.ChapterKey,
+                snapshot.PageBreakOffsets);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -306,6 +322,15 @@ public partial class MainWindow
             or TtsPlaybackState.AdvancingChapter)
         {
             _readerTtsFloatingRequested = true;
+        }
+        if (e.State is TtsPlaybackState.Generating
+            or TtsPlaybackState.Playing
+            or TtsPlaybackState.AdvancingChapter)
+        {
+            // Every new/resumed playback starts unobtrusively. The edge
+            // handle remains available when the controls are needed.
+            _readerTtsFloatingExpanded = false;
+            _readerTtsFloatingCollapseTimer?.Stop();
         }
         if (e.State == TtsPlaybackState.Error
             && !string.IsNullOrWhiteSpace(e.Message))
@@ -555,17 +580,31 @@ public partial class MainWindow
     private void UpdateReaderTtsFloatingUi(TtsPlaybackState state)
     {
         if (ReaderTtsFloatingPanel is null
+            || ReaderTtsFloatingEdgeActivationRegion is null
             || ReaderTtsFloatingToggleButton is null
             || ReaderTtsFloatingStopButton is null)
         {
             return;
         }
 
-        var active = _readerTtsFloatingRequested
-            && ReaderRoot.IsVisible
-            && !_readerIsPdf
-            && _readerDocument is not null;
+        var active = IsReaderTtsFloatingActive();
+        if (!active)
+        {
+            _readerTtsFloatingExpanded = false;
+            _readerTtsFloatingCollapseTimer?.Stop();
+        }
+
         ReaderTtsFloatingPanel.IsVisible = active;
+        ReaderTtsFloatingEdgeActivationRegion.IsVisible = active;
+        ReaderTtsFloatingEdgeActivationRegion.IsHitTestVisible = active;
+        if (ReaderTtsFloatingPanel.RenderTransform is TranslateTransform transform)
+        {
+            transform.X = active && _readerTtsFloatingExpanded
+                ? 0
+                : ReaderTtsFloatingCollapsedOffset;
+        }
+
+        UpdateReaderTtsFloatingPointerWatch();
         if (!active) return;
 
         var canToggle = state is not TtsPlaybackState.Generating
@@ -591,6 +630,149 @@ public partial class MainWindow
             state == TtsPlaybackState.Playing ? T("暂停") : T("继续"));
         ToolTip.SetTip(ReaderTtsFloatingStopButton, T("停止听书"));
     }
+
+    private bool IsReaderTtsFloatingActive()
+        => _readerTtsFloatingRequested
+            && ReaderRoot is not null
+            && ReaderRoot.IsVisible
+            && !_readerIsPdf
+            && _readerDocument is not null;
+
+    private void UpdateReaderTtsFloatingPointerWatch()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        if (_readerZenMode || IsReaderTtsFloatingActive())
+            StartReaderZenPointerWatch();
+        else
+            _readerZenPointerWatchTimer?.Stop();
+    }
+
+    private void ExpandReaderTtsFloatingPanel()
+    {
+        if (!IsReaderTtsFloatingActive()) return;
+
+        _readerTtsFloatingCollapseTimer?.Stop();
+        if (_readerTtsFloatingExpanded) return;
+
+        _readerTtsFloatingExpanded = true;
+        UpdateReaderTtsFloatingUi(_readerTts.State);
+    }
+
+    private void CollapseReaderTtsFloatingPanel()
+    {
+        _readerTtsFloatingCollapseTimer?.Stop();
+        if (!_readerTtsFloatingExpanded) return;
+
+        _readerTtsFloatingExpanded = false;
+        UpdateReaderTtsFloatingUi(_readerTts.State);
+    }
+
+    private void ScheduleReaderTtsFloatingCollapse()
+    {
+        if (!IsReaderTtsFloatingActive()
+            || !_readerTtsFloatingExpanded
+            || ReaderTtsPopup.IsOpen)
+        {
+            return;
+        }
+
+        _readerTtsFloatingCollapseTimer ??= new DispatcherTimer();
+        _readerTtsFloatingCollapseTimer.Stop();
+        _readerTtsFloatingCollapseTimer.Interval =
+            TimeSpan.FromMilliseconds(ReaderTtsFloatingCollapseDelayMs);
+        _readerTtsFloatingCollapseTimer.Tick -=
+            ReaderTtsFloatingCollapseTimer_Tick;
+        _readerTtsFloatingCollapseTimer.Tick +=
+            ReaderTtsFloatingCollapseTimer_Tick;
+        _readerTtsFloatingCollapseTimer.Start();
+    }
+
+    private void ReaderTtsFloatingCollapseTimer_Tick(object? sender, EventArgs e)
+    {
+        _readerTtsFloatingCollapseTimer?.Stop();
+        if (!ReaderTtsPopup.IsOpen)
+            CollapseReaderTtsFloatingPanel();
+    }
+
+    private void UpdateReaderTtsFloatingForPointer(
+        double x,
+        double y,
+        double surfaceWidth,
+        double surfaceHeight)
+    {
+        if (!IsReaderTtsFloatingActive()
+            || surfaceWidth <= 0
+            || surfaceHeight <= 0)
+        {
+            return;
+        }
+
+        if (ReaderTtsPopup.IsOpen)
+        {
+            _readerTtsFloatingCollapseTimer?.Stop();
+            return;
+        }
+
+        var panelLeft = surfaceWidth
+            - ReaderTtsFloatingPanelRightMargin
+            - ReaderTtsFloatingPanelWidth;
+        var panelTop = surfaceHeight
+            - ReaderTtsFloatingPanelBottomMargin
+            - ReaderTtsFloatingPanelHeight;
+        var insidePanel = x >= panelLeft
+            && x <= panelLeft + ReaderTtsFloatingPanelWidth
+            && y >= panelTop
+            && y <= panelTop + ReaderTtsFloatingPanelHeight;
+        var insideEdge = x >= surfaceWidth - ReaderTtsFloatingEdgeActivationWidth
+            && y >= panelTop - ReaderTtsFloatingEdgeActivationTopPadding
+            && y <= surfaceHeight - ReaderTtsFloatingEdgeActivationBottomPadding;
+
+        if (insidePanel || insideEdge)
+        {
+            if (!_readerTtsFloatingExpanded)
+                ExpandReaderTtsFloatingPanel();
+            else
+                _readerTtsFloatingCollapseTimer?.Stop();
+        }
+        else
+        {
+            ScheduleReaderTtsFloatingCollapse();
+        }
+    }
+
+    private void ReaderTtsFloatingEdgeActivationRegion_PointerEntered(
+        object? sender,
+        PointerEventArgs e)
+        => ExpandReaderTtsFloatingPanel();
+
+    private void ReaderTtsFloatingEdgeActivationRegion_PointerMoved(
+        object? sender,
+        PointerEventArgs e)
+        => ExpandReaderTtsFloatingPanel();
+
+    private void ReaderTtsFloatingEdgeActivationRegion_PointerExited(
+        object? sender,
+        PointerEventArgs e)
+        => ScheduleReaderTtsFloatingCollapse();
+
+    private void ReaderTtsFloatingPanel_PointerEntered(
+        object? sender,
+        PointerEventArgs e)
+        => ExpandReaderTtsFloatingPanel();
+
+    private void ReaderTtsFloatingPanel_PointerMoved(
+        object? sender,
+        PointerEventArgs e)
+        => ExpandReaderTtsFloatingPanel();
+
+    private void ReaderTtsFloatingPanel_PointerExited(
+        object? sender,
+        PointerEventArgs e)
+        => ScheduleReaderTtsFloatingCollapse();
+
+    private void ReaderTtsPopup_Closed(object? sender, EventArgs e)
+        => ScheduleReaderTtsFloatingCollapse();
 
     private void OpenReaderTtsPopup(
         Control placementTarget,
