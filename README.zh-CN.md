@@ -35,6 +35,17 @@ dotnet run --project src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj 
 
 Linux 还需要 WebKitGTK 和 Secret Service。Linux/macOS 的运行命令见[跨平台说明](docs/cross-platform.md)。
 
+## 技术参考
+
+- **功能参考与工具**：[zlibrary.koplugin](https://github.com/ZlibraryKO/zlibrary.koplugin)、[Calibre](https://github.com/kovidgoyal/calibre)、[KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290)。
+- **运行依赖**：[Avalonia](https://github.com/AvaloniaUI/Avalonia)、[CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet)、[EF Core](https://github.com/dotnet/efcore)、[PdfPig](https://github.com/UglyToad/PdfPig)。
+- **测试工具**：[xUnit](https://github.com/xunit/xunit)、[VSTest](https://github.com/microsoft/vstest)。
+
+## 致谢
+
+- 社区：[LINUX DO](https://linux.do/?tl=en)
+- 公益站：any
+
 ## 许可证
 
 本项目采用 [MIT License](LICENSE) 开源；第三方组件和随应用分发的字体遵循各自许可证。

@@ -35,6 +35,17 @@ dotnet run --project src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj 
 
 Linux also requires WebKitGTK and Secret Service. See [cross-platform notes](docs/cross-platform.md) for Linux and macOS commands.
 
+## Referenced technologies
+
+- **Feature references and tools** — [zlibrary.koplugin](https://github.com/ZlibraryKO/zlibrary.koplugin), [Calibre](https://github.com/kovidgoyal/calibre), and [KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290).
+- **Runtime** — [Avalonia](https://github.com/AvaloniaUI/Avalonia), [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet), [EF Core](https://github.com/dotnet/efcore), and [PdfPig](https://github.com/UglyToad/PdfPig).
+- **Testing** — [xUnit](https://github.com/xunit/xunit) and [VSTest](https://github.com/microsoft/vstest).
+
+## Acknowledgments
+
+- Community: [LINUX DO](https://linux.do/?tl=en)
+- Public-service site: any
+
 ## License
 
 [MIT License](LICENSE). Third-party components and bundled fonts retain their own licenses.
