@@ -200,6 +200,56 @@ public sealed class TtsTests
     }
 
     [Fact]
+    public async Task TtsCacheIncludesProviderMetadataAndEvictsOldEntriesAtCapacity()
+    {
+        var root = CreateTemporaryDirectory();
+        var sourceOne = Path.Combine(Path.GetTempPath(), "kkindle-tts-source-" + Guid.NewGuid().ToString("N") + ".mp3");
+        var sourceTwo = Path.Combine(Path.GetTempPath(), "kkindle-tts-source-" + Guid.NewGuid().ToString("N") + ".mp3");
+        try
+        {
+            var cache = new TtsCacheManager(root, maximumBytes: 5);
+            var mp3 = new TtsOptions();
+            var wav = new TtsOptions
+            {
+                Provider = "local",
+                Model = "local-v1",
+                AudioFormat = "wav",
+                SampleRate = 16000
+            };
+            Assert.NotEqual(
+                cache.GetCacheKey("文字", mp3),
+                cache.GetCacheKey("文字", wav));
+
+            await File.WriteAllBytesAsync(sourceOne, [1, 2, 3, 4]);
+            await File.WriteAllBytesAsync(sourceTwo, [5, 6, 7, 8]);
+            var first = await cache.WriteAsync(
+                "book",
+                "chapter-1",
+                "第一段",
+                mp3,
+                sourceOne);
+            var second = await cache.WriteAsync(
+                "book",
+                "chapter-2",
+                "第二段",
+                wav,
+                sourceTwo);
+
+            var statistics = await cache.GetStatisticsAsync();
+            Assert.Equal(1, statistics.FileCount);
+            Assert.Equal(4, statistics.TotalBytes);
+            Assert.False(File.Exists(first));
+            Assert.True(File.Exists(second));
+        }
+        finally
+        {
+            try { File.Delete(sourceOne); } catch { }
+            try { File.Delete(sourceTwo); } catch { }
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
     public async Task ServicePrefetchesAndPlaysEverySegment()
     {
         var root = CreateTemporaryDirectory();

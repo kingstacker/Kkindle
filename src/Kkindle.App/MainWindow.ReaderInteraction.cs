@@ -1480,7 +1480,6 @@ public partial class MainWindow
         ReaderNotesView.IsVisible = false;
         ReaderAiSettingsView.IsVisible = false;
         ReaderAiComposer.IsVisible = true;
-        ReaderAiSendBar.IsVisible = true;
         ReaderNotesExportBar.IsVisible = false;
         ReaderAssistantPanel.IsVisible = false;
         ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
@@ -7802,7 +7801,8 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
         ShowReaderAiTab();
         _ = ObserveReaderTaskAsync(SendReaderAiQuestionAsync(
-            T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection)));
+            T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection),
+            ReaderAiRequestKind.SelectionExplain));
     }
 
     private void ReaderSelectionSearchButton_Click(object? sender, RoutedEventArgs e)
@@ -7844,7 +7844,8 @@ public partial class MainWindow
                 {
                     ShowReaderAiTab();
                     _ = ObserveReaderTaskAsync(SendReaderAiQuestionAsync(
-                        T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection)));
+                        T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection),
+                        ReaderAiRequestKind.SelectionExplain));
                 }
                 break;
             case "search":
@@ -8792,9 +8793,10 @@ public partial class MainWindow
         _readerZenMode = false;
         ReaderTocPanel.IsVisible = false;
         ReaderAssistantPanel.IsVisible = _readerAssistantVisibleBeforeZen;
-        ReaderRoot.ColumnDefinitions[2].Width = _readerAssistantVisibleBeforeZen
-            ? new GridLength(360)
-            : new GridLength(0);
+        if (_readerAssistantVisibleBeforeZen)
+            SetReaderAiPanelWidth(_readerAiPanelWidth);
+        else
+            ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         ReaderAssistantToggleButton.IsVisible = true;
         ReaderZenBar.IsVisible = false;
         if (ReaderZenMenuItem is not null) ReaderZenMenuItem.IsChecked = false;

@@ -17,9 +17,15 @@ public enum TtsPlaybackState
 /// <summary>Options that affect the generated audio and its cache key.</summary>
 public sealed record TtsOptions
 {
+    public const string DefaultProvider = "edge-tts";
+    public const string DefaultAudioFormat = "mp3";
     public const string DefaultVoice = "zh-CN-XiaoxiaoNeural";
 
+    public string Provider { get; init; } = DefaultProvider;
+    public string Model { get; init; } = string.Empty;
     public string Voice { get; init; } = DefaultVoice;
+    public string AudioFormat { get; init; } = DefaultAudioFormat;
+    public int SampleRate { get; init; }
     public int RatePercent { get; init; }
     public int VolumePercent { get; init; }
     public int PitchHz { get; init; }
@@ -27,11 +33,24 @@ public sealed record TtsOptions
     public static TtsOptions Normalize(TtsOptions? options)
     {
         options ??= new TtsOptions();
+        var audioFormat = string.IsNullOrWhiteSpace(options.AudioFormat)
+            ? DefaultAudioFormat
+            : options.AudioFormat.Trim().ToLowerInvariant();
+        if (audioFormat is not ("mp3" or "wav" or "ogg" or "opus"))
+            audioFormat = DefaultAudioFormat;
         return new TtsOptions
         {
+            Provider = string.IsNullOrWhiteSpace(options.Provider)
+                ? DefaultProvider
+                : options.Provider.Trim().ToLowerInvariant(),
+            Model = options.Model?.Trim() ?? string.Empty,
             Voice = string.IsNullOrWhiteSpace(options.Voice)
                 ? DefaultVoice
                 : options.Voice.Trim(),
+            AudioFormat = audioFormat,
+            SampleRate = options.SampleRate <= 0
+                ? 0
+                : Math.Clamp(options.SampleRate, 8000, 48000),
             RatePercent = Math.Clamp(options.RatePercent, -50, 100),
             VolumePercent = Math.Clamp(options.VolumePercent, -100, 100),
             PitchHz = Math.Clamp(options.PitchHz, -100, 100),
@@ -53,10 +72,13 @@ public sealed record TtsOptions
 /// </summary>
 public sealed class TtsSettings
 {
-    public const string DefaultProvider = "edge-tts";
+    public const string DefaultProvider = TtsOptions.DefaultProvider;
 
     public string Provider { get; set; } = DefaultProvider;
+    public string Model { get; set; } = string.Empty;
     public string Voice { get; set; } = TtsOptions.DefaultVoice;
+    public string AudioFormat { get; set; } = TtsOptions.DefaultAudioFormat;
+    public int SampleRate { get; set; }
     public double Speed { get; set; } = 1.0;
     public int Volume { get; set; } = 100;
     public int Pitch { get; set; }
@@ -81,7 +103,11 @@ public sealed class TtsSettings
         var normalized = Normalize(this);
         return TtsOptions.Normalize(new TtsOptions
         {
+            Provider = normalized.Provider,
+            Model = normalized.Model,
             Voice = normalized.Voice,
+            AudioFormat = normalized.AudioFormat,
+            SampleRate = normalized.SampleRate,
             RatePercent = (int)Math.Round((normalized.Speed - 1.0) * 100.0),
             VolumePercent = normalized.Volume - 100,
             PitchHz = normalized.Pitch,
@@ -101,7 +127,15 @@ public sealed class TtsSettings
         return new TtsSettings
         {
             Provider = DefaultProvider,
+            Model = settings.Model?.Trim() ?? string.Empty,
             Voice = voice,
+            AudioFormat = TtsOptions.Normalize(new TtsOptions
+            {
+                AudioFormat = settings.AudioFormat
+            }).AudioFormat,
+            SampleRate = settings.SampleRate <= 0
+                ? 0
+                : Math.Clamp(settings.SampleRate, 8000, 48000),
             Speed = speed,
             Volume = Math.Clamp(settings.Volume, 0, 200),
             Pitch = Math.Clamp(settings.Pitch, -100, 100),

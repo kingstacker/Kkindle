@@ -2790,7 +2790,8 @@
                     Background="{StaticResource PaperBrush}"
                     BorderBrush="{StaticResource HairlineBrush}"
                     BorderThickness="1,0,0,0"
-                    IsVisible="False">
+                    IsVisible="False"
+                    SizeChanged="ReaderAiSettingsPane_SizeChanged">
                 <Grid RowDefinitions="Auto,*">
                     <Grid Margin="20,50,20,12">
                         <TextBlock Text="{DynamicResource Ui.Auto.6F5D72AA32F2C95E}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -2817,7 +2818,20 @@
                             </StackPanel>
                             <StackPanel Spacing="5">
                                 <TextBlock Text="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="11" />
-                                <TextBox x:Name="MainReaderAiModelBox" PlaceholderText="{DynamicResource Ui.Auto.CB2F1709F983D2F4}" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                    <TextBox x:Name="MainReaderAiModelBox" PlaceholderText="{DynamicResource Ui.Auto.CB2F1709F983D2F4}" />
+                                    <ComboBox x:Name="MainReaderAiModelSelectorBox"
+                                              Grid.Column="0"
+                                              Classes="aiModelSelector"
+                                              IsVisible="False"
+                                              PlaceholderText="{DynamicResource Ui.Auto.1AFED6A81A2512D2}"
+                                              SelectionChanged="MainReaderAiModelSelectorBox_SelectionChanged" />
+                                    <Button x:Name="MainReaderAiFetchModelsButton"
+                                            Grid.Column="1"
+                                            Classes="quiet"
+                                            Content="{DynamicResource Ui.Auto.83FCFB4C1F2C1641}"
+                                            Click="MainReaderAiFetchModelsButton_Click" />
+                                </Grid>
                             </StackPanel>
                             <StackPanel Spacing="5">
                                 <TextBlock Text="API Key" FontSize="11" />
@@ -2827,13 +2841,68 @@
                                        FontSize="10"
                                        Foreground="{StaticResource MutedInkBrush}"
                                        TextWrapping="Wrap" />
+                            <Border Margin="0,4,0,0"
+                                    Padding="12"
+                                    Background="#F7F7F4"
+                                    BorderBrush="{StaticResource HairlineBrush}"
+                                    BorderThickness="1">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="本地语义检索模型" FontSize="12" FontWeight="SemiBold" />
+                                            <TextBlock Text="用于书籍问答的向量检索；未安装时仍可使用关键词检索。"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="MainReaderEmbeddingModelStatusText"
+                                                   Grid.Column="1"
+                                                   MaxWidth="180"
+                                                   FontSize="10"
+                                                   Foreground="{StaticResource MutedInkBrush}"
+                                                   TextAlignment="Right"
+                                                   TextWrapping="Wrap"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <ProgressBar x:Name="MainReaderEmbeddingModelProgressBar"
+                                                 Height="5"
+                                                 IsVisible="False"
+                                                 IsIndeterminate="False" />
+                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                                        <TextBlock Text="BGE Small 中文模型 · 约 95 MB"
+                                                   FontSize="10"
+                                                   Foreground="{StaticResource MutedInkBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <Button x:Name="MainReaderEmbeddingModelDownloadButton"
+                                                Grid.Column="1"
+                                                Classes="quiet"
+                                                Padding="10,5"
+                                                FontSize="11"
+                                                Content="下载模型"
+                                                Click="MainReaderEmbeddingModelDownloadButton_Click" />
+                                        <Button x:Name="MainReaderEmbeddingModelCancelButton"
+                                                Grid.Column="2"
+                                                Classes="quiet"
+                                                Padding="10,5"
+                                                FontSize="11"
+                                                Content="取消"
+                                                IsVisible="False"
+                                                Click="MainReaderEmbeddingModelCancelButton_Click" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
                             <Grid Margin="0,4,0,0"
-                                  ColumnDefinitions="Auto,Auto,*"
+                                  ColumnDefinitions="Auto,Auto,Auto,*"
                                   ColumnSpacing="8">
                                 <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="MainReaderAiSettingsCancelButton_Click" />
-                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="MainReaderAiSettingsSaveButton_Click" />
+                                <Button x:Name="MainReaderAiSettingsTestButton"
+                                        Grid.Column="1"
+                                        Content="{DynamicResource Ui.Auto.D5061C58DDC3BB77}"
+                                        Classes="quiet"
+                                        Click="MainReaderAiSettingsTestButton_Click" />
+                                <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="MainReaderAiSettingsSaveButton_Click" />
                                 <TextBlock x:Name="MainReaderAiSettingsStatusText"
-                                           Grid.Column="2"
+                                           Grid.Column="3"
                                            FontSize="10"
                                            Foreground="{StaticResource MutedInkBrush}"
                                            VerticalAlignment="Center"
@@ -4616,9 +4685,9 @@
                     Margin="0,38,0,0"
                     IsVisible="False"
                     Background="{StaticResource PaperBrush}">
-                <Grid RowDefinitions="52,42,*,Auto">
-                    <!-- Long separator below the assistant header. -->
-                    <Rectangle Grid.Row="1"
+                <Grid RowDefinitions="52,*,Auto">
+                    <!-- Long separator beside the assistant surface. -->
+                    <Rectangle Grid.Row="0"
                                Grid.RowSpan="3"
                                Width="1"
                                HorizontalAlignment="Left"
@@ -4628,18 +4697,19 @@
                     <Border Background="{StaticResource PaperBrush}"
                             BorderBrush="#EEEEEA"
                             BorderThickness="0,0,0,1">
-                        <Grid Margin="14,8" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <TextBlock Text="{DynamicResource Ui.Auto.1B0049FCFD4163FE}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                <TextBlock x:Name="ReaderAiProviderText"
-                                           Text="{DynamicResource Ui.Auto.95537256AF757996}"
-                                           FontSize="9"
-                                           MaxWidth="150"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           VerticalAlignment="Center"
-                                           TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                            <Button Grid.Column="1"
+                        <Grid Margin="8,2" ColumnDefinitions="*,*,Auto" ColumnSpacing="6">
+                            <Button x:Name="ReaderAiTabButton"
+                                    Classes="readerAssistantTab active"
+                                    Content="{DynamicResource Ui.Auto.69825479A95E6330}"
+                                    HorizontalAlignment="Stretch"
+                                    Click="ReaderAiTabButton_Click" />
+                            <Button x:Name="ReaderNotesTabButton"
+                                    Grid.Column="1"
+                                    Classes="readerAssistantTab"
+                                    Content="{DynamicResource Ui.Auto.3062C477D4C1E1FA}"
+                                    HorizontalAlignment="Stretch"
+                                    Click="ReaderNotesTabButton_Click" />
+                            <Button Grid.Column="2"
                                     Classes="icon"
                                     Width="38"
                                     MinWidth="38"
@@ -4659,21 +4729,7 @@
                         </Grid>
                     </Border>
 
-                    <Grid Grid.Row="1" ColumnDefinitions="*,*" Margin="18,2,18,0" ColumnSpacing="12">
-                        <Button x:Name="ReaderAiTabButton"
-                                Classes="readerAssistantTab active"
-                                Content="{DynamicResource Ui.Auto.69825479A95E6330}"
-                                HorizontalAlignment="Stretch"
-                                Click="ReaderAiTabButton_Click" />
-                        <Button x:Name="ReaderNotesTabButton"
-                                Grid.Column="1"
-                                Classes="readerAssistantTab"
-                                Content="{DynamicResource Ui.Auto.3062C477D4C1E1FA}"
-                                HorizontalAlignment="Stretch"
-                                Click="ReaderNotesTabButton_Click" />
-                    </Grid>
-
-                    <Grid Grid.Row="2">
+                    <Grid Grid.Row="1">
                         <Grid x:Name="ReaderAiView" RowDefinitions="*,Auto">
                             <ScrollViewer x:Name="ReaderAiScrollViewer" Padding="20,18,20,8" VerticalScrollBarVisibility="Auto">
                                 <StackPanel Spacing="18">
@@ -4683,70 +4739,154 @@
                                                    Foreground="{StaticResource MutedInkBrush}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="8">
-                                        <Button Classes="readerMinimalAction" Content="{DynamicResource Ui.Auto.E687BAF44D22C09D}" HorizontalAlignment="Stretch" Click="ReaderAiSummarizeChapterButton_Click" />
-                                        <Button Grid.Column="1" Classes="readerMinimalAction" Content="{DynamicResource Ui.Auto.93ACD7FCCB3F0D76}" HorizontalAlignment="Stretch" Click="ReaderAiExplainSelectionButton_Click" />
-                                        <Button Grid.Row="1" Classes="readerMinimalAction" Content="{DynamicResource Ui.Auto.D65CE013C49D1834}" HorizontalAlignment="Stretch" Click="ReaderAiSummarizeBookButton_Click" />
-                                        <Button Grid.Row="1" Grid.Column="1" Classes="readerMinimalAction" Content="{DynamicResource Ui.Auto.C7D90AE040169512}" HorizontalAlignment="Stretch" Click="ReaderAiClearButton_Click" />
-                                    </Grid>
                                     <ItemsControl x:Name="ReaderChatMessagesPanel" ItemsSource="{Binding ReaderAiMessages}" Margin="0,0,0,4">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:ReaderAiMessageViewModel">
-                                                <Border MaxWidth="306"
-                                                        Padding="2,9,2,10"
-                                                        Margin="0,1"
-                                                        HorizontalAlignment="{Binding BubbleAlignment}"
-                                                        Background="Transparent"
-                                                        BorderBrush="{StaticResource HairlineBrush}"
-                                                        BorderThickness="0,0,0,1"
-                                                        CornerRadius="0">
-                                                    <StackPanel Spacing="4">
-                                                        <TextBlock Text="{Binding RoleLabel}" FontSize="9" Foreground="{Binding RoleBrush}" Opacity="0.72" />
-                                                        <TextBlock Text="{Binding Reasoning}" IsVisible="{Binding IsReasoningVisible}" FontSize="10" Foreground="#5F5F5F" TextWrapping="Wrap" />
-                                                        <local:KreaderMarkdownTextBlock Text="{Binding Content}" FontSize="12" />
-                                                    </StackPanel>
-                                                </Border>
+                                                <Grid HorizontalAlignment="Stretch" Margin="0,3">
+                                                    <Border MaxWidth="520"
+                                                            MinWidth="96"
+                                                            Padding="10,8,10,9"
+                                                            HorizontalAlignment="{Binding BubbleAlignment}"
+                                                            Background="{Binding BubbleBackground}"
+                                                            BorderBrush="{Binding BorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="10">
+                                                        <StackPanel Spacing="5">
+                                                        <TextBlock Text="{Binding RoleLabel}" FontSize="9" Foreground="{Binding BubbleForeground}" Opacity="0.72" />
+                                                        <StackPanel Orientation="Horizontal"
+                                                                    Spacing="5"
+                                                                    IsVisible="{Binding IsThinkingRowVisible}">
+                                                            <Button Classes="readerAiReasoningToggle"
+                                                                    Content="{Binding ReasoningToggleLabel}"
+                                                                    IsVisible="{Binding HasReasoning}"
+                                                                    HorizontalAlignment="Left"
+                                                                    Click="ReaderAiReasoningToggleButton_Click" />
+                                                            <TextBlock Text="{Binding ThinkingLabel}"
+                                                                       IsVisible="{Binding IsThinkingLabelVisible}"
+                                                                       FontSize="9"
+                                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                                       VerticalAlignment="Center" />
+                                                            <Path Width="11"
+                                                                  Height="11"
+                                                                  Stretch="Uniform"
+                                                                  Fill="{StaticResource MutedInkBrush}"
+                                                                  Data="M 17.65,6.35 C 16.2,4.9 14.21,4 12,4 C 7.58,4 4.01,7.58 4.01,12 C 4.01,16.42 7.58,20 12,20 C 15.73,20 18.84,17.45 19.73,14 H 17.65 C 16.83,16.33 14.61,18 12,18 C 8.69,18 6,15.31 6,12 C 6,8.69 8.69,6 12,6 C 13.66,6 15.14,6.69 16.22,7.78 L 13,11 H 20 V 4 Z"
+                                                                  IsVisible="{Binding IsThinking}"
+                                                                  RenderTransformOrigin="50%,50%"
+                                                                  IsHitTestVisible="False">
+                                                                <Path.RenderTransform>
+                                                                    <RotateTransform Angle="{Binding ThinkingRotation}" />
+                                                                </Path.RenderTransform>
+                                                            </Path>
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding Reasoning}"
+                                                                   IsVisible="{Binding IsReasoningVisible}"
+                                                                   FontSize="10"
+                                                                   Foreground="#5F5F5F"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding Content}"
+                                                                   IsVisible="{Binding IsUser}"
+                                                                   Foreground="{Binding BubbleForeground}"
+                                                                   FontSize="12"
+                                                                   TextWrapping="Wrap" />
+                                                         <local:KreaderMarkdownTextBlock Text="{Binding Content}"
+                                                                                          IsVisible="{Binding IsAssistant}"
+                                                                                          CitationAction="{Binding CitationAction}"
+                                                                                          Foreground="{Binding BubbleForeground}"
+                                                                                          FontSize="12"
+                                                                                          TextWrapping="Wrap" />
+                                                         <StackPanel Spacing="4" IsVisible="{Binding HasSources}">
+                                                             <Button Classes="readerAiReasoningToggle"
+                                                                     HorizontalAlignment="Left"
+                                                                     Click="ReaderAiMessageSourcesToggleButton_Click">
+                                                                 <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                     <TextBlock Text="{Binding SourcesToggleGlyph}" FontSize="10" />
+                                                                     <TextBlock Text="{DynamicResource Ui.Auto.DA3968C80FE7A060}" />
+                                                                 </StackPanel>
+                                                             </Button>
+                                                             <ItemsControl ItemsSource="{Binding Sources}"
+                                                                           IsVisible="{Binding IsSourcesExpanded}">
+                                                                 <ItemsControl.ItemTemplate>
+                                                                     <DataTemplate x:DataType="local:ReaderAiSourceViewModel">
+                                                                         <Button Classes="readerNoteItem"
+                                                                                 Tag="{Binding}"
+                                                                                 HorizontalContentAlignment="Left"
+                                                                                 Click="ReaderAiSourceButton_Click">
+                                                                             <TextBlock Text="{Binding Label}" TextWrapping="Wrap" FontSize="10" />
+                                                                         </Button>
+                                                                     </DataTemplate>
+                                                                 </ItemsControl.ItemTemplate>
+                                                             </ItemsControl>
+                                                         </StackPanel>
+                                                         </StackPanel>
+                                                    </Border>
+                                                </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <TextBlock x:Name="ReaderAiStatusText"
-                                               Text="{DynamicResource Ui.Auto.D4DCD9B74693BD4C}"
-                                               FontSize="10"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <StackPanel x:Name="ReaderAiSourcesPanel" Spacing="5" IsVisible="False">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.DA3968C80FE7A060}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
-                                        <ItemsControl ItemsSource="{Binding ReaderAiSources}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="local:ReaderAiSourceViewModel">
-                                                    <Button Classes="readerNoteItem" Tag="{Binding}" HorizontalContentAlignment="Left" Click="ReaderAiSourceButton_Click">
-                                                        <TextBlock Text="{Binding Label}" TextWrapping="Wrap" FontSize="10" />
-                                                    </Button>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
+                                     <TextBlock x:Name="ReaderAiStatusText"
+                                                Text="{DynamicResource Ui.Auto.D4DCD9B74693BD4C}"
+                                                FontSize="10"
+                                                Foreground="{StaticResource MutedInkBrush}"
+                                                TextWrapping="Wrap"
+                                                IsVisible="False" />
                                 </StackPanel>
                             </ScrollViewer>
-                            <Grid x:Name="ReaderAiComposer" Grid.Row="1" RowDefinitions="Auto,Auto" RowSpacing="12" Margin="20,8,20,14">
-                                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Grid x:Name="ReaderAiComposer" Grid.Row="1" RowDefinitions="Auto,Auto" RowSpacing="12" Margin="20,8,20,14" SizeChanged="ReaderAiComposer_SizeChanged">
+                                <Grid ColumnDefinitions="78,*,92" ColumnSpacing="8">
                                     <StackPanel Spacing="5">
                                         <TextBlock Text="{DynamicResource Ui.Auto.2FD1FCDA22E20FF7}" FontSize="11" />
-                                        <ComboBox x:Name="ReaderAiReasoningDepthBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" SelectionChanged="ReaderAiReasoningDepthBox_SelectionChanged" />
+                                        <ComboBox x:Name="ReaderAiReasoningDepthBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" HorizontalAlignment="Stretch" SelectionChanged="ReaderAiReasoningDepthBox_SelectionChanged" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Spacing="5">
                                         <TextBlock Text="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="11" />
-                                        <ComboBox x:Name="ReaderAiModelSelectorBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" PlaceholderText="{DynamicResource Ui.Auto.1AFED6A81A2512D2}" SelectionChanged="ReaderAiModelSelectorBox_SelectionChanged" />
+                                        <ComboBox x:Name="ReaderAiModelSelectorBox" Classes="readerMinimalField aiModelSelector" MinHeight="32" FontSize="10" HorizontalAlignment="Stretch" PlaceholderText="{DynamicResource Ui.Auto.1AFED6A81A2512D2}" SelectionChanged="ReaderAiModelSelectorBox_SelectionChanged" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.D9A8514E981DEE1F}" FontSize="11" />
+                                        <ComboBox x:Name="ReaderAiQuickActionBox"
+                                                  Classes="readerMinimalField"
+                                                  MinHeight="32"
+                                                  FontSize="10"
+                                                  HorizontalAlignment="Stretch"
+                                                  PlaceholderText="{DynamicResource Ui.Auto.D9A8514E981DEE1F}"
+                                                  SelectionChanged="ReaderAiQuickActionBox_SelectionChanged">
+                                            <ComboBoxItem Tag="chapter-summary" Content="{DynamicResource Ui.Auto.E687BAF44D22C09D}" />
+                                            <ComboBoxItem Tag="selection-explain" Content="{DynamicResource Ui.Auto.93ACD7FCCB3F0D76}" />
+                                            <ComboBoxItem Tag="book-summary" Content="{DynamicResource Ui.Auto.D65CE013C49D1834}" />
+                                            <ComboBoxItem Tag="clear" Content="{DynamicResource Ui.Auto.C7D90AE040169512}" />
+                                        </ComboBox>
                                     </StackPanel>
                                 </Grid>
-                                <TextBox x:Name="ReaderAiQuestionBox"
-                                         Grid.Row="1"
-                                         Classes="readerMinimalField"
-                                         MinHeight="130"
-                                         AcceptsReturn="True"
-                                         TextWrapping="Wrap"
-                                         PlaceholderText="{DynamicResource Ui.Auto.2884AF5B8126BF7B}"
-                                         KeyDown="ReaderAiQuestionBox_KeyDown" />
+                                <Grid Grid.Row="1" MinHeight="130" ClipToBounds="True">
+                                    <TextBox x:Name="ReaderAiQuestionBox"
+                                             Classes="readerMinimalField"
+                                             MinHeight="130"
+                                             Padding="8,8,46,38"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             PlaceholderText="{DynamicResource Ui.Auto.2884AF5B8126BF7B}"
+                                             />
+                                    <Button x:Name="ReaderAiSendButton"
+                                            Classes="readerAiSendButton"
+                                            Width="34"
+                                            MinWidth="34"
+                                            Height="34"
+                                            MinHeight="34"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,5,5"
+                                            AutomationProperties.Name="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
+                                            ToolTip.Tip="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
+                                            Click="ReaderAiSendButton_Click">
+                                        <Path Width="16"
+                                              Height="16"
+                                              Stretch="Uniform"
+                                              Fill="{Binding $parent[Button].Foreground}"
+                                              Data="M 2,2 L 22,11 L 2,20 L 6,13 L 16,11 L 6,9 Z"
+                                              IsHitTestVisible="False" />
+                                    </Button>
+                                </Grid>
                             </Grid>
                         </Grid>
 
@@ -4803,7 +4943,8 @@
                         <ScrollViewer x:Name="ReaderAiSettingsView"
                                       IsVisible="False"
                                       Padding="18,16,18,18"
-                                      VerticalScrollBarVisibility="Auto">
+                                      VerticalScrollBarVisibility="Auto"
+                                      SizeChanged="ReaderAiSettingsView_SizeChanged">
                             <StackPanel Spacing="12">
                                 <TextBlock Text="{DynamicResource Ui.Auto.6F5D72AA32F2C95E}" FontSize="16" FontWeight="SemiBold" />
                                 <StackPanel Spacing="5">
@@ -4825,9 +4966,22 @@
                                 </StackPanel>
                                 <StackPanel Spacing="5">
                                     <TextBlock Text="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="11" />
-                                    <TextBox x:Name="ReaderAiModelBox"
-                                             Classes="readerSettingsField"
-                                             PlaceholderText="{DynamicResource Ui.Auto.CB2F1709F983D2F4}" />
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                        <TextBox x:Name="ReaderAiModelBox"
+                                                 Classes="readerSettingsField"
+                                                 PlaceholderText="{DynamicResource Ui.Auto.CB2F1709F983D2F4}" />
+                                        <ComboBox x:Name="ReaderAiSettingsModelSelectorBox"
+                                                  Grid.Column="0"
+                                                  Classes="readerSettingsField aiModelSelector"
+                                                  IsVisible="False"
+                                                  PlaceholderText="{DynamicResource Ui.Auto.1AFED6A81A2512D2}"
+                                                  SelectionChanged="ReaderAiSettingsModelSelectorBox_SelectionChanged" />
+                                        <Button x:Name="ReaderAiFetchModelsButton"
+                                                Grid.Column="1"
+                                                Classes="quiet"
+                                                Content="{DynamicResource Ui.Auto.83FCFB4C1F2C1641}"
+                                                Click="ReaderAiFetchModelsButton_Click" />
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Spacing="5">
                                     <TextBlock Text="API Key" FontSize="11" />
@@ -4839,17 +4993,72 @@
                                                FontSize="10"
                                                Foreground="{StaticResource MutedInkBrush}"
                                                TextWrapping="Wrap" />
+                                <Border Margin="0,4,0,0"
+                                        Padding="12"
+                                        Background="#F7F7F4"
+                                        BorderBrush="{StaticResource HairlineBrush}"
+                                        BorderThickness="1">
+                                    <StackPanel Spacing="8">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Text="本地语义检索模型" FontSize="11" FontWeight="SemiBold" />
+                                                <TextBlock Text="用于书籍问答的向量检索。"
+                                                           FontSize="10"
+                                                           Foreground="{StaticResource MutedInkBrush}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="ReaderEmbeddingModelStatusText"
+                                                       Grid.Column="1"
+                                                       MaxWidth="126"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                       TextAlignment="Right"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Center" />
+                                        </Grid>
+                                        <ProgressBar x:Name="ReaderEmbeddingModelProgressBar"
+                                                     Height="4"
+                                                     IsVisible="False"
+                                                     IsIndeterminate="False" />
+                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
+                                            <TextBlock Text="BGE Small · 约 95 MB"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                       VerticalAlignment="Center" />
+                                            <Button x:Name="ReaderEmbeddingModelDownloadButton"
+                                                    Grid.Column="1"
+                                                    Classes="quiet"
+                                                    Padding="9,5"
+                                                    FontSize="10"
+                                                    Content="下载"
+                                                    Click="ReaderEmbeddingModelDownloadButton_Click" />
+                                            <Button x:Name="ReaderEmbeddingModelCancelButton"
+                                                    Grid.Column="2"
+                                                    Classes="quiet"
+                                                    Padding="9,5"
+                                                    FontSize="10"
+                                                    Content="取消"
+                                                    IsVisible="False"
+                                                    Click="ReaderEmbeddingModelCancelButton_Click" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
                                 </StackPanel>
                                 <TextBlock x:Name="ReaderAiSettingsStatusText"
                                            FontSize="10"
                                            Foreground="{StaticResource MutedInkBrush}"
                                            TextWrapping="Wrap" />
-                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                                <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
                                     <Button Grid.Column="1"
                                             Classes="quiet"
                                             Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}"
                                             Click="ReaderAiSettingsCancelButton_Click" />
-                                    <Button Grid.Column="2"
+                                    <Button x:Name="ReaderAiSettingsTestButton"
+                                            Grid.Column="2"
+                                            Classes="quiet"
+                                            Content="{DynamicResource Ui.Auto.D5061C58DDC3BB77}"
+                                            Click="ReaderAiSettingsTestButton_Click" />
+                                    <Button Grid.Column="3"
                                             Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}"
                                             Click="ReaderAiSettingsSaveButton_Click" />
                                 </Grid>
@@ -4857,18 +5066,10 @@
                         </ScrollViewer>
                     </Grid>
 
-                    <!-- Bottom strip. No top hairline by design; the two bars
-                         measure 49 DIP tall (6 + 36 + 7). -->
-                    <Border Grid.Row="3">
+                    <!-- Notes keep their export actions in the bottom row; AI
+                         sends directly from the composer above. -->
+                    <Border Grid.Row="2">
                         <Grid>
-                            <Grid x:Name="ReaderAiSendBar" Margin="20,6,20,7" IsVisible="False">
-                                <Button x:Name="ReaderAiSendButton"
-                                        Classes="readerMinimalAction"
-                                        Content="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
-                                        MinWidth="66"
-                                        HorizontalAlignment="Right"
-                                        Click="ReaderAiSendButton_Click" />
-                            </Grid>
                             <Grid x:Name="ReaderNotesExportBar" Margin="20,6,20,7" IsVisible="False">
                                 <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
                                     <Button Classes="readerMinimalAction" Content="{DynamicResource Ui.Auto.AC8B027CC1E3A493}" HorizontalAlignment="Stretch" Click="ReaderExportMarkdownButton_Click" />
@@ -4877,6 +5078,23 @@
                             </Grid>
                         </Grid>
                     </Border>
+
+                    <!-- The AI rail is resizable from its left edge. Keep the
+                         hit area wider than the one-pixel divider so it is
+                         easy to grab without covering the conversation. -->
+                    <Border x:Name="ReaderAssistantResizeHandle"
+                            Grid.Row="0"
+                            Grid.RowSpan="3"
+                            Width="9"
+                            HorizontalAlignment="Left"
+                            Background="Transparent"
+                            BorderBrush="#D5D5D1"
+                            BorderThickness="1,0,0,0"
+                            Cursor="SizeWestEast"
+                            ZIndex="20"
+                            PointerPressed="ReaderAssistantResizeHandle_PointerPressed"
+                            PointerMoved="ReaderAssistantResizeHandle_PointerMoved"
+                            PointerReleased="ReaderAssistantResizeHandle_PointerReleased" />
                 </Grid>
             </Border>
 

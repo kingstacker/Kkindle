@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text.RegularExpressions;
 using Kkindle.Core;
 using Microsoft.Data.Sqlite;
@@ -83,6 +84,19 @@ public sealed partial class ReaderDataService
                     ON BookContentChunks(BookFileId, SourceHash, ChapterIndex, ChunkIndex);
                 CREATE INDEX IF NOT EXISTS IX_BookContentChunks_Book
                     ON BookContentChunks(BookId, ChapterIndex, ChunkIndex);
+
+                CREATE TABLE IF NOT EXISTS BookChunkEmbeddings (
+                    ChunkId INTEGER PRIMARY KEY,
+                    BookId TEXT NOT NULL,
+                    BookFileId TEXT NOT NULL,
+                    SourceHash TEXT NOT NULL,
+                    Embedding BLOB NOT NULL,
+                    EmbeddingModel TEXT NOT NULL,
+                    EmbeddingDimension INTEGER NOT NULL,
+                    UpdatedAt TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_BookChunkEmbeddings_Book
+                    ON BookChunkEmbeddings(BookId, BookFileId, EmbeddingModel, EmbeddingDimension);
 
                 CREATE TABLE IF NOT EXISTS ReaderProgress (
                     BookFileId TEXT PRIMARY KEY,
@@ -871,6 +885,12 @@ public sealed partial class ReaderDataService
             await using var connection = await OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+            var deleteEmbeddings = connection.CreateCommand();
+            deleteEmbeddings.Transaction = (SqliteTransaction)transaction;
+            deleteEmbeddings.CommandText = "DELETE FROM BookChunkEmbeddings WHERE BookFileId = $bookFileId;";
+            deleteEmbeddings.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
+            await deleteEmbeddings.ExecuteNonQueryAsync(cancellationToken);
+
             var delete = connection.CreateCommand();
             delete.Transaction = (SqliteTransaction)transaction;
             delete.CommandText = "DELETE FROM BookContentChunks WHERE BookFileId = $bookFileId;";
@@ -920,6 +940,193 @@ public sealed partial class ReaderDataService
         {
             _databaseGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Returns chunks that do not have an embedding for the requested model
+    /// version. The query is intentionally scoped to one BookFile and source
+    /// hash so a changed EPUB never reuses vectors from an older index.
+    /// </summary>
+    public async Task<IReadOnlyList<BookContentChunk>> GetChunksNeedingEmbeddingsAsync(
+        Guid bookFileId,
+        string sourceHash,
+        string embeddingModel,
+        int embeddingDimension,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.Id, c.BookId, c.BookFileId, c.SourceHash, c.ChapterIndex, c.ChunkIndex,
+                   c.ChapterTitle, c.ChapterPath, c.StartOffset, c.EndOffset, c.Content
+            FROM BookContentChunks c
+            LEFT JOIN BookChunkEmbeddings e ON e.ChunkId = c.Id
+            WHERE c.BookFileId = $bookFileId
+              AND c.SourceHash = $sourceHash
+              AND (
+                    e.ChunkId IS NULL
+                    OR e.SourceHash <> $sourceHash
+                    OR e.EmbeddingModel <> $embeddingModel
+                    OR e.EmbeddingDimension <> $embeddingDimension)
+            ORDER BY c.ChapterIndex, c.ChunkIndex, c.Id;
+            """;
+        command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
+        command.Parameters.AddWithValue("$sourceHash", sourceHash);
+        command.Parameters.AddWithValue("$embeddingModel", embeddingModel);
+        command.Parameters.AddWithValue("$embeddingDimension", embeddingDimension);
+
+        var result = new List<BookContentChunk>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(ReadChunk(reader));
+        return result;
+    }
+
+    /// <summary>
+    /// Persists a batch of vectors atomically. The vector bytes are stored as
+    /// little-endian float32 values, which keeps the database portable across
+    /// the supported desktop platforms.
+    /// </summary>
+    public async Task UpsertChunkEmbeddingsAsync(
+        Guid bookId,
+        Guid bookFileId,
+        string sourceHash,
+        string embeddingModel,
+        int embeddingDimension,
+        IReadOnlyList<ReaderChunkEmbedding> embeddings,
+        CancellationToken cancellationToken = default)
+    {
+        if (embeddings.Count == 0) return;
+        if (embeddingDimension <= 0)
+            throw new ArgumentOutOfRangeException(nameof(embeddingDimension));
+
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = """
+                INSERT INTO BookChunkEmbeddings (
+                    ChunkId, BookId, BookFileId, SourceHash, Embedding,
+                    EmbeddingModel, EmbeddingDimension, UpdatedAt)
+                VALUES (
+                    $chunkId, $bookId, $bookFileId, $sourceHash, $embedding,
+                    $embeddingModel, $embeddingDimension, $updatedAt)
+                ON CONFLICT(ChunkId) DO UPDATE SET
+                    BookId = excluded.BookId,
+                    BookFileId = excluded.BookFileId,
+                    SourceHash = excluded.SourceHash,
+                    Embedding = excluded.Embedding,
+                    EmbeddingModel = excluded.EmbeddingModel,
+                    EmbeddingDimension = excluded.EmbeddingDimension,
+                    UpdatedAt = excluded.UpdatedAt;
+                """;
+            command.Parameters.Add("$chunkId", SqliteType.Integer);
+            command.Parameters.Add("$bookId", SqliteType.Text);
+            command.Parameters.Add("$bookFileId", SqliteType.Text);
+            command.Parameters.Add("$sourceHash", SqliteType.Text);
+            command.Parameters.Add("$embedding", SqliteType.Blob);
+            command.Parameters.Add("$embeddingModel", SqliteType.Text);
+            command.Parameters.Add("$embeddingDimension", SqliteType.Integer);
+            command.Parameters.Add("$updatedAt", SqliteType.Text);
+
+            foreach (var embedding in embeddings)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (embedding.Vector.Count != embeddingDimension)
+                    throw new InvalidDataException("Embedding 向量维度不一致。");
+
+                command.Parameters["$chunkId"].Value = embedding.ChunkId;
+                command.Parameters["$bookId"].Value = bookId.ToString();
+                command.Parameters["$bookFileId"].Value = bookFileId.ToString();
+                command.Parameters["$sourceHash"].Value = sourceHash;
+                command.Parameters["$embedding"].Value = SerializeEmbedding(embedding.Vector);
+                command.Parameters["$embeddingModel"].Value = embeddingModel;
+                command.Parameters["$embeddingDimension"].Value = embeddingDimension;
+                command.Parameters["$updatedAt"].Value = DateTimeOffset.UtcNow.ToString("O");
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            _databaseGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Loads only vectors that still match the source chunk and requested
+    /// model version. Stale rows can therefore remain harmlessly until the
+    /// owning chunk is rebuilt.
+    /// </summary>
+    public async Task<IReadOnlyList<(BookContentChunk Chunk, float[] Vector)>> GetBookChunkEmbeddingsAsync(
+        Guid bookId,
+        string embeddingModel,
+        int embeddingDimension,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.Id, c.BookId, c.BookFileId, c.SourceHash, c.ChapterIndex, c.ChunkIndex,
+                   c.ChapterTitle, c.ChapterPath, c.StartOffset, c.EndOffset, c.Content,
+                   e.Embedding
+            FROM BookContentChunks c
+            INNER JOIN BookChunkEmbeddings e ON e.ChunkId = c.Id
+            WHERE c.BookId = $bookId
+              AND c.SourceHash = e.SourceHash
+              AND e.EmbeddingModel = $embeddingModel
+              AND e.EmbeddingDimension = $embeddingDimension
+            ORDER BY c.BookFileId, c.ChapterIndex, c.ChunkIndex, c.Id;
+            """;
+        command.Parameters.AddWithValue("$bookId", bookId.ToString());
+        command.Parameters.AddWithValue("$embeddingModel", embeddingModel);
+        command.Parameters.AddWithValue("$embeddingDimension", embeddingDimension);
+
+        var result = new List<(BookContentChunk Chunk, float[] Vector)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (reader.GetValue(11) is not byte[] bytes)
+                continue;
+            var vector = DeserializeEmbedding(bytes, embeddingDimension);
+            if (vector is not null)
+                result.Add((ReadChunk(reader), vector));
+        }
+        return result;
+    }
+
+    public Task<IReadOnlyList<BookContentChunk>> GetBookChunksAsync(
+        Guid bookId,
+        CancellationToken cancellationToken = default)
+        => GetBookChunksAsync(bookId, null, cancellationToken);
+
+    public async Task<IReadOnlyList<BookContentChunk>> GetBookChunksAsync(
+        Guid bookId,
+        Guid? bookFileId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, BookId, BookFileId, SourceHash, ChapterIndex, ChunkIndex, ChapterTitle,
+                   ChapterPath, StartOffset, EndOffset, Content
+            FROM BookContentChunks
+            WHERE BookId = $bookId
+              AND ($bookFileId IS NULL OR BookFileId = $bookFileId)
+            ORDER BY BookFileId, ChapterIndex, ChunkIndex, Id;
+            """;
+        command.Parameters.AddWithValue("$bookId", bookId.ToString());
+        command.Parameters.AddWithValue("$bookFileId", (object?)bookFileId?.ToString() ?? DBNull.Value);
+
+        var result = new List<BookContentChunk>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(ReadChunk(reader));
+        return result;
     }
 
     public async Task<IReadOnlyList<BookContentChunk>> SearchBookAsync(
@@ -1345,6 +1552,36 @@ public sealed partial class ReaderDataService
             reader.GetInt32(9),
             reader.GetString(10),
             includeRank && !reader.IsDBNull(11) ? reader.GetDouble(11) : 0);
+    }
+
+    private static byte[] SerializeEmbedding(IReadOnlyList<float> vector)
+    {
+        var bytes = new byte[checked(vector.Count * sizeof(float))];
+        for (var index = 0; index < vector.Count; index++)
+        {
+            var bits = BitConverter.SingleToInt32Bits(vector[index]);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                bytes.AsSpan(index * sizeof(float), sizeof(float)),
+                bits);
+        }
+        return bytes;
+    }
+
+    private static float[]? DeserializeEmbedding(byte[] bytes, int dimension)
+    {
+        if (dimension <= 0 || bytes.Length != checked(dimension * sizeof(float)))
+            return null;
+
+        var vector = new float[dimension];
+        for (var index = 0; index < dimension; index++)
+        {
+            var bits = BinaryPrimitives.ReadInt32LittleEndian(
+                bytes.AsSpan(index * sizeof(float), sizeof(float)));
+            var value = BitConverter.Int32BitsToSingle(bits);
+            if (!float.IsFinite(value)) return null;
+            vector[index] = value;
+        }
+        return vector;
     }
 
     private static readonly string[] ChineseStopPhrases =

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 using Microsoft.Data.Sqlite;
@@ -242,6 +244,304 @@ public sealed class S3SyncTests
             Assert.Equal("重复记录的简介", reader.GetString(1));
             Assert.Equal(1, reader.GetInt32(2));
             Assert.Single(pathsToDelete, path => path.EndsWith("duplicate.jpg", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public void SnapshotLocalPaths_AreNotSerialized()
+    {
+        var snapshot = new S3SyncSnapshot();
+        var fileId = Guid.NewGuid();
+        var bookId = Guid.NewGuid();
+        snapshot.LocalFilePaths[fileId] = "library/book/book.epub";
+        snapshot.LocalCoverPaths[bookId] = "covers/book.jpg";
+        snapshot.Books.Add(new S3SyncBook { Id = bookId, LocalCoverPath = "covers/book.jpg" });
+
+        var json = JsonSerializer.Serialize(snapshot);
+
+        Assert.DoesNotContain("LocalFilePaths", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalCoverPaths", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalCoverPath", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("library/book/book.epub", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SqliteParameterReuse_UpdatesExistingNamedParameter()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT $value;";
+        command.Parameters.AddWithValue("$value", 1);
+        Assert.Equal(0, command.Parameters.IndexOf("$value"));
+        command.Parameters[command.Parameters.IndexOf("$value")].Value = 2;
+        Assert.Equal(2L, (long)(await command.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public void MergeTombstones_DropsExpiredEntriesAndKeepsNewestVersion()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var id = Guid.NewGuid();
+        var method = typeof(S3SyncService).GetMethod(
+            "MergeTombstones",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var result = (List<S3SyncTombstone>)method!.Invoke(
+            null,
+            [
+                new List<S3SyncTombstone>
+                {
+                    new() { EntityType = "Book", Key = id.ToString(), DeletedAt = now.AddDays(-91) },
+                    new() { EntityType = "book", Key = id.ToString("N"), DeletedAt = now.AddDays(-2) }
+                },
+                Array.Empty<S3SyncTombstone>(),
+                now
+            ])!;
+
+        var tombstone = Assert.Single(result);
+        Assert.Equal("book", tombstone.EntityType);
+        Assert.Equal(id.ToString("N"), tombstone.Key);
+        Assert.Equal(now.AddDays(-2), tombstone.DeletedAt);
+    }
+
+    [Fact]
+    public void DetectDeletedEntities_UsesPreviousEntityVersion()
+    {
+        var id = Guid.NewGuid();
+        var deletedVersion = DateTimeOffset.UtcNow.AddDays(-3);
+        var previous = new S3SyncSnapshot
+        {
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-2),
+            Books =
+            [
+                new S3SyncBook { Id = id, UpdatedAt = deletedVersion }
+            ]
+        };
+        var current = new S3SyncSnapshot();
+        var method = typeof(S3SyncService).GetMethod(
+            "DetectDeletedEntities",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var result = (List<S3SyncTombstone>)method!.Invoke(null, [previous, current])!;
+
+        var tombstone = Assert.Single(result);
+        Assert.Equal("book", tombstone.EntityType);
+        Assert.Equal(id.ToString("N"), tombstone.Key);
+        Assert.Equal(deletedVersion, tombstone.DeletedAt);
+    }
+
+    [Fact]
+    public async Task EncryptedBlob_RoundTripsStreamingAndLegacyFormats()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var sourcePath = Path.Combine(root, "source.bin");
+            var encryptedPath = Path.Combine(root, "encrypted.bin");
+            var decryptedPath = Path.Combine(root, "decrypted.bin");
+            var bytes = RandomNumberGenerator.GetBytes(1024 * 1024 + 137);
+            await File.WriteAllBytesAsync(sourcePath, bytes);
+
+            var encrypt = typeof(S3SyncService).GetMethod(
+                "EncryptFileToPathAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(encrypt);
+            await (Task)encrypt!.Invoke(
+                service,
+                [sourcePath, encryptedPath, "test-passphrase", CancellationToken.None])!;
+
+            var decrypt = typeof(S3SyncService).GetMethod(
+                "DecryptBlobToPathAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(decrypt);
+            await using (var encrypted = new FileStream(encryptedPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                await (Task)decrypt!.Invoke(
+                    service,
+                    [encrypted, decryptedPath, "test-passphrase", CancellationToken.None])!;
+            }
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(decryptedPath));
+
+            var protect = typeof(S3SyncService)
+                .GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
+                .Single(item => item.Name == "ProtectPayload" && item.GetParameters().Length == 2);
+            var legacy = (byte[])protect.Invoke(null, [bytes, "test-passphrase"])!;
+            var legacyPath = Path.Combine(root, "legacy.bin");
+            await File.WriteAllBytesAsync(legacyPath, legacy);
+            var legacyDecryptedPath = Path.Combine(root, "legacy-decrypted.bin");
+            await using (var legacyStream = new FileStream(legacyPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                await (Task)decrypt!.Invoke(
+                    service,
+                    [legacyStream, legacyDecryptedPath, "test-passphrase", CancellationToken.None])!;
+            }
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(legacyDecryptedPath));
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task TombstonedRemoteBook_IsFilteredBeforeDownloadAndCleanup()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            await new ReaderDataService(paths).InitializeAsync();
+
+            var bookId = Guid.NewGuid();
+            var fileId = Guid.NewGuid();
+            var updatedAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+            var relativePath = Path.Combine("library", bookId.ToString("N"), "book.epub");
+            var absolutePath = Path.Combine(paths.Data, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(absolutePath)!);
+            await File.WriteAllBytesAsync(absolutePath, [1, 2, 3]);
+
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO Books (Id, Title, Authors, Tags, Category, IsFavorite, ReadingStatus,
+                                       CreatedAt, UpdatedAt)
+                    VALUES ($bookId, '待删除', '作者', '', '', 0, 0, $updatedAt, $updatedAt);
+                    INSERT INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256)
+                    VALUES ($fileId, $bookId, 'epub', $relativePath, 3,
+                            '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81');
+                    """;
+                command.Parameters.AddWithValue("$bookId", bookId.ToString());
+                command.Parameters.AddWithValue("$fileId", fileId.ToString());
+                command.Parameters.AddWithValue("$updatedAt", updatedAt.ToString("O"));
+                command.Parameters.AddWithValue("$relativePath", relativePath);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var local = new S3SyncSnapshot
+            {
+                DeviceId = Guid.NewGuid().ToString("N"),
+                Tombstones =
+                [
+                    new S3SyncTombstone
+                    {
+                        EntityType = "book",
+                        Key = bookId.ToString("N"),
+                        DeletedAt = updatedAt
+                    }
+                ],
+                Books =
+                [
+                    new S3SyncBook
+                    {
+                        Id = bookId,
+                        Title = "待删除",
+                        Authors = "作者",
+                        CreatedAt = updatedAt,
+                        UpdatedAt = updatedAt
+                    }
+                ],
+                Files =
+                [
+                    new S3SyncBookFile
+                    {
+                        Id = fileId,
+                        BookId = bookId,
+                        FileName = "book.epub",
+                        Format = "epub",
+                        Size = 3,
+                        Sha256 = "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+                        ModifiedAt = updatedAt
+                    }
+                ]
+            };
+            var remote = new S3SyncSnapshot
+            {
+                DeviceId = Guid.NewGuid().ToString("N"),
+                CreatedAt = DateTimeOffset.UtcNow,
+                Books = local.Books.ToList(),
+                Files = local.Files.ToList()
+            };
+
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var method = typeof(S3SyncService).GetMethod(
+                "ApplyRemoteSnapshotsAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            var settings = new S3SyncSettings();
+            var mergeTask = (Task)method!.Invoke(
+                service,
+                [null!, settings, local, new[] { remote }, null, CancellationToken.None])!;
+            await mergeTask;
+
+            await using var verify = new SqliteConnection($"Data Source={paths.Database}");
+            await verify.OpenAsync();
+            using var count = verify.CreateCommand();
+            count.CommandText = "SELECT COUNT(*) FROM Books;";
+            Assert.Equal(0L, (long)(await count.ExecuteScalarAsync())!);
+            Assert.False(File.Exists(absolutePath));
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task DeletionTracking_RecordsActualDeleteTime()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            await new ReaderDataService(paths).InitializeAsync();
+
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            await service.InitializeDeletionTrackingAsync();
+
+            var bookId = Guid.NewGuid();
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var insert = connection.CreateCommand();
+                insert.CommandText = """
+                    INSERT INTO Books (Id, Title, Authors, Tags, Category, IsFavorite, ReadingStatus,
+                                       CreatedAt, UpdatedAt)
+                    VALUES ($id, '删除时间测试', '', '', '', 0, 0, $now, $now);
+                    DELETE FROM Books WHERE Id = $id;
+                    """;
+                insert.Parameters.AddWithValue("$id", bookId.ToString());
+                insert.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                await insert.ExecuteNonQueryAsync();
+            }
+
+            await using var verify = new SqliteConnection($"Data Source={paths.Database}");
+            await verify.OpenAsync();
+            using var query = verify.CreateCommand();
+            query.CommandText = """
+                SELECT EntityType, EntityKey, DeletedAt
+                FROM S3SyncDeletionLog
+                WHERE EntityType = 'book' AND EntityKey = $id;
+                """;
+            query.Parameters.AddWithValue("$id", bookId.ToString());
+            await using var reader = await query.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("book", reader.GetString(0));
+            Assert.Equal(bookId.ToString(), reader.GetString(1));
+            Assert.True(DateTimeOffset.TryParse(reader.GetString(2), out var deletedAt));
+            Assert.True(deletedAt > DateTimeOffset.UtcNow.AddMinutes(-1));
         }
         finally
         {

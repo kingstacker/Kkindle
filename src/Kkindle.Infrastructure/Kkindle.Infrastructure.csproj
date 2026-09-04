@@ -9,6 +9,7 @@
     <ProjectReference Include="..\Kkindle.Core\Kkindle.Core.csproj" />
     <PackageReference Include="AWSSDK.S3" Version="4.0.102.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
     <PackageReference Include="SharpZipLib" Version="1.4.2" />

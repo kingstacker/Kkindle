@@ -362,6 +362,33 @@
             <Setter Property="Background" Value="{StaticResource PressedBrush}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         </Style>
+        <Style Selector="Button.readerAiCitationMarker">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="1,0" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Transitions">
+                <Transitions />
+            </Setter>
+        </Style>
+        <Style Selector="Button.readerAiCitationMarker:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerAiCitationMarker:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
         <Style Selector="TextBox">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
@@ -1182,6 +1209,19 @@
                 </ControlTemplate>
             </Setter>
         </Style>
+        <!-- AI model lists have a deliberately fixed item width. The popup
+             must follow the field width instead of measuring each model name
+             independently, otherwise selecting another model makes the list
+             jump and can push it past the panel divider. -->
+        <Style Selector="ComboBox.aiModelSelector">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Visible" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        </Style>
+        <Style Selector="ComboBoxItem.aiModelOption /template/ TextBlock">
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+        </Style>
         <Style Selector="ComboBoxItem:pointerover">
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
             <Setter Property="Background" Value="{StaticResource InkBrush}" />
@@ -1534,6 +1574,71 @@
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,2" />
             <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.readerAiReasoningToggle">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerAiReasoningToggle:pointerover">
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerAiSendButton">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Width" Value="34" />
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerAiSendButton:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="Button.readerAiSendButton:pressed">
+            <Setter Property="Background" Value="#D9D9D5" />
+        </Style>
+        <Style Selector="Button.readerAiSendButton:disabled">
+            <Setter Property="Opacity" Value="0.35" />
+        </Style>
+        <Style Selector="Button.readerAiQuickOption">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerAiQuickOption:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.readerAiQuickOption:pressed">
+            <Setter Property="Background" Value="#D9D9D5" />
+        </Style>
+        <Style Selector="Button.readerAiQuickOption:disabled">
+            <Setter Property="Opacity" Value="0.35" />
         </Style>
         <Style Selector="Button.readerMinimalAction">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />

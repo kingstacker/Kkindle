@@ -13,12 +13,16 @@ namespace Kkindle;
 /// equivalent, so this TextBlock subclass rebuilds its inlines from the plain
 /// markdown text. Supports headings, lists, quotes, fenced code blocks,
 /// separators, bold/italic, inline code and links (rendered as underlined
-/// text; no navigation). Text stays selectable like the reference.
+/// text). AI source citations such as [S1] are rendered as clickable buttons
+/// through CitationAction. Text stays selectable like the reference.
 /// </summary>
 public sealed class KreaderMarkdownTextBlock : TextBlock
 {
+    public static readonly StyledProperty<Action<string>?> CitationActionProperty =
+        AvaloniaProperty.Register<KreaderMarkdownTextBlock, Action<string>?>(nameof(CitationAction));
+
     private static readonly Regex InlineTokenPattern = new(
-        @"(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*|\[[^\]\n]+\]\([^)\n]+\))",
+        @"(\[[Ss]\d+\]|\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*|\[[^\]\n]+\]\([^)\n]+\))",
         RegexOptions.Compiled);
 
     private static readonly Regex HeadingPattern = new(
@@ -42,11 +46,19 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
         TextWrapping = TextWrapping.Wrap;
     }
 
+    public Action<string>? CitationAction
+    {
+        get => GetValue(CitationActionProperty);
+        set => SetValue(CitationActionProperty, value);
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == TextProperty)
-            RebuildMarkdownInlines(change.GetNewValue<string?>());
+        if (change.Property == TextProperty || change.Property == CitationActionProperty)
+            RebuildMarkdownInlines(change.Property == TextProperty
+                ? change.GetNewValue<string?>()
+                : Text);
     }
 
     private void RebuildMarkdownInlines(string? markdown)
@@ -147,7 +159,22 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
             if (match.Index > position)
                 Inlines?.Add(new Run(text[position..match.Index]));
             var token = match.Value;
-            if (token.StartsWith("**", StringComparison.Ordinal) && token.EndsWith("**", StringComparison.Ordinal))
+            if (Regex.IsMatch(token, @"^\[[Ss]\d+\]$", RegexOptions.CultureInvariant))
+            {
+                var sourceId = token[1..^1].ToUpperInvariant();
+                var citationButton = new Button
+                {
+                    Content = $"[{sourceId}]",
+                    Focusable = true,
+                    Padding = new Thickness(1, 0),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center
+                };
+                citationButton.Classes.Add("readerAiCitationMarker");
+                citationButton.Click += (_, _) => CitationAction?.Invoke(sourceId);
+                Inlines?.Add(new InlineUIContainer(citationButton));
+            }
+            else if (token.StartsWith("**", StringComparison.Ordinal) && token.EndsWith("**", StringComparison.Ordinal))
             {
                 Inlines?.Add(new Run(token[2..^2]) { FontWeight = FontWeight.Bold });
             }

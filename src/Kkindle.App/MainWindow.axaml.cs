@@ -64,10 +64,16 @@ public partial class MainWindow : Window
     private readonly DictionaryService _dictionaryService;
     private readonly ReaderDataService _readerData;
     private readonly EpubBookContentService _bookContent;
+    private readonly EmbeddingModelDownloadService _embeddingModelDownloader;
+    private readonly IEmbeddingService _embeddingService;
+    private readonly ReaderEmbeddingIndexService _readerEmbeddingIndex;
+    private readonly IReaderRetriever _readerRetriever;
+    private readonly ReaderAiContextBuilder _readerAiContextBuilder;
     private readonly EpubFootnoteResolver _footnotes;
     private readonly PdfTextService _pdfTextService;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly AiChatClient _aiChatClient;
+    private readonly QueryRewriteService _queryRewriteService;
     private readonly TtsSettingsStore _ttsSettingsStore;
     private readonly TtsCacheManager _ttsCacheManager;
     private readonly TtsService _readerTts;
@@ -86,6 +92,9 @@ public partial class MainWindow : Window
         Guid.NewGuid().ToString("N"),
         new S3SyncSettings());
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private CancellationTokenSource? _embeddingModelDownloadCancellation;
+    private Task? _embeddingModelDownloadTask;
+    private bool _embeddingModelDownloadBusy;
     private string? _deviceDisplayName;
     private Button? _activeNavigationSectionButton;
     private IReaderHost? _readerActiveHost;
@@ -157,10 +166,24 @@ public partial class MainWindow : Window
         _dictionaryService = new DictionaryService(paths, _formatConverter);
         _readerData = new ReaderDataService(paths);
         _bookContent = new EpubBookContentService(_readerData);
+        _embeddingModelDownloader = new EmbeddingModelDownloadService(paths);
+        _embeddingService = new OnnxEmbeddingService(new OnnxEmbeddingOptions
+        {
+            ModelDirectory = Path.Combine(paths.EmbeddingModels, "bge-small-zh-v1.5")
+        });
+        _readerEmbeddingIndex = new ReaderEmbeddingIndexService(_readerData, _embeddingService);
+        _readerRetriever = new HybridRetriever(
+            new KeywordRetriever(_readerData),
+            new VectorRetriever(_readerData, _embeddingService),
+            log: message => Debug.WriteLine($"[RAG] {message}"));
+        _readerAiContextBuilder = new ReaderAiContextBuilder(_readerData);
         _footnotes = new EpubFootnoteResolver();
         _pdfTextService = new PdfTextService();
         _aiSettingsStore = new AiSettingsStore(paths, _secretProtector);
         _aiChatClient = new AiChatClient();
+        _queryRewriteService = new QueryRewriteService(
+            _aiChatClient,
+            message => Debug.WriteLine($"[RAG] {message}"));
         _ttsSettingsStore = new TtsSettingsStore(paths);
         _ttsCacheManager = new TtsCacheManager();
         _readerTts = new TtsService(
@@ -186,9 +209,19 @@ public partial class MainWindow : Window
         ViewModel = new LibraryViewModel(library, paths.Data);
 
         InitializeComponent();
+        // AcceptsReturn lets the TextBox handle Enter before a normal bubbled
+        // handler can see it. Observe the tunneling phase, including an event
+        // already marked handled, so Ctrl+Enter always reaches the AI sender
+        // while plain Enter remains a newline.
+        ReaderAiQuestionBox.AddHandler(
+            InputElement.KeyDownEvent,
+            ReaderAiQuestionBox_KeyDown,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
         _library.DataChanged += LocalLibraryDataChanged;
         _readerData.DataChanged += LocalReaderDataChanged;
         InitializeS3SyncIndicator();
+        _readerAiThinkingAnimationTimer.Tick += (_, _) => TickReaderAiThinkingAnimation();
         if (startupSettings is not null && !_appSettings.OnboardingCompleted)
         {
             // Choose the first-run surface before the window is presented. The
@@ -446,6 +479,8 @@ public partial class MainWindow : Window
         UpdateDeviceBookEmptyState();
         UpdateReaderAiLanguageText();
         ApplyReaderAiSettingsToControls();
+        _ = ObserveReaderTaskAsync(
+            RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         UpdateCalibreDetectionStatus();
         UpdateZLibraryAccountStatus();
         if (!string.IsNullOrWhiteSpace(_pendingUpdateVersion))
@@ -781,6 +816,7 @@ public partial class MainWindow : Window
         _stage3Timer.Stop();
         _s3SyncTimer.Stop();
         StopS3SyncIndicatorAnimation();
+        StopReaderAiThinkingAnimation();
         _transferToastTimer.Stop();
         _deviceStatusToastTimer.Stop();
         _appSettingsAutoSaveCancellation?.Cancel();
@@ -810,12 +846,27 @@ public partial class MainWindow : Window
         _zLibrarySearchCancellation?.Cancel();
         _zLibrarySearchCancellation?.Dispose();
         _zLibrarySearchCancellation = null;
+        _embeddingModelDownloadCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
+        if (_embeddingModelDownloadTask is { } embeddingModelDownloadTask)
+        {
+            try
+            {
+                await embeddingModelDownloadTask.WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            catch
+            {
+                // Closing the window must not be held up by a slow or broken
+                // model download. Its cancellation token has already fired.
+            }
+        }
         _lifetimeCancellation.Dispose();
         _douban.Dispose();
         _doubanBatchService?.Dispose();
         _zLibraryService.Dispose();
         _aiChatClient.Dispose();
+        _embeddingModelDownloader.Dispose();
+        (_embeddingService as IDisposable)?.Dispose();
         _readerTts.EnvironmentChanged -= ReaderTts_EnvironmentChanged;
         _readerTts.StateChanged -= ReaderTts_StateChanged;
         _readerTts.Dispose();

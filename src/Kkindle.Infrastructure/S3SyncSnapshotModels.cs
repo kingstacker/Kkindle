@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
@@ -21,6 +22,15 @@ internal sealed class S3SyncSnapshot
     public List<S3SyncLayout> Layouts { get; set; } = [];
     public List<S3SyncReadingStats> ReadingStats { get; set; } = [];
     public List<S3SyncTombstone> Tombstones { get; set; } = [];
+
+    // These maps are populated only while capturing the local snapshot. They
+    // are deliberately excluded from the wire format: relative paths are
+    // local implementation details and must not be leaked to other devices.
+    [JsonIgnore]
+    public Dictionary<Guid, string> LocalFilePaths { get; } = [];
+
+    [JsonIgnore]
+    public Dictionary<Guid, string> LocalCoverPaths { get; } = [];
 }
 
 internal sealed class S3SyncBook
@@ -46,6 +56,11 @@ internal sealed class S3SyncBook
     public DateTimeOffset UpdatedAt { get; set; }
     public string? CoverHash { get; set; }
     public string? CoverFileName { get; set; }
+
+    // Populated for a locally captured snapshot only; see S3SyncSnapshot's
+    // non-serialized path maps. Older/remote snapshots leave this null.
+    [JsonIgnore]
+    public string? LocalCoverPath { get; set; }
 }
 
 internal sealed class S3SyncBookFile

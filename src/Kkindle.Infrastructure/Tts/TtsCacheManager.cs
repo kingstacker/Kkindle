@@ -6,23 +6,33 @@ namespace Kkindle.Infrastructure;
 
 /// <summary>
 /// Stores generated audio under the user's cache directory. The file name is
-/// derived from all request inputs, so changing voice, speed, pitch or volume
-/// automatically selects a different audio file.
+/// derived from all request inputs, so changing provider, model, voice, rate,
+/// pitch, format, sample rate or volume automatically selects a different file.
 /// </summary>
 public sealed class TtsCacheManager
 {
+    public const long DefaultMaximumBytes = 1024L * 1024 * 1024;
+    private static readonly string[] CacheAudioExtensions = [".mp3", ".wav", ".ogg", ".opus"];
     private readonly string _temporaryRoot;
+    private readonly long _maximumBytes;
+    private readonly SemaphoreSlim _capacityGate = new(1, 1);
 
-    public TtsCacheManager(string? cacheRoot = null)
+    public TtsCacheManager(
+        string? cacheRoot = null,
+        long maximumBytes = DefaultMaximumBytes)
     {
+        if (maximumBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
         CacheRoot = Path.GetFullPath(
             string.IsNullOrWhiteSpace(cacheRoot)
                 ? ResolveDefaultCacheRoot()
                 : cacheRoot);
         _temporaryRoot = Path.GetFullPath(Path.GetTempPath());
+        _maximumBytes = maximumBytes;
     }
 
     public string CacheRoot { get; }
+    public long MaximumBytes => _maximumBytes;
 
     public string GetCacheKey(string text, TtsOptions options)
     {
@@ -31,7 +41,12 @@ public sealed class TtsCacheManager
         var canonical = string.Join(
             "\u001f",
             text,
+            normalized.Provider,
+            normalized.Model,
             normalized.Voice,
+            normalized.AudioFormat,
+            normalized.SampleRate.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
             normalized.RatePercent.ToString(
                 System.Globalization.CultureInfo.InvariantCulture),
             normalized.PitchHz.ToString(
@@ -55,9 +70,10 @@ public sealed class TtsCacheManager
         var chapterDirectory = Path.Combine(
             bookDirectory,
             "chapter_" + ShortHash(chapterKey));
+        var extension = TtsOptions.Normalize(options).AudioFormat;
         return Path.Combine(
             chapterDirectory,
-            GetCacheKey(text, options) + ".mp3");
+            GetCacheKey(text, options) + "." + extension);
     }
 
     public Task<string?> FindAsync(
@@ -69,10 +85,22 @@ public sealed class TtsCacheManager
     {
         cancellationToken.ThrowIfCancellationRequested();
         var path = GetCachePath(bookKey, chapterKey, text, options);
-        return Task.FromResult<string?>(
-            File.Exists(path) && new FileInfo(path).Length > 0
-                ? path
-                : null);
+        if (!File.Exists(path)) return Task.FromResult<string?>(null);
+        try
+        {
+            if (new FileInfo(path).Length <= 0)
+                return Task.FromResult<string?>(null);
+            Touch(path);
+            return Task.FromResult<string?>(path);
+        }
+        catch (FileNotFoundException)
+        {
+            return Task.FromResult<string?>(null);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return Task.FromResult<string?>(null);
+        }
     }
 
     /// <summary>
@@ -94,8 +122,23 @@ public sealed class TtsCacheManager
             throw new FileNotFoundException("TTS 音频文件不存在。", sourcePath);
 
         var destination = GetCachePath(bookKey, chapterKey, text, options);
-        if (File.Exists(destination) && new FileInfo(destination).Length > 0)
-            return destination;
+        if (File.Exists(destination))
+        {
+            try
+            {
+                if (new FileInfo(destination).Length > 0)
+                {
+                    Touch(destination);
+                    return destination;
+                }
+            }
+            catch (FileNotFoundException)
+            {
+            }
+            catch (DirectoryNotFoundException)
+            {
+            }
+        }
 
         var directory = Path.GetDirectoryName(destination);
         if (string.IsNullOrWhiteSpace(directory))
@@ -127,6 +170,8 @@ public sealed class TtsCacheManager
 
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(temporaryPath, destination, overwrite: true);
+            await EnforceCapacityAsync(destination, cancellationToken)
+                .ConfigureAwait(false);
             return destination;
         }
         catch
@@ -190,10 +235,7 @@ public sealed class TtsCacheManager
                      "book_*",
                      SearchOption.TopDirectoryOnly))
         {
-            foreach (var path in Directory.EnumerateFiles(
-                         bookDirectory,
-                         "*.mp3",
-                         SearchOption.AllDirectories))
+            foreach (var path in EnumerateCacheFiles(bookDirectory))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
@@ -237,6 +279,77 @@ public sealed class TtsCacheManager
         }
         catch
         {
+        }
+    }
+
+    private async Task EnforceCapacityAsync(
+        string protectedPath,
+        CancellationToken cancellationToken)
+    {
+        await _capacityGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!Directory.Exists(CacheRoot)) return;
+
+            var files = new List<(string Path, long Length, DateTime LastAccessUtc)>();
+            long totalBytes = 0;
+            foreach (var path in EnumerateCacheFiles(CacheRoot))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var info = new FileInfo(path);
+                    if (info.Length <= 0) continue;
+                    files.Add((path, info.Length, info.LastAccessTimeUtc));
+                    totalBytes += info.Length;
+                }
+                catch (FileNotFoundException)
+                {
+                }
+                catch (DirectoryNotFoundException)
+                {
+                }
+            }
+
+            if (totalBytes <= _maximumBytes) return;
+            var keep = Path.GetFullPath(protectedPath);
+            foreach (var file in files
+                         .OrderBy(item => item.LastAccessUtc)
+                         .ThenBy(item => item.Path, StringComparer.Ordinal))
+            {
+                if (string.Equals(file.Path, keep, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                DeleteFileQuietly(file.Path);
+                totalBytes -= file.Length;
+                if (totalBytes <= _maximumBytes) break;
+            }
+        }
+        finally
+        {
+            _capacityGate.Release();
+        }
+    }
+
+    private static IEnumerable<string> EnumerateCacheFiles(string root)
+    {
+        if (!Directory.Exists(root)) yield break;
+        foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            if (CacheAudioExtensions.Contains(
+                    Path.GetExtension(path),
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                yield return path;
+            }
+        }
+    }
+
+    private static void Touch(string path)
+    {
+        try { File.SetLastAccessTimeUtc(path, DateTime.UtcNow); }
+        catch
+        {
+            // Cache access metadata is best effort and must never block playback.
         }
     }
 

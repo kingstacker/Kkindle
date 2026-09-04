@@ -170,6 +170,11 @@ public sealed class EdgeTtsEngine : ITtsEngine
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         var normalized = TtsOptions.Normalize(options);
+        if (!normalized.AudioFormat.Equals("mp3", StringComparison.OrdinalIgnoreCase))
+        {
+            return TtsResult.Failure(
+                "当前 edge-tts 引擎只支持 MP3 输出，请选择 MP3 音频格式。" );
+        }
         var executable = await ResolveExecutableAsync(
             refresh: false,
             cancellationToken).ConfigureAwait(false);

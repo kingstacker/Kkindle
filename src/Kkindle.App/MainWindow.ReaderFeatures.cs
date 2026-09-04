@@ -288,7 +288,6 @@ public partial class MainWindow
             ReaderAiView.IsVisible = true;
             ReaderNotesView.IsVisible = false;
             ReaderAiComposer.IsVisible = true;
-            ReaderAiSendBar.IsVisible = true;
             ReaderNotesExportBar.IsVisible = false;
             ReaderAssistantPanel.IsVisible = false;
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
@@ -1676,7 +1675,10 @@ public partial class MainWindow
         if (_readerZenMode) return;
         var visible = !ReaderAssistantPanel.IsVisible;
         ReaderAssistantPanel.IsVisible = visible;
-        ReaderRoot.ColumnDefinitions[2].Width = visible ? new GridLength(360) : new GridLength(0);
+        if (visible)
+            SetReaderAiPanelWidth(_readerAiPanelWidth);
+        else
+            ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         ScheduleLinuxReaderTextFallbackReflow();
         ScheduleReaderRelayout();
     }

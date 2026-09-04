@@ -10,6 +10,7 @@ public sealed class AppPaths
         Covers = Path.Combine(Data, "covers");
         Logs = Path.Combine(Data, "logs");
         ReaderCache = Path.Combine(Data, "reader-cache");
+        EmbeddingModels = Path.Combine(Data, "embedding-models");
         Fonts = Path.Combine(Data, "fonts");
         Dictionaries = Path.Combine(Data, "dictionaries");
         Backups = Path.Combine(Root, "backups");
@@ -23,6 +24,7 @@ public sealed class AppPaths
     public string Covers { get; }
     public string Logs { get; }
     public string ReaderCache { get; }
+    public string EmbeddingModels { get; }
     public string Fonts { get; }
     public string Dictionaries { get; }
     public string Backups { get; }
@@ -36,6 +38,7 @@ public sealed class AppPaths
         Directory.CreateDirectory(Covers);
         Directory.CreateDirectory(Logs);
         Directory.CreateDirectory(ReaderCache);
+        Directory.CreateDirectory(EmbeddingModels);
         Directory.CreateDirectory(Fonts);
         Directory.CreateDirectory(Dictionaries);
         Directory.CreateDirectory(Backups);

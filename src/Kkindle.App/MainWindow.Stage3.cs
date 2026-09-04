@@ -73,6 +73,7 @@ public partial class MainWindow
     private int _zLibraryPageCount;
     private bool _readingMaterialsExportMode;
     private bool _suppressMainAiProviderChange;
+    private bool _suppressMainAiModelChange;
     private bool _settingsPanelVisible;
     private bool _deviceGridView = true;
     private KindleBookCardViewModel? _deviceMultiSelectAnchor;
@@ -342,6 +343,7 @@ public partial class MainWindow
         if (_stage3Ready) return;
 
         await _readerData.InitializeAsync(cancellationToken);
+        await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken);
         await _deviceModelStore.InitializeAsync(cancellationToken);
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
         if (Application.Current is App app)
@@ -3435,11 +3437,17 @@ public partial class MainWindow
                 MainReaderAiModelBox.Text = _readerAiSettings.Model;
                 MainReaderAiApiKeyBox.Text = _readerAiSettings.ApiKey;
                 MainReaderAiSettingsStatusText.Text = string.Empty;
+                ApplyReaderAiModelSelectors(_readerAiSettings.Provider, _readerAiSettings.Model);
             }
             finally
             {
                 _suppressMainAiProviderChange = false;
             }
+            if (_readerAiAvailableModels.Count == 0 && _readerAiSettings.IsConfigured)
+                _ = ObserveReaderTaskAsync(
+                    RefreshReaderAiModelSelectorAsync(_lifetimeCancellation.Token));
+            _ = ObserveReaderTaskAsync(
+                RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         }
         catch (Exception exception)
         {
@@ -3459,6 +3467,8 @@ public partial class MainWindow
         var defaults = AiConnectionSettings.GetDefaults(item.Tag.ToString()!);
         MainReaderAiBaseUrlBox.Text = defaults.BaseUrl;
         MainReaderAiModelBox.Text = defaults.Model;
+        _readerAiAvailableModels = [];
+        ApplyReaderAiModelSelectors(item.Tag.ToString()!, defaults.Model);
         MainReaderAiSettingsStatusText.Text = item.Tag.ToString() == "custom"
             ? T("自定义服务使用 OpenAI-compatible Chat Completions。")
             : string.Empty;
@@ -3466,6 +3476,7 @@ public partial class MainWindow
 
     private async void MainReaderAiSettingsSaveButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (_aiConnectivityTestBusy || _aiModelFetchBusy) return;
         if (MainReaderAiProviderBox.SelectedItem is not ComboBoxItem { Tag: not null } item) return;
         var provider = item.Tag.ToString()!;
         var baseUrl = MainReaderAiBaseUrlBox.Text?.Trim() ?? string.Empty;
@@ -3503,6 +3514,57 @@ public partial class MainWindow
         {
             MainReaderAiSettingsStatusText.Text = T("保存失败：{0}", UiText.Localize(exception.Message));
         }
+    }
+
+    private async void MainReaderAiFetchModelsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MainReaderAiProviderBox.SelectedItem is not ComboBoxItem { Tag: not null } item)
+            return;
+
+        if (!TryBuildReaderAiConnectionSettings(
+                item.Tag.ToString()!,
+                MainReaderAiBaseUrlBox.Text,
+                MainReaderAiModelBox.Text,
+                MainReaderAiApiKeyBox.Text,
+                requireApiKey: true,
+                requireModel: false,
+                out var settings,
+                out var validationMessage))
+        {
+            MainReaderAiSettingsStatusText.Text = validationMessage;
+            return;
+        }
+
+        await FetchReaderAiModelsAsync(
+            settings,
+            MainReaderAiSettingsStatusText,
+            MainReaderAiFetchModelsButton,
+            _lifetimeCancellation.Token);
+    }
+
+    private void MainReaderAiModelSelectorBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressMainAiModelChange
+            || MainReaderAiModelSelectorBox is null
+            || MainReaderAiModelBox is null
+            || MainReaderAiModelSelectorBox.SelectedItem is not ComboBoxItem { Tag: string model })
+            return;
+        MainReaderAiModelBox.Text = model;
+    }
+
+    private async void MainReaderAiSettingsTestButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MainReaderAiProviderBox.SelectedItem is not ComboBoxItem { Tag: not null } item)
+            return;
+
+        await TestReaderAiConnectionAsync(
+            item.Tag.ToString()!,
+            MainReaderAiBaseUrlBox.Text,
+            MainReaderAiModelBox.Text,
+            MainReaderAiApiKeyBox.Text,
+            MainReaderAiSettingsStatusText,
+            MainReaderAiSettingsTestButton,
+            _lifetimeCancellation.Token);
     }
 
     private void PopulateSettingsControls()
@@ -3967,7 +4029,6 @@ public partial class MainWindow
         if (!_stage3Ready || _s3SyncBusy || _s3SyncExitInProgress || !_appSettings.NetworkEnabled) return;
         try
         {
-            _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(_lifetimeCancellation.Token);
             var settings = _s3SyncStoredSettings.Settings;
             if (!settings.Enabled || !settings.AutomaticSyncEnabled) return;
             if (!HasPendingS3LocalChanges
@@ -4772,6 +4833,7 @@ public partial class MainWindow
             _lastS3SyncAt = null;
             await _library.InitializeAsync(_lifetimeCancellation.Token);
             await _readerData.InitializeAsync(_lifetimeCancellation.Token);
+            await _s3SyncService.InitializeDeletionTrackingAsync(_lifetimeCancellation.Token);
             _appSettings = await _appSettingsStore.LoadAsync(_lifetimeCancellation.Token);
             LoadReaderVerticalDebugBoxesSetting();
             _readerAiSettings = result.AiSettings;

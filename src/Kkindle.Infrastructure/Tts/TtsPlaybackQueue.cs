@@ -122,7 +122,10 @@ public sealed class TtsPlaybackQueue : IDisposable
                     cancellationToken)
                 .ConfigureAwait(false);
             if (cached is not null)
-                return TtsResult.Success(cached, "mp3", fromCache: true);
+                return TtsResult.Success(
+                    cached,
+                    TtsOptions.Normalize(item.Options).AudioFormat,
+                    fromCache: true);
 
             var generated = await _engine.SynthesizeAsync(
                     item.Segment.Text,

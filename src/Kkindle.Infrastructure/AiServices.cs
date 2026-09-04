@@ -51,7 +51,7 @@ public sealed class AiConnectionSettings
 
         return new[] { currentModel.Trim() }
             .Concat(defaults)
-            .Where(model => model.Length > 0)
+            .Where(model => !string.IsNullOrWhiteSpace(model))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -173,14 +173,22 @@ public sealed class AiChatClient : IDisposable
         EnsureSuccess(response, body);
 
         using var document = JsonDocument.Parse(body);
-        if (!document.RootElement.TryGetProperty("data", out var data)
-            || data.ValueKind != JsonValueKind.Array)
+        if ((!document.RootElement.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Array)
+            && (!document.RootElement.TryGetProperty("models", out data)
+                || data.ValueKind != JsonValueKind.Array))
             throw new InvalidDataException("AI 服务返回的模型列表格式无法识别。");
 
         return data.EnumerateArray()
-            .Where(item => item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
-            .Select(item => item.GetProperty("id").GetString()?.Trim() ?? string.Empty)
-            .Where(model => model.Length > 0)
+            .Select(item => item.ValueKind == JsonValueKind.String
+                ? item.GetString()
+                : item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+                    ? id.GetString()
+                    : item.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
+                        ? name.GetString()
+                        : null)
+            .Where(model => !string.IsNullOrWhiteSpace(model))
+            .Select(model => model!.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -204,6 +212,24 @@ public sealed class AiChatClient : IDisposable
             answer.Append(chunk.Text);
         }
         return answer.ToString().Trim();
+    }
+
+    public async Task<string> TestConnectionAsync(
+        AiConnectionSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        if (!settings.IsConfigured)
+            throw new InvalidOperationException("请先配置 AI 服务、模型和 API Key。");
+
+        var answer = await CompleteAsync(
+            settings,
+            "你是 Kkindle 的 AI 连通性检测助手。请简短回答，不要补充解释。",
+            "请只回复：连接成功",
+            Array.Empty<AiConversationTurn>(),
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(answer))
+            throw new InvalidDataException("AI 服务返回了空答案。");
+        return answer;
     }
 
     public async IAsyncEnumerable<AiStreamChunk> StreamAsync(
@@ -555,4 +581,3 @@ public sealed class AiChatClient : IDisposable
 
     public void Dispose() => _httpClient.Dispose();
 }
-

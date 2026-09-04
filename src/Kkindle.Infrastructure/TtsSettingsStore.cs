@@ -45,9 +45,12 @@ public sealed class TtsSettingsStore
             return TtsSettings.Normalize(new TtsSettings
             {
                 Provider = persisted.Provider ?? TtsSettings.DefaultProvider,
+                Model = persisted.Model ?? string.Empty,
                 Voice = string.IsNullOrWhiteSpace(persisted.Voice)
                     ? persisted.MicrosoftVoice ?? TtsOptions.DefaultVoice
                     : persisted.Voice,
+                AudioFormat = persisted.AudioFormat ?? TtsOptions.DefaultAudioFormat,
+                SampleRate = persisted.SampleRate,
                 Speed = persisted.Speed,
                 Volume = persisted.Volume,
                 Pitch = persisted.Pitch,
@@ -75,7 +78,10 @@ public sealed class TtsSettingsStore
         var persisted = new PersistedTtsSettings
         {
             Provider = normalized.Provider,
+            Model = normalized.Model,
             Voice = normalized.Voice,
+            AudioFormat = normalized.AudioFormat,
+            SampleRate = normalized.SampleRate,
             Speed = normalized.Speed,
             Volume = normalized.Volume,
             Pitch = normalized.Pitch,
@@ -124,10 +130,14 @@ public sealed class TtsSettingsStore
     private sealed class PersistedTtsSettings
     {
         public string? Provider { get; set; }
+        public string? Model { get; set; }
         public string? Voice { get; set; }
 
         // Read-only migration field for the previous Windows-only prototype.
         public string? MicrosoftVoice { get; set; }
+
+        public string? AudioFormat { get; set; }
+        public int SampleRate { get; set; }
 
         public double Speed { get; set; } = 1.0;
         public int Volume { get; set; } = 100;

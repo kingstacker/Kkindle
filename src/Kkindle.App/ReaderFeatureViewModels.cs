@@ -4,6 +4,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.Core;
+using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 
 namespace Kkindle;
@@ -334,24 +335,47 @@ public sealed class ReaderSearchHighlightTextBlock : TextBlock
 public sealed class ReaderAiSourceViewModel : ObservableObject, IDisposable
 {
     public ReaderAiSourceViewModel(BookContentChunk chunk)
+        : this(chunk, string.Empty, chunk.Content)
+    {
+    }
+
+    public ReaderAiSourceViewModel(ReaderAiSource source)
+        : this(source.Chunk, source.Id, source.Content)
+    {
+    }
+
+    private ReaderAiSourceViewModel(BookContentChunk chunk, string sourceId, string content)
     {
         UiText.LanguageChanged += OnLanguageChanged;
         Chunk = chunk;
+        SourceId = sourceId;
+        Content = content;
     }
 
-    public ReaderAiSourceViewModel(PdfPageText page)
+    public ReaderAiSourceViewModel(PdfPageText page, string sourceId = "S1")
     {
         UiText.LanguageChanged += OnLanguageChanged;
         Page = page;
+        SourceId = sourceId;
+        Content = page.Text;
     }
 
     public BookContentChunk? Chunk { get; }
     public PdfPageText? Page { get; }
-    public string Label => Chunk is { } chunk
-        ? UiText.Get("{0} · 片段 {1}", chunk.ChapterTitle, chunk.ChunkIndex + 1)
-        : Page is { } page
-            ? UiText.Get("第 {0} 页 · {1}", page.PageNumber, CreateExcerpt(page.Text, 100))
-            : string.Empty;
+    public string SourceId { get; }
+    public string Content { get; }
+    public string Label
+    {
+        get
+        {
+            var label = Chunk is { } chunk
+                ? UiText.Get("{0} · 片段 {1}", chunk.ChapterTitle, chunk.ChunkIndex + 1)
+                : Page is { } page
+                    ? UiText.Get("第 {0} 页 · {1}", page.PageNumber, CreateExcerpt(page.Text, 100))
+                    : string.Empty;
+            return SourceId.Length == 0 ? label : $"[{SourceId}] {label}";
+        }
+    }
 
     private void OnLanguageChanged(object? sender, EventArgs e) =>
         OnPropertyChanged(nameof(Label));
@@ -370,26 +394,38 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 {
     private string _content;
     private string _reasoning;
-    private bool _isReasoningVisible;
+    private bool _isReasoningExpanded;
+    private bool _isThinking;
+    private double _thinkingRotation;
+    private bool _isSourcesExpanded;
 
-    public ReaderAiMessageViewModel(string role, string content = "", string reasoning = "")
+    public ReaderAiMessageViewModel(
+        string role,
+        string content = "",
+        string reasoning = "",
+        Action<string>? citationAction = null)
     {
         UiText.LanguageChanged += OnLanguageChanged;
         Role = role;
         _content = content;
         _reasoning = reasoning;
+        CitationAction = citationAction;
     }
 
     public string Role { get; }
+    public Action<string>? CitationAction { get; }
 
     public bool IsUser => Role.Equals("user", StringComparison.OrdinalIgnoreCase);
 
+    public bool IsAssistant => !IsUser;
+
     public string RoleLabel => IsUser ? UiText.Get("你") : "Kreader AI";
 
-    // WinUI reference bubbles: the user message is a transparent box with a
-    // black ink border on the right, the assistant reply a white card with a
-    // light grey border on the left.
-    public IBrush BubbleBackground => IsUser ? Brushes.Transparent : Brushes.White;
+    // Keep both sides as hollow chat boxes so the reader surface remains
+    // light and the question/answer relationship is carried by alignment.
+    public IBrush BubbleBackground => Brushes.Transparent;
+
+    public IBrush BubbleForeground => new SolidColorBrush(Color.FromRgb(25, 25, 25));
 
     public IBrush BorderBrush => IsUser
         ? new SolidColorBrush(Color.FromRgb(0, 0, 0))
@@ -415,21 +451,98 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _reasoning, value);
     }
 
-    public bool IsReasoningVisible
+    public bool HasReasoning => !string.IsNullOrWhiteSpace(Reasoning);
+
+    public bool IsReasoningVisible => HasReasoning && _isReasoningExpanded;
+
+    public string ReasoningToggleLabel =>
+        _isReasoningExpanded ? UiText.Get("收起思考过程") : UiText.Get("展开思考过程");
+
+    public bool IsThinking
     {
-        get => _isReasoningVisible;
-        private set => SetProperty(ref _isReasoningVisible, value);
+        get => _isThinking;
+        private set => SetProperty(ref _isThinking, value);
+    }
+
+    public bool IsThinkingRowVisible => IsThinking || HasReasoning;
+
+    public bool IsThinkingLabelVisible => IsThinking && !HasReasoning;
+
+    public string ThinkingLabel => UiText.Get("思考中…");
+
+    public double ThinkingRotation
+    {
+        get => _thinkingRotation;
+        private set => SetProperty(ref _thinkingRotation, value);
+    }
+
+    public ObservableCollection<ReaderAiSourceViewModel> Sources { get; } = [];
+
+    public bool HasSources => Sources.Count > 0;
+
+    public bool IsSourcesExpanded => _isSourcesExpanded;
+
+    public string SourcesToggleGlyph => _isSourcesExpanded ? "▾" : "▸";
+
+    public void ToggleReasoning()
+    {
+        if (!HasReasoning) return;
+        _isReasoningExpanded = !_isReasoningExpanded;
+        OnPropertyChanged(nameof(IsReasoningVisible));
+        OnPropertyChanged(nameof(ReasoningToggleLabel));
+    }
+
+    public void SetThinking(bool thinking)
+    {
+        var next = !IsUser && thinking;
+        if (IsThinking == next) return;
+        IsThinking = next;
+        OnPropertyChanged(nameof(IsThinkingRowVisible));
+        OnPropertyChanged(nameof(IsThinkingLabelVisible));
+    }
+
+    public void SetThinkingRotation(double angle) => ThinkingRotation = angle;
+
+    public void SetSources(IEnumerable<ReaderAiSourceViewModel> sources)
+    {
+        Sources.Clear();
+        foreach (var source in sources)
+            Sources.Add(source);
+
+        _isSourcesExpanded = false;
+        OnPropertyChanged(nameof(HasSources));
+        OnPropertyChanged(nameof(IsSourcesExpanded));
+        OnPropertyChanged(nameof(SourcesToggleGlyph));
+    }
+
+    public void ToggleSources()
+    {
+        if (!HasSources) return;
+
+        _isSourcesExpanded = !_isSourcesExpanded;
+        OnPropertyChanged(nameof(IsSourcesExpanded));
+        OnPropertyChanged(nameof(SourcesToggleGlyph));
     }
 
     public void Update(string content, string reasoning, bool isStreaming)
     {
         Content = content;
         Reasoning = reasoning;
-        IsReasoningVisible = reasoning.Length > 0 && (isStreaming || Content.Length == 0);
+        SetThinking(isStreaming && string.IsNullOrWhiteSpace(Content));
+        if (!HasReasoning) _isReasoningExpanded = false;
+        OnPropertyChanged(nameof(HasReasoning));
+        OnPropertyChanged(nameof(IsThinkingRowVisible));
+        OnPropertyChanged(nameof(IsThinkingLabelVisible));
+        OnPropertyChanged(nameof(IsReasoningVisible));
+        OnPropertyChanged(nameof(ReasoningToggleLabel));
     }
 
-    private void OnLanguageChanged(object? sender, EventArgs e) =>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
         OnPropertyChanged(nameof(RoleLabel));
+        OnPropertyChanged(nameof(ReasoningToggleLabel));
+        OnPropertyChanged(nameof(ThinkingLabel));
+    }
 
     public void Dispose() =>
         UiText.LanguageChanged -= OnLanguageChanged;
