@@ -5583,12 +5583,40 @@ public partial class MainWindow
         ReaderNavigationIntent intent = ReaderNavigationIntent.None,
         int? transitionDirection = null)
     {
+        var isReaderTtsNavigation = !_readerTtsAutoNavigation
+            && intent is ReaderNavigationIntent.Toc or ReaderNavigationIntent.Progress;
+        var shouldResumeReaderTts = isReaderTtsNavigation
+            && (_readerTtsResumeAfterNavigation
+                || _readerTtsFloatingRequested
+                || IsReaderTtsActiveState(_readerTts.State));
+        var navigationRequestVersion = BeginReaderTtsNavigationRequest(
+            shouldResumeReaderTts);
+        if (!isReaderTtsNavigation && !_readerTtsAutoNavigation)
+            _readerTtsResumeAfterNavigation = false;
         if (!_readerTtsAutoNavigation)
             await _readerTts.StopAsync();
-        if (_readerDocument is null || CurrentReaderHost is null) return false;
-        if (item.ChapterIndex < 0 || item.ChapterIndex >= _readerDocument.Chapters.Count) return false;
-        if (!Uri.TryCreate(item.Target, UriKind.Absolute, out var target) || !target.IsFile) return false;
-        if (!IsPathInside(_readerDocument.RootPath, target.LocalPath)) return false;
+        if (!IsCurrentReaderTtsNavigationRequest(navigationRequestVersion))
+            return false;
+        if (_readerDocument is null || CurrentReaderHost is null)
+        {
+            CompleteReaderTtsNavigationRequest(navigationRequestVersion);
+            return false;
+        }
+        if (item.ChapterIndex < 0 || item.ChapterIndex >= _readerDocument.Chapters.Count)
+        {
+            CompleteReaderTtsNavigationRequest(navigationRequestVersion);
+            return false;
+        }
+        if (!Uri.TryCreate(item.Target, UriKind.Absolute, out var target) || !target.IsFile)
+        {
+            CompleteReaderTtsNavigationRequest(navigationRequestVersion);
+            return false;
+        }
+        if (!IsPathInside(_readerDocument.RootPath, target.LocalPath))
+        {
+            CompleteReaderTtsNavigationRequest(navigationRequestVersion);
+            return false;
+        }
         PruneReaderPendingLocations(intent);
         HideReaderSelectionPopup();
         if (!ReaderNavigationLocationPolicy.UsesRestorePosition(intent))
@@ -5648,6 +5676,12 @@ public partial class MainWindow
                 SetReaderTocSelection(item);
                 ReaderChapterText.Text = GetReaderChapterPositionLabel();
                 UpdateReaderToolbar();
+                if (CanResumeReaderTtsNavigation(
+                        navigationRequestVersion,
+                        shouldResumeReaderTts))
+                {
+                    await ResumeReaderTtsAfterNavigationAsync(true);
+                }
                 await UpdateReaderBookmarkIndicatorAsync();
                 await SaveReaderProgressAsync(sameDocumentSessionToken);
                 return true;
@@ -5663,6 +5697,7 @@ public partial class MainWindow
             }
             finally
             {
+                CompleteReaderTtsNavigationRequest(navigationRequestVersion);
                 if (ReferenceEquals(_readerNavigationCancellation, sameDocumentNavigationCancellation))
                     _readerNavigationCancellation = null;
                 sameDocumentNavigationCancellation.Dispose();
@@ -5744,6 +5779,12 @@ public partial class MainWindow
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
             UpdateReaderToolbar();
             ReaderStatusText.Text = string.Empty;
+            if (CanResumeReaderTtsNavigation(
+                    navigationRequestVersion,
+                    shouldResumeReaderTts))
+            {
+                await ResumeReaderTtsAfterNavigationAsync(true);
+            }
             await UpdateReaderBookmarkIndicatorAsync();
             await SaveReaderProgressAsync(sessionToken);
             _ = PreloadNextReaderChapterAsync(sessionToken);
@@ -5770,6 +5811,7 @@ public partial class MainWindow
         }
         finally
         {
+            CompleteReaderTtsNavigationRequest(navigationRequestVersion);
             await HideReaderChapterHoldOverlayAsync();
             if (ReferenceEquals(_readerNavigationCancellation, navigationCancellation))
                 _readerNavigationCancellation = null;
@@ -8930,15 +8972,8 @@ public partial class MainWindow
         }
 
         if (ttsFloatingActive)
-        {
-            var surfaceWidth = (window.Right - window.Left) / scaling;
-            var surfaceHeight = (window.Bottom - window.Top) / scaling;
-            UpdateReaderTtsFloatingForPointer(
-                (cursor.X - window.Left) / scaling,
-                (cursor.Y - window.Top) / scaling,
-                surfaceWidth,
-                surfaceHeight);
-        }
+            UpdateReaderTtsFloatingForScreenPointer(
+                new PixelPoint(cursor.X, cursor.Y));
     }
 
     private void ReaderRoot_PointerMoved(object? sender, PointerEventArgs e)
@@ -8949,18 +8984,22 @@ public partial class MainWindow
         // non-100% display scaling and repeatedly opens/closes the popup.
         if (OperatingSystem.IsWindows()) return;
 
-        var point = e.GetPosition(ReaderRoot);
+        var rootPoint = e.GetPosition(ReaderRoot);
+        var contentPoint = e.GetPosition(ReaderReadingArea);
         UpdateReaderTtsFloatingForPointer(
-            point.X,
-            point.Y,
-            ReaderRoot.Bounds.Width,
-            ReaderRoot.Bounds.Height);
+            contentPoint.X,
+            contentPoint.Y,
+            ReaderReadingArea.Bounds.Width,
+            ReaderReadingArea.Bounds.Height);
 
         if (!_readerZenMode) return;
         var now = Environment.TickCount64;
         if (now - _readerZenLastMouseMoveTick <= 80) return;
         _readerZenLastMouseMoveTick = now;
-        UpdateReaderZenChromeForPointer(point.X, point.Y, ReaderRoot.Bounds.Width);
+        UpdateReaderZenChromeForPointer(
+            rootPoint.X,
+            rootPoint.Y,
+            ReaderRoot.Bounds.Width);
     }
 
     private void UpdateReaderZenChromeForPointer(double x, double y, double surfaceWidth)

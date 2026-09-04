@@ -254,65 +254,21 @@ public static class TtsTextSegmenter
     }
 
     /// <summary>
-    /// Splits spoken sentences again at reader page boundaries. A sentence may
-    /// continue across pages, but the two page fragments are played in order so
-    /// the reader can move to the next page before its audio starts. Offsets
-    /// must be measured in the same plain-text string passed as <paramref name="source"/>.
+    /// Keeps the historical page-aware entry point for callers that already
+    /// provide layout offsets, but never treats a visual page boundary as a
+    /// speech boundary. A sentence that crosses pages must stay in one audio
+    /// request so the provider does not insert an artificial pause between its
+    /// two visual fragments.
     /// </summary>
     public static IReadOnlyList<TtsTextSegment> SplitSentencesAtPageBreaks(
         string? source,
         IReadOnlyList<int>? pageBreakOffsets,
         int maxCharacters = DefaultMaximumCharacters)
     {
-        var sentences = SplitSentences(source, maxCharacters);
-        if (sentences.Count == 0
-            || pageBreakOffsets is null
-            || pageBreakOffsets.Count == 0
-            || string.IsNullOrEmpty(source))
-        {
-            return sentences;
-        }
-
-        var boundaries = pageBreakOffsets
-            .Where(offset => offset > 0 && offset < source.Length)
-            .Distinct()
-            .OrderBy(offset => offset)
-            .ToArray();
-        if (boundaries.Length == 0) return sentences;
-
-        var result = new List<TtsTextSegment>(sentences.Count + boundaries.Length);
-        foreach (var sentence in sentences)
-        {
-            var partStart = sentence.Start;
-            foreach (var boundary in boundaries)
-            {
-                if (boundary <= partStart) continue;
-                if (boundary >= sentence.End) break;
-
-                AddTrimmedSegment(source, partStart, boundary, result);
-                partStart = boundary;
-            }
-
-            AddTrimmedSegment(source, partStart, sentence.End, result);
-        }
-
-        return result;
-    }
-
-    private static void AddTrimmedSegment(
-        string source,
-        int start,
-        int end,
-        List<TtsTextSegment> segments)
-    {
-        while (start < end && char.IsWhiteSpace(source[start])) start++;
-        while (end > start && char.IsWhiteSpace(source[end - 1])) end--;
-        if (end <= start) return;
-
-        segments.Add(new TtsTextSegment(
-            start,
-            end - start,
-            source.Substring(start, end - start)));
+        // Page offsets describe the reader layout only. Deliberately consume
+        // the parameter without using it as a segmentation boundary.
+        _ = pageBreakOffsets;
+        return SplitSentences(source, maxCharacters);
     }
 
     private static int FindNextSentenceEnd(string text, int start)

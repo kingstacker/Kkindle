@@ -648,8 +648,6 @@ public partial class MainWindow
     {
         direction = Math.Sign(direction);
         if (direction == 0) return;
-        if (!_readerTtsAutoNavigation)
-            await _readerTts.StopAsync();
         if (_readerIsPdf)
         {
             await NavigatePdfPageAsync(_readerPdfPage + direction, ReaderToken);
@@ -817,7 +815,7 @@ public partial class MainWindow
         Interlocked.Increment(ref _readerProgressSaveSequence);
         try
         {
-            _readerTtsFloatingRequested = false;
+            CancelReaderTtsContinuation();
             await _readerTts.StopAsync();
             ReaderTtsPopup.IsOpen = false;
         // Return-to-bookshelf is the authoritative checkpoint. Wait for a

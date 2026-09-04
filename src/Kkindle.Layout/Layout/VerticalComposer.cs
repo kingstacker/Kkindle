@@ -52,6 +52,7 @@ internal sealed class VerticalComposer
 
     public void Compose(ChapterContent content)
     {
+        var previousBlockWasHeading = false;
         foreach (var block in content.Blocks)
         {
             switch (block.Kind)
@@ -63,16 +64,19 @@ internal sealed class VerticalComposer
                     PlaceRule(block);
                     break;
                 default:
-                    PlaceTextBlock(block);
+                    PlaceTextBlock(block, previousBlockWasHeading);
                     break;
             }
+
+            previousBlockWasHeading = block.Kind == BlockKind.Heading;
         }
     }
 
-    private void PlaceTextBlock(ContentBlock block)
+    private void PlaceTextBlock(ContentBlock block, bool followsHeading)
     {
         var isHeading = block.Kind == BlockKind.Heading;
         var startsAtPageTop = isHeading
+            && !followsHeading
             && (!string.IsNullOrWhiteSpace(block.ElementId) || block.FragmentIds.Count > 0);
 
         float rightInset = 0f;
@@ -104,9 +108,6 @@ internal sealed class VerticalComposer
         }
         _cursorX -= rightInset;
 
-        var quoteRight = float.MinValue;
-        var quoteLeft = float.MaxValue;
-
         var index = 0;
         var firstColumnOfBlock = true;
         while (index < cells.Count)
@@ -133,23 +134,8 @@ internal sealed class VerticalComposer
                 columnLeft,
                 centerVertically: isHeading && !startsAtPageTop);
 
-            if (block.Kind == BlockKind.Blockquote && flowUsed > 0)
-            {
-                quoteRight = Math.Max(quoteRight, _cursorX);
-                quoteLeft = Math.Min(quoteLeft, columnLeft);
-            }
-
             index = placed;
             _cursorX -= ColumnPitch;
-        }
-
-        if (block.Kind == BlockKind.Blockquote && quoteRight > quoteLeft)
-        {
-            _pages.AddDecoration(new PlacedRect
-            {
-                Kind = DecorationKind.BlockquoteBar,
-                Rect = new SKRect(quoteRight, ContentTop, quoteRight + 3f, ContentTop + ContentHeight),
-            });
         }
 
         _cursorX -= block.SpaceAfterLines * ColumnPitch;

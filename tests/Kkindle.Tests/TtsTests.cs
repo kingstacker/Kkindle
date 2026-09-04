@@ -79,7 +79,7 @@ public sealed class TtsTests
     }
 
     [Fact]
-    public void SentenceSegmenterSplitsCrossPageSentenceAtThePageBreak()
+    public void SentenceSegmenterKeepsCrossPageSentenceTogether()
     {
         const string source = "本页末尾，下一页继续说完。";
         var pageBreak = source.IndexOf("下一", StringComparison.Ordinal);
@@ -90,9 +90,9 @@ public sealed class TtsTests
             maxCharacters: 120);
 
         Assert.Equal(
-            ["本页末尾，", "下一页继续说完。"],
+            [source],
             segments.Select(segment => segment.Text).ToArray());
-        Assert.Equal([0, pageBreak], segments.Select(segment => segment.Start).ToArray());
+        Assert.Equal([0], segments.Select(segment => segment.Start).ToArray());
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public sealed class TtsTests
     }
 
     [Fact]
-    public async Task ServiceHighlightsTheNextPageBeforePlayingItsFragment()
+    public async Task ServiceKeepsCrossPageSentenceInOneAudioRequest()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -276,10 +276,61 @@ public sealed class TtsTests
             });
             await stopped.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
-            Assert.Equal(2, player.PlayCount);
-            Assert.Equal(2, highlights.Count);
+            Assert.Equal(1, player.PlayCount);
+            Assert.Single(highlights);
             Assert.Equal(0, highlights[0].Start);
-            Assert.Equal(pageBreak, highlights[1].Start);
+            Assert.Equal(text.Length, highlights[0].Length);
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task ServiceSkipsImageOnlyDocumentsBeforeStartingPlayback()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new FakeEngine();
+            var player = new FakePlayer();
+            var readable = new ReaderTtsDocument(
+                "book:text",
+                "后面的正文。",
+                0,
+                (_, _) => Task.CompletedTask,
+                () => { },
+                BookKey: "book",
+                ChapterKey: "text");
+            var current = 0;
+            var advanceCount = 0;
+            var stopped = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            using var service = new TtsService(
+                engine,
+                new TtsCacheManager(root),
+                player,
+                () => current == 0 ? null : readable,
+                _ =>
+                {
+                    advanceCount++;
+                    current++;
+                    return Task.FromResult(true);
+                });
+            service.StateChanged += (_, args) =>
+            {
+                if (args.State == TtsPlaybackState.Stopped)
+                    stopped.TrySetResult(true);
+            };
+
+            await service.StartAsync(new TtsSettings { AutoAdvance = false });
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+            Assert.Equal(1, advanceCount);
+            Assert.Equal(1, player.PlayCount);
+            Assert.Equal(TtsPlaybackState.Stopped, service.State);
         }
         finally
         {

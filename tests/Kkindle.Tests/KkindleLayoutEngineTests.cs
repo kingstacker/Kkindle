@@ -166,6 +166,22 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     }
 
     [Fact]
+    public void Blockquote_DoesNotAddAnArtificialVerticalBar()
+    {
+        var path = WriteChapter("<blockquote><p>引用内容也应该保持普通正文的干净排版。</p></blockquote>");
+        var content = new XhtmlChapterLoader().Load(path);
+
+        using var engine = CreateEngine();
+        foreach (var mode in new[] { TypesetWritingMode.HorizontalTb, TypesetWritingMode.VerticalRl })
+        {
+            var layout = engine.Compose(content, Options(mode));
+            Assert.DoesNotContain(
+                layout.Pages.SelectMany(page => page.Decorations),
+                decoration => decoration.Kind == DecorationKind.BlockquoteBar);
+        }
+    }
+
+    [Fact]
     public void Horizontal_BreaksAnUnbreakableTokenThatExceedsTheContentBox()
     {
         var token = new string('W', 400);
@@ -752,6 +768,95 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     }
 
     [Fact]
+    public void Loader_ConvertsPlainNumberedNotesIntoHoverableFootnotes()
+    {
+        var path = WriteChapter(
+            "<p>正文第一处（1），第二处[2]。</p>"
+            + "<p>【注释】</p>"
+            + "<p>（1）</p>"
+            + "<p>第一条注释说明。</p>"
+            + "<p>[2]</p>"
+            + "<p>第二条注释说明。</p>");
+
+        var content = new XhtmlChapterLoader().Load(path);
+        var markers = content.Blocks
+            .SelectMany(block => block.Items)
+            .Where(item => item.Kind == InlineKind.FootnoteMarker)
+            .ToList();
+
+        Assert.Equal(2, markers.Count);
+        Assert.Equal("（1）", markers[0].Text);
+        Assert.Equal("第一条注释说明。", markers[0].FootnoteText);
+        Assert.Equal("[2]", markers[1].Text);
+        Assert.Equal("第二条注释说明。", markers[1].FootnoteText);
+        var firstNoteBlock = Assert.Single(content.Blocks, block =>
+            block.Items.Any(item => item.Text == "第一条注释说明。"));
+        Assert.Contains(firstNoteBlock.Items, item => item.Text == "（1）");
+        var secondNoteBlock = Assert.Single(content.Blocks, block =>
+            block.Items.Any(item => item.Text == "第二条注释说明。"));
+        Assert.Contains(secondNoteBlock.Items, item => item.Text == "[2]");
+        Assert.Contains("（1）", content.BodyText);
+        Assert.Contains("第二条注释说明", content.BodyText);
+
+        using var engine = CreateEngine();
+        foreach (var mode in new[] { TypesetWritingMode.HorizontalTb, TypesetWritingMode.VerticalRl })
+        {
+            var layout = engine.Compose(content, Options(mode));
+            var hotZones = layout.Pages
+                .SelectMany(page => page.HotZones)
+                .Where(zone => zone.Kind == HotZoneKind.FootnoteMarker)
+                .ToList();
+
+            Assert.Equal(2, hotZones.Count);
+            Assert.Contains(hotZones, zone => zone.FootnoteText == "第一条注释说明。");
+            Assert.Contains(hotZones, zone => zone.FootnoteText == "第二条注释说明。");
+        }
+    }
+
+    [Fact]
+    public void Loader_AssociatesRepeatedPlainNoteSectionsWithTheirOwnBodyMarkers()
+    {
+        var path = WriteChapter(
+            "<p>第一段正文（1）。</p>"
+            + "<p>【注释】</p>"
+            + "<p>（1）第一组注释。</p>"
+            + "<p>【译文】</p>"
+            + "<p>第一组译文。</p>"
+            + "<p>第二段正文（1），另一个标记(2)。</p>"
+            + "<p>【注释】</p>"
+            + "<p>（1）第二组第一条。</p>"
+            + "<p>（2）第二组第二条。</p>"
+            + "<p>【译文】</p>");
+
+        var content = new XhtmlChapterLoader().Load(path);
+        var markers = content.Blocks
+            .SelectMany(block => block.Items)
+            .Where(item => item.Kind == InlineKind.FootnoteMarker)
+            .ToList();
+
+        Assert.Equal(3, markers.Count);
+        Assert.Equal("第一组注释。", markers[0].FootnoteText);
+        Assert.Equal("第二组第一条。", markers[1].FootnoteText);
+        Assert.Equal("第二组第二条。", markers[2].FootnoteText);
+        Assert.NotEqual(markers[0].FootnoteHref, markers[1].FootnoteHref);
+
+        using var engine = CreateEngine();
+        foreach (var mode in new[] { TypesetWritingMode.HorizontalTb, TypesetWritingMode.VerticalRl })
+        {
+            var layout = engine.Compose(content, Options(mode));
+            var hotZones = layout.Pages
+                .SelectMany(page => page.HotZones)
+                .Where(zone => zone.Kind == HotZoneKind.FootnoteMarker)
+                .ToList();
+
+            Assert.Equal(3, hotZones.Count);
+            Assert.Contains(hotZones, zone => zone.FootnoteText == "第一组注释。");
+            Assert.Contains(hotZones, zone => zone.FootnoteText == "第二组第一条。");
+            Assert.Contains(hotZones, zone => zone.FootnoteText == "第二组第二条。");
+        }
+    }
+
+    [Fact]
     public void Loader_KeepsInlineImageFragmentOnTheImageBlock()
     {
         var imagePath = WritePng();
@@ -895,6 +1000,33 @@ public sealed class KkindleLayoutEngineTests : IDisposable
                 rect.Value.Top,
                 0f,
                 options.InsetVertical + options.BaseFontSize * 1.5f);
+        }
+    }
+
+    [Fact]
+    public void AdjacentFragmentHeadingStaysWithThePreviousHeading()
+    {
+        var path = WriteChapter(
+            "<h1>第一章</h1>"
+            + "<h1 id=\"chapter-title\">老三</h1>"
+            + "<p>章节正文应该紧跟在标题之后。</p>");
+        var content = new XhtmlChapterLoader().Load(path);
+        var firstHeadingOffset = content.BodyText.IndexOf("第一章", StringComparison.Ordinal);
+        var secondHeadingOffset = content.BodyText.IndexOf("老三", StringComparison.Ordinal);
+        Assert.True(firstHeadingOffset >= 0);
+        Assert.True(secondHeadingOffset >= 0);
+        var heading = Assert.Single(content.Blocks, block => block.Kind == BlockKind.Heading);
+        Assert.Equal("第一章 老三", string.Concat(heading.Items.Select(item => item.Text)));
+
+        using var engine = CreateEngine();
+        foreach (var mode in new[] { TypesetWritingMode.HorizontalTb, TypesetWritingMode.VerticalRl })
+        {
+            var layout = engine.Compose(content, Options(mode));
+            var firstPage = layout.GetPageIndexOfOffset(firstHeadingOffset);
+            var secondPage = layout.GetPageIndexOfFragment("chapter-title");
+
+            Assert.Equal(firstPage, secondPage);
+            Assert.Equal(secondPage, layout.GetPageIndexOfOffset(secondHeadingOffset));
         }
     }
 

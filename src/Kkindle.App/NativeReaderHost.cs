@@ -692,8 +692,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return null;
         }
 
+        var speechStartOffset = GetSpeechStartOffset();
+        if (speechStartOffset < 0)
+        {
+            return null;
+        }
+
         if (ReferenceEquals(_speechTextSnapshotContent, _content)
-            && ReferenceEquals(_speechTextSnapshotLayout, _layout))
+            && ReferenceEquals(_speechTextSnapshotLayout, _layout)
+            && _speechTextSnapshot is { StartOffset: var cachedStartOffset }
+            && cachedStartOffset == speechStartOffset)
         {
             return _speechTextSnapshot;
         }
@@ -702,7 +710,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _speechTextSnapshotLayout = _layout;
         _speechTextSnapshot = BuildSpeechTextSnapshot(
             _content,
-            GetSpeechStartOffset(),
+            speechStartOffset,
             _layout);
         return _speechTextSnapshot;
     }
@@ -735,9 +743,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         {
             foreach (var item in block.Items)
             {
-                // Ghost items (ruby phonetics) and generated markers/images
-                // have no visible source range and must not be spoken.
-                if (item.Ghost || item.TextStart < 0 || item.Text.Length == 0)
+                // Ghost items (ruby phonetics), footnote references and
+                // generated markers/images must not be spoken. Keep the
+                // reference in BodyText so source offsets and footnote
+                // interaction remain unchanged; only omit it from this TTS
+                // snapshot.
+                if (item.Ghost
+                    || item.Kind == InlineKind.FootnoteMarker
+                    || item.FootnoteHref is not null
+                    || item.TextStart < 0
+                    || item.Text.Length == 0)
                     continue;
 
                 var itemStart = Math.Clamp(item.TextStart, 0, content.BodyText.Length);
@@ -893,12 +908,27 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _speechTextSnapshotLayout = null;
     }
 
-    /// <summary>Character offset of the first visible text, for starting TTS.</summary>
+    /// <summary>
+    /// Character offset of the first visible text at or after the current page,
+    /// for starting TTS. Returns -1 when the current chapter has no readable
+    /// text from the current page onward (for example, an image-only page at
+    /// the end of a chapter).
+    /// </summary>
     public int GetSpeechStartOffset()
     {
-        if (_layout is null || _layout.Pages.Count == 0) return 0;
+        if (_layout is null || _layout.Pages.Count == 0) return -1;
         var pageIndex = Math.Clamp(VisibleFirstPageIndex, 0, _layout.Pages.Count - 1);
-        return Math.Max(0, _layout.Pages[pageIndex].TextStartOffset);
+        for (var index = pageIndex; index < _layout.Pages.Count; index++)
+        {
+            var page = _layout.Pages[index];
+            if (page.TextStartOffset >= 0
+                && page.TextEndOffset > page.TextStartOffset)
+            {
+                return page.TextStartOffset;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>Paints and scrolls the currently spoken text range.</summary>

@@ -39,6 +39,7 @@ internal sealed class HorizontalComposer
 
     public void Compose(ChapterContent content)
     {
+        var previousBlockWasHeading = false;
         foreach (var block in content.Blocks)
         {
             switch (block.Kind)
@@ -50,16 +51,19 @@ internal sealed class HorizontalComposer
                     PlaceRule(block);
                     break;
                 default:
-                    PlaceTextBlock(block);
+                    PlaceTextBlock(block, previousBlockWasHeading);
                     break;
             }
+
+            previousBlockWasHeading = block.Kind == BlockKind.Heading;
         }
     }
 
-    private void PlaceTextBlock(ContentBlock block)
+    private void PlaceTextBlock(ContentBlock block, bool followsHeading)
     {
         var isHeading = block.Kind == BlockKind.Heading;
         var startsAtPageTop = isHeading
+            && !followsHeading
             && (!string.IsNullOrWhiteSpace(block.ElementId) || block.FragmentIds.Count > 0);
         float leftInset = 0f;
         float rightInset = 0f;
@@ -101,8 +105,6 @@ internal sealed class HorizontalComposer
         }
 
         var lines = BreakLines(cells, availWidth, block.TextIndentEm * BaseFontSize);
-        var quoteTop = float.MaxValue;
-        var quoteBottom = float.MinValue;
 
         for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
         {
@@ -118,12 +120,6 @@ internal sealed class HorizontalComposer
                 _pages.RecordFragment(block.ElementId);
                 _pages.RecordFragments(block.FragmentIds);
             }
-            if (block.Kind == BlockKind.Blockquote)
-            {
-                quoteTop = Math.Min(quoteTop, _cursorY);
-                quoteBottom = Math.Max(quoteBottom, _cursorY + lineHeight);
-            }
-
             var baseline = _cursorY + lineHeight / 2f + (line.Ascent - line.Descent) / 2f;
 
             var startX = blockLeft + line.Indent;
@@ -143,15 +139,6 @@ internal sealed class HorizontalComposer
 
             PlaceLine(line, startX, baseline, _cursorY, lineHeight);
             _cursorY += lineHeight;
-        }
-
-        if (block.Kind == BlockKind.Blockquote && quoteTop <= quoteBottom)
-        {
-            _pages.AddDecoration(new PlacedRect
-            {
-                Kind = DecorationKind.BlockquoteBar,
-                Rect = new SKRect(InsetH, quoteTop, InsetH + 3f, quoteBottom),
-            });
         }
 
         _cursorY += block.SpaceAfterLines * BodyLineHeight;

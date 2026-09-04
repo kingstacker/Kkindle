@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -14,11 +15,21 @@ public partial class MainWindow
     private const double ReaderTtsFloatingPanelHeight = 128;
     private const double ReaderTtsFloatingPanelRightMargin = 22;
     private const double ReaderTtsFloatingPanelBottomMargin = 20;
-    private const double ReaderTtsFloatingCollapsedOffset = 134;
+    private const double ReaderTtsFloatingCollapsedVisibleWidth = 16;
+    private const double ReaderTtsFloatingCollapsedOffset =
+        ReaderTtsFloatingPanelWidth
+        + ReaderTtsFloatingPanelRightMargin
+        - ReaderTtsFloatingCollapsedVisibleWidth;
     private const double ReaderTtsFloatingEdgeActivationWidth = 36;
     private const double ReaderTtsFloatingEdgeActivationTopPadding = 22;
     private const double ReaderTtsFloatingEdgeActivationBottomPadding = 10;
     private const int ReaderTtsFloatingCollapseDelayMs = 700;
+    private const int ReaderTtsFloatingAutoHideDelayMs = 2200;
+    private const int ReaderTtsFloatingPointerExitCollapseDelayMs = 180;
+    private const int ReaderTtsButtonBreathingIntervalMs = 50;
+    private const double ReaderTtsButtonBreathingPeriodMs = 1800;
+    private const double ReaderTtsSpectrumMinimumHeight = 4;
+    private const double ReaderTtsSpectrumMaximumHeight = 22;
 
     private sealed record ReaderTtsPrefetchRequest(
         int ChapterIndex,
@@ -34,18 +45,63 @@ public partial class MainWindow
     private bool _readerTtsAutoNavigation;
     private bool _readerTtsFloatingRequested;
     private bool _readerTtsFloatingExpanded;
+    private bool _readerTtsFloatingStartupShowing;
+    private bool _readerTtsResumeAfterNavigation;
+    private long _readerTtsNavigationRequestVersion;
     private bool _readerTtsEnvironmentChecked;
     private bool _readerTtsPreviewInProgress;
     private long _readerTtsHighlightVersion;
     private string? _readerTtsNotice;
     private Task? _readerTtsEnvironmentTask;
     private DispatcherTimer? _readerTtsFloatingCollapseTimer;
+    private DispatcherTimer? _readerTtsFloatingAutoHideTimer;
+    private DispatcherTimer? _readerTtsButtonBreathingTimer;
+    private double _readerTtsButtonBreathingPhase;
 
     private static bool IsZhCnVoice(TtsVoiceInfo voice)
     {
         var culture = voice.Culture?.Replace('_', '-');
         return string.Equals(culture, "zh-CN", StringComparison.OrdinalIgnoreCase)
             || voice.Id.StartsWith("zh-CN-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsReaderTtsActiveState(TtsPlaybackState state)
+        => state is TtsPlaybackState.Generating
+            or TtsPlaybackState.Playing
+            or TtsPlaybackState.Paused
+            or TtsPlaybackState.AdvancingChapter;
+
+    private long BeginReaderTtsNavigationRequest(bool shouldResume)
+    {
+        var requestVersion = Interlocked.Increment(
+            ref _readerTtsNavigationRequestVersion);
+        if (shouldResume)
+            _readerTtsResumeAfterNavigation = true;
+        return requestVersion;
+    }
+
+    private bool IsCurrentReaderTtsNavigationRequest(long requestVersion)
+        => requestVersion == Volatile.Read(
+            ref _readerTtsNavigationRequestVersion);
+
+    private bool CanResumeReaderTtsNavigation(
+        long requestVersion,
+        bool shouldResume)
+        => shouldResume
+            && IsCurrentReaderTtsNavigationRequest(requestVersion)
+            && _readerTtsResumeAfterNavigation;
+
+    private void CompleteReaderTtsNavigationRequest(long requestVersion)
+    {
+        if (IsCurrentReaderTtsNavigationRequest(requestVersion))
+            _readerTtsResumeAfterNavigation = false;
+    }
+
+    private void CancelReaderTtsContinuation()
+    {
+        _readerTtsResumeAfterNavigation = false;
+        Interlocked.Increment(ref _readerTtsNavigationRequestVersion);
+        _readerTtsFloatingRequested = false;
     }
 
     private ReaderTtsDocument? GetCurrentReaderTtsDocument()
@@ -323,14 +379,14 @@ public partial class MainWindow
         {
             _readerTtsFloatingRequested = true;
         }
-        if (e.State is TtsPlaybackState.Generating
-            or TtsPlaybackState.Playing
-            or TtsPlaybackState.AdvancingChapter)
+        if (e.State is TtsPlaybackState.Stopped
+            or TtsPlaybackState.Error)
         {
-            // Every new/resumed playback starts unobtrusively. The edge
-            // handle remains available when the controls are needed.
+            _readerTtsFloatingRequested = false;
+            _readerTtsFloatingStartupShowing = false;
             _readerTtsFloatingExpanded = false;
             _readerTtsFloatingCollapseTimer?.Stop();
+            _readerTtsFloatingAutoHideTimer?.Stop();
         }
         if (e.State == TtsPlaybackState.Error
             && !string.IsNullOrWhiteSpace(e.Message))
@@ -498,10 +554,34 @@ public partial class MainWindow
         }
         if (ReaderTtsButton is null) return;
 
+        // An image-only page/chapter has no current speech document, but it is
+        // still a valid starting point: TtsService will advance to the next
+        // chapter containing visible text when playback starts.
         var documentAvailable = !_readerIsPdf
-            && GetCurrentReaderTtsDocument() is not null;
-        ReaderTtsButton.Content = T("听书");
-        ReaderTtsButton.IsEnabled = _readerTts.CanOpen && documentAvailable;
+            && _readerDocument is not null
+            && CurrentReaderHost is not null;
+        var state = _readerTts.State;
+        var isActive = IsReaderTtsActiveState(state);
+        var buttonText = _readerTts.EnvironmentSetupInProgress
+            ? T("准备中")
+            : state switch
+            {
+                TtsPlaybackState.Generating => T("生成中"),
+                TtsPlaybackState.Playing => T("朗读中"),
+                TtsPlaybackState.Paused => T("已暂停"),
+                TtsPlaybackState.AdvancingChapter => T("跳转中"),
+                _ => T("听书")
+            };
+        ReaderTtsButtonText.Text = buttonText;
+        ToolTip.SetTip(
+            ReaderTtsButton,
+            _readerTts.EnvironmentSetupInProgress
+                ? T("准备听书环境")
+                : isActive ? T("停止听书") : T("开始听书"));
+        UpdateReaderTtsButtonVisualState(state);
+        ReaderTtsButton.IsEnabled = _readerTts.CanOpen
+            && documentAvailable
+            && !_readerTts.EnvironmentSetupInProgress;
         ReaderTtsTitleText.Text = T("听书");
         ReaderTtsDescriptionText.Text = T(
             "首次启动会自动准备 edge-tts；生成语音需要联网。Windows 和 Linux 均支持。");
@@ -525,7 +605,6 @@ public partial class MainWindow
         ReaderTtsNextSegmentButton.Content = T("下一段");
         ReaderTtsStopButton.Content = T("停止");
 
-        var state = _readerTts.State;
         ReaderTtsPlayButton.Content = state switch
         {
             TtsPlaybackState.Playing => T("暂停"),
@@ -577,6 +656,106 @@ public partial class MainWindow
         UpdateReaderTtsFloatingUi(state);
     }
 
+    private void UpdateReaderTtsButtonVisualState(TtsPlaybackState state)
+    {
+        if (ReaderTtsButton is null
+            || ReaderTtsButtonText is null
+            || ReaderTtsSpectrum is null)
+        {
+            return;
+        }
+
+        var active = IsReaderTtsActiveState(state);
+        var playing = state == TtsPlaybackState.Playing;
+        ReaderTtsButton.Classes.Set("ttsActive", active);
+        ReaderTtsButtonText.IsVisible = !playing;
+        ReaderTtsSpectrum.IsVisible = playing;
+        if (!playing)
+        {
+            _readerTtsButtonBreathingTimer?.Stop();
+            _readerTtsButtonBreathingPhase = 0;
+            ResetReaderTtsSpectrum();
+            return;
+        }
+
+        _readerTtsButtonBreathingTimer ??= CreateReaderTtsButtonBreathingTimer();
+        if (_readerTtsButtonBreathingTimer.IsEnabled) return;
+
+        _readerTtsButtonBreathingPhase = 0;
+        UpdateReaderTtsSpectrum();
+        _readerTtsButtonBreathingTimer.Start();
+    }
+
+    private DispatcherTimer CreateReaderTtsButtonBreathingTimer()
+    {
+        var timer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(ReaderTtsButtonBreathingIntervalMs)
+        };
+        timer.Tick += ReaderTtsButtonBreathingTimer_Tick;
+        return timer;
+    }
+
+    private void ReaderTtsButtonBreathingTimer_Tick(object? sender, EventArgs e)
+    {
+        var active = _readerTts.State == TtsPlaybackState.Playing;
+        if (ReaderTtsButton is null
+            || ReaderTtsButtonText is null
+            || ReaderTtsSpectrum is null
+            || !active)
+        {
+            _readerTtsButtonBreathingTimer?.Stop();
+            if (ReaderTtsButton is not null)
+                ReaderTtsButton.Classes.Set("ttsActive", false);
+            if (ReaderTtsButtonText is not null)
+                ReaderTtsButtonText.IsVisible = true;
+            if (ReaderTtsSpectrum is not null)
+                ReaderTtsSpectrum.IsVisible = false;
+            ResetReaderTtsSpectrum();
+            return;
+        }
+
+        UpdateReaderTtsSpectrum();
+        _readerTtsButtonBreathingPhase +=
+            2 * Math.PI * ReaderTtsButtonBreathingIntervalMs
+            / ReaderTtsButtonBreathingPeriodMs;
+        if (_readerTtsButtonBreathingPhase >= 2 * Math.PI)
+            _readerTtsButtonBreathingPhase -= 2 * Math.PI;
+    }
+
+    private void UpdateReaderTtsSpectrum()
+    {
+        var bars = new[]
+        {
+            ReaderTtsSpectrumBar1,
+            ReaderTtsSpectrumBar2,
+            ReaderTtsSpectrumBar3,
+            ReaderTtsSpectrumBar4
+        };
+        var offsets = new[] { 0.1, 1.3, 2.6, 3.8 };
+        var ranges = new[] { 0.55, 0.82, 1.00, 0.68 };
+        for (var index = 0; index < bars.Length; index++)
+        {
+            var wave = (1 - Math.Cos(
+                _readerTtsButtonBreathingPhase + offsets[index])) / 2;
+            bars[index].Height = ReaderTtsSpectrumMinimumHeight
+                + (wave * ranges[index]
+                    * (ReaderTtsSpectrumMaximumHeight
+                        - ReaderTtsSpectrumMinimumHeight));
+        }
+    }
+
+    private void ResetReaderTtsSpectrum()
+    {
+        if (ReaderTtsSpectrumBar1 is null)
+            return;
+
+        ReaderTtsSpectrumBar1.Height = 6;
+        ReaderTtsSpectrumBar2.Height = 11;
+        ReaderTtsSpectrumBar3.Height = 17;
+        ReaderTtsSpectrumBar4.Height = 22;
+    }
+
     private void UpdateReaderTtsFloatingUi(TtsPlaybackState state)
     {
         if (ReaderTtsFloatingPanel is null
@@ -590,13 +769,19 @@ public partial class MainWindow
         var active = IsReaderTtsFloatingActive();
         if (!active)
         {
+            _readerTtsFloatingStartupShowing = false;
             _readerTtsFloatingExpanded = false;
             _readerTtsFloatingCollapseTimer?.Stop();
+            _readerTtsFloatingAutoHideTimer?.Stop();
         }
 
         ReaderTtsFloatingPanel.IsVisible = active;
         ReaderTtsFloatingEdgeActivationRegion.IsVisible = active;
-        ReaderTtsFloatingEdgeActivationRegion.IsHitTestVisible = active;
+        // The edge strip is a wake-up target only while the wheel is hidden.
+        // Leaving it hit-testable while expanded can re-enter the strip as
+        // the pointer leaves the wheel and cancel the collapse timer.
+        ReaderTtsFloatingEdgeActivationRegion.IsHitTestVisible = active
+            && !_readerTtsFloatingExpanded;
         if (ReaderTtsFloatingPanel.RenderTransform is TranslateTransform transform)
         {
             transform.X = active && _readerTtsFloatingExpanded
@@ -633,6 +818,8 @@ public partial class MainWindow
 
     private bool IsReaderTtsFloatingActive()
         => _readerTtsFloatingRequested
+            && (IsReaderTtsActiveState(_readerTts.State)
+                || _readerTtsFloatingStartupShowing)
             && ReaderRoot is not null
             && ReaderRoot.IsVisible
             && !_readerIsPdf
@@ -653,6 +840,8 @@ public partial class MainWindow
         if (!IsReaderTtsFloatingActive()) return;
 
         _readerTtsFloatingCollapseTimer?.Stop();
+        _readerTtsFloatingAutoHideTimer?.Stop();
+        _readerTtsFloatingStartupShowing = false;
         if (_readerTtsFloatingExpanded) return;
 
         _readerTtsFloatingExpanded = true;
@@ -662,13 +851,63 @@ public partial class MainWindow
     private void CollapseReaderTtsFloatingPanel()
     {
         _readerTtsFloatingCollapseTimer?.Stop();
+        _readerTtsFloatingAutoHideTimer?.Stop();
+        _readerTtsFloatingStartupShowing = false;
         if (!_readerTtsFloatingExpanded) return;
 
         _readerTtsFloatingExpanded = false;
         UpdateReaderTtsFloatingUi(_readerTts.State);
     }
 
-    private void ScheduleReaderTtsFloatingCollapse()
+    private void ShowReaderTtsFloatingPanelTemporarily()
+    {
+        // The header/popup start action is away from the wheel. Give the
+        // user a short visual confirmation without making the wheel stay on
+        // screen for the whole reading session.
+        _readerTtsFloatingStartupShowing = true;
+        if (!IsReaderTtsFloatingActive())
+        {
+            _readerTtsFloatingStartupShowing = false;
+            return;
+        }
+
+        _readerTtsFloatingExpanded = true;
+        _readerTtsFloatingCollapseTimer?.Stop();
+        UpdateReaderTtsFloatingUi(_readerTts.State);
+        StartReaderTtsFloatingAutoHideTimer();
+    }
+
+    private void StartReaderTtsFloatingAutoHideTimer()
+    {
+        if (!IsReaderTtsFloatingActive()
+            || !_readerTtsFloatingExpanded
+            || ReaderTtsPopup.IsOpen)
+        {
+            return;
+        }
+
+        _readerTtsFloatingAutoHideTimer ??= new DispatcherTimer();
+        _readerTtsFloatingAutoHideTimer.Stop();
+        _readerTtsFloatingAutoHideTimer.Interval =
+            TimeSpan.FromMilliseconds(ReaderTtsFloatingAutoHideDelayMs);
+        _readerTtsFloatingAutoHideTimer.Tick -=
+            ReaderTtsFloatingAutoHideTimer_Tick;
+        _readerTtsFloatingAutoHideTimer.Tick +=
+            ReaderTtsFloatingAutoHideTimer_Tick;
+        _readerTtsFloatingAutoHideTimer.Start();
+    }
+
+    private void ReaderTtsFloatingAutoHideTimer_Tick(
+        object? sender,
+        EventArgs e)
+    {
+        _readerTtsFloatingAutoHideTimer?.Stop();
+        if (!ReaderTtsPopup.IsOpen && _readerTtsFloatingStartupShowing)
+            CollapseReaderTtsFloatingPanel();
+    }
+
+    private void ScheduleReaderTtsFloatingCollapse(
+        int delayMs = ReaderTtsFloatingCollapseDelayMs)
     {
         if (!IsReaderTtsFloatingActive()
             || !_readerTtsFloatingExpanded
@@ -678,9 +917,18 @@ public partial class MainWindow
         }
 
         _readerTtsFloatingCollapseTimer ??= new DispatcherTimer();
+        var interval = TimeSpan.FromMilliseconds(Math.Max(1, delayMs));
+        // The Windows pointer watcher samples every 80ms. Do not restart an
+        // already-running countdown on every sample, or it can never tick.
+        // A newly requested shorter delay is still allowed to win.
+        if (_readerTtsFloatingCollapseTimer.IsEnabled
+            && _readerTtsFloatingCollapseTimer.Interval <= interval)
+        {
+            return;
+        }
+
         _readerTtsFloatingCollapseTimer.Stop();
-        _readerTtsFloatingCollapseTimer.Interval =
-            TimeSpan.FromMilliseconds(ReaderTtsFloatingCollapseDelayMs);
+        _readerTtsFloatingCollapseTimer.Interval = interval;
         _readerTtsFloatingCollapseTimer.Tick -=
             ReaderTtsFloatingCollapseTimer_Tick;
         _readerTtsFloatingCollapseTimer.Tick +=
@@ -728,33 +976,106 @@ public partial class MainWindow
             && y >= panelTop - ReaderTtsFloatingEdgeActivationTopPadding
             && y <= surfaceHeight - ReaderTtsFloatingEdgeActivationBottomPadding;
 
-        if (insidePanel || insideEdge)
+        // The edge strip is only an activation target while the wheel is
+        // collapsed. Once the wheel is open, leaving the wheel for that strip
+        // must start the collapse timer instead of keeping it open forever.
+        var keepExpanded = _readerTtsFloatingExpanded
+            ? insidePanel
+            : insideEdge;
+        if (keepExpanded)
         {
             if (!_readerTtsFloatingExpanded)
                 ExpandReaderTtsFloatingPanel();
             else
+            {
+                _readerTtsFloatingStartupShowing = false;
+                _readerTtsFloatingAutoHideTimer?.Stop();
                 _readerTtsFloatingCollapseTimer?.Stop();
+            }
         }
         else
         {
-            ScheduleReaderTtsFloatingCollapse();
+            // Do not let the global pointer watcher cancel the startup grace
+            // period: the start button is normally far from the wheel.
+            if (!_readerTtsFloatingStartupShowing)
+            {
+                ScheduleReaderTtsFloatingCollapse(
+                    ReaderTtsFloatingPointerExitCollapseDelayMs);
+            }
+        }
+    }
+
+    private void UpdateReaderTtsFloatingForScreenPointer(PixelPoint cursor)
+    {
+        if (!IsReaderTtsFloatingActive()
+            || ReaderTtsFloatingPanel is null
+            || ReaderTtsFloatingEdgeActivationRegion is null)
+        {
+            return;
+        }
+
+        if (ReaderTtsPopup.IsOpen)
+        {
+            _readerTtsFloatingCollapseTimer?.Stop();
+            return;
+        }
+
+        // Use the controls' real screen rectangles. This includes the row
+        // offset, display scaling and the current slide transform, so native
+        // WebView mouse movement cannot leave the wheel permanently expanded.
+        var insidePanel = _readerTtsFloatingExpanded
+            && ContainsReaderScreenPoint(
+                GetReaderScreenRect(ReaderTtsFloatingPanel),
+                cursor);
+        var insideEdge = !_readerTtsFloatingExpanded
+            && ContainsReaderScreenPoint(
+                GetReaderScreenRect(ReaderTtsFloatingEdgeActivationRegion),
+                cursor);
+
+        if (insidePanel)
+        {
+            _readerTtsFloatingStartupShowing = false;
+            _readerTtsFloatingAutoHideTimer?.Stop();
+            _readerTtsFloatingCollapseTimer?.Stop();
+        }
+        else if (insideEdge)
+        {
+            ExpandReaderTtsFloatingPanel();
+        }
+        else if (!_readerTtsFloatingStartupShowing)
+        {
+            ScheduleReaderTtsFloatingCollapse(
+                ReaderTtsFloatingPointerExitCollapseDelayMs);
         }
     }
 
     private void ReaderTtsFloatingEdgeActivationRegion_PointerEntered(
         object? sender,
         PointerEventArgs e)
-        => ExpandReaderTtsFloatingPanel();
+    {
+        if (_readerTtsFloatingExpanded)
+            ScheduleReaderTtsFloatingCollapse(
+                ReaderTtsFloatingPointerExitCollapseDelayMs);
+        else
+            ExpandReaderTtsFloatingPanel();
+    }
 
     private void ReaderTtsFloatingEdgeActivationRegion_PointerMoved(
         object? sender,
         PointerEventArgs e)
-        => ExpandReaderTtsFloatingPanel();
+    {
+        if (_readerTtsFloatingExpanded)
+            ScheduleReaderTtsFloatingCollapse(
+                ReaderTtsFloatingPointerExitCollapseDelayMs);
+        else
+            ExpandReaderTtsFloatingPanel();
+    }
 
     private void ReaderTtsFloatingEdgeActivationRegion_PointerExited(
         object? sender,
         PointerEventArgs e)
-        => ScheduleReaderTtsFloatingCollapse();
+        => ScheduleReaderTtsFloatingCollapse(
+            ReaderTtsFloatingPointerExitCollapseDelayMs);
 
     private void ReaderTtsFloatingPanel_PointerEntered(
         object? sender,
@@ -769,10 +1090,16 @@ public partial class MainWindow
     private void ReaderTtsFloatingPanel_PointerExited(
         object? sender,
         PointerEventArgs e)
-        => ScheduleReaderTtsFloatingCollapse();
+        => ScheduleReaderTtsFloatingCollapse(
+            ReaderTtsFloatingPointerExitCollapseDelayMs);
 
     private void ReaderTtsPopup_Closed(object? sender, EventArgs e)
-        => ScheduleReaderTtsFloatingCollapse();
+    {
+        if (_readerTtsFloatingStartupShowing)
+            StartReaderTtsFloatingAutoHideTimer();
+        else
+            ScheduleReaderTtsFloatingCollapse();
+    }
 
     private void OpenReaderTtsPopup(
         Control placementTarget,
@@ -786,8 +1113,38 @@ public partial class MainWindow
         _ = RefreshReaderTtsVoicesAsync();
     }
 
-    private void ReaderTtsButton_Click(object? sender, RoutedEventArgs e)
-        => OpenReaderTtsPopup(ReaderTtsButton, PlacementMode.Bottom);
+    private async void ReaderTtsButton_Click(
+        object? sender,
+        RoutedEventArgs e)
+    {
+        try
+        {
+            if (IsReaderTtsActiveState(_readerTts.State)
+                || _readerTtsFloatingRequested
+                || _readerTtsResumeAfterNavigation)
+            {
+                // The header button is deliberately a start/stop toggle. The
+                // floating wheel remains available so its MENU is the only
+                // place where voice and playback settings are configured.
+                CancelReaderTtsContinuation();
+                await _readerTts.StopAsync();
+                return;
+            }
+
+            await StartReaderTtsWithSavedSettingsAsync("启动听书失败：{0}");
+        }
+        catch (OperationCanceledException)
+            when (ReaderToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _readerTtsNotice = T(
+                "启动听书失败：{0}",
+                UiText.Localize(exception.Message));
+            UpdateReaderTtsUi();
+        }
+    }
 
     private void ReaderTtsFloatingMenuButton_Click(
         object? sender,
@@ -915,6 +1272,7 @@ public partial class MainWindow
             if (_readerTts.State is not TtsPlaybackState.Stopped
                 and not TtsPlaybackState.Error)
             {
+                CancelReaderTtsContinuation();
                 await _readerTts.StopAsync();
             }
 
@@ -950,11 +1308,7 @@ public partial class MainWindow
 
             CaptureReaderTtsSettingsFromControls();
             await _ttsSettingsStore.SaveAsync(_readerTtsSettings, ReaderToken);
-            _readerTtsNotice = null;
-
-            await _readerTts.StartAsync(_readerTtsSettings, ReaderToken);
-            _readerTtsFloatingRequested = true;
-            UpdateReaderTtsUi();
+            await StartReaderTtsWithSavedSettingsAsync("启动听书失败：{0}");
         }
         catch (OperationCanceledException)
             when (ReaderToken.IsCancellationRequested)
@@ -973,7 +1327,7 @@ public partial class MainWindow
         object? sender,
         RoutedEventArgs e)
     {
-        _readerTtsFloatingRequested = false;
+        CancelReaderTtsContinuation();
         await _readerTts.StopAsync();
     }
 
@@ -997,8 +1351,53 @@ public partial class MainWindow
         object? sender,
         RoutedEventArgs e)
     {
-        _readerTtsFloatingRequested = false;
+        CancelReaderTtsContinuation();
         await _readerTts.StopAsync();
+    }
+
+    private async Task<bool> StartReaderTtsWithSavedSettingsAsync(
+        string failureFormat,
+        bool isNavigationResume = false)
+    {
+        try
+        {
+            if (!isNavigationResume)
+                CancelReaderTtsContinuation();
+            _readerTtsNotice = null;
+            _readerTtsFloatingRequested = true;
+            ShowReaderTtsFloatingPanelTemporarily();
+            await _readerTts.StartAsync(_readerTtsSettings, ReaderToken);
+            UpdateReaderTtsUi();
+            return true;
+        }
+        catch (OperationCanceledException)
+            when (ReaderToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception exception)
+        {
+            _readerTtsNotice = T(
+                failureFormat,
+                UiText.Localize(exception.Message));
+            UpdateReaderTtsUi();
+            return false;
+        }
+    }
+
+    private async Task ResumeReaderTtsAfterNavigationAsync(bool shouldResume)
+    {
+        if (!shouldResume
+            || _readerIsPdf
+            || !ReaderRoot.IsVisible
+            || GetCurrentReaderTtsDocument() is null)
+        {
+            return;
+        }
+
+        await StartReaderTtsWithSavedSettingsAsync(
+            "切换章节后启动听书失败：{0}",
+            isNavigationResume: true);
     }
 
     private async void ReaderTtsPreviousSegmentButton_Click(
@@ -1026,37 +1425,39 @@ public partial class MainWindow
         bool positionAtStart = false)
     {
         var state = _readerTts.State;
-        var shouldContinue = _readerTtsFloatingRequested
-            && state is not TtsPlaybackState.Paused
-            and not TtsPlaybackState.Error;
+        var shouldContinue = _readerTtsResumeAfterNavigation
+            || _readerTtsFloatingRequested
+            || IsReaderTtsActiveState(state);
+        var navigationRequestVersion = BeginReaderTtsNavigationRequest(
+            shouldContinue);
         var previousChapter = _readerChapterIndex;
-
-        await _readerTts.StopAsync();
-        await MoveReaderChapterAsync(
-            direction,
-            positionAtStart: positionAtStart);
-
-        if (!shouldContinue
-            || previousChapter == _readerChapterIndex
-            || !ReaderRoot.IsVisible
-            || _readerIsPdf
-            || GetCurrentReaderTtsDocument() is null)
-        {
-            return;
-        }
 
         try
         {
-            _readerTtsNotice = null;
-            await _readerTts.StartAsync(_readerTtsSettings, ReaderToken);
-            UpdateReaderTtsUi();
+            await _readerTts.StopAsync();
+            if (!IsCurrentReaderTtsNavigationRequest(navigationRequestVersion))
+                return;
+
+            await MoveReaderChapterAsync(
+                direction,
+                positionAtStart: positionAtStart);
+
+            if (!CanResumeReaderTtsNavigation(
+                    navigationRequestVersion,
+                    shouldContinue)
+                || previousChapter == _readerChapterIndex
+                || !ReaderRoot.IsVisible
+                || _readerIsPdf
+                || GetCurrentReaderTtsDocument() is null)
+            {
+                return;
+            }
+
+            await ResumeReaderTtsAfterNavigationAsync(true);
         }
-        catch (Exception exception)
+        finally
         {
-            _readerTtsNotice = T(
-                "切换章节后启动听书失败：{0}",
-                UiText.Localize(exception.Message));
-            UpdateReaderTtsUi();
+            CompleteReaderTtsNavigationRequest(navigationRequestVersion);
         }
     }
 }

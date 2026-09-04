@@ -3886,6 +3886,7 @@
                                     <Button Width="50"
                                             Height="10"
                                             MinWidth="0"
+                                            MinHeight="0"
                                             Padding="0"
                                             HorizontalAlignment="Center"
                                             HorizontalContentAlignment="Center"
@@ -3957,9 +3958,39 @@
                                     Click="ReaderSearchToolbarButton_Click" />
                             <Button x:Name="ReaderTtsButton"
                                     Classes="readerHeader"
-                                    Content="{DynamicResource Ui.Auto.50E6C34A9A5257C7}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.57E9D77DA9EFA036}"
-                                    Click="ReaderTtsButton_Click" />
+                                    Click="ReaderTtsButton_Click">
+                                <Grid Width="44"
+                                      Height="24">
+                                    <TextBlock x:Name="ReaderTtsButtonText"
+                                               Text="{DynamicResource Ui.Auto.50E6C34A9A5257C7}"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                    <StackPanel x:Name="ReaderTtsSpectrum"
+                                                Orientation="Horizontal"
+                                                Spacing="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsVisible="False">
+                                        <Border x:Name="ReaderTtsSpectrumBar1"
+                                                Width="3"
+                                                Height="6"
+                                                Background="{StaticResource InkBrush}" />
+                                        <Border x:Name="ReaderTtsSpectrumBar2"
+                                                Width="3"
+                                                Height="11"
+                                                Background="{StaticResource InkBrush}" />
+                                        <Border x:Name="ReaderTtsSpectrumBar3"
+                                                Width="3"
+                                                Height="17"
+                                                Background="{StaticResource InkBrush}" />
+                                        <Border x:Name="ReaderTtsSpectrumBar4"
+                                                Width="3"
+                                                Height="22"
+                                                Background="{StaticResource InkBrush}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
                         </StackPanel>
                         <TextBlock x:Name="ReaderStatusText"
                                    Grid.Column="1"
@@ -4078,7 +4109,9 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="1" Background="{StaticResource PaperBrush}">
+                <Grid x:Name="ReaderReadingArea"
+                      Grid.Row="1"
+                      Background="{StaticResource PaperBrush}">
                     <Grid x:Name="ReaderWebViewHost"
                           Margin="0,12,2,10"
                           Background="{StaticResource PaperBrush}"

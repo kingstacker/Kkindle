@@ -57,6 +57,7 @@
         <DataTemplate x:Key="ReaderTtsButtonTextTemplate">
             <TextBlock Text="{Binding}"
                        Foreground="{Binding $parent[Button].Foreground}"
+                       FontSize="{Binding $parent[Button].FontSize}"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center" />
         </DataTemplate>
@@ -1643,6 +1644,19 @@
         </Style>
         <Style Selector="Button.readerHeader:pressed">
             <Setter Property="Background" Value="#D9D9D5" />
+        </Style>
+        <Style Selector="Button.readerHeader.ttsActive">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.readerHeader.ttsActive:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.readerHeader.ttsActive:pressed">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <!-- TTS lives in a Popup outside LibraryRoot, so it cannot inherit the
              libraryShell action selectors. Keep its three actions explicit. -->

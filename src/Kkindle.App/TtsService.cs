@@ -585,16 +585,26 @@ public sealed class TtsService : IDisposable
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var document = _documentAccessor();
+                var document = await ResolveReadableDocumentAsync(
+                        cancellationToken,
+                        allowAdvance: firstDocument || settings.AutoAdvance)
+                    .ConfigureAwait(false);
                 if (document is null || string.IsNullOrWhiteSpace(document.Text))
-                    throw new InvalidOperationException("当前章节没有可朗读的正文。");
+                {
+                    // Reaching the end after skipping image-only chapters is
+                    // a normal end-of-book condition, not a playback error.
+                    if (!firstDocument && settings.AutoAdvance)
+                        break;
+
+                    throw new InvalidOperationException("当前阅读位置之后没有可朗读的正文。");
+                }
 
                 var segments = TtsTextSegmenter.SplitSentencesAtPageBreaks(
                     document.Text,
                     document.PageBreakOffsets,
                     settings.MaxCharactersPerRequest);
                 if (segments.Count == 0)
-                    throw new InvalidOperationException("当前章节没有可朗读的正文。");
+                    throw new InvalidOperationException("当前阅读位置之后没有可朗读的正文。");
 
                 var startIndex = firstDocument
                     ? FindStartingSegment(segments, document.StartOffset)
@@ -756,6 +766,38 @@ public sealed class TtsService : IDisposable
                     _currentSegmentIndex = -1;
                     _requestedSegmentIndex = -1;
                 }
+            }
+        }
+    }
+
+    private async Task<ReaderTtsDocument?> ResolveReadableDocumentAsync(
+        CancellationToken cancellationToken,
+        bool allowAdvance)
+    {
+        var document = _documentAccessor();
+        if (document is not null && !string.IsNullOrWhiteSpace(document.Text))
+        {
+            return document;
+        }
+
+        if (!allowAdvance || _advanceChapterAsync is null)
+        {
+            return null;
+        }
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetState(TtsPlaybackState.AdvancingChapter, null, 0, 0);
+            if (!await _advanceChapterAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            document = _documentAccessor();
+            if (document is not null && !string.IsNullOrWhiteSpace(document.Text))
+            {
+                return document;
             }
         }
     }

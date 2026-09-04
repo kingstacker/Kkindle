@@ -105,7 +105,8 @@ public sealed record ReaderTtsDocument(
     string? BookKey = null,
     string? ChapterKey = null,
     /// <summary>
-    /// Plain-text offsets at which a composed reader page begins. TTS uses
-    /// these only to split a cross-page sentence before playback.
+    /// Plain-text offsets at which a composed reader page begins. They are
+    /// retained for reader synchronization; TTS must not split a sentence at
+    /// these visual boundaries.
     /// </summary>
     IReadOnlyList<int>? PageBreakOffsets = null);
