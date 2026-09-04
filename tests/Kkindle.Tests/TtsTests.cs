@@ -132,6 +132,22 @@ public sealed class TtsTests
         Assert.Equal("-100Hz", options.PitchArgument);
     }
 
+    [Theory]
+    [InlineData(
+        @"C:\Users\reader\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe",
+        true)]
+    [InlineData(
+        @"C:\Users\reader\AppData\Local\Programs\Python\Python312\python.exe",
+        false)]
+    public void StorePythonIsRejectedForPipxVirtualEnvironments(
+        string path,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            TtsEnvironmentSetupService.IsMicrosoftStorePythonPath(path));
+    }
+
     [Fact]
     public async Task CacheKeyChangesWhenVoiceOrAudioOptionsChange()
     {

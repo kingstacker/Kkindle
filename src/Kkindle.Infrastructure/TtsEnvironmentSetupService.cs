@@ -232,20 +232,27 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
             installArguments.AddRange(["install", "edge-tts", "--force"]);
         }
 
+        // Do not let pipx select its own default interpreter here. Windows
+        // Store Python redirects venv paths into the package sandbox, which
+        // makes pipx fail immediately after printing only
+        // "creating virtual environment...". FindPythonAsync filters that
+        // interpreter out and records the real interpreter path for pipx.
+        installArguments.AddRange(["--python", PythonInterpreterPath(python)]);
+
         var install = pipxUsesModule
             ? await RunPythonModuleAsync(
                     python,
                     installArguments,
                     CommandTimeout,
                     cancellationToken,
-                    BuildPipxEnvironment())
+                    BuildPipxEnvironment(python))
                 .ConfigureAwait(false)
             : await RunProcessAsync(
                     pipx!,
                     installArguments,
                     CommandTimeout,
                     cancellationToken,
-                    BuildPipxEnvironment())
+                    BuildPipxEnvironment(python))
                 .ConfigureAwait(false);
         RequireSuccess(install, "安装 edge-tts 失败。");
 
@@ -433,12 +440,20 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
             {
                 var result = await RunPythonAsync(
                         candidate,
-                        ["--version"],
+                        ["-c", "import sys; print(sys.executable)"],
                         ProbeTimeout,
                         cancellationToken)
                     .ConfigureAwait(false);
-                if (!result.TimedOut && result.ExitCode == 0)
-                    return candidate;
+                if (result.TimedOut || result.ExitCode != 0)
+                    continue;
+
+                var interpreterPath = FirstNonEmptyLine(
+                    result.StandardOutput,
+                    result.StandardError);
+                if (IsMicrosoftStorePythonPath(interpreterPath))
+                    continue;
+
+                return candidate with { InterpreterPath = interpreterPath };
             }
             catch (Win32Exception)
             {
@@ -493,7 +508,33 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
         }
     }
 
-    private Dictionary<string, string> BuildPipxEnvironment()
+    private static string PythonInterpreterPath(PythonCommand python)
+        => string.IsNullOrWhiteSpace(python.InterpreterPath)
+            ? python.Executable
+            : python.InterpreterPath;
+
+    internal static bool IsMicrosoftStorePythonPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var normalized = path.Replace('/', '\\');
+        return normalized.Contains(
+                   @"\Microsoft\WindowsApps\",
+                   StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains(
+                   @"\Packages\PythonSoftwareFoundation.",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? FirstNonEmptyLine(params string?[] values)
+        => values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .SelectMany(value => value!.Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries))
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => line.Length > 0);
+
+    private Dictionary<string, string> BuildPipxEnvironment(PythonCommand python)
     {
         var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -501,6 +542,7 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
             ["PIPX_BIN_DIR"] = TtsRuntimePaths.PipxBin(_paths),
             ["PIPX_MAN_DIR"] = TtsRuntimePaths.PipxMan(_paths),
             ["PIPX_VENV_CACHEDIR"] = TtsRuntimePaths.PipxVenvCache(_paths),
+            ["PIPX_DEFAULT_PYTHON"] = PythonInterpreterPath(python),
         };
         return environment;
     }
@@ -672,9 +714,11 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
 
     private static string FormatProcessDetail(ProcessResult result, string fallback)
     {
-        var detail = string.IsNullOrWhiteSpace(result.StandardError)
-            ? result.StandardOutput.Trim()
-            : result.StandardError.Trim();
+        var detail = string.Join(
+            Environment.NewLine,
+            new[] { result.StandardError, result.StandardOutput }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim()));
         if (detail.Length > 3000) detail = detail[^3000..];
         return string.IsNullOrWhiteSpace(detail)
             ? fallback
@@ -707,7 +751,8 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
 
     private sealed record PythonCommand(
         string Executable,
-        IReadOnlyList<string> PrefixArguments);
+        IReadOnlyList<string> PrefixArguments,
+        string? InterpreterPath = null);
 
     private sealed record ProcessResult(
         int ExitCode,
