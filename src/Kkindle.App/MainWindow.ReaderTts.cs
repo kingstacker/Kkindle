@@ -23,9 +23,9 @@ public partial class MainWindow
     private const double ReaderTtsFloatingEdgeActivationWidth = 36;
     private const double ReaderTtsFloatingEdgeActivationTopPadding = 22;
     private const double ReaderTtsFloatingEdgeActivationBottomPadding = 10;
-    private const int ReaderTtsFloatingCollapseDelayMs = 700;
-    private const int ReaderTtsFloatingAutoHideDelayMs = 2200;
-    private const int ReaderTtsFloatingPointerExitCollapseDelayMs = 180;
+    private const int ReaderTtsFloatingCollapseDelayMs = 4000;
+    private const int ReaderTtsFloatingAutoHideDelayMs = 4000;
+    private const int ReaderTtsFloatingPointerExitCollapseDelayMs = 4000;
     private const int ReaderTtsButtonBreathingIntervalMs = 50;
     private const double ReaderTtsButtonBreathingPeriodMs = 1800;
     private const double ReaderTtsSpectrumMinimumHeight = 4;
@@ -46,6 +46,10 @@ public partial class MainWindow
     private bool _readerTtsFloatingRequested;
     private bool _readerTtsFloatingExpanded;
     private bool _readerTtsFloatingStartupShowing;
+    // The right-edge wake-up target is edge-triggered. If the wheel collapses
+    // while the pointer is still in that strip, making the strip hit-testable
+    // again must not count as a fresh entry and immediately reopen the wheel.
+    private bool _readerTtsFloatingEdgeActivationArmed = true;
     private bool _readerTtsResumeAfterNavigation;
     private long _readerTtsNavigationRequestVersion;
     private bool _readerTtsEnvironmentChecked;
@@ -771,11 +775,18 @@ public partial class MainWindow
         {
             _readerTtsFloatingStartupShowing = false;
             _readerTtsFloatingExpanded = false;
+            _readerTtsFloatingEdgeActivationArmed = true;
             _readerTtsFloatingCollapseTimer?.Stop();
             _readerTtsFloatingAutoHideTimer?.Stop();
         }
 
         ReaderTtsFloatingPanel.IsVisible = active;
+        // The collapsed wheel intentionally leaves a small visual sliver at
+        // the edge, but that sliver must not be an independent wake-up target.
+        // Otherwise PointerEntered on the panel bypasses the edge arming
+        // guard and can reopen the wheel in a collapse/reopen loop.
+        ReaderTtsFloatingPanel.IsHitTestVisible = active
+            && _readerTtsFloatingExpanded;
         ReaderTtsFloatingEdgeActivationRegion.IsVisible = active;
         // The edge strip is a wake-up target only while the wheel is hidden.
         // Leaving it hit-testable while expanded can re-enter the strip as
@@ -855,8 +866,35 @@ public partial class MainWindow
         _readerTtsFloatingStartupShowing = false;
         if (!_readerTtsFloatingExpanded) return;
 
+        // The edge region is temporarily non-hit-testable while the wheel is
+        // expanded. Re-sample the real cursor before enabling it again so a
+        // pointer that stayed on the right cannot generate a synthetic
+        // PointerEntered and reopen the wheel.
+        SyncReaderTtsFloatingEdgeActivationArmWithCursor();
         _readerTtsFloatingExpanded = false;
         UpdateReaderTtsFloatingUi(_readerTts.State);
+    }
+
+    private void SyncReaderTtsFloatingEdgeActivationArmWithCursor()
+    {
+        if (ReaderTtsFloatingEdgeActivationRegion is null
+            || !TryGetReaderCursorScreenPoint(out var cursor))
+        {
+            return;
+        }
+
+        _readerTtsFloatingEdgeActivationArmed = !ContainsReaderScreenPoint(
+            GetReaderScreenRect(ReaderTtsFloatingEdgeActivationRegion),
+            cursor);
+    }
+
+    private void TryExpandReaderTtsFloatingFromEdge()
+    {
+        if (!_readerTtsFloatingEdgeActivationArmed)
+            return;
+
+        _readerTtsFloatingEdgeActivationArmed = false;
+        ExpandReaderTtsFloatingPanel();
     }
 
     private void ShowReaderTtsFloatingPanelTemporarily()
@@ -976,6 +1014,11 @@ public partial class MainWindow
             && y >= panelTop - ReaderTtsFloatingEdgeActivationTopPadding
             && y <= surfaceHeight - ReaderTtsFloatingEdgeActivationBottomPadding;
 
+        if (!insideEdge)
+            _readerTtsFloatingEdgeActivationArmed = true;
+        else if (_readerTtsFloatingExpanded)
+            _readerTtsFloatingEdgeActivationArmed = false;
+
         // The edge strip is only an activation target while the wheel is
         // collapsed. Once the wheel is open, leaving the wheel for that strip
         // must start the collapse timer instead of keeping it open forever.
@@ -985,7 +1028,7 @@ public partial class MainWindow
         if (keepExpanded)
         {
             if (!_readerTtsFloatingExpanded)
-                ExpandReaderTtsFloatingPanel();
+                TryExpandReaderTtsFloatingFromEdge();
             else
             {
                 _readerTtsFloatingStartupShowing = false;
@@ -1027,10 +1070,14 @@ public partial class MainWindow
             && ContainsReaderScreenPoint(
                 GetReaderScreenRect(ReaderTtsFloatingPanel),
                 cursor);
-        var insideEdge = !_readerTtsFloatingExpanded
-            && ContainsReaderScreenPoint(
-                GetReaderScreenRect(ReaderTtsFloatingEdgeActivationRegion),
-                cursor);
+        var insideEdge = ContainsReaderScreenPoint(
+            GetReaderScreenRect(ReaderTtsFloatingEdgeActivationRegion),
+            cursor);
+
+        if (!insideEdge)
+            _readerTtsFloatingEdgeActivationArmed = true;
+        else if (_readerTtsFloatingExpanded)
+            _readerTtsFloatingEdgeActivationArmed = false;
 
         if (insidePanel)
         {
@@ -1038,9 +1085,9 @@ public partial class MainWindow
             _readerTtsFloatingAutoHideTimer?.Stop();
             _readerTtsFloatingCollapseTimer?.Stop();
         }
-        else if (insideEdge)
+        else if (!_readerTtsFloatingExpanded && insideEdge)
         {
-            ExpandReaderTtsFloatingPanel();
+            TryExpandReaderTtsFloatingFromEdge();
         }
         else if (!_readerTtsFloatingStartupShowing)
         {
@@ -1054,10 +1101,13 @@ public partial class MainWindow
         PointerEventArgs e)
     {
         if (_readerTtsFloatingExpanded)
+        {
+            _readerTtsFloatingEdgeActivationArmed = false;
             ScheduleReaderTtsFloatingCollapse(
                 ReaderTtsFloatingPointerExitCollapseDelayMs);
+        }
         else
-            ExpandReaderTtsFloatingPanel();
+            TryExpandReaderTtsFloatingFromEdge();
     }
 
     private void ReaderTtsFloatingEdgeActivationRegion_PointerMoved(
@@ -1065,27 +1115,42 @@ public partial class MainWindow
         PointerEventArgs e)
     {
         if (_readerTtsFloatingExpanded)
+        {
+            _readerTtsFloatingEdgeActivationArmed = false;
             ScheduleReaderTtsFloatingCollapse(
                 ReaderTtsFloatingPointerExitCollapseDelayMs);
+        }
         else
-            ExpandReaderTtsFloatingPanel();
+            TryExpandReaderTtsFloatingFromEdge();
     }
 
     private void ReaderTtsFloatingEdgeActivationRegion_PointerExited(
         object? sender,
         PointerEventArgs e)
-        => ScheduleReaderTtsFloatingCollapse(
+    {
+        // Expansion disables hit testing on this strip and can raise
+        // PointerExited even though the physical pointer is still there.
+        // Re-arm only after checking the actual screen cursor position.
+        SyncReaderTtsFloatingEdgeActivationArmWithCursor();
+        ScheduleReaderTtsFloatingCollapse(
             ReaderTtsFloatingPointerExitCollapseDelayMs);
+    }
 
     private void ReaderTtsFloatingPanel_PointerEntered(
         object? sender,
         PointerEventArgs e)
-        => ExpandReaderTtsFloatingPanel();
+    {
+        if (_readerTtsFloatingExpanded)
+            ExpandReaderTtsFloatingPanel();
+    }
 
     private void ReaderTtsFloatingPanel_PointerMoved(
         object? sender,
         PointerEventArgs e)
-        => ExpandReaderTtsFloatingPanel();
+    {
+        if (_readerTtsFloatingExpanded)
+            ExpandReaderTtsFloatingPanel();
+    }
 
     private void ReaderTtsFloatingPanel_PointerExited(
         object? sender,
