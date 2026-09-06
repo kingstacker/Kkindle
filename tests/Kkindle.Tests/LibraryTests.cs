@@ -288,6 +288,110 @@ public sealed class LibraryTests
     }
 
     [Fact]
+    public async Task ImportConflictResolverCanKeepSameTitleAsSeparateEdition()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var first = Path.Combine(root, "first.epub");
+            var second = Path.Combine(root, "second.epub");
+            CreateEpub(first, "first");
+            CreateEpub(second, "second");
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([first]);
+
+            var seen = new List<ImportBookConflict>();
+            var result = await service.ImportAsync(
+                [second],
+                conflictResolver: conflict =>
+                {
+                    seen.Add(conflict);
+                    return Task.FromResult(ImportConflictResolution.KeepSeparate);
+                });
+
+            Assert.Single(seen);
+            Assert.Equal("second.epub", Path.GetFileName(seen[0].SourcePath));
+            Assert.Equal(1, result.SuccessCount);
+            Assert.Equal(2, (await service.SearchAsync()).Count);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task DeletedBookAndFormatCanBeRestoredFromTrash()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "原书.epub");
+            CreateEpub(source);
+            var converted = Path.Combine(root, "原书.pdf");
+            await File.WriteAllBytesAsync(converted, [1, 2, 3, 4]);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([source]);
+            var book = Assert.Single(await service.SearchAsync());
+            var pdf = await service.AddFileToBookAsync(book.Id, converted);
+            var pdfPath = service.GetAbsoluteFilePath(pdf);
+            var coverPath = Path.Combine(paths.Data, book.CoverPath!);
+
+            await service.DeleteFileAsync(book.Id, pdf.Id);
+            var formatTrash = Assert.Single(await service.GetTrashItemsAsync());
+            Assert.Equal(LibraryTrashItemKind.File, formatTrash.Kind);
+            Assert.False(File.Exists(pdfPath));
+            await service.RestoreTrashItemAsync(formatTrash.Id);
+            var restoredWithFormat = Assert.Single(await service.SearchAsync());
+            Assert.Equal(2, restoredWithFormat.Files.Count);
+            Assert.True(File.Exists(service.GetAbsoluteFilePath(
+                restoredWithFormat.Files.Single(file => file.Id == pdf.Id))));
+
+            var epubPath = service.GetAbsoluteFilePath(restoredWithFormat.Files.Single(file => file.Format == "epub"));
+            await service.DeleteAsync(restoredWithFormat.Id);
+            var bookTrash = Assert.Single(await service.GetTrashItemsAsync());
+            Assert.Equal(LibraryTrashItemKind.Book, bookTrash.Kind);
+            Assert.Empty(await service.SearchAsync());
+            Assert.False(File.Exists(epubPath));
+            Assert.False(File.Exists(coverPath));
+
+            await service.RestoreTrashItemAsync(bookTrash.Id);
+            var restoredBook = Assert.Single(await service.SearchAsync());
+            Assert.Equal(book.Id, restoredBook.Id);
+            Assert.Equal(2, restoredBook.Files.Count);
+            Assert.All(restoredBook.Files, file => Assert.True(File.Exists(service.GetAbsoluteFilePath(file))));
+            Assert.True(File.Exists(coverPath));
+            Assert.Empty(await service.GetTrashItemsAsync());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PurgingTrashItemRemovesItsManagedContent()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "清理.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([source]);
+            var book = Assert.Single(await service.SearchAsync());
+            await service.DeleteAsync(book.Id);
+            var trash = Assert.Single(await service.GetTrashItemsAsync());
+
+            await service.PurgeTrashItemAsync(trash.Id);
+
+            Assert.Empty(await service.GetTrashItemsAsync());
+            Assert.Empty(Directory.EnumerateFiles(paths.Trash, "*", SearchOption.AllDirectories));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task CancellationCleansPartialImportAndLeavesLibraryEmpty()
     {
         var root = TestHelpers.CreateTempDirectory();

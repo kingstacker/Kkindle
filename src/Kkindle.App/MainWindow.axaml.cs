@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private const string LibraryCollectionsGlyphData = "M 3,7 H 9 L 11,9 H 21 V 20 H 3 Z";
     private const double LibraryDetailWidth = 320;
     private const double BookGridSlotWidth = 166;
+    private const int PerFileImportFormatSelectionLimit = 1_000;
     private const double RubberBandDragThreshold = 8;
     // Gallery mode trims the card to its cover, so the wrap-panel slot shrinks
     // with it (cover 214 + card margin 12) instead of leaving a blank strip.
@@ -59,6 +60,7 @@ public partial class MainWindow : Window
     private readonly KindleDeviceAuxiliaryCacheStore _kindleAuxiliaryCacheStore;
     private readonly ISecretProtector _secretProtector;
     private readonly AppBackupService _backupService;
+    private readonly PlatformDiagnosticsService _platformDiagnostics;
     private readonly AppSettingsStore _appSettingsStore;
     private readonly FontLibraryService _fontLibrary;
     private readonly DictionaryService _dictionaryService;
@@ -123,6 +125,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _doubanMatchCancellation;
     private bool _doubanResearchPending;
     private TaskCompletionSource<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?>? _importFormatSelectionCompletion;
+    private TaskCompletionSource<ImportConflictResolution>? _importConflictCompletion;
     private readonly List<(string FilePath, ToggleSwitch Toggle)> _importFormatSelectionRows = [];
     private bool _rubberBandSelecting;
     private bool _rubberBandPointerSequenceHandled;
@@ -161,6 +164,7 @@ public partial class MainWindow : Window
         _kindleAuxiliaryCacheStore = new KindleDeviceAuxiliaryCacheStore(paths);
         _secretProtector = services?.SecretProtector ?? new PlaintextSecretProtector();
         _backupService = new AppBackupService(paths, _secretProtector);
+        _platformDiagnostics = new PlatformDiagnosticsService(paths);
         _appSettingsStore = new AppSettingsStore(paths);
         _fontLibrary = new FontLibraryService(paths);
         _dictionaryService = new DictionaryService(paths, _formatConverter);
@@ -486,6 +490,9 @@ public partial class MainWindow : Window
             RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         UpdateCalibreDetectionStatus();
         UpdateZLibraryAccountStatus();
+        UpdateDiagnosticsTexts();
+        foreach (var diagnostic in PlatformDiagnostics)
+            diagnostic.RefreshLocalizedProperties();
         if (!string.IsNullOrWhiteSpace(_pendingUpdateVersion))
         {
             var packageReady = TryGetPendingUpdatePackage(out _, out _);
@@ -709,6 +716,16 @@ public partial class MainWindow : Window
                 UpdateMaximizeGlyph();
                 UpdateWindowShadowMargin();
             }
+            if (_readerZenMode)
+            {
+                // Re-apply after the platform has processed the FullScreen or
+                // Maximized transition; Windows may otherwise restore a native
+                // caption row one layout pass later.
+                ApplyReaderZenWindowChrome();
+                Dispatcher.UIThread.Post(
+                    ApplyReaderZenWindowChrome,
+                    DispatcherPriority.Render);
+            }
         }
     }
 
@@ -853,6 +870,14 @@ public partial class MainWindow : Window
         _confirmationCompletion = null;
         _importFormatSelectionCompletion?.TrySetResult(null);
         _importFormatSelectionCompletion = null;
+        _importConflictCompletion?.TrySetResult(ImportConflictResolution.Skip);
+        _importConflictCompletion = null;
+        foreach (var diagnostic in PlatformDiagnostics)
+            diagnostic.Dispose();
+        PlatformDiagnostics.Clear();
+        foreach (var trashItem in LibraryTrashItems)
+            trashItem.Dispose();
+        LibraryTrashItems.Clear();
         if (_readerDocument is not null || _readerIsPdf)
             await CloseReaderAsync();
         _readerNavigationCancellation?.Cancel();
@@ -962,7 +987,7 @@ public partial class MainWindow : Window
         LibraryBusyProgress.IsVisible = ViewModel.IsBusy;
         LibrarySummaryText.Text = ViewModel.StatusText;
         TaskStatusText.Text = ViewModel.StatusText;
-        SidebarCountText.Text = ViewModel.Books.Count.ToString();
+        SidebarCountText.Text = ViewModel.LibraryBooks.Count.ToString();
         foreach (var card in ViewModel.Books)
         {
             card.SetGalleryTextVisible(!_appSettings.GridGalleryDisplay);
@@ -980,6 +1005,12 @@ public partial class MainWindow : Window
         var hasBooks = ViewModel.Books.Count > 0;
         var showingCollections = _libraryViewMode == LibraryViewMode.Collections;
         var collectionsEmpty = CollectionFolders.Count == 0;
+        LibraryPreviousPageButton.Content = T("上一页");
+        LibraryNextPageButton.Content = T("下一页");
+        LibraryPaginationBar.IsVisible = showingBooks && ViewModel.PageCount > 1;
+        LibraryPreviousPageButton.IsEnabled = ViewModel.CanGoToPreviousPage;
+        LibraryNextPageButton.IsEnabled = ViewModel.CanGoToNextPage;
+        LibraryPageText.Text = ViewModel.PageStatusText;
         EmptyLibraryState.IsVisible = !ViewModel.IsBusy
             && ((showingBooks && !hasBooks) || (showingCollections && collectionsEmpty));
 
@@ -1016,7 +1047,7 @@ public partial class MainWindow : Window
                 if (LibraryDetailPane.IsVisible)
                     SelectBook(refreshedCard);
             }
-            else if (!ViewModel.LibraryBooks.Any(book => book.Id == _selectedCard.Book.Id))
+            else
                 ClearSelectedBook();
         }
     }
@@ -1064,6 +1095,7 @@ public partial class MainWindow : Window
     private void SelectBook(BookCardViewModel card)
     {
         _selectedCard = card;
+        card.LoadCover();
         DetailCoverImage.Source = card.CoverImage;
         DetailCoverPlaceholder.IsVisible = card.CoverImage is null;
         DetailTitleText.Text = card.Title;
@@ -1400,7 +1432,11 @@ public partial class MainWindow : Window
                 TaskProgressPopupBar.Value = value.Percentage;
                 TaskProgressPopupText.Text = message;
             });
-            var result = await ViewModel.ImportAsync(inputPaths, progress, _lifetimeCancellation.Token);
+            var result = await ViewModel.ImportAsync(
+                inputPaths,
+                progress,
+                _lifetimeCancellation.Token,
+                ResolveImportConflictAsync);
             var automaticFormats = await AutoGenerateReaderFormatsForImportsAsync(
                 result,
                 _lifetimeCancellation.Token,
@@ -1408,11 +1444,11 @@ public partial class MainWindow : Window
             HideTaskProgressPopup();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
-            if (_appSettings.AutoDoubanMatchOnImport)
+            if (_appSettings.AutoDoubanMatchOnImport && result.BookDetailsAvailable)
             {
                 var importedIds = result.Items
-                    .Where(item => item.Succeeded && item.Added && item.Book is not null)
-                    .Select(item => item.Book!.Id)
+                    .Where(item => item.Succeeded && item.Added && item.BookId is not null)
+                    .Select(item => item.BookId!.Value)
                     .ToHashSet();
                 var importedCards = ViewModel.Books
                     .Where(card => card.Book is not null && importedIds.Contains(card.Book.Id))
@@ -1441,9 +1477,19 @@ public partial class MainWindow : Window
         }
     }
 
-    private Task<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?> ChooseImportFormatsAsync(
+    private async Task<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?> ChooseImportFormatsAsync(
         IReadOnlyList<string> files)
     {
+        if (files.Count > PerFileImportFormatSelectionLimit)
+        {
+            var continueImport = await ConfirmAsync(
+                T("导入大量书籍"),
+                T("共 {0} 个文件。为避免一次创建数千个设置控件，本次将关闭逐项格式补齐并仅导入原始文件。是否继续？", files.Count));
+            return continueImport
+                ? new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.OrdinalIgnoreCase)
+                : null;
+        }
+
         _importFormatSelectionCompletion?.TrySetResult(null);
         _importFormatSelectionRows.Clear();
         ImportFormatSelectionList.Children.Clear();
@@ -1483,7 +1529,7 @@ public partial class MainWindow : Window
         ImportFormatSelectionOverlay.Focus();
         _importFormatSelectionCompletion = new TaskCompletionSource<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        return _importFormatSelectionCompletion.Task;
+        return await _importFormatSelectionCompletion.Task;
     }
 
     private void CompleteImportFormatSelection(bool import)
@@ -1514,6 +1560,73 @@ public partial class MainWindow : Window
         if (e.Key is not (Key.Escape or Key.Enter)) return;
         e.Handled = true;
         CompleteImportFormatSelection(e.Key == Key.Enter);
+    }
+
+    private async Task<ImportConflictResolution> ResolveImportConflictAsync(ImportBookConflict conflict)
+    {
+        if (_importConflictCompletion is not null)
+            return ImportConflictResolution.Skip;
+
+        ImportConflictTitleText.Text = T("发现同名版本");
+        ImportConflictSummaryText.Text = T(
+            "《{0}》与书库中的《{1}》标题和作者相同。请选择导入方式。",
+            Path.GetFileName(conflict.SourcePath),
+            conflict.ExistingBook.Title);
+        var existingFormats = conflict.ExistingBook.Files
+            .Select(file => file.Format.Trim().TrimStart('.').ToUpperInvariant())
+            .Where(format => format.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        ImportConflictExistingFilesText.Text = existingFormats.Length == 0
+            ? T("现有记录还没有文件格式。")
+            : T("现有格式：{0}", string.Join("、", existingFormats));
+        ImportConflictMergeButton.Content = T("添加为格式");
+        ImportConflictSeparateButton.Content = T("作为新版本");
+        ImportConflictSkipButton.Content = T("跳过");
+
+        var completion = new TaskCompletionSource<ImportConflictResolution>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _importConflictCompletion = completion;
+        ShowOverlay(ImportConflictOverlay);
+        ImportConflictOverlay.Focus();
+        try
+        {
+            return await completion.Task.WaitAsync(_lifetimeCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            return ImportConflictResolution.Skip;
+        }
+        finally
+        {
+            if (ReferenceEquals(_importConflictCompletion, completion))
+            {
+                _importConflictCompletion = null;
+                ImportConflictOverlay.IsVisible = false;
+            }
+        }
+    }
+
+    private void CompleteImportConflict(ImportConflictResolution resolution)
+    {
+        ImportConflictOverlay.IsVisible = false;
+        _importConflictCompletion?.TrySetResult(resolution);
+    }
+
+    private void ImportConflictMergeButton_Click(object? sender, RoutedEventArgs e) =>
+        CompleteImportConflict(ImportConflictResolution.AddAsFormat);
+
+    private void ImportConflictSeparateButton_Click(object? sender, RoutedEventArgs e) =>
+        CompleteImportConflict(ImportConflictResolution.KeepSeparate);
+
+    private void ImportConflictSkipButton_Click(object? sender, RoutedEventArgs e) =>
+        CompleteImportConflict(ImportConflictResolution.Skip);
+
+    private void ImportConflictOverlay_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        e.Handled = true;
+        CompleteImportConflict(ImportConflictResolution.Skip);
     }
 
     private void LibraryPane_DragOver(object? sender, DragEventArgs e)
@@ -2051,7 +2164,7 @@ public partial class MainWindow : Window
             _selectedBookIds.Clear();
             ClearSelectedBook();
             await RefreshLibraryAsync();
-            SetTaskStatus(T("已删除 {0} 本书。", cards.Count));
+            SetTaskStatus(T("已将 {0} 本书移入回收站。", cards.Count));
         }
         catch (Exception exception)
         {
@@ -2074,7 +2187,7 @@ public partial class MainWindow : Window
             _selectedBookIds.Remove(card.Book.Id);
             if (_selectedCard?.Book.Id == card.Book.Id) ClearSelectedBook();
             await RefreshLibraryAsync();
-            SetTaskStatus(T("已删除《{0}》。", card.Title));
+            SetTaskStatus(T("已将《{0}》移入回收站。", card.Title));
         }
         catch (Exception exception)
         {
@@ -3051,6 +3164,18 @@ public partial class MainWindow : Window
             ViewModel.RefreshView();
         }
         SetLibraryViewMode(next);
+    }
+
+    private void LibraryPreviousPageButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        ViewModel.GoToPreviousPage();
+        UpdateLibraryUi();
+    }
+
+    private void LibraryNextPageButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        ViewModel.GoToNextPage();
+        UpdateLibraryUi();
     }
 
     private void BackToCollectionsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

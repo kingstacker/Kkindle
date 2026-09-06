@@ -5,11 +5,18 @@ public interface IBookLibraryService
     event EventHandler<LocalDataChangedEventArgs>? DataChanged;
     Task InitializeAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Book>> SearchAsync(string? query = null, CancellationToken cancellationToken = default);
-    Task<ImportBatchResult> ImportAsync(IEnumerable<string> paths, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default);
+    Task<ImportBatchResult> ImportAsync(
+        IEnumerable<string> paths,
+        IProgress<TransferProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null);
     Task<BookFile> AddFileToBookAsync(Guid bookId, string sourcePath, CancellationToken cancellationToken = default);
     Task UpdateMetadataAsync(Book book, CancellationToken cancellationToken = default);
     Task DeleteFileAsync(Guid bookId, Guid bookFileId, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid bookId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LibraryTrashItem>> GetTrashItemsAsync(CancellationToken cancellationToken = default);
+    Task RestoreTrashItemAsync(Guid trashItemId, CancellationToken cancellationToken = default);
+    Task PurgeTrashItemAsync(Guid trashItemId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BookCollection>> GetCollectionsAsync(CancellationToken cancellationToken = default);
     Task<BookCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default);
     Task DeleteCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default);

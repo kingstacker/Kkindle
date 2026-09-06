@@ -126,6 +126,8 @@ public partial class MainWindow
     public ObservableCollection<ZLibraryBookCardViewModel> ZLibraryBooks { get; } = [];
     public ObservableCollection<ManagedFont> ManagedFonts { get; } = [];
     public ObservableCollection<DictionaryDefinition> ManagedDictionaries { get; } = [];
+    public ObservableCollection<LibraryTrashItemViewModel> LibraryTrashItems { get; } = [];
+    public ObservableCollection<PlatformDiagnosticViewModel> PlatformDiagnostics { get; } = [];
 
     private readonly List<Stage3ReadingMaterialViewModel> _allStage3ReadingMaterials = [];
     private readonly Dictionary<string, string> _readingMaterialCoverPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -3362,10 +3364,15 @@ public partial class MainWindow
         MainReaderAiBaseUrlBox.Focus();
     }
 
-    private void SettingsCategoryButton_Click(object? sender, RoutedEventArgs e)
+    private async void SettingsCategoryButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: not null } button)
-            ShowSettingsSection(button.Tag.ToString()!);
+        if (sender is not Button { Tag: not null } button) return;
+        var tag = button.Tag.ToString()!;
+        ShowSettingsSection(tag);
+        if (string.Equals(tag, "Library", StringComparison.OrdinalIgnoreCase))
+            await RefreshTrashItemsAsync();
+        else if (string.Equals(tag, "Diagnostics", StringComparison.OrdinalIgnoreCase))
+            await RefreshPlatformDiagnosticsAsync();
     }
 
     private void ShowSettingsSection(string tag)
@@ -3376,7 +3383,8 @@ public partial class MainWindow
             ["Calibre"] = SettingsCalibreSection,
             ["Kindle"] = SettingsKindleSection,
             ["Reading"] = SettingsReadingSection,
-            ["About"] = SettingsAboutSection
+            ["About"] = SettingsAboutSection,
+            ["Diagnostics"] = SettingsDiagnosticsSection
         };
 
         foreach (var section in sections.Values)
@@ -3394,12 +3402,144 @@ public partial class MainWindow
             SettingsCalibreButton,
             SettingsKindleButton,
             SettingsReadingButton,
-            SettingsAboutButton
+            SettingsAboutButton,
+            SettingsDiagnosticsButton
         };
         foreach (var button in buttons)
             button.Classes.Set("active", string.Equals(button.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase));
 
         SettingsScrollViewer.Offset = new Vector(0, 0);
+    }
+
+    private void UpdateDiagnosticsTexts()
+    {
+        SettingsDiagnosticsTitleText.Text = T("跨平台诊断");
+        SettingsDiagnosticsDescriptionText.Text = T("检查数据目录、阅读器、PDF、Calibre 和设备能力；不会下载或修改系统组件。");
+        RefreshDiagnosticsButton.Content = T("重新检测");
+    }
+
+    private async Task RefreshPlatformDiagnosticsAsync()
+    {
+        UpdateDiagnosticsTexts();
+        RefreshDiagnosticsButton.IsEnabled = false;
+        DiagnosticsStatusText.Text = T("正在检测…");
+        try
+        {
+            var diagnostics = (await _platformDiagnostics.CollectAsync(
+                _appSettings.CalibrePath,
+                _kindle is not null,
+                _lifetimeCancellation.Token)).ToList();
+            try
+            {
+                var tts = await _readerTts.CheckEnvironmentAsync(_lifetimeCancellation.Token);
+                diagnostics.Add(new PlatformDiagnostic(
+                    "TTS",
+                    tts.IsAvailable
+                        ? PlatformDiagnosticStatus.Ready
+                        : _readerTts.CanOpen
+                            ? PlatformDiagnosticStatus.Warning
+                            : PlatformDiagnosticStatus.Unavailable,
+                    tts.IsAvailable ? "edge-tts 与音频输出已就绪。" : tts.Message));
+            }
+            catch (Exception exception)
+            {
+                diagnostics.Add(new PlatformDiagnostic("TTS", PlatformDiagnosticStatus.Warning, exception.Message));
+            }
+
+            foreach (var item in PlatformDiagnostics)
+                item.Dispose();
+            PlatformDiagnostics.Clear();
+            foreach (var item in diagnostics)
+                PlatformDiagnostics.Add(new PlatformDiagnosticViewModel(item));
+            DiagnosticsStatusText.Text = T("检测完成：{0} 项。", diagnostics.Count);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            DiagnosticsStatusText.Text = T("检测失败：{0}", UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            RefreshDiagnosticsButton.IsEnabled = true;
+        }
+    }
+
+    private async void RefreshDiagnosticsButton_Click(object? sender, RoutedEventArgs e) =>
+        await RefreshPlatformDiagnosticsAsync();
+
+    private async Task RefreshTrashItemsAsync()
+    {
+        try
+        {
+            var items = await _library.GetTrashItemsAsync(_lifetimeCancellation.Token);
+            foreach (var item in LibraryTrashItems)
+                item.Dispose();
+            LibraryTrashItems.Clear();
+            foreach (var item in items)
+                LibraryTrashItems.Add(new LibraryTrashItemViewModel(item));
+            LibraryTrashEmptyText.IsVisible = LibraryTrashItems.Count == 0;
+            LibraryTrashList.IsVisible = LibraryTrashItems.Count > 0;
+            LibraryTrashStatusText.Text = LibraryTrashItems.Count == 0
+                ? string.Empty
+                : T("共 {0} 项，恢复前请确认原文件位置没有同名文件。", LibraryTrashItems.Count);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            LibraryTrashStatusText.Text = T("读取回收站失败：{0}", UiText.Localize(exception.Message));
+        }
+    }
+
+    private async void RefreshTrashButton_Click(object? sender, RoutedEventArgs e) =>
+        await RefreshTrashItemsAsync();
+
+    private async void RestoreTrashButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: LibraryTrashItemViewModel item }) return;
+        try
+        {
+            await _library.RestoreTrashItemAsync(item.Item.Id, _lifetimeCancellation.Token);
+            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+            await RefreshCollectionsAsync();
+            UpdateLibraryUi();
+            await RefreshTrashItemsAsync();
+            SetTaskStatus(T("已恢复《{0}》。", item.Item.Title));
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            LibraryTrashStatusText.Text = T("恢复失败：{0}", UiText.Localize(exception.Message));
+        }
+    }
+
+    private async void PurgeTrashButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: LibraryTrashItemViewModel item }) return;
+        var confirmed = await ConfirmAsync(
+            T("永久清理回收站项目"),
+            T("《{0}》将被永久删除，之后无法恢复。继续吗？", item.Item.Title),
+            T("永久删除"),
+            _lifetimeCancellation.Token);
+        if (!confirmed) return;
+        try
+        {
+            await _library.PurgeTrashItemAsync(item.Item.Id, _lifetimeCancellation.Token);
+            await RefreshTrashItemsAsync();
+            SetTaskStatus(T("已永久清理《{0}》。", item.Item.Title));
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            LibraryTrashStatusText.Text = T("清理失败：{0}", UiText.Localize(exception.Message));
+        }
     }
 
     private void ShowSystemSettingsSection(string tag)
@@ -3608,6 +3748,7 @@ public partial class MainWindow
                 ? T("当前平台暂不支持应用内更新")
                 : T("尚未检查更新");
             SettingsDataPathText.Text = _paths.Data;
+            UpdateDiagnosticsTexts();
             ZLibraryEmailBox.Text = _zLibrarySettings.Email;
             ZLibraryPasswordBox.Text = _zLibrarySettings.Password;
             ZLibraryBaseUrlBox.Text = _zLibrarySettings.BaseUrl;
@@ -5777,6 +5918,75 @@ public sealed class KindleBookCardViewModel : ObservableObject, IDisposable
         UiText.LanguageChanged -= OnLanguageChanged;
         _coverImage?.Dispose();
     }
+}
+
+public sealed class PlatformDiagnosticViewModel : ObservableObject, IDisposable
+{
+    public PlatformDiagnosticViewModel(PlatformDiagnostic item)
+    {
+        Item = item;
+        UiText.LanguageChanged += OnLanguageChanged;
+    }
+
+    public PlatformDiagnostic Item { get; }
+    public string Name => UiText.Localize(Item.Name);
+    public string Detail => UiText.Localize(Item.Detail);
+    public string StatusLabel => Item.Status switch
+    {
+        PlatformDiagnosticStatus.Ready => UiText.Get("正常"),
+        PlatformDiagnosticStatus.Warning => UiText.Get("注意"),
+        _ => UiText.Get("不可用")
+    };
+    public IBrush StatusBrush => Item.Status switch
+    {
+        PlatformDiagnosticStatus.Ready => Brushes.SeaGreen,
+        PlatformDiagnosticStatus.Warning => Brushes.DarkGoldenrod,
+        _ => Brushes.IndianRed
+    };
+
+    public void RefreshLocalizedProperties()
+    {
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(Detail));
+        OnPropertyChanged(nameof(StatusLabel));
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e) => RefreshLocalizedProperties();
+
+    public void Dispose() => UiText.LanguageChanged -= OnLanguageChanged;
+}
+
+public sealed class LibraryTrashItemViewModel : ObservableObject, IDisposable
+{
+    public LibraryTrashItemViewModel(LibraryTrashItem item)
+    {
+        Item = item;
+        UiText.LanguageChanged += OnLanguageChanged;
+    }
+
+    public LibraryTrashItem Item { get; }
+    public string DisplayTitle => Item.DisplayTitle;
+    public string DetailText => string.Join(
+        " · ",
+        new[]
+        {
+            Item.KindLabel,
+            Item.FormatLabel,
+            Item.SizeLabel,
+            Item.DeletedAtLabel
+        }.Where(value => value.Length > 0));
+    public string RestoreLabel => UiText.Get("恢复");
+    public string PurgeLabel => UiText.Get("永久删除");
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(DisplayTitle));
+        OnPropertyChanged(nameof(DetailText));
+        OnPropertyChanged(nameof(RestoreLabel));
+        OnPropertyChanged(nameof(PurgeLabel));
+    }
+
+    public void Dispose() => UiText.LanguageChanged -= OnLanguageChanged;
 }
 
 public sealed class ZLibraryBookCardViewModel : ObservableObject, IDisposable

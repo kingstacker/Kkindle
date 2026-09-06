@@ -234,6 +234,7 @@ public partial class MainWindow
             var pages = await _pdfTextService.ExtractAsync(path, token);
             if (pages.Count == 0)
                 throw new InvalidDataException(T("PDF 没有可读取的页面文本。"));
+            var textPageCount = pages.Count(page => !string.IsNullOrWhiteSpace(page.Text));
 
             _readerBookCard = card;
             _readerBookFile = file;
@@ -273,7 +274,9 @@ public partial class MainWindow
 
             ReaderBookInfoText.Text = $"{card.Title} · PDF";
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
-            ReaderStatusText.Text = T("PDF · {0} 页", pages.Count);
+            ReaderStatusText.Text = textPageCount == 0
+                ? T("PDF · {0} 页 · 主要是扫描图片", pages.Count)
+                : T("PDF · {0} 页 · 可搜索文本 {1}/{0} 页", pages.Count, textPageCount);
             ReaderRoot.IsVisible = true;
             LibraryRoot.IsVisible = false;
             WindowBrandText.IsVisible = true;
@@ -281,7 +284,9 @@ public partial class MainWindow
             // explanatory empty state; bookmarks still work per page.
             _readerTocExpanded = true;
             _readerTocMinimal = false;
-            ReaderTocEmptyText.Text = T("PDF 使用内置查看器；Kkindle 已启用本地搜索、页码进度、书签和页面笔记。");
+            ReaderTocEmptyText.Text = textPageCount == 0
+                ? T("PDF 主要是扫描图片；当前可翻页、保存进度、书签和页面笔记，搜索、AI 与朗读不可用。")
+                : T("PDF 使用内置查看器；已加载 {0}/{1} 页文本，可搜索、使用 AI、朗读并添加页面笔记。", textPageCount, pages.Count);
             ReaderTocEmptyText.IsVisible = true;
             ApplyReaderPanelLayout();
             ShowReaderTocTab();
@@ -306,7 +311,9 @@ public partial class MainWindow
                 throw new InvalidOperationException(T("PDF 阅读器页面加载失败。"));
             }
 
-            ReaderStatusText.Text = T("PDF · {0} 页 · 可搜索文本已加载", pages.Count);
+            ReaderStatusText.Text = textPageCount == 0
+                ? T("PDF · {0} 页 · 扫描图片，无可搜索文本", pages.Count)
+                : T("PDF · {0} 页 · 可搜索文本 {1}/{0} 页", pages.Count, textPageCount);
             UpdateReaderToolbar();
             await UpdateReaderBookmarkIndicatorAsync();
             await SaveReaderProgressAsync(token);

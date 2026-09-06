@@ -12,6 +12,7 @@ using System.Xml.Linq;
 using System.Xml;
 using Avalonia;
 using Avalonia.Animation;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
@@ -8676,6 +8677,27 @@ public partial class MainWindow
         ShowReaderBookmarkTab();
     }
 
+    private void ReaderPdfNoteButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!_readerIsPdf || _readerBookFile is null) return;
+        _selectedReaderAnnotation = null;
+        _readerPendingSelection = null;
+        _readerPendingSelectionStartOffset = 0;
+        _readerPendingSelectionEndOffset = 0;
+        _readerPendingSelectionPrefix = string.Empty;
+        _readerPendingSelectionSuffix = string.Empty;
+        ReaderAnnotationInputQuote.Text = T("PDF 第 {0} 页（页面笔记）", _readerPdfPage);
+        ReaderAnnotationInputBox.Text = string.Empty;
+        ShowReaderPopupNearSelection(
+            ReaderAnnotationInputPopup,
+            ReaderAnnotationInputPanel,
+            fallbackWidth: 320,
+            fallbackHeight: 190,
+            placementPoint: null,
+            selectionBottom: null);
+        ReaderAnnotationInputBox.Focus();
+    }
+
     private async void ReaderBookmarkCornerButton_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
@@ -8704,8 +8726,18 @@ public partial class MainWindow
             _readerAssistantVisibleBeforeZen = ReaderAssistantPanel.IsVisible;
             _readerTocExpandedBeforeZen = ReaderTocPanel.IsVisible;
             _readerTocMinimalBeforeZen = ReaderTocCompactPanel.IsVisible;
-            WindowState = WindowState.FullScreen;
+            CaptureReaderWindowStyleBeforeZen();
             _readerZenMode = true;
+            // Use a borderless maximized window instead of the platform's
+            // FullScreen state. Windows can reveal its own auto-hidden
+            // caption strip when the pointer touches the top edge of a true
+            // FullScreen window; the custom zen popup should be the only
+            // chrome that appears there.
+            WindowState = WindowState.Maximized;
+            ApplyReaderZenWindowChrome();
+            Dispatcher.UIThread.Post(
+                ApplyReaderZenWindowChrome,
+                DispatcherPriority.Render);
             ReaderAssistantPanel.IsVisible = false;
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
             ReaderAssistantToggleButton.IsVisible = false;
@@ -8733,6 +8765,7 @@ public partial class MainWindow
             // movement reveals the title controls again when they are needed.
             UpdateReaderZenChrome(visible: false);
             StartReaderZenPointerWatch();
+            StartReaderZenNativeChromeWatch();
         }
         else
         {
@@ -8791,7 +8824,10 @@ public partial class MainWindow
     {
         if (!_readerZenMode) return;
         WindowState = _readerWindowStateBeforeZen;
+        WindowDecorations = Avalonia.Controls.WindowDecorations.None;
         _readerZenMode = false;
+        RestoreReaderWindowChromeAfterZen();
+        ReaderWindowTitleBar.IsVisible = true;
         ReaderTocPanel.IsVisible = false;
         ReaderAssistantPanel.IsVisible = _readerAssistantVisibleBeforeZen;
         if (_readerAssistantVisibleBeforeZen)
@@ -8838,7 +8874,9 @@ public partial class MainWindow
     private bool _readerZenChromeVisible = true;
     private DispatcherTimer? _readerZenChromeHideTimer;
     private DispatcherTimer? _readerZenPointerWatchTimer;
+    private DispatcherTimer? _readerZenNativeChromeWatchTimer;
     private long _readerZenLastMouseMoveTick;
+    private int? _readerWindowStyleBeforeZen;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ReaderNativePoint
@@ -8867,6 +8905,41 @@ public partial class MainWindow
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr window, out ReaderNativeRect rect);
+
+    private const int ReaderWindowStyleIndex = -16;
+    private const int ReaderWindowCaptionStyle = 0x00C00000;
+    private const int ReaderWindowResizeFrameStyle = 0x00040000;
+    private const int ReaderWindowSystemMenuStyle = 0x00080000;
+    private const int ReaderWindowMinimizeBoxStyle = 0x00020000;
+    private const int ReaderWindowMaximizeBoxStyle = 0x00010000;
+    private const int ReaderWindowZenNativeChromeStyles =
+        ReaderWindowCaptionStyle
+        | ReaderWindowResizeFrameStyle
+        | ReaderWindowSystemMenuStyle
+        | ReaderWindowMinimizeBoxStyle
+        | ReaderWindowMaximizeBoxStyle;
+    private const uint ReaderSetWindowPosNoSize = 0x0001;
+    private const uint ReaderSetWindowPosNoMove = 0x0002;
+    private const uint ReaderSetWindowPosNoZOrder = 0x0004;
+    private const uint ReaderSetWindowPosNoActivate = 0x0010;
+    private const uint ReaderSetWindowPosFrameChanged = 0x0020;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static extern int GetReaderWindowStyle(IntPtr window, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")]
+    private static extern int SetReaderWindowStyle(IntPtr window, int index, int style);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr window,
+        IntPtr insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
 
     [DllImport("libX11.so.6")]
     private static extern IntPtr XOpenDisplay(IntPtr displayName);
@@ -9061,10 +9134,120 @@ public partial class MainWindow
         if (_readerZenMode) UpdateReaderZenChrome(visible: false);
     }
 
+    private void ApplyReaderZenWindowChrome()
+    {
+        if (!_readerZenMode) return;
+
+        // Hide the Avalonia-drawn title row, which is the second row shown in
+        // the Windows build. ReaderZenControlsPopup remains independent and
+        // continues to provide the custom zen exit row.
+        ReaderWindowTitleBar.IsVisible = false;
+        WindowDecorations = Avalonia.Controls.WindowDecorations.None;
+
+        // FullScreen/Maximized can cause Windows to restore the native
+        // overlapped-window styles after Avalonia has applied
+        // WindowDecorations=None. Strip the complete caption/control group at
+        // the native level too, then notify DWM that the frame changed. Removing
+        // only WS_CAPTION is insufficient: WS_SYSMENU plus the box styles can
+        // still leave a thin native row with the window title and buttons.
+        if (!OperatingSystem.IsWindows()) return;
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero) return;
+        var style = GetReaderWindowStyle(handle, ReaderWindowStyleIndex);
+        var zenStyle = style & ~ReaderWindowZenNativeChromeStyles;
+        if (zenStyle != style)
+        {
+            SetReaderWindowStyle(handle, ReaderWindowStyleIndex, zenStyle);
+        }
+        SetWindowPos(
+            handle,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            ReaderSetWindowPosNoSize
+                | ReaderSetWindowPosNoMove
+                | ReaderSetWindowPosNoZOrder
+                | ReaderSetWindowPosNoActivate
+                | ReaderSetWindowPosFrameChanged);
+    }
+
+    private void CaptureReaderWindowStyleBeforeZen()
+    {
+        if (!OperatingSystem.IsWindows() || _readerWindowStyleBeforeZen.HasValue)
+            return;
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle != IntPtr.Zero)
+            _readerWindowStyleBeforeZen = GetReaderWindowStyle(handle, ReaderWindowStyleIndex);
+    }
+
+    private void StartReaderZenNativeChromeWatch()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        _readerZenNativeChromeWatchTimer ??= new DispatcherTimer
+        {
+            // The Windows platform may apply its FullScreen/Maximized frame
+            // after the property notification. Keep checking while zen mode is
+            // active so that late platform passes cannot resurrect the native
+            // title row above the custom popup.
+            Interval = TimeSpan.FromMilliseconds(250)
+        };
+        _readerZenNativeChromeWatchTimer.Tick -= ReaderZenNativeChromeWatchTimer_Tick;
+        _readerZenNativeChromeWatchTimer.Tick += ReaderZenNativeChromeWatchTimer_Tick;
+        if (!_readerZenNativeChromeWatchTimer.IsEnabled)
+            _readerZenNativeChromeWatchTimer.Start();
+    }
+
+    private void ReaderZenNativeChromeWatchTimer_Tick(object? sender, EventArgs e)
+    {
+        if (!_readerZenMode)
+        {
+            _readerZenNativeChromeWatchTimer?.Stop();
+            return;
+        }
+
+        ApplyReaderZenWindowChrome();
+    }
+
+    private void RestoreReaderWindowChromeAfterZen()
+    {
+        _readerZenNativeChromeWatchTimer?.Stop();
+        if (!OperatingSystem.IsWindows())
+        {
+            _readerWindowStyleBeforeZen = null;
+            return;
+        }
+
+        var originalStyle = _readerWindowStyleBeforeZen;
+        _readerWindowStyleBeforeZen = null;
+        if (originalStyle is not { } style) return;
+
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero) return;
+        SetReaderWindowStyle(handle, ReaderWindowStyleIndex, style);
+        SetWindowPos(
+            handle,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            ReaderSetWindowPosNoSize
+                | ReaderSetWindowPosNoMove
+                | ReaderSetWindowPosNoZOrder
+                | ReaderSetWindowPosNoActivate
+                | ReaderSetWindowPosFrameChanged);
+    }
+
     private void UpdateReaderZenChrome(bool visible)
     {
         _readerZenChromeVisible = visible;
-        ReaderZenActivationRegion.IsVisible = _readerZenMode;
+        // The titlebar layer itself is hidden for zen mode. Keep the invisible
+        // activation region disabled as well so it cannot leave a hit-test or
+        // composition strip at the top of the reader.
+        ReaderZenActivationRegion.IsVisible = false;
+        if (_readerZenMode) ApplyReaderZenWindowChrome();
         ReaderZenTitleTocButton.IsVisible = false;
         ReaderZenTitleExitButton.IsVisible = false;
         MinimizeWindowButton.IsVisible = visible;
@@ -9072,7 +9255,9 @@ public partial class MainWindow
         CloseWindowButton.IsVisible = visible;
         if (_readerZenMode && visible)
         {
-            ReaderZenControlsPopup.PlacementTarget = ReaderZenActivationRegion;
+            // Anchor the fallback/native popup to the reader surface instead
+            // of the hidden titlebar activation region.
+            ReaderZenControlsPopup.PlacementTarget = ReaderRoot;
             ReaderZenControlsPopup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
             ReaderZenControlsPopup.PlacementAnchor = Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopRight;
             ReaderZenControlsPopup.PlacementGravity = Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomLeft;
@@ -9150,6 +9335,13 @@ public partial class MainWindow
         }
         if (ReaderPdfBadge is not null)
             ReaderPdfBadge.IsVisible = _readerIsPdf;
+        if (ReaderPdfNoteButton is not null)
+        {
+            ReaderPdfNoteButton.IsVisible = _readerIsPdf;
+            ReaderPdfNoteButton.Content = T("页面笔记");
+            ToolTip.SetTip(ReaderPdfNoteButton, T("为当前 PDF 页面添加笔记"));
+            AutomationProperties.SetName(ReaderPdfNoteButton, T("页面笔记"));
+        }
         if (ReaderPreviousButton is not null)
             ReaderPreviousButton.IsEnabled = _readerIsPdf
                 ? _readerPdfPage > 1

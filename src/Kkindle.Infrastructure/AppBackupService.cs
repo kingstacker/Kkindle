@@ -94,6 +94,7 @@ public sealed class AppBackupService
                 await AddOptionalFileEntryAsync(archive, databaseSnapshotPath + "-shm", DatabaseShmEntryName, cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Library, "library", cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Covers, "covers", cancellationToken);
+                await AddDirectoryEntriesAsync(archive, _paths.Trash, "trash", cancellationToken);
                 await AddJsonEntryAsync(archive, SettingsEntryName, settings, cancellationToken);
             }
 
@@ -152,8 +153,10 @@ public sealed class AppBackupService
 
             var stagedLibraryPath = Path.Combine(stagingRoot, "library");
             var stagedCoversPath = Path.Combine(stagingRoot, "covers");
+            var stagedTrashPath = Path.Combine(stagingRoot, "trash");
             Directory.CreateDirectory(stagedLibraryPath);
             Directory.CreateDirectory(stagedCoversPath);
+            Directory.CreateDirectory(stagedTrashPath);
 
             var rollbackRoot = CreateWorkingDirectory(".kkindle-rollback-");
             var currentDataMoved = false;
@@ -166,6 +169,7 @@ public sealed class AppBackupService
                 currentDataMoved = true;
                 Directory.Move(stagedLibraryPath, _paths.Library);
                 Directory.Move(stagedCoversPath, _paths.Covers);
+                Directory.Move(stagedTrashPath, _paths.Trash);
                 await ReplaceDatabaseFromSnapshotAsync(stagedDatabasePath, cancellationToken);
 
                 await _aiSettingsStore.SaveAsync(importedAiSettings, cancellationToken);
@@ -458,6 +462,7 @@ public sealed class AppBackupService
         {
             MoveIfExists(_paths.Library, Path.Combine(rollbackRoot, "library"));
             MoveIfExists(_paths.Covers, Path.Combine(rollbackRoot, "covers"));
+            MoveIfExists(_paths.Trash, Path.Combine(rollbackRoot, "trash"));
             MoveIfExists(Path.Combine(_paths.Data, AiSettingsPath), Path.Combine(rollbackRoot, AiSettingsPath));
             MoveIfExists(Path.Combine(_paths.Data, KindleEmailSettingsPath), Path.Combine(rollbackRoot, KindleEmailSettingsPath));
             MoveIfExists(Path.Combine(_paths.Data, S3SyncSettingsPath), Path.Combine(rollbackRoot, S3SyncSettingsPath));
@@ -473,6 +478,7 @@ public sealed class AppBackupService
     {
         MoveIfExists(Path.Combine(rollbackRoot, "library"), _paths.Library);
         MoveIfExists(Path.Combine(rollbackRoot, "covers"), _paths.Covers);
+        MoveIfExists(Path.Combine(rollbackRoot, "trash"), _paths.Trash);
         MoveIfExists(Path.Combine(rollbackRoot, AiSettingsPath), Path.Combine(_paths.Data, AiSettingsPath));
         MoveIfExists(Path.Combine(rollbackRoot, KindleEmailSettingsPath), Path.Combine(_paths.Data, KindleEmailSettingsPath));
         MoveIfExists(Path.Combine(rollbackRoot, S3SyncSettingsPath), Path.Combine(_paths.Data, S3SyncSettingsPath));
@@ -484,12 +490,14 @@ public sealed class AppBackupService
     {
         DeletePath(_paths.Library);
         DeletePath(_paths.Covers);
+        DeletePath(_paths.Trash);
         DeletePath(Path.Combine(_paths.Data, AiSettingsPath));
         DeletePath(Path.Combine(_paths.Data, KindleEmailSettingsPath));
         DeletePath(Path.Combine(_paths.Data, S3SyncSettingsPath));
 
         MoveIfExists(Path.Combine(rollbackRoot, "library"), _paths.Library);
         MoveIfExists(Path.Combine(rollbackRoot, "covers"), _paths.Covers);
+        MoveIfExists(Path.Combine(rollbackRoot, "trash"), _paths.Trash);
         MoveIfExists(Path.Combine(rollbackRoot, AiSettingsPath), Path.Combine(_paths.Data, AiSettingsPath));
         MoveIfExists(Path.Combine(rollbackRoot, KindleEmailSettingsPath), Path.Combine(_paths.Data, KindleEmailSettingsPath));
         MoveIfExists(Path.Combine(rollbackRoot, S3SyncSettingsPath), Path.Combine(_paths.Data, S3SyncSettingsPath));
@@ -597,7 +605,8 @@ public sealed class AppBackupService
         || entryName.Equals(DatabaseShmEntryName, StringComparison.OrdinalIgnoreCase)
         || entryName.Equals(SettingsEntryName, StringComparison.OrdinalIgnoreCase)
         || entryName.StartsWith("library/", StringComparison.OrdinalIgnoreCase)
-        || entryName.StartsWith("covers/", StringComparison.OrdinalIgnoreCase);
+        || entryName.StartsWith("covers/", StringComparison.OrdinalIgnoreCase)
+        || entryName.StartsWith("trash/", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeEntryName(string entryName)
     {

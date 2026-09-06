@@ -19,6 +19,7 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         Book = book;
         DataRoot = dataRoot;
         Refresh();
+        LoadCover();
     }
 
     public Book Book { get; }
@@ -99,6 +100,7 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     private bool _isSelected;
     private bool _isMultiSelected;
     private bool _isHovered;
+    private bool _coverLoadAttempted;
 
     // Any selection (single click or multi-select) turns the card outline
     // black; the check badge below is reserved for genuine multi-selection.
@@ -254,7 +256,8 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     public void Refresh()
     {
         CoverImage?.Dispose();
-        CoverImage = LoadCover(DataRoot, Book.CoverPath);
+        CoverImage = null;
+        _coverLoadAttempted = false;
 
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Authors));
@@ -270,6 +273,14 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DescriptionSummaryLabel));
         OnPropertyChanged(nameof(UpdatedLabel));
         OnPropertyChanged(nameof(DescriptionLabel));
+        OnPropertyChanged(nameof(CoverImage));
+    }
+
+    public void LoadCover()
+    {
+        if (_coverLoadAttempted) return;
+        _coverLoadAttempted = true;
+        CoverImage = LoadCoverImage(DataRoot, Book.CoverPath, 320);
         OnPropertyChanged(nameof(CoverImage));
     }
 
@@ -299,13 +310,18 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         CoverImage = null;
     }
 
-    private static Bitmap? LoadCover(string dataRoot, string? relativePath)
+    private static Bitmap? LoadCoverImage(string dataRoot, string? relativePath, int decodeWidth)
     {
         if (string.IsNullOrWhiteSpace(relativePath)) return null;
         try
         {
             var path = Path.GetFullPath(Path.Combine(dataRoot, relativePath));
-            return File.Exists(path) ? new Bitmap(path) : null;
+            if (!File.Exists(path)) return null;
+            using var stream = File.OpenRead(path);
+            return Bitmap.DecodeToWidth(
+                stream,
+                decodeWidth,
+                BitmapInterpolationMode.MediumQuality);
         }
         catch
         {
@@ -338,7 +354,7 @@ public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposabl
         for (var index = 0; index < _covers.Length; index++)
         {
             var path = index < coverPaths.Count ? coverPaths[index] : null;
-            _covers[index] = LoadCover(dataRoot, path);
+            _covers[index] = LoadCoverImage(dataRoot, path, 96);
         }
     }
 
@@ -367,13 +383,18 @@ public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposabl
         foreach (var cover in _covers) cover?.Dispose();
     }
 
-    private static Bitmap? LoadCover(string dataRoot, string? relativePath)
+    private static Bitmap? LoadCoverImage(string dataRoot, string? relativePath, int decodeWidth)
     {
         if (string.IsNullOrWhiteSpace(relativePath)) return null;
         try
         {
             var path = Path.GetFullPath(Path.Combine(dataRoot, relativePath));
-            return File.Exists(path) ? new Bitmap(path) : null;
+            if (!File.Exists(path)) return null;
+            using var stream = File.OpenRead(path);
+            return Bitmap.DecodeToWidth(
+                stream,
+                decodeWidth,
+                BitmapInterpolationMode.MediumQuality);
         }
         catch
         {
@@ -384,6 +405,8 @@ public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposabl
 
 public sealed class LibraryViewModel : ObservableObject, IDisposable
 {
+    public const int PageSize = 200;
+
     private readonly IBookLibraryService _library;
     private readonly string _dataRoot;
     private readonly Dictionary<Guid, BookCardViewModel> _bookCards = [];
@@ -397,6 +420,8 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     private LibraryReadingStatus? _readingStatusFilter;
     private bool _favoritesOnly;
     private LibrarySortMode _sortMode;
+    private int _pageIndex;
+    private int _pageCount = 1;
     private bool _isBusy;
     private string _statusText = UiText.Get("准备就绪");
 
@@ -413,6 +438,14 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     public IReadOnlyList<string> AvailableTags { get; private set; } = [];
     public IReadOnlyList<string> AvailableFormats { get; private set; } = [];
     public IReadOnlyList<string> AvailableCategories { get; private set; } = [];
+
+    public int PageIndex => _pageIndex;
+    public int PageCount => _pageCount;
+    public bool CanGoToPreviousPage => _pageIndex > 0;
+    public bool CanGoToNextPage => _pageIndex + 1 < _pageCount;
+    public string PageStatusText => _pageCount <= 1
+        ? string.Empty
+        : UiText.Get("第 {0} / {1} 页", _pageIndex + 1, _pageCount);
 
     public string SearchText
     {
@@ -501,10 +534,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         {
             var allBooks = await _library.SearchAsync(cancellationToken: cancellationToken);
             LibraryBooks = allBooks;
-            foreach (var card in _bookCards.Values) card.Dispose();
-            _bookCards.Clear();
-            foreach (var book in allBooks)
-                _bookCards[book.Id] = new BookCardViewModel(book, _dataRoot);
+            _pageIndex = 0;
 
             AvailableAuthors = allBooks
                 .SelectMany(book => SplitValues(book.Authors))
@@ -532,7 +562,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(AvailableTags));
             OnPropertyChanged(nameof(AvailableFormats));
             OnPropertyChanged(nameof(AvailableCategories));
-            ApplyCurrentView();
+            ApplyCurrentView(resetPage: true);
         }
         finally
         {
@@ -540,7 +570,21 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void RefreshView() => ApplyCurrentView();
+    public void RefreshView() => ApplyCurrentView(resetPage: true);
+
+    public void GoToPreviousPage()
+    {
+        if (!CanGoToPreviousPage) return;
+        _pageIndex--;
+        ApplyCurrentView();
+    }
+
+    public void GoToNextPage()
+    {
+        if (!CanGoToNextPage) return;
+        _pageIndex++;
+        ApplyCurrentView();
+    }
 
     public void Dispose()
     {
@@ -554,12 +598,13 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     public async Task<ImportBatchResult> ImportAsync(
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null)
     {
         IsBusy = true;
         try
         {
-            var result = await _library.ImportAsync(paths, progress, cancellationToken);
+            var result = await _library.ImportAsync(paths, progress, cancellationToken, conflictResolver);
             await RefreshAsync(cancellationToken);
             StatusText = result.FailureCount == 0
                 ? UiText.Get("已导入 {0} 项", result.SuccessCount)
@@ -576,20 +621,21 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     {
         await _library.DeleteAsync(book.Id, cancellationToken);
         await RefreshAsync(cancellationToken);
-        StatusText = UiText.Get("已删除《{0}》", book.Title);
+        StatusText = UiText.Get("已移入回收站：《{0}》", book.Title);
     }
 
     public async Task DeleteFileAsync(Book book, BookFile file, CancellationToken cancellationToken = default)
     {
         await _library.DeleteFileAsync(book.Id, file.Id, cancellationToken);
         await RefreshAsync(cancellationToken);
-        StatusText = UiText.Get("已删除 {0} 文件", file.Format.ToUpperInvariant());
+        StatusText = UiText.Get("已移入回收站：{0} 文件", file.Format.ToUpperInvariant());
     }
 
     public string GetAbsoluteFilePath(BookFile file) => _library.GetAbsoluteFilePath(file);
 
-    private void ApplyCurrentView()
+    private void ApplyCurrentView(bool resetPage = false)
     {
+        if (resetPage) _pageIndex = 0;
         var filtered = LibraryBooks.Where(MatchesFilters);
         var books = SortMode switch
         {
@@ -600,18 +646,37 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             _ => filtered.OrderByDescending(book => book.UpdatedAt).ToArray()
         };
 
-        Books.Clear();
-        foreach (var book in books)
+        var pageCount = Math.Max(1, (int)Math.Ceiling(books.Length / (double)PageSize));
+        if (_pageIndex >= pageCount) _pageIndex = pageCount - 1;
+        if (_pageCount != pageCount)
         {
-            if (!_bookCards.TryGetValue(book.Id, out var card))
-            {
-                card = new BookCardViewModel(book, _dataRoot);
-                _bookCards[book.Id] = card;
-            }
+            _pageCount = pageCount;
+            OnPropertyChanged(nameof(PageCount));
+        }
+        OnPropertyChanged(nameof(PageIndex));
+        OnPropertyChanged(nameof(CanGoToPreviousPage));
+        OnPropertyChanged(nameof(CanGoToNextPage));
+        OnPropertyChanged(nameof(PageStatusText));
+
+        // Keep the model list authoritative, but bound the presentation layer
+        // to one page. A normal WrapPanel materializes every item; creating
+        // 40,000 card visual trees and cover bitmaps is what made large imports
+        // exhaust memory even though the database itself was fine.
+        var visibleBooks = books
+            .Skip(_pageIndex * PageSize)
+            .Take(PageSize)
+            .ToArray();
+        foreach (var card in _bookCards.Values) card.Dispose();
+        _bookCards.Clear();
+        Books.Clear();
+        foreach (var book in visibleBooks)
+        {
+            var card = new BookCardViewModel(book, _dataRoot);
+            _bookCards[book.Id] = card;
             Books.Add(card);
         }
 
-        StatusText = books.Length == 0
+        var baseStatus = books.Length == 0
             ? LibraryBooks.Count == 0 ? UiText.Get("书库还是空的")
                 : CollectionFilterId is not null ? UiText.Get("“{0}”收藏夹还是空的", UiText.Localize(CollectionFilterName ?? string.Empty))
                 : UiText.Get("没有符合条件的书籍")
@@ -620,6 +685,9 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
                     ? UiText.Get("{0} · {1} 本书", UiText.Localize(CollectionFilterName ?? string.Empty), books.Length)
                     : UiText.Get("找到 {0} 本书", books.Length)
                 : UiText.Get("共 {0} 本书", books.Length);
+        StatusText = _pageCount <= 1
+            ? baseStatus
+            : $"{baseStatus} · {PageStatusText}";
 
         OnPropertyChanged(nameof(HasActiveFilters));
     }

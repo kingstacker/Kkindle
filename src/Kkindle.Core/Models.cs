@@ -328,16 +328,71 @@ public sealed class BookMetadata
     public string CoverExtension { get; init; } = ".jpg";
 }
 
+public enum ImportConflictResolution
+{
+    AddAsFormat,
+    KeepSeparate,
+    Skip
+}
+
+public sealed record ImportBookConflict(
+    string SourcePath,
+    Book ExistingBook,
+    string Title,
+    string Authors,
+    string Format);
+
+public enum LibraryTrashItemKind
+{
+    Book,
+    File
+}
+
+public sealed record LibraryTrashItem(
+    Guid Id,
+    LibraryTrashItemKind Kind,
+    Guid BookId,
+    string Title,
+    string? Format,
+    long Size,
+    DateTimeOffset DeletedAt)
+{
+    public string KindLabel => Kind == LibraryTrashItemKind.Book
+        ? UiText.Get("整本书")
+        : UiText.Get("单个格式");
+
+    public string FormatLabel => string.IsNullOrWhiteSpace(Format)
+        ? string.Empty
+        : Format.Trim().TrimStart('.').ToUpperInvariant();
+
+    public string DisplayTitle => Kind == LibraryTrashItemKind.Book || FormatLabel.Length == 0
+        ? Title
+        : UiText.Get("{0} · {1}", Title, FormatLabel);
+
+    public string SizeLabel => Size <= 0
+        ? string.Empty
+        : Size >= 1024L * 1024
+            ? $"{Size / 1024d / 1024:0.0} MB"
+            : $"{Size / 1024d:0} KB";
+
+    public string DeletedAtLabel => DeletedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+}
+
 public sealed record ImportItemResult(
     string SourcePath,
     bool Succeeded,
     string? Message,
     Book? Book,
-    bool Added = false);
+    bool Added = false,
+    Guid? BookId = null);
 
 public sealed class ImportBatchResult
 {
     public List<ImportItemResult> Items { get; } = [];
+    // Large folder imports intentionally omit the full Book object from each
+    // item. Keeping 40,000 duplicate object graphs alive until the UI finishes
+    // its post-import work creates a second avoidable memory spike.
+    public bool BookDetailsAvailable { get; set; } = true;
     public int SuccessCount => Items.Count(x => x.Succeeded);
     public int FailureCount => Items.Count(x => !x.Succeeded);
 }

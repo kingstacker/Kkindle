@@ -125,8 +125,10 @@ public partial class MainWindow
             }
         }
 
-        if (_readerIsPdf
-            || _readerDocument is null
+        if (_readerIsPdf)
+            return GetCurrentPdfReaderTtsDocument();
+
+        if (_readerDocument is null
             || CurrentReaderHost is not NativeReaderHost host)
         {
             return null;
@@ -151,6 +153,51 @@ public partial class MainWindow
             _readerBookFile?.Id.ToString("N"),
             $"{_readerChapterIndex}:{host.Source?.AbsoluteUri}",
             speech.PageBreakOffsets);
+    }
+
+    private ReaderTtsDocument? GetCurrentPdfReaderTtsDocument()
+    {
+        if (_readerBookFile is null || _readerPdfPages.Count == 0)
+            return null;
+        var page = _readerPdfPages.FirstOrDefault(item => item.PageNumber == _readerPdfPage);
+        if (page is null || string.IsNullOrWhiteSpace(page.Text))
+            return null;
+
+        var key = string.Join(":", _readerBookFile.Id.ToString("N"), "pdf", page.PageNumber);
+        return new ReaderTtsDocument(
+            key,
+            page.Text,
+            0,
+            (start, length) => ApplyPdfReaderTtsHighlightAsync(page.PageNumber, start, length),
+            ClearPdfReaderTtsHighlight,
+            (start, length) => (start, length),
+            _readerBookFile.Id.ToString("N"),
+            $"pdf:{page.PageNumber}");
+    }
+
+    private Task ApplyPdfReaderTtsHighlightAsync(int page, int start, int length)
+    {
+        // The embedded PDF viewer owns its page DOM, so text ranges cannot be
+        // painted from Avalonia. Keep the page/status synchronized instead.
+        return RunOnReaderUiAsync(() =>
+        {
+            if (_readerIsPdf && page == _readerPdfPage)
+                ReaderStatusText.Text = T("PDF 第 {0} 页 · 正在朗读", page);
+        });
+    }
+
+    private void ClearPdfReaderTtsHighlight()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(ClearPdfReaderTtsHighlight);
+            return;
+        }
+        if (!_readerIsPdf || !ReaderRoot.IsVisible) return;
+        var textPageCount = _readerPdfPages.Count(page => !string.IsNullOrWhiteSpace(page.Text));
+        ReaderStatusText.Text = textPageCount == 0
+            ? T("PDF · {0} 页 · 扫描图片，无可搜索文本", _readerPdfPages.Count)
+            : T("PDF · {0} 页 · 可搜索文本 {1}/{0} 页", _readerPdfPages.Count, textPageCount);
     }
 
     private async Task<ReaderTtsDocument?> GetNextReaderTtsDocumentAsync(
@@ -346,9 +393,24 @@ public partial class MainWindow
             return await completion.Task.WaitAsync(cancellationToken);
         }
 
-        if (_readerIsPdf
-            || _readerDocument is null
-            || CurrentReaderHost is null)
+        if (_readerIsPdf)
+        {
+            if (_readerPdfPage >= _readerPdfPages.Count)
+                return false;
+            var previousPage = _readerPdfPage;
+            _readerTtsAutoNavigation = true;
+            try
+            {
+                await NavigatePdfPageAsync(previousPage + 1, cancellationToken);
+                return _readerPdfPage > previousPage;
+            }
+            finally
+            {
+                _readerTtsAutoNavigation = false;
+            }
+        }
+
+        if (_readerDocument is null || CurrentReaderHost is null)
         {
             return false;
         }
@@ -561,9 +623,10 @@ public partial class MainWindow
         // An image-only page/chapter has no current speech document, but it is
         // still a valid starting point: TtsService will advance to the next
         // chapter containing visible text when playback starts.
-        var documentAvailable = !_readerIsPdf
-            && _readerDocument is not null
-            && CurrentReaderHost is not null;
+        var documentAvailable = _readerIsPdf
+            ? _readerPdfPages.Any(page => !string.IsNullOrWhiteSpace(page.Text))
+            : _readerDocument is not null
+                && CurrentReaderHost is not null;
         var state = _readerTts.State;
         var isActive = IsReaderTtsActiveState(state);
         var buttonText = _readerTts.EnvironmentSetupInProgress
@@ -587,8 +650,9 @@ public partial class MainWindow
             && documentAvailable
             && !_readerTts.EnvironmentSetupInProgress;
         ReaderTtsTitleText.Text = T("听书");
-        ReaderTtsDescriptionText.Text = T(
-            "首次启动会自动准备 edge-tts；生成语音需要联网。Windows 和 Linux 均支持。");
+        ReaderTtsDescriptionText.Text = _readerIsPdf
+            ? T("当前 PDF 页面有可提取文本时可朗读；扫描图片页需要 OCR，当前版本不自动识别。")
+            : T("首次启动会自动准备 edge-tts；生成语音需要联网。Windows 和 Linux 均支持。");
         ReaderTtsProviderLabelText.Text = T("语音引擎");
         ReaderTtsEngineText.Text = "edge-tts";
         ReaderTtsVoiceLabelText.Text = T("声音");
@@ -1170,7 +1234,7 @@ public partial class MainWindow
         Control placementTarget,
         PlacementMode placement)
     {
-        if (_readerIsPdf || !_readerTts.CanOpen) return;
+        if (!_readerTts.CanOpen) return;
         ReaderTtsPopup.PlacementTarget = placementTarget;
         ReaderTtsPopup.Placement = placement;
         ReaderTtsPopup.IsOpen = true;
@@ -1453,7 +1517,6 @@ public partial class MainWindow
     private async Task ResumeReaderTtsAfterNavigationAsync(bool shouldResume)
     {
         if (!shouldResume
-            || _readerIsPdf
             || !ReaderRoot.IsVisible
             || GetCurrentReaderTtsDocument() is null)
         {
@@ -1512,7 +1575,6 @@ public partial class MainWindow
                     shouldContinue)
                 || previousChapter == _readerChapterIndex
                 || !ReaderRoot.IsVisible
-                || _readerIsPdf
                 || GetCurrentReaderTtsDocument() is null)
             {
                 return;

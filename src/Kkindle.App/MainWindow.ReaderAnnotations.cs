@@ -27,7 +27,10 @@ public partial class MainWindow
     {
         if (_readerBookCard is null || _readerBookFile is null) return;
         var selectedText = (_readerPendingSelection ?? string.Empty).Trim();
-        if (selectedText.Length == 0 && _selectedReaderAnnotation is null)
+        var isPdfPageNote = _readerIsPdf
+            && selectedText.Length == 0
+            && _selectedReaderAnnotation is null;
+        if (selectedText.Length == 0 && _selectedReaderAnnotation is null && !isPdfPageNote)
         {
             ReaderStatusText.Text = T("请先在正文中选择一段文字。");
             return;
@@ -49,7 +52,9 @@ public partial class MainWindow
             BookId = _readerBookCard.Book.Id,
             BookFileId = _readerBookFile.Id,
             ChapterPath = chapterPath,
-            SelectedText = selectedText,
+            SelectedText = isPdfPageNote
+                ? T("PDF 第 {0} 页", _readerPdfPage)
+                : selectedText,
             CreatedAt = DateTimeOffset.UtcNow
         };
 
@@ -81,7 +86,9 @@ public partial class MainWindow
             : NormalizeReaderAnnotationColor(color ?? "#000000");
         annotation.UnderlineStyle = normalizedStyle;
         annotation.StartOffset = _readerPendingSelectionStartOffset;
-        annotation.EndOffset = _readerPendingSelectionEndOffset > _readerPendingSelectionStartOffset
+        annotation.EndOffset = isPdfPageNote
+            ? 0
+            : _readerPendingSelectionEndOffset > _readerPendingSelectionStartOffset
             ? _readerPendingSelectionEndOffset
             : annotation.StartOffset + annotation.SelectedText.Length;
         annotation.Prefix = _readerPendingSelectionPrefix;

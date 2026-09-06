@@ -37,6 +37,13 @@ WebKit when `libWPEWebKit-2.0.so.1` is installed. Ubuntu 22.04 does not package
 that WPE 2.0 ABI, so the `.deb` remains installable there through the
 WebKitGTK 4.1 fallback.
 
+The Settings > Diagnostics page performs the same local checks at runtime and
+shows the detected WebView library, writable data paths, bundled PDF parser,
+Calibre, TTS and Kindle service. A PDF with a text layer supports local search,
+AI context and TTS; an image-only/scanned PDF still supports page navigation,
+bookmarks and page notes, but Kkindle does not currently run OCR or paint text
+highlights inside the embedded PDF viewer.
+
 The `Development Build` GitHub Actions workflow can be run manually or by
 pushing the `develop`/`dev/**` branches. It appends the Actions run number to a
 base version such as `0.6.0-dev`, uploads three-platform packages as seven-day

@@ -123,6 +123,48 @@ public sealed class BackupTests
         }
     }
 
+    [Fact]
+    public async Task ExportsAndRestoresTrashItems()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var sourceBook = Path.Combine(root, "source.epub");
+            CreateEpub(sourceBook);
+            var converted = Path.Combine(root, "source.pdf");
+            await File.WriteAllBytesAsync(converted, [1, 2, 3, 4]);
+            var protector = new TestHelpers.PlaintextSecretProtector();
+            var sourcePaths = new AppPaths(Path.Combine(root, "source-app"));
+            var sourceLibrary = new SqliteBookLibraryService(sourcePaths, new BookMetadataService());
+            await sourceLibrary.InitializeAsync();
+            await sourceLibrary.ImportAsync([sourceBook]);
+            var book = Assert.Single(await sourceLibrary.SearchAsync());
+            var deletedFile = await sourceLibrary.AddFileToBookAsync(book.Id, converted);
+            await sourceLibrary.DeleteFileAsync(book.Id, deletedFile.Id);
+            Assert.Single(await sourceLibrary.GetTrashItemsAsync());
+
+            var backupPath = Path.Combine(root, "with-trash.kkindle");
+            await new AppBackupService(sourcePaths, protector).ExportAsync(backupPath);
+            using (var archive = ZipFile.OpenRead(backupPath))
+                Assert.Contains(archive.Entries, entry => entry.FullName.StartsWith("trash/", StringComparison.OrdinalIgnoreCase));
+
+            var targetPaths = new AppPaths(Path.Combine(root, "target-app"));
+            var targetLibrary = new SqliteBookLibraryService(targetPaths, new BookMetadataService());
+            await targetLibrary.InitializeAsync();
+            await new AppBackupService(targetPaths, protector).ImportAsync(backupPath);
+            await targetLibrary.InitializeAsync();
+
+            var trash = Assert.Single(await targetLibrary.GetTrashItemsAsync());
+            Assert.Equal(LibraryTrashItemKind.File, trash.Kind);
+            await targetLibrary.RestoreTrashItemAsync(trash.Id);
+            Assert.Equal(2, Assert.Single(await targetLibrary.SearchAsync()).Files.Count);
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
     private static void CreateEpub(string path)
     {
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);

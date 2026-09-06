@@ -57,8 +57,11 @@
                 BorderBrush="#000000"
                 BorderThickness="1">
         <Grid Background="{StaticResource PaperBrush}">
-        <!-- Self-drawn square title bar. -->
-        <Grid Grid.Row="0"
+        <!-- Self-drawn square title bar. It is kept for the normal window,
+             but zen mode hides this whole layer and leaves the reader's own
+             exit controls as the only way to leave distraction-free mode. -->
+        <Grid x:Name="ReaderWindowTitleBar"
+              Grid.Row="0"
               ColumnDefinitions="*,Auto"
               Background="Transparent"
               Height="38"
@@ -168,6 +171,7 @@
                         <Binding Path="IsVisible" ElementName="DoubanCandidateOverlay" />
                         <Binding Path="IsVisible" ElementName="DoubanPreviewOverlay" />
                         <Binding Path="IsVisible" ElementName="ImportFormatSelectionOverlay" />
+                        <Binding Path="IsVisible" ElementName="ImportConflictOverlay" />
                         <!-- MessageOverlay lives above the complete window content
                              layer, so it already covers the caption column and
                              must not be mirrored here a second time. -->
@@ -651,7 +655,7 @@
 
             <Grid x:Name="LibraryContentHost"
                   Grid.Row="3"
-                  RowDefinitions="Auto,*"
+                  RowDefinitions="Auto,*,Auto"
                   Background="Transparent">
                     <Border x:Name="CollectionHeader"
                             Padding="0,0,0,10"
@@ -937,6 +941,30 @@
                                 <Button Content="{DynamicResource Ui.Auto.74966E20DF2EA9FD}" Padding="12,6" Click="ClearMultiSelectionButton_Click" />
                             </StackPanel>
                         </Border>
+                    </Grid>
+
+                    <Grid x:Name="LibraryPaginationBar"
+                      Grid.Row="2"
+                      ColumnDefinitions="Auto,*,Auto"
+                      Margin="0,8,0,0"
+                      IsVisible="False">
+                    <Button x:Name="LibraryPreviousPageButton"
+                            Content="上一页"
+                            Classes="quiet"
+                            Padding="10,5"
+                            Click="LibraryPreviousPageButton_Click" />
+                    <TextBlock x:Name="LibraryPageText"
+                               Grid.Column="1"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontSize="11"
+                               Foreground="{StaticResource MutedInkBrush}" />
+                    <Button x:Name="LibraryNextPageButton"
+                            Grid.Column="2"
+                            Content="下一页"
+                            Classes="quiet"
+                            Padding="10,5"
+                            Click="LibraryNextPageButton_Click" />
                     </Grid>
                 </Grid>
 
@@ -2161,6 +2189,11 @@
                                     Content="{DynamicResource Ui.Auto.52D25A9E30BA94F1}"
                                     Tag="About"
                                     Click="SettingsCategoryButton_Click" />
+                            <Button x:Name="SettingsDiagnosticsButton"
+                                    Classes="settingsCategory"
+                                    Content="诊断"
+                                    Tag="Diagnostics"
+                                    Click="SettingsCategoryButton_Click" />
                         </StackPanel>
                     </StackPanel>
 
@@ -2215,6 +2248,51 @@
                                             <ToggleSwitch x:Name="GridGalleryDisplayCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.694BA13A98D0252A}" />
                                         </Grid>
                                     </StackPanel>
+                                    <Border Classes="flatSubsection" Margin="0,4,0,0" Padding="0,14,0,0">
+                                        <StackPanel Spacing="9">
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock x:Name="SettingsTrashTitleText" Text="回收站" FontSize="16" FontWeight="SemiBold" />
+                                                    <TextBlock x:Name="SettingsTrashDescriptionText"
+                                                               Text="删除的书籍和格式会暂存于此，可恢复或永久清理。"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource MutedInkBrush}"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <Button x:Name="RefreshTrashButton"
+                                                        Grid.Column="1"
+                                                        Content="刷新"
+                                                        Classes="quiet"
+                                                        Click="RefreshTrashButton_Click" />
+                                            </Grid>
+                                            <ListBox x:Name="LibraryTrashList"
+                                                     ItemsSource="{Binding LibraryTrashItems}"
+                                                     MaxHeight="220"
+                                                     SelectionMode="Single">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:LibraryTrashItemViewModel">
+                                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="7" Margin="0,3">
+                                                            <StackPanel Spacing="2">
+                                                                <TextBlock Text="{Binding DisplayTitle}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding DetailText}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                            <Button Grid.Column="1" Content="{Binding RestoreLabel}" Classes="quiet" Padding="8,4" Tag="{Binding}" Click="RestoreTrashButton_Click" />
+                                                            <Button Grid.Column="2" Content="{Binding PurgeLabel}" Classes="quiet" Padding="8,4" Tag="{Binding}" Click="PurgeTrashButton_Click" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <TextBlock x:Name="LibraryTrashEmptyText"
+                                                       Text="回收站为空。"
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                       IsVisible="True" />
+                                            <TextBlock x:Name="LibraryTrashStatusText"
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                             </Border>
 
@@ -2364,6 +2442,45 @@
                                             <TextBlock x:Name="DictionaryResultText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="SettingsDiagnosticsSection"
+                                    Classes="flatPanel"
+                                    BorderThickness="0"
+                                    IsVisible="False"
+                                    Padding="18"
+                                    Background="{StaticResource PaperBrush}">
+                                <StackPanel Spacing="13">
+                                    <TextBlock x:Name="SettingsDiagnosticsTitleText" Text="跨平台诊断" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="SettingsDiagnosticsDescriptionText"
+                                               Text="检查数据目录、阅读器、PDF、Calibre 和设备能力；不会下载或修改系统组件。"
+                                               FontSize="12"
+                                               Foreground="{StaticResource MutedInkBrush}"
+                                               TextWrapping="Wrap" />
+                                    <Button x:Name="RefreshDiagnosticsButton"
+                                            Content="重新检测"
+                                            Classes="quiet"
+                                            HorizontalAlignment="Left"
+                                            Click="RefreshDiagnosticsButton_Click" />
+                                    <ItemsControl x:Name="PlatformDiagnosticsList"
+                                                  ItemsSource="{Binding PlatformDiagnostics}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:PlatformDiagnosticViewModel">
+                                                <Border BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="0,8">
+                                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="9">
+                                                        <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Top" Margin="0,4,0,0" />
+                                                        <StackPanel Grid.Column="1" Spacing="2">
+                                                            <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="2" Text="{Binding StatusLabel}" FontSize="11" VerticalAlignment="Top" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock x:Name="DiagnosticsStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
 
@@ -3542,6 +3659,57 @@
                 </Border>
             </Grid>
 
+            <Grid x:Name="ImportConflictOverlay"
+                  Grid.ColumnSpan="3"
+                  Background="#66000000"
+                  IsVisible="False"
+                  ZIndex="106"
+                  Focusable="True"
+                  KeyDown="ImportConflictOverlay_KeyDown">
+                <Grid.Transitions>
+                    <Transitions>
+                        <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
+                    </Transitions>
+                </Grid.Transitions>
+                <Border Width="620"
+                        MaxWidth="620"
+                        Background="{StaticResource PaperBrush}"
+                        BorderBrush="{StaticResource InkBrush}"
+                        BorderThickness="1"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                    <StackPanel Margin="28,24,28,22" Spacing="13">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Rectangle Width="10" Height="24" Fill="{StaticResource InkBrush}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ImportConflictTitleText" FontSize="24" FontWeight="Bold" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock x:Name="ImportConflictSummaryText" FontSize="14" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ImportConflictExistingFilesText"
+                                   FontSize="12"
+                                   Foreground="{StaticResource MutedInkBrush}"
+                                   TextWrapping="Wrap" />
+                        <Grid ColumnDefinitions="*,10,*,10,*" Margin="0,8,0,0">
+                            <Button x:Name="ImportConflictMergeButton"
+                                    Content="添加为格式"
+                                    HorizontalAlignment="Stretch"
+                                    Click="ImportConflictMergeButton_Click" />
+                            <Button x:Name="ImportConflictSeparateButton"
+                                    Grid.Column="2"
+                                    Content="作为新版本"
+                                    Classes="quiet"
+                                    HorizontalAlignment="Stretch"
+                                    Click="ImportConflictSeparateButton_Click" />
+                            <Button x:Name="ImportConflictSkipButton"
+                                    Grid.Column="4"
+                                    Content="跳过"
+                                    Classes="quiet"
+                                    HorizontalAlignment="Stretch"
+                                    Click="ImportConflictSkipButton_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
         </Grid>
         <!-- Stage 4: the EPUB reader surface. Two native webview hosts
              stay attached so the next chapter can be prepared offscreen.
@@ -4167,6 +4335,11 @@
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.3FF66E53453FEC82}"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.3FF66E53453FEC82}"
                                         Click="ReaderBookmarkButton_Click" />
+                                <Button x:Name="ReaderPdfNoteButton"
+                                        Classes="readerHeader"
+                                        Content="页面笔记"
+                                        IsVisible="False"
+                                        Click="ReaderPdfNoteButton_Click" />
                                 <Rectangle Width="1" Height="20" Margin="12,0" Fill="#E2E2DE" VerticalAlignment="Center" />
                                 <Button x:Name="ReaderAssistantToggleButton"
                                         Classes="readerHeader"

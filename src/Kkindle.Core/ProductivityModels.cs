@@ -88,6 +88,18 @@ public sealed record DictionaryEntry(string Term, string Definition, string Dict
 public sealed record PdfPageText(int PageNumber, string Text);
 public sealed record PdfSearchResult(int PageNumber, string Excerpt, int MatchIndex);
 
+public enum PlatformDiagnosticStatus
+{
+    Ready,
+    Warning,
+    Unavailable
+}
+
+public sealed record PlatformDiagnostic(
+    string Name,
+    PlatformDiagnosticStatus Status,
+    string Detail);
+
 public sealed record ReadingDashboard(
     int BooksStarted,
     int BooksFinished,

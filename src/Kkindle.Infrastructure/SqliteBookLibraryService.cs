@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Kkindle.Core;
 
@@ -6,6 +7,16 @@ namespace Kkindle.Infrastructure;
 
 public sealed class SqliteBookLibraryService : IBookLibraryService
 {
+    // Import results are only used for the small post-import workflows (format
+    // generation and optional metadata matching). Do not retain a full Book
+    // object for every item in a very large folder import.
+    private const int DetailedImportResultLimit = 1_000;
+
+    private static readonly JsonSerializerOptions TrashJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".epub", ".pdf", ".mobi", ".azw3"
@@ -96,6 +107,22 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 PRIMARY KEY (CollectionId, BookId)
             );
             CREATE INDEX IF NOT EXISTS IX_BookCollectionItems_BookId ON BookCollectionItems(BookId);
+            CREATE TABLE IF NOT EXISTS LibraryTrash (
+                Id TEXT PRIMARY KEY,
+                Kind INTEGER NOT NULL,
+                BookId TEXT NOT NULL,
+                Title TEXT NOT NULL,
+                Format TEXT NULL,
+                Size INTEGER NOT NULL DEFAULT 0,
+                DeletedAt TEXT NOT NULL,
+                BookJson TEXT NULL,
+                FileJson TEXT NULL,
+                TrashPath TEXT NOT NULL,
+                OriginalPath TEXT NOT NULL,
+                TrashCoverPath TEXT NULL,
+                OriginalCoverPath TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_LibraryTrash_DeletedAt ON LibraryTrash(DeletedAt DESC);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
@@ -190,10 +217,15 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         return books;
     }
 
-    public async Task<ImportBatchResult> ImportAsync(IEnumerable<string> paths, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default)
+    public async Task<ImportBatchResult> ImportAsync(
+        IEnumerable<string> paths,
+        IProgress<TransferProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null)
     {
         var files = ExpandInputFiles(paths).ToList();
         var result = new ImportBatchResult();
+        result.BookDetailsAvailable = files.Count <= DetailedImportResultLimit;
         var totalBytes = files.Sum(GetFileLengthSafe);
         long completedBytes = 0;
 
@@ -211,7 +243,12 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 var duplicate = await FindBookByHashAsync(connection, hash, cancellationToken);
                 if (duplicate is not null)
                 {
-                    result.Items.Add(new ImportItemResult(sourcePath, true, "已存在，跳过重复文件", duplicate));
+                    result.Items.Add(new ImportItemResult(
+                        sourcePath,
+                        true,
+                        "已存在，跳过重复文件",
+                        result.BookDetailsAvailable ? duplicate : null,
+                        BookId: duplicate.Id));
                     completedBytes += file.Length;
                     progress?.Report(new TransferProgress(completedBytes, totalBytes, $"已检查 {file.Name}"));
                     continue;
@@ -220,7 +257,33 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 var metadata = await _metadata.ReadMetadataAsync(sourcePath, cancellationToken);
                 var title = string.IsNullOrWhiteSpace(metadata.Title) ? Path.GetFileNameWithoutExtension(sourcePath) : metadata.Title.Trim();
                 var authors = string.IsNullOrWhiteSpace(metadata.Authors) ? "未知作者" : metadata.Authors.Trim();
-                var book = await FindBookByTitleAuthorsAsync(connection, title, authors, cancellationToken);
+                Book? book = await FindBookByTitleAuthorsAsync(connection, title, authors, cancellationToken);
+                if (book is not null && conflictResolver is not null)
+                {
+                    book.Files = await ReadFilesAsync(connection, book.Id, cancellationToken);
+                    var resolution = await conflictResolver(new ImportBookConflict(
+                        sourcePath,
+                        book,
+                        title,
+                        authors,
+                        Path.GetExtension(sourcePath).TrimStart('.').ToLowerInvariant()));
+                    if (resolution == ImportConflictResolution.Skip)
+                    {
+                        result.Items.Add(new ImportItemResult(
+                            sourcePath,
+                            true,
+                            "已跳过同名版本",
+                            result.BookDetailsAvailable ? book : null,
+                            Added: false,
+                            BookId: book.Id));
+                        completedBytes += file.Length;
+                        progress?.Report(new TransferProgress(completedBytes, totalBytes, $"已跳过 {file.Name}"));
+                        continue;
+                    }
+
+                    if (resolution == ImportConflictResolution.KeepSeparate)
+                        book = null;
+                }
                 var newBook = book is null;
                 book ??= new Book
                 {
@@ -307,8 +370,9 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     sourcePath,
                     true,
                     newBook ? "已导入" : "已添加新格式",
-                    book,
-                    Added: true));
+                    result.BookDetailsAvailable ? book : null,
+                    Added: true,
+                    BookId: book.Id));
                 NotifyDataChanged();
                 completedBytes += file.Length;
                 progress?.Report(new TransferProgress(completedBytes, totalBytes, $"已导入 {file.Name}"));
@@ -419,62 +483,15 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
-            string relativePath;
-            string? coverPath;
-            long fileCount;
+            var book = await ReadBookByIdAsync(connection, bookId, cancellationToken)
+                ?? throw new FileNotFoundException("指定书籍不存在。");
+            var file = book.Files.FirstOrDefault(item => item.Id == bookFileId)
+                ?? throw new FileNotFoundException("指定书籍格式不存在。");
 
-            var lookup = connection.CreateCommand();
-            lookup.CommandText = """
-                SELECT f.RelativePath, b.CoverPath,
-                       (SELECT COUNT(*) FROM BookFiles WHERE BookId = $bookId)
-                FROM BookFiles f
-                INNER JOIN Books b ON b.Id = f.BookId
-                WHERE f.Id = $fileId AND f.BookId = $bookId
-                LIMIT 1;
-                """;
-            lookup.Parameters.AddWithValue("$fileId", bookFileId.ToString());
-            lookup.Parameters.AddWithValue("$bookId", bookId.ToString());
-            await using (var reader = await lookup.ExecuteReaderAsync(cancellationToken))
-            {
-                if (!await reader.ReadAsync(cancellationToken))
-                    throw new FileNotFoundException("指定书籍格式不存在。");
-
-                relativePath = reader.GetString(0);
-                coverPath = reader.IsDBNull(1) ? null : reader.GetString(1);
-                fileCount = reader.GetInt64(2);
-            }
-
-            var filePath = GetAbsoluteFilePath(new BookFile { RelativePath = relativePath });
-            if (File.Exists(filePath))
-                File.Delete(filePath);
-
-            var deleteFile = connection.CreateCommand();
-            deleteFile.CommandText = "DELETE FROM BookFiles WHERE Id = $fileId AND BookId = $bookId;";
-            deleteFile.Parameters.AddWithValue("$fileId", bookFileId.ToString());
-            deleteFile.Parameters.AddWithValue("$bookId", bookId.ToString());
-            await deleteFile.ExecuteNonQueryAsync(cancellationToken);
-
-            if (fileCount <= 1)
-            {
-                var deleteBook = connection.CreateCommand();
-                deleteBook.CommandText = "DELETE FROM Books WHERE Id = $bookId;";
-                deleteBook.Parameters.AddWithValue("$bookId", bookId.ToString());
-                await deleteBook.ExecuteNonQueryAsync(cancellationToken);
-
-                if (!string.IsNullOrWhiteSpace(coverPath))
-                {
-                    var coverFile = Path.GetFullPath(Path.Combine(_paths.Data, coverPath));
-                    if (File.Exists(coverFile)) File.Delete(coverFile);
-                }
-            }
+            if (book.Files.Count <= 1)
+                await MoveBookToTrashAsync(connection, book, cancellationToken);
             else
-            {
-                var updateBook = connection.CreateCommand();
-                updateBook.CommandText = "UPDATE Books SET UpdatedAt = $updatedAt WHERE Id = $bookId;";
-                updateBook.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
-                updateBook.Parameters.AddWithValue("$bookId", bookId.ToString());
-                await updateBook.ExecuteNonQueryAsync(cancellationToken);
-            }
+                await MoveFileToTrashAsync(connection, book, file, cancellationToken);
             NotifyDataChanged();
         }
         finally { _databaseGate.Release(); }
@@ -486,22 +503,355 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
-            var book = (await SearchAsync(bookId.ToString(), cancellationToken)).FirstOrDefault(x => x.Id == bookId);
-            var directory = Path.Combine(_paths.Library, bookId.ToString("N"));
-            if (Directory.Exists(directory)) Directory.Delete(directory, true);
-            if (book?.CoverPath is not null)
-            {
-                var cover = Path.Combine(_paths.Data, book.CoverPath);
-                if (File.Exists(cover)) File.Delete(cover);
-            }
+            var book = await ReadBookByIdAsync(connection, bookId, cancellationToken);
+            if (book is null)
+                return;
+
+            await MoveBookToTrashAsync(connection, book, cancellationToken);
+            NotifyDataChanged();
+        }
+        finally { _databaseGate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<LibraryTrashItem>> GetTrashItemsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, Kind, BookId, Title, Format, Size, DeletedAt
+            FROM LibraryTrash
+            ORDER BY DeletedAt DESC;
+            """;
+        var items = new List<LibraryTrashItem>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!Guid.TryParse(reader.GetString(0), out var id)
+                || !Guid.TryParse(reader.GetString(2), out var bookId)
+                || !Enum.IsDefined(typeof(LibraryTrashItemKind), reader.GetInt32(1)))
+                continue;
+
+            items.Add(new LibraryTrashItem(
+                id,
+                (LibraryTrashItemKind)reader.GetInt32(1),
+                bookId,
+                reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.GetInt64(5),
+                DateTimeOffset.Parse(reader.GetString(6))));
+        }
+        return items;
+    }
+
+    public async Task RestoreTrashItemAsync(
+        Guid trashItemId,
+        CancellationToken cancellationToken = default)
+    {
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            var entry = await ReadTrashEntryAsync(connection, trashItemId, cancellationToken)
+                ?? throw new FileNotFoundException("回收站项目不存在，可能已被其他设备处理。");
+
+            if (entry.Kind == LibraryTrashItemKind.Book)
+                await RestoreBookFromTrashAsync(connection, entry, cancellationToken);
+            else
+                await RestoreFileFromTrashAsync(connection, entry, cancellationToken);
+            NotifyDataChanged();
+        }
+        finally { _databaseGate.Release(); }
+    }
+
+    public async Task PurgeTrashItemAsync(
+        Guid trashItemId,
+        CancellationToken cancellationToken = default)
+    {
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            var entry = await ReadTrashEntryAsync(connection, trashItemId, cancellationToken)
+                ?? throw new FileNotFoundException("回收站项目不存在，可能已被其他设备处理。");
+            DeletePath(ResolveDataPath(entry.TrashPath));
+            if (!string.IsNullOrWhiteSpace(entry.TrashCoverPath))
+                DeletePath(ResolveDataPath(entry.TrashCoverPath));
 
             var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM Books WHERE Id = $id;";
-            command.Parameters.AddWithValue("$id", bookId.ToString());
+            command.CommandText = "DELETE FROM LibraryTrash WHERE Id = $id;";
+            command.Parameters.AddWithValue("$id", trashItemId.ToString());
             await command.ExecuteNonQueryAsync(cancellationToken);
             NotifyDataChanged();
         }
         finally { _databaseGate.Release(); }
+    }
+
+    private async Task MoveBookToTrashAsync(
+        SqliteConnection connection,
+        Book book,
+        CancellationToken cancellationToken)
+    {
+        var trashId = Guid.NewGuid();
+        var trashDirectory = Path.Combine(_paths.Trash, "books", trashId.ToString("N"));
+        var originalDirectory = Path.Combine(_paths.Library, book.Id.ToString("N"));
+        var trashPath = Path.GetRelativePath(_paths.Data, trashDirectory);
+        var originalPath = Path.GetRelativePath(_paths.Data, originalDirectory);
+        var trashCoverPath = string.IsNullOrWhiteSpace(book.CoverPath)
+            ? null
+            : Path.GetRelativePath(
+                _paths.Data,
+                Path.Combine(_paths.Trash, "covers", trashId.ToString("N"), "cover" + Path.GetExtension(book.CoverPath)));
+        var originalCoverPath = book.CoverPath;
+
+        try
+        {
+            MovePath(originalDirectory, trashDirectory);
+            if (!string.IsNullOrWhiteSpace(originalCoverPath))
+            {
+                var originalCover = ResolveDataPath(originalCoverPath);
+                var movedCover = ResolveDataPath(trashCoverPath!);
+                MovePath(originalCover, movedCover);
+            }
+        }
+        catch
+        {
+            MovePathBack(trashDirectory, originalDirectory);
+            if (!string.IsNullOrWhiteSpace(trashCoverPath))
+                MovePathBack(ResolveDataPath(trashCoverPath), ResolveDataPath(originalCoverPath!));
+            throw;
+        }
+
+        var entry = new TrashEntry
+        {
+            Id = trashId,
+            Kind = LibraryTrashItemKind.Book,
+            BookId = book.Id,
+            Title = book.Title,
+            Format = null,
+            Size = book.Files.Sum(file => Math.Max(0, file.Size)),
+            DeletedAt = DateTimeOffset.UtcNow,
+            BookJson = JsonSerializer.Serialize(book, TrashJsonOptions),
+            TrashPath = trashPath,
+            OriginalPath = originalPath,
+            TrashCoverPath = trashCoverPath,
+            OriginalCoverPath = originalCoverPath
+        };
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await InsertTrashEntryAsync(connection, transaction, entry, cancellationToken);
+                var delete = connection.CreateCommand();
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM Books WHERE Id = $id;";
+                delete.Parameters.AddWithValue("$id", book.Id.ToString());
+                await delete.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+        catch
+        {
+            MovePathBack(trashDirectory, originalDirectory);
+            if (!string.IsNullOrWhiteSpace(trashCoverPath))
+                MovePathBack(ResolveDataPath(trashCoverPath), ResolveDataPath(originalCoverPath!));
+            throw;
+        }
+    }
+
+    private async Task MoveFileToTrashAsync(
+        SqliteConnection connection,
+        Book book,
+        BookFile file,
+        CancellationToken cancellationToken)
+    {
+        var trashId = Guid.NewGuid();
+        var originalPath = file.RelativePath;
+        var sourcePath = ResolveDataPath(originalPath);
+        var trashDirectory = Path.Combine(_paths.Trash, "files", trashId.ToString("N"));
+        var trashFilePath = Path.Combine(trashDirectory, SanitizeFileName(Path.GetFileName(originalPath)));
+        var trashPath = Path.GetRelativePath(_paths.Data, trashFilePath);
+        MovePath(sourcePath, trashFilePath);
+
+        var entry = new TrashEntry
+        {
+            Id = trashId,
+            Kind = LibraryTrashItemKind.File,
+            BookId = book.Id,
+            Title = book.Title,
+            Format = file.Format,
+            Size = file.Size,
+            DeletedAt = DateTimeOffset.UtcNow,
+            FileJson = JsonSerializer.Serialize(file, TrashJsonOptions),
+            TrashPath = trashPath,
+            OriginalPath = originalPath
+        };
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await InsertTrashEntryAsync(connection, transaction, entry, cancellationToken);
+                var delete = connection.CreateCommand();
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM BookFiles WHERE Id = $id AND BookId = $bookId;";
+                delete.Parameters.AddWithValue("$id", file.Id.ToString());
+                delete.Parameters.AddWithValue("$bookId", book.Id.ToString());
+                await delete.ExecuteNonQueryAsync(cancellationToken);
+
+                var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = "UPDATE Books SET UpdatedAt = $updatedAt WHERE Id = $bookId;";
+                update.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
+                update.Parameters.AddWithValue("$bookId", book.Id.ToString());
+                await update.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+        catch
+        {
+            MovePathBack(trashFilePath, sourcePath);
+            throw;
+        }
+    }
+
+    private async Task RestoreBookFromTrashAsync(
+        SqliteConnection connection,
+        TrashEntry entry,
+        CancellationToken cancellationToken)
+    {
+        var book = JsonSerializer.Deserialize<Book>(entry.BookJson ?? string.Empty, TrashJsonOptions)
+            ?? throw new InvalidDataException("回收站中的书籍记录无法读取。");
+        book.Files ??= [];
+        book.CollectionIds ??= [];
+        if (await BookExistsAsync(connection, book.Id, cancellationToken))
+            throw new InvalidOperationException("同 ID 的书籍已经存在，无法恢复。");
+        foreach (var file in book.Files)
+        {
+            if (await FindFileByHashAsync(connection, file.Sha256, cancellationToken) is not null)
+                throw new InvalidOperationException($"恢复失败：文件 {file.Format.ToUpperInvariant()} 已存在于书库中。");
+        }
+
+        var sourceDirectory = ResolveDataPath(entry.TrashPath);
+        var targetDirectory = ResolveDataPath(entry.OriginalPath);
+        var targetCover = string.IsNullOrWhiteSpace(entry.OriginalCoverPath)
+            ? null
+            : ResolveDataPath(entry.OriginalCoverPath);
+        var sourceCover = string.IsNullOrWhiteSpace(entry.TrashCoverPath)
+            ? null
+            : ResolveDataPath(entry.TrashCoverPath);
+        EnsureMoveTargetAvailable(targetDirectory);
+        if (targetCover is not null) EnsureMoveTargetAvailable(targetCover);
+
+        MovePath(sourceDirectory, targetDirectory);
+        if (sourceCover is not null && targetCover is not null)
+            MovePath(sourceCover, targetCover);
+        book.UpdatedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await InsertBookAsync(connection, book, cancellationToken, transaction);
+                foreach (var file in book.Files)
+                    await InsertFileAsync(connection, file, cancellationToken, transaction);
+                foreach (var collectionId in book.CollectionIds)
+                    await RestoreCollectionMembershipAsync(connection, transaction, collectionId, book.Id, cancellationToken);
+                await DeleteTrashEntryAsync(connection, transaction, entry.Id, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+        catch
+        {
+            MovePathBack(targetDirectory, sourceDirectory);
+            if (sourceCover is not null && targetCover is not null)
+                MovePathBack(targetCover, sourceCover);
+            throw;
+        }
+    }
+
+    private async Task RestoreFileFromTrashAsync(
+        SqliteConnection connection,
+        TrashEntry entry,
+        CancellationToken cancellationToken)
+    {
+        var file = JsonSerializer.Deserialize<BookFile>(entry.FileJson ?? string.Empty, TrashJsonOptions)
+            ?? throw new InvalidDataException("回收站中的文件记录无法读取。");
+        if (!await BookExistsAsync(connection, file.BookId, cancellationToken))
+            throw new InvalidOperationException("原书籍已经不存在，无法恢复此格式。");
+        if (await FindFileByHashAsync(connection, file.Sha256, cancellationToken) is not null)
+            throw new InvalidOperationException("相同文件已经在书库中，无法重复恢复。");
+
+        var sourcePath = ResolveDataPath(entry.TrashPath);
+        var targetPath = ResolveDataPath(entry.OriginalPath);
+        EnsureMoveTargetAvailable(targetPath);
+        MovePath(sourcePath, targetPath);
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await InsertFileAsync(connection, file, cancellationToken, transaction);
+                var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = "UPDATE Books SET UpdatedAt = $updatedAt WHERE Id = $bookId;";
+                update.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
+                update.Parameters.AddWithValue("$bookId", file.BookId.ToString());
+                await update.ExecuteNonQueryAsync(cancellationToken);
+                await DeleteTrashEntryAsync(connection, transaction, entry.Id, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+        catch
+        {
+            MovePathBack(targetPath, sourcePath);
+            throw;
+        }
+    }
+
+    private static async Task RestoreCollectionMembershipAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid collectionId,
+        Guid bookId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+            SELECT $collectionId, $bookId, $addedAt
+            WHERE EXISTS(SELECT 1 FROM BookCollections WHERE Id = $collectionId);
+            """;
+        command.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+        command.Parameters.AddWithValue("$bookId", bookId.ToString());
+        command.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<BookCollection>> GetCollectionsAsync(CancellationToken cancellationToken = default)
@@ -643,9 +993,11 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         finally { _databaseGate.Release(); }
     }
 
-    public string GetAbsoluteFilePath(BookFile file)
+    public string GetAbsoluteFilePath(BookFile file) => ResolveDataPath(file.RelativePath);
+
+    private string ResolveDataPath(string relativePath)
     {
-        var full = Path.GetFullPath(Path.Combine(_paths.Data, file.RelativePath));
+        var full = Path.GetFullPath(Path.Combine(_paths.Data, relativePath));
         var dataRoot = Path.GetFullPath(_paths.Data + Path.DirectorySeparatorChar);
         if (!full.StartsWith(dataRoot, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("书籍路径不在应用数据目录内。");
@@ -887,6 +1239,30 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         return await reader.ReadAsync(cancellationToken) ? ReadBook(reader) : null;
     }
 
+    private static async Task<Book?> ReadBookByIdAsync(
+        SqliteConnection connection,
+        Guid bookId,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
+                   Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
+            FROM Books WHERE Id = $id LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", bookId.ToString());
+        Book? book;
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            if (!await reader.ReadAsync(cancellationToken)) return null;
+            book = ReadBook(reader);
+        }
+        book.Files = await ReadFilesAsync(connection, book.Id, cancellationToken);
+        book.CollectionIds = (await ReadCollectionIdsByBookAsync(connection, [book.Id], cancellationToken))
+            .GetValueOrDefault(book.Id) ?? [];
+        return book;
+    }
+
     private static async Task<bool> BookExistsAsync(
         SqliteConnection connection,
         Guid bookId,
@@ -919,9 +1295,14 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         };
     }
 
-    private static async Task InsertBookAsync(SqliteConnection connection, Book book, CancellationToken cancellationToken)
+    private static async Task InsertBookAsync(
+        SqliteConnection connection,
+        Book book,
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO Books (Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
                                Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount)
@@ -932,9 +1313,14 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task UpdateBookRowAsync(SqliteConnection connection, Book book, CancellationToken cancellationToken)
+    private static async Task UpdateBookRowAsync(
+        SqliteConnection connection,
+        Book book,
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE Books SET Title=$title, Authors=$authors, Series=$series, SeriesIndex=$seriesIndex, Description=$description,
                 Tags=$tags, Category=$category, IsFavorite=$isFavorite, ReadingStatus=$readingStatus,
@@ -999,9 +1385,14 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         }
     }
 
-    private static async Task InsertFileAsync(SqliteConnection connection, BookFile file, CancellationToken cancellationToken)
+    private static async Task InsertFileAsync(
+        SqliteConnection connection,
+        BookFile file,
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "INSERT INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256) VALUES ($id, $bookId, $format, $relativePath, $size, $sha256);";
         command.Parameters.AddWithValue("$id", file.Id.ToString());
         command.Parameters.AddWithValue("$bookId", file.BookId.ToString());
@@ -1012,6 +1403,126 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task InsertTrashEntryAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        TrashEntry entry,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO LibraryTrash
+                (Id, Kind, BookId, Title, Format, Size, DeletedAt, BookJson, FileJson,
+                 TrashPath, OriginalPath, TrashCoverPath, OriginalCoverPath)
+            VALUES
+                ($id, $kind, $bookId, $title, $format, $size, $deletedAt, $bookJson, $fileJson,
+                 $trashPath, $originalPath, $trashCoverPath, $originalCoverPath);
+            """;
+        command.Parameters.AddWithValue("$id", entry.Id.ToString());
+        command.Parameters.AddWithValue("$kind", (int)entry.Kind);
+        command.Parameters.AddWithValue("$bookId", entry.BookId.ToString());
+        command.Parameters.AddWithValue("$title", entry.Title);
+        command.Parameters.AddWithValue("$format", (object?)entry.Format ?? DBNull.Value);
+        command.Parameters.AddWithValue("$size", entry.Size);
+        command.Parameters.AddWithValue("$deletedAt", entry.DeletedAt.ToString("O"));
+        command.Parameters.AddWithValue("$bookJson", (object?)entry.BookJson ?? DBNull.Value);
+        command.Parameters.AddWithValue("$fileJson", (object?)entry.FileJson ?? DBNull.Value);
+        command.Parameters.AddWithValue("$trashPath", entry.TrashPath);
+        command.Parameters.AddWithValue("$originalPath", entry.OriginalPath);
+        command.Parameters.AddWithValue("$trashCoverPath", (object?)entry.TrashCoverPath ?? DBNull.Value);
+        command.Parameters.AddWithValue("$originalCoverPath", (object?)entry.OriginalCoverPath ?? DBNull.Value);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task DeleteTrashEntryAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "DELETE FROM LibraryTrash WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", id.ToString());
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<TrashEntry?> ReadTrashEntryAsync(
+        SqliteConnection connection,
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, Kind, BookId, Title, Format, Size, DeletedAt, BookJson, FileJson,
+                   TrashPath, OriginalPath, TrashCoverPath, OriginalCoverPath
+            FROM LibraryTrash WHERE Id = $id LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", id.ToString());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        if (!Guid.TryParse(reader.GetString(0), out var parsedId)
+            || !Guid.TryParse(reader.GetString(2), out var bookId)
+            || !Enum.IsDefined(typeof(LibraryTrashItemKind), reader.GetInt32(1)))
+            return null;
+        return new TrashEntry
+        {
+            Id = parsedId,
+            Kind = (LibraryTrashItemKind)reader.GetInt32(1),
+            BookId = bookId,
+            Title = reader.GetString(3),
+            Format = reader.IsDBNull(4) ? null : reader.GetString(4),
+            Size = reader.GetInt64(5),
+            DeletedAt = DateTimeOffset.Parse(reader.GetString(6)),
+            BookJson = reader.IsDBNull(7) ? null : reader.GetString(7),
+            FileJson = reader.IsDBNull(8) ? null : reader.GetString(8),
+            TrashPath = reader.GetString(9),
+            OriginalPath = reader.GetString(10),
+            TrashCoverPath = reader.IsDBNull(11) ? null : reader.GetString(11),
+            OriginalCoverPath = reader.IsDBNull(12) ? null : reader.GetString(12)
+        };
+    }
+
+    private static void EnsureMoveTargetAvailable(string path)
+    {
+        if (File.Exists(path) || Directory.Exists(path))
+            throw new IOException($"恢复目标已存在：{path}");
+    }
+
+    private static void MovePath(string source, string destination)
+    {
+        if (!File.Exists(source) && !Directory.Exists(source)) return;
+        EnsureMoveTargetAvailable(destination);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (File.Exists(source))
+            File.Move(source, destination);
+        else
+            Directory.Move(source, destination);
+    }
+
+    private static void MovePathBack(string source, string destination)
+    {
+        try
+        {
+            if (File.Exists(source) || Directory.Exists(source))
+                MovePath(source, destination);
+        }
+        catch
+        {
+            // Keep the original exception from the database operation. A
+            // subsequent startup can still expose the manifest for recovery.
+        }
+    }
+
+    private static void DeletePath(string path)
+    {
+        if (File.Exists(path))
+            File.Delete(path);
+        else if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+    }
+
     private static void TryDeleteFile(string path)
     {
         try
@@ -1019,5 +1530,22 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             if (File.Exists(path)) File.Delete(path);
         }
         catch { }
+    }
+
+    private sealed class TrashEntry
+    {
+        public Guid Id { get; init; }
+        public LibraryTrashItemKind Kind { get; init; }
+        public Guid BookId { get; init; }
+        public string Title { get; init; } = string.Empty;
+        public string? Format { get; init; }
+        public long Size { get; init; }
+        public DateTimeOffset DeletedAt { get; init; }
+        public string? BookJson { get; init; }
+        public string? FileJson { get; init; }
+        public string TrashPath { get; init; } = string.Empty;
+        public string OriginalPath { get; init; } = string.Empty;
+        public string? TrashCoverPath { get; init; }
+        public string? OriginalCoverPath { get; init; }
     }
 }
