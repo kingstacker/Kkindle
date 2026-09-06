@@ -1,7 +1,6 @@
 using System.Text;
 using System.ComponentModel;
 using Avalonia.Media.Imaging;
-using Avalonia.Interactivity;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 
@@ -58,12 +57,8 @@ public sealed class DoubanCandidateViewModel : INotifyPropertyChanged, IDisposab
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
-// One-click Douban batch matching. The per-book flow (manual candidate pick,
-// field-by-field confirmation) lives in MainWindow.axaml.cs; this partial adds
-// the automated pipeline: search by title+authors, score the candidates, apply
-// metadata for high-confidence hits and report everything else for manual
-// follow-up. Requests stay serialized through DoubanMetadataService's built-in
-// rate limit, matching the one-book-at-a-time etiquette but bulk-driven.
+// Automatic Douban matching during import. The per-book flow (manual candidate
+// pick and field-by-field confirmation) lives in MainWindow.axaml.cs.
 public partial class MainWindow
 {
     private const string DefaultBookTitle = "未命名书籍";
@@ -81,23 +76,6 @@ public partial class MainWindow
 
     private DoubanMetadataService DoubanBatchService => _doubanBatchService ??= new DoubanMetadataService(
         minimumInterval: TimeSpan.FromSeconds(2.5));
-
-    private async void DoubanBatchMatchButton_Click(object? sender, RoutedEventArgs e)
-    {
-        var cards = ViewModel.Books.Where(card => card.Book is not null).ToArray();
-        if (cards.Length == 0)
-        {
-            SetTaskStatus(T("书库是空的，先导入书籍再使用一键豆瓣匹配。"));
-            return;
-        }
-
-        if (!await ConfirmAsync(
-                T("一键豆瓣匹配"),
-                T("将按书名和作者自动匹配并写入 {0} 本书的豆瓣信息。此功能不推荐频繁使用，可能触发豆瓣访问限制；是否继续？", cards.Length),
-                T("继续匹配")))
-            return;
-        await RunDoubanBatchMatchAsync(cards);
-    }
 
     internal async Task RunDoubanBatchMatchAsync(IReadOnlyList<BookCardViewModel> cards)
     {

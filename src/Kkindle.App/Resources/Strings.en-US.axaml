@@ -44,8 +44,6 @@
     <x:String x:Key="Ui.Auto.68DBD3556A19C150">ebook-convert is used for format conversion during import and Kindle dictionary imports; leave the path empty to find an installed Calibre automatically.</x:String>
     <x:String x:Key="Ui.Auto.6160F42DABA0438E">ebook-convert path</x:String>
     <x:String x:Key="Ui.Auto.9DD9F8A0E4DE0220">Package book files, covers, library data, and reading records into a .kkindle backup with one click. Importing a backup replaces the current library; its contents are verified first.</x:String>
-    <x:String x:Key="Ui.Auto.7E332D1630BA5CBC">Match with Douban</x:String>
-    <x:String x:Key="Ui.Auto.6F8656E318CB926A">Match with Douban: fill in ratings, descriptions, and covers from the title and author</x:String>
     <x:String x:Key="Ui.Auto.393F2A5120AC2098">Previous chapter</x:String>
     <x:String x:Key="Ui.Auto.C9B9AE7A61444AB7">Previous page</x:String>
     <x:String x:Key="Ui.Auto.9443994BC3B186C5">Next chapter</x:String>

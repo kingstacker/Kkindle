@@ -845,7 +845,9 @@ public partial class MainWindow
             _readerTocExpanded ? 286d : _readerTocMinimal ? ReaderTocMinimalWidth : 0d);
         ReaderTocPanel.IsVisible = _readerTocExpanded;
         ReaderTocCompactPanel.IsVisible = _readerTocMinimal;
-        ReaderTocToggleButton.Opacity = _readerTocExpanded ? 0.58 : 1;
+        // Opening the TOC changes the layout, not the availability of the
+        // toolbar action. Keep its label at full opacity in both states.
+        ReaderTocToggleButton.Opacity = 1;
         ScheduleLinuxReaderTextFallbackReflow();
         ScheduleReaderRelayout();
     }

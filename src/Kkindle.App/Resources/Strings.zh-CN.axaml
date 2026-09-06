@@ -44,8 +44,6 @@
     <x:String x:Key="Ui.Auto.68DBD3556A19C150">ebook-convert 用于导入时的格式转换与 Kindle 词典导入；路径留空时自动查找系统中已安装的 Calibre。</x:String>
     <x:String x:Key="Ui.Auto.6160F42DABA0438E">ebook-convert 路径</x:String>
     <x:String x:Key="Ui.Auto.9DD9F8A0E4DE0220">一键打包书籍文件、封面、书库信息和阅读记录，生成 .kkindle 备份文件。导入备份会覆盖当前书库；导入前会自动校验备份内容。</x:String>
-    <x:String x:Key="Ui.Auto.7E332D1630BA5CBC">一键豆瓣匹配</x:String>
-    <x:String x:Key="Ui.Auto.6F8656E318CB926A">一键豆瓣匹配：用书名和作者自动补全书籍的评分、简介与封面</x:String>
     <x:String x:Key="Ui.Auto.393F2A5120AC2098">上一章</x:String>
     <x:String x:Key="Ui.Auto.C9B9AE7A61444AB7">上一页</x:String>
     <x:String x:Key="Ui.Auto.9443994BC3B186C5">下一章</x:String>

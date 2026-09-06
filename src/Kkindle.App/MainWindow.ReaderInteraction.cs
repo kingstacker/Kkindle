@@ -7043,9 +7043,8 @@ public partial class MainWindow
 
     private Point? _readerAnnotationHoverPlacementPoint;
 
-    private void ShowReaderAnnotationHoverPopup(string quote, string note, Point? placementPoint)
+    private void ShowReaderAnnotationHoverPopup(string note, Point? placementPoint)
     {
-        ReaderAnnotationHoverQuote.Text = string.IsNullOrWhiteSpace(quote) ? T("批注") : quote;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
         if (placementPoint is { } point)
@@ -7081,7 +7080,6 @@ public partial class MainWindow
     {
         ReaderAnnotationHoverHostPopup.IsOpen = false;
         ReaderAnnotationHoverPopup.IsVisible = false;
-        ReaderAnnotationHoverQuote.Text = string.Empty;
         ReaderAnnotationHoverNote.Text = string.Empty;
         _readerAnnotationHoverPlacementPoint = null;
     }
@@ -7355,7 +7353,6 @@ public partial class MainWindow
                         annotationPlacementPoint = new Point(Math.Max(0, annotationPx), Math.Max(0, annotationPy));
                     }
                     ShowReaderAnnotationHoverPopup(
-                        ReadString(root, "quote"),
                         ReadString(root, "note"),
                         annotationPlacementPoint);
                     break;

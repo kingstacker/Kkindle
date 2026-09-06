@@ -652,8 +652,10 @@ public partial class MainWindow
 
     private void ReaderAiScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        // Layout growth must not be mistaken for the user scrolling away.
-        if (e.ExtentDelta.Y != 0 || e.ViewportDelta.Y != 0) return;
+        // Extent/viewport changes are layout-only and must not flip follow mode.
+        // If layout also changes the offset (for example, while the user scrolls
+        // away as a streamed answer grows), the offset delta is still meaningful.
+        if (e.OffsetDelta.Y == 0) return;
         _readerAiFollowOutput = ReaderAiScrollViewer.Extent.Height
             - ReaderAiScrollViewer.Viewport.Height - ReaderAiScrollViewer.Offset.Y < 40;
         if (_readerAiFollowOutput) ReaderAiNewContentButton.IsVisible = false;

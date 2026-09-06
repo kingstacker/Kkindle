@@ -193,7 +193,7 @@
                     BorderBrush="{StaticResource HairlineBrush}"
                     BorderThickness="0,0,1,0">
                 <Grid RowDefinitions="Auto,*,Auto" Margin="18,24,18,18">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
                         <Border Width="34" Height="34" Background="{StaticResource InkBrush}">
                             <TextBlock Text="K"
                                        Foreground="{StaticResource PaperBrush}"
@@ -202,7 +202,10 @@
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center" />
                         </Border>
-                        <StackPanel VerticalAlignment="Center" Spacing="0">
+                        <StackPanel Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Spacing="0"
+                                    Margin="10,0,0,0">
                             <StackPanel Orientation="Horizontal" Spacing="5">
                                 <TextBlock Text="Kkindle"
                                            FontSize="18"
@@ -227,6 +230,8 @@
                                        Foreground="{StaticResource MutedInkBrush}" />
                         </StackPanel>
                         <Button x:Name="S3SyncIndicatorButton"
+                                Grid.Column="2"
+                                HorizontalAlignment="Right"
                                 Classes="syncIndicator"
                                 Click="S3SyncIndicatorButton_Click"
                                 Cursor="Hand"
@@ -280,7 +285,7 @@
                                       IsHitTestVisible="False" />
                             </Grid>
                         </Button>
-                    </StackPanel>
+                    </Grid>
 
                     <ScrollViewer Grid.Row="1"
                                   Margin="0,24,0,16"
@@ -579,15 +584,6 @@
                         <Button x:Name="ImportButton" Classes="icon" ToolTip.Tip="{DynamicResource Ui.Auto.A76D4E4052F3FA6F}" Click="ImportButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.576D81BB0631B165}">
                             <Path Classes="libraryGlyph"
                                   Data="M 12,3 V 16 M 7,11 L 12,16 L 17,11 M 4,21 H 20" />
-                        </Button>
-                        <Button x:Name="DoubanBatchMatchButton"
-                                Classes="icon"
-                                ToolTip.Tip="{DynamicResource Ui.Auto.6F8656E318CB926A}"
-                                Click="DoubanBatchMatchButton_Click"
-                                AutomationProperties.Name="{DynamicResource Ui.Auto.7E332D1630BA5CBC}">
-                            <Path Classes="libraryGlyph"
-                                  UseLayoutRounding="True"
-                                  Data="M 11,4.5 L 12.6,9.4 L 17.5,11 L 12.6,12.6 L 11,17.5 L 9.4,12.6 L 4.5,11 L 9.4,9.4 Z M 18.5,15.5 L 19.3,17.7 L 21.5,18.5 L 19.3,19.3 L 18.5,21.5 L 17.7,19.3 L 15.5,18.5 L 17.7,17.7 Z" />
                         </Button>
                     </StackPanel>
                 </Grid>
@@ -4690,13 +4686,15 @@
                     IsVisible="False"
                     Background="{StaticResource PaperBrush}">
                 <Grid RowDefinitions="52,*,Auto">
-                    <!-- Long separator beside the assistant surface. -->
-                    <Rectangle Grid.Row="0"
-                               Grid.RowSpan="3"
+                    <!-- Match the TOC divider: start below the shared tab
+                         header so the separator does not protrude above it. -->
+                    <Rectangle Grid.Row="1"
+                               Grid.RowSpan="2"
                                Width="1"
                                HorizontalAlignment="Left"
                                Fill="#EEEEEA"
-                               IsHitTestVisible="False" />
+                               IsHitTestVisible="False"
+                               ZIndex="21" />
 
                     <Border Background="{StaticResource PaperBrush}"
                             BorderBrush="#EEEEEA"
@@ -4866,7 +4864,7 @@
                                     </Button>
                                     <Button x:Name="ReaderAiClearButton" Grid.Column="2" Content="{DynamicResource Ui.Auto.1EF3DE06B32E521B}" Classes="readerAiReasoningToggle" Click="ReaderAiClearButton_Click" />
                                 </Grid>
-                                <Border Grid.Row="2" BorderBrush="#D8D8D8" BorderThickness="1" CornerRadius="4" Background="White">
+                                <Border Grid.Row="2" BorderBrush="#D8D8D8" BorderThickness="1" CornerRadius="0" Background="White">
                                 <Grid RowDefinitions="Auto,Auto" ClipToBounds="True">
                                     <TextBox x:Name="ReaderAiQuestionBox"
                                              Classes="readerMinimalField readerAiQuestionInput"
@@ -4927,36 +4925,46 @@
                                     <ItemsControl x:Name="ReaderAnnotationList" ItemsSource="{Binding ReaderAnnotations}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="core:ReaderAnnotation">
-                                                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,7">
-                                                    <Button Classes="readerNoteItem"
-                                                            Tag="{Binding}"
-                                                            HorizontalContentAlignment="Stretch"
-                                                            Click="ReaderAnnotationItemButton_Click">
-                                                        <StackPanel Spacing="5" HorizontalAlignment="Stretch">
-                                                            <TextBlock Text="{Binding DisplayQuote}" FontSize="11" FontWeight="SemiBold" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
-                                                            <TextBlock Text="{Binding DisplayNote}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                    <Button Grid.Column="1"
-                                                            Classes="icon"
-                                                            Width="30"
-                                                            MinWidth="30"
-                                                            Height="30"
-                                                            Margin="6,0,0,0"
-                                                            VerticalAlignment="Top"
-                                                            AutomationProperties.Name="{DynamicResource Ui.Auto.E06985CB8EEAACEB}"
-                                                            ToolTip.Tip="{DynamicResource Ui.Auto.E06985CB8EEAACEB}"
-                                                            Tag="{Binding}"
-                                                            Click="ReaderAnnotationItemDeleteButton_Click">
-                                                        <Path Width="10"
-                                                              Height="10"
-                                                              Data="M 1,1 L 9,9 M 9,1 L 1,9"
-                                                              Stroke="{StaticResource InkBrush}"
-                                                              StrokeThickness="1.2"
-                                                              StrokeLineCap="Square"
-                                                              IsHitTestVisible="False" />
-                                                    </Button>
-                                                </Grid>
+                                                <Border BorderBrush="{StaticResource HairlineBrush}"
+                                                        BorderThickness="0,0,0,1"
+                                                        Padding="0,0,0,5"
+                                                        Margin="0,0,0,6"
+                                                        HorizontalAlignment="Stretch">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <Button Classes="readerNoteItem"
+                                                                Tag="{Binding}"
+                                                                MinHeight="0"
+                                                                Padding="2,4"
+                                                                BorderBrush="Transparent"
+                                                                BorderThickness="0"
+                                                                HorizontalContentAlignment="Stretch"
+                                                                Click="ReaderAnnotationItemButton_Click">
+                                                            <StackPanel Spacing="3" HorizontalAlignment="Stretch">
+                                                                <TextBlock Text="{Binding DisplayQuote}" FontSize="11" FontWeight="SemiBold" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                                                                <TextBlock Text="{Binding DisplayNote}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" MaxHeight="54" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                                                            </StackPanel>
+                                                        </Button>
+                                                        <Button Grid.Column="1"
+                                                                Classes="icon"
+                                                                Width="30"
+                                                                MinWidth="30"
+                                                                Height="30"
+                                                                Margin="6,0,0,0"
+                                                                VerticalAlignment="Top"
+                                                                AutomationProperties.Name="{DynamicResource Ui.Auto.E06985CB8EEAACEB}"
+                                                                ToolTip.Tip="{DynamicResource Ui.Auto.E06985CB8EEAACEB}"
+                                                                Tag="{Binding}"
+                                                                Click="ReaderAnnotationItemDeleteButton_Click">
+                                                            <Path Width="10"
+                                                                  Height="10"
+                                                                  Data="M 1,1 L 9,9 M 9,1 L 1,9"
+                                                                  Stroke="{StaticResource InkBrush}"
+                                                                  StrokeThickness="1.2"
+                                                                  StrokeLineCap="Square"
+                                                                  IsHitTestVisible="False" />
+                                                        </Button>
+                                                    </Grid>
+                                                </Border>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
@@ -5098,8 +5106,19 @@
                         <Grid>
                             <Grid x:Name="ReaderNotesExportBar" Margin="20,6,20,7" IsVisible="False">
                                 <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                                    <Button Classes="readerMinimalAction" Content="{DynamicResource Ui.Auto.AC8B027CC1E3A493}" HorizontalAlignment="Stretch" Click="ReaderExportMarkdownButton_Click" />
-                                    <Button Grid.Column="1" Classes="readerMinimalAction" Content="{DynamicResource Ui.Auto.8E1B126E634DCA98}" HorizontalAlignment="Stretch" Click="ReaderExportTextButton_Click" />
+                                    <Button Classes="readerMinimalAction"
+                                            Content="{DynamicResource Ui.Auto.AC8B027CC1E3A493}"
+                                            BorderBrush="Transparent"
+                                            BorderThickness="0"
+                                            HorizontalAlignment="Stretch"
+                                            Click="ReaderExportMarkdownButton_Click" />
+                                    <Button Grid.Column="1"
+                                            Classes="readerMinimalAction"
+                                            Content="{DynamicResource Ui.Auto.8E1B126E634DCA98}"
+                                            BorderBrush="Transparent"
+                                            BorderThickness="0"
+                                            HorizontalAlignment="Stretch"
+                                            Click="ReaderExportTextButton_Click" />
                                 </Grid>
                             </Grid>
                         </Grid>
@@ -5114,8 +5133,8 @@
                             Width="9"
                             HorizontalAlignment="Left"
                             Background="Transparent"
-                            BorderBrush="#D5D5D1"
-                            BorderThickness="1,0,0,0"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
                             Cursor="SizeWestEast"
                             ZIndex="20"
                             PointerPressed="ReaderAssistantResizeHandle_PointerPressed"
@@ -5511,11 +5530,15 @@
                         <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                             <Button Classes="readerMinimalAction"
                                     Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="0"
                                     HorizontalAlignment="Stretch"
                                     Click="ReaderAnnotationInputCancelButton_Click" />
                             <Button Grid.Column="1"
                                     Classes="readerMinimalAction"
                                     Content="{DynamicResource Ui.Auto.49DD2BD35DD7E743}"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="0"
                                     HorizontalAlignment="Stretch"
                                     Click="ReaderAnnotationInputSaveButton_Click" />
                         </Grid>
@@ -5537,7 +5560,7 @@
                         Padding="12,10"
                         Background="{StaticResource PaperBrush}"
                         BorderBrush="#000000"
-                        BorderThickness="2"
+                        BorderThickness="1"
                         CornerRadius="0"
                         IsHitTestVisible="False"
                         IsVisible="False">
@@ -5563,7 +5586,7 @@
                    TakesFocusFromNativeControl="False"
                    IsHitTestVisible="False">
                 <Border x:Name="ReaderAnnotationHoverPopup"
-                        Width="360"
+                        MaxWidth="360"
                         MaxHeight="260"
                         Padding="12,10"
                         Background="{StaticResource PaperBrush}"
@@ -5576,12 +5599,6 @@
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                         <StackPanel Spacing="6">
-                            <TextBlock x:Name="ReaderAnnotationHoverQuote"
-                                       Foreground="{StaticResource InkBrush}"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"
-                                       LineHeight="20"
-                                       TextWrapping="Wrap" />
                             <TextBlock x:Name="ReaderAnnotationHoverNote"
                                        Foreground="{StaticResource MutedInkBrush}"
                                        FontSize="11"

@@ -2319,6 +2319,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             var page = _layout.Pages[pageIndex];
             foreach (var candidate in _annotations)
             {
+                // A highlight without a note is only a visual mark. It must
+                // not become a hover target that opens an empty preview.
+                if (string.IsNullOrWhiteSpace(candidate.Note))
+                {
+                    continue;
+                }
+
                 if (candidate.EndOffset <= candidate.StartOffset)
                 {
                     continue;
