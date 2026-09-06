@@ -422,6 +422,10 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     private LibrarySortMode _sortMode;
     private int _pageIndex;
     private int _pageCount = 1;
+    private int _bookCount;
+    private int _filteredBookCount;
+    private int _viewRequestId;
+    private CancellationTokenSource? _viewCancellation;
     private bool _isBusy;
     private string _statusText = UiText.Get("准备就绪");
 
@@ -441,6 +445,8 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
     public int PageIndex => _pageIndex;
     public int PageCount => _pageCount;
+    public int BookCount => _bookCount;
+    public int FilteredBookCount => _filteredBookCount;
     public bool CanGoToPreviousPage => _pageIndex > 0;
     public bool CanGoToNextPage => _pageIndex + 1 < _pageCount;
     public string PageStatusText => _pageCount <= 1
@@ -527,42 +533,27 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _statusText, value);
     }
 
+    public event EventHandler? ViewChanged;
+
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         IsBusy = true;
         try
         {
-            var allBooks = await _library.SearchAsync(cancellationToken: cancellationToken);
-            LibraryBooks = allBooks;
-            _pageIndex = 0;
+            _bookCount = await _library.GetBookCountAsync(cancellationToken);
+            OnPropertyChanged(nameof(BookCount));
 
-            AvailableAuthors = allBooks
-                .SelectMany(book => SplitValues(book.Authors))
-                .Distinct(StringComparer.CurrentCultureIgnoreCase)
-                .Order(StringComparer.CurrentCultureIgnoreCase)
-                .ToArray();
-            AvailableTags = allBooks
-                .SelectMany(book => SplitValues(book.Tags))
-                .Distinct(StringComparer.CurrentCultureIgnoreCase)
-                .Order(StringComparer.CurrentCultureIgnoreCase)
-                .ToArray();
-            AvailableFormats = allBooks
-                .SelectMany(book => book.Files.Select(file => file.Format.ToUpperInvariant()))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Order(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            AvailableCategories = allBooks
-                .Select(book => book.Category.Trim())
-                .Where(category => category.Length > 0)
-                .Distinct(StringComparer.CurrentCultureIgnoreCase)
-                .Order(StringComparer.CurrentCultureIgnoreCase)
-                .ToArray();
+            var options = await _library.GetFilterOptionsAsync(cancellationToken);
+            AvailableAuthors = options.Authors;
+            AvailableTags = options.Tags;
+            AvailableFormats = options.Formats;
+            AvailableCategories = options.Categories;
 
             OnPropertyChanged(nameof(AvailableAuthors));
             OnPropertyChanged(nameof(AvailableTags));
             OnPropertyChanged(nameof(AvailableFormats));
             OnPropertyChanged(nameof(AvailableCategories));
-            ApplyCurrentView(resetPage: true);
+            await RefreshViewAsync(resetPage: true, cancellationToken);
         }
         finally
         {
@@ -570,25 +561,27 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void RefreshView() => ApplyCurrentView(resetPage: true);
+    public void RefreshView() => _ = RefreshViewSafelyAsync(resetPage: true);
 
     public void GoToPreviousPage()
     {
         if (!CanGoToPreviousPage) return;
         _pageIndex--;
-        ApplyCurrentView();
+        _ = RefreshViewSafelyAsync(resetPage: false);
     }
 
     public void GoToNextPage()
     {
         if (!CanGoToNextPage) return;
         _pageIndex++;
-        ApplyCurrentView();
+        _ = RefreshViewSafelyAsync(resetPage: false);
     }
 
     public void Dispose()
     {
         UiText.LanguageChanged -= OnLanguageChanged;
+        _viewCancellation?.Cancel();
+        _viewCancellation?.Dispose();
         foreach (var card in _bookCards.Values)
             card.Dispose();
         _bookCards.Clear();
@@ -633,88 +626,119 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
     public string GetAbsoluteFilePath(BookFile file) => _library.GetAbsoluteFilePath(file);
 
-    private void ApplyCurrentView(bool resetPage = false)
+    public async Task RefreshViewAsync(
+        bool resetPage = true,
+        CancellationToken cancellationToken = default)
     {
         if (resetPage) _pageIndex = 0;
-        var filtered = LibraryBooks.Where(MatchesFilters);
-        var books = SortMode switch
+        var requestId = Interlocked.Increment(ref _viewRequestId);
+        _viewCancellation?.Cancel();
+        _viewCancellation?.Dispose();
+        _viewCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var requestToken = _viewCancellation.Token;
+        IsBusy = true;
+        try
         {
-            LibrarySortMode.TitleAscending => filtered.OrderBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase).ToArray(),
-            LibrarySortMode.AuthorAscending => filtered.OrderBy(book => book.Authors, StringComparer.CurrentCultureIgnoreCase).ThenBy(book => book.Title).ToArray(),
-            LibrarySortMode.CreatedDescending => filtered.OrderByDescending(book => book.CreatedAt).ToArray(),
-            LibrarySortMode.ProgressDescending => filtered.OrderByDescending(book => book.ReadingStatus).ThenByDescending(book => book.UpdatedAt).ToArray(),
-            _ => filtered.OrderByDescending(book => book.UpdatedAt).ToArray()
-        };
+            var page = await _library.SearchPageAsync(
+                SearchText,
+                AuthorFilter,
+                TagFilter,
+                FormatFilter,
+                CategoryFilter,
+                CollectionFilterId,
+                ReadingStatusFilter,
+                FavoritesOnly,
+                SortMode,
+                _pageIndex,
+                PageSize,
+                requestToken);
+            requestToken.ThrowIfCancellationRequested();
+            if (requestId != _viewRequestId) return;
 
-        var pageCount = Math.Max(1, (int)Math.Ceiling(books.Length / (double)PageSize));
-        if (_pageIndex >= pageCount) _pageIndex = pageCount - 1;
-        if (_pageCount != pageCount)
-        {
-            _pageCount = pageCount;
-            OnPropertyChanged(nameof(PageCount));
+            var lastPageIndex = Math.Max(0, (int)Math.Ceiling(page.TotalCount / (double)PageSize) - 1);
+            if (_pageIndex > lastPageIndex)
+            {
+                _pageIndex = lastPageIndex;
+                page = await _library.SearchPageAsync(
+                    SearchText,
+                    AuthorFilter,
+                    TagFilter,
+                    FormatFilter,
+                    CategoryFilter,
+                    CollectionFilterId,
+                    ReadingStatusFilter,
+                    FavoritesOnly,
+                    SortMode,
+                    _pageIndex,
+                    PageSize,
+                    requestToken);
+                requestToken.ThrowIfCancellationRequested();
+                if (requestId != _viewRequestId) return;
+            }
+
+            LibraryBooks = page.Books;
+            _filteredBookCount = page.TotalCount;
+            var pageCount = Math.Max(1, (int)Math.Ceiling(page.TotalCount / (double)PageSize));
+            if (_pageIndex >= pageCount) _pageIndex = pageCount - 1;
+            if (_pageCount != pageCount)
+            {
+                _pageCount = pageCount;
+                OnPropertyChanged(nameof(PageCount));
+            }
+            OnPropertyChanged(nameof(LibraryBooks));
+            OnPropertyChanged(nameof(FilteredBookCount));
+            OnPropertyChanged(nameof(PageIndex));
+            OnPropertyChanged(nameof(CanGoToPreviousPage));
+            OnPropertyChanged(nameof(CanGoToNextPage));
+            OnPropertyChanged(nameof(PageStatusText));
+
+            foreach (var card in _bookCards.Values) card.Dispose();
+            _bookCards.Clear();
+            Books.Clear();
+            foreach (var book in page.Books)
+            {
+                var card = new BookCardViewModel(book, _dataRoot);
+                _bookCards[book.Id] = card;
+                Books.Add(card);
+            }
+
+            var baseStatus = page.TotalCount == 0
+                ? _bookCount == 0 ? UiText.Get("书库还是空的")
+                    : CollectionFilterId is not null ? UiText.Get("“{0}”收藏夹还是空的", UiText.Localize(CollectionFilterName ?? string.Empty))
+                    : UiText.Get("没有符合条件的书籍")
+                : HasActiveFilters || !string.IsNullOrWhiteSpace(SearchText)
+                    ? CollectionFilterId is not null
+                        ? UiText.Get("{0} · {1} 本书", UiText.Localize(CollectionFilterName ?? string.Empty), page.TotalCount)
+                        : UiText.Get("找到 {0} 本书", page.TotalCount)
+                    : UiText.Get("共 {0} 本书", page.TotalCount);
+            StatusText = _pageCount <= 1
+                ? baseStatus
+                : $"{baseStatus} · {PageStatusText}";
+
+            OnPropertyChanged(nameof(HasActiveFilters));
+            ViewChanged?.Invoke(this, EventArgs.Empty);
         }
-        OnPropertyChanged(nameof(PageIndex));
-        OnPropertyChanged(nameof(CanGoToPreviousPage));
-        OnPropertyChanged(nameof(CanGoToNextPage));
-        OnPropertyChanged(nameof(PageStatusText));
-
-        // Keep the model list authoritative, but bound the presentation layer
-        // to one page. A normal WrapPanel materializes every item; creating
-        // 40,000 card visual trees and cover bitmaps is what made large imports
-        // exhaust memory even though the database itself was fine.
-        var visibleBooks = books
-            .Skip(_pageIndex * PageSize)
-            .Take(PageSize)
-            .ToArray();
-        foreach (var card in _bookCards.Values) card.Dispose();
-        _bookCards.Clear();
-        Books.Clear();
-        foreach (var book in visibleBooks)
+        finally
         {
-            var card = new BookCardViewModel(book, _dataRoot);
-            _bookCards[book.Id] = card;
-            Books.Add(card);
+            if (requestId == _viewRequestId) IsBusy = false;
         }
-
-        var baseStatus = books.Length == 0
-            ? LibraryBooks.Count == 0 ? UiText.Get("书库还是空的")
-                : CollectionFilterId is not null ? UiText.Get("“{0}”收藏夹还是空的", UiText.Localize(CollectionFilterName ?? string.Empty))
-                : UiText.Get("没有符合条件的书籍")
-            : HasActiveFilters || !string.IsNullOrWhiteSpace(SearchText)
-                ? CollectionFilterId is not null
-                    ? UiText.Get("{0} · {1} 本书", UiText.Localize(CollectionFilterName ?? string.Empty), books.Length)
-                    : UiText.Get("找到 {0} 本书", books.Length)
-                : UiText.Get("共 {0} 本书", books.Length);
-        StatusText = _pageCount <= 1
-            ? baseStatus
-            : $"{baseStatus} · {PageStatusText}";
-
-        OnPropertyChanged(nameof(HasActiveFilters));
     }
 
-    private bool MatchesFilters(Book book)
+    private async Task RefreshViewSafelyAsync(bool resetPage)
     {
-        if (!string.IsNullOrWhiteSpace(SearchText)
-            && !book.Title.Contains(SearchText, StringComparison.CurrentCultureIgnoreCase)
-            && !book.Authors.Contains(SearchText, StringComparison.CurrentCultureIgnoreCase)
-            && !book.Tags.Contains(SearchText, StringComparison.CurrentCultureIgnoreCase)) return false;
-        if (!string.IsNullOrWhiteSpace(AuthorFilter)
-            && !SplitValues(book.Authors).Any(author => string.Equals(author, AuthorFilter, StringComparison.CurrentCultureIgnoreCase))) return false;
-        if (!string.IsNullOrWhiteSpace(TagFilter)
-            && !SplitValues(book.Tags).Any(tag => string.Equals(tag, TagFilter, StringComparison.CurrentCultureIgnoreCase))) return false;
-        if (!string.IsNullOrWhiteSpace(CategoryFilter)
-            && !string.Equals(book.Category.Trim(), CategoryFilter, StringComparison.CurrentCultureIgnoreCase)) return false;
-        if (ReadingStatusFilter is { } readingStatus && book.ReadingStatus != readingStatus) return false;
-        if (FavoritesOnly && !book.IsFavorite) return false;
-        if (CollectionFilterId is { } collectionId && !book.CollectionIds.Contains(collectionId)) return false;
-        return string.IsNullOrWhiteSpace(FormatFilter)
-            || book.Files.Any(file => string.Equals(file.Format, FormatFilter, StringComparison.OrdinalIgnoreCase));
+        try
+        {
+            await RefreshViewAsync(resetPage);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            StatusText = UiText.Get("刷新书库失败：{0}", UiText.Localize(exception.Message));
+            ViewChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
-
-    private static IEnumerable<string> SplitValues(string? value) =>
-        (value ?? string.Empty)
-        .Split([',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Where(item => item.Length > 0);
 
     private void SetFilter<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
     {
@@ -723,5 +747,5 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e) =>
-        ApplyCurrentView();
+        _ = RefreshViewSafelyAsync(resetPage: false);
 }

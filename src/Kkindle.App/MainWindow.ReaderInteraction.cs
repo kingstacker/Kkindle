@@ -6173,7 +6173,10 @@ public partial class MainWindow
         {
             // Annotation offsets are body-textContent coordinates; the native
             // loader reproduces the same stream, so they apply directly.
-            var nativeAnnotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken);
+            var nativeAnnotations = await _readerData.GetAnnotationsAsync(
+                _readerBookFile.Id,
+                cancellationToken,
+                MaxReaderAnnotations);
             nativeReader.SetAnnotations(nativeAnnotations
                 .Where(item => string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase))
                 .Where(item => !string.IsNullOrWhiteSpace(item.SelectedText))
@@ -6181,7 +6184,10 @@ public partial class MainWindow
             return;
         }
 
-        var annotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken);
+        var annotations = await _readerData.GetAnnotationsAsync(
+            _readerBookFile.Id,
+            cancellationToken,
+            MaxReaderAnnotations);
         var marks = annotations
             .Where(item => string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase))
             .Where(item => !string.IsNullOrWhiteSpace(item.SelectedText))

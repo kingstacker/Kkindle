@@ -798,10 +798,9 @@ public sealed partial class S3SyncService
         S3SyncSnapshot snapshot,
         CancellationToken cancellationToken)
     {
-        var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions);
         await using var output = new MemoryStream();
         await using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, leaveOpen: true))
-            await gzip.WriteAsync(json, cancellationToken);
+            await JsonSerializer.SerializeAsync(gzip, snapshot, JsonOptions, cancellationToken);
         return output.ToArray();
     }
 
@@ -820,18 +819,76 @@ public sealed partial class S3SyncService
             : payload;
         await using var input = new MemoryStream(compressed, writable: false);
         await using var gzip = new GZipStream(input, CompressionMode.Decompress);
-        await using var json = new MemoryStream();
-        var buffer = new byte[128 * 1024];
-        while (true)
-        {
-            var read = await gzip.ReadAsync(buffer.AsMemory(), cancellationToken);
-            if (read == 0) break;
-            if (json.Length > MaxSnapshotBytes - read)
-                throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
-            await json.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        }
-        return JsonSerializer.Deserialize<S3SyncSnapshot>(json.ToArray(), JsonOptions)
+        await using var limited = new SnapshotReadLimitStream(gzip, MaxSnapshotBytes);
+        return await JsonSerializer.DeserializeAsync<S3SyncSnapshot>(limited, JsonOptions, cancellationToken)
             ?? throw new InvalidDataException("S3 同步快照为空。");
+    }
+
+    private sealed class SnapshotReadLimitStream(Stream inner, long maximumBytes) : Stream
+    {
+        private long _bytesRead;
+
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _bytesRead;
+        public override long Position
+        {
+            get => _bytesRead;
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+            => Track(inner.Read(buffer, offset, count));
+
+        public override int Read(Span<byte> buffer)
+            => Track(inner.Read(buffer));
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+            => Track(await inner.ReadAsync(buffer, cancellationToken));
+
+        public override async Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+            => Track(await inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken));
+
+        public override int ReadByte()
+        {
+            var value = inner.ReadByte();
+            if (value < 0) return -1;
+            Track(1);
+            return value;
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+        public override Task FlushAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Write(ReadOnlySpan<byte> buffer) => throw new NotSupportedException();
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+
+        private int Track(int read)
+        {
+            if (read <= 0) return read;
+            if (_bytesRead > maximumBytes - read)
+                throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
+            _bytesRead += read;
+            return read;
+        }
     }
 
     private byte[] ProtectPayloadForSync(byte[] value, string passphrase)

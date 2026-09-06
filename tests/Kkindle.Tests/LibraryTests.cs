@@ -164,6 +164,52 @@ public sealed class LibraryTests
     }
 
     [Fact]
+    public async Task PagedLibraryQueriesKeepFilteringAndCollectionCountsInSqlite()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "paged.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([source]);
+            var book = Assert.Single(await service.SearchAsync());
+            book.Tags = "阅读,测试";
+            await service.UpdateMetadataAsync(book);
+
+            Assert.Equal(1, await service.GetBookCountAsync());
+            var page = await service.SearchPageAsync(
+                query: "测试",
+                author: "测试作者",
+                tag: "阅读",
+                format: "epub",
+                pageSize: 1);
+            var result = Assert.Single(page.Books);
+            Assert.Equal(1, page.TotalCount);
+            Assert.Equal(book.Id, result.Id);
+
+            var options = await service.GetFilterOptionsAsync();
+            Assert.Contains("测试作者", options.Authors);
+            Assert.Contains("阅读", options.Tags);
+            Assert.Contains("EPUB", options.Formats);
+
+            var collection = Assert.Single(await service.GetCollectionsAsync());
+            var summaries = await service.GetCollectionSummariesAsync();
+            var summary = Assert.Single(summaries);
+            Assert.Equal(collection.Id, summary.Collection.Id);
+            Assert.Equal(1, summary.BookCount);
+
+            var match = Assert.Single(await service.GetLibraryMatchRecordsAsync());
+            Assert.Equal(book.Id, match.Id);
+            Assert.Contains(match.Files, file => file.Sha256 == book.Files[0].Sha256);
+            Assert.Equal(book.Title, (await service.GetBookTitlesAsync([book.Id]))[book.Id]);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task AddsConvertedFormatToExistingBookWithoutCreatingDuplicateBook()
     {
         var root = TestHelpers.CreateTempDirectory();

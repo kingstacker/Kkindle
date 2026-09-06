@@ -6,15 +6,22 @@ namespace Kkindle.Infrastructure;
 
 public sealed class PdfTextService
 {
+    private const int MaxIndexedPages = 10_000;
+    private const int MaxIndexedCharacters = 20_000_000;
+
     public Task<IReadOnlyList<PdfPageText>> ExtractAsync(string path, CancellationToken cancellationToken = default) =>
         Task.Run<IReadOnlyList<PdfPageText>>(() =>
         {
             var pages = new List<PdfPageText>();
+            var characterCount = 0L;
             using var document = PdfDocument.Open(path);
             foreach (var page in document.GetPages())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                pages.Add(new PdfPageText(page.Number, ContentOrderTextExtractor.GetText(page).Trim()));
+                if (pages.Count >= MaxIndexedPages || characterCount >= MaxIndexedCharacters) break;
+                var text = ContentOrderTextExtractor.GetText(page).Trim();
+                characterCount += text.Length;
+                pages.Add(new PdfPageText(page.Number, text));
             }
             return pages;
         }, cancellationToken);

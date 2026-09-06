@@ -16,6 +16,8 @@ public sealed class CssHints
     public float FontSizeFactor { get; init; } = float.NaN;
     /// <summary>Percentage width as a 0..1 factor, primarily for images.</summary>
     public float ImageWidthFactor { get; init; } = float.NaN;
+    /// <summary>Font-relative image height in em units, primarily for inline glyph images.</summary>
+    public float ImageHeightEm { get; init; } = float.NaN;
 
     public static readonly CssHints None = new();
 }
@@ -105,6 +107,7 @@ public sealed class MicroCss
         var indent = float.NaN;
         var sizeFactor = float.NaN;
         var imageWidthFactor = float.NaN;
+        var imageHeightEm = float.NaN;
         var matched = false;
 
         foreach (var (selector, declarations) in _rules)
@@ -148,6 +151,13 @@ public sealed class MicroCss
                     case "width":
                         imageWidthFactor = ParsePercent(value);
                         break;
+                    case "height":
+                        var parsedHeight = ParseEm(value);
+                        if (parsedHeight > 0f)
+                        {
+                            imageHeightEm = parsedHeight;
+                        }
+                        break;
                 }
             }
         }
@@ -165,6 +175,7 @@ public sealed class MicroCss
                 TextIndentEm = indent,
                 FontSizeFactor = sizeFactor,
                 ImageWidthFactor = imageWidthFactor,
+                ImageHeightEm = imageHeightEm,
             }
             : CssHints.None;
     }

@@ -66,8 +66,15 @@ public sealed class ReaderAiContextBuilder
         if (retrievalResults.Count == 0)
             return new ReaderAiContext(string.Empty, []);
 
+        var locations = retrievalResults
+            .Select(result => (
+                result.Chunk.BookFileId,
+                result.Chunk.ChapterIndex,
+                result.Chunk.ChunkIndex))
+            .Distinct()
+            .ToArray();
         var allChunks = await _readerData
-            .GetBookChunksAsync(bookId, cancellationToken)
+            .GetBookChunkNeighborsAsync(locations, neighborRadius, cancellationToken)
             .ConfigureAwait(false);
         var byId = allChunks.ToDictionary(chunk => chunk.Id);
         var groups = allChunks

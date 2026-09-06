@@ -5,6 +5,30 @@ public interface IBookLibraryService
     event EventHandler<LocalDataChangedEventArgs>? DataChanged;
     Task InitializeAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Book>> SearchAsync(string? query = null, CancellationToken cancellationToken = default);
+    Task<Book?> GetBookAsync(Guid bookId, CancellationToken cancellationToken = default);
+    Task<int> GetBookCountAsync(CancellationToken cancellationToken = default);
+    Task<LibraryFilterOptions> GetFilterOptionsAsync(CancellationToken cancellationToken = default);
+    Task<LibraryPageResult> SearchPageAsync(
+        string? query = null,
+        string? author = null,
+        string? tag = null,
+        string? format = null,
+        string? category = null,
+        Guid? collectionId = null,
+        LibraryReadingStatus? readingStatus = null,
+        bool favoritesOnly = false,
+        LibrarySortMode sortMode = LibrarySortMode.UpdatedDescending,
+        int pageIndex = 0,
+        int pageSize = 200,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LibraryCollectionSummary>> GetCollectionSummariesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LibraryBookMatch>> GetLibraryMatchRecordsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<Guid, string>> GetBookTitlesAsync(
+        IReadOnlyCollection<Guid> bookIds,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<Guid, LibraryBookDisplayInfo>> GetBookDisplayInfosAsync(
+        IReadOnlyCollection<Guid> bookIds,
+        CancellationToken cancellationToken = default);
     Task<ImportBatchResult> ImportAsync(
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
@@ -55,7 +79,10 @@ public interface IKindleDeviceService
     Task SendResourceAsync(KindleDevice device, KindleResourceKind kind, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default);
     Task ExportResourceAsync(KindleDevice device, KindleDeviceResource resource, string destinationPath, CancellationToken cancellationToken = default);
     Task RemoveResourceAsync(KindleDevice device, KindleDeviceResource resource, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<KindleClipping>> ReadClippingsAsync(KindleDevice device, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<KindleClipping>> ReadClippingsAsync(
+        KindleDevice device,
+        CancellationToken cancellationToken = default,
+        int maxItems = int.MaxValue);
     Task DeleteClippingAsync(KindleDevice device, string clippingId, CancellationToken cancellationToken = default);
     Task DeleteClippingsAsync(KindleDevice device, IReadOnlyCollection<string> clippingIds, CancellationToken cancellationToken = default);
     Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default);

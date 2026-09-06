@@ -16,6 +16,9 @@ namespace Kkindle;
 
 public partial class MainWindow
 {
+    private const int MaxWholeBookSearchResults = 500;
+    private const int MaxReaderAnnotations = 5_000;
+    private const int MaxReaderBookmarks = 5_000;
     private int _readerWholeSearchSequence;
     private int _readerPdfSearchSequence;
     private bool _readerSearchVisible;
@@ -361,7 +364,10 @@ public partial class MainWindow
     {
         ReaderBookmarks.Clear();
         if (_readerBookFile is null) return;
-        var bookmarks = await _readerData.GetBookmarksAsync(_readerBookFile.Id, cancellationToken);
+        var bookmarks = await _readerData.GetBookmarksAsync(
+            _readerBookFile.Id,
+            cancellationToken,
+            MaxReaderBookmarks);
         foreach (var bookmark in bookmarks
                      .OrderBy(item => item.ChapterIndex)
                      .ThenBy(item => item.CreatedAt))
@@ -375,7 +381,10 @@ public partial class MainWindow
         ReaderAnnotations.Clear();
         _selectedReaderAnnotation = null;
         if (_readerBookFile is null) return;
-        var annotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken);
+        var annotations = await _readerData.GetAnnotationsAsync(
+            _readerBookFile.Id,
+            cancellationToken,
+            MaxReaderAnnotations);
         foreach (var annotation in annotations) ReaderAnnotations.Add(annotation);
         ReaderAnnotationEmptyText.IsVisible = ReaderAnnotations.Count == 0;
     }
@@ -1014,7 +1023,7 @@ public partial class MainWindow
             var pendingResults = new List<ReaderSearchResultViewModel>();
             if (_readerIsPdf)
             {
-                var results = PdfTextService.Search(_readerPdfPages, query, int.MaxValue);
+                var results = PdfTextService.Search(_readerPdfPages, query, MaxWholeBookSearchResults);
                 foreach (var result in results)
                     pendingResults.Add(new ReaderSearchResultViewModel(
                         T("第 {0} 页", result.PageNumber),
@@ -1030,7 +1039,7 @@ public partial class MainWindow
                 var results = await _readerData.SearchBookAsync(
                     _readerBookCard.Book.Id,
                     query,
-                    int.MaxValue,
+                    MaxWholeBookSearchResults,
                     ReaderToken,
                     exactPhraseOnly: true);
                 // The same visible excerpt can come from duplicate EPUB spine
@@ -1052,8 +1061,8 @@ public partial class MainWindow
             foreach (var item in pendingResults)
                 ReaderSearchResults.Add(item);
             ReaderWholeSearchCountText.Text = _readerIsPdf
-                ? T("全书 {0} 条结果 · PDF 本地文本索引", ReaderSearchResults.Count)
-                : T("全书 {0} 段结果", ReaderSearchResults.Count);
+                ? T("全书最多 {0} 条结果 · PDF 本地文本索引", ReaderSearchResults.Count)
+                : T("全书最多 {0} 段结果", ReaderSearchResults.Count);
             ShowReaderSearchStatus(
                 ReaderSearchResults.Count == 0
                     ? (_readerIsPdf ? T("没有找到匹配的内容。") : T("没有找到匹配的片段。"))

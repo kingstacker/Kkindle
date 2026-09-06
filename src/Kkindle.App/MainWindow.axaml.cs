@@ -209,6 +209,7 @@ public partial class MainWindow : Window
             ? new UpdateService(updateInstaller)
             : null;
         ViewModel = new LibraryViewModel(library, paths.Data);
+        ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
         InitializeReaderEmbeddingModelSelectors();
@@ -483,6 +484,7 @@ public partial class MainWindow : Window
         if (_selectedCard is not null)
             UpdateDetailActionIcons(_selectedCard.Book.IsFavorite, _selectedCard.Book.ReadingStatus);
         UpdateDeviceBookSelectionUi();
+        UpdateDeviceBookPaginationUi();
         UpdateDeviceBookEmptyState();
         UpdateReaderAiLanguageText();
         ApplyReaderAiSettingsToControls();
@@ -628,7 +630,7 @@ public partial class MainWindow : Window
             SetTaskStatus(T("正在准备本地书库…"));
             await _library.InitializeAsync(_lifetimeCancellation.Token);
             await InitializeStage3Async(_lifetimeCancellation.Token);
-            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+            await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
             SetupFilterControls();
             await RefreshCollectionsAsync();
             _filterControlsReady = true;
@@ -982,12 +984,22 @@ public partial class MainWindow : Window
         return widestText + 14 + 12;
     }
 
+    private void ViewModel_ViewChanged(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(UpdateLibraryUi);
+            return;
+        }
+        UpdateLibraryUi();
+    }
+
     private void UpdateLibraryUi()
     {
         LibraryBusyProgress.IsVisible = ViewModel.IsBusy;
         LibrarySummaryText.Text = ViewModel.StatusText;
         TaskStatusText.Text = ViewModel.StatusText;
-        SidebarCountText.Text = ViewModel.LibraryBooks.Count.ToString();
+        SidebarCountText.Text = ViewModel.BookCount.ToString();
         foreach (var card in ViewModel.Books)
         {
             card.SetGalleryTextVisible(!_appSettings.GridGalleryDisplay);
@@ -1019,7 +1031,7 @@ public partial class MainWindow : Window
             EmptyLibraryTitleText.Text = T("还没有收藏夹");
             EmptyLibraryMessageText.Text = T("点击“新建收藏夹”创建，之后可在书籍右键菜单中把书籍加入其中。");
         }
-        else if (ViewModel.LibraryBooks.Count == 0)
+        else if (ViewModel.BookCount == 0)
         {
             EmptyLibraryTitleText.Text = T("电脑书库还是空的");
             EmptyLibraryMessageText.Text = T("导入 EPUB、PDF、MOBI 或 AZW3 文件开始阅读。");
@@ -1358,37 +1370,39 @@ public partial class MainWindow : Window
 
     private async Task RefreshLibraryAsync()
     {
-        await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+        await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
         SetupFilterControls();
         await RefreshCollectionsAsync();
         UpdateLibraryUi();
         SetTaskStatus(ViewModel.StatusText);
     }
 
+    private async Task RefreshLibraryDataAsync(CancellationToken cancellationToken)
+    {
+        await ViewModel.RefreshAsync(cancellationToken);
+        await RefreshLibraryMatchRecordsAsync(cancellationToken);
+    }
+
+    private async Task RefreshLibraryMatchRecordsAsync(CancellationToken cancellationToken)
+    {
+        _libraryMatchRecords = await _library.GetLibraryMatchRecordsAsync(cancellationToken);
+        _libraryPresenceComparison = null;
+    }
+
     private async Task RefreshCollectionsAsync()
     {
-        var collections = await _library.GetCollectionsAsync(_lifetimeCancellation.Token);
-        var books = ViewModel.LibraryBooks;
+        var collections = await _library.GetCollectionSummariesAsync(_lifetimeCancellation.Token);
 
         foreach (var folder in CollectionFolders) folder.Dispose();
         CollectionFolders.Clear();
 
-        foreach (var collection in collections)
+        foreach (var summary in collections)
         {
-            var collectionBooks = books
-                .Where(book => book.CollectionIds.Contains(collection.Id))
-                .OrderByDescending(book => book.UpdatedAt)
-                .ToArray();
-            var coverPaths = collectionBooks
-                .Select(book => book.CoverPath)
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Take(3)
-                .ToArray();
             CollectionFolders.Add(new BookCollectionFolderViewModel(
-                collection,
-                collectionBooks.Length,
+                summary.Collection,
+                summary.BookCount,
                 _paths.Data,
-                coverPaths));
+                summary.CoverPaths));
         }
 
     }
@@ -1441,6 +1455,7 @@ public partial class MainWindow : Window
                 result,
                 _lifetimeCancellation.Token,
                 requestedFormats);
+            await RefreshLibraryMatchRecordsAsync(_lifetimeCancellation.Token);
             HideTaskProgressPopup();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
@@ -1818,6 +1833,7 @@ public partial class MainWindow : Window
         try
         {
             await ViewModel.DeleteBookAsync(card.Book, _lifetimeCancellation.Token);
+            await RefreshLibraryMatchRecordsAsync(_lifetimeCancellation.Token);
             ClearSelectedBook();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
@@ -2430,7 +2446,7 @@ public partial class MainWindow : Window
             }
 
             if (generatedCount > 0)
-                await ViewModel.RefreshAsync(cancellationToken);
+                await RefreshLibraryDataAsync(cancellationToken);
             return new AutomaticReaderFormatGenerationResult(generatedCount, failures);
         }
         finally

@@ -408,10 +408,10 @@ internal sealed class CellFactory
                 return cells;
             }
 
-            // Formula images in this EPUB specify height:1.5em. Preserve that
-            // inline metric instead of treating the source pixel dimensions as
-            // a block image size. A conservative cap keeps malformed/oversized
-            // formula assets from escaping the content box in either mode.
+            // Inline formula/glyph images specify a font-relative height.
+            // Preserve that metric instead of treating source pixels as a
+            // block image size. A conservative cap keeps malformed/oversized
+            // assets from escaping the content box in either mode.
             var hasWidthConstraint = item.ImageWidthFactor is > 0f;
             var requestedHeight = _context.Options.BaseFontSize
                 * Math.Clamp(item.ImageHeightEm ?? 1.5f, 0.5f, 8f);

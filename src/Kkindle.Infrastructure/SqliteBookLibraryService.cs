@@ -217,6 +217,350 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         return books;
     }
 
+    public async Task<int> GetBookCountAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM Books;";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
+    }
+
+    public async Task<Book?> GetBookAsync(Guid bookId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        return await ReadBookByIdAsync(connection, bookId, cancellationToken);
+    }
+
+    public async Task<LibraryFilterOptions> GetFilterOptionsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var authors = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+        var tags = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+        var categories = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+
+        var bookCommand = connection.CreateCommand();
+        bookCommand.CommandText = "SELECT Authors, Tags, Category FROM Books;";
+        await using (var reader = await bookCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                AddFilterValues(authors, reader.IsDBNull(0) ? null : reader.GetString(0));
+                AddFilterValues(tags, reader.IsDBNull(1) ? null : reader.GetString(1));
+                AddFilterValues(categories, reader.IsDBNull(2) ? null : reader.GetString(2), split: false);
+            }
+        }
+
+        var formats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var formatCommand = connection.CreateCommand();
+        formatCommand.CommandText = "SELECT DISTINCT Format FROM BookFiles WHERE trim(Format) <> '';";
+        await using (var reader = await formatCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var format = reader.GetString(0).Trim();
+                if (format.Length > 0) formats.Add(format.ToUpperInvariant());
+            }
+        }
+
+        return new LibraryFilterOptions(
+            authors.Order(StringComparer.CurrentCultureIgnoreCase).ToArray(),
+            tags.Order(StringComparer.CurrentCultureIgnoreCase).ToArray(),
+            formats.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            categories.Order(StringComparer.CurrentCultureIgnoreCase).ToArray());
+    }
+
+    public async Task<LibraryPageResult> SearchPageAsync(
+        string? query = null,
+        string? author = null,
+        string? tag = null,
+        string? format = null,
+        string? category = null,
+        Guid? collectionId = null,
+        LibraryReadingStatus? readingStatus = null,
+        bool favoritesOnly = false,
+        LibrarySortMode sortMode = LibrarySortMode.UpdatedDescending,
+        int pageIndex = 0,
+        int pageSize = 200,
+        CancellationToken cancellationToken = default)
+    {
+        pageIndex = Math.Max(0, pageIndex);
+        pageSize = Math.Clamp(pageSize, 1, 500);
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var where = BuildLibrarySearchWhere(
+            query,
+            author,
+            tag,
+            format,
+            category,
+            collectionId,
+            readingStatus,
+            favoritesOnly);
+
+        var countCommand = connection.CreateCommand();
+        countCommand.CommandText = $"SELECT COUNT(*) FROM Books b {where};";
+        AddLibrarySearchParameters(countCommand, query, author, tag, format, category, collectionId, readingStatus, favoritesOnly);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
+
+        var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT b.Id, b.Title, b.Authors, b.Series, b.SeriesIndex, b.Description, b.Tags, b.Category, b.IsFavorite, b.ReadingStatus, b.CoverPath, b.CreatedAt, b.UpdatedAt,
+                   b.Publisher, b.PublishDate, b.Isbn, b.PageCount, b.Binding, b.DoubanRating, b.DoubanRatingCount
+            FROM Books b
+            {where}
+            ORDER BY {GetLibrarySortSql(sortMode)}
+            LIMIT $limit OFFSET $offset;
+            """;
+        AddLibrarySearchParameters(command, query, author, tag, format, category, collectionId, readingStatus, favoritesOnly);
+        command.Parameters.AddWithValue("$limit", pageSize);
+        command.Parameters.AddWithValue("$offset", (long)pageIndex * pageSize);
+
+        var books = new List<Book>(Math.Min(pageSize, totalCount));
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                books.Add(ReadBook(reader));
+        }
+
+        var filesByBook = await ReadFilesByBookAsync(connection, books.Select(book => book.Id), cancellationToken);
+        var collectionsByBook = await ReadCollectionIdsByBookAsync(connection, books.Select(book => book.Id), cancellationToken);
+        foreach (var book in books)
+        {
+            book.Files = filesByBook.GetValueOrDefault(book.Id) ?? [];
+            book.CollectionIds = collectionsByBook.GetValueOrDefault(book.Id) ?? [];
+        }
+
+        return new LibraryPageResult(books, totalCount);
+    }
+
+    public async Task<IReadOnlyList<LibraryCollectionSummary>> GetCollectionSummariesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.Id, c.Name, c.CreatedAt, COUNT(i.BookId)
+            FROM BookCollections c
+            LEFT JOIN BookCollectionItems i ON i.CollectionId = c.Id
+            GROUP BY c.Id, c.Name, c.CreatedAt
+            ORDER BY c.Name COLLATE NOCASE;
+            """;
+        var summaries = new List<(BookCollection Collection, int Count)>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                summaries.Add((new BookCollection
+                {
+                    Id = Guid.Parse(reader.GetString(0)),
+                    Name = reader.GetString(1),
+                    CreatedAt = DateTimeOffset.Parse(reader.GetString(2))
+                },
+                reader.GetInt32(3)));
+            }
+        }
+
+        var coverPathsByCollection = new Dictionary<Guid, List<string>>();
+        var covers = connection.CreateCommand();
+        covers.CommandText = """
+            SELECT i.CollectionId, b.CoverPath
+            FROM BookCollectionItems i
+            INNER JOIN Books b ON b.Id = i.BookId
+            WHERE b.CoverPath IS NOT NULL AND trim(b.CoverPath) <> ''
+            ORDER BY i.CollectionId, b.UpdatedAt DESC, b.Id;
+            """;
+        await using (var reader = await covers.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var collectionId = Guid.Parse(reader.GetString(0));
+                if (!coverPathsByCollection.TryGetValue(collectionId, out var paths))
+                {
+                    paths = [];
+                    coverPathsByCollection[collectionId] = paths;
+                }
+                if (paths.Count < 3) paths.Add(reader.GetString(1));
+            }
+        }
+
+        return summaries
+            .Select(item => new LibraryCollectionSummary(
+                item.Collection,
+                item.Count,
+                coverPathsByCollection.GetValueOrDefault(item.Collection.Id) ?? []))
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<LibraryBookMatch>> GetLibraryMatchRecordsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var books = new Dictionary<Guid, LibraryBookMatch>();
+        var bookCommand = connection.CreateCommand();
+        bookCommand.CommandText = "SELECT Id, Title, Authors FROM Books ORDER BY Id;";
+        await using (var reader = await bookCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = Guid.Parse(reader.GetString(0));
+                books[id] = new LibraryBookMatch(id, reader.GetString(1), reader.GetString(2), []);
+            }
+        }
+
+        var fileCommand = connection.CreateCommand();
+        fileCommand.CommandText = """
+            SELECT BookId, RelativePath, Sha256
+            FROM BookFiles
+            ORDER BY BookId, Id;
+            """;
+        var filesByBook = new Dictionary<Guid, List<LibraryFileMatch>>();
+        await using (var reader = await fileCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var bookId = Guid.Parse(reader.GetString(0));
+                if (!filesByBook.TryGetValue(bookId, out var files))
+                {
+                    files = [];
+                    filesByBook[bookId] = files;
+                }
+                files.Add(new LibraryFileMatch(reader.GetString(1), reader.GetString(2)));
+            }
+        }
+
+        return books.Values
+            .Select(book => book with { Files = filesByBook.GetValueOrDefault(book.Id) ?? [] })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, string>> GetBookTitlesAsync(
+        IReadOnlyCollection<Guid> bookIds,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<Guid, string>();
+        if (bookIds.Count == 0) return result;
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        foreach (var batch in bookIds.Distinct().Chunk(500))
+        {
+            var command = connection.CreateCommand();
+            var parameters = batch.Select((_, index) => $"$book{index}").ToArray();
+            command.CommandText = $"SELECT Id, Title FROM Books WHERE Id IN ({string.Join(", ", parameters)});";
+            for (var index = 0; index < batch.Length; index++)
+                command.Parameters.AddWithValue(parameters[index], batch[index].ToString());
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                result[Guid.Parse(reader.GetString(0))] = reader.GetString(1);
+        }
+        return result;
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, LibraryBookDisplayInfo>> GetBookDisplayInfosAsync(
+        IReadOnlyCollection<Guid> bookIds,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<Guid, LibraryBookDisplayInfo>();
+        if (bookIds.Count == 0) return result;
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        foreach (var batch in bookIds.Distinct().Chunk(500))
+        {
+            var command = connection.CreateCommand();
+            var parameters = batch.Select((_, index) => $"$book{index}").ToArray();
+            command.CommandText = $"SELECT Id, Title, CoverPath FROM Books WHERE Id IN ({string.Join(", ", parameters)});";
+            for (var index = 0; index < batch.Length; index++)
+                command.Parameters.AddWithValue(parameters[index], batch[index].ToString());
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = Guid.Parse(reader.GetString(0));
+                result[id] = new LibraryBookDisplayInfo(
+                    id,
+                    reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2));
+            }
+        }
+        return result;
+    }
+
+    private static void AddFilterValues(HashSet<string> values, string? value, bool split = true)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        var candidates = split
+            ? value.Split([',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [value.Trim()];
+        foreach (var candidate in candidates)
+        {
+            var normalized = candidate.Trim();
+            if (normalized.Length > 0) values.Add(normalized);
+        }
+    }
+
+    private static string BuildLibrarySearchWhere(
+        string? query,
+        string? author,
+        string? tag,
+        string? format,
+        string? category,
+        Guid? collectionId,
+        LibraryReadingStatus? readingStatus,
+        bool favoritesOnly)
+    {
+        var clauses = new List<string> { "WHERE 1 = 1" };
+        clauses.Add("AND ($query = '' OR b.Title LIKE $like OR b.Authors LIKE $like OR b.Tags LIKE $like OR b.Series LIKE $like)");
+        if (!string.IsNullOrWhiteSpace(author))
+            clauses.Add("AND instr(',' || lower(replace(replace(replace(replace(coalesce(b.Authors, ''), '，', ','), ';', ','), '；', ','), ' ', '')) || ',', ',' || $authorToken || ',') > 0");
+        if (!string.IsNullOrWhiteSpace(tag))
+            clauses.Add("AND instr(',' || lower(replace(replace(replace(replace(coalesce(b.Tags, ''), '，', ','), ';', ','), '；', ','), ' ', '')) || ',', ',' || $tagToken || ',') > 0");
+        if (!string.IsNullOrWhiteSpace(format))
+            clauses.Add("AND EXISTS (SELECT 1 FROM BookFiles f WHERE f.BookId = b.Id AND lower(f.Format) = lower($format))");
+        if (!string.IsNullOrWhiteSpace(category))
+            clauses.Add("AND lower(trim(coalesce(b.Category, ''))) = lower(trim($category))");
+        if (collectionId is not null)
+            clauses.Add("AND EXISTS (SELECT 1 FROM BookCollectionItems ci WHERE ci.BookId = b.Id AND ci.CollectionId = $collectionId)");
+        if (readingStatus is not null)
+            clauses.Add("AND b.ReadingStatus = $readingStatus");
+        if (favoritesOnly)
+            clauses.Add("AND b.IsFavorite = 1");
+        return string.Join("\n", clauses);
+    }
+
+    private static void AddLibrarySearchParameters(
+        SqliteCommand command,
+        string? query,
+        string? author,
+        string? tag,
+        string? format,
+        string? category,
+        Guid? collectionId,
+        LibraryReadingStatus? readingStatus,
+        bool favoritesOnly)
+    {
+        var text = query?.Trim() ?? string.Empty;
+        command.Parameters.AddWithValue("$query", text);
+        command.Parameters.AddWithValue("$like", $"%{text}%");
+        if (!string.IsNullOrWhiteSpace(author)) command.Parameters.AddWithValue("$authorToken", NormalizeFilterToken(author));
+        if (!string.IsNullOrWhiteSpace(tag)) command.Parameters.AddWithValue("$tagToken", NormalizeFilterToken(tag));
+        if (!string.IsNullOrWhiteSpace(format)) command.Parameters.AddWithValue("$format", format.Trim());
+        if (!string.IsNullOrWhiteSpace(category)) command.Parameters.AddWithValue("$category", category.Trim());
+        if (collectionId is not null) command.Parameters.AddWithValue("$collectionId", collectionId.Value.ToString());
+        if (readingStatus is not null) command.Parameters.AddWithValue("$readingStatus", (int)readingStatus.Value);
+    }
+
+    private static string NormalizeFilterToken(string value) => value
+        .Trim()
+        .Replace('，', ',')
+        .Replace('；', ';')
+        .Replace(" ", string.Empty, StringComparison.Ordinal)
+        .ToLowerInvariant();
+
+    private static string GetLibrarySortSql(LibrarySortMode sortMode) => sortMode switch
+    {
+        LibrarySortMode.TitleAscending => "b.Title COLLATE NOCASE, b.Id",
+        LibrarySortMode.AuthorAscending => "b.Authors COLLATE NOCASE, b.Title COLLATE NOCASE, b.Id",
+        LibrarySortMode.CreatedDescending => "b.CreatedAt DESC, b.Title COLLATE NOCASE, b.Id",
+        LibrarySortMode.ProgressDescending => "b.ReadingStatus DESC, b.UpdatedAt DESC, b.Title COLLATE NOCASE, b.Id",
+        _ => "b.UpdatedAt DESC, b.Title COLLATE NOCASE, b.Id"
+    };
+
     public async Task<ImportBatchResult> ImportAsync(
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
@@ -228,15 +572,18 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         result.BookDetailsAvailable = files.Count <= DetailedImportResultLimit;
         var totalBytes = files.Sum(GetFileLengthSafe);
         long completedBytes = 0;
+        var changed = false;
 
-        foreach (var sourcePath in files)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            foreach (var sourcePath in files)
             {
-                var file = new FileInfo(sourcePath);
-                if (!file.Exists)
-                    throw new FileNotFoundException("文件不存在", sourcePath);
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var file = new FileInfo(sourcePath);
+                    if (!file.Exists)
+                        throw new FileNotFoundException("文件不存在", sourcePath);
 
                 var hash = await Hashing.Sha256Async(sourcePath, cancellationToken);
                 await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -373,18 +720,25 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     result.BookDetailsAvailable ? book : null,
                     Added: true,
                     BookId: book.Id));
-                NotifyDataChanged();
+                changed = true;
                 completedBytes += file.Length;
                 progress?.Report(new TransferProgress(completedBytes, totalBytes, $"已导入 {file.Name}"));
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    result.Items.Add(new ImportItemResult(sourcePath, false, ex.Message, null));
+                }
             }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                result.Items.Add(new ImportItemResult(sourcePath, false, ex.Message, null));
-            }
-        }
 
-        return result;
+            return result;
+        }
+        finally
+        {
+            // A large import must not wake the window/S3 debounce pipeline once
+            // per file. Partial imports still publish one final notification.
+            if (changed) NotifyDataChanged();
+        }
     }
 
     public async Task<BookFile> AddFileToBookAsync(

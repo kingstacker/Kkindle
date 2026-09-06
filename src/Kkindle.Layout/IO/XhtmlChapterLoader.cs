@@ -388,7 +388,7 @@ public sealed class XhtmlChapterLoader
                     TrackId(element);
                     AddFootnoteMarker(element, ctx);
                 }
-                else if (IsInlineFormulaImage(element) || IsLeftQuoteImage(element))
+                else if (IsInlineImage(element))
                 {
                     TrackId(element);
                     AddInlineImage(element, ctx);
@@ -522,7 +522,7 @@ public sealed class XhtmlChapterLoader
                     TrackId(element);
                     AddFootnoteMarker(element, ctx);
                 }
-                else if (IsInlineFormulaImage(element) || IsLeftQuoteImage(element))
+                else if (IsInlineImage(element))
                 {
                     TrackId(element);
                     AddInlineImage(element, ctx);
@@ -833,7 +833,7 @@ public sealed class XhtmlChapterLoader
         {
             Kind = InlineKind.Image,
             ImagePath = path,
-            ImageHeightEm = GetImageHeightEm(element),
+            ImageHeightEm = GetImageHeightEm(element, hints),
             ImageWidthFactor = float.IsNaN(hints.ImageWidthFactor)
                 ? null
                 : hints.ImageWidthFactor,
@@ -943,6 +943,25 @@ public sealed class XhtmlChapterLoader
         return FormulaImageNamePattern.IsMatch(name);
     }
 
+    private bool IsInlineImage(XElement element)
+    {
+        if (IsInlineFormulaImage(element) || IsLeftQuoteImage(element))
+        {
+            return true;
+        }
+
+        // Many Chinese EPUBs store a missing/unusual glyph as a tiny raster
+        // image. Its stylesheet gives it a font-relative height (for example
+        // 0.675em) and width, but the source does not use a formula name or a
+        // special quote class. Treat those glyph-sized images as part of the
+        // surrounding line; otherwise WalkInlineElement promotes each one to
+        // a standalone image block and leaves a lonely character on the page.
+        var hints = ResolveHints(element);
+        var height = GetImageHeightEm(element, hints);
+        return height is > 0f and <= 2f
+            && (float.IsNaN(hints.ImageWidthFactor) || hints.ImageWidthFactor <= 0.5f);
+    }
+
     private static bool IsLeftQuoteImage(XElement element)
     {
         var classes = ((string?)element.Attribute("class") ?? string.Empty)
@@ -975,7 +994,7 @@ public sealed class XhtmlChapterLoader
         return name.Equals("yinhao-right", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static float? GetImageHeightEm(XElement element)
+    private static float? GetImageHeightEm(XElement element, CssHints hints)
     {
         var style = (string?)element.Attribute("style");
         var match = style is null ? null : InlineEmHeightPattern.Match(style);
@@ -993,6 +1012,11 @@ public sealed class XhtmlChapterLoader
             && height > 0f)
         {
             return height;
+        }
+
+        if (!float.IsNaN(hints.ImageHeightEm) && hints.ImageHeightEm > 0f)
+        {
+            return hints.ImageHeightEm;
         }
 
         return null;
@@ -1653,6 +1677,9 @@ public sealed class XhtmlChapterLoader
             ImageWidthFactor = float.IsNaN(inline.ImageWidthFactor)
                 ? hints.ImageWidthFactor
                 : inline.ImageWidthFactor,
+            ImageHeightEm = float.IsNaN(inline.ImageHeightEm)
+                ? hints.ImageHeightEm
+                : inline.ImageHeightEm,
         };
     }
 

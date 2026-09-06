@@ -297,13 +297,14 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
 
     public async Task<IReadOnlyList<KindleClipping>> ReadClippingsAsync(
         KindleDevice device,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int maxItems = int.MaxValue)
     {
         EnsureMassStorage(device);
         var path = GetClippingsPath(device);
         if (!File.Exists(path)) return [];
         using var reader = new StreamReader(path, Encoding.UTF8, true);
-        return KindleClippingsParser.Parse(await reader.ReadToEndAsync(cancellationToken));
+        return await KindleClippingsParser.ParseAsync(reader, maxItems, cancellationToken);
     }
 
     public Task DeleteClippingAsync(

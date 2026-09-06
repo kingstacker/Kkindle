@@ -5,6 +5,96 @@ namespace Kkindle.Infrastructure;
 
 public static class ReadingMaterialsExport
 {
+    public static async Task WriteMarkdownAsync(
+        Stream destination,
+        IReadOnlyList<ReadingMaterialRecord> records,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(records);
+        await using var writer = new StreamWriter(
+            destination,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            16 * 1024,
+            leaveOpen: true);
+        await WriteLineAsync(writer, "# Kkindle " + UiText.Get("阅读资料"), cancellationToken);
+        await WriteLineAsync(writer, string.Empty, cancellationToken);
+        foreach (var sourceGroup in records.GroupBy(item => item.Source))
+        foreach (var bookGroup in sourceGroup.GroupBy(item => item.BookTitle, StringComparer.CurrentCultureIgnoreCase))
+        {
+            var source = sourceGroup.Key == ReadingMaterialSource.Local ? UiText.Get("本地书籍") : "Kindle";
+            await WriteLineAsync(writer, $"## {source} · {bookGroup.Key}", cancellationToken);
+            await WriteLineAsync(writer, string.Empty, cancellationToken);
+            foreach (var item in bookGroup)
+            {
+                await WriteLineAsync(writer, $"### {item.Type}", cancellationToken);
+                if (!string.IsNullOrWhiteSpace(item.Quote))
+                    await WriteLineAsync(writer, "> " + item.Quote.ReplaceLineEndings("\n> "), cancellationToken);
+                if (!string.IsNullOrWhiteSpace(item.Note))
+                {
+                    await WriteLineAsync(writer, string.Empty, cancellationToken);
+                    await WriteLineAsync(writer, UiText.Get("笔记：") + item.Note, cancellationToken);
+                }
+                if (!string.IsNullOrWhiteSpace(item.Location))
+                {
+                    await WriteLineAsync(writer, string.Empty, cancellationToken);
+                    await WriteLineAsync(writer, UiText.Get("位置：") + item.Location, cancellationToken);
+                }
+                if (item.UpdatedAt is { } time)
+                    await WriteLineAsync(writer, UiText.Get("时间：") + time.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), cancellationToken);
+                await WriteLineAsync(writer, string.Empty, cancellationToken);
+            }
+        }
+        if (records.Count == 0)
+            await WriteLineAsync(writer, UiText.Get("暂无划线与笔记。"), cancellationToken);
+        await writer.FlushAsync(cancellationToken);
+    }
+
+    public static async Task WritePlainTextAsync(
+        Stream destination,
+        IReadOnlyList<ReadingMaterialRecord> records,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(records);
+        await using var writer = new StreamWriter(
+            destination,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            16 * 1024,
+            leaveOpen: true);
+        await WriteLineAsync(writer, "Kkindle " + UiText.Get("阅读资料"), cancellationToken);
+        await WriteLineAsync(writer, "================", cancellationToken);
+        await WriteLineAsync(writer, string.Empty, cancellationToken);
+        foreach (var sourceGroup in records.GroupBy(item => item.Source))
+        foreach (var bookGroup in sourceGroup.GroupBy(item => item.BookTitle, StringComparer.CurrentCultureIgnoreCase))
+        {
+            var source = sourceGroup.Key == ReadingMaterialSource.Local ? UiText.Get("本地书籍") : "Kindle";
+            await WriteLineAsync(writer, $"[{source}] {bookGroup.Key}", cancellationToken);
+            foreach (var item in bookGroup)
+            {
+                var header = $"- {item.Type}" + (string.IsNullOrWhiteSpace(item.Location) ? string.Empty : $" · {item.Location}");
+                await WriteLineAsync(writer, header, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(item.Quote)) await WriteLineAsync(writer, item.Quote, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(item.Note)) await WriteLineAsync(writer, UiText.Get("笔记：") + item.Note, cancellationToken);
+                if (item.UpdatedAt is { } time)
+                    await WriteLineAsync(writer, UiText.Get("时间：") + time.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), cancellationToken);
+                await WriteLineAsync(writer, string.Empty, cancellationToken);
+            }
+        }
+        if (records.Count == 0)
+            await WriteLineAsync(writer, UiText.Get("暂无划线与笔记。"), cancellationToken);
+        await writer.FlushAsync(cancellationToken);
+    }
+
+    private static async Task WriteLineAsync(
+        StreamWriter writer,
+        string value,
+        CancellationToken cancellationToken)
+    {
+        await writer.WriteAsync(value.AsMemory(), cancellationToken);
+        await writer.WriteAsync("\n".AsMemory(), cancellationToken);
+    }
+
     public static string BuildMarkdown(IReadOnlyList<ReadingMaterialRecord> records)
     {
         var builder = new StringBuilder("# Kkindle " + UiText.Get("阅读资料") + "\n\n");

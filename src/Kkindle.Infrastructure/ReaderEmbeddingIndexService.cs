@@ -45,14 +45,14 @@ public sealed class ReaderEmbeddingIndexService
             }
         }
 
-        var pending = await _readerData.GetChunksNeedingEmbeddingsAsync(
+        var pendingCount = await _readerData.CountChunksNeedingEmbeddingsAsync(
                 bookFileId,
                 sourceHash,
                 _embeddingService.ModelId,
                 _embeddingService.Dimension,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (pending.Count == 0)
+        if (pendingCount == 0)
         {
             return new EmbeddingIndexResult(
                 true,
@@ -62,12 +62,23 @@ public sealed class ReaderEmbeddingIndexService
         }
 
         Debug.WriteLine(
-            $"Generating embeddings: book={bookId:N}; file={bookFileId:N}; chunks={pending.Count}; model={_embeddingService.ModelId}");
+            $"Generating embeddings: book={bookId:N}; file={bookFileId:N}; chunks={pendingCount}; model={_embeddingService.ModelId}");
         var stopwatch = Stopwatch.StartNew();
         var generated = 0;
-        foreach (var batch in pending.Chunk(EmbeddingBatchSize))
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var pending = await _readerData.GetChunksNeedingEmbeddingsAsync(
+                    bookFileId,
+                    sourceHash,
+                    _embeddingService.ModelId,
+                    _embeddingService.Dimension,
+                    cancellationToken,
+                    EmbeddingBatchSize)
+                .ConfigureAwait(false);
+            if (pending.Count == 0) break;
+
+            var batch = pending.ToArray();
             var texts = batch.Select(chunk => chunk.Content).ToArray();
             var vectors = await _embeddingService
                 .EmbedPassagesAsync(texts, cancellationToken)
@@ -91,12 +102,12 @@ public sealed class ReaderEmbeddingIndexService
                 .ToArray();
             await _readerData.UpsertChunkEmbeddingsAsync(
                     bookId,
-                    bookFileId,
-                    sourceHash,
-                    _embeddingService.ModelId,
-                    dimension,
-                    rows,
-                    cancellationToken)
+                bookFileId,
+                sourceHash,
+                _embeddingService.ModelId,
+                dimension,
+                rows,
+                cancellationToken)
                 .ConfigureAwait(false);
 
             generated += batch.Length;
@@ -104,7 +115,7 @@ public sealed class ReaderEmbeddingIndexService
                 bookId,
                 bookFileId,
                 generated,
-                pending.Count,
+                pendingCount,
                 _embeddingService.ModelId));
         }
 
@@ -114,7 +125,7 @@ public sealed class ReaderEmbeddingIndexService
         return new EmbeddingIndexResult(
             true,
             generated,
-            Math.Max(0, pending.Count - generated),
+            Math.Max(0, pendingCount - generated),
             "Embedding 索引建立完成。" );
     }
 }

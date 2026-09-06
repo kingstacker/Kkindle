@@ -37,6 +37,7 @@ public sealed class KeywordRetriever : IKeywordRetriever
 
 public sealed class VectorRetriever : IVectorRetriever
 {
+    private const int EmbeddingPageSize = 256;
     private readonly ReaderDataService _readerData;
     private readonly IEmbeddingService _embeddingService;
 
@@ -59,24 +60,35 @@ public sealed class VectorRetriever : IVectorRetriever
             .ConfigureAwait(false);
         if (queryVector.Length == 0) return [];
 
-        var candidates = await _readerData.GetBookChunkEmbeddingsAsync(
-                bookId,
-                _embeddingService.ModelId,
-                _embeddingService.Dimension,
-                cancellationToken)
-            .ConfigureAwait(false);
-        var ranked = candidates
-            .Select(candidate =>
+        var requestedTopK = Math.Clamp(topK, 1, 100);
+        var ranked = new List<(BookContentChunk Chunk, double Score)>(requestedTopK);
+        var offset = 0;
+        while (true)
+        {
+            var candidates = await _readerData.GetBookChunkEmbeddingsAsync(
+                    bookId,
+                    _embeddingService.ModelId,
+                    _embeddingService.Dimension,
+                    cancellationToken,
+                    EmbeddingPageSize,
+                    offset)
+                .ConfigureAwait(false);
+            if (candidates.Count == 0) break;
+
+            foreach (var candidate in candidates)
             {
                 var score = CosineSimilarity(queryVector, candidate.Vector);
-                return (candidate.Chunk, Score: score);
-            })
-            .Where(item => double.IsFinite(item.Score))
-            .OrderByDescending(item => item.Score)
-            .ThenBy(item => item.Chunk.ChapterIndex)
-            .ThenBy(item => item.Chunk.ChunkIndex)
-            .Take(Math.Clamp(topK, 1, 100))
-            .ToArray();
+                if (double.IsFinite(score)) ranked.Add((candidate.Chunk, score));
+            }
+            ranked = ranked
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => item.Chunk.ChapterIndex)
+                .ThenBy(item => item.Chunk.ChunkIndex)
+                .Take(requestedTopK)
+                .ToList();
+            if (candidates.Count < EmbeddingPageSize) break;
+            offset += candidates.Count;
+        }
 
         return ranked
             .Select((item, index) => new ReaderRetrievalResult(

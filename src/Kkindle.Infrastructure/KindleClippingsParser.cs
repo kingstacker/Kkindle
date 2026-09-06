@@ -10,9 +10,10 @@ public static partial class KindleClippingsParser
 {
     public sealed record DisplayPair(KindleClipping Clipping, KindleClipping? PairedNote);
 
-    public static IReadOnlyList<KindleClipping> Parse(string? text)
+    public static IReadOnlyList<KindleClipping> Parse(string? text, int maxItems = int.MaxValue)
     {
         if (string.IsNullOrWhiteSpace(text)) return [];
+        maxItems = Math.Max(1, maxItems);
         var normalized = text.ReplaceLineEndings("\n");
         var result = new List<KindleClipping>();
         var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -20,30 +21,69 @@ public static partial class KindleClippingsParser
         {
             var raw = value.Trim('\n', '\r', ' ', '\t');
             if (raw.Length == 0) continue;
-            var lines = raw.Split('\n');
-            var heading = lines[0].Trim().TrimStart('\uFEFF');
-            if (heading.Length == 0) continue;
-            var metadataIndex = Array.FindIndex(lines, 1, line => line.TrimStart().StartsWith('-'));
-            var metadata = metadataIndex >= 0 ? lines[metadataIndex].Trim() : string.Empty;
-            var content = metadataIndex >= 0
-                ? string.Join("\n", lines.Skip(metadataIndex + 1)).Trim()
-                : string.Join("\n", lines.Skip(1)).Trim();
-            var (title, author) = ParseHeading(heading);
-            var occurrence = occurrences.TryGetValue(raw, out var count) ? count + 1 : 1;
-            occurrences[raw] = occurrence;
-            result.Add(new KindleClipping
-            {
-                Id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{raw}\n#{occurrence}"))).ToLowerInvariant(),
-                BookTitle = title,
-                Author = author,
-                Type = ParseType(metadata),
-                Metadata = metadata,
-                Content = content,
-                RawBlock = raw,
-                AddedAt = ParseAddedAt(metadata)
-            });
+            if (ParseBlock(raw, occurrences) is { } clipping) result.Add(clipping);
+            if (result.Count >= maxItems) break;
         }
         return result;
+    }
+
+    public static async Task<IReadOnlyList<KindleClipping>> ParseAsync(
+        TextReader reader,
+        int maxItems = int.MaxValue,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        maxItems = Math.Max(1, maxItems);
+        var result = new List<KindleClipping>();
+        var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        var block = new StringBuilder();
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (line.Trim() is "==========")
+            {
+                if (ParseBlock(block.ToString().Trim(), occurrences) is { } clipping)
+                    result.Add(clipping);
+                block.Clear();
+                if (result.Count >= maxItems) break;
+                continue;
+            }
+            if (block.Length > 0) block.Append('\n');
+            block.Append(line);
+        }
+        if (result.Count < maxItems
+            && ParseBlock(block.ToString().Trim(), occurrences) is { } finalClipping)
+            result.Add(finalClipping);
+        return result;
+    }
+
+    private static KindleClipping? ParseBlock(
+        string raw,
+        IDictionary<string, int> occurrences)
+    {
+        if (raw.Length == 0) return null;
+        var lines = raw.Split('\n');
+        var heading = lines[0].Trim().TrimStart('\uFEFF');
+        if (heading.Length == 0) return null;
+        var metadataIndex = Array.FindIndex(lines, 1, line => line.TrimStart().StartsWith('-'));
+        var metadata = metadataIndex >= 0 ? lines[metadataIndex].Trim() : string.Empty;
+        var content = metadataIndex >= 0
+            ? string.Join("\n", lines.Skip(metadataIndex + 1)).Trim()
+            : string.Join("\n", lines.Skip(1)).Trim();
+        var (title, author) = ParseHeading(heading);
+        var occurrence = occurrences.TryGetValue(raw, out var count) ? count + 1 : 1;
+        occurrences[raw] = occurrence;
+        return new KindleClipping
+        {
+            Id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{raw}\n#{occurrence}"))).ToLowerInvariant(),
+            BookTitle = title,
+            Author = author,
+            Type = ParseType(metadata),
+            Metadata = metadata,
+            Content = content,
+            RawBlock = raw,
+            AddedAt = ParseAddedAt(metadata)
+        };
     }
 
     /// <summary>

@@ -665,7 +665,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
 
     public async Task<IReadOnlyList<KindleClipping>> ReadClippingsAsync(
         KindleDevice device,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int maxItems = int.MaxValue)
     {
         string text;
         if (device.Transport == KindleTransport.Wpd)
@@ -675,9 +676,11 @@ public sealed class KindleDeviceService : IKindleDeviceService
             var path = GetClippingsPath(device);
             if (!File.Exists(path)) return [];
             using var reader = new StreamReader(path, Encoding.UTF8, true);
+            if (maxItems != int.MaxValue)
+                return await KindleClippingsParser.ParseAsync(reader, maxItems, cancellationToken);
             text = await reader.ReadToEndAsync(cancellationToken);
         }
-        return KindleClippingsParser.Parse(text);
+        return KindleClippingsParser.Parse(text, maxItems);
     }
 
     public Task DeleteClippingAsync(

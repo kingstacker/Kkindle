@@ -185,7 +185,8 @@ public sealed partial class ReaderDataService
 
     public async Task<IReadOnlyList<ReaderAnnotation>> GetAnnotationsAsync(
         Guid bookFileId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int limit = int.MaxValue)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
@@ -194,9 +195,11 @@ public sealed partial class ReaderDataService
                    SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
             FROM ReaderAnnotations
             WHERE BookFileId = $bookFileId
-            ORDER BY ChapterPath COLLATE NOCASE, StartOffset, CreatedAt;
+            ORDER BY ChapterPath COLLATE NOCASE, StartOffset, CreatedAt
+            LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 100_000));
         var result = new List<ReaderAnnotation>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -204,7 +207,9 @@ public sealed partial class ReaderDataService
         return result;
     }
 
-    public async Task<IReadOnlyList<ReaderAnnotation>> GetAllAnnotationsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ReaderAnnotation>> GetAllAnnotationsAsync(
+        CancellationToken cancellationToken = default,
+        int limit = int.MaxValue)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
@@ -212,8 +217,10 @@ public sealed partial class ReaderDataService
             SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
                    SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
             FROM ReaderAnnotations
-            ORDER BY UpdatedAt DESC, BookId, ChapterPath COLLATE NOCASE, StartOffset;
+            ORDER BY UpdatedAt DESC, BookId, ChapterPath COLLATE NOCASE, StartOffset
+            LIMIT $limit;
             """;
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 100_000));
         var result = new List<ReaderAnnotation>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(ReadAnnotation(reader));
@@ -378,7 +385,8 @@ public sealed partial class ReaderDataService
 
     public async Task<IReadOnlyList<ReaderBookmark>> GetBookmarksAsync(
         Guid bookFileId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int limit = int.MaxValue)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
@@ -387,9 +395,11 @@ public sealed partial class ReaderDataService
                    ScrollPosition, FlowMode, Title, Quote, CreatedAt
             FROM ReaderBookmarks
             WHERE BookFileId = $bookFileId
-            ORDER BY ChapterIndex, CreatedAt;
+            ORDER BY ChapterIndex, CreatedAt
+            LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 100_000));
         var result = new List<ReaderBookmark>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -894,6 +904,26 @@ public sealed partial class ReaderDataService
         IReadOnlyList<BookContentChunkDraft> chunks,
         CancellationToken cancellationToken = default)
     {
+        await ReplaceBookChunksStreamingAsync(
+            bookId,
+            bookFileId,
+            sourceHash,
+            ToAsyncEnumerable(chunks, cancellationToken),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Replaces an EPUB's chunks while consuming them incrementally. The
+    /// caller can parse one chapter at a time without retaining the entire
+    /// book's extracted text and chunk list.
+    /// </summary>
+    public async Task<int> ReplaceBookChunksStreamingAsync(
+        Guid bookId,
+        Guid bookFileId,
+        string sourceHash,
+        IAsyncEnumerable<BookContentChunkDraft> chunks,
+        CancellationToken cancellationToken = default)
+    {
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -933,9 +963,9 @@ public sealed partial class ReaderDataService
             insert.Parameters.Add("$endOffset", SqliteType.Integer);
             insert.Parameters.Add("$content", SqliteType.Text);
 
-            foreach (var chunk in chunks)
+            var count = 0;
+            await foreach (var chunk in chunks.WithCancellation(cancellationToken))
             {
-                cancellationToken.ThrowIfCancellationRequested();
                 insert.Parameters["$bookId"].Value = bookId.ToString();
                 insert.Parameters["$bookFileId"].Value = bookFileId.ToString();
                 insert.Parameters["$sourceHash"].Value = sourceHash;
@@ -947,14 +977,29 @@ public sealed partial class ReaderDataService
                 insert.Parameters["$endOffset"].Value = chunk.EndOffset;
                 insert.Parameters["$content"].Value = chunk.Content;
                 await insert.ExecuteNonQueryAsync(cancellationToken);
+                count++;
             }
 
             await transaction.CommitAsync(cancellationToken);
+            return count;
         }
         finally
         {
             _databaseGate.Release();
         }
+    }
+
+    private static async IAsyncEnumerable<BookContentChunkDraft> ToAsyncEnumerable(
+        IReadOnlyList<BookContentChunkDraft> chunks,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var chunk in chunks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return chunk;
+        }
+
+        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -967,7 +1012,8 @@ public sealed partial class ReaderDataService
         string sourceHash,
         string embeddingModel,
         int embeddingDimension,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int limit = int.MaxValue)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
@@ -983,18 +1029,48 @@ public sealed partial class ReaderDataService
                     OR e.SourceHash <> $sourceHash
                     OR e.EmbeddingModel <> $embeddingModel
                     OR e.EmbeddingDimension <> $embeddingDimension)
-            ORDER BY c.ChapterIndex, c.ChunkIndex, c.Id;
+            ORDER BY c.ChapterIndex, c.ChunkIndex, c.Id
+            LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
         command.Parameters.AddWithValue("$sourceHash", sourceHash);
         command.Parameters.AddWithValue("$embeddingModel", embeddingModel);
         command.Parameters.AddWithValue("$embeddingDimension", embeddingDimension);
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 1000));
 
         var result = new List<BookContentChunk>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
             result.Add(ReadChunk(reader));
         return result;
+    }
+
+    public async Task<int> CountChunksNeedingEmbeddingsAsync(
+        Guid bookFileId,
+        string sourceHash,
+        string embeddingModel,
+        int embeddingDimension,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM BookContentChunks c
+            LEFT JOIN BookChunkEmbeddings e ON e.ChunkId = c.Id
+            WHERE c.BookFileId = $bookFileId
+              AND c.SourceHash = $sourceHash
+              AND (
+                    e.ChunkId IS NULL
+                    OR e.SourceHash <> $sourceHash
+                    OR e.EmbeddingModel <> $embeddingModel
+                    OR e.EmbeddingDimension <> $embeddingDimension);
+            """;
+        command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
+        command.Parameters.AddWithValue("$sourceHash", sourceHash);
+        command.Parameters.AddWithValue("$embeddingModel", embeddingModel);
+        command.Parameters.AddWithValue("$embeddingDimension", embeddingDimension);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
 
     /// <summary>
@@ -1081,7 +1157,9 @@ public sealed partial class ReaderDataService
         Guid bookId,
         string embeddingModel,
         int embeddingDimension,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int limit = int.MaxValue,
+        int offset = 0)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
@@ -1095,11 +1173,14 @@ public sealed partial class ReaderDataService
               AND c.SourceHash = e.SourceHash
               AND e.EmbeddingModel = $embeddingModel
               AND e.EmbeddingDimension = $embeddingDimension
-            ORDER BY c.BookFileId, c.ChapterIndex, c.ChunkIndex, c.Id;
+            ORDER BY c.BookFileId, c.ChapterIndex, c.ChunkIndex, c.Id
+            LIMIT $limit OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$bookId", bookId.ToString());
         command.Parameters.AddWithValue("$embeddingModel", embeddingModel);
         command.Parameters.AddWithValue("$embeddingDimension", embeddingDimension);
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 1000));
+        command.Parameters.AddWithValue("$offset", Math.Max(0, offset));
 
         var result = new List<(BookContentChunk Chunk, float[] Vector)>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1156,13 +1237,13 @@ public sealed partial class ReaderDataService
         // int.MaxValue is the explicit "whole book" mode used by the reader
         // search UI. Small bounded callers (for example AI context retrieval)
         // keep their existing limits.
-        var requestedLimit = limit == int.MaxValue ? int.MaxValue : Math.Clamp(limit, 1, 100);
+        var requestedLimit = limit == int.MaxValue ? int.MaxValue : Math.Clamp(limit, 1, 500);
         // Adjacent index chunks overlap so a phrase crossing a chunk boundary
         // remains searchable. Fetch extra candidates, then collapse candidates
         // whose first matching character resolves to the same chapter offset.
         var candidateLimit = requestedLimit == int.MaxValue
             ? int.MaxValue
-            : Math.Clamp(requestedLimit * 3, requestedLimit, 100);
+            : Math.Clamp(requestedLimit * 3, requestedLimit, 1500);
 
         if (_ftsAvailable && terms.Any(term => term.Length >= 3))
         {
@@ -1215,7 +1296,8 @@ public sealed partial class ReaderDataService
     public async Task<IReadOnlyList<BookContentChunk>> GetBookOverviewChunksAsync(
         Guid bookId,
         int limit = 12,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? bookFileId = null)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
@@ -1223,10 +1305,13 @@ public sealed partial class ReaderDataService
             SELECT Id, BookId, BookFileId, SourceHash, ChapterIndex, ChunkIndex, ChapterTitle,
                    ChapterPath, StartOffset, EndOffset, Content
             FROM BookContentChunks
-            WHERE BookId = $bookId AND ChunkIndex = 0
+            WHERE BookId = $bookId
+              AND ($bookFileId IS NULL OR BookFileId = $bookFileId)
+              AND ChunkIndex = 0
             ORDER BY ChapterIndex;
             """;
         command.Parameters.AddWithValue("$bookId", bookId.ToString());
+        command.Parameters.AddWithValue("$bookFileId", (object?)bookFileId?.ToString() ?? DBNull.Value);
         var openings = new List<BookContentChunk>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) openings.Add(ReadChunk(reader));
@@ -1239,6 +1324,76 @@ public sealed partial class ReaderDataService
             sampled.Add(openings[sourceIndex]);
         }
         return sampled;
+    }
+
+    public async Task<IReadOnlyList<BookContentChunk>> GetBookChapterChunksAsync(
+        Guid bookFileId,
+        int chapterIndex,
+        int? startOffset = null,
+        int? endOffset = null,
+        int limit = 256,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, BookId, BookFileId, SourceHash, ChapterIndex, ChunkIndex, ChapterTitle,
+                   ChapterPath, StartOffset, EndOffset, Content
+            FROM BookContentChunks
+            WHERE BookFileId = $bookFileId
+              AND ChapterIndex = $chapterIndex
+              AND ($startOffset IS NULL OR EndOffset > $startOffset)
+              AND ($endOffset IS NULL OR StartOffset < $endOffset)
+            ORDER BY ChunkIndex, Id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
+        command.Parameters.AddWithValue("$chapterIndex", chapterIndex);
+        command.Parameters.AddWithValue("$startOffset", startOffset is null ? DBNull.Value : startOffset.Value);
+        command.Parameters.AddWithValue("$endOffset", endOffset is null ? DBNull.Value : endOffset.Value);
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 1000));
+
+        var result = new List<BookContentChunk>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(ReadChunk(reader));
+        return result;
+    }
+
+    public async Task<IReadOnlyList<BookContentChunk>> GetBookChunkNeighborsAsync(
+        IReadOnlyCollection<(Guid BookFileId, int ChapterIndex, int ChunkIndex)> locations,
+        int neighborRadius = 1,
+        CancellationToken cancellationToken = default)
+    {
+        if (locations.Count == 0) return [];
+        neighborRadius = Math.Clamp(neighborRadius, 0, 3);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        var predicates = new List<string>(locations.Count);
+        var index = 0;
+        foreach (var location in locations.Distinct())
+        {
+            var fileParameter = $"$neighborFile{index}";
+            var chapterParameter = $"$neighborChapter{index}";
+            var startParameter = $"$neighborStart{index}";
+            var endParameter = $"$neighborEnd{index}";
+            predicates.Add($"(BookFileId = {fileParameter} AND ChapterIndex = {chapterParameter} AND ChunkIndex BETWEEN {startParameter} AND {endParameter})");
+            command.Parameters.AddWithValue(fileParameter, location.BookFileId.ToString());
+            command.Parameters.AddWithValue(chapterParameter, location.ChapterIndex);
+            command.Parameters.AddWithValue(startParameter, Math.Max(0, location.ChunkIndex - neighborRadius));
+            command.Parameters.AddWithValue(endParameter, location.ChunkIndex + neighborRadius);
+            index++;
+        }
+        command.CommandText = $"""
+            SELECT Id, BookId, BookFileId, SourceHash, ChapterIndex, ChunkIndex, ChapterTitle,
+                   ChapterPath, StartOffset, EndOffset, Content
+            FROM BookContentChunks
+            WHERE {string.Join(" OR ", predicates)}
+            ORDER BY BookFileId, ChapterIndex, ChunkIndex, Id;
+            """;
+        var result = new List<BookContentChunk>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(ReadChunk(reader));
+        return result;
     }
 
     private async Task<IReadOnlyList<BookContentChunk>> SearchFullTextAsync(
@@ -1293,7 +1448,7 @@ public sealed partial class ReaderDataService
         command.Parameters.AddWithValue("$contentQuery", contentMatch);
         command.Parameters.AddWithValue("$titleQuery", titleMatch);
         command.Parameters.AddWithValue("$bookId", bookId.ToString());
-        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 100));
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 1500));
         var result = new List<BookContentChunk>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(ReadChunk(reader, includeRank: true));
@@ -1331,7 +1486,7 @@ public sealed partial class ReaderDataService
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$bookId", bookId.ToString());
-        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 100));
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 1500));
         var result = new List<BookContentChunk>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(ReadChunk(reader));
@@ -1387,7 +1542,7 @@ public sealed partial class ReaderDataService
             }
             ranges.Add(paragraphRange);
             results.Add(candidate);
-            if (results.Count >= (limit == int.MaxValue ? int.MaxValue : Math.Clamp(limit, 1, 100))) break;
+            if (results.Count >= (limit == int.MaxValue ? int.MaxValue : Math.Clamp(limit, 1, 500))) break;
         }
         return results;
     }

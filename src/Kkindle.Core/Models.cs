@@ -131,6 +131,22 @@ public static class BookLibraryComparer
         IEnumerable<KindleBook> kindleBooks)
     {
         ArgumentNullException.ThrowIfNull(computerBooks);
+        return Compare(
+            computerBooks.Select(book => new LibraryBookMatch(
+                book.Id,
+                book.Title,
+                book.Authors,
+                book.Files
+                    .Select(file => new LibraryFileMatch(file.RelativePath, file.Sha256))
+                    .ToArray())),
+            kindleBooks);
+    }
+
+    public static BookLibraryComparisonResult Compare(
+        IEnumerable<LibraryBookMatch> computerBooks,
+        IEnumerable<KindleBook> kindleBooks)
+    {
+        ArgumentNullException.ThrowIfNull(computerBooks);
         ArgumentNullException.ThrowIfNull(kindleBooks);
 
         var localBooks = computerBooks.ToArray();
@@ -157,7 +173,7 @@ public static class BookLibraryComparer
         var matchedDevicePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var kindleBook in deviceBooks)
         {
-            var matches = new HashSet<Book>();
+            var matches = new HashSet<LibraryBookMatch>();
             var hash = NormalizeHash(kindleBook.Sha256);
             if (hash.Length > 0 && localHashes.TryGetValue(hash, out var hashMatches))
                 matches.UnionWith(hashMatches);
@@ -182,9 +198,10 @@ public static class BookLibraryComparer
         return new BookLibraryComparisonResult(matchedLocalIds, matchedDevicePaths);
     }
 
-    private static Dictionary<string, List<Book>> BuildLookup(IEnumerable<(string Key, Book Book)> entries)
+    private static Dictionary<string, List<LibraryBookMatch>> BuildLookup(
+        IEnumerable<(string Key, LibraryBookMatch Book)> entries)
     {
-        var lookup = new Dictionary<string, List<Book>>(StringComparer.OrdinalIgnoreCase);
+        var lookup = new Dictionary<string, List<LibraryBookMatch>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, book) in entries)
         {
             if (!lookup.TryGetValue(key, out var books))

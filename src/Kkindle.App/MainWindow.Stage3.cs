@@ -28,6 +28,8 @@ namespace Kkindle;
 /// </summary>
 public partial class MainWindow
 {
+    private const int MaxReadingMaterials = 5_000;
+    private const int DevicePageSize = 200;
     private readonly DispatcherTimer _stage3Timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _transferToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _deviceStatusToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
@@ -44,6 +46,8 @@ public partial class MainWindow
     // list (its Count == 0 fast path would skip the rescan).
     private bool _deviceBooksDirty;
     private bool _deviceBooksLoaded;
+    private IReadOnlyList<LibraryBookMatch> _libraryMatchRecords = [];
+    private BookLibraryComparisonResult? _libraryPresenceComparison;
     private Task? _deviceWarmTask;
     private bool _isRefreshingDevices;
     private double _deviceUsedRatio;
@@ -116,6 +120,9 @@ public partial class MainWindow
 
     public ObservableCollection<KindleBookCardViewModel> DeviceBooks { get; } = [];
     public ObservableCollection<KindleBookCardViewModel> VisibleDeviceBooks { get; } = [];
+    private IReadOnlyList<KindleBookCardViewModel> _filteredDeviceBooks = [];
+    private int _devicePageIndex;
+    private int _devicePageCount = 1;
     public ObservableCollection<KindleDeviceResource> DeviceResources { get; } = [];
     public ObservableCollection<Stage3ReadingMaterialViewModel> ReadingMaterials { get; } = [];
     public ObservableCollection<Stage3ReadingMaterialGroupViewModel> ReadingMaterialGroups { get; } = [];
@@ -642,6 +649,12 @@ public partial class MainWindow
     {
         foreach (var book in DeviceBooks) book.Dispose();
         DeviceBooks.Clear();
+        _libraryPresenceComparison = null;
+        _filteredDeviceBooks = [];
+        VisibleDeviceBooks.Clear();
+        _devicePageIndex = 0;
+        _devicePageCount = 1;
+        UpdateDeviceBookPaginationUi();
         _deviceBooksLoaded = false;
         _deviceWarmTask = null;
         _deviceResourceCache.Clear();
@@ -690,6 +703,11 @@ public partial class MainWindow
             var books = await _kindle.ScanBooksAsync(device, cancellationToken);
             foreach (var old in DeviceBooks) old.Dispose();
             DeviceBooks.Clear();
+            _libraryPresenceComparison = null;
+            VisibleDeviceBooks.Clear();
+            _filteredDeviceBooks = [];
+            _devicePageIndex = 0;
+            _devicePageCount = 1;
             foreach (var book in books)
                 DeviceBooks.Add(new KindleBookCardViewModel(book));
             DeviceBookCountText.Text = DeviceBooks.Count.ToString();
@@ -713,9 +731,19 @@ public partial class MainWindow
 
     private void RefreshLibraryPresenceState(bool refreshDeviceView = true)
     {
-        var comparison = BookLibraryComparer.Compare(
-            ViewModel.LibraryBooks,
+        var localBooks = _libraryMatchRecords.Count > 0
+            ? _libraryMatchRecords
+            : ViewModel.LibraryBooks
+                .Select(book => new LibraryBookMatch(
+                    book.Id,
+                    book.Title,
+                    book.Authors,
+                    book.Files.Select(file => new LibraryFileMatch(file.RelativePath, file.Sha256)).ToArray()))
+                .ToArray();
+        _libraryPresenceComparison ??= BookLibraryComparer.Compare(
+            localBooks,
             DeviceBooks.Select(card => card.Book));
+        var comparison = _libraryPresenceComparison;
         foreach (var localCard in ViewModel.Books)
         {
             localCard.SetLibraryPresence(
@@ -760,7 +788,7 @@ public partial class MainWindow
                 await RefreshDeviceBooksAsync(cancellationToken);
             var fonts = await _kindle.ScanResourcesAsync(device, KindleResourceKind.Font, cancellationToken);
             var dictionaries = await _kindle.ScanResourcesAsync(device, KindleResourceKind.Dictionary, cancellationToken);
-            var clippings = await _kindle.ReadClippingsAsync(device, cancellationToken);
+            var clippings = await _kindle.ReadClippingsAsync(device, cancellationToken, MaxReadingMaterials + 1);
             _deviceResourceCache[(cacheKey, KindleResourceKind.Font)] = fonts;
             _deviceResourceCache[(cacheKey, KindleResourceKind.Dictionary)] = dictionaries;
             _deviceClippingCache[device.Identity] = clippings;
@@ -926,6 +954,9 @@ public partial class MainWindow
     }
 
     private void ApplyDeviceBookFilter()
+        => ApplyDeviceBookFilter(resetPage: true);
+
+    private void ApplyDeviceBookFilter(bool resetPage)
     {
         var query = DeviceBookSearchBox.Text?.Trim() ?? string.Empty;
         var format = (DeviceBookFormatFilterBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? string.Empty;
@@ -958,16 +989,51 @@ public partial class MainWindow
             _ => filtered.OrderBy(card => card.Title, StringComparer.CurrentCultureIgnoreCase)
         };
 
+        _filteredDeviceBooks = filtered.ToArray();
+        if (resetPage) _devicePageIndex = 0;
+        _devicePageCount = Math.Max(1, (int)Math.Ceiling(_filteredDeviceBooks.Count / (double)DevicePageSize));
+        if (_devicePageIndex >= _devicePageCount) _devicePageIndex = _devicePageCount - 1;
         VisibleDeviceBooks.Clear();
-        foreach (var card in filtered)
+        foreach (var card in _filteredDeviceBooks
+            .Skip(_devicePageIndex * DevicePageSize)
+            .Take(DevicePageSize))
             VisibleDeviceBooks.Add(card);
+        UpdateDeviceBookPaginationUi();
         UpdateDeviceBookEmptyState();
+    }
+
+    private void UpdateDeviceBookPaginationUi()
+    {
+        DevicePaginationBar.IsVisible = _filteredDeviceBooks.Count > DevicePageSize;
+        DevicePreviousPageButton.Content = T("上一页");
+        DeviceNextPageButton.Content = T("下一页");
+        DevicePreviousPageButton.IsEnabled = _devicePageIndex > 0;
+        DeviceNextPageButton.IsEnabled = _devicePageIndex + 1 < _devicePageCount;
+        DevicePageText.Text = _devicePageCount <= 1
+            ? string.Empty
+            : T("第 {0} / {1} 页", _devicePageIndex + 1, _devicePageCount);
+    }
+
+    private void DevicePreviousPageButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_devicePageIndex <= 0) return;
+        _devicePageIndex--;
+        ClearDeviceBookSelection();
+        ApplyDeviceBookFilter(resetPage: false);
+    }
+
+    private void DeviceNextPageButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_devicePageIndex + 1 >= _devicePageCount) return;
+        _devicePageIndex++;
+        ClearDeviceBookSelection();
+        ApplyDeviceBookFilter(resetPage: false);
     }
 
     private void UpdateDeviceBookEmptyState()
     {
-        DeviceBookEmptyState.IsVisible = VisibleDeviceBooks.Count == 0;
-        if (VisibleDeviceBooks.Count > 0) return;
+        DeviceBookEmptyState.IsVisible = _filteredDeviceBooks.Count == 0;
+        if (_filteredDeviceBooks.Count > 0) return;
         DeviceBookEmptyText.Text = DeviceBooks.Count > 0
             ? T("没有符合当前搜索或筛选条件的书籍。")
             : CurrentDevice is null
@@ -1233,6 +1299,12 @@ public partial class MainWindow
             await _kindle.EjectAsync(device, _lifetimeCancellation.Token);
             foreach (var book in DeviceBooks) book.Dispose();
             DeviceBooks.Clear();
+            _libraryPresenceComparison = null;
+            VisibleDeviceBooks.Clear();
+            _filteredDeviceBooks = [];
+            _devicePageIndex = 0;
+            _devicePageCount = 1;
+            UpdateDeviceBookPaginationUi();
             DeviceBookCountText.Text = "0";
             RefreshLibraryPresenceState();
             UpdateDeviceBookSelectionUi();
@@ -2203,6 +2275,7 @@ public partial class MainWindow
             {
                 await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
+                _libraryPresenceComparison = null;
                 card.Dispose();
                 removed++;
                 DeviceBookCountText.Text = DeviceBooks.Count.ToString();
@@ -2235,6 +2308,7 @@ public partial class MainWindow
             {
                 await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
+                _libraryPresenceComparison = null;
                 card.Dispose();
                 DeviceBookCountText.Text = DeviceBooks.Count.ToString();
                 RefreshLibraryPresenceState();
@@ -2299,27 +2373,32 @@ public partial class MainWindow
             // every Kindle cover from this page.
             if (_kindle is not null && CurrentDevice is not null && !_deviceBooksLoaded)
                 await RefreshDeviceBooksAsync(_lifetimeCancellation.Token);
-            var books = await _library.SearchAsync(cancellationToken: _lifetimeCancellation.Token);
-            var titles = books.ToDictionary(book => book.Id, book => book.Title);
-            foreach (var book in books)
-            {
-                if (string.IsNullOrWhiteSpace(book.CoverPath)) continue;
-                var path = Path.GetFullPath(Path.Combine(_paths.Data, book.CoverPath));
-                if (File.Exists(path))
-                    _readingMaterialCoverPaths[BuildReadingMaterialCoverKey(ReadingMaterialSource.Local, book.Title)] = path;
-            }
             foreach (var card in DeviceBooks)
             {
                 if (!string.IsNullOrWhiteSpace(card.Book.CoverPath) && File.Exists(card.Book.CoverPath))
                     _readingMaterialCoverPaths[BuildReadingMaterialCoverKey(ReadingMaterialSource.Kindle, card.Title)] = card.Book.CoverPath;
             }
-            var annotations = await _readerData.GetAllAnnotationsAsync(_lifetimeCancellation.Token);
+            var annotations = await _readerData.GetAllAnnotationsAsync(
+                _lifetimeCancellation.Token,
+                MaxReadingMaterials);
+            var readingMaterialsTruncated = annotations.Count >= MaxReadingMaterials;
+            var displayInfos = await _library.GetBookDisplayInfosAsync(
+                annotations.Select(annotation => annotation.BookId).Distinct().ToArray(),
+                _lifetimeCancellation.Token);
+            var titles = displayInfos.ToDictionary(pair => pair.Key, pair => pair.Value.Title);
+            foreach (var info in displayInfos.Values)
+            {
+                if (string.IsNullOrWhiteSpace(info.CoverPath)) continue;
+                var path = Path.GetFullPath(Path.Combine(_paths.Data, info.CoverPath));
+                if (File.Exists(path))
+                    _readingMaterialCoverPaths[BuildReadingMaterialCoverKey(ReadingMaterialSource.Local, info.Title)] = path;
+            }
             var chapterTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var bookId in annotations.Select(annotation => annotation.BookId).Distinct())
             {
                 foreach (var chunk in await _readerData.GetBookOverviewChunksAsync(
                              bookId,
-                             int.MaxValue,
+                             256,
                              _lifetimeCancellation.Token))
                 {
                     if (string.IsNullOrWhiteSpace(chunk.ChapterTitle)) continue;
@@ -2353,12 +2432,19 @@ public partial class MainWindow
                         clippings = cached;
                     else
                     {
-                        clippings = await _kindle.ReadClippingsAsync(device, _lifetimeCancellation.Token);
+                        clippings = await _kindle.ReadClippingsAsync(
+                            device,
+                            _lifetimeCancellation.Token,
+                            MaxReadingMaterials + 1);
                         _deviceClippingCache[device.Identity] = clippings;
                         await PersistDeviceAuxiliaryCacheAsync(device);
                     }
                 });
-                foreach (var pair in KindleClippingsParser.PairForDisplay(clippings ?? []))
+                readingMaterialsTruncated |= (clippings?.Count ?? 0) > MaxReadingMaterials;
+                var clippingInput = (clippings ?? [])
+                    .Take(MaxReadingMaterials + 1)
+                    .ToArray();
+                foreach (var pair in KindleClippingsParser.PairForDisplay(clippingInput).Take(MaxReadingMaterials))
                 {
                     var clipping = pair.Clipping;
                     _allStage3ReadingMaterials.Add(new Stage3ReadingMaterialViewModel(
@@ -2384,8 +2470,8 @@ public partial class MainWindow
             _readingMaterialsDirty = false;
             var kindleCount = _allStage3ReadingMaterials.Count(item => item.Source == ReadingMaterialSource.Kindle);
             ReadingMaterialsStatusText.Text = _readingMaterialsExportMode
-                ? T("导出预览已准备 · Kindle {0} 条", kindleCount)
-                : T("本地资料已读取 · Kindle {0} 条", kindleCount);
+                ? T("导出预览已准备 · Kindle {0} 条{1}", kindleCount, readingMaterialsTruncated ? T("（已限制最多 {0} 条）", MaxReadingMaterials) : string.Empty)
+                : T("本地资料已读取 · Kindle {0} 条{1}", kindleCount, readingMaterialsTruncated ? T("（已限制最多 {0} 条）", MaxReadingMaterials) : string.Empty);
         }
         catch (Exception exception)
         {
@@ -2531,14 +2617,26 @@ public partial class MainWindow
         }
 
         var card = ViewModel.Books.FirstOrDefault(candidate => candidate.Book.Id == annotation.BookId);
+        var temporaryCard = false;
+        if (card is null)
+        {
+            var book = await _library.GetBookAsync(annotation.BookId, _lifetimeCancellation.Token);
+            if (book is not null)
+            {
+                card = new BookCardViewModel(book, _paths.Data);
+                temporaryCard = true;
+            }
+        }
         var file = card?.Book.Files.FirstOrDefault(candidate => candidate.Id == annotation.BookFileId);
         if (card is null || file is null)
         {
+            if (temporaryCard) card?.Dispose();
             ReadingMaterialsStatusText.Text = T("找不到这条批注对应的本地书籍文件。");
             return;
         }
 
         await OpenBookAsync(card, file);
+        if (temporaryCard) card.Dispose();
         if (!ReaderRoot.IsVisible) return;
         ShowReaderNotesTab();
         var loaded = ReaderAnnotations.FirstOrDefault(candidate => candidate.Id == annotation.Id);
@@ -2680,10 +2778,19 @@ public partial class MainWindow
         });
         var path = file?.TryGetLocalPath();
         if (string.IsNullOrWhiteSpace(path)) return;
-        var content = markdown
-            ? ReadingMaterialsExport.BuildMarkdown(records)
-            : ReadingMaterialsExport.BuildPlainText(records);
-        await File.WriteAllTextAsync(path, content, new UTF8Encoding(true), _lifetimeCancellation.Token);
+        await using (var stream = new FileStream(
+                         path,
+                         FileMode.Create,
+                         FileAccess.Write,
+                         FileShare.None,
+                         64 * 1024,
+                         FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            if (markdown)
+                await ReadingMaterialsExport.WriteMarkdownAsync(stream, records, _lifetimeCancellation.Token);
+            else
+                await ReadingMaterialsExport.WritePlainTextAsync(stream, records, _lifetimeCancellation.Token);
+        }
         ReadingMaterialsStatusText.Text = T("已导出 {0} 条记录到 {1}。", records.Length, path);
     }
 
@@ -3191,10 +3298,13 @@ public partial class MainWindow
             DashboardStreakText.Text = T("{0} 天", ComputeReadingStreakDays(dashboard.DailyReading));
             DashboardStatusText.IsVisible = false;
 
+            var dashboardTitles = await _library.GetBookTitlesAsync(
+                dashboard.RecentBooks.Select(item => item.BookId).ToArray(),
+                _lifetimeCancellation.Token);
             _readingDashboardItems.Clear();
             foreach (var item in dashboard.RecentBooks)
             {
-                var title = ViewModel.LibraryBooks.FirstOrDefault(book => book.Id == item.BookId)?.Title
+                var title = dashboardTitles.GetValueOrDefault(item.BookId)
                     ?? T("未导入的书籍");
                 var recent = new Stage3DashboardRecentViewModel(
                     title,
@@ -3222,7 +3332,7 @@ public partial class MainWindow
                 .OrderByDescending(item => item.CumulativeSeconds)
                 .Take(8)
                 .Select(item => (
-                    ViewModel.LibraryBooks.FirstOrDefault(book => book.Id == item.BookId)?.Title ?? T("未导入的书籍"),
+                    dashboardTitles.GetValueOrDefault(item.BookId) ?? T("未导入的书籍"),
                     (double)item.CumulativeSeconds,
                     FormatReadingTime(item.CumulativeSeconds))));
 
@@ -3503,7 +3613,7 @@ public partial class MainWindow
         try
         {
             await _library.RestoreTrashItemAsync(item.Item.Id, _lifetimeCancellation.Token);
-            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+            await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
             await RefreshTrashItemsAsync();
@@ -4452,7 +4562,7 @@ public partial class MainWindow
 
     private async Task RefreshLibraryAfterS3SyncAsync(CancellationToken cancellationToken)
     {
-        await ViewModel.RefreshAsync(cancellationToken);
+        await RefreshLibraryDataAsync(cancellationToken);
         SetupFilterControls();
         await RefreshCollectionsAsync();
         UpdateLibraryUi();
@@ -5137,7 +5247,7 @@ public partial class MainWindow
             _kindleEmailSettings = result.KindleEmailSettings;
             PopulateSettingsControls();
             ApplyReaderAiSettingsToControls();
-            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+            await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
             await RefreshCollectionsAsync();
             SettingsBackupStatusText.Text = T("已导入 {0} 本书、{1} 个文件。", result.BookCount, result.FileCount);
             S3SyncStatusText.Text = T("本地备份已导入；下次 S3 同步将按导入内容建立新的本地基线。 ");
@@ -5477,7 +5587,7 @@ public partial class MainWindow
             item.SetStatus(automaticFormats.Failures.Count == 0
                 ? T("已下载并导入电脑书库")
                 : T("已导入；格式补齐失败 {0} 项", automaticFormats.Failures.Count));
-            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+            await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
             try { File.Delete(downloaded); } catch { }
@@ -5643,7 +5753,15 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
         _isExpanded = isExpanded;
         if (!string.IsNullOrWhiteSpace(coverPath) && File.Exists(coverPath))
         {
-            try { CoverImage = new Bitmap(coverPath); } catch { }
+            try
+            {
+                using var stream = File.OpenRead(coverPath);
+                CoverImage = Bitmap.DecodeToWidth(
+                    stream,
+                    240,
+                    BitmapInterpolationMode.MediumQuality);
+            }
+            catch { }
         }
     }
 
@@ -5773,6 +5891,7 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
 public sealed class KindleBookCardViewModel : ObservableObject, IDisposable
 {
     private Bitmap? _coverImage;
+    private bool _coverLoadAttempted;
     private BookLibraryPresence _libraryPresence = BookLibraryPresence.KindleOnly;
     private bool _isDownloading;
     private bool _isSelected;
@@ -5785,14 +5904,28 @@ public sealed class KindleBookCardViewModel : ObservableObject, IDisposable
     {
         UiText.LanguageChanged += OnLanguageChanged;
         Book = book;
-        if (!string.IsNullOrWhiteSpace(book.CoverPath) && File.Exists(book.CoverPath))
-        {
-            try { _coverImage = new Bitmap(book.CoverPath); } catch { }
-        }
     }
 
     public KindleBook Book { get; }
-    public Bitmap? CoverImage => _coverImage;
+    public Bitmap? CoverImage
+    {
+        get
+        {
+            if (_coverLoadAttempted) return _coverImage;
+            _coverLoadAttempted = true;
+            if (string.IsNullOrWhiteSpace(Book.CoverPath) || !File.Exists(Book.CoverPath)) return null;
+            try
+            {
+                using var stream = File.OpenRead(Book.CoverPath);
+                _coverImage = Bitmap.DecodeToWidth(
+                    stream,
+                    320,
+                    BitmapInterpolationMode.MediumQuality);
+            }
+            catch { }
+            return _coverImage;
+        }
+    }
     public string Title => UiText.Localize(Book.Title);
     public string Authors => UiText.Localize(Book.Authors);
     public string FormatLabel => Book.Format.ToUpperInvariant();

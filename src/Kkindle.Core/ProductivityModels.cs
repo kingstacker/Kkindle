@@ -13,6 +13,29 @@ public enum LibrarySortMode
     ProgressDescending = 4
 }
 
+public sealed record LibraryPageResult(IReadOnlyList<Book> Books, int TotalCount);
+
+public sealed record LibraryFilterOptions(
+    IReadOnlyList<string> Authors,
+    IReadOnlyList<string> Tags,
+    IReadOnlyList<string> Formats,
+    IReadOnlyList<string> Categories);
+
+public sealed record LibraryCollectionSummary(
+    BookCollection Collection,
+    int BookCount,
+    IReadOnlyList<string> CoverPaths);
+
+public sealed record LibraryFileMatch(string RelativePath, string Sha256);
+
+public sealed record LibraryBookMatch(
+    Guid Id,
+    string Title,
+    string Authors,
+    IReadOnlyList<LibraryFileMatch> Files);
+
+public sealed record LibraryBookDisplayInfo(Guid Id, string Title, string? CoverPath);
+
 public sealed record AppSettings
 {
     public const string DefaultEmbeddingModelId = "BAAI/bge-small-zh-v1.5";

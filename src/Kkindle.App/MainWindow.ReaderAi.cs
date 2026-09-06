@@ -1526,10 +1526,6 @@ public partial class MainWindow
         {
             case ReaderAiRequestKind.SelectionExplain:
             {
-                var chunks = await _readerData.GetBookChunksAsync(
-                    book.Id,
-                    bookFile.Id,
-                    cancellationToken);
                 var chapterPath = GetReaderChapterPath();
                 var selectionStart = Math.Min(
                     _readerPendingSelectionStartOffset,
@@ -1537,20 +1533,26 @@ public partial class MainWindow
                 var selectionEnd = Math.Max(
                     _readerPendingSelectionStartOffset,
                     _readerPendingSelectionEndOffset);
+                var chunks = await _readerData.GetBookChapterChunksAsync(
+                    bookFile.Id,
+                    _readerChapterIndex,
+                    selectionStart,
+                    Math.Max(selectionStart + 1, selectionEnd),
+                    256,
+                    cancellationToken);
                 var selected = chunks
-                    .Where(chunk => chunk.ChapterIndex == _readerChapterIndex)
                     .Where(chunk => chapterPath is null
                         || string.Equals(chunk.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase))
-                    .Where(chunk => chunk.StartOffset < Math.Max(selectionStart + 1, selectionEnd)
-                        && chunk.EndOffset > selectionStart)
                     .ToArray();
                 if (selected.Length == 0)
                 {
-                    selected = chunks
-                        .Where(chunk => chunk.ChapterIndex == _readerChapterIndex)
+                    selected = (await _readerData.GetBookChapterChunksAsync(
+                            bookFile.Id,
+                            _readerChapterIndex,
+                            limit: 3,
+                            cancellationToken: cancellationToken))
                         .Where(chunk => chapterPath is null
                             || string.Equals(chunk.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase))
-                        .Take(3)
                         .ToArray();
                 }
                 retrievalResults = selected
@@ -1563,10 +1565,17 @@ public partial class MainWindow
             case ReaderAiRequestKind.ChapterSummary:
             case ReaderAiRequestKind.BookSummary:
             {
-                var chunks = await _readerData.GetBookChunksAsync(
-                    book.Id,
-                    bookFile.Id,
-                    cancellationToken);
+                var chunks = requestKind == ReaderAiRequestKind.BookSummary
+                    ? await _readerData.GetBookOverviewChunksAsync(
+                        book.Id,
+                        64,
+                        cancellationToken,
+                        bookFile.Id)
+                    : await _readerData.GetBookChapterChunksAsync(
+                        bookFile.Id,
+                        _readerChapterIndex,
+                        limit: 256,
+                        cancellationToken: cancellationToken);
                 var overview = ReaderAiContextBuilder.BuildOverview(chunks.Where(chunk =>
                     requestKind == ReaderAiRequestKind.BookSummary || chunk.ChapterIndex == _readerChapterIndex).ToArray());
                 ReaderAiScopeText.Text = requestKind == ReaderAiRequestKind.BookSummary

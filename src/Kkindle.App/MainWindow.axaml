@@ -1177,7 +1177,7 @@
                   Grid.Column="1"
                   Margin="30,24,30,18"
                   IsVisible="False"
-                  RowDefinitions="Auto,Auto,Auto,*">
+                  RowDefinitions="Auto,Auto,Auto,*,Auto">
                   <Grid.Transitions>
                       <Transitions>
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
@@ -3708,6 +3708,18 @@
                         </Grid>
                     </StackPanel>
                 </Border>
+                <StackPanel x:Name="DevicePaginationBar"
+                            Grid.Row="4"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="10"
+                            Margin="0,10,0,0"
+                            IsVisible="False">
+                    <Button x:Name="DevicePreviousPageButton" Classes="quiet" Padding="12,5" Click="DevicePreviousPageButton_Click" />
+                    <TextBlock x:Name="DevicePageText" VerticalAlignment="Center" Foreground="{StaticResource MutedInkBrush}" />
+                    <Button x:Name="DeviceNextPageButton" Classes="quiet" Padding="12,5" Click="DeviceNextPageButton_Click" />
+                </StackPanel>
             </Grid>
 
         </Grid>

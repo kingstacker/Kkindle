@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -28,6 +29,9 @@ public sealed record EpubReaderDocument(
 public sealed class EpubReaderPreparationService
 {
     private const string ExtractionReadyFileName = ".kkindle-extracted";
+    private const string ReaderIndexFileName = ".kkindle-reader-index.json";
+    private const string ReaderIndexFormatVersion = "1";
+    private const int PhysicalTocFullScanChapterLimit = 256;
     // Bump whenever sanitization changes. Existing reader caches otherwise
     // keep stale sanitized markup indefinitely.
     private const string ExtractionFormatVersion = "70";
@@ -58,6 +62,8 @@ public sealed class EpubReaderPreparationService
     private static readonly XNamespace XhtmlNamespace = "http://www.w3.org/1999/xhtml";
     private readonly AppPaths _paths;
 
+    private static readonly JsonSerializerOptions ReaderIndexJsonOptions = new(JsonSerializerDefaults.Web);
+
     public EpubReaderPreparationService(AppPaths paths)
     {
         _paths = paths;
@@ -81,8 +87,15 @@ public sealed class EpubReaderPreparationService
             extractionReadyPath,
             cacheKey,
             cancellationToken);
+        if (extractionReady
+            && await TryLoadReaderIndexAsync(cacheRoot, cancellationToken) is { } cachedDocument)
+        {
+            return cachedDocument;
+        }
+
         if (!extractionReady)
         {
+            TryDeleteFile(Path.Combine(cacheRoot, ReaderIndexFileName));
             // Re-extract on every format-version mismatch. Re-sanitizing an
             // already transformed cache cannot restore content removed by an
             // older sanitizer and would leave bridge changes version-skewed.
@@ -140,13 +153,17 @@ public sealed class EpubReaderPreparationService
         if (chapters.Count == 0)
             throw new InvalidDataException("EPUB 没有可阅读的章节。");
 
+        var chapterIndexByPath = CreateChapterIndexLookup(chapters);
+
         var navigation = await ReadNavigationAsync(
             package,
             manifest,
             packageDirectory,
             cacheRoot,
             chapters,
+            chapterIndexByPath,
             cancellationToken);
+        var hasAuthoritativeNavigation = navigation.Count > 0;
         if (navigation.Count == 0)
         {
             navigation = chapters
@@ -157,16 +174,21 @@ public sealed class EpubReaderPreparationService
                 .ToList();
         }
 
-        var chapterTitles = new List<string>(chapters.Count);
-        foreach (var chapter in chapters)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            chapterTitles.Add(await ReadChapterTitleAsync(chapter, cancellationToken));
-        }
+        var authoritativeNavigation = hasAuthoritativeNavigation ? navigation : [];
+        var chapterTitles = await ReadChapterTitlesAsync(
+            chapters,
+            authoritativeNavigation,
+            cancellationToken);
 
-        await ReplaceDuplicateChapterTitlesWithBodyPreviewAsync(chapters, chapterTitles, cancellationToken);
+        await ReplaceDuplicateChapterTitlesWithBodyPreviewAsync(
+            chapters,
+            chapterTitles,
+            authoritativeNavigation,
+            cancellationToken);
 
-        return new EpubReaderDocument(cacheRoot, chapters, navigation, chapterTitles);
+        var document = new EpubReaderDocument(cacheRoot, chapters, navigation, chapterTitles);
+        await WriteReaderIndexAsync(cacheRoot, document, cancellationToken);
+        return document;
     }
 
     private sealed record PhysicalTocPage(
@@ -174,12 +196,31 @@ public sealed class EpubReaderPreparationService
         string Title,
         IReadOnlyList<EpubReaderNavigationItem> Items);
 
+    private static IReadOnlyDictionary<string, int> CreateChapterIndexLookup(
+        IReadOnlyList<string> chapters)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < chapters.Count; index++)
+        {
+            var path = Path.GetFullPath(chapters[index]);
+            // Match the previous FindIndex behavior when a malformed EPUB
+            // repeats one spine document: the first occurrence wins.
+            result.TryAdd(path, index);
+        }
+
+        return result;
+    }
+
+    private static int GetMetadataConcurrency() =>
+        Math.Clamp(Environment.ProcessorCount, 1, 4);
+
     private static async Task<List<EpubReaderNavigationItem>> ReadNavigationAsync(
         XDocument package,
         IReadOnlyDictionary<string, ManifestItem> manifest,
         string packageDirectory,
         string cacheRoot,
         IReadOnlyList<string> chapters,
+        IReadOnlyDictionary<string, int> chapterIndexByPath,
         CancellationToken cancellationToken)
     {
         var navigation = new List<EpubReaderNavigationItem>();
@@ -204,7 +245,7 @@ public sealed class EpubReaderPreparationService
                         GetNavigationLinks(element),
                         navPath,
                         cacheRoot,
-                        chapters))
+                        chapterIndexByPath))
                     .OrderByDescending(items => items.Count)
                     .FirstOrDefault(items => items.Count > 0);
                 if (explicitToc is not null)
@@ -221,7 +262,7 @@ public sealed class EpubReaderPreparationService
                             GetNavigationLinks(element),
                             navPath,
                             cacheRoot,
-                            chapters))
+                            chapterIndexByPath))
                         .OrderByDescending(items => items.Count)
                         .FirstOrDefault(items => items.Count > 0);
                     if (inferredToc is not null)
@@ -260,7 +301,7 @@ public sealed class EpubReaderPreparationService
                         navMap is null ? [] : ReadNcxNavigationLinks(navMap),
                         ncxPath,
                         cacheRoot,
-                        chapters,
+                        chapterIndexByPath,
                         out ncxCollisions);
                 }
             }
@@ -287,7 +328,7 @@ public sealed class EpubReaderPreparationService
                         GetNavigationLinks(guideDocument.Root),
                         guidePath,
                         cacheRoot,
-                        chapters,
+                        chapterIndexByPath,
                         out var guideCollisions);
                     if (IsBetterNavigationSource(
                             guideItems,
@@ -313,6 +354,7 @@ public sealed class EpubReaderPreparationService
             navigation,
             cacheRoot,
             chapters,
+            chapterIndexByPath,
             cancellationToken);
     }
 
@@ -320,11 +362,25 @@ public sealed class EpubReaderPreparationService
         List<EpubReaderNavigationItem> navigation,
         string cacheRoot,
         IReadOnlyList<string> chapters,
+        IReadOnlyDictionary<string, int> chapterIndexByPath,
         CancellationToken cancellationToken)
     {
+        // Once the authoritative TOC already reaches every spine document,
+        // a second pass over every chapter cannot add a readable chapter. It
+        // is especially expensive for large novels whose NCX lists every
+        // chapter, so keep the physical-TOC compatibility pass only for
+        // incomplete navigation sources.
+        if (navigation.Count > 0
+            && CountDistinctChapters(navigation) >= chapters.Count)
+        {
+            return navigation;
+        }
+
         var tocPages = await ReadPhysicalTocPagesAsync(
             cacheRoot,
             chapters,
+            navigation,
+            chapterIndexByPath,
             cancellationToken);
         if (tocPages.Count == 0)
             return navigation;
@@ -404,44 +460,122 @@ public sealed class EpubReaderPreparationService
     private static async Task<List<PhysicalTocPage>> ReadPhysicalTocPagesAsync(
         string cacheRoot,
         IReadOnlyList<string> chapters,
+        IReadOnlyList<EpubReaderNavigationItem> navigation,
+        IReadOnlyDictionary<string, int> chapterIndexByPath,
         CancellationToken cancellationToken)
     {
-        var pages = new List<PhysicalTocPage>();
-        for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
+        var candidateIndexes = GetPhysicalTocCandidateIndexes(
+            chapters,
+            navigation,
+            chapterIndexByPath);
+        var pages = new PhysicalTocPage?[candidateIndexes.Count];
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, candidateIndexes.Count),
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = GetMetadataConcurrency()
+            },
+            async (resultIndex, token) =>
+            {
+                var chapterIndex = candidateIndexes[resultIndex];
+                try
+                {
+                    var document = await LoadXmlAsync(chapters[chapterIndex], token);
+                    var links = GetNavigationLinks(document.Root).ToArray();
+                    if (!IsPhysicalTocPage(document, links))
+                        return;
+
+                    var items = CreateNavigationItems(
+                        links,
+                        chapters[chapterIndex],
+                        cacheRoot,
+                        chapterIndexByPath);
+                    if (items.Count == 0)
+                        return;
+
+                    pages[resultIndex] = new PhysicalTocPage(
+                        chapterIndex,
+                        GetPhysicalTocTitle(document),
+                        items);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // A broken auxiliary XHTML page must not prevent the rest
+                    // of the EPUB from opening or erase its NCX navigation.
+                }
+            });
+
+        return pages
+            .Where(page => page is not null)
+            .Select(page => page!)
+            .OrderBy(page => page.ChapterIndex)
+            .ToList();
+    }
+
+    private static IReadOnlyList<int> GetPhysicalTocCandidateIndexes(
+        IReadOnlyList<string> chapters,
+        IReadOnlyList<EpubReaderNavigationItem> navigation,
+        IReadOnlyDictionary<string, int> chapterIndexByPath)
+    {
+        if (chapters.Count <= PhysicalTocFullScanChapterLimit)
+            return Enumerable.Range(0, chapters.Count).ToArray();
+
+        var candidates = new HashSet<int>();
+        var earlyLimit = Math.Min(PhysicalTocFullScanChapterLimit, chapters.Count);
+        foreach (var item in navigation)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            if (!Uri.TryCreate(item.Target, UriKind.Absolute, out var target)
+                || !target.IsFile
+                || !chapterIndexByPath.TryGetValue(
+                    Path.GetFullPath(target.LocalPath),
+                    out var chapterIndex))
             {
-                var document = await LoadXmlAsync(chapters[chapterIndex], cancellationToken);
-                var links = GetNavigationLinks(document.Root).ToArray();
-                if (!IsPhysicalTocPage(document, links))
-                    continue;
-
-                var items = CreateNavigationItems(
-                    links,
-                    chapters[chapterIndex],
-                    cacheRoot,
-                    chapters);
-                if (items.Count == 0)
-                    continue;
-
-                pages.Add(new PhysicalTocPage(
-                    chapterIndex,
-                    GetPhysicalTocTitle(document),
-                    items));
+                continue;
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+            var fileName = Path.GetFileNameWithoutExtension(chapters[chapterIndex]);
+            if (chapterIndex < earlyLimit
+                || IsPhysicalTocFileName(fileName)
+                || IsTocHeading(item.Title))
             {
-                throw;
-            }
-            catch
-            {
-                // A broken auxiliary XHTML page must not prevent the rest of
-                // the EPUB from opening or erase its NCX navigation.
+                candidates.Add(chapterIndex);
             }
         }
 
-        return pages;
+        // Physical TOCs are normally named explicitly. Keep the early spine
+        // window as a compatibility fallback for publishers that use generic
+        // filenames, while avoiding a full XML parse of a 10k-chapter novel.
+        for (var chapterIndex = 0; chapterIndex < earlyLimit; chapterIndex++)
+            candidates.Add(chapterIndex);
+
+        for (var chapterIndex = 0; chapterIndex < chapters.Count; chapterIndex++)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(chapters[chapterIndex]);
+            if (IsPhysicalTocFileName(fileName))
+                candidates.Add(chapterIndex);
+        }
+
+        return candidates.OrderBy(index => index).ToArray();
+    }
+
+    private static bool IsPhysicalTocFileName(string? value)
+    {
+        var compact = new string((value ?? string.Empty)
+            .Where(character => char.IsLetterOrDigit(character)
+                || character is >= '\u3400' and <= '\u9fff')
+            .ToArray());
+        return compact.Contains("toc", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("contents", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("tableofcontents", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("目录", StringComparison.Ordinal)
+            || compact.Contains("目錄", StringComparison.Ordinal)
+            || compact.Contains("目次", StringComparison.Ordinal);
     }
 
     private static bool IsPhysicalTocPage(
@@ -538,8 +672,8 @@ public sealed class EpubReaderPreparationService
         IEnumerable<(string Title, string? Href, int Level)> source,
         string navigationDocumentPath,
         string cacheRoot,
-        IReadOnlyList<string> chapters) =>
-        CreateNavigationItems(source, navigationDocumentPath, cacheRoot, chapters, out _);
+        IReadOnlyDictionary<string, int> chapterIndexByPath) =>
+        CreateNavigationItems(source, navigationDocumentPath, cacheRoot, chapterIndexByPath, out _);
 
     // collidedEntries counts entries discarded because another entry already
     // claimed the same target. A navigation source that keeps pointing several
@@ -549,7 +683,7 @@ public sealed class EpubReaderPreparationService
         IEnumerable<(string Title, string? Href, int Level)> source,
         string navigationDocumentPath,
         string cacheRoot,
-        IReadOnlyList<string> chapters,
+        IReadOnlyDictionary<string, int> chapterIndexByPath,
         out int collidedEntries)
     {
         collidedEntries = 0;
@@ -569,9 +703,11 @@ public sealed class EpubReaderPreparationService
                     Path.GetDirectoryName(navigationDocumentPath)!,
                     cacheRoot,
                     Uri.UnescapeDataString(pathPart));
-            var chapterIndex = chapters.ToList().FindIndex(chapter =>
-                Path.GetFullPath(chapter).Equals(Path.GetFullPath(targetPath), StringComparison.OrdinalIgnoreCase));
-            if (chapterIndex < 0 || !File.Exists(targetPath)) continue;
+            if (!chapterIndexByPath.TryGetValue(Path.GetFullPath(targetPath), out var chapterIndex)
+                || !File.Exists(targetPath))
+            {
+                continue;
+            }
 
             var target = new Uri(targetPath).AbsoluteUri;
             if (parts.Length == 2 && parts[1].Length > 0) target += $"#{parts[1]}";
@@ -740,22 +876,43 @@ public sealed class EpubReaderPreparationService
     {
         try
         {
-            var document = await LoadXmlAsync(chapterPath, cancellationToken);
-            var heading = document.Descendants().FirstOrDefault(element =>
-                element.Name.LocalName.Equals("h1", StringComparison.OrdinalIgnoreCase));
-            var title = NormalizeTitle(heading?.Value);
-            if (title.Length == 0)
+            await using var stream = new FileStream(
+                chapterPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                81920,
+                useAsync: true);
+            using var reader = XmlReader.Create(stream, CreateSecureXmlReaderSettings());
+            var documentTitle = string.Empty;
+            while (await reader.ReadAsync())
             {
-                title = NormalizeTitle(document.Descendants().FirstOrDefault(element =>
-                    element.Name.LocalName.Equals("title", StringComparison.OrdinalIgnoreCase))?.Value);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.NodeType != XmlNodeType.Element)
+                    continue;
+
+                if (reader.LocalName.Equals("title", StringComparison.OrdinalIgnoreCase)
+                    && documentTitle.Length == 0
+                    && !reader.IsEmptyElement)
+                {
+                    documentTitle = NormalizeTitle(
+                        await ReadXmlElementTextAsync(reader, cancellationToken));
+                    continue;
+                }
+
+                if (!reader.LocalName.Equals("h1", StringComparison.OrdinalIgnoreCase)
+                    || reader.IsEmptyElement)
+                {
+                    continue;
+                }
+
+                var heading = NormalizeTitle(
+                    await ReadXmlElementTextAsync(reader, cancellationToken));
+                if (heading.Length > 0)
+                    return NormalizeChapterTitle(heading);
             }
 
-            return title.ToLowerInvariant() switch
-            {
-                "cover" => "封面",
-                "table of contents" => "目录",
-                _ => title
-            };
+            return NormalizeChapterTitle(documentTitle);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -766,6 +923,77 @@ public sealed class EpubReaderPreparationService
             return string.Empty;
         }
     }
+
+    private static async Task<List<string>> ReadChapterTitlesAsync(
+        IReadOnlyList<string> chapters,
+        IReadOnlyList<EpubReaderNavigationItem> navigation,
+        CancellationToken cancellationToken)
+    {
+        var titles = new string[chapters.Count];
+        Array.Fill(titles, string.Empty);
+
+        // An EPUB TOC already contains the display title for most novel
+        // chapters. Reuse it and only inspect spine files that the TOC does
+        // not cover (cover, title page, dedication, etc.).
+        foreach (var item in navigation)
+        {
+            if (item.ChapterIndex < 0
+                || item.ChapterIndex >= titles.Length
+                || string.IsNullOrWhiteSpace(item.Title)
+                || titles[item.ChapterIndex].Length > 0)
+            {
+                continue;
+            }
+
+            titles[item.ChapterIndex] = NormalizeTitle(item.Title);
+        }
+
+        var missingIndexes = Enumerable.Range(0, chapters.Count)
+            .Where(index => titles[index].Length == 0)
+            .ToArray();
+        await Parallel.ForEachAsync(
+            missingIndexes,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = GetMetadataConcurrency()
+            },
+            async (index, token) =>
+            {
+                titles[index] = await ReadChapterTitleAsync(chapters[index], token);
+            });
+
+        return titles.ToList();
+    }
+
+    private static async Task<string> ReadXmlElementTextAsync(
+        XmlReader reader,
+        CancellationToken cancellationToken)
+    {
+        using var subtree = reader.ReadSubtree();
+        var builder = new StringBuilder();
+        while (await subtree.ReadAsync())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (subtree.NodeType is XmlNodeType.Text
+                or XmlNodeType.CDATA
+                or XmlNodeType.Whitespace
+                or XmlNodeType.SignificantWhitespace)
+            {
+                builder.Append(subtree.Value);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string NormalizeChapterTitle(string title) =>
+        title.ToLowerInvariant() switch
+        {
+            "cover" => "封面",
+            "table of contents" => "目录",
+            _ => title
+        };
 
     private static string NormalizeTitle(string? value) =>
         string.Join(' ', (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
@@ -783,22 +1011,42 @@ public sealed class EpubReaderPreparationService
     private static async Task ReplaceDuplicateChapterTitlesWithBodyPreviewAsync(
         IReadOnlyList<string> chapters,
         List<string> chapterTitles,
+        IReadOnlyList<EpubReaderNavigationItem> navigation,
         CancellationToken cancellationToken)
     {
+        var authoritativeIndexes = navigation
+            .Select(item => item.ChapterIndex)
+            .ToHashSet();
         var duplicates = chapterTitles
-            .Where(title => title.Length > 0)
-            .GroupBy(title => title, StringComparer.Ordinal)
+            .Select((title, index) => (title, index))
+            .Where(item => item.title.Length > 0 && !authoritativeIndexes.Contains(item.index))
+            .GroupBy(item => item.title, StringComparer.Ordinal)
             .Where(group => group.Count() > 1)
             .Select(group => group.Key)
             .ToHashSet(StringComparer.Ordinal);
         if (duplicates.Count == 0) return;
 
-        for (var index = 0; index < chapterTitles.Count; index++)
+        var duplicateIndexes = Enumerable.Range(0, chapterTitles.Count)
+            .Where(index => !authoritativeIndexes.Contains(index)
+                && duplicates.Contains(chapterTitles[index]))
+            .ToArray();
+        var previews = new string[chapterTitles.Count];
+        await Parallel.ForEachAsync(
+            duplicateIndexes,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = GetMetadataConcurrency()
+            },
+            async (index, token) =>
+            {
+                previews[index] = TruncateChapterTitle(
+                    await ReadChapterBodyPreviewAsync(chapters[index], token));
+            });
+
+        foreach (var index in duplicateIndexes)
         {
-            if (!duplicates.Contains(chapterTitles[index])) continue;
-            cancellationToken.ThrowIfCancellationRequested();
-            var preview = TruncateChapterTitle(
-                await ReadChapterBodyPreviewAsync(chapters[index], cancellationToken));
+            var preview = previews[index];
             // A preview that collides again would just move the duplication;
             // keep the original label when no distinct first line exists.
             if (preview.Length > 0 && !duplicates.Contains(preview))
@@ -812,32 +1060,52 @@ public sealed class EpubReaderPreparationService
     {
         try
         {
-            var document = await LoadXmlAsync(chapterPath, cancellationToken);
-            var blockPreview = document
-                .Descendants()
-                .Where(element =>
-                    IsBodyPreviewElement(element)
-                    && element.Name.LocalName is
-                        "p" or "div" or "section" or "article" or "li"
-                        or "blockquote" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6")
-                .Select(element => NormalizeTitle(element.Value))
-                .FirstOrDefault(value => value.Length > 0);
-            if (!string.IsNullOrWhiteSpace(blockPreview))
-                return blockPreview;
+            await using var stream = new FileStream(
+                chapterPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                81920,
+                useAsync: true);
+            using var reader = XmlReader.Create(stream, CreateSecureXmlReaderSettings());
+            while (await reader.ReadAsync())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.NodeType != XmlNodeType.Element)
+                    continue;
 
-            return document
-                .DescendantNodes()
-                .OfType<XText>()
-                .Where(text => text.Parent is XElement parent && IsBodyPreviewElement(parent))
-                .Select(text => NormalizeTitle(text.Value))
-                .FirstOrDefault(value => value.Length > 0) ?? string.Empty;
+                var localName = reader.LocalName;
+                if (BodyPreviewSkippedElements.Contains(localName))
+                {
+                    if (!reader.IsEmptyElement)
+                        reader.Skip();
+                    continue;
+                }
+
+                if (localName is not (
+                    "p" or "div" or "section" or "article" or "li"
+                    or "blockquote" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6"))
+                {
+                    continue;
+                }
+
+                if (reader.IsEmptyElement)
+                    continue;
+
+                var preview = NormalizeTitle(
+                    await ReadXmlElementTextAsync(reader, cancellationToken));
+                if (preview.Length > 0)
+                    return preview;
+            }
+
+            return string.Empty;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch { return string.Empty; }
     }
-
-    private static bool IsBodyPreviewElement(XElement element) =>
-        !BodyPreviewSkippedElements.Contains(element.Name.LocalName)
-        && element.Ancestors().All(ancestor => !BodyPreviewSkippedElements.Contains(ancestor.Name.LocalName));
 
     private static string TruncateChapterTitle(string value)
     {
@@ -845,6 +1113,179 @@ public sealed class EpubReaderPreparationService
         return value.Length <= ChapterTitlePreviewMaxLength
             ? value
             : value[..ChapterTitlePreviewMaxLength].TrimEnd() + "…";
+    }
+
+    private sealed record ReaderIndexCacheDocument(
+        string FormatVersion,
+        List<string>? Chapters,
+        List<ReaderIndexNavigationItem>? Navigation,
+        List<string>? ChapterTitles);
+
+    private sealed record ReaderIndexNavigationItem(
+        string Title,
+        string TargetPath,
+        string Fragment,
+        int ChapterIndex,
+        int Level);
+
+    private static async Task<EpubReaderDocument?> TryLoadReaderIndexAsync(
+        string cacheRoot,
+        CancellationToken cancellationToken)
+    {
+        var indexPath = Path.Combine(cacheRoot, ReaderIndexFileName);
+        if (!File.Exists(indexPath)) return null;
+
+        try
+        {
+            await using var stream = new FileStream(
+                indexPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                81920,
+                useAsync: true);
+            var cache = await JsonSerializer.DeserializeAsync<ReaderIndexCacheDocument>(
+                stream,
+                ReaderIndexJsonOptions,
+                cancellationToken);
+            if (cache is null
+                || !string.Equals(cache.FormatVersion, ReaderIndexFormatVersion, StringComparison.Ordinal)
+                || cache.Chapters is null
+                || cache.Navigation is null
+                || cache.ChapterTitles is null
+                || cache.ChapterTitles.Count != cache.Chapters.Count
+                || cache.Chapters.Count == 0)
+            {
+                return null;
+            }
+
+            var chapters = new List<string>(cache.Chapters.Count);
+            foreach (var relativePath in cache.Chapters)
+            {
+                if (string.IsNullOrWhiteSpace(relativePath)) return null;
+                var chapterPath = ResolveContainedPath(cacheRoot, relativePath);
+                if (!File.Exists(chapterPath)) return null;
+                chapters.Add(chapterPath);
+            }
+
+            var chapterIndexByPath = CreateChapterIndexLookup(chapters);
+            var navigation = new List<EpubReaderNavigationItem>(cache.Navigation.Count);
+            foreach (var item in cache.Navigation)
+            {
+                if (item is null
+                    || item.ChapterIndex < 0
+                    || item.ChapterIndex >= chapters.Count
+                    || string.IsNullOrWhiteSpace(item.Title)
+                    || string.IsNullOrWhiteSpace(item.TargetPath))
+                {
+                    return null;
+                }
+
+                var targetPath = ResolveContainedPath(cacheRoot, item.TargetPath);
+                if (!File.Exists(targetPath)
+                    || !chapterIndexByPath.TryGetValue(targetPath, out var actualChapterIndex)
+                    || actualChapterIndex != item.ChapterIndex)
+                {
+                    return null;
+                }
+
+                var fragment = item.Fragment ?? string.Empty;
+                if (fragment.Length > 0 && !fragment.StartsWith('#'))
+                    fragment = $"#{fragment}";
+                navigation.Add(new EpubReaderNavigationItem(
+                    item.Title,
+                    new Uri(targetPath).AbsoluteUri + fragment,
+                    item.ChapterIndex,
+                    item.Level));
+            }
+
+            return new EpubReaderDocument(
+                cacheRoot,
+                chapters,
+                navigation,
+                cache.ChapterTitles);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // A partial or manually edited metadata file is disposable. The
+            // normal preparation path rebuilds it without affecting the book.
+            return null;
+        }
+    }
+
+    private static async Task WriteReaderIndexAsync(
+        string cacheRoot,
+        EpubReaderDocument document,
+        CancellationToken cancellationToken)
+    {
+        var cachedNavigation = new List<ReaderIndexNavigationItem>(document.Navigation.Count);
+        foreach (var item in document.Navigation)
+        {
+            if (!Uri.TryCreate(item.Target, UriKind.Absolute, out var target)
+                || !target.IsFile)
+            {
+                return;
+            }
+
+            var targetPath = Path.GetFullPath(target.LocalPath);
+            EnsureContainedPath(cacheRoot, targetPath);
+            cachedNavigation.Add(new ReaderIndexNavigationItem(
+                item.Title,
+                Path.GetRelativePath(cacheRoot, targetPath).Replace('\\', '/'),
+                target.Fragment,
+                item.ChapterIndex,
+                item.Level));
+        }
+
+        var cache = new ReaderIndexCacheDocument(
+            ReaderIndexFormatVersion,
+            document.Chapters
+                .Select(chapter => Path.GetRelativePath(cacheRoot, chapter).Replace('\\', '/'))
+                .ToList(),
+            cachedNavigation,
+            document.ChapterTitles.ToList());
+        var indexPath = Path.Combine(cacheRoot, ReaderIndexFileName);
+        var temporaryPath = Path.Combine(
+            cacheRoot,
+            $"{ReaderIndexFileName}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            await using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                81920,
+                useAsync: true))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    cache,
+                    ReaderIndexJsonOptions,
+                    cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            File.Move(temporaryPath, indexPath, overwrite: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // The index is an optional acceleration layer. A read-only cache
+            // or an interrupted replacement must not prevent opening the EPUB.
+        }
+        finally
+        {
+            TryDeleteFile(temporaryPath);
+        }
     }
 
     private sealed record ManifestItem(string? Id, string? Href, string? MediaType, string? Properties);
@@ -1112,18 +1553,26 @@ public sealed class EpubReaderPreparationService
                 || Path.GetExtension(path).Equals(".html", StringComparison.OrdinalIgnoreCase)
                 || Path.GetExtension(path).Equals(".htm", StringComparison.OrdinalIgnoreCase))
             .ToArray();
-        foreach (var path in htmlFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await SanitizeHtmlFileSafelyAsync(path, cacheRoot, cancellationToken);
-        }
+        await Parallel.ForEachAsync(
+            htmlFiles,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = GetMetadataConcurrency()
+            },
+            async (path, token) =>
+                await SanitizeHtmlFileSafelyAsync(path, cacheRoot, token));
 
         var cssFiles = Directory.EnumerateFiles(cacheRoot, "*.css", SearchOption.AllDirectories).ToArray();
-        foreach (var path in cssFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await SanitizeCssFileAsync(path, cacheRoot, cancellationToken);
-        }
+        await Parallel.ForEachAsync(
+            cssFiles,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = GetMetadataConcurrency()
+            },
+            async (path, token) =>
+                await SanitizeCssFileAsync(path, cacheRoot, token));
     }
 
     // One unrepairable page must never cost the reader the whole book. The

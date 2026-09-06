@@ -904,6 +904,31 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     }
 
     [Fact]
+    public void CssSizedGlyphImagesStayInlineAndPreserveHeight()
+    {
+        var imagePath = WritePng("glyph.png");
+        var cssPath = Path.Combine(_tempDir, "glyphs.css");
+        File.WriteAllText(cssPath, ".glyph { height: 0.675em; width: 0.69312em; }");
+        var path = Path.Combine(_tempDir, "glyph.xhtml");
+        File.WriteAllText(path, $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <head><link rel="stylesheet" type="text/css" href="glyphs.css" /></head>
+              <body><p>字前<img class="glyph" src="{Path.GetFileName(imagePath)}" />字后</p></body>
+            </html>
+            """);
+
+        var content = new XhtmlChapterLoader().Load(path);
+
+        var paragraph = Assert.Single(content.Blocks);
+        Assert.Equal(BlockKind.Paragraph, paragraph.Kind);
+        var glyph = Assert.Single(paragraph.Items, item => item.Kind == InlineKind.Image);
+        Assert.Equal(imagePath, glyph.ImagePath);
+        Assert.Equal(0.675f, glyph.ImageHeightEm);
+        Assert.DoesNotContain(content.Blocks, block => block.Kind == BlockKind.Image);
+    }
+
+    [Fact]
     public void DecorativeQuoteImagesHonorCssWidthAndAlignment()
     {
         var leftImagePath = WritePng("yinhao-left.png");
