@@ -403,13 +403,18 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         string role,
         string content = "",
         string reasoning = "",
-        Action<string>? citationAction = null)
+        Action<ReaderAiSourceViewModel>? citationAction = null)
     {
         UiText.LanguageChanged += OnLanguageChanged;
         Role = role;
         _content = content;
         _reasoning = reasoning;
-        CitationAction = citationAction;
+        CitationAction = sourceId =>
+        {
+            var source = Sources.FirstOrDefault(item =>
+                string.Equals(item.SourceId, sourceId, StringComparison.OrdinalIgnoreCase));
+            if (source is not null) citationAction?.Invoke(source);
+        };
     }
 
     public string Role { get; }
@@ -421,19 +426,15 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 
     public string RoleLabel => IsUser ? UiText.Get("你") : "Kreader AI";
 
-    // Keep both sides as hollow chat boxes so the reader surface remains
-    // light and the question/answer relationship is carried by alignment.
-    public IBrush BubbleBackground => Brushes.Transparent;
+    public IBrush BubbleBackground => IsUser ? new SolidColorBrush(Color.FromRgb(245, 245, 245)) : Brushes.Transparent;
 
     public IBrush BubbleForeground => new SolidColorBrush(Color.FromRgb(25, 25, 25));
 
-    public IBrush BorderBrush => IsUser
-        ? new SolidColorBrush(Color.FromRgb(0, 0, 0))
-        : new SolidColorBrush(Color.FromRgb(218, 218, 214));
+    public IBrush BorderBrush => Brushes.Transparent;
 
     public Avalonia.Layout.HorizontalAlignment BubbleAlignment => IsUser
         ? Avalonia.Layout.HorizontalAlignment.Right
-        : Avalonia.Layout.HorizontalAlignment.Left;
+        : Avalonia.Layout.HorizontalAlignment.Stretch;
 
     public IBrush RoleBrush => Role.Equals("user", StringComparison.OrdinalIgnoreCase)
         ? new SolidColorBrush(Color.FromRgb(75, 75, 75))
@@ -478,6 +479,15 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<ReaderAiSourceViewModel> Sources { get; } = [];
 
+    private bool _isStreaming;
+    private bool _canRetry;
+    private string _status = string.Empty;
+    public string Status { get => _status; set { if (SetProperty(ref _status, value)) OnPropertyChanged(nameof(HasStatus)); } }
+    public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
+    public bool CanCopy => IsAssistant && !_isStreaming && !string.IsNullOrWhiteSpace(Content);
+    public bool CanRetry { get => _canRetry; set => SetProperty(ref _canRetry, value); }
+    public Action? RetryAction { get; set; }
+
     public bool HasSources => Sources.Count > 0;
 
     public bool IsSourcesExpanded => _isSourcesExpanded;
@@ -505,6 +515,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 
     public void SetSources(IEnumerable<ReaderAiSourceViewModel> sources)
     {
+        foreach (var source in Sources) source.Dispose();
         Sources.Clear();
         foreach (var source in sources)
             Sources.Add(source);
@@ -526,6 +537,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 
     public void Update(string content, string reasoning, bool isStreaming)
     {
+        _isStreaming = isStreaming;
         Content = content;
         Reasoning = reasoning;
         SetThinking(isStreaming && string.IsNullOrWhiteSpace(Content));
@@ -535,6 +547,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsThinkingLabelVisible));
         OnPropertyChanged(nameof(IsReasoningVisible));
         OnPropertyChanged(nameof(ReasoningToggleLabel));
+        OnPropertyChanged(nameof(CanCopy));
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -544,6 +557,11 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ThinkingLabel));
     }
 
-    public void Dispose() =>
+    public void Dispose()
+    {
         UiText.LanguageChanged -= OnLanguageChanged;
+        foreach (var source in Sources) source.Dispose();
+        Sources.Clear();
+        RetryAction = null;
+    }
 }

@@ -55,7 +55,7 @@ public sealed class VectorRetriever : IVectorRetriever
         CancellationToken cancellationToken = default)
     {
         var queryVector = await _embeddingService
-            .EmbedAsync(query, cancellationToken)
+            .EmbedQueryAsync(query, cancellationToken)
             .ConfigureAwait(false);
         if (queryVector.Length == 0) return [];
 

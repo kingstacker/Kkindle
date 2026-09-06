@@ -24,7 +24,7 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public sealed partial class S3SyncService
 {
-    private const int SnapshotVersion = 1;
+    private const int SnapshotVersion = 2;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
     private const int EncryptionNonceBytes = 12;
@@ -32,7 +32,6 @@ public sealed partial class S3SyncService
     private const int EncryptionKeyBytes = 32;
     private const int EncryptionIterations = 120_000;
     private const int BlobEncryptionChunkBytes = 1024 * 1024;
-    private static readonly TimeSpan TombstoneRetention = TimeSpan.FromDays(90);
     private const double LargeDeletionRatio = 0.50;
     private const int LargeDeletionMinimumEntities = 10;
     private static readonly byte[] EncryptionMagic = Encoding.ASCII.GetBytes("KKINDLE-SYNC1");
@@ -45,6 +44,7 @@ public sealed partial class S3SyncService
 
     private readonly AppPaths _paths;
     private readonly S3SyncSettingsStore _settingsStore;
+    private readonly Func<S3SyncSettings, IAmazonS3> _clientFactory;
     private readonly AppSettingsStore _appSettingsStore;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
@@ -73,8 +73,14 @@ public sealed partial class S3SyncService
     }
 
     public S3SyncService(AppPaths paths, ISecretProtector protector)
+        : this(paths, protector, CreateClient)
+    {
+    }
+
+    internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, IAmazonS3> clientFactory)
     {
         _paths = paths;
+        _clientFactory = clientFactory;
         _settingsStore = new S3SyncSettingsStore(paths, protector);
         _appSettingsStore = new AppSettingsStore(paths);
         _aiSettingsStore = new AiSettingsStore(paths, protector);
@@ -85,11 +91,35 @@ public sealed partial class S3SyncService
     public Task<S3SyncStoredSettings> LoadSettingsAsync(CancellationToken cancellationToken = default) =>
         _settingsStore.LoadAsync(cancellationToken);
 
-    public Task SaveSettingsAsync(
+    // A later upload can fail after settings have already been committed.
+    public event EventHandler? RemoteSettingsApplied;
+
+    public async Task SaveSettingsAsync(
         string deviceId,
         S3SyncSettings settings,
-        CancellationToken cancellationToken = default) =>
-        _settingsStore.SaveAsync(deviceId, S3SyncSettings.Normalize(settings), cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = S3SyncSettings.Normalize(settings);
+        await _syncGate.WaitAsync(cancellationToken);
+        try
+        {
+            var current = await _settingsStore.LoadAsync(cancellationToken);
+            if (current.Settings.EncryptionKey != normalized.EncryptionKey
+                && current.Settings.Endpoint == normalized.Endpoint
+                && current.Settings.Bucket == normalized.Bucket
+                && current.Settings.Prefix == normalized.Prefix)
+            {
+                var state = await LoadStateAsync(NormalizeDeviceId(deviceId), BuildStorageIdentity(current.Settings), cancellationToken);
+                if (state.LastUploadedSnapshot is not null)
+                    throw new InvalidOperationException(UiText.Get("当前同步目录已使用原加密配置。更换密钥或启停加密时，请改用新的对象前缀，并在其他设备上配置相同的前缀和密钥。"));
+            }
+            await _settingsStore.SaveAsync(deviceId, normalized, cancellationToken);
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
 
     /// <summary>
     /// Clears the local change-detection baseline after a portable backup has
@@ -129,15 +159,17 @@ public sealed partial class S3SyncService
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
 
-        using var client = CreateClient(normalized);
-        await ListSnapshotKeysAsync(client, normalized, cancellationToken);
+        using var client = _clientFactory(normalized);
+        var keys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
+        await DownloadRemoteSnapshotsAsync(client, normalized, keys, string.Empty, false, null, cancellationToken);
     }
 
     public async Task<S3SyncResult> SyncAsync(
         string deviceId,
         S3SyncSettings settings,
         IProgress<string>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        S3SyncOptions? options = null)
     {
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
@@ -151,6 +183,7 @@ public sealed partial class S3SyncService
                 ? null
                 : CreateEncryptionSession(normalized.EncryptionKey);
             _paths.EnsureDirectories();
+            await InitializeDeletionTrackingAsync(cancellationToken, deviceId);
             var storageIdentity = BuildStorageIdentity(normalized);
             var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
             var recordedDeletionTimes = await ReadRecordedDeletionTimesAsync(cancellationToken);
@@ -159,24 +192,17 @@ public sealed partial class S3SyncService
                 state.LastUploadedSnapshot,
                 local,
                 recordedDeletionTimes);
-            EnsureDeletionVolumeIsSafe(state.LastUploadedSnapshot, detectedDeletions);
+            EnsureDeletionVolumeIsSafe(state.LastUploadedSnapshot, detectedDeletions, options?.ConfirmedDeletionFingerprint);
             local.Tombstones = MergeTombstones(
                 state.Tombstones,
-                detectedDeletions);
+                detectedDeletions.Concat(GetRecordedTombstones(recordedDeletionTimes, local, state.LastUploadedSnapshot)));
 
-            progress?.Report("正在连接 S3…");
-            using var client = CreateClient(normalized);
+            progress?.Report(UiText.Get("正在连接 S3…"));
+            using var client = _clientFactory(normalized);
             var snapshotKeys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
 
-            progress?.Report("正在上传本地书籍文件…");
-            var uploadWarning = await UploadLocalObjectsAsync(
-                client,
-                normalized,
-                local,
-                progress,
-                cancellationToken);
-
-            progress?.Report("正在读取其他设备的同步快照…");
+            // Validate remote encryption before uploading any local bytes.
+            progress?.Report(UiText.Get("正在读取其他设备的同步快照…"));
             var remoteSnapshots = await DownloadRemoteSnapshotsAsync(
                 client,
                 normalized,
@@ -189,7 +215,7 @@ public sealed partial class S3SyncService
             var remoteTombstones = remoteSnapshots.SelectMany(snapshot => snapshot.Tombstones);
             local.Tombstones = MergeTombstones(local.Tombstones, remoteTombstones);
 
-            progress?.Report("正在合并书籍和阅读数据…");
+            progress?.Report(UiText.Get("正在合并书籍和阅读数据…"));
             var databaseResult = await ApplyRemoteSnapshotsAsync(
                 client,
                 normalized,
@@ -198,7 +224,7 @@ public sealed partial class S3SyncService
                 progress,
                 cancellationToken);
 
-            progress?.Report("正在合并同步设置…");
+            progress?.Report(UiText.Get("正在合并同步设置…"));
             var settingsChanged = await ApplyRemoteSettingsAsync(
                 local.Settings,
                 remoteSnapshots,
@@ -208,9 +234,19 @@ public sealed partial class S3SyncService
             // a complete converged view, so a third device can catch up from it
             // without having to contact every previous device forever.
             var finalSnapshot = await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
-            finalSnapshot.Tombstones = local.Tombstones;
+            var finalDeletions = await ReadRecordedDeletionTimesAsync(cancellationToken);
+            var recordedTombstones = GetRecordedTombstones(finalDeletions, finalSnapshot, state.LastUploadedSnapshot);
+            EnsureDeletionVolumeIsSafe(state.LastUploadedSnapshot,
+                MergeTombstones(detectedDeletions, recordedTombstones), options?.ConfirmedDeletionFingerprint);
+            finalSnapshot.Tombstones = MergeTombstones(local.Tombstones, recordedTombstones);
 
-            progress?.Report("正在保存同步快照…");
+            // Publish exactly this captured view after all its objects exist.
+            // Writes after capture remain outside the saved local baseline.
+            progress?.Report(UiText.Get("正在上传本地书籍文件…"));
+            var uploadWarning = await UploadLocalObjectsAsync(
+                client, normalized, finalSnapshot, progress, cancellationToken);
+
+            progress?.Report(UiText.Get("正在保存同步快照…"));
             await UploadSnapshotAsync(client, normalized, finalSnapshot, cancellationToken);
 
             state.DeviceId = deviceId;
@@ -224,7 +260,6 @@ public sealed partial class S3SyncService
                 " ",
                 new[] { uploadWarning, databaseResult.Warning }
                     .Where(message => !string.IsNullOrWhiteSpace(message)));
-            progress?.Report("S3 同步完成。");
             return new S3SyncResult(
                 remoteSnapshots
                     .Select(snapshot => NormalizeKnownDeviceId(snapshot.DeviceId))
@@ -236,7 +271,10 @@ public sealed partial class S3SyncService
                 databaseResult.AnnotationsApplied,
                 settingsChanged ? 1 : 0,
                 databaseResult.Changed || settingsChanged,
-                warning.Length == 0 ? null : warning);
+                warning.Length == 0 ? null : warning)
+            {
+                IsPartial = uploadWarning is not null || databaseResult.IsPartial
+            };
         }
         finally
         {
@@ -391,7 +429,7 @@ public sealed partial class S3SyncService
     }
 
     private static async Task<List<string>> ListSnapshotKeysAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         CancellationToken cancellationToken)
     {
@@ -420,7 +458,7 @@ public sealed partial class S3SyncService
     }
 
     private async Task<string?> UploadLocalObjectsAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         S3SyncSnapshot snapshot,
         IProgress<string>? progress,
@@ -429,16 +467,21 @@ public sealed partial class S3SyncService
         var objects = new List<LocalSyncObject>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var missing = new ConcurrentBag<string>();
+        var invalid = new ConcurrentBag<string>();
 
         foreach (var file in snapshot.Files)
         {
-            if (!IsSha256(file.Sha256)) continue;
+            if (!IsSha256(file.Sha256))
+            {
+                invalid.Add(UiText.Get("本地文件“{0}”缺少有效的 SHA-256 校验值，已跳过上传。", file.FileName));
+                continue;
+            }
             var relativePath = snapshot.LocalFilePaths.GetValueOrDefault(file.Id)
                 ?? Path.Combine("library", file.BookId.ToString("N"), file.FileName);
             var path = ResolveDataPath(relativePath);
             if (path is null || !File.Exists(path))
             {
-                missing.Add(file.FileName);
+                missing.Add(path ?? relativePath);
                 continue;
             }
             if (seen.Add(file.Sha256))
@@ -454,7 +497,7 @@ public sealed partial class S3SyncService
             var path = ResolveDataPath(relativePath);
             if (path is null || !File.Exists(path))
             {
-                missing.Add(book.CoverFileName);
+                missing.Add(path ?? relativePath);
                 continue;
             }
             if (seen.Add(book.CoverHash!))
@@ -477,19 +520,30 @@ public sealed partial class S3SyncService
             },
             async (item, token) =>
             {
-                await UploadObjectIfMissingAsync(client, settings, item, existingKeys, token);
+                try
+                {
+                    await UploadObjectIfMissingAsync(client, settings, item, existingKeys, token);
+                }
+                catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    missing.Add(item.Path);
+                }
+                catch (InvalidDataException exception)
+                {
+                    invalid.Add(UiText.Get("本地文件“{0}”校验失败：{1}", Path.GetFileName(item.Path), UiText.Localize(exception.Message)));
+                }
                 var count = Interlocked.Increment(ref uploaded);
                 if (count == objects.Count || count % 10 == 0)
-                    progress?.Report($"已处理 {count}/{objects.Count} 个同步对象…");
+                    progress?.Report(UiText.Get("已处理 {0}/{1} 个同步对象…", count, objects.Count));
             });
 
-        return missing.IsEmpty
-            ? null
-            : $"有 {missing.Distinct(StringComparer.OrdinalIgnoreCase).Count()} 个本地文件缺失，已跳过上传。";
+        if (!missing.IsEmpty)
+            invalid.Add(UiText.Get("有 {0} 个本地文件缺失，已跳过上传。", missing.Distinct(StringComparer.OrdinalIgnoreCase).Count()));
+        return invalid.IsEmpty ? null : string.Join(" ", invalid.Distinct());
     }
 
     private async Task UploadObjectIfMissingAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         LocalSyncObject item,
         ConcurrentDictionary<string, byte>? existingKeys,
@@ -505,6 +559,15 @@ public sealed partial class S3SyncService
             return;
         }
 
+        // Hold the same input stream through validation and upload. On Windows
+        // the sharing mode also prevents a concurrent edit or removal.
+        await using var input = new FileStream(item.Path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            128 * 1024, useAsync: true);
+        var actualHash = Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken));
+        if (!string.Equals(actualHash, item.Hash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(UiText.Get("本地文件内容与 SHA-256 校验值不匹配，已跳过上传。"));
+        input.Position = 0;
+
         string? temporaryEncryptedPath = null;
         try
         {
@@ -515,19 +578,19 @@ public sealed partial class S3SyncService
                 {
                     BucketName = settings.Bucket,
                     Key = key,
-                    FilePath = item.Path,
+                    InputStream = input,
                     ContentType = item.ContentType,
-                    AutoCloseStream = true
+                    AutoCloseStream = false
                 };
-                ConfigureCompatibleUpload(request, settings, new FileInfo(item.Path).Length);
+                ConfigureCompatibleUpload(request, settings, input.Length);
             }
             else
             {
                 temporaryEncryptedPath = Path.Combine(
                     Path.GetTempPath(),
                     $"kkindle-sync-{Guid.NewGuid():N}.bin");
-                await EncryptFileToPathAsync(
-                    item.Path,
+                await EncryptStreamToPathAsync(
+                    input,
                     temporaryEncryptedPath,
                     settings.EncryptionKey,
                     cancellationToken);
@@ -552,7 +615,7 @@ public sealed partial class S3SyncService
     }
 
     private static async Task<ConcurrentDictionary<string, byte>?> TryListBlobKeysAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         CancellationToken cancellationToken)
     {
@@ -600,7 +663,7 @@ public sealed partial class S3SyncService
     }
 
     private static async Task<bool> ObjectExistsAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         string bucket,
         string key,
         CancellationToken cancellationToken)
@@ -619,7 +682,7 @@ public sealed partial class S3SyncService
     }
 
     private async Task UploadSnapshotAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         S3SyncSnapshot snapshot,
         CancellationToken cancellationToken)
@@ -657,7 +720,7 @@ public sealed partial class S3SyncService
     }
 
     private async Task<List<S3SyncSnapshot>> DownloadRemoteSnapshotsAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         IReadOnlyList<string> snapshotKeys,
         string localDeviceId,
@@ -676,13 +739,13 @@ public sealed partial class S3SyncService
             var payload = await DownloadObjectBytesAsync(client, settings.Bucket, key, cancellationToken);
             var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, cancellationToken);
             if (snapshot.Version > SnapshotVersion)
-                throw new InvalidDataException($"同步快照版本 {snapshot.Version} 高于当前版本。请先升级 Kkindle。");
+                throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
             if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
                 throw new InvalidDataException("同步快照缺少有效的设备 ID。");
             snapshot.DeviceId = parsedDeviceId.ToString("N");
             snapshot.Tombstones ??= [];
             snapshots.Add(snapshot);
-            progress?.Report($"已读取 {++processed}/{keysToRead.Length} 台设备的快照…");
+            progress?.Report(UiText.Get("已读取 {0}/{1} 台设备的快照…", ++processed, keysToRead.Length));
         }
         return snapshots;
     }
@@ -704,7 +767,7 @@ public sealed partial class S3SyncService
     }
 
     private static async Task<byte[]> DownloadObjectBytesAsync(
-        AmazonS3Client client,
+        IAmazonS3 client,
         string bucket,
         string key,
         CancellationToken cancellationToken)
@@ -749,6 +812,8 @@ public sealed partial class S3SyncService
     {
         if (HasMagic(payload) && encryptionKey.Length == 0)
             throw new InvalidDataException("S3 同步对象已加密，请配置相同的加密密钥。");
+        if (!HasMagic(payload) && encryptionKey.Length > 0)
+            throw new InvalidDataException(UiText.Get("此同步目录尚未加密。请保持原加密配置，或改用新的对象前缀创建加密同步目录。"));
 
         var compressed = HasMagic(payload)
             ? UnprotectPayloadWithCache(payload, encryptionKey)
@@ -860,7 +925,6 @@ public sealed partial class S3SyncService
         string passphrase,
         CancellationToken cancellationToken)
     {
-        var material = GetEncryptionMaterial(passphrase);
         await using var input = new FileStream(
             sourcePath,
             FileMode.Open,
@@ -868,6 +932,13 @@ public sealed partial class S3SyncService
             FileShare.Read,
             BlobEncryptionChunkBytes,
             useAsync: true);
+        await EncryptStreamToPathAsync(input, targetPath, passphrase, cancellationToken);
+    }
+
+    private async Task EncryptStreamToPathAsync(
+        Stream input, string targetPath, string passphrase, CancellationToken cancellationToken)
+    {
+        var material = GetEncryptionMaterial(passphrase);
         await using var output = new FileStream(
             targetPath,
             FileMode.CreateNew,

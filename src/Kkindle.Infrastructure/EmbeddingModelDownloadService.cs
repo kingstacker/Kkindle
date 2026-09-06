@@ -15,6 +15,13 @@ public sealed record EmbeddingModelFile(
     long? ExpectedBytes = null,
     string? ExpectedSha256 = null);
 
+public enum EmbeddingTokenizerKind
+{
+    BertWordPiece,
+    SentencePiece,
+    SentencePieceXlmRoberta
+}
+
 /// <summary>
 /// Metadata for a model that can be downloaded by the application UI.
 /// Download URLs are part of the application catalog rather than user input.
@@ -25,7 +32,13 @@ public sealed record EmbeddingModelPackage(
     string DirectoryName,
     int Dimension,
     string EstimatedSizeText,
-    IReadOnlyList<EmbeddingModelFile> Files)
+    IReadOnlyList<EmbeddingModelFile> Files,
+    EmbeddingTokenizerKind TokenizerKind = EmbeddingTokenizerKind.BertWordPiece,
+    string TokenizerFileName = "vocab.txt",
+    int PaddingTokenId = 0,
+    int MaxSequenceLength = 512,
+    string QueryPrefix = "",
+    string PassagePrefix = "")
 {
     public long? ExpectedTotalBytes => Files.All(file => file.ExpectedBytes is not null)
         ? Files.Sum(file => file.ExpectedBytes!.Value)
@@ -57,6 +70,54 @@ public sealed record EmbeddingModelPackage(
                 new Uri("https://huggingface.co/Qdrant/bge-small-zh-v1.5/resolve/main/tokenizer_config.json"),
                 MaximumBytes: 1L * 1024 * 1024)
         ]);
+
+    /// <summary>
+    /// Multilingual E5 small uses XLM-Roberta's SentencePiece vocabulary and
+    /// the standard query/passage prefixes recommended by the model authors.
+    /// The ONNX model is pinned to the revision that contains the published
+    /// ONNX export so a later upstream replacement cannot silently change the
+    /// downloaded model.
+    /// </summary>
+    public static EmbeddingModelPackage MultilingualE5Small { get; } = new(
+        "intfloat/multilingual-e5-small",
+        "Multilingual E5 Small（中英文）",
+        "multilingual-e5-small",
+        384,
+        "约 475 MB",
+        [
+            new EmbeddingModelFile(
+                "model.onnx",
+                new Uri("https://huggingface.co/intfloat/multilingual-e5-small/resolve/03415a4be176a1620747c692ed433219fabc3def/onnx/model.onnx"),
+                MaximumBytes: 600L * 1024 * 1024,
+                ExpectedBytes: 470_268_510,
+                ExpectedSha256: "CA456C06B3A9505DDFD9131408916DD79290368331E7D76BB621F1CBA6BC8665"),
+            new EmbeddingModelFile(
+                "sentencepiece.bpe.model",
+                new Uri("https://huggingface.co/intfloat/multilingual-e5-small/resolve/03415a4be176a1620747c692ed433219fabc3def/onnx/sentencepiece.bpe.model"),
+                MaximumBytes: 8L * 1024 * 1024,
+                ExpectedBytes: 5_069_051,
+                ExpectedSha256: "CFC8146ABE2A0488E9E2A0C56DE7952F7C11AB059ECA145A0A727AFCE0DB2865"),
+            new EmbeddingModelFile(
+                "tokenizer_config.json",
+                new Uri("https://huggingface.co/intfloat/multilingual-e5-small/resolve/03415a4be176a1620747c692ed433219fabc3def/onnx/tokenizer_config.json"),
+                MaximumBytes: 1L * 1024 * 1024,
+                ExpectedBytes: 443)
+        ],
+        TokenizerKind: EmbeddingTokenizerKind.SentencePieceXlmRoberta,
+        TokenizerFileName: "sentencepiece.bpe.model",
+        PaddingTokenId: 1,
+        MaxSequenceLength: 512,
+        QueryPrefix: "query: ",
+        PassagePrefix: "passage: ");
+
+    public static IReadOnlyList<EmbeddingModelPackage> Supported { get; } =
+        [BgeSmallZhV15, MultilingualE5Small];
+
+    public static EmbeddingModelPackage Default => BgeSmallZhV15;
+
+    public static EmbeddingModelPackage? Find(string? modelId) =>
+        Supported.FirstOrDefault(package =>
+            package.ModelId.Equals(modelId?.Trim(), StringComparison.OrdinalIgnoreCase));
 }
 
 public sealed record EmbeddingModelDownloadProgress(

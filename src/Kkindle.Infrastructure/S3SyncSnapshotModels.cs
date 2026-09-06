@@ -8,7 +8,7 @@ namespace Kkindle.Infrastructure;
 // identified by their content hash and reader rows refer to portable IDs.
 internal sealed class S3SyncSnapshot
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
     public string DeviceId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public S3SyncSettingsSnapshot? Settings { get; set; }
@@ -156,6 +156,7 @@ internal sealed class S3SyncReadingStats
     public Guid BookId { get; set; }
     public Guid BookFileId { get; set; }
     public long CumulativeSeconds { get; set; }
+    public Dictionary<string, long> SecondsByDevice { get; set; } = new(StringComparer.Ordinal);
     public double ProgressPercent { get; set; }
     public int CompletedChapters { get; set; }
     public int TotalChapters { get; set; }
@@ -172,6 +173,10 @@ internal sealed class S3SyncTombstone
 internal sealed class S3SyncSettingsSnapshot
 {
     public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? AppUpdatedAt { get; set; }
+    public DateTimeOffset? AiUpdatedAt { get; set; }
+    public DateTimeOffset? KindleEmailUpdatedAt { get; set; }
+    public DateTimeOffset? ZLibraryUpdatedAt { get; set; }
     public S3SyncAppSettings App { get; set; } = new();
     public S3SyncAiSettings Ai { get; set; } = new();
     public S3SyncKindleEmailSettings KindleEmail { get; set; } = new();

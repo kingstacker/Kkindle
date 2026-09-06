@@ -62,6 +62,12 @@ public partial class MainWindow
     private bool _s3SyncExitInProgress;
     private bool _allowWindowCloseForS3Sync;
     private TaskCompletionSource<bool>? _s3SyncCompletion;
+    private CancellationTokenSource? _s3SyncCancellation;
+    private CancellationTokenSource? _s3SyncExitCancellation;
+    private CancellationTokenSource? _s3TestConnectionCancellation;
+    private bool _s3DeletionConfirmationPending;
+    private bool _s3SyncCancelledByUser;
+    private volatile bool _s3RemoteSettingsChanged;
     private long _s3LocalChangeVersion;
     private long _s3SyncedLocalChangeVersion;
     private int _s3LocalChangeRetryAttempt;
@@ -342,8 +348,9 @@ public partial class MainWindow
     {
         if (_stage3Ready) return;
 
+        _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(cancellationToken);
         await _readerData.InitializeAsync(cancellationToken);
-        await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken);
+        await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken, _s3SyncStoredSettings.DeviceId);
         await _deviceModelStore.InitializeAsync(cancellationToken);
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
         if (Application.Current is App app)
@@ -354,7 +361,6 @@ public partial class MainWindow
         await DetectCalibreAtStartupAsync(cancellationToken);
         _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
         _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
-        _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(cancellationToken);
         RefreshS3SyncIndicatorFromSettings();
         PopulateSettingsControls();
         ConfigureAppSettingsAutoSave();
@@ -3414,7 +3420,7 @@ public partial class MainWindow
         activeSection.IsVisible = true;
 
         SystemSettingsPaneTitle.Text = string.Equals(tag, "Sync", StringComparison.OrdinalIgnoreCase)
-            ? "S3 同步"
+            ? T("S3 同步")
             : T("备份");
 
         SystemSettingsScrollViewer.Offset = new Vector(0, 0);
@@ -3508,7 +3514,6 @@ public partial class MainWindow
             _readerAiSettings = settings;
             ApplyReaderAiSettingsToControls();
             MainReaderAiSettingsStatusText.Text = T("AI 设置已保存。");
-            HideSettingsPanel();
         }
         catch (Exception exception)
         {
@@ -3669,7 +3674,7 @@ public partial class MainWindow
         ConcurrentRequests = S3ConcurrencyBox.Value is { } concurrency ? (int)concurrency : 4
     });
 
-    private async Task<bool> SaveS3SyncSettingsFromControlsAsync(bool showStatus = true)
+    private async Task<bool> SaveS3SyncSettingsFromControlsAsync(bool showStatus = true, CancellationToken cancellationToken = default)
     {
         var settings = ReadS3SyncSettingsFromControls();
         // Allow the feature to be disabled and saved before credentials are
@@ -3677,14 +3682,22 @@ public partial class MainWindow
         var validation = settings.Enabled ? settings.Validate() : null;
         if (validation is not null)
         {
-            if (showStatus) S3SyncStatusText.Text = UiText.Localize(validation);
+            S3SyncStatusText.Text = UiText.Localize(validation);
+            UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, S3SyncStatusText.Text);
+            SetTaskStatus(S3SyncStatusText.Text);
             return false;
         }
 
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token, cancellationToken);
         await _s3SyncService.SaveSettingsAsync(
             _s3SyncStoredSettings.DeviceId,
             settings,
-            _lifetimeCancellation.Token);
+            linkedCancellation.Token);
+        if (settings != _s3SyncStoredSettings.Settings)
+        {
+            _s3DeletionConfirmationPending = false;
+            _s3SyncCancelledByUser = false;
+        }
         _s3SyncStoredSettings = new S3SyncStoredSettings(_s3SyncStoredSettings.DeviceId, settings);
         RefreshS3SyncIndicatorFromSettings();
         PopulateS3SyncControls();
@@ -3732,6 +3745,10 @@ public partial class MainWindow
         finally
         {
             _s3SyncToggleAutoSaveInProgress = false;
+            var wasSuppressing = _suppressS3SyncToggleAutoSave;
+            _suppressS3SyncToggleAutoSave = true;
+            try { S3SyncEnabledCheck.IsChecked = _s3SyncStoredSettings.Settings.Enabled; }
+            finally { _suppressS3SyncToggleAutoSave = wasSuppressing; }
         }
     }
 
@@ -3824,6 +3841,7 @@ public partial class MainWindow
 
     private async void S3TestConnectionButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (_s3SyncBusy || _s3TestConnectionCancellation is not null) return;
         if (!_appSettings.NetworkEnabled)
         {
             S3SyncStatusText.Text = T("请先开启“允许网络功能”。");
@@ -3838,30 +3856,69 @@ public partial class MainWindow
             return;
         }
 
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        _s3TestConnectionCancellation = cancellation;
         S3TestConnectionButton.IsEnabled = false;
         S3SyncStatusText.Text = T("正在测试 S3 连接…");
         try
         {
-            await _s3SyncService.TestConnectionAsync(settings, _lifetimeCancellation.Token);
+            await _s3SyncService.TestConnectionAsync(settings, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
             S3SyncStatusText.Text = T("S3 连接成功。");
             RefreshS3SyncIndicatorFromSettings();
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
+            if (cancellation.IsCancellationRequested || _s3SyncBusy) return;
             var error = UiText.Localize(exception.Message);
             S3SyncStatusText.Text = T("S3 连接失败：{0}", error);
             UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, error);
         }
         finally
         {
+            _s3TestConnectionCancellation = null;
             S3TestConnectionButton.IsEnabled = !_s3SyncBusy;
         }
     }
 
     private async void S3SyncNowButton_Click(object? sender, RoutedEventArgs e) => await RunS3SyncAsync(silent: false);
+
+    private void S3RemoteSettingsApplied(object? sender, EventArgs e) => _s3RemoteSettingsChanged = true;
+
+    private void S3CancelSyncButton_Click(object? sender, RoutedEventArgs e)
+    {
+        _s3SyncCancelledByUser = true;
+        _s3LocalChangeSyncTimer.Stop();
+        S3CancelSyncButton.IsEnabled = false;
+        _s3SyncCancellation?.Cancel();
+        _s3SyncExitCancellation?.Cancel();
+    }
+
+    private void SetS3SyncControlsBusy(bool busy)
+    {
+        Control[] controls =
+        [
+            S3SyncEnabledCheck, S3AutomaticSyncCheck, S3SyncIntervalBox, S3EndpointBox,
+            S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox,
+            S3PathStyleCheck, S3SkipTlsVerifyCheck, S3EncryptionKeyBox, S3TimeoutBox,
+            S3ConcurrencyBox, S3SaveSettingsButton, S3TestConnectionButton, S3SyncNowButton,
+            S3ExportConnectionProfileButton, S3ImportConnectionProfileButton
+        ];
+        foreach (var control in controls) control.IsEnabled = !busy;
+        S3CancelSyncButton.IsVisible = busy;
+        S3CancelSyncButton.IsEnabled = busy;
+    }
+
+    private void SetS3SyncStatus(string status, bool silent)
+    {
+        if (_s3SyncExitInProgress)
+            status += " " + T("再次关闭窗口可取消同步并退出；最多等待 30 秒。");
+        S3SyncStatusText.Text = status;
+        if (!silent || _s3SyncExitInProgress) SetTaskStatus(status);
+    }
 
     private void LocalLibraryDataChanged(object? sender, LocalDataChangedEventArgs e) =>
         HandleLocalDataChanged(e.Kind);
@@ -3879,6 +3936,10 @@ public partial class MainWindow
 
         if (_lifetimeCancellation.IsCancellationRequested) return;
         _s3LocalChangeVersion++;
+        _s3DeletionConfirmationPending = false;
+        _s3SyncCancelledByUser = false;
+        if (!_s3SyncBusy && _s3SyncStoredSettings.Settings is { Enabled: true, IsConfigured: true })
+            UpdateS3SyncIndicator(S3SyncIndicatorState.Pending);
         if (!IsAutomaticS3SyncReady())
         {
             _s3LocalChangeSyncTimer.Stop();
@@ -3886,8 +3947,6 @@ public partial class MainWindow
         }
 
         _s3LocalChangeRetryAttempt = 0;
-        if (!_s3SyncBusy)
-            UpdateS3SyncIndicator(S3SyncIndicatorState.Pending);
         ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce, resetRetry: false);
     }
 
@@ -3896,7 +3955,8 @@ public partial class MainWindow
 
     private bool IsAutomaticS3SyncReady()
     {
-        if (!_stage3Ready || _s3SyncExitInProgress || !_appSettings.NetworkEnabled)
+        if (!_stage3Ready || _backupBusy || _s3SyncExitInProgress || !_appSettings.NetworkEnabled
+            || _s3DeletionConfirmationPending || _s3SyncCancelledByUser)
             return false;
 
         var settings = _s3SyncStoredSettings.Settings;
@@ -3955,30 +4015,33 @@ public partial class MainWindow
             // instead of replacing it with the backoff for the old failure.
             if (_s3LocalChangeSyncTimer.IsEnabled)
                 return;
-            if (!_s3SyncBusy && _s3SyncIndicatorState != S3SyncIndicatorState.Failed)
+            if (!_s3SyncBusy && _s3SyncIndicatorState is not (S3SyncIndicatorState.Failed or S3SyncIndicatorState.Warning))
                 UpdateS3SyncIndicator(S3SyncIndicatorState.Pending);
             ScheduleS3LocalChangeSync(GetNextS3LocalChangeRetryDelay(), resetRetry: false);
         }
     }
 
-    private async Task RunLifecycleS3SyncAsync(bool waitForExistingSync = false)
+    private async Task RunLifecycleS3SyncAsync(bool waitForExistingSync = false, CancellationToken cancellationToken = default)
     {
         if (!_stage3Ready)
             return;
 
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token, cancellationToken);
+        var token = linkedCancellation.Token;
         try
         {
             if (!_appSettings.NetworkEnabled)
             {
-                if (waitForExistingSync) await WaitForS3SyncAsync();
+                if (waitForExistingSync) await WaitForS3SyncAsync(token);
                 return;
             }
 
-            _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(_lifetimeCancellation.Token);
+            _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(token);
             var settings = _s3SyncStoredSettings.Settings;
-            if (!settings.Enabled || !settings.AutomaticSyncEnabled || !settings.IsConfigured)
+            if (!settings.Enabled || !settings.AutomaticSyncEnabled || !settings.IsConfigured
+                || _s3DeletionConfirmationPending || _s3SyncCancelledByUser)
             {
-                if (waitForExistingSync) await WaitForS3SyncAsync();
+                if (waitForExistingSync) await WaitForS3SyncAsync(token);
                 return;
             }
 
@@ -3988,12 +4051,12 @@ public partial class MainWindow
             // background activity keeps producing updates.
             for (var attempt = 0; attempt < 3; attempt++)
             {
-                var succeeded = await RunS3SyncAsync(silent: true);
+                var succeeded = await RunS3SyncAsync(silent: true, token);
                 if (!succeeded || !HasPendingS3LocalChanges)
                     break;
             }
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
         }
         catch (Exception exception)
@@ -4004,29 +4067,47 @@ public partial class MainWindow
         }
     }
 
-    private async Task WaitForS3SyncAsync()
+    private async Task WaitForS3SyncAsync(CancellationToken cancellationToken = default)
     {
         if (_s3SyncCompletion is { } completion)
-            await completion.Task;
+        {
+            using var registration = cancellationToken.Register(() =>
+                Dispatcher.UIThread.Post(() => _s3SyncCancellation?.Cancel()));
+            await completion.Task.WaitAsync(cancellationToken);
+        }
     }
 
     private async Task CompleteWindowCloseAfterS3SyncAsync()
     {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        cancellation.CancelAfter(TimeSpan.FromSeconds(30));
+        _s3SyncExitCancellation = cancellation;
         try
         {
             _s3LocalChangeSyncTimer.Stop();
-            await RunLifecycleS3SyncAsync(waitForExistingSync: true);
+            if (_s3SyncBusy || (_s3SyncStoredSettings.Settings is { Enabled: true, AutomaticSyncEnabled: true, IsConfigured: true }
+                && _appSettings.NetworkEnabled && !_s3DeletionConfirmationPending && !_s3SyncCancelledByUser))
+                SetS3SyncStatus(T("正在退出前同步…"), silent: false);
+            await RunLifecycleS3SyncAsync(waitForExistingSync: true, cancellation.Token).WaitAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            _s3SyncCancellation?.Cancel();
         }
         finally
         {
-            _allowWindowCloseForS3Sync = true;
-            Close();
+            _s3SyncExitCancellation = null;
+            if (!_allowWindowCloseForS3Sync)
+            {
+                _allowWindowCloseForS3Sync = true;
+                Close();
+            }
         }
     }
 
     private async Task RunAutomaticS3SyncIfDueAsync()
     {
-        if (!_stage3Ready || _s3SyncBusy || _s3SyncExitInProgress || !_appSettings.NetworkEnabled) return;
+        if (_s3SyncBusy || !IsAutomaticS3SyncReady()) return;
         try
         {
             var settings = _s3SyncStoredSettings.Settings;
@@ -4048,12 +4129,21 @@ public partial class MainWindow
         }
     }
 
-    private async Task<bool> RunS3SyncAsync(bool silent)
+    private async Task<bool> RunS3SyncAsync(bool silent, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_backupBusy)
+        {
+            if (!silent) SetS3SyncStatus(T("备份任务正在进行，请完成后再执行 S3 同步。"), silent: false);
+            return false;
+        }
         if (_s3SyncBusy)
         {
             if (_s3SyncCompletion is { } completion)
+            {
+                await WaitForS3SyncAsync(cancellationToken);
                 return await completion.Task;
+            }
             return false;
         }
         if (!_appSettings.NetworkEnabled)
@@ -4075,20 +4165,27 @@ public partial class MainWindow
 
         var localChangeVersionAtStart = _s3LocalChangeVersion;
         var succeeded = false;
+        var refreshAfterFailure = false;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token, cancellationToken);
+        var token = cancellation.Token;
         // Claim the sync slot before the first await. Saving/loading settings
         // can yield to the dispatcher; without claiming it here, a manual
         // click and an automatic tick could both start an S3 operation.
         _s3SyncBusy = true;
+        _s3TestConnectionCancellation?.Cancel();
+        _s3SyncCancellation = cancellation;
+        if (!silent) _s3SyncCancelledByUser = false;
         _s3SyncCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        SetS3SyncControlsBusy(true);
         try
         {
             if (!silent)
             {
-                if (!await SaveS3SyncSettingsFromControlsAsync(showStatus: false)) return false;
+                if (!await SaveS3SyncSettingsFromControlsAsync(showStatus: false, token)) return false;
             }
             else
             {
-                _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(_lifetimeCancellation.Token);
+                _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(token);
             }
 
             var settings = _s3SyncStoredSettings.Settings;
@@ -4096,9 +4193,9 @@ public partial class MainWindow
             if (validation is not null)
             {
                 var validationStatus = UiText.Localize(validation);
+                SetS3SyncStatus(validationStatus, silent);
                 if (!silent)
                 {
-                    S3SyncStatusText.Text = validationStatus;
                     UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, validationStatus);
                 }
                 else
@@ -4109,90 +4206,137 @@ public partial class MainWindow
             }
 
             UpdateS3SyncIndicator(S3SyncIndicatorState.Syncing);
-            S3SyncEnabledCheck.IsEnabled = false;
-            S3SaveSettingsButton.IsEnabled = false;
-            S3TestConnectionButton.IsEnabled = false;
-            S3SyncNowButton.IsEnabled = false;
-            var startStatus = T("正在同步到 S3…");
-            S3SyncStatusText.Text = startStatus;
-            if (!silent) SetTaskStatus(startStatus);
+            SetS3SyncStatus(T("正在同步到 S3…"), silent);
             var progress = new Progress<string>(message =>
             {
-                var status = UiText.Localize(message);
-                S3SyncStatusText.Text = status;
-                if (!silent) SetTaskStatus(status);
+                if (ReferenceEquals(_s3SyncCancellation, cancellation) && !token.IsCancellationRequested)
+                    SetS3SyncStatus(UiText.Localize(message), silent);
             });
-            var result = await _s3SyncService.SyncAsync(
-                _s3SyncStoredSettings.DeviceId,
-                settings,
-                progress,
-                _lifetimeCancellation.Token);
+            S3SyncOptions? options = null;
+            S3SyncResult result;
+            refreshAfterFailure = true;
+            while (true)
+            {
+                try
+                {
+                    result = await _s3SyncService.SyncAsync(
+                        _s3SyncStoredSettings.DeviceId, settings, progress, token, options);
+                    break;
+                }
+                catch (S3SyncDeletionConfirmationRequiredException exception)
+                {
+                    _s3DeletionConfirmationPending = true;
+                    _s3LocalChangeSyncTimer.Stop();
+                    var message = UiText.Localize(exception.Message);
+                    SetS3SyncStatus(message + " " + T("请点击“立即同步”审核并确认删除。"), silent);
+                    UpdateS3SyncIndicator(S3SyncIndicatorState.ConfirmationRequired, message);
+                    if (silent || _s3SyncExitInProgress || !await ConfirmAsync(
+                            T("确认同步删除"), message + "\n\n" + T("继续后，这些删除会同步到其他设备。"),
+                            T("同步这些删除"), token))
+                        return false;
+                    options = new S3SyncOptions { ConfirmedDeletionFingerprint = exception.DeletionFingerprint };
+                    _s3DeletionConfirmationPending = false;
+                    UpdateS3SyncIndicator(S3SyncIndicatorState.Syncing);
+                }
+            }
+            _s3DeletionConfirmationPending = false;
             _lastS3SyncAt = DateTimeOffset.UtcNow;
 
-            if (result.SettingsApplied > 0)
-            {
-                _appSettings = await _appSettingsStore.LoadAsync(_lifetimeCancellation.Token);
-                _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(_lifetimeCancellation.Token);
-                _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(_lifetimeCancellation.Token);
-                _readerAiSettings = await _aiSettingsStore.LoadAsync(_lifetimeCancellation.Token);
-                if (Application.Current is App app) app.ApplyLanguage(_appSettings.UiLanguage);
-                PopulateSettingsControls();
-                ApplyReaderAiSettingsToControls();
-                UpdateZLibraryAccountStatus();
-            }
+            if (result.SettingsApplied > 0 || _s3RemoteSettingsChanged)
+                await RefreshSettingsAfterS3SyncAsync(token);
 
-            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
-            SetupFilterControls();
-            await RefreshCollectionsAsync();
-            UpdateLibraryUi();
-            var status = result.Changed
+            if (result.Changed)
+            {
+                await RefreshLibraryAfterS3SyncAsync(token);
+            }
+            refreshAfterFailure = false;
+            var status = result.IsPartial
+                ? T("同步未完成：新增 {0} 本书，下载 {1} 个文件；部分文件未能同步，请重试。", result.BooksAdded, result.FilesDownloaded)
+                : result.Changed
                 ? T("同步完成：新增 {0} 本书，下载 {1} 个文件，应用 {2} 条批注。", result.BooksAdded, result.FilesDownloaded, result.AnnotationsApplied)
                 : T("同步完成，当前已是最新。 ");
             if (!string.IsNullOrWhiteSpace(result.Warning)) status += " " + UiText.Localize(result.Warning);
-            S3SyncStatusText.Text = status;
-            SetTaskStatus(status);
-            _s3SyncedLocalChangeVersion = Math.Max(
-                _s3SyncedLocalChangeVersion,
-                localChangeVersionAtStart);
-            succeeded = true;
+            SetS3SyncStatus(status, silent);
+            succeeded = !result.IsPartial;
+            if (succeeded)
+                _s3SyncedLocalChangeVersion = Math.Max(_s3SyncedLocalChangeVersion, localChangeVersionAtStart);
             // A write that landed while the network operation was running is
             // deliberately left pending and is shown as such. This avoids a
             // misleading green check between the two sync passes.
             UpdateS3SyncIndicator(
-                HasPendingS3LocalChanges
+                result.IsPartial || !string.IsNullOrWhiteSpace(result.Warning)
+                    ? S3SyncIndicatorState.Warning
+                    : HasPendingS3LocalChanges
                     ? S3SyncIndicatorState.Pending
-                    : S3SyncIndicatorState.Succeeded);
+                    : S3SyncIndicatorState.Succeeded,
+                result.IsPartial || !string.IsNullOrWhiteSpace(result.Warning) ? status : null);
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            if (!silent)
-            {
-                var status = T("S3 同步已取消。");
-                S3SyncStatusText.Text = status;
-                SetTaskStatus(status);
-                UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, status);
-            }
+            var status = T("S3 同步已取消。");
+            SetS3SyncStatus(status, silent);
+            UpdateS3SyncIndicator(S3SyncIndicatorState.Warning, status);
         }
         catch (Exception exception)
         {
             var error = UiText.Localize(exception.Message);
             var status = T("S3 同步失败：{0}", error);
-            S3SyncStatusText.Text = status;
-            if (!silent) SetTaskStatus(status);
+            SetS3SyncStatus(status, silent);
             UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, error);
         }
         finally
         {
+            // A failure after the merge (for example an upload cancellation)
+            // must not leave the library displaying rows already changed on disk.
+            if (refreshAfterFailure && !_lifetimeCancellation.IsCancellationRequested)
+            {
+                try
+                {
+                    if (_s3RemoteSettingsChanged)
+                        await RefreshSettingsAfterS3SyncAsync(_lifetimeCancellation.Token);
+                    await RefreshLibraryAfterS3SyncAsync(_lifetimeCancellation.Token);
+                }
+                catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+                catch (Exception exception) { Debug.WriteLine($"S3 library refresh failed: {exception.Message}"); }
+            }
             _s3SyncBusy = false;
+            _s3SyncCancellation = null;
             _s3SyncCompletion?.TrySetResult(succeeded);
             _s3SyncCompletion = null;
-            S3SyncEnabledCheck.IsEnabled = true;
-            S3SaveSettingsButton.IsEnabled = true;
-            S3TestConnectionButton.IsEnabled = true;
-            S3SyncNowButton.IsEnabled = true;
+            SetS3SyncControlsBusy(false);
         }
 
         return succeeded;
+    }
+
+    private async Task RefreshLibraryAfterS3SyncAsync(CancellationToken cancellationToken)
+    {
+        await ViewModel.RefreshAsync(cancellationToken);
+        SetupFilterControls();
+        await RefreshCollectionsAsync();
+        UpdateLibraryUi();
+    }
+
+    private async Task RefreshSettingsAfterS3SyncAsync(CancellationToken cancellationToken)
+    {
+        _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
+        _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
+        _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
+        _readerAiSettings = await _aiSettingsStore.LoadAsync(cancellationToken);
+        // Preserve edits still waiting for their auto-save debounce.
+        while (_appSettingsAutoSaveCancellation is { } pendingSave)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _appSettingsAutoSaveCancellation = null;
+            pendingSave.Cancel();
+            pendingSave.Dispose();
+            await SaveAppSettingsCoreAsync();
+        }
+        if (Application.Current is App app) app.ApplyLanguage(_appSettings.UiLanguage);
+        PopulateSettingsControls();
+        ApplyReaderAiSettingsToControls();
+        UpdateZLibraryAccountStatus();
+        _s3RemoteSettingsChanged = false;
     }
 
     // Basic settings auto-save (WinUI reference MainWindow.Productivity.cs):
@@ -4355,13 +4499,19 @@ public partial class MainWindow
         if (_suppressAppSettingsAutoSave) return;
         _appSettingsAutoSaveCancellation?.Cancel();
         _appSettingsAutoSaveCancellation?.Dispose();
-        _appSettingsAutoSaveCancellation = new CancellationTokenSource();
-        var token = _appSettingsAutoSaveCancellation.Token;
+        var cancellation = new CancellationTokenSource();
+        _appSettingsAutoSaveCancellation = cancellation;
+        var token = cancellation.Token;
         _ = Task.Delay(600, token).ContinueWith(
             _ => Dispatcher.UIThread.Post(async () =>
             {
                 if (token.IsCancellationRequested) return;
                 await SaveAppSettingsCoreAsync();
+                if (ReferenceEquals(_appSettingsAutoSaveCancellation, cancellation))
+                {
+                    _appSettingsAutoSaveCancellation = null;
+                    cancellation.Dispose();
+                }
             }),
             TaskScheduler.Default);
     }
@@ -4816,6 +4966,12 @@ public partial class MainWindow
         });
         var path = files.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrWhiteSpace(path) || !await ConfirmAsync(T("导入 Kkindle 备份"), T("导入会覆盖当前书库、封面和阅读记录，确定继续吗？"))) return;
+        if (_backupBusy) return;
+        if (_s3SyncBusy)
+        {
+            await ShowMessageAsync(T("请稍候"), T("S3 同步正在进行，请完成后再导入备份。"));
+            return;
+        }
         _backupBusy = true;
         ShowTaskProgressPopup();
         TaskProgressPopupBar.IsIndeterminate = true;
@@ -4833,7 +4989,7 @@ public partial class MainWindow
             _lastS3SyncAt = null;
             await _library.InitializeAsync(_lifetimeCancellation.Token);
             await _readerData.InitializeAsync(_lifetimeCancellation.Token);
-            await _s3SyncService.InitializeDeletionTrackingAsync(_lifetimeCancellation.Token);
+            await _s3SyncService.InitializeDeletionTrackingAsync(_lifetimeCancellation.Token, _s3SyncStoredSettings.DeviceId);
             _appSettings = await _appSettingsStore.LoadAsync(_lifetimeCancellation.Token);
             LoadReaderVerticalDebugBoxesSetting();
             _readerAiSettings = result.AiSettings;

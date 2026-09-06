@@ -78,7 +78,22 @@ public sealed record S3SyncResult(
     int AnnotationsApplied,
     int SettingsApplied,
     bool Changed,
-    string? Warning = null);
+    string? Warning = null)
+{
+    public bool IsPartial { get; init; }
+}
+
+public sealed record S3SyncOptions
+{
+    public string? ConfirmedDeletionFingerprint { get; init; }
+}
+
+public sealed class S3SyncDeletionConfirmationRequiredException(
+    string message,
+    string deletionFingerprint) : InvalidOperationException(message)
+{
+    public string DeletionFingerprint { get; } = deletionFingerprint;
+}
 
 /// <summary>
 /// Portable S3 connection profile. Unlike the regular application backup,

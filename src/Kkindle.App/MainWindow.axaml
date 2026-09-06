@@ -230,8 +230,8 @@
                                 Classes="syncIndicator"
                                 Click="S3SyncIndicatorButton_Click"
                                 Cursor="Hand"
-                                ToolTip.Tip="S3 同步未配置；点击打开设置"
-                                AutomationProperties.Name="S3 同步状态"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.A02FDF126DDFD0CB}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.EEFCC7D924EF25BA}"
                                 VerticalAlignment="Center">
                             <Grid Width="28" Height="28">
                                 <Path x:Name="S3SyncCloudIcon"
@@ -445,7 +445,7 @@
                                             Click="ReaderAiSettingsButton_Click" />
                                     <Button x:Name="SystemS3SyncNavigationButton"
                                             Classes="sidebarItem"
-                                            Content="S3 同步"
+                                            Content="{DynamicResource Ui.Auto.03E350A22079004A}"
                                             Click="SystemS3SyncNavigationButton_Click" />
                                     <Button x:Name="SystemBackupNavigationButton"
                                             Classes="sidebarItem"
@@ -2521,7 +2521,7 @@
                                                FontSize="11"
                                                Foreground="{StaticResource MutedInkBrush}"
                                                TextWrapping="Wrap" />
-                                    <TextBlock Text="本地备份会包含 S3 的非敏感连接参数，但不会包含 Access Key、Secret Key 和本地加密密钥。需要迁移 S3 凭据时，请使用 S3 设置中的独立配置导出。"
+                                    <TextBlock Text="{DynamicResource Ui.Auto.E8CBC61A2FF1925A}"
                                                FontSize="11"
                                                Foreground="{StaticResource MutedInkBrush}"
                                                TextWrapping="Wrap" />
@@ -2548,35 +2548,35 @@
                                     Padding="18"
                                     Background="{StaticResource PaperBrush}">
                                 <StackPanel Spacing="14">
-                                    <TextBlock Text="S3 同步" FontSize="18" FontWeight="SemiBold" IsVisible="False" />
-                                    <TextBlock Text="同步本地书籍、封面、批注、书签、阅读进度和可同步的应用设置。书籍文件按 SHA-256 去重，数据库文件本身不会上传。"
+                                    <TextBlock Text="{DynamicResource Ui.Auto.03E350A22079004A}" FontSize="18" FontWeight="SemiBold" IsVisible="False" />
+                                    <TextBlock Text="{DynamicResource Ui.Auto.74FF42E1909F20DC}"
                                                FontSize="11"
                                                Foreground="{StaticResource MutedInkBrush}"
                                                TextWrapping="Wrap" />
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="启用 S3 同步" FontSize="13" VerticalAlignment="Center" />
+                                        <TextBlock Text="{DynamicResource Ui.Auto.4E08C2329F790C28}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="S3SyncEnabledCheck"
                                                       Grid.Column="1"
                                                       VerticalAlignment="Center"
                                                       IsCheckedChanged="S3SyncEnabledCheck_IsCheckedChanged" />
                                     </Grid>
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="自动同步（启动、退出、变更后及按间隔执行）" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                        <TextBlock Text="{DynamicResource Ui.Auto.1744BAADE68F9732}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
                                         <ToggleSwitch x:Name="S3AutomaticSyncCheck" Grid.Column="1" VerticalAlignment="Center" />
                                     </Grid>
                                     <Grid ColumnDefinitions="*,150" ColumnSpacing="12">
-                                        <TextBlock Text="自动同步间隔（分钟）" FontSize="13" VerticalAlignment="Center" />
+                                        <TextBlock Text="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="13" VerticalAlignment="Center" />
                                         <NumericUpDown x:Name="S3SyncIntervalBox" Grid.Column="1" Minimum="5" Maximum="1440" Increment="5" Value="30" />
                                     </Grid>
 
                                     <Border Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
                                         <StackPanel Spacing="9">
-                                            <TextBlock Text="连接参数" FontSize="15" FontWeight="SemiBold" />
-                                            <TextBlock Text="Endpoint 留空使用 AWS S3；使用 MinIO、Cloudflare R2、Wasabi 等服务时填写其 S3 Endpoint。"
+                                            <TextBlock Text="{DynamicResource Ui.Auto.72251455F2297070}" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.70E98FFE2B292C81}"
                                                        FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
                                                 <TextBlock Text="Endpoint" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3EndpointBox" Grid.Column="1" PlaceholderText="https://s3.example.com（AWS 可留空）" />
+                                                <TextBox x:Name="S3EndpointBox" Grid.Column="1" PlaceholderText="{DynamicResource Ui.Auto.3DF0B4CE64DC4FA2}" />
                                             </Grid>
                                             <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
                                                 <TextBlock Text="Access Key" FontSize="12" VerticalAlignment="Center" />
@@ -2595,27 +2595,27 @@
                                                 <TextBox x:Name="S3RegionBox" Grid.Column="1" Text="us-east-1" />
                                             </Grid>
                                             <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="对象前缀" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.3AAE440415FDD869}" FontSize="12" VerticalAlignment="Center" />
                                                 <TextBox x:Name="S3PrefixBox" Grid.Column="1" Text="kkindle" />
                                             </Grid>
                                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                                <TextBlock Text="使用 Path-style 地址（多数 S3 兼容服务需要）" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.176EC00F33DEEA1C}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                 <ToggleSwitch x:Name="S3PathStyleCheck" Grid.Column="1" IsChecked="False" VerticalAlignment="Center" />
                                             </Grid>
                                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                                <TextBlock Text="跳过 TLS 证书校验（仅限本地测试）" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.37E7E1EFA89D10E1}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                 <ToggleSwitch x:Name="S3SkipTlsVerifyCheck" Grid.Column="1" VerticalAlignment="Center" />
                                             </Grid>
                                             <Border Classes="flatSubsection" Padding="0,10,0,0" Margin="0,4,0,0">
                                                 <StackPanel Spacing="8">
-                                                    <TextBlock Text="连接参数文件" FontSize="13" FontWeight="SemiBold" />
-                                                    <TextBlock Text="独立文件包含 Endpoint、Access Key、Secret Key、Bucket 等连接参数，但不包含本地加密密钥和自动同步开关。文件包含敏感凭据，请妥善保管。"
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.AF350F4FDBDCDD84}" FontSize="13" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.74ADE508B010AB31}"
                                                                FontSize="11"
                                                                Foreground="{StaticResource MutedInkBrush}"
                                                                TextWrapping="Wrap" />
                                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                                        <Button Content="导出连接参数" Click="ExportS3ConnectionProfileButton_Click" />
-                                                        <Button Content="导入连接参数" Classes="quiet" Click="ImportS3ConnectionProfileButton_Click" />
+                                                        <Button x:Name="S3ExportConnectionProfileButton" Content="{DynamicResource Ui.Auto.6E7D7EA130A1FCFA}" Click="ExportS3ConnectionProfileButton_Click" />
+                                                        <Button x:Name="S3ImportConnectionProfileButton" Content="{DynamicResource Ui.Auto.9CD9DEE98B5E7988}" Classes="quiet" Click="ImportS3ConnectionProfileButton_Click" />
                                                     </StackPanel>
                                                     <TextBlock x:Name="S3ConnectionProfileStatusText"
                                                                FontSize="11"
@@ -2628,29 +2628,32 @@
 
                                     <Border Classes="flatSubsection" Padding="0,12,0,0">
                                         <StackPanel Spacing="9">
-                                            <TextBlock Text="本地加密（可选）" FontSize="15" FontWeight="SemiBold" />
-                                            <TextBlock Text="填写同一个密钥后，快照和书籍对象会在上传前使用 AES-GCM 加密；请在所有设备上手动配置相同密钥，忘记后无法恢复云端数据。"
+                                            <TextBlock Text="{DynamicResource Ui.Auto.92711FE519D1DCFD}" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.1FF53DB62A2A3A4C}"
+                                                       FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.F7C9C4CFD4F50703}"
                                                        FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="加密密钥" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="12" VerticalAlignment="Center" />
                                                 <TextBox x:Name="S3EncryptionKeyBox" Grid.Column="1" PasswordChar="●" />
                                             </Grid>
                                             <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
-                                                <TextBlock Text="请求超时（秒）" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.72EC61D7855C86A1}" FontSize="12" VerticalAlignment="Center" />
                                                 <NumericUpDown x:Name="S3TimeoutBox" Grid.Column="1" Minimum="10" Maximum="600" Increment="10" Value="60" />
                                             </Grid>
                                             <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
-                                                <TextBlock Text="并发请求数" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.8267CD636CE539F9}" FontSize="12" VerticalAlignment="Center" />
                                                 <NumericUpDown x:Name="S3ConcurrencyBox" Grid.Column="1" Minimum="1" Maximum="32" Increment="1" Value="4" />
                                             </Grid>
                                         </StackPanel>
                                     </Border>
 
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button x:Name="S3SaveSettingsButton" Content="保存设置" Click="S3SaveSettingsButton_Click" />
-                                        <Button x:Name="S3TestConnectionButton" Content="测试连接" Classes="quiet" Click="S3TestConnectionButton_Click" />
-                                        <Button x:Name="S3SyncNowButton" Content="立即同步" Classes="quiet" Click="S3SyncNowButton_Click" />
-                                    </StackPanel>
+                                    <WrapPanel Orientation="Horizontal">
+                                        <Button x:Name="S3SaveSettingsButton" Content="{DynamicResource Ui.Auto.C8550237BA701F64}" Margin="0,0,8,8" Click="S3SaveSettingsButton_Click" />
+                                        <Button x:Name="S3TestConnectionButton" Content="{DynamicResource Ui.Auto.0A98A48EAAAC4175}" Margin="0,0,8,8" Classes="quiet" Click="S3TestConnectionButton_Click" />
+                                        <Button x:Name="S3SyncNowButton" Content="{DynamicResource Ui.Auto.36E7A43A1C674E50}" Margin="0,0,8,8" Classes="quiet" Click="S3SyncNowButton_Click" />
+                                        <Button x:Name="S3CancelSyncButton" Content="{DynamicResource Ui.Auto.5034DDC8102C5DF8}" Margin="0,0,0,8" Classes="quiet" IsVisible="False" Click="S3CancelSyncButton_Click" />
+                                    </WrapPanel>
                                     <TextBlock x:Name="S3SyncDeviceText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                     <TextBlock x:Name="S3SyncStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
@@ -2869,10 +2872,11 @@
                                                  IsVisible="False"
                                                  IsIndeterminate="False" />
                                     <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
-                                        <TextBlock Text="BGE Small 中文模型 · 约 95 MB"
-                                                   FontSize="10"
-                                                   Foreground="{StaticResource MutedInkBrush}"
-                                                   VerticalAlignment="Center" />
+                                        <ComboBox x:Name="MainReaderEmbeddingModelSelectorBox"
+                                                  FontSize="10"
+                                                  MinWidth="180"
+                                                  VerticalAlignment="Center"
+                                                  SelectionChanged="MainReaderEmbeddingModelSelectorBox_SelectionChanged" />
                                         <Button x:Name="MainReaderEmbeddingModelDownloadButton"
                                                 Grid.Column="1"
                                                 Classes="quiet"
@@ -4699,6 +4703,7 @@
                             BorderThickness="0,0,0,1">
                         <Grid Margin="8,2" ColumnDefinitions="*,*,Auto" ColumnSpacing="6">
                             <Button x:Name="ReaderAiTabButton"
+                                    Grid.Column="0"
                                     Classes="readerAssistantTab active"
                                     Content="{DynamicResource Ui.Auto.69825479A95E6330}"
                                     HorizontalAlignment="Stretch"
@@ -4730,14 +4735,12 @@
                     </Border>
 
                     <Grid Grid.Row="1">
-                        <Grid x:Name="ReaderAiView" RowDefinitions="*,Auto">
-                            <ScrollViewer x:Name="ReaderAiScrollViewer" Padding="20,18,20,8" VerticalScrollBarVisibility="Auto">
-                                <StackPanel Spacing="18">
-                                    <StackPanel x:Name="ReaderAiEmptyState" Spacing="4">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.FBCA6604A6DC8F48}"
-                                                   FontSize="11"
-                                                   Foreground="{StaticResource MutedInkBrush}"
-                                                   TextWrapping="Wrap" />
+                        <Grid x:Name="ReaderAiView" RowDefinitions="*,Auto" Background="White">
+                            <ScrollViewer x:Name="ReaderAiScrollViewer" Padding="20,24,20,12" VerticalScrollBarVisibility="Auto" ScrollChanged="ReaderAiScrollViewer_ScrollChanged">
+                                <StackPanel Spacing="24">
+                                    <StackPanel x:Name="ReaderAiEmptyState" Spacing="12" Margin="0,24,0,12">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.A3628E64A4842E6F}" FontSize="20" Foreground="#171717" />
+                                        <TextBlock Text="{DynamicResource Ui.Auto.5F14F7F49C437BA2}" FontSize="12" Foreground="#707070" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <ItemsControl x:Name="ReaderChatMessagesPanel" ItemsSource="{Binding ReaderAiMessages}" Margin="0,0,0,4">
                                         <ItemsControl.ItemTemplate>
@@ -4745,14 +4748,14 @@
                                                 <Grid HorizontalAlignment="Stretch" Margin="0,3">
                                                     <Border MaxWidth="520"
                                                             MinWidth="96"
-                                                            Padding="10,8,10,9"
+                                                            Padding="10,10"
                                                             HorizontalAlignment="{Binding BubbleAlignment}"
                                                             Background="{Binding BubbleBackground}"
                                                             BorderBrush="{Binding BorderBrush}"
-                                                            BorderThickness="1"
-                                                            CornerRadius="10">
-                                                        <StackPanel Spacing="5">
-                                                        <TextBlock Text="{Binding RoleLabel}" FontSize="9" Foreground="{Binding BubbleForeground}" Opacity="0.72" />
+                                                            BorderThickness="0"
+                                                            CornerRadius="4">
+                                                        <StackPanel Spacing="10">
+                                                        <TextBlock Text="{Binding RoleLabel}" FontSize="11" Foreground="#707070" />
                                                         <StackPanel Orientation="Horizontal"
                                                                     Spacing="5"
                                                                     IsVisible="{Binding IsThinkingRowVisible}">
@@ -4763,7 +4766,7 @@
                                                                     Click="ReaderAiReasoningToggleButton_Click" />
                                                             <TextBlock Text="{Binding ThinkingLabel}"
                                                                        IsVisible="{Binding IsThinkingLabelVisible}"
-                                                                       FontSize="9"
+                                                                       FontSize="11"
                                                                        Foreground="{StaticResource MutedInkBrush}"
                                                                        VerticalAlignment="Center" />
                                                             <Path Width="11"
@@ -4781,19 +4784,20 @@
                                                         </StackPanel>
                                                         <TextBlock Text="{Binding Reasoning}"
                                                                    IsVisible="{Binding IsReasoningVisible}"
-                                                                   FontSize="10"
+                                                                   FontSize="12"
                                                                    Foreground="#5F5F5F"
                                                                    TextWrapping="Wrap" />
                                                         <TextBlock Text="{Binding Content}"
                                                                    IsVisible="{Binding IsUser}"
                                                                    Foreground="{Binding BubbleForeground}"
-                                                                   FontSize="12"
+                                                                   FontSize="14"
                                                                    TextWrapping="Wrap" />
-                                                         <local:KreaderMarkdownTextBlock Text="{Binding Content}"
+                                                         <local:KreaderMarkdownTextBlock Markdown="{Binding Content}"
                                                                                           IsVisible="{Binding IsAssistant}"
                                                                                           CitationAction="{Binding CitationAction}"
                                                                                           Foreground="{Binding BubbleForeground}"
-                                                                                          FontSize="12"
+                                                                                          FontSize="14"
+                                                                                          LineHeight="24"
                                                                                           TextWrapping="Wrap" />
                                                          <StackPanel Spacing="4" IsVisible="{Binding HasSources}">
                                                              <Button Classes="readerAiReasoningToggle"
@@ -4812,62 +4816,78 @@
                                                                                  Tag="{Binding}"
                                                                                  HorizontalContentAlignment="Left"
                                                                                  Click="ReaderAiSourceButton_Click">
-                                                                             <TextBlock Text="{Binding Label}" TextWrapping="Wrap" FontSize="10" />
+                                                                             <TextBlock Text="{Binding Label}" TextWrapping="Wrap" FontSize="11" />
                                                                          </Button>
                                                                      </DataTemplate>
                                                                  </ItemsControl.ItemTemplate>
                                                              </ItemsControl>
                                                          </StackPanel>
+                                                         <StackPanel Orientation="Horizontal" Spacing="16" IsVisible="{Binding IsAssistant}">
+                                                             <Button Content="{DynamicResource Ui.Auto.63D90D977348AB1F}" Classes="readerAiReasoningToggle" IsVisible="{Binding CanCopy}" Click="ReaderAiCopyButton_Click" />
+                                                             <Button Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="readerAiReasoningToggle" IsVisible="{Binding CanCopy}" Click="ReaderAiSaveAnswerButton_Click" />
+                                                             <Button Content="{DynamicResource Ui.Auto.3221A042EA3677A8}" Classes="readerAiReasoningToggle" IsVisible="{Binding CanRetry}" Click="ReaderAiRetryButton_Click" />
+                                                         </StackPanel>
+                                                         <TextBlock Text="{Binding Status}" IsVisible="{Binding HasStatus}" FontSize="11" Foreground="#707070" TextWrapping="Wrap" />
                                                          </StackPanel>
                                                     </Border>
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                     <TextBlock x:Name="ReaderAiStatusText"
-                                                Text="{DynamicResource Ui.Auto.D4DCD9B74693BD4C}"
-                                                FontSize="10"
-                                                Foreground="{StaticResource MutedInkBrush}"
-                                                TextWrapping="Wrap"
-                                                IsVisible="False" />
                                 </StackPanel>
                             </ScrollViewer>
-                            <Grid x:Name="ReaderAiComposer" Grid.Row="1" RowDefinitions="Auto,Auto" RowSpacing="12" Margin="20,8,20,14" SizeChanged="ReaderAiComposer_SizeChanged">
-                                <Grid ColumnDefinitions="78,*,92" ColumnSpacing="8">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.2FD1FCDA22E20FF7}" FontSize="11" />
-                                        <ComboBox x:Name="ReaderAiReasoningDepthBox" Classes="readerMinimalField" MinHeight="32" FontSize="10" HorizontalAlignment="Stretch" SelectionChanged="ReaderAiReasoningDepthBox_SelectionChanged" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1" Spacing="5">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="11" />
-                                        <ComboBox x:Name="ReaderAiModelSelectorBox" Classes="readerMinimalField aiModelSelector" MinHeight="32" FontSize="10" HorizontalAlignment="Stretch" PlaceholderText="{DynamicResource Ui.Auto.1AFED6A81A2512D2}" SelectionChanged="ReaderAiModelSelectorBox_SelectionChanged" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2" Spacing="5">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.D9A8514E981DEE1F}" FontSize="11" />
-                                        <ComboBox x:Name="ReaderAiQuickActionBox"
-                                                  Classes="readerMinimalField"
-                                                  MinHeight="32"
-                                                  FontSize="10"
-                                                  HorizontalAlignment="Stretch"
-                                                  PlaceholderText="{DynamicResource Ui.Auto.D9A8514E981DEE1F}"
-                                                  SelectionChanged="ReaderAiQuickActionBox_SelectionChanged">
-                                            <ComboBoxItem Tag="chapter-summary" Content="{DynamicResource Ui.Auto.E687BAF44D22C09D}" />
-                                            <ComboBoxItem Tag="selection-explain" Content="{DynamicResource Ui.Auto.93ACD7FCCB3F0D76}" />
-                                            <ComboBoxItem Tag="book-summary" Content="{DynamicResource Ui.Auto.D65CE013C49D1834}" />
-                                            <ComboBoxItem Tag="clear" Content="{DynamicResource Ui.Auto.C7D90AE040169512}" />
-                                        </ComboBox>
-                                    </StackPanel>
+                            <Grid x:Name="ReaderAiComposer" Grid.Row="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="10" Margin="20,8,20,16" SizeChanged="ReaderAiComposer_SizeChanged">
+                                <Button x:Name="ReaderAiNewContentButton" Content="{DynamicResource Ui.Auto.07E68FA158F2077C}" Classes="readerAiQuickOption" IsVisible="False" HorizontalAlignment="Center" Click="ReaderAiNewContentButton_Click" />
+                                <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                    <Grid Grid.Column="0" ColumnDefinitions="Auto,*" ColumnSpacing="5">
+                                        <Ellipse x:Name="ReaderAiVectorStatusDot"
+                                                 Width="7"
+                                                 Height="7"
+                                                 VerticalAlignment="Center"
+                                                 Fill="#D6A100"
+                                                 ToolTip.Tip="{DynamicResource Ui.Auto.8372A76EAD8077A9}"
+                                                 AutomationProperties.Name="{DynamicResource Ui.Auto.8372A76EAD8077A9}" />
+                                        <TextBlock x:Name="ReaderAiScopeText" Grid.Column="1" Text="{DynamicResource Ui.Auto.C558C087EB70654C}" FontSize="11" Foreground="#707070" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Button x:Name="ReaderAiOptionsButton"
+                                            Grid.Column="1"
+                                            Content="{DynamicResource Ui.Auto.B94E8C2A0D642FC5}"
+                                            Classes="readerAiReasoningToggle">
+                                        <Button.Flyout>
+                                            <MenuFlyout ShowMode="Transient"
+                                                        Placement="Bottom"
+                                                        VerticalOffset="4">
+                                                <MenuItem x:Name="ReaderAiModelMenuItem"
+                                                          Header="{DynamicResource Ui.Auto.C98E118E0A43F078}" />
+                                                <MenuItem x:Name="ReaderAiReasoningMenuItem"
+                                                          Header="{DynamicResource Ui.Auto.2FD1FCDA22E20FF7}" />
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                    <Button x:Name="ReaderAiClearButton" Grid.Column="2" Content="{DynamicResource Ui.Auto.1EF3DE06B32E521B}" Classes="readerAiReasoningToggle" Click="ReaderAiClearButton_Click" />
                                 </Grid>
-                                <Grid Grid.Row="1" MinHeight="130" ClipToBounds="True">
+                                <Border Grid.Row="2" BorderBrush="#D8D8D8" BorderThickness="1" CornerRadius="4" Background="White">
+                                <Grid RowDefinitions="Auto,Auto" ClipToBounds="True">
                                     <TextBox x:Name="ReaderAiQuestionBox"
-                                             Classes="readerMinimalField"
-                                             MinHeight="130"
-                                             Padding="8,8,46,38"
+                                             Classes="readerMinimalField readerAiQuestionInput"
+                                             MinHeight="68"
+                                             MaxHeight="160"
+                                             FontSize="14"
+                                             Background="White"
+                                             BorderThickness="0"
+                                             Padding="12,10"
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
-                                             PlaceholderText="{DynamicResource Ui.Auto.2884AF5B8126BF7B}"
+                                             PlaceholderText="{DynamicResource Ui.Auto.8513176BCF21002D}"
                                              />
+                                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="8,0,6,6">
+                                    <StackPanel x:Name="ReaderAiQuickActions" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                        <Button Content="{DynamicResource Ui.Auto.04830193B408EEB1}" ToolTip.Tip="{DynamicResource Ui.Auto.98B4E0EFFCF15443}" Classes="readerAiReasoningToggle" Click="ReaderAiSummarizeChapterButton_Click" />
+                                        <Button Content="{DynamicResource Ui.Auto.23CEC14BBCFAB6FA}" ToolTip.Tip="{DynamicResource Ui.Auto.9B4D1CC07395F4B1}" Classes="readerAiReasoningToggle" Click="ReaderAiExplainSelectionButton_Click" />
+                                        <Button Content="{DynamicResource Ui.Auto.51AFFFDDE76EA35A}" ToolTip.Tip="{DynamicResource Ui.Auto.7A4BBB19D1387A93}" Classes="readerAiReasoningToggle" Click="ReaderAiSummarizeBookButton_Click" />
+                                    </StackPanel>
                                     <Button x:Name="ReaderAiSendButton"
+                                            Grid.Column="1"
                                             Classes="readerAiSendButton"
                                             Width="34"
                                             MinWidth="34"
@@ -4875,18 +4895,23 @@
                                             MinHeight="34"
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Bottom"
-                                            Margin="0,0,5,5"
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
                                             Click="ReaderAiSendButton_Click">
-                                        <Path Width="16"
+                                        <Path x:Name="ReaderAiSendGlyph" Width="16"
                                               Height="16"
                                               Stretch="Uniform"
                                               Fill="{Binding $parent[Button].Foreground}"
-                                              Data="M 2,2 L 22,11 L 2,20 L 6,13 L 16,11 L 6,9 Z"
+                                              Data="M 12,3 L 18.2,9.2 L 17.3,10.1 L 12.45,5.25 L 12.45,21 L 11.55,21 L 11.55,5.25 L 6.7,10.1 L 5.8,9.2 Z"
                                               IsHitTestVisible="False" />
                                     </Button>
+                                    </Grid>
                                 </Grid>
+                                </Border>
+                                <TextBlock x:Name="ReaderAiStatusText"
+                                           IsVisible="False"
+                                           Width="0"
+                                           Height="0" />
                             </Grid>
                         </Grid>
 
@@ -5021,10 +5046,11 @@
                                                      IsVisible="False"
                                                      IsIndeterminate="False" />
                                         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
-                                            <TextBlock Text="BGE Small · 约 95 MB"
-                                                       FontSize="10"
-                                                       Foreground="{StaticResource MutedInkBrush}"
-                                                       VerticalAlignment="Center" />
+                                            <ComboBox x:Name="ReaderEmbeddingModelSelectorBox"
+                                                      FontSize="10"
+                                                      MinWidth="150"
+                                                      VerticalAlignment="Center"
+                                                      SelectionChanged="ReaderEmbeddingModelSelectorBox_SelectionChanged" />
                                             <Button x:Name="ReaderEmbeddingModelDownloadButton"
                                                     Grid.Column="1"
                                                     Classes="quiet"

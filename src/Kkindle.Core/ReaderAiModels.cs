@@ -69,6 +69,25 @@ public interface IEmbeddingService
     Task<IReadOnlyList<float[]>> EmbedBatchAsync(
         IReadOnlyList<string> texts,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Embeds a user query. Providers that distinguish queries from passages
+    /// (for example E5) can override this to add the model's query prefix;
+    /// existing providers keep the original behavior by default.
+    /// </summary>
+    Task<float[]> EmbedQueryAsync(
+        string text,
+        CancellationToken cancellationToken = default) =>
+        EmbedAsync(text, cancellationToken);
+
+    /// <summary>
+    /// Embeds book passages for indexing. Providers that distinguish queries
+    /// from passages can override this to add the model's passage prefix.
+    /// </summary>
+    Task<IReadOnlyList<float[]>> EmbedPassagesAsync(
+        IReadOnlyList<string> texts,
+        CancellationToken cancellationToken = default) =>
+        EmbedBatchAsync(texts, cancellationToken);
 }
 
 /// <summary>

@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>loaded-state harness</title>
+<style>
+  body { margin: 0; background: #222; }
+  iframe { display: block; border: 0; background: #fff; }
+</style>
+<iframe id="f" src="index.html" width="1280" height="4700"></iframe>
+<script>
+  // Feed the real release payload straight into renderRelease() so the loaded
+  // download state can be inspected without a cross-origin fetch.
+  window.addEventListener("load", async () => {
+    const release = await (await fetch("_release.json")).json();
+    setTimeout(() => {
+      const w = document.getElementById("f").contentWindow;
+      w.renderRelease(release);
+      w.document.documentElement.scrollTop = 0;
+    }, 800);
+  });
+</script>

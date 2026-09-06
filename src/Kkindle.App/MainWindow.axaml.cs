@@ -65,7 +65,7 @@ public partial class MainWindow : Window
     private readonly ReaderDataService _readerData;
     private readonly EpubBookContentService _bookContent;
     private readonly EmbeddingModelDownloadService _embeddingModelDownloader;
-    private readonly IEmbeddingService _embeddingService;
+    private readonly LocalEmbeddingService _embeddingService;
     private readonly ReaderEmbeddingIndexService _readerEmbeddingIndex;
     private readonly IReaderRetriever _readerRetriever;
     private readonly ReaderAiContextBuilder _readerAiContextBuilder;
@@ -167,10 +167,7 @@ public partial class MainWindow : Window
         _readerData = new ReaderDataService(paths);
         _bookContent = new EpubBookContentService(_readerData);
         _embeddingModelDownloader = new EmbeddingModelDownloadService(paths);
-        _embeddingService = new OnnxEmbeddingService(new OnnxEmbeddingOptions
-        {
-            ModelDirectory = Path.Combine(paths.EmbeddingModels, "bge-small-zh-v1.5")
-        });
+        _embeddingService = new LocalEmbeddingService(paths, _appSettings.EmbeddingModelId);
         _readerEmbeddingIndex = new ReaderEmbeddingIndexService(_readerData, _embeddingService);
         _readerRetriever = new HybridRetriever(
             new KeywordRetriever(_readerData),
@@ -203,12 +200,14 @@ public partial class MainWindow : Window
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, _secretProtector);
         _kindleEmailSender = new KindleEmailSender();
         _s3SyncService = new S3SyncService(paths, _secretProtector);
+        _s3SyncService.RemoteSettingsApplied += S3RemoteSettingsApplied;
         _updateService = services?.UpdateInstaller is { } updateInstaller
             ? new UpdateService(updateInstaller)
             : null;
         ViewModel = new LibraryViewModel(library, paths.Data);
 
         InitializeComponent();
+        InitializeReaderEmbeddingModelSelectors();
         // AcceptsReturn lets the TextBox handle Enter before a normal bubbled
         // handler can see it. Observe the tunneling phase, including an event
         // already marked handled, so Ctrl+Enter always reaches the AI sender
@@ -466,6 +465,10 @@ public partial class MainWindow : Window
         }
 
         RefreshInteractiveControlToolTips();
+        UpdateS3SyncIndicator(_s3SyncIndicatorState, _s3SyncIndicatorError);
+        if (SystemSettingsPane.IsVisible)
+            SystemSettingsPaneTitle.Text = SettingsSyncSection.IsVisible ? T("S3 同步") : T("备份");
+        S3SyncDeviceText.Text = T("当前设备 ID：{0}", _s3SyncStoredSettings.DeviceId[..Math.Min(12, _s3SyncStoredSettings.DeviceId.Length)]);
         RefreshOnboardingLocalizedChoices();
         if (_filterControlsReady)
             RefreshLocalizedFilterItems();
@@ -632,6 +635,10 @@ public partial class MainWindow : Window
                 _ = RunSendDiagnosticAsync();
             }
 #if DEBUG
+            if (Environment.GetEnvironmentVariable("KKINDLE_AI_PREVIEW") == "1")
+            {
+                _ = Dispatcher.UIThread.InvokeAsync(RunReaderAiPreviewAsync);
+            }
             if (Environment.GetEnvironmentVariable("KKINDLE_KREADER_VALIDATE") == "1")
             {
                 _ = Dispatcher.UIThread.InvokeAsync(RunKreaderValidationAndExitAsync);
@@ -797,12 +804,16 @@ public partial class MainWindow : Window
 
         if (_stage3Ready)
         {
-            e.Cancel = true;
-            if (!_s3SyncExitInProgress)
+            if (_s3SyncExitInProgress)
             {
-                _s3SyncExitInProgress = true;
-                _ = CompleteWindowCloseAfterS3SyncAsync();
+                _allowWindowCloseForS3Sync = true;
+                _s3SyncCancellation?.Cancel();
+                _s3SyncExitCancellation?.Cancel();
+                return;
             }
+            e.Cancel = true;
+            _s3SyncExitInProgress = true;
+            _ = CompleteWindowCloseAfterS3SyncAsync();
         }
     }
 
@@ -810,6 +821,7 @@ public partial class MainWindow : Window
     {
         _library.DataChanged -= LocalLibraryDataChanged;
         _readerData.DataChanged -= LocalReaderDataChanged;
+        _s3SyncService.RemoteSettingsApplied -= S3RemoteSettingsApplied;
         _s3LocalChangeSyncTimer.Stop();
         UiText.LanguageChanged -= MainWindowLanguageChanged;
         UiText.LanguageChanged -= TrayLanguageChanged;
@@ -837,6 +849,8 @@ public partial class MainWindow : Window
         _doubanMatchCancellation = null;
         _messageCompletion?.TrySetResult(true);
         _messageCompletion = null;
+        _confirmationCompletion?.TrySetResult(false);
+        _confirmationCompletion = null;
         _importFormatSelectionCompletion?.TrySetResult(null);
         _importFormatSelectionCompletion = null;
         if (_readerDocument is not null || _readerIsPdf)
@@ -889,23 +903,23 @@ public partial class MainWindow : Window
         {
             // The empty selection is represented by each ComboBox's placeholder;
             // keep the "全部..." labels out of the popup item list.
-            var authors = ViewModel.AvailableAuthors.ToArray();
+            var authors = IncludeActiveFilter(ViewModel.AvailableAuthors, ViewModel.AuthorFilter);
             AuthorFilterBox.ItemsSource = authors;
             // The popup resizes itself to the currently realized items, so its
             // width follows whatever author names are on screen while scrolling.
             // Pin the popup to one fixed width, sized by the longest author name.
             _authorPopupWidth = Math.Ceiling(MeasureWidestFilterText(AuthorFilterBox, authors)) + 6;
-            TagFilterBox.ItemsSource = ViewModel.AvailableTags.ToArray();
-            FormatFilterBox.ItemsSource = ViewModel.AvailableFormats.ToArray();
-            CategoryFilterBox.ItemsSource = ViewModel.AvailableCategories.ToArray();
+            TagFilterBox.ItemsSource = IncludeActiveFilter(ViewModel.AvailableTags, ViewModel.TagFilter);
+            FormatFilterBox.ItemsSource = IncludeActiveFilter(ViewModel.AvailableFormats, ViewModel.FormatFilter);
+            CategoryFilterBox.ItemsSource = IncludeActiveFilter(ViewModel.AvailableCategories, ViewModel.CategoryFilter);
             ReadingStatusFilterBox.ItemsSource = new[] { T("待读"), T("阅读中"), T("已读") };
             LibrarySortBox.ItemsSource = new[] { T("最近更新"), T("标题升序"), T("作者升序"), T("创建时间"), T("进度优先") };
 
-            AuthorFilterBox.SelectedIndex = -1;
-            TagFilterBox.SelectedIndex = -1;
-            FormatFilterBox.SelectedIndex = -1;
-            CategoryFilterBox.SelectedIndex = -1;
-            ReadingStatusFilterBox.SelectedIndex = -1;
+            AuthorFilterBox.SelectedItem = ViewModel.AuthorFilter;
+            TagFilterBox.SelectedItem = ViewModel.TagFilter;
+            FormatFilterBox.SelectedItem = ViewModel.FormatFilter;
+            CategoryFilterBox.SelectedItem = ViewModel.CategoryFilter;
+            ReadingStatusFilterBox.SelectedIndex = ViewModel.ReadingStatusFilter is { } readingStatus ? (int)readingStatus : -1;
             LibrarySortBox.SelectedIndex = (int)ViewModel.SortMode;
             FavoritesOnlyCheckBox.IsChecked = ViewModel.FavoritesOnly;
         }
@@ -914,6 +928,11 @@ public partial class MainWindow : Window
             _updatingFilterControls = false;
         }
     }
+
+    private static string[] IncludeActiveFilter(IEnumerable<string> choices, string? active) =>
+        string.IsNullOrWhiteSpace(active)
+            ? choices.ToArray()
+            : choices.Append(active).Distinct(StringComparer.Ordinal).ToArray();
 
     private static double MeasureWidestFilterText(ComboBox comboBox, IEnumerable<string> labels)
     {
@@ -2828,8 +2847,9 @@ public partial class MainWindow : Window
         bool UpdateCover,
         bool UpdatePublication);
 
-    private async Task<bool> ConfirmAsync(string title, string message, string? primaryText = null)
+    private async Task<bool> ConfirmAsync(string title, string message, string? primaryText = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
         if (_confirmationCompletion is not null) return false;
         ConfirmationTitleText.Text = title;
@@ -2839,10 +2859,18 @@ public partial class MainWindow : Window
         ShowOverlay(ConfirmationOverlay);
         _confirmationCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var completion = _confirmationCompletion;
-        var confirmed = await completion.Task;
-        if (ReferenceEquals(_confirmationCompletion, completion))
-            _confirmationCompletion = null;
-        return confirmed;
+        try
+        {
+            return await completion.Task.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            if (ReferenceEquals(_confirmationCompletion, completion))
+            {
+                _confirmationCompletion = null;
+                ConfirmationOverlay.IsVisible = false;
+            }
+        }
     }
 
     // Fade-in helpers: the overlays and pages carry an Opacity transition in

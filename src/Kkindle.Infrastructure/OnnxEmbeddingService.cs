@@ -4,23 +4,29 @@ using System.Text.Json;
 using Kkindle.Core;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using Microsoft.ML.Tokenizers;
 
 namespace Kkindle.Infrastructure;
 
 /// <summary>
-/// Configuration for a local BERT-style ONNX embedding model. The default
-/// layout matches the files published for BAAI/bge-small-zh-v1.5:
-/// model.onnx, vocab.txt and (optionally) tokenizer_config.json.
+/// Configuration for a local ONNX embedding model. Both BERT WordPiece
+/// packages (such as BGE Small Chinese) and SentencePiece packages (such as
+/// Multilingual E5 Small) are supported.
 /// </summary>
 public sealed record OnnxEmbeddingOptions
 {
-    public const string DefaultModelId = "BAAI/bge-small-zh-v1.5";
+    public const string DefaultModelId = AppSettings.DefaultEmbeddingModelId;
 
     public string ModelId { get; init; } = DefaultModelId;
     public string ModelDirectory { get; init; } = string.Empty;
     public string ModelFileName { get; init; } = "model.onnx";
     public int ExpectedDimension { get; init; } = 512;
     public int MaxSequenceLength { get; init; } = 512;
+    public EmbeddingTokenizerKind TokenizerKind { get; init; } = EmbeddingTokenizerKind.BertWordPiece;
+    public string TokenizerFileName { get; init; } = "vocab.txt";
+    public int PaddingTokenId { get; init; }
+    public string QueryPrefix { get; init; } = string.Empty;
+    public string PassagePrefix { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -35,7 +41,7 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
     private readonly SemaphoreSlim _inferenceGate = new(1, 1);
     private readonly OnnxEmbeddingOptions _options;
     private InferenceSession? _session;
-    private BertVocabulary? _vocabulary;
+    private IEmbeddingTokenizer? _tokenizer;
     private Exception? _loadFailure;
     private int _dimension;
     private bool _disposed;
@@ -72,7 +78,7 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
         {
             return new EmbeddingAvailability(
                 false,
-                $"未找到本地 embedding 模型：{ModelId}。请将 ONNX 模型和 vocab.txt 放入模型目录。",
+                $"未找到本地 embedding 模型：{ModelId}。请将 ONNX 模型和分词器文件放入模型目录。",
                 Path.GetFullPath(_options.ModelDirectory),
                 Dimension);
         }
@@ -120,6 +126,25 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
         return embeddings.Count == 0 ? [] : embeddings[0];
     }
 
+    public Task<float[]> EmbedQueryAsync(
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return EmbedAsync(ApplyPrefix(text, _options.QueryPrefix), cancellationToken);
+    }
+
+    public Task<IReadOnlyList<float[]>> EmbedPassagesAsync(
+        IReadOnlyList<string> texts,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(texts);
+        var prefixed = texts
+            .Select(text => ApplyPrefix(text, _options.PassagePrefix))
+            .ToArray();
+        return EmbedBatchAsync(prefixed, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<float[]>> EmbedBatchAsync(
         IReadOnlyList<string> texts,
         CancellationToken cancellationToken = default)
@@ -127,20 +152,20 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
         ArgumentNullException.ThrowIfNull(texts);
         if (texts.Count == 0) return [];
 
-        var (session, vocabulary) = await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
+        var (session, tokenizer) = await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
         return await Task.Run(
-            () => RunBatch(session, vocabulary, texts, cancellationToken),
+            () => RunBatch(session, tokenizer, texts, cancellationToken),
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<(InferenceSession Session, BertVocabulary Vocabulary)> EnsureLoadedAsync(
+    private async Task<(InferenceSession Session, IEmbeddingTokenizer Tokenizer)> EnsureLoadedAsync(
         CancellationToken cancellationToken)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_session is not null && _vocabulary is not null)
-                return (_session, _vocabulary);
+            if (_session is not null && _tokenizer is not null)
+                return (_session, _tokenizer);
             if (_loadFailure is not null) throw _loadFailure;
         }
 
@@ -150,8 +175,8 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
-                if (_session is not null && _vocabulary is not null)
-                    return (_session, _vocabulary);
+                if (_session is not null && _tokenizer is not null)
+                    return (_session, _tokenizer);
                 if (_loadFailure is not null) throw _loadFailure;
             }
 
@@ -161,8 +186,8 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
                     ?? throw new FileNotFoundException(
                         "未找到本地 embedding ONNX 模型。",
                         _options.ModelDirectory);
-                var vocabulary = await Task.Run(
-                    () => BertVocabulary.Load(_options.ModelDirectory),
+                var tokenizer = await Task.Run(
+                    () => EmbeddingTokenizerFactory.Load(_options),
                     cancellationToken).ConfigureAwait(false);
                 var session = await Task.Run(
                     () => new InferenceSession(modelPath),
@@ -176,7 +201,7 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
                         throw new ObjectDisposedException(nameof(OnnxEmbeddingService));
                     }
 
-                    _vocabulary = vocabulary;
+                    _tokenizer = tokenizer;
                     _session = session;
                     Debug.WriteLine(
                         $"Embedding model loaded: {ModelId}; expected dimension={Dimension}; "
@@ -193,7 +218,7 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
                 throw;
             }
 
-            lock (_gate) return (_session!, _vocabulary!);
+            lock (_gate) return (_session!, _tokenizer!);
         }
         finally
         {
@@ -203,7 +228,7 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
 
     private IReadOnlyList<float[]> RunBatch(
         InferenceSession session,
-        BertVocabulary vocabulary,
+        IEmbeddingTokenizer tokenizer,
         IReadOnlyList<string> texts,
         CancellationToken cancellationToken)
     {
@@ -211,7 +236,7 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
         try
         {
             var encoded = texts
-                .Select(text => vocabulary.Encode(text, _options.MaxSequenceLength))
+                .Select(text => tokenizer.Encode(text, _options.MaxSequenceLength))
                 .ToArray();
             try
             {
@@ -376,6 +401,9 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
         return values;
     }
 
+    private static string ApplyPrefix(string text, string prefix) =>
+        string.IsNullOrEmpty(prefix) ? text : prefix + text;
+
     private static string? FindTensorName(
         IEnumerable<string> names,
         string expected)
@@ -413,7 +441,7 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
             _disposed = true;
             session = _session;
             _session = null;
-            _vocabulary = null;
+            _tokenizer = null;
         }
 
         session?.Dispose();
@@ -426,7 +454,28 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
         long[] AttentionMask,
         long[] TokenTypeIds);
 
-    private sealed class BertVocabulary
+    private interface IEmbeddingTokenizer
+    {
+        BertEncodedText Encode(string text, int configuredMaximumLength);
+    }
+
+    private static class EmbeddingTokenizerFactory
+    {
+        public static IEmbeddingTokenizer Load(OnnxEmbeddingOptions options) =>
+            options.TokenizerKind switch
+            {
+                EmbeddingTokenizerKind.SentencePiece or
+                    EmbeddingTokenizerKind.SentencePieceXlmRoberta => SentencePieceVocabulary.Load(
+                    Path.Combine(options.ModelDirectory, options.TokenizerFileName),
+                    options.PaddingTokenId,
+                    options.TokenizerKind == EmbeddingTokenizerKind.SentencePieceXlmRoberta),
+                _ => BertVocabulary.Load(
+                    options.ModelDirectory,
+                    options.TokenizerFileName)
+            };
+    }
+
+    private sealed class BertVocabulary : IEmbeddingTokenizer
     {
         private readonly Dictionary<string, int> _ids;
         private readonly bool _lowerCase;
@@ -445,9 +494,9 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
             _paddingId = GetId("[PAD]", 0);
         }
 
-        public static BertVocabulary Load(string directory)
+        public static BertVocabulary Load(string directory, string tokenizerFileName)
         {
-            var vocabPath = Path.Combine(directory, "vocab.txt");
+            var vocabPath = Path.Combine(directory, tokenizerFileName);
             if (!File.Exists(vocabPath))
                 throw new FileNotFoundException("Embedding 模型缺少 vocab.txt。", vocabPath);
 
@@ -592,5 +641,79 @@ public sealed class OnnxEmbeddingService : IEmbeddingService, IEmbeddingAvailabi
             value is >= '\u3400' and <= '\u4DBF'
                 or >= '\u4E00' and <= '\u9FFF'
                 or >= '\uF900' and <= '\uFAFF';
+    }
+
+    private sealed class SentencePieceVocabulary : IEmbeddingTokenizer
+    {
+        private readonly SentencePieceTokenizer _tokenizer;
+        private readonly int _paddingTokenId;
+        private readonly bool _useXlmRobertaIds;
+
+        private SentencePieceVocabulary(
+            SentencePieceTokenizer tokenizer,
+            int paddingTokenId,
+            bool useXlmRobertaIds)
+        {
+            _tokenizer = tokenizer;
+            _paddingTokenId = Math.Max(0, paddingTokenId);
+            _useXlmRobertaIds = useXlmRobertaIds;
+        }
+
+        public static SentencePieceVocabulary Load(
+            string modelPath,
+            int paddingTokenId,
+            bool useXlmRobertaIds)
+        {
+            if (!File.Exists(modelPath))
+                throw new FileNotFoundException(
+                    "Embedding 模型缺少 SentencePiece 分词器文件。",
+                    modelPath);
+
+            using var stream = File.OpenRead(modelPath);
+            var tokenizer = SentencePieceTokenizer.Create(
+                stream,
+                addBeginningOfSentence: true,
+                addEndOfSentence: true,
+                specialTokens: null);
+            return new SentencePieceVocabulary(tokenizer, paddingTokenId, useXlmRobertaIds);
+        }
+
+        public BertEncodedText Encode(string text, int configuredMaximumLength)
+        {
+            var maximumLength = Math.Clamp(configuredMaximumLength, 32, 4096);
+            var ids = _tokenizer.EncodeToIds(
+                text ?? string.Empty,
+                addBeginningOfSentence: true,
+                addEndOfSentence: true,
+                maxTokenCount: maximumLength,
+                normalizedText: out _,
+                charsConsumed: out _);
+            var inputIds = Enumerable.Repeat((long)_paddingTokenId, maximumLength).ToArray();
+            var attentionMask = new long[maximumLength];
+            var tokenCount = Math.Min(ids.Count, maximumLength);
+            for (var index = 0; index < tokenCount; index++)
+            {
+                inputIds[index] = MapTokenId(ids[index]);
+                attentionMask[index] = 1;
+            }
+
+            return new BertEncodedText(inputIds, attentionMask, new long[maximumLength]);
+        }
+
+        private long MapTokenId(int tokenId)
+        {
+            if (!_useXlmRobertaIds) return tokenId;
+
+            // The raw E5 SentencePiece model stores <unk>, <s>, </s> as
+            // 0, 1, 2. XLMRobertaTokenizer exposes <s>, <pad>, </s>, <unk>
+            // as 0, 1, 2, 3 and shifts ordinary SentencePiece IDs by one.
+            return tokenId switch
+            {
+                0 => 3,
+                1 => 0,
+                2 => 2,
+                _ => tokenId + 1
+            };
+        }
     }
 }

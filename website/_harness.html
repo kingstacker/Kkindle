@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>viewport harness</title>
+<style>
+  body { margin: 0; font: 13px/1.5 monospace; background: #222; color: #fff; }
+  .col { display: inline-block; vertical-align: top; margin: 8px; }
+  .tag { padding: 4px 6px; background: #000; }
+  iframe { display: block; border: 0; background: #fff; }
+</style>
+<div class="col">
+  <div class="tag" id="t390">390</div>
+  <iframe id="f390" src="index.html" width="390" height="1400"></iframe>
+</div>
+<div class="col">
+  <div class="tag" id="t768">768</div>
+  <iframe id="f768" src="index.html" width="768" height="1400"></iframe>
+</div>
+<script>
+  // Report horizontal overflow inside each frame: scrollWidth must equal the
+  // viewport width, and no element may extend past the right edge.
+  window.addEventListener("load", () => {
+    setTimeout(() => {
+      [390, 768].forEach((w) => {
+        const doc = document.getElementById("f" + w).contentDocument;
+        const sw = doc.documentElement.scrollWidth;
+        const offenders = [];
+        doc.querySelectorAll("body *").forEach((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.right > w + 1 && r.width > 0) {
+            offenders.push(el.className || el.tagName);
+          }
+        });
+        document.getElementById("t" + w).textContent =
+          `viewport ${w} · scrollWidth ${sw} · overflow ${sw > w ? "YES" : "no"} · ` +
+          (offenders.length ? "offenders: " + [...new Set(offenders)].slice(0, 6).join(", ") : "clean");
+      });
+    }, 1200);
+  });
+</script>

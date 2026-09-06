@@ -115,6 +115,12 @@ public sealed class AiSettingsStore
 
     public async Task SaveAsync(AiConnectionSettings settings, CancellationToken cancellationToken = default)
     {
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
+        await SaveUnderLockAsync(settings, cancellationToken);
+    }
+
+    internal async Task SaveUnderLockAsync(AiConnectionSettings settings, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
+    {
         _paths.EnsureDirectories();
         var persisted = new PersistedAiSettings
         {
@@ -128,6 +134,7 @@ public sealed class AiSettingsStore
         var temporaryPath = SettingsPath + ".tmp";
         await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, persisted, _jsonOptions, cancellationToken);
+        if (syncedAt is { } timestamp) File.SetLastWriteTimeUtc(temporaryPath, timestamp.UtcDateTime);
         File.Move(temporaryPath, SettingsPath, overwrite: true);
     }
 

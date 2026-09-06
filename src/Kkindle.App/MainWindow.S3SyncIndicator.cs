@@ -17,6 +17,8 @@ public partial class MainWindow
         Pending,
         Syncing,
         Succeeded,
+        Warning,
+        ConfirmationRequired,
         Failed
     }
 
@@ -34,9 +36,12 @@ public partial class MainWindow
 
     private void RefreshS3SyncIndicatorFromSettings()
     {
+        if (_s3SyncBusy) return;
         var settings = _s3SyncStoredSettings.Settings;
         UpdateS3SyncIndicator(
-            settings.Enabled && settings.IsConfigured && HasPendingS3LocalChanges
+            settings.Enabled && settings.IsConfigured && _s3DeletionConfirmationPending
+                ? S3SyncIndicatorState.ConfirmationRequired
+                : settings.Enabled && settings.IsConfigured && HasPendingS3LocalChanges
                 ? S3SyncIndicatorState.Pending
                 : settings.Enabled && settings.IsConfigured
                 ? S3SyncIndicatorState.Ready
@@ -54,20 +59,21 @@ public partial class MainWindow
         _s3SyncIndicatorState = state;
         _s3SyncIndicatorError = error;
         var syncing = state == S3SyncIndicatorState.Syncing;
+        var needsAttention = state is S3SyncIndicatorState.Failed or S3SyncIndicatorState.Warning or S3SyncIndicatorState.ConfirmationRequired;
 
         S3SyncIndicatorButton.Classes.Set("syncing", syncing);
         S3SyncIndicatorButton.Classes.Set("pending", state == S3SyncIndicatorState.Pending);
         S3SyncIndicatorButton.Classes.Set("success", state == S3SyncIndicatorState.Succeeded);
-        S3SyncIndicatorButton.Classes.Set("failed", state == S3SyncIndicatorState.Failed);
+        S3SyncIndicatorButton.Classes.Set("failed", needsAttention);
         S3SyncIndicatorButton.Classes.Set("unconfigured", state == S3SyncIndicatorState.NotConfigured);
         S3SyncCloudIcon.IsVisible = true;
         S3SyncSpinnerIcon.IsVisible = syncing;
         S3SyncSuccessGlyph.IsVisible = state == S3SyncIndicatorState.Succeeded;
-        S3SyncFailureGlyph.IsVisible = state == S3SyncIndicatorState.Failed;
+        S3SyncFailureGlyph.IsVisible = needsAttention;
         S3SyncCloudIcon.Stroke = state == S3SyncIndicatorState.NotConfigured
             ? Brushes.Gray
             : Brushes.Black;
-        S3SyncCloudIcon.StrokeThickness = state == S3SyncIndicatorState.Failed ? 1.9 : 1.6;
+        S3SyncCloudIcon.StrokeThickness = needsAttention ? 1.9 : 1.6;
 
         var tooltip = BuildS3SyncIndicatorTooltip();
         ToolTip.SetTip(S3SyncIndicatorButton, tooltip);
@@ -82,9 +88,14 @@ public partial class MainWindow
     private string BuildS3SyncIndicatorTooltip() => _s3SyncIndicatorState switch
     {
         S3SyncIndicatorState.Ready => T("S3 同步已就绪；点击立即同步"),
+        S3SyncIndicatorState.Pending when !_s3SyncStoredSettings.Settings.AutomaticSyncEnabled
+            || !_appSettings.NetworkEnabled || _s3SyncCancelledByUser => T("有本地变更待同步；点击立即同步"),
         S3SyncIndicatorState.Pending => T("有本地变更待同步；即将自动同步"),
-        S3SyncIndicatorState.Syncing => T("正在同步到 S3…"),
+        S3SyncIndicatorState.Syncing when _s3SyncExitInProgress => T("正在退出前同步；再次关闭窗口可取消并退出"),
+        S3SyncIndicatorState.Syncing => T("正在同步到 S3；点击打开设置可取消"),
         S3SyncIndicatorState.Succeeded => T("S3 同步完成；点击再次同步"),
+        S3SyncIndicatorState.Warning => T("{0} 点击重试", _s3SyncIndicatorError ?? T("S3 同步需要注意。")),
+        S3SyncIndicatorState.ConfirmationRequired => T("S3 同步已暂停：大量删除需要确认；点击审核"),
         S3SyncIndicatorState.Failed when !string.IsNullOrWhiteSpace(_s3SyncIndicatorError)
             => T("S3 同步失败：{0}；点击重试", _s3SyncIndicatorError),
         S3SyncIndicatorState.Failed => T("S3 同步失败；点击重试"),
@@ -123,15 +134,14 @@ public partial class MainWindow
 
     private async void S3SyncIndicatorButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (_s3SyncBusy) return;
-
         var settings = _s3SyncStoredSettings.Settings;
-        if (!settings.Enabled || settings.Validate() is not null)
+        if (_s3SyncBusy || !settings.Enabled || settings.Validate() is not null)
         {
             ShowStage3Page(SettingsPage, SystemS3SyncNavigationButton);
             ShowSettingsSection("Library");
             ShowSystemSettingsSection("Sync");
             ShowSettingsPanel(SystemSettingsPane);
+            if (_s3SyncBusy) return;
             S3SyncStatusText.Text = settings.Enabled
                 ? T("请先完善 S3 同步设置。")
                 : T("请先开启 S3 同步。 ");

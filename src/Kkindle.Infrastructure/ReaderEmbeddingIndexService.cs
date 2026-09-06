@@ -70,7 +70,7 @@ public sealed class ReaderEmbeddingIndexService
             cancellationToken.ThrowIfCancellationRequested();
             var texts = batch.Select(chunk => chunk.Content).ToArray();
             var vectors = await _embeddingService
-                .EmbedBatchAsync(texts, cancellationToken)
+                .EmbedPassagesAsync(texts, cancellationToken)
                 .ConfigureAwait(false);
             if (vectors.Count != batch.Length)
                 throw new InvalidDataException("Embedding 服务返回的批量数量不一致。" );

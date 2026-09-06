@@ -18,6 +18,15 @@ namespace Kkindle;
 /// </summary>
 public sealed class KreaderMarkdownTextBlock : TextBlock
 {
+    public static readonly StyledProperty<string?> MarkdownProperty =
+        AvaloniaProperty.Register<KreaderMarkdownTextBlock, string?>(nameof(Markdown));
+
+    public string? Markdown
+    {
+        get => GetValue(MarkdownProperty);
+        set => SetValue(MarkdownProperty, value);
+    }
+
     public static readonly StyledProperty<Action<string>?> CitationActionProperty =
         AvaloniaProperty.Register<KreaderMarkdownTextBlock, Action<string>?>(nameof(CitationAction));
 
@@ -55,15 +64,15 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == TextProperty || change.Property == CitationActionProperty)
-            RebuildMarkdownInlines(change.Property == TextProperty
-                ? change.GetNewValue<string?>()
-                : Text);
+        // TextBlock.Text and Inlines share storage. Binding the markdown to
+        // Text lets inline mutations clear the source and erase the answer.
+        if (change.Property == MarkdownProperty || change.Property == CitationActionProperty)
+            RebuildMarkdownInlines(Markdown);
     }
 
     private void RebuildMarkdownInlines(string? markdown)
     {
-        Inlines?.Clear();
+        Inlines = new InlineCollection();
         if (string.IsNullOrWhiteSpace(markdown)) return;
 
         var lines = markdown.Replace("\r\n", "\n").Split('\n');

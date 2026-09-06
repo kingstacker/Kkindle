@@ -406,6 +406,14 @@
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
+        <Style Selector="TextBox.readerAiQuestionInput /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.readerAiQuestionInput:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
 
         <!-- Caption buttons invert to black-on-white on hover, which is the
              product's hover language everywhere. Note there is no red close
@@ -1578,13 +1586,13 @@
         <Style Selector="Button.readerAiReasoningToggle">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinWidth" Value="0" />
-            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinHeight" Value="24" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="FontSize" Value="9" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />

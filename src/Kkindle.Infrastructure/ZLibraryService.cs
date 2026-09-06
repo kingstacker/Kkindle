@@ -111,6 +111,12 @@ public sealed class ZLibrarySettingsStore
 
     public async Task SaveAsync(ZLibrarySettings settings, CancellationToken cancellationToken = default)
     {
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
+        await SaveUnderLockAsync(settings, cancellationToken);
+    }
+
+    internal async Task SaveUnderLockAsync(ZLibrarySettings settings, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
+    {
         _paths.EnsureDirectories();
         var normalized = ZLibrarySettings.Normalize(settings);
         var persisted = new PersistedZLibrarySettings
@@ -125,6 +131,7 @@ public sealed class ZLibrarySettingsStore
         var temporaryPath = SettingsPath + ".tmp";
         await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, persisted, _jsonOptions, cancellationToken);
+        if (syncedAt is { } timestamp) File.SetLastWriteTimeUtc(temporaryPath, timestamp.UtcDateTime);
         File.Move(temporaryPath, SettingsPath, overwrite: true);
     }
 

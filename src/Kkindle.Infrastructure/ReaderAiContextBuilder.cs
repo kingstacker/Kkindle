@@ -18,6 +18,41 @@ public sealed class ReaderAiContextBuilder
         _readerData = readerData ?? throw new ArgumentNullException(nameof(readerData));
     }
 
+    /// <summary>Spread a bounded overview across chapters and their beginning,
+    /// middle and end, rather than spending the entire budget on early chapters.</summary>
+    public static ReaderAiContext BuildOverview(IReadOnlyList<BookContentChunk> chunks, int budget = DefaultMaxTokenBudget)
+    {
+        var chapters = chunks.Where(chunk => !string.IsNullOrWhiteSpace(chunk.Content))
+            .GroupBy(chunk => (chunk.BookFileId, chunk.ChapterIndex))
+            .OrderBy(group => group.Key.ChapterIndex)
+            .Select(group => group.OrderBy(chunk => chunk.StartOffset).ToArray()).ToArray();
+        if (chapters.Length == 0) return new ReaderAiContext(string.Empty, []);
+        var sourceLimit = Math.Min(24, Math.Max(1, (Math.Clamp(budget, 512, 16000) - 128) / 128));
+        var sampledChapters = SampleEvenly(chapters, sourceLimit);
+        var perChapter = Math.Max(1, sourceLimit / sampledChapters.Count);
+        var sampled = sampledChapters.SelectMany(chapter => SampleEvenly(chapter, perChapter)).ToArray();
+        var allowance = Math.Max(1, (Math.Clamp(budget, 512, 16000) - 128) / sampled.Length - 48);
+        var sources = sampled.Select((chunk, index) => new ReaderAiSource(
+            $"S{index + 1}", chunk, TruncateToTokenBudget(NormalizeContent(chunk.Content), allowance))).ToArray();
+        var text = new StringBuilder()
+            .AppendLine($"概览范围：抽样覆盖 {sampledChapters.Count}/{chapters.Length} 个章节，共 {sources.Length}/{chunks.Count} 个片段。")
+            .AppendLine("这是原文抽样，不是全文精读。请在回答中说明覆盖范围；未提供的内容不能推断为书中结论。");
+        foreach (var source in sources)
+            text.AppendLine($"[{source.Id}] chapter: {source.Chunk.ChapterTitle}")
+                .AppendLine($"location: chapter={source.Chunk.ChapterIndex + 1}; offset={source.Chunk.StartOffset}")
+                .AppendLine("content:").AppendLine(source.Content);
+        return new ReaderAiContext(text.ToString(), sources);
+    }
+
+    public static IReadOnlyList<T> SampleEvenly<T>(IReadOnlyList<T> items, int limit)
+    {
+        if (limit <= 0 || items.Count == 0) return [];
+        if (items.Count <= limit) return items.ToArray();
+        if (limit == 1) return [items[items.Count / 2]];
+        return Enumerable.Range(0, limit)
+            .Select(index => items[(int)((long)index * (items.Count - 1) / (limit - 1))]).ToArray();
+    }
+
     public async Task<ReaderAiContext> BuildAsync(
         Guid bookId,
         IReadOnlyList<ReaderRetrievalResult> retrievalResults,

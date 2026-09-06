@@ -1372,10 +1372,14 @@ public partial class MainWindow
 
     private void ClearReaderAiCollections()
     {
+        StopReaderAiThinkingAnimation();
+        _readerAiBusy = false;
+        SetReaderAiBusyState(false);
+        ReaderAiNewContentButton.IsVisible = false;
+        _readerAiConversation.Clear();
+        _readerAiFollowOutput = true;
         foreach (var message in ReaderAiMessages)
             message.Dispose();
-        foreach (var source in ReaderAiSources)
-            source.Dispose();
         ReaderAiMessages.Clear();
         ReaderAiSources.Clear();
     }

@@ -283,10 +283,11 @@ public sealed class S3SyncTests
     }
 
     [Fact]
-    public void MergeTombstones_DropsExpiredEntriesAndKeepsNewestVersion()
+    public void MergeTombstones_RetainsOldDeletionsAndKeepsNewestVersion()
     {
         var now = DateTimeOffset.UtcNow;
         var id = Guid.NewGuid();
+        var dormantId = Guid.NewGuid();
         var method = typeof(S3SyncService).GetMethod(
             "MergeTombstones",
             BindingFlags.Static | BindingFlags.NonPublic);
@@ -298,13 +299,16 @@ public sealed class S3SyncTests
                 new List<S3SyncTombstone>
                 {
                     new() { EntityType = "Book", Key = id.ToString(), DeletedAt = now.AddDays(-91) },
-                    new() { EntityType = "book", Key = id.ToString("N"), DeletedAt = now.AddDays(-2) }
+                    new() { EntityType = "book", Key = id.ToString("N"), DeletedAt = now.AddDays(-2) },
+                    new() { EntityType = "book", Key = dormantId.ToString("N"), DeletedAt = now.AddDays(-91) }
                 },
                 Array.Empty<S3SyncTombstone>(),
                 now
             ])!;
 
-        var tombstone = Assert.Single(result);
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, row => row.Key == dormantId.ToString("N") && row.DeletedAt == now.AddDays(-91));
+        var tombstone = Assert.Single(result, row => row.Key == id.ToString("N"));
         Assert.Equal("book", tombstone.EntityType);
         Assert.Equal(id.ToString("N"), tombstone.Key);
         Assert.Equal(now.AddDays(-2), tombstone.DeletedAt);

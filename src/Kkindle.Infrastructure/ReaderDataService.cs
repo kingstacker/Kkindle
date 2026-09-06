@@ -169,6 +169,12 @@ public sealed partial class ReaderDataService
             await EnsureReaderAnnotationStyleColumnAsync(connection, cancellationToken);
             await EnsureReaderBookmarkPositionColumnsAsync(connection, cancellationToken);
 
+            await using (var syncTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
+            {
+                await ReadingTimeSyncTracker.EnsureSchemaAsync(connection, syncTransaction, cancellationToken);
+                await syncTransaction.CommitAsync(cancellationToken);
+            }
+
             _ftsAvailable = await EnsureFullTextIndexAsync(connection, cancellationToken);
         }
         finally
@@ -688,14 +694,16 @@ public sealed partial class ReaderDataService
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO ReaderReadingStats (
                     BookFileId, BookId, CumulativeSeconds, ProgressPercent, CompletedChapters, TotalChapters, UpdatedAt)
                 VALUES (
                     $bookFileId, $bookId, $cumulativeSeconds, $progressPercent, $completedChapters, $totalChapters, $updatedAt)
                 ON CONFLICT(BookFileId) DO UPDATE SET
-                    BookId=$bookId, CumulativeSeconds=$cumulativeSeconds, ProgressPercent=$progressPercent,
+                    BookId=$bookId, CumulativeSeconds=MAX(CumulativeSeconds, $cumulativeSeconds), ProgressPercent=$progressPercent,
                     CompletedChapters=$completedChapters, TotalChapters=$totalChapters, UpdatedAt=$updatedAt;
                 """;
             command.Parameters.AddWithValue("$bookFileId", stats.BookFileId.ToString());
@@ -706,6 +714,8 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$totalChapters", stats.TotalChapters);
             command.Parameters.AddWithValue("$updatedAt", stats.UpdatedAt.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
+            await ReadingTimeSyncTracker.RecordCurrentTotalAsync(connection, transaction, stats.BookFileId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             NotifyDataChanged(LocalDataChangeKind.ReadingStats);
         }
         finally
@@ -813,7 +823,9 @@ public sealed partial class ReaderDataService
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO ReaderReadingStats (
                     BookFileId, BookId, CumulativeSeconds, ProgressPercent, CompletedChapters, TotalChapters, UpdatedAt)
@@ -836,6 +848,7 @@ public sealed partial class ReaderDataService
             await command.ExecuteNonQueryAsync(cancellationToken);
 
             var session = connection.CreateCommand();
+            session.Transaction = transaction;
             session.CommandText = """
                 INSERT INTO ReaderReadingSessions (
                     BookId, BookFileId, ActiveSeconds, ProgressPercent, RecordedAt)
@@ -847,6 +860,8 @@ public sealed partial class ReaderDataService
             session.Parameters.AddWithValue("$progressPercent", progressPercent);
             session.Parameters.AddWithValue("$recordedAt", DateTimeOffset.UtcNow.ToString("O"));
             await session.ExecuteNonQueryAsync(cancellationToken);
+            await ReadingTimeSyncTracker.RecordCurrentTotalAsync(connection, transaction, bookFileId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             NotifyDataChanged(LocalDataChangeKind.ReadingStats);
         }
         finally

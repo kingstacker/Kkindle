@@ -49,10 +49,17 @@ public sealed class AppSettingsStore
 
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
+        await SaveUnderLockAsync(settings, cancellationToken);
+    }
+
+    internal async Task SaveUnderLockAsync(AppSettings settings, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
+    {
         _paths.EnsureDirectories();
         var temporary = _paths.Settings + ".tmp";
         await using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, AppSettings.Normalize(settings), JsonOptions, cancellationToken);
+        if (syncedAt is { } timestamp) File.SetLastWriteTimeUtc(temporary, timestamp.UtcDateTime);
         File.Move(temporary, _paths.Settings, true);
     }
 }

@@ -7,6 +7,24 @@ namespace Kkindle.Tests;
 public sealed class EmbeddingModelDownloadTests
 {
     [Fact]
+    public void ExposesMultilingualE5AsAnXlmRobertaEmbeddingPackage()
+    {
+        var package = EmbeddingModelPackage.Find(" intfloat/multilingual-e5-small ");
+
+        Assert.NotNull(package);
+        Assert.Equal(384, package!.Dimension);
+        Assert.Equal(EmbeddingTokenizerKind.SentencePieceXlmRoberta, package.TokenizerKind);
+        Assert.Equal("sentencepiece.bpe.model", package.TokenizerFileName);
+        Assert.Equal("query: ", package.QueryPrefix);
+        Assert.Equal("passage: ", package.PassagePrefix);
+        Assert.Equal(475_338_004L, package.ExpectedTotalBytes);
+        Assert.Equal(470_268_510L, package.Files.Single(file => file.TargetFileName == "model.onnx").ExpectedBytes);
+        Assert.Equal(5_069_051L, package.Files.Single(file => file.TargetFileName == "sentencepiece.bpe.model").ExpectedBytes);
+        Assert.Contains(package.Files, file => file.TargetFileName == "model.onnx");
+        Assert.Contains(package.Files, file => file.TargetFileName == "sentencepiece.bpe.model");
+    }
+
+    [Fact]
     public async Task DownloadsThePackageAtomicallyAndReportsProgress()
     {
         var root = TestHelpers.CreateTempDirectory();

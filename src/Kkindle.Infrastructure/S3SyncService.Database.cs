@@ -32,19 +32,56 @@ public sealed partial class S3SyncService
     /// never included in a sync snapshot.
     /// </summary>
     public async Task InitializeDeletionTrackingAsync(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? deviceId = null)
     {
         await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
         await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
+        if (deviceId is not null)
+        {
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await ReadingTimeSyncTracker.ConfigureDeviceAsync(connection, transaction, NormalizeDeviceId(deviceId), cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
     }
 
     private static async Task EnsureDeletionTrackingSchemaAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        using (var control = CreateCommand(connection, transaction, """
+            CREATE TABLE IF NOT EXISTS S3SyncDeletionControl (
+                Id INTEGER PRIMARY KEY CHECK (Id = 1),
+                SchemaVersion INTEGER NOT NULL DEFAULT 0,
+                Suppressed INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT OR IGNORE INTO S3SyncDeletionControl (Id) VALUES (1);
+            """))
+            await control.ExecuteNonQueryAsync(cancellationToken);
+        await ReadingTimeSyncTracker.EnsureSchemaAsync(connection, transaction, cancellationToken);
+        using (var version = CreateCommand(connection, transaction,
+                   "SELECT SchemaVersion FROM S3SyncDeletionControl WHERE Id = 1;"))
+        {
+            if (Convert.ToInt32(await version.ExecuteScalarAsync(cancellationToken)) >= 2)
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return;
+            }
+        }
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText =
             """
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_Books;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_BookFiles;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_BookCollections;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_BookCollectionItems;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderAnnotations;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderProgress;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderBookmarks;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderLayoutSettings;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderReadingStats;
             CREATE TABLE IF NOT EXISTS S3SyncDeletionLog (
                 EntityType TEXT NOT NULL,
                 EntityKey TEXT NOT NULL,
@@ -56,6 +93,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_Books
             AFTER DELETE ON Books
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('book', OLD.Id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -63,6 +101,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_BookFiles
             AFTER DELETE ON BookFiles
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('file', OLD.Id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -70,6 +109,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_BookCollections
             AFTER DELETE ON BookCollections
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('collection', OLD.Id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -77,6 +117,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_BookCollectionItems
             AFTER DELETE ON BookCollectionItems
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('collection-item', OLD.CollectionId || '|' || OLD.BookId,
@@ -85,6 +126,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_ReaderAnnotations
             AFTER DELETE ON ReaderAnnotations
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('annotation', OLD.Id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -92,6 +134,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_ReaderProgress
             AFTER DELETE ON ReaderProgress
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('progress', OLD.BookFileId, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -99,6 +142,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_ReaderBookmarks
             AFTER DELETE ON ReaderBookmarks
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('bookmark', OLD.Id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -106,6 +150,7 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_ReaderLayoutSettings
             AFTER DELETE ON ReaderLayoutSettings
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('layout', OLD.BookFileId, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -113,12 +158,15 @@ public sealed partial class S3SyncService
 
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_ReaderReadingStats
             AFTER DELETE ON ReaderReadingStats
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
             BEGIN
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('stats', OLD.BookFileId, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
             END;
+            UPDATE S3SyncDeletionControl SET SchemaVersion = 2 WHERE Id = 1;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task<Dictionary<string, DateTimeOffset>> ReadRecordedDeletionTimesAsync(
@@ -126,12 +174,18 @@ public sealed partial class S3SyncService
     {
         await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
         await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
+        return await ReadRecordedDeletionTimesInTransactionAsync(connection, null, cancellationToken);
+    }
 
-        var cutoff = DateTimeOffset.UtcNow - TombstoneRetention;
+    private static async Task<Dictionary<string, DateTimeOffset>> ReadRecordedDeletionTimesInTransactionAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
         var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         using (var command = CreateCommand(
                    connection,
-                   null,
+                   transaction,
                    "SELECT EntityType, EntityKey, DeletedAt FROM S3SyncDeletionLog;"))
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
@@ -142,8 +196,7 @@ public sealed partial class S3SyncService
                 var deletedAt = ParseTimestamp(reader.GetString(2));
                 if (entityType.Length == 0
                     || entityKey.Length == 0
-                    || deletedAt == DateTimeOffset.MinValue
-                    || deletedAt < cutoff)
+                    || deletedAt == DateTimeOffset.MinValue)
                     continue;
 
                 var key = VersionKey(entityType, entityKey);
@@ -152,17 +205,20 @@ public sealed partial class S3SyncService
             }
         }
 
-        // Trigger-generated timestamps are UTC and ISO ordered. Pruning here
-        // keeps the journal bounded while preserving entries needed by an
-        // interrupted sync. A subsequent sync can still use the fallback for
-        // old rows that predate this journal.
-        using var prune = CreateCommand(
-            connection,
-            null,
-            "DELETE FROM S3SyncDeletionLog WHERE DeletedAt < $cutoff;");
-        AddParameter(prune, "$cutoff", cutoff.ToUniversalTime().ToString("O"));
-        await prune.ExecuteNonQueryAsync(cancellationToken);
+        // There is no device-retirement/acknowledgement protocol yet. Retain
+        // deletions while old snapshots can still be read from the bucket.
         return result;
+    }
+
+    private static async Task SuppressDeletionTrackingAsync(
+        SqliteConnection connection, SqliteTransaction transaction, bool suppressed, CancellationToken cancellationToken)
+    {
+        // This flag only exists inside the writer transaction. Other writers
+        // see zero after commit, or the old zero if the transaction rolls back.
+        using var command = CreateCommand(connection, transaction,
+            "UPDATE S3SyncDeletionControl SET Suppressed = $value WHERE Id = 1;");
+        AddParameter(command, "$value", suppressed ? 1 : 0);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task ClearRecordedDeletionTimesAsync(CancellationToken cancellationToken)
@@ -180,7 +236,9 @@ public sealed partial class S3SyncService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private async Task<S3SyncSnapshot> CaptureSnapshotAsync(
+    private static async Task<S3SyncSnapshot> CaptureDatabaseSnapshotAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
         string deviceId,
         IReadOnlyCollection<S3SyncTombstone> tombstones,
         CancellationToken cancellationToken)
@@ -192,8 +250,6 @@ public sealed partial class S3SyncService
             Tombstones = tombstones.ToList()
         };
 
-        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var bookUpdatedAt = new Dictionary<Guid, DateTimeOffset>();
 
         using (var command = CreateCommand(connection, transaction, 
@@ -432,6 +488,27 @@ public sealed partial class S3SyncService
                 });
         }
 
+        foreach (var stats in snapshot.ReadingStats)
+        {
+            stats.SecondsByDevice = await ReadingTimeSyncTracker.CaptureAsync(
+                connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
+            stats.CumulativeSeconds = ReadingTimeSyncTracker.Total(stats.SecondsByDevice);
+            await ReadingTimeSyncTracker.UpdateTotalAsync(connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
+        }
+        var recorded = await ReadRecordedDeletionTimesInTransactionAsync(connection, transaction, cancellationToken);
+        snapshot.Tombstones = MergeTombstones(tombstones, GetRecordedTombstones(recorded, snapshot));
+        return snapshot;
+    }
+
+    private async Task<S3SyncSnapshot> CaptureSnapshotAsync(
+        string deviceId,
+        IReadOnlyCollection<S3SyncTombstone> tombstones,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var snapshot = await CaptureDatabaseSnapshotAsync(connection, transaction, deviceId, tombstones, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         foreach (var book in snapshot.Books)
@@ -462,13 +539,27 @@ public sealed partial class S3SyncService
 
     private async Task<S3SyncSettingsSnapshot> CaptureSettingsAsync(CancellationToken cancellationToken)
     {
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
+        return await CaptureSettingsUnderLockAsync(cancellationToken);
+    }
+
+    private async Task<S3SyncSettingsSnapshot> CaptureSettingsUnderLockAsync(CancellationToken cancellationToken)
+    {
         var app = AppSettings.Normalize(await _appSettingsStore.LoadAsync(cancellationToken));
         var ai = await _aiSettingsStore.LoadAsync(cancellationToken);
         var kindleEmail = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
         var zLibrary = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
+        var appUpdatedAt = GetSettingsUpdatedAt(_paths.Settings);
+        var aiUpdatedAt = GetSettingsUpdatedAt(Path.Combine(_paths.Data, "ai-settings.json"));
+        var emailUpdatedAt = GetSettingsUpdatedAt(Path.Combine(_paths.Data, "kindle-email-settings.json"));
+        var zLibraryUpdatedAt = GetSettingsUpdatedAt(Path.Combine(_paths.Data, "zlibrary-settings.json"));
         return new S3SyncSettingsSnapshot
         {
-            UpdatedAt = GetSettingsUpdatedAt(),
+            UpdatedAt = new[] { appUpdatedAt, aiUpdatedAt, emailUpdatedAt, zLibraryUpdatedAt }.Max(),
+            AppUpdatedAt = appUpdatedAt,
+            AiUpdatedAt = aiUpdatedAt,
+            KindleEmailUpdatedAt = emailUpdatedAt,
+            ZLibraryUpdatedAt = zLibraryUpdatedAt,
             App = new S3SyncAppSettings
             {
                 UiLanguage = app.UiLanguage,
@@ -509,34 +600,22 @@ public sealed partial class S3SyncService
         };
     }
 
-    private DateTimeOffset GetSettingsUpdatedAt()
+    private static DateTimeOffset GetSettingsUpdatedAt(string path)
     {
-        var paths = new[]
+        try
         {
-            _paths.Settings,
-            Path.Combine(_paths.Data, "ai-settings.json"),
-            Path.Combine(_paths.Data, "kindle-email-settings.json"),
-            Path.Combine(_paths.Data, "zlibrary-settings.json")
-        };
-        var latest = DateTimeOffset.MinValue;
-        foreach (var path in paths)
-        {
-            try
-            {
-                if (File.Exists(path))
-                    latest = Max(latest, new DateTimeOffset(File.GetLastWriteTimeUtc(path)));
-            }
-            catch (IOException)
-            {
-            }
+            if (File.Exists(path)) return new DateTimeOffset(File.GetLastWriteTimeUtc(path));
         }
-        return latest;
+        catch (IOException)
+        {
+        }
+        return DateTimeOffset.MinValue;
     }
 
     private static DateTimeOffset Max(DateTimeOffset left, DateTimeOffset right) => left >= right ? left : right;
 
     private async Task<DatabaseMergeResult> ApplyRemoteSnapshotsAsync(
-        Amazon.S3.AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         S3SyncSnapshot localSnapshot,
         IReadOnlyList<S3SyncSnapshot> remoteSnapshots,
@@ -558,12 +637,13 @@ public sealed partial class S3SyncService
             snapshots.SelectMany(snapshot => snapshot.Tombstones ?? []));
 
         var warnings = new List<string>();
+        var isPartial = false;
         var pathsToDelete = new List<string>();
         var duplicateBooksMerged = await ConsolidateLocalDuplicateBooksAsync(
             pathsToDelete,
             cancellationToken);
         if (duplicateBooksMerged > 0)
-            warnings.Add($"已自动合并 {duplicateBooksMerged} 本重复书籍。");
+            warnings.Add(UiText.Get("已自动合并 {0} 本重复书籍。", duplicateBooksMerged));
 
         if (snapshots.Length == 0)
         {
@@ -700,18 +780,39 @@ public sealed partial class S3SyncService
         var remoteStats = snapshots
             .SelectMany(snapshot => snapshot.ReadingStats)
             .GroupBy(stats => stats.BookFileId)
-            .Select(group => group.OrderByDescending(stats => stats.UpdatedAt).First())
+            .Select(MergeRemoteReadingStats)
             .Where(item => !tombstonedBooks.Contains(item.BookId)
                 && !IsTombstoned(tombstoneIndex, "book", item.BookId, item.UpdatedAt)
                 && !IsTombstoned(tombstoneIndex, "stats", item.BookFileId, item.UpdatedAt)
                 && !IsTombstoned(tombstoneIndex, "file", item.BookFileId, item.UpdatedAt))
             .ToArray();
+        void RefilterRemoteRows()
+        {
+            var view = FilterRemoteRows(new S3SyncSnapshot
+            {
+                Books = remoteBooks.ToList(), Files = remoteFiles.ToList(), Collections = remoteCollections.ToList(),
+                CollectionItems = remoteItems.ToList(), Annotations = remoteAnnotations.ToList(),
+                Progress = remoteProgress.ToList(), Bookmarks = remoteBookmarks.ToList(),
+                Layouts = remoteLayouts.ToList(), ReadingStats = remoteStats.ToList()
+            }, tombstoneIndex, bookMap, fileMap, collectionMap);
+            remoteBooks = view.Books.ToArray();
+            remoteFiles = view.Files.ToArray();
+            remoteCollections = view.Collections.ToArray();
+            remoteItems = view.CollectionItems.ToArray();
+            remoteAnnotations = view.Annotations.ToArray();
+            remoteProgress = view.Progress.ToArray();
+            remoteBookmarks = view.Bookmarks.ToArray();
+            remoteLayouts = view.Layouts.ToArray();
+            remoteStats = view.ReadingStats.ToArray();
+        }
+        RefilterRemoteRows();
         var preparedFilesByLocalId = new Dictionary<Guid, PreparedSyncFile>();
         var plannedRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var coverUpdates = new Dictionary<Guid, string>();
+        var coverUpdates = new Dictionary<Guid, (string RelativePath, DateTimeOffset UpdatedAt)>();
         var filesDownloaded = 0;
+        var coversDownloaded = false;
 
-        progress?.Report("正在准备书籍文件…");
+        progress?.Report(UiText.Get("正在准备书籍文件…"));
         foreach (var remoteFile in remoteFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -738,7 +839,8 @@ public sealed partial class S3SyncService
             var absolutePath = ResolveDataPath(relativePath);
             if (absolutePath is null)
             {
-                warnings.Add($"《{remoteFile.FileName}》的同步路径无效。");
+                warnings.Add(UiText.Get("《{0}》的同步路径无效。", remoteFile.FileName));
+                isPartial = true;
                 continue;
             }
 
@@ -762,11 +864,13 @@ public sealed partial class S3SyncService
             }
             catch (AmazonS3Exception exception) when (IsMissingObjectForRead(exception))
             {
-                warnings.Add($"《{remoteFile.FileName}》的 S3 文件对象不存在，已跳过。");
+                warnings.Add(UiText.Get("《{0}》的 S3 文件对象不存在，已跳过。", remoteFile.FileName));
+                isPartial = true;
             }
             catch (InvalidDataException exception)
             {
-                warnings.Add($"《{remoteFile.FileName}》校验失败：{exception.Message}");
+                warnings.Add(UiText.Get("《{0}》校验失败：{1}", remoteFile.FileName, UiText.Localize(exception.Message)));
+                isPartial = true;
             }
         }
 
@@ -781,32 +885,40 @@ public sealed partial class S3SyncService
             var localCoverPath = existing?.CoverPath;
             var remoteWins = existing is null || remoteBook.UpdatedAt >= existing.UpdatedAt;
             if (!remoteWins && !string.IsNullOrWhiteSpace(localCoverPath)) continue;
+            if (coverUpdates.TryGetValue(localBookId, out var previousCover) && previousCover.UpdatedAt > remoteBook.UpdatedAt)
+                continue;
 
-            var relativePath = !string.IsNullOrWhiteSpace(localCoverPath) && remoteWins
-                ? localCoverPath!
-                : Path.Combine(
-                    "covers",
-                    $"{localBookId:N}{NormalizeCoverExtension(remoteBook.CoverFileName)}");
+            // Never replace the currently displayed cover during network I/O.
+            // The database transaction below decides whether this version wins.
+            var relativePath = Path.Combine("covers",
+                $"{localBookId:N}-{remoteBook.CoverHash!.ToLowerInvariant()}{NormalizeCoverExtension(remoteBook.CoverFileName)}");
             var absolutePath = ResolveDataPath(relativePath);
             if (absolutePath is null) continue;
             try
             {
-                await EnsureLocalBlobAsync(
+                coversDownloaded |= await EnsureLocalBlobAsync(
                     client,
                     settings,
                     remoteBook.CoverHash!,
                     absolutePath,
                     progress,
                     cancellationToken);
-                coverUpdates[localBookId] = Path.GetRelativePath(_paths.Data, absolutePath);
+                if (coverUpdates.TryGetValue(localBookId, out previousCover))
+                {
+                    var previousPath = ResolveDataPath(previousCover.RelativePath);
+                    if (previousPath is not null) pathsToDelete.Add(previousPath);
+                }
+                coverUpdates[localBookId] = (Path.GetRelativePath(_paths.Data, absolutePath), remoteBook.UpdatedAt);
             }
             catch (AmazonS3Exception exception) when (IsMissingObjectForRead(exception))
             {
-                warnings.Add("有封面对象不存在，已跳过封面同步。");
+                warnings.Add(UiText.Get("有封面对象不存在，已跳过封面同步。"));
+                isPartial = true;
             }
             catch (InvalidDataException exception)
             {
-                warnings.Add($"有封面校验失败：{exception.Message}");
+                warnings.Add(UiText.Get("有封面校验失败：{0}", UiText.Localize(exception.Message)));
+                isPartial = true;
             }
         }
 
@@ -821,11 +933,48 @@ public sealed partial class S3SyncService
         await using (var connection = await OpenDatabaseConnectionAsync(cancellationToken))
         await using (var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
         {
+            // Network I/O may have taken minutes. Rebase against the current
+            // database and deletion journal under the same writer transaction
+            // that applies the merge, so a just-deleted row cannot be revived.
+            var currentLocal = await CaptureDatabaseSnapshotAsync(
+                connection, transaction, localSnapshot.DeviceId, localSnapshot.Tombstones, cancellationToken);
+            var currentBooks = currentLocal.Books.ToDictionary(book => book.Id);
+            var currentFileIds = currentLocal.Files.Select(file => file.Id).ToHashSet();
+            localSnapshot.Tombstones = currentLocal.Tombstones;
+            tombstoneIndex = BuildTombstoneIndex(currentLocal.Tombstones);
+            RefilterRemoteRows();
+            foreach (var (id, prepared) in preparedFilesByLocalId.ToArray())
+            {
+                var source = remoteFiles.FirstOrDefault(file => fileMap.GetValueOrDefault(file.Id) == id);
+                if (source is not null) preparedFilesByLocalId[id] = prepared with { Source = source };
+                else
+                {
+                    preparedFilesByLocalId.Remove(id);
+                    var unusedPath = ResolveDataPath(prepared.RelativePath);
+                    if (unusedPath is not null) pathsToDelete.Add(unusedPath);
+                }
+            }
+            var survivingBookIds = remoteBooks.Select(book => bookMap[book.Id]).ToHashSet();
+            foreach (var (id, cover) in coverUpdates.ToArray())
+            {
+                if (!survivingBookIds.Contains(id)
+                    || (currentBooks.TryGetValue(id, out var currentBook) && currentBook.UpdatedAt > cover.UpdatedAt
+                        && !string.IsNullOrWhiteSpace(currentBook.LocalCoverPath)))
+                {
+                    var unusedPath = ResolveDataPath(cover.RelativePath);
+                    if (unusedPath is not null) pathsToDelete.Add(unusedPath);
+                    coverUpdates.Remove(id);
+                }
+            }
+            locallyKnownFileIds.Clear();
+            locallyKnownFileIds.UnionWith(currentLocal.Files.Select(file => file.Id));
+            locallyKnownFileIds.UnionWith(preparedFilesByLocalId.Keys);
+            await SuppressDeletionTrackingAsync(connection, transaction, true, cancellationToken);
             using var commandCache = new SqliteCommandCache(connection, transaction);
             foreach (var book in remoteBooks)
             {
                 if (!bookMap.TryGetValue(book.Id, out var localBookId)) continue;
-                if (!localIdentity.BooksById.ContainsKey(localBookId)
+                if (!currentBooks.ContainsKey(localBookId)
                     && addedBookIds.Add(localBookId))
                     booksAdded++;
                 var affected = await UpsertBookAsync(
@@ -853,7 +1002,7 @@ public sealed partial class S3SyncService
 
             foreach (var prepared in preparedFilesByLocalId.Values)
             {
-                if (localIdentity.FilesById.ContainsKey(prepared.LocalFileId)) continue;
+                if (currentFileIds.Contains(prepared.LocalFileId)) continue;
                 var command = commandCache.Get(
                     """
                     INSERT OR IGNORE INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256)
@@ -870,16 +1019,23 @@ public sealed partial class S3SyncService
                 locallyKnownFileIds.Add(prepared.LocalFileId);
             }
 
-            foreach (var (bookId, relativePath) in coverUpdates)
+            foreach (var (bookId, cover) in coverUpdates)
             {
+                if (currentBooks.TryGetValue(bookId, out var previous) && !string.IsNullOrWhiteSpace(previous.LocalCoverPath))
+                {
+                    var previousPath = ResolveDataPath(previous.LocalCoverPath);
+                    if (previousPath is not null) pathsToDelete.Add(previousPath);
+                }
                 var command = commandCache.Get(
                     """
                     UPDATE Books SET CoverPath = $coverPath
-                    WHERE Id = $bookId AND (CoverPath IS NULL OR CoverPath <> $coverPath);
+                    WHERE Id = $bookId AND (CoverPath IS NULL OR CoverPath <> $coverPath)
+                        AND (CoverPath IS NULL OR julianday(UpdatedAt) <= julianday($updatedAt));
                     """
                     );
                 AddParameter(command, "$bookId", bookId.ToString());
-                AddParameter(command, "$coverPath", relativePath);
+                AddParameter(command, "$coverPath", cover.RelativePath);
+                AddParameter(command, "$updatedAt", cover.UpdatedAt.ToString("O"));
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
             }
 
@@ -1063,6 +1219,8 @@ public sealed partial class S3SyncService
             {
                 if (!TryMapReaderRow(stats.BookId, stats.BookFileId, bookMap, fileMap, locallyKnownFileIds, out var localBookId, out var localFileId))
                     continue;
+                var mergedSeconds = await ReadingTimeSyncTracker.MergeAsync(
+                    connection, transaction, localFileId, stats.SecondsByDevice, stats.CumulativeSeconds, cancellationToken);
                 var command = commandCache.Get(
                     """
                     INSERT INTO ReaderReadingStats (
@@ -1081,19 +1239,21 @@ public sealed partial class S3SyncService
                     );
                 AddParameter(command, "$bookFileId", localFileId.ToString());
                 AddParameter(command, "$bookId", localBookId.ToString());
-                AddParameter(command, "$cumulativeSeconds", stats.CumulativeSeconds);
+                AddParameter(command, "$cumulativeSeconds", mergedSeconds);
                 AddParameter(command, "$progressPercent", stats.ProgressPercent);
                 AddParameter(command, "$completedChapters", stats.CompletedChapters);
                 AddParameter(command, "$totalChapters", stats.TotalChapters);
                 AddParameter(command, "$updatedAt", stats.UpdatedAt.ToString("O"));
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+                changed |= await ReadingTimeSyncTracker.UpdateTotalAsync(
+                    connection, transaction, localFileId, mergedSeconds, cancellationToken) > 0;
             }
 
             changed |= await ApplyTombstonesAsync(
                 connection,
                 transaction,
                 localSnapshot.Tombstones,
-                localSnapshot,
+                currentLocal,
                 bookMap,
                 fileMap,
                 collectionMap,
@@ -1115,6 +1275,7 @@ public sealed partial class S3SyncService
                 transaction,
                 pathsToDelete,
                 cancellationToken);
+            await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
 
@@ -1124,8 +1285,69 @@ public sealed partial class S3SyncService
             booksAdded,
             filesDownloaded,
             annotationsApplied,
-            changed || filesDownloaded > 0,
-            warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct()));
+            changed || filesDownloaded > 0 || coversDownloaded,
+            warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct())) { IsPartial = isPartial };
+    }
+
+    private static S3SyncReadingStats MergeRemoteReadingStats(IEnumerable<S3SyncReadingStats> versions)
+    {
+        var rows = versions.ToArray();
+        var latest = rows.OrderByDescending(row => row.UpdatedAt).First();
+        var counters = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var values = row.SecondsByDevice is { Count: > 0 } ? row.SecondsByDevice
+                : new Dictionary<string, long> { ["legacy"] = Math.Max(0, row.CumulativeSeconds) };
+            foreach (var (device, seconds) in values)
+                counters[device] = Math.Max(counters.GetValueOrDefault(device), seconds);
+        }
+        return new S3SyncReadingStats
+        {
+            BookId = latest.BookId, BookFileId = latest.BookFileId,
+            CumulativeSeconds = ReadingTimeSyncTracker.Total(counters), SecondsByDevice = counters,
+            ProgressPercent = latest.ProgressPercent, CompletedChapters = latest.CompletedChapters,
+            TotalChapters = latest.TotalChapters, UpdatedAt = latest.UpdatedAt
+        };
+    }
+
+    private static S3SyncSnapshot FilterRemoteRows(
+        S3SyncSnapshot view,
+        IReadOnlyDictionary<string, DateTimeOffset> tombstones,
+        IReadOnlyDictionary<Guid, Guid> bookMap,
+        IReadOnlyDictionary<Guid, Guid> fileMap,
+        IReadOnlyDictionary<Guid, Guid> collectionMap)
+    {
+        bool Deleted(string type, Guid id, DateTimeOffset version, IReadOnlyDictionary<Guid, Guid> map) =>
+            IsTombstoned(tombstones, type, id, version)
+            || (map.TryGetValue(id, out var mapped) && IsTombstoned(tombstones, type, mapped, version));
+        var deletedBooks = view.Books.Where(book => Deleted("book", book.Id, book.UpdatedAt, bookMap))
+            .Select(book => book.Id).ToHashSet();
+        var deletedCollections = view.Collections.Where(row => Deleted("collection", row.Id, row.CreatedAt, collectionMap))
+            .Select(row => row.Id).ToHashSet();
+        bool LiveReader(Guid book, Guid file, DateTimeOffset version) => !deletedBooks.Contains(book)
+            && !Deleted("book", book, version, bookMap) && !Deleted("file", file, version, fileMap);
+        view.Books = view.Books.Where(book => !deletedBooks.Contains(book.Id)).ToList();
+        view.Files = view.Files.Where(file => LiveReader(file.BookId, file.Id, file.ModifiedAt)).ToList();
+        view.Collections = view.Collections.Where(row => !deletedCollections.Contains(row.Id)).ToList();
+        view.CollectionItems = view.CollectionItems.Where(row =>
+            !deletedBooks.Contains(row.BookId) && !deletedCollections.Contains(row.CollectionId)
+            && !Deleted("book", row.BookId, row.AddedAt, bookMap)
+            && !Deleted("collection", row.CollectionId, row.AddedAt, collectionMap)
+            && !IsTombstoned(tombstones, "collection-item", CompositeKey(row.CollectionId, row.BookId), row.AddedAt)
+            && !IsTombstoned(tombstones, "collection-item", CompositeKey(
+                collectionMap.GetValueOrDefault(row.CollectionId, row.CollectionId),
+                bookMap.GetValueOrDefault(row.BookId, row.BookId)), row.AddedAt)).ToList();
+        view.Annotations = view.Annotations.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
+            && !IsTombstoned(tombstones, "annotation", row.Id, row.UpdatedAt)).ToList();
+        view.Progress = view.Progress.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
+            && !Deleted("progress", row.BookFileId, row.UpdatedAt, fileMap)).ToList();
+        view.Bookmarks = view.Bookmarks.Where(row => LiveReader(row.BookId, row.BookFileId, row.CreatedAt)
+            && !IsTombstoned(tombstones, "bookmark", row.Id, row.CreatedAt)).ToList();
+        view.Layouts = view.Layouts.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
+            && !Deleted("layout", row.BookFileId, row.UpdatedAt, fileMap)).ToList();
+        view.ReadingStats = view.ReadingStats.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
+            && !Deleted("stats", row.BookFileId, row.UpdatedAt, fileMap)).ToList();
+        return view;
     }
 
     private async Task<LocalDatabaseIdentity> ReadLocalDatabaseIdentityAsync(CancellationToken cancellationToken)
@@ -1430,7 +1652,9 @@ public sealed partial class S3SyncService
     {
         var books = new List<LocalDuplicateBook>();
         await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await SuppressDeletionTrackingAsync(connection, transaction, true, cancellationToken);
 
         using (var command = CreateCommand(connection, transaction,
             """
@@ -1482,6 +1706,7 @@ public sealed partial class S3SyncService
             }
         }
 
+        await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return merged;
     }
@@ -1711,6 +1936,7 @@ public sealed partial class S3SyncService
         SqliteCommandCache commandCache,
         CancellationToken cancellationToken)
     {
+        await ReadingTimeSyncTracker.MergeFilesAsync(connection, transaction, sourceFileId, targetFileId, cancellationToken);
         var copyAnnotations = commandCache.Get(
             """
             INSERT OR IGNORE INTO ReaderAnnotations (
@@ -1800,6 +2026,7 @@ public sealed partial class S3SyncService
             "CompletedChapters",
             "TotalChapters",
             "UpdatedAt");
+        await ReadingTimeSyncTracker.RecordCurrentTotalAsync(connection, transaction, targetFileId, cancellationToken);
 
         var moveSessions = commandCache.Get(
             """
@@ -1961,7 +2188,7 @@ public sealed partial class S3SyncService
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                warnings.Add($"无法删除重复书籍留下的本地文件：{exception.Message}");
+                warnings.Add(UiText.Get("无法删除重复书籍留下的本地文件：{0}", UiText.Localize(exception.Message)));
             }
         }
     }
@@ -2051,7 +2278,7 @@ public sealed partial class S3SyncService
     }
 
     private async Task<bool> EnsureLocalBlobAsync(
-        Amazon.S3.AmazonS3Client client,
+        IAmazonS3 client,
         S3SyncSettings settings,
         string hash,
         string targetPath,
@@ -2107,7 +2334,7 @@ public sealed partial class S3SyncService
             if (!string.Equals(actualHash, hash, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("下载后的同步文件校验值不匹配。");
             File.Move(temporaryPath, targetPath, overwrite: true);
-            progress?.Report($"已下载 {Path.GetFileName(targetPath)}");
+            progress?.Report(UiText.Get("已下载 {0}", Path.GetFileName(targetPath)));
             return true;
         }
         finally
@@ -2619,76 +2846,144 @@ public sealed partial class S3SyncService
         IReadOnlyList<S3SyncSnapshot> remoteSnapshots,
         CancellationToken cancellationToken)
     {
-        var remoteSettings = remoteSnapshots
+        var candidates = remoteSnapshots
             .Select(snapshot => snapshot.Settings)
-            .Where(settings => settings is not null)
-            .OrderByDescending(settings => settings!.UpdatedAt)
-            .FirstOrDefault();
-        if (remoteSettings is null
-            || (localSettings is not null && remoteSettings.UpdatedAt <= localSettings.UpdatedAt))
-            return false;
+            .OfType<S3SyncSettingsSnapshot>()
+            .ToArray();
+        if (candidates.Length == 0) return false;
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
+        localSettings = await CaptureSettingsUnderLockAsync(cancellationToken);
+        S3SyncSettingsSnapshot Latest(Func<S3SyncSettingsSnapshot, DateTimeOffset?> version) =>
+            candidates.MaxBy(settings => version(settings) ?? settings.UpdatedAt)!;
+        var applied = false;
 
-        var currentApp = AppSettings.Normalize(await _appSettingsStore.LoadAsync(cancellationToken));
-        var remoteApp = remoteSettings.App ?? new S3SyncAppSettings();
-        var mergedApp = AppSettings.Normalize(currentApp with
+        // Compare each settings file independently. A cancelled/failed write
+        // can then resume without an already-applied file masking the others.
+        var remoteSettings = Latest(settings => settings.AppUpdatedAt);
+        var remoteUpdatedAt = remoteSettings.AppUpdatedAt ?? remoteSettings.UpdatedAt;
+        if (remoteUpdatedAt > (localSettings.AppUpdatedAt ?? localSettings.UpdatedAt))
         {
-            UiLanguage = remoteApp.UiLanguage,
-            PreferredOpenFormat = remoteApp.PreferredOpenFormat,
-            AutoBackupEnabled = remoteApp.AutoBackupEnabled,
-            AutoGenerateEpubAndAzw3OnImport = remoteApp.AutoGenerateEpubAndAzw3OnImport,
-            CollectionsMutuallyExclusive = remoteApp.CollectionsMutuallyExclusive,
-            AutoBackupRetention = remoteApp.AutoBackupRetention,
-            AiEnabled = remoteApp.AiEnabled,
-            NetworkEnabled = remoteApp.NetworkEnabled,
-            AutoUpdateCheckEnabled = remoteApp.AutoUpdateCheckEnabled,
-            AutoDoubanMatchOnImport = remoteApp.AutoDoubanMatchOnImport,
-            CompareKindleLibraryEnabled = remoteApp.CompareKindleLibraryEnabled,
-            GridGalleryDisplay = remoteApp.GridGalleryDisplay,
-            ReadingMaterialsCollapsedByDefault = remoteApp.ReadingMaterialsCollapsedByDefault,
-            DefaultReaderLayout = remoteApp.DefaultReaderLayout ?? new ReaderLayoutSettings()
-        });
-        await _appSettingsStore.SaveAsync(mergedApp, cancellationToken);
+            var currentApp = AppSettings.Normalize(await _appSettingsStore.LoadAsync(cancellationToken));
+            var remoteApp = remoteSettings.App ?? new S3SyncAppSettings();
+            var mergedApp = AppSettings.Normalize(currentApp with
+            {
+                UiLanguage = remoteApp.UiLanguage,
+                PreferredOpenFormat = remoteApp.PreferredOpenFormat,
+                AutoBackupEnabled = remoteApp.AutoBackupEnabled,
+                AutoGenerateEpubAndAzw3OnImport = remoteApp.AutoGenerateEpubAndAzw3OnImport,
+                CollectionsMutuallyExclusive = remoteApp.CollectionsMutuallyExclusive,
+                AutoBackupRetention = remoteApp.AutoBackupRetention,
+                AiEnabled = remoteApp.AiEnabled,
+                NetworkEnabled = remoteApp.NetworkEnabled,
+                AutoUpdateCheckEnabled = remoteApp.AutoUpdateCheckEnabled,
+                AutoDoubanMatchOnImport = remoteApp.AutoDoubanMatchOnImport,
+                CompareKindleLibraryEnabled = remoteApp.CompareKindleLibraryEnabled,
+                GridGalleryDisplay = remoteApp.GridGalleryDisplay,
+                ReadingMaterialsCollapsedByDefault = remoteApp.ReadingMaterialsCollapsedByDefault,
+                DefaultReaderLayout = remoteApp.DefaultReaderLayout ?? new ReaderLayoutSettings()
+            });
+            await _appSettingsStore.SaveUnderLockAsync(mergedApp, cancellationToken, remoteUpdatedAt);
+            RemoteSettingsApplied?.Invoke(this, EventArgs.Empty);
+            applied = true;
+        }
 
-        var currentAi = await _aiSettingsStore.LoadAsync(cancellationToken);
-        var remoteAi = remoteSettings.Ai ?? new S3SyncAiSettings();
-        await _aiSettingsStore.SaveAsync(new AiConnectionSettings
+        remoteSettings = Latest(settings => settings.AiUpdatedAt);
+        remoteUpdatedAt = remoteSettings.AiUpdatedAt ?? remoteSettings.UpdatedAt;
+        if (remoteUpdatedAt > (localSettings.AiUpdatedAt ?? localSettings.UpdatedAt))
         {
-            Provider = string.IsNullOrWhiteSpace(remoteAi.Provider) ? currentAi.Provider : remoteAi.Provider,
-            BaseUrl = string.IsNullOrWhiteSpace(remoteAi.BaseUrl) ? currentAi.BaseUrl : remoteAi.BaseUrl,
-            Model = string.IsNullOrWhiteSpace(remoteAi.Model) ? currentAi.Model : remoteAi.Model,
-            ApiKey = currentAi.ApiKey
-        }, cancellationToken);
+            var currentAi = await _aiSettingsStore.LoadAsync(cancellationToken);
+            var remoteAi = remoteSettings.Ai ?? new S3SyncAiSettings();
+            await _aiSettingsStore.SaveUnderLockAsync(new AiConnectionSettings
+            {
+                Provider = string.IsNullOrWhiteSpace(remoteAi.Provider) ? currentAi.Provider : remoteAi.Provider,
+                BaseUrl = string.IsNullOrWhiteSpace(remoteAi.BaseUrl) ? currentAi.BaseUrl : remoteAi.BaseUrl,
+                Model = string.IsNullOrWhiteSpace(remoteAi.Model) ? currentAi.Model : remoteAi.Model,
+                ApiKey = currentAi.ApiKey
+            }, cancellationToken, remoteUpdatedAt);
+            RemoteSettingsApplied?.Invoke(this, EventArgs.Empty);
+            applied = true;
+        }
 
-        var currentEmail = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
-        var remoteEmail = remoteSettings.KindleEmail ?? new S3SyncKindleEmailSettings();
-        await _kindleEmailSettingsStore.SaveAsync(new KindleEmailSettings
+        remoteSettings = Latest(settings => settings.KindleEmailUpdatedAt);
+        remoteUpdatedAt = remoteSettings.KindleEmailUpdatedAt ?? remoteSettings.UpdatedAt;
+        if (remoteUpdatedAt > (localSettings.KindleEmailUpdatedAt ?? localSettings.UpdatedAt))
         {
-            KindleEmailAddress = remoteEmail.KindleEmailAddress,
-            SenderEmailAddress = remoteEmail.SenderEmailAddress,
-            SmtpHost = remoteEmail.SmtpHost,
-            SmtpPort = remoteEmail.SmtpPort,
-            SmtpUsername = remoteEmail.SmtpUsername,
-            SmtpPassword = currentEmail.SmtpPassword,
-            EnableSsl = remoteEmail.EnableSsl
-        }, cancellationToken);
+            var currentEmail = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
+            var remoteEmail = remoteSettings.KindleEmail ?? new S3SyncKindleEmailSettings();
+            await _kindleEmailSettingsStore.SaveUnderLockAsync(new KindleEmailSettings
+            {
+                KindleEmailAddress = remoteEmail.KindleEmailAddress,
+                SenderEmailAddress = remoteEmail.SenderEmailAddress,
+                SmtpHost = remoteEmail.SmtpHost,
+                SmtpPort = remoteEmail.SmtpPort,
+                SmtpUsername = remoteEmail.SmtpUsername,
+                SmtpPassword = currentEmail.SmtpPassword,
+                EnableSsl = remoteEmail.EnableSsl
+            }, cancellationToken, remoteUpdatedAt);
+            RemoteSettingsApplied?.Invoke(this, EventArgs.Empty);
+            applied = true;
+        }
 
-        var currentZLibrary = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
-        var remoteZLibrary = remoteSettings.ZLibrary ?? new S3SyncZLibrarySettings();
-        await _zLibrarySettingsStore.SaveAsync(new ZLibrarySettings
+        remoteSettings = Latest(settings => settings.ZLibraryUpdatedAt);
+        remoteUpdatedAt = remoteSettings.ZLibraryUpdatedAt ?? remoteSettings.UpdatedAt;
+        if (remoteUpdatedAt > (localSettings.ZLibraryUpdatedAt ?? localSettings.UpdatedAt))
         {
-            Email = remoteZLibrary.Email,
-            BaseUrl = string.IsNullOrWhiteSpace(remoteZLibrary.BaseUrl)
-                ? currentZLibrary.BaseUrl
-                : remoteZLibrary.BaseUrl,
-            Password = currentZLibrary.Password
-        }, cancellationToken);
-        return true;
+            var currentZLibrary = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
+            var remoteZLibrary = remoteSettings.ZLibrary ?? new S3SyncZLibrarySettings();
+            await _zLibrarySettingsStore.SaveUnderLockAsync(new ZLibrarySettings
+            {
+                Email = remoteZLibrary.Email,
+                BaseUrl = string.IsNullOrWhiteSpace(remoteZLibrary.BaseUrl)
+                    ? currentZLibrary.BaseUrl
+                    : remoteZLibrary.BaseUrl,
+                Password = currentZLibrary.Password
+            }, cancellationToken, remoteUpdatedAt);
+            RemoteSettingsApplied?.Invoke(this, EventArgs.Empty);
+            applied = true;
+        }
+        return applied;
     }
 
     private static List<S3SyncTombstone> DetectDeletedEntities(
         S3SyncSnapshot? previous,
         S3SyncSnapshot current)
         => DetectDeletedEntitiesCore(previous, current, null);
+
+    private static Dictionary<string, DateTimeOffset> GetSnapshotEntityVersions(S3SyncSnapshot snapshot)
+    {
+        var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        void Add(string type, string key, DateTimeOffset version) => result[VersionKey(type, key)] = version;
+        foreach (var row in snapshot.Books) Add("book", row.Id.ToString("N"), row.UpdatedAt);
+        foreach (var row in snapshot.Files) Add("file", row.Id.ToString("N"), row.ModifiedAt);
+        foreach (var row in snapshot.Collections) Add("collection", row.Id.ToString("N"), row.CreatedAt);
+        foreach (var row in snapshot.CollectionItems) Add("collection-item", CompositeKey(row.CollectionId, row.BookId), row.AddedAt);
+        foreach (var row in snapshot.Annotations) Add("annotation", row.Id.ToString("N"), row.UpdatedAt);
+        foreach (var row in snapshot.Progress) Add("progress", row.BookFileId.ToString("N"), row.UpdatedAt);
+        foreach (var row in snapshot.Bookmarks) Add("bookmark", row.Id.ToString("N"), row.CreatedAt);
+        foreach (var row in snapshot.Layouts) Add("layout", row.BookFileId.ToString("N"), row.UpdatedAt);
+        foreach (var row in snapshot.ReadingStats) Add("stats", row.BookFileId.ToString("N"), row.UpdatedAt);
+        return result;
+    }
+
+    private static List<S3SyncTombstone> GetRecordedTombstones(
+        IReadOnlyDictionary<string, DateTimeOffset> recorded,
+        S3SyncSnapshot current,
+        S3SyncSnapshot? previous = null)
+    {
+        var live = GetSnapshotEntityVersions(current);
+        var previousVersions = previous is null ? null : GetSnapshotEntityVersions(previous);
+        var result = new List<S3SyncTombstone>();
+        foreach (var (key, deletedAt) in recorded)
+        {
+            if (live.ContainsKey(key)
+                || (previousVersions?.TryGetValue(key, out var version) == true && version > deletedAt))
+                continue;
+            var separator = key.IndexOf(':');
+            if (separator <= 0) continue;
+            result.Add(new S3SyncTombstone { EntityType = key[..separator], Key = key[(separator + 1)..], DeletedAt = deletedAt });
+        }
+        return result;
+    }
 
     private static List<S3SyncTombstone> DetectDeletedEntitiesWithRecordedTimes(
         S3SyncSnapshot? previous,
@@ -2803,15 +3098,6 @@ public sealed partial class S3SyncService
                     ? fallbackDeletedAt
                     : item.DeletedAt;
 
-            // Rows that were already deleted before this version of Kkindle
-            // installed the journal have no trustworthy deletion timestamp.
-            // Keep such a newly observed tombstone alive for the retention
-            // window instead of dropping it immediately as an old row.
-            if (!hasRecordedDeletionTime
-                && recordedDeletionTimes is not null
-                && deletedAt < observationTime - TombstoneRetention)
-                deletedAt = observationTime;
-
             if (deletedAt == DateTimeOffset.MinValue)
                 deletedAt = observationTime;
             output.Add(new S3SyncTombstone
@@ -2825,9 +3111,17 @@ public sealed partial class S3SyncService
 
     private static void EnsureDeletionVolumeIsSafe(
         S3SyncSnapshot? previous,
-        IReadOnlyCollection<S3SyncTombstone> detectedDeletions)
+        IReadOnlyCollection<S3SyncTombstone> detectedDeletions,
+        string? confirmedDeletionFingerprint = null)
     {
         if (previous is null) return;
+        var knownKeys = GetSnapshotEntityVersions(previous).Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pendingKeys = detectedDeletions.Select(item => VersionKey(item.EntityType, item.Key))
+            .Where(knownKeys.Contains).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
+        var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(string.Join("\n", pendingKeys))));
+        if (string.Equals(confirmedDeletionFingerprint, fingerprint, StringComparison.Ordinal)) return;
+        var descriptions = new List<string>();
         var counts = new[]
         {
             (Name: "书籍", Type: "book", Total: previous.Books.Count),
@@ -2848,16 +3142,18 @@ public sealed partial class S3SyncService
                 .Where(item => string.Equals(
                     NormalizeTombstoneEntityType(item.EntityType),
                     count.Type,
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.OrdinalIgnoreCase)
+                    && knownKeys.Contains(VersionKey(item.EntityType, item.Key)))
                 .Select(item => NormalizeTombstoneKey(count.Type, item.Key))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count();
             if (deleted <= count.Total * LargeDeletionRatio) continue;
 
-            throw new InvalidOperationException(
-                $"本次同步检测到 {deleted} 条{count.Name}删除（占上次同步数据的 {deleted * 100.0 / count.Total:F0}%），" +
-                "为避免数据库损坏导致误删全库，已暂停同步。请检查本地书库后重试。 ");
+            descriptions.Add(UiText.Get("{0}：删除 {1}/{2} 条", UiText.Get(count.Name), deleted, count.Total));
         }
+        if (descriptions.Count > 0)
+            throw new S3SyncDeletionConfirmationRequiredException(
+                UiText.Get("本次同步将传播大量删除（{0}）。请确认这些删除由你主动执行。", string.Join("; ", descriptions)), fingerprint);
     }
 
     private static List<S3SyncTombstone> MergeTombstones(
@@ -2865,13 +3161,11 @@ public sealed partial class S3SyncService
         IEnumerable<S3SyncTombstone> second,
         DateTimeOffset? now = null)
     {
-        var cutoff = (now ?? DateTimeOffset.UtcNow) - TombstoneRetention;
         var merged = new Dictionary<string, S3SyncTombstone>(StringComparer.OrdinalIgnoreCase);
         foreach (var tombstone in first.Concat(second))
         {
             if (string.IsNullOrWhiteSpace(tombstone.EntityType)
-                || string.IsNullOrWhiteSpace(tombstone.Key)
-                || tombstone.DeletedAt < cutoff)
+                || string.IsNullOrWhiteSpace(tombstone.Key))
                 continue;
             var entityType = NormalizeTombstoneEntityType(tombstone.EntityType);
             var normalizedKey = NormalizeTombstoneKey(entityType, tombstone.Key);
@@ -2936,7 +3230,10 @@ public sealed partial class S3SyncService
         int FilesDownloaded,
         int AnnotationsApplied,
         bool Changed,
-        string? Warning);
+        string? Warning)
+    {
+        public bool IsPartial { get; init; }
+    }
 
     private static SqliteCommand CreateCommand(
         SqliteConnection connection,
@@ -2982,7 +3279,7 @@ public sealed partial class S3SyncService
     private static Guid ParseGuid(string value, string field) =>
         Guid.TryParse(value, out var result)
             ? result
-            : throw new InvalidDataException($"本地数据库字段 {field} 不是有效的 GUID。");
+            : throw new InvalidDataException(UiText.Get("本地数据库字段 {0} 不是有效的 GUID。", field));
 
     private static DateTimeOffset ParseTimestamp(string value) =>
         DateTimeOffset.TryParse(

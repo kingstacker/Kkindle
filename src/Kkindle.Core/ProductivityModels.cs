@@ -15,6 +15,8 @@ public enum LibrarySortMode
 
 public sealed record AppSettings
 {
+    public const string DefaultEmbeddingModelId = "BAAI/bge-small-zh-v1.5";
+
     public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
     public bool OnboardingCompleted { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -29,6 +31,7 @@ public sealed record AppSettings
     public int AutoBackupRetention { get; init; } = 5;
     public bool AiEnabled { get; init; } = true;
     public bool NetworkEnabled { get; init; } = true;
+    public string EmbeddingModelId { get; init; } = DefaultEmbeddingModelId;
     public bool AutoUpdateCheckEnabled { get; init; } = true;
 
     // Update checks run at most once per calendar day; the timestamp and the
@@ -67,6 +70,9 @@ public sealed record AppSettings
                 : settings.DefaultDeviceModel.Trim(),
             PreferredOpenFormat = preferred,
             CalibrePath = (settings.CalibrePath ?? string.Empty).Trim(),
+            EmbeddingModelId = string.IsNullOrWhiteSpace(settings.EmbeddingModelId)
+                ? DefaultEmbeddingModelId
+                : settings.EmbeddingModelId.Trim(),
             AutoGenerateEpubAndAzw3OnImport = settings.AutoGenerateEpubAndAzw3OnImport
                 || settings.AutoGenerateAzw3OnImport,
             AutoGenerateAzw3OnImport = false,

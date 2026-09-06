@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>en harness</title>
+<style>
+  body { margin: 0; background: #222; }
+  iframe { display: block; border: 0; background: #fff; }
+  #log { padding: 6px; font: 12px/1.4 monospace; color: #0f0; background: #000; }
+</style>
+<div id="log">…</div>
+<iframe id="f" src="index.html" width="1280" height="1500"></iframe>
+<script>
+  window.addEventListener("load", () => {
+    // Give the GitHub release fetch time to land, then switch to English and
+    // report what the release-driven DOM actually contains.
+    setTimeout(() => {
+      const w = document.getElementById("f").contentWindow;
+      const d = w.document;
+      w.applyLanguage("en");
+      const meta = d.querySelector('[data-file-meta="windows-installer"]');
+      const link = d.querySelector('[data-download-key="windows-installer"]');
+      document.getElementById("log").textContent =
+        "lang=" + d.documentElement.lang +
+        " | title=" + d.title.slice(0, 30) +
+        " | version=" + d.querySelector("#latest-version").textContent +
+        " | published=" + d.querySelector("#release-published").textContent +
+        " | status=" + d.querySelector("#release-status").textContent.slice(0, 46) +
+        " | assetMeta=" + (meta ? meta.textContent.slice(0, 34) : "n/a") +
+        " | href=" + (link ? link.getAttribute("href").slice(-34) : "n/a") +
+        " | recommended=" + (d.querySelector(".platform.is-recommended")?.dataset.platform || "none");
+    }, 4000);
+  });
+</script>
