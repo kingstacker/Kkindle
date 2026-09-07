@@ -98,6 +98,14 @@ public sealed class TtsService : IDisposable
     /// </summary>
     public bool CanOpen => !_disposed && _player is not null;
 
+    /// <summary>
+    /// Indicates whether the caller can offer an automatic environment repair.
+    /// The setup implementation is optional so platform heads and tests can
+    /// still use TTS without promising an installer that is not present.
+    /// </summary>
+    public bool CanRepairEnvironment =>
+        !_disposed && _engine is not null && _environmentSetup is not null;
+
     public TtsPlaybackState State
     {
         get

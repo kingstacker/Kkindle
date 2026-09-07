@@ -355,6 +355,7 @@ public partial class MainWindow
 
             try
             {
+                if (!await PrepareSettingsForExitAsync()) return;
                 _allowWindowCloseForPendingUpdate = true;
                 _updateService!.LaunchInstaller(packagePath);
                 if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

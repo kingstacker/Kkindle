@@ -37,6 +37,8 @@ jobs:
         run: dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj -c Release
       - name: Run platform-common tests
         run: dotnet test tests/Kkindle.Platform.Common.Tests/Kkindle.Platform.Common.Tests.csproj -c Release
+      - name: Run settings UI regression tests
+        run: dotnet test tests/Kkindle.App.Tests/Kkindle.App.Tests.csproj -c Release
       - name: Build native package
         run: ${{ matrix.package_command }}
       - name: Install and smoke-test Linux package

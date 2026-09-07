@@ -75,8 +75,7 @@ public partial class MainWindow
     private long _s3LocalChangeVersion;
     private long _s3SyncedLocalChangeVersion;
     private int _s3LocalChangeRetryAttempt;
-    private bool _suppressS3SyncToggleAutoSave;
-    private bool _s3SyncToggleAutoSaveInProgress;
+    private bool _suppressS3SettingsDraftTracking;
     private DateTimeOffset? _lastS3SyncAt;
     private CancellationTokenSource? _zLibrarySearchCancellation;
     private int _zLibraryPage = 1;
@@ -84,7 +83,6 @@ public partial class MainWindow
     private bool _readingMaterialsExportMode;
     private bool _suppressMainAiProviderChange;
     private bool _suppressMainAiModelChange;
-    private bool _settingsPanelVisible;
     private bool _deviceGridView = true;
     private KindleBookCardViewModel? _deviceMultiSelectAnchor;
     private bool _deviceRubberBandSelecting;
@@ -117,6 +115,8 @@ public partial class MainWindow
     private bool _appSettingsStartupSettled;
     private bool _calibreSetupBusy;
     private CancellationTokenSource? _calibreDetectionCancellation;
+    private bool _diagnosticsRepairBusy;
+    private bool _diagnosticsRefreshing;
 
     public ObservableCollection<KindleBookCardViewModel> DeviceBooks { get; } = [];
     public ObservableCollection<KindleBookCardViewModel> VisibleDeviceBooks { get; } = [];
@@ -387,20 +387,15 @@ public partial class MainWindow
         }
         await RefreshDevicesAsync(scanBooks: false, cancellationToken);
 
-        // Let any pending layout/template work run to completion, then drop a
-        // debounce that was only triggered by startup-time control events —
-        // it must not surface the “设置已保存” capsule.
+        // Startup layout can raise harmless change events. Equality checks in
+        // the scheduler filter those without cancelling real user edits.
         await Dispatcher.UIThread.InvokeAsync(() => { });
-        _appSettingsAutoSaveCancellation?.Cancel();
-        _appSettingsAutoSaveCancellation?.Dispose();
-        _appSettingsAutoSaveCancellation = null;
         _appSettingsStartupSettled = true;
     }
 
     private void ShowLibraryPage()
     {
         WindowBrandText.IsVisible = false;
-        HideSettingsPanel();
         SetSidebarActive(AllBooksButton);
         FadeInPage(LibraryWorkspace);
         LibraryDetailPane.IsVisible = _selectedCard is not null;
@@ -417,7 +412,6 @@ public partial class MainWindow
     private void ShowStage3Page(Control page, Button? activeButton = null)
     {
         WindowBrandText.IsVisible = false;
-        HideSettingsPanel();
         activeButton ??= page switch
         {
             _ when ReferenceEquals(page, DevicePage) => KindleBooksButton,
@@ -443,35 +437,6 @@ public partial class MainWindow
         SettingsPage.IsVisible = ReferenceEquals(page, SettingsPage);
     }
 
-    private void ShowSettingsPanel(Control panel)
-    {
-        KindleEmailSettingsPane.IsVisible = false;
-        ZLibraryAccountPane.IsVisible = false;
-        ReaderAiSettingsPane.IsVisible = false;
-        SystemSettingsPane.IsVisible = false;
-        panel.IsVisible = true;
-        _settingsPanelVisible = true;
-        if (LibraryRoot.ColumnDefinitions.Count >= 3)
-        {
-            LibraryRoot.ColumnDefinitions[1].Width = new GridLength(0);
-            LibraryRoot.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
-        }
-    }
-
-    private void HideSettingsPanel()
-    {
-        KindleEmailSettingsPane.IsVisible = false;
-        ZLibraryAccountPane.IsVisible = false;
-        ReaderAiSettingsPane.IsVisible = false;
-        SystemSettingsPane.IsVisible = false;
-        _settingsPanelVisible = false;
-        if (LibraryRoot.ColumnDefinitions.Count >= 3)
-        {
-            LibraryRoot.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
-            LibraryRoot.ColumnDefinitions[2].Width = new GridLength(0);
-        }
-    }
-
     private void SetSidebarActive(Button activeButton)
     {
         Button[] buttons =
@@ -483,12 +448,7 @@ public partial class MainWindow
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
             ReadingDashboardButton,
-            SettingsNavigationButton,
-            SystemBackupNavigationButton,
-            SystemS3SyncNavigationButton,
-            KindleEmailSettingsNavigationButton,
-            ZLibraryAccountNavigationButton,
-            ReaderAiSettingsNavigationButton
+            SettingsNavigationButton
         ];
         foreach (var button in buttons)
             button.Classes.Remove("active");
@@ -500,12 +460,7 @@ public partial class MainWindow
                 || ReferenceEquals(activeButton, DictionaryManagementButton) => DeviceManagementSectionButton,
             _ when ReferenceEquals(activeButton, ReaderNotesNavigationButton)
                 || ReferenceEquals(activeButton, ReadingDashboardButton) => ReadingSectionButton,
-            _ when ReferenceEquals(activeButton, SettingsNavigationButton)
-                || ReferenceEquals(activeButton, SystemBackupNavigationButton)
-                || ReferenceEquals(activeButton, SystemS3SyncNavigationButton)
-                || ReferenceEquals(activeButton, KindleEmailSettingsNavigationButton)
-                || ReferenceEquals(activeButton, ZLibraryAccountNavigationButton)
-                || ReferenceEquals(activeButton, ReaderAiSettingsNavigationButton) => SystemSectionButton,
+            _ when ReferenceEquals(activeButton, SettingsNavigationButton) => null,
             _ => BookManagementSectionButton
         };
         switch (_activeNavigationSectionButton)
@@ -518,9 +473,6 @@ public partial class MainWindow
                 break;
             case var section when ReferenceEquals(section, ReadingSectionButton):
                 ReadingChildren.IsVisible = true;
-                break;
-            case var section when ReferenceEquals(section, SystemSectionButton):
-                SystemChildren.IsVisible = true;
                 break;
         }
         UpdateSidebarSectionVisuals();
@@ -3425,113 +3377,28 @@ public partial class MainWindow
         return T("{0:0.#} 小时", seconds / 3600d);
     }
 
-    private void SettingsButton_Click(object? sender, RoutedEventArgs e)
-    {
-        ShowStage3Page(SettingsPage, SettingsNavigationButton);
-        SettingsDataPathText.Text = _paths.Data;
-        ShowSettingsSection("Library");
-    }
-
-    private void SystemBackupNavigationButton_Click(object? sender, RoutedEventArgs e)
-    {
-        ShowStage3Page(SettingsPage, SystemBackupNavigationButton);
-        ShowSettingsSection("Library");
-        ShowSystemSettingsSection("Backup");
-        ShowSettingsPanel(SystemSettingsPane);
-    }
-
-    private void SystemS3SyncNavigationButton_Click(object? sender, RoutedEventArgs e)
-    {
-        ShowStage3Page(SettingsPage, SystemS3SyncNavigationButton);
-        ShowSettingsSection("Library");
-        ShowSystemSettingsSection("Sync");
-        ShowSettingsPanel(SystemSettingsPane);
-    }
-
-    private async void KindleEmailSettingsButton_Click(object? sender, RoutedEventArgs e)
-    {
-        _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(_lifetimeCancellation.Token);
-        KindleEmailRecipientBox.Text = _kindleEmailSettings.KindleEmailAddress;
-        KindleEmailSenderBox.Text = _kindleEmailSettings.SenderEmailAddress;
-        KindleEmailSmtpHostBox.Text = _kindleEmailSettings.SmtpHost;
-        KindleEmailSmtpPortBox.Text = _kindleEmailSettings.SmtpPort.ToString(CultureInfo.InvariantCulture);
-        KindleEmailUsernameBox.Text = _kindleEmailSettings.SmtpUsername;
-        KindleEmailPasswordBox.Text = _kindleEmailSettings.SmtpPassword;
-        KindleEmailSslCheck.IsChecked = _kindleEmailSettings.EnableSsl;
-        ShowStage3Page(SettingsPage, KindleEmailSettingsNavigationButton);
-        ShowSettingsSection("Kindle");
-        KindleEmailSettingsStatusText.Text = string.Empty;
-        ShowSettingsPanel(KindleEmailSettingsPane);
-        KindleEmailRecipientBox.Focus();
-    }
-
-    private async void ReaderAiSettingsButton_Click(object? sender, RoutedEventArgs e)
-    {
-        ShowStage3Page(SettingsPage, ReaderAiSettingsNavigationButton);
-        ShowSettingsSection("Kindle");
-        await LoadMainReaderAiSettingsAsync();
-        ShowSettingsPanel(ReaderAiSettingsPane);
-        MainReaderAiBaseUrlBox.Focus();
-    }
-
-    private async void SettingsCategoryButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: not null } button) return;
-        var tag = button.Tag.ToString()!;
-        ShowSettingsSection(tag);
-        if (string.Equals(tag, "Library", StringComparison.OrdinalIgnoreCase))
-            await RefreshTrashItemsAsync();
-        else if (string.Equals(tag, "Diagnostics", StringComparison.OrdinalIgnoreCase))
-            await RefreshPlatformDiagnosticsAsync();
-    }
-
-    private void ShowSettingsSection(string tag)
-    {
-        var sections = new Dictionary<string, Control>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Library"] = SettingsLibrarySection,
-            ["Calibre"] = SettingsCalibreSection,
-            ["Kindle"] = SettingsKindleSection,
-            ["Reading"] = SettingsReadingSection,
-            ["About"] = SettingsAboutSection,
-            ["Diagnostics"] = SettingsDiagnosticsSection
-        };
-
-        foreach (var section in sections.Values)
-            section.IsVisible = false;
-        if (!sections.TryGetValue(tag, out var activeSection))
-        {
-            tag = "Library";
-            activeSection = SettingsLibrarySection;
-        }
-        activeSection.IsVisible = true;
-
-        var buttons = new[]
-        {
-            SettingsLibraryButton,
-            SettingsCalibreButton,
-            SettingsKindleButton,
-            SettingsReadingButton,
-            SettingsAboutButton,
-            SettingsDiagnosticsButton
-        };
-        foreach (var button in buttons)
-            button.Classes.Set("active", string.Equals(button.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase));
-
-        SettingsScrollViewer.Offset = new Vector(0, 0);
-    }
-
     private void UpdateDiagnosticsTexts()
     {
         SettingsDiagnosticsTitleText.Text = T("跨平台诊断");
-        SettingsDiagnosticsDescriptionText.Text = T("检查数据目录、阅读器、PDF、Calibre 和设备能力；不会下载或修改系统组件。");
+        SettingsDiagnosticsDescriptionText.Text = T("检测数据目录、阅读器、PDF、Calibre 和设备能力；缺少可安装依赖时可在这里一键修复。");
+        RepairDiagnosticsButton.Content = T("一键修复");
         RefreshDiagnosticsButton.Content = T("重新检测");
+    }
+
+    private void UpdateDiagnosticsRepairButtonState()
+    {
+        RepairDiagnosticsButton.IsEnabled = !_diagnosticsRepairBusy
+            && !_diagnosticsRefreshing
+            && PlatformDiagnostics.Any(item => item.CanRepair);
     }
 
     private async Task RefreshPlatformDiagnosticsAsync()
     {
+        if (_diagnosticsRefreshing) return;
+        _diagnosticsRefreshing = true;
         UpdateDiagnosticsTexts();
         RefreshDiagnosticsButton.IsEnabled = false;
+        RepairDiagnosticsButton.IsEnabled = false;
         DiagnosticsStatusText.Text = T("正在检测…");
         try
         {
@@ -3547,13 +3414,22 @@ public partial class MainWindow
                     tts.IsAvailable
                         ? PlatformDiagnosticStatus.Ready
                         : _readerTts.CanOpen
-                            ? PlatformDiagnosticStatus.Warning
-                            : PlatformDiagnosticStatus.Unavailable,
-                    tts.IsAvailable ? "edge-tts 与音频输出已就绪。" : tts.Message));
+                        ? PlatformDiagnosticStatus.Warning
+                        : PlatformDiagnosticStatus.Unavailable,
+                    tts.IsAvailable ? "edge-tts 与音频输出已就绪。" : tts.Message,
+                    tts.IsAvailable || !_readerTts.CanRepairEnvironment
+                        ? PlatformDiagnosticRepairKind.None
+                        : PlatformDiagnosticRepairKind.InstallTts));
             }
             catch (Exception exception)
             {
-                diagnostics.Add(new PlatformDiagnostic("TTS", PlatformDiagnosticStatus.Warning, exception.Message));
+                diagnostics.Add(new PlatformDiagnostic(
+                    "TTS",
+                    PlatformDiagnosticStatus.Warning,
+                    exception.Message,
+                    _readerTts.CanRepairEnvironment
+                        ? PlatformDiagnosticRepairKind.InstallTts
+                        : PlatformDiagnosticRepairKind.None));
             }
 
             foreach (var item in PlatformDiagnostics)
@@ -3572,12 +3448,160 @@ public partial class MainWindow
         }
         finally
         {
-            RefreshDiagnosticsButton.IsEnabled = true;
+            _diagnosticsRefreshing = false;
+            RefreshDiagnosticsButton.IsEnabled = !_diagnosticsRepairBusy;
+            UpdateDiagnosticsRepairButtonState();
         }
     }
 
     private async void RefreshDiagnosticsButton_Click(object? sender, RoutedEventArgs e) =>
         await RefreshPlatformDiagnosticsAsync();
+
+    private async void RepairDiagnosticsButton_Click(object? sender, RoutedEventArgs e) =>
+        await RepairDiagnosticsAsync();
+
+    private async void RepairDiagnosticButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: PlatformDiagnosticViewModel diagnostic }) return;
+        await RepairDiagnosticsAsync(diagnostic.Item.RepairKind);
+    }
+
+    private async Task RepairDiagnosticsAsync(
+        PlatformDiagnosticRepairKind? requestedKind = null)
+    {
+        if (_diagnosticsRepairBusy || _diagnosticsRefreshing) return;
+
+        PlatformDiagnosticRepairKind[] repairKinds;
+        if (requestedKind is { } requested)
+        {
+            repairKinds = requested == PlatformDiagnosticRepairKind.None
+                ? []
+                : [requested];
+        }
+        else
+        {
+            repairKinds = PlatformDiagnostics
+                .Where(item => item.CanRepair)
+                .Select(item => item.Item.RepairKind)
+                .Distinct()
+                .ToArray();
+        }
+
+        if (repairKinds.Length == 0)
+        {
+            DiagnosticsStatusText.Text = T("没有可自动修复的项目。");
+            return;
+        }
+
+        if (NetworkEnabledCheck.IsChecked == false)
+        {
+            DiagnosticsStatusText.Text = T("请先开启“允许网络功能”。");
+            return;
+        }
+
+        var repairNames = repairKinds
+            .Select(GetDiagnosticRepairName)
+            .ToArray();
+        var message = T(
+            "将尝试自动安装 {0}。安装程序可能请求系统权限，是否继续？",
+            string.Join("、", repairNames));
+        if (!await ConfirmAsync(
+                T("一键修复"),
+                message,
+                T("继续安装"),
+                _lifetimeCancellation.Token))
+        {
+            return;
+        }
+
+        _diagnosticsRepairBusy = true;
+        RefreshDiagnosticsButton.IsEnabled = false;
+        UpdateDiagnosticsRepairButtonState();
+        try
+        {
+            _paths.EnsureDirectories();
+            DiagnosticsStatusText.Text = T("正在修复…");
+            foreach (var repairKind in repairKinds)
+            {
+                switch (repairKind)
+                {
+                    case PlatformDiagnosticRepairKind.InstallCalibre:
+                        await RunCalibreSetupAsync(installPlugin: false);
+                        break;
+                    case PlatformDiagnosticRepairKind.InstallTts:
+                        await RunTtsDiagnosticRepairAsync();
+                        break;
+                }
+            }
+
+            await RefreshPlatformDiagnosticsAsync();
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            DiagnosticsStatusText.Text = T(
+                "诊断修复失败：{0}",
+                UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            _diagnosticsRepairBusy = false;
+            RefreshDiagnosticsButton.IsEnabled = !_diagnosticsRefreshing;
+            UpdateDiagnosticsRepairButtonState();
+        }
+    }
+
+    private async Task RunTtsDiagnosticRepairAsync()
+    {
+        if (!_readerTts.CanRepairEnvironment)
+        {
+            DiagnosticsStatusText.Text = T("当前版本没有配置 TTS 自动安装器。");
+            return;
+        }
+
+        var progress = new Progress<TtsSetupProgress>(update =>
+        {
+            if (_diagnosticsRepairBusy && !_lifetimeCancellation.IsCancellationRequested)
+                DiagnosticsStatusText.Text = UiText.Localize(update.Message);
+        });
+        try
+        {
+            var availability = await _readerTts.EnsureEnvironmentReadyAsync(
+                progress,
+                _lifetimeCancellation.Token);
+            _readerTtsEnvironmentChecked = true;
+            _readerTtsNotice = availability.IsAvailable
+                ? null
+                : availability.Message;
+            UpdateReaderTtsUi();
+            if (!availability.IsAvailable)
+            {
+                DiagnosticsStatusText.Text = T(
+                    "安装失败：{0}",
+                    UiText.Localize(availability.Message));
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            DiagnosticsStatusText.Text = T("安装已取消。");
+        }
+        catch (Exception exception)
+        {
+            DiagnosticsStatusText.Text = T(
+                "安装失败：{0}",
+                UiText.Localize(exception.Message));
+        }
+    }
+
+    private static string GetDiagnosticRepairName(
+        PlatformDiagnosticRepairKind repairKind) => repairKind switch
+    {
+        PlatformDiagnosticRepairKind.InstallCalibre => T("下载/安装 Calibre"),
+        PlatformDiagnosticRepairKind.InstallTts => T("安装 TTS"),
+        _ => T("修复")
+    };
 
     private async Task RefreshTrashItemsAsync()
     {
@@ -3652,32 +3676,9 @@ public partial class MainWindow
         }
     }
 
-    private void ShowSystemSettingsSection(string tag)
-    {
-        var sections = new Dictionary<string, Control>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Backup"] = SettingsBackupSection,
-            ["Sync"] = SettingsSyncSection
-        };
-
-        foreach (var section in sections.Values)
-            section.IsVisible = false;
-        if (!sections.TryGetValue(tag, out var activeSection))
-        {
-            tag = "Sync";
-            activeSection = SettingsSyncSection;
-        }
-        activeSection.IsVisible = true;
-
-        SystemSettingsPaneTitle.Text = string.Equals(tag, "Sync", StringComparison.OrdinalIgnoreCase)
-            ? T("S3 同步")
-            : T("备份");
-
-        SystemSettingsScrollViewer.Offset = new Vector(0, 0);
-    }
-
     private async Task LoadMainReaderAiSettingsAsync()
     {
+        ReaderAiSettingsPane.IsEnabled = false;
         try
         {
             _readerAiSettings = await _aiSettingsStore.LoadAsync(_lifetimeCancellation.Token);
@@ -3699,6 +3700,7 @@ public partial class MainWindow
             {
                 _suppressMainAiProviderChange = false;
             }
+            _mainReaderAiSettingsLoaded = true;
             if (_readerAiAvailableModels.Count == 0 && _readerAiSettings.IsConfigured)
                 _ = ObserveReaderTaskAsync(
                     RefreshReaderAiModelSelectorAsync(_lifetimeCancellation.Token));
@@ -3709,6 +3711,7 @@ public partial class MainWindow
         {
             MainReaderAiSettingsStatusText.Text = T("读取 AI 设置失败：{0}", UiText.Localize(exception.Message));
         }
+        finally { ReaderAiSettingsPane.IsEnabled = true; }
     }
 
     private void MainReaderAiProviderBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -3822,7 +3825,9 @@ public partial class MainWindow
             _lifetimeCancellation.Token);
     }
 
-    private void PopulateSettingsControls()
+    private void PopulateSettingsControls() => PopulateSettingsControlsCore(false, false, false);
+
+    private void PopulateSettingsControlsCore(bool preserveS3Draft, bool preserveEmailDraft, bool preserveAccountDraft)
     {
         _suppressAppSettingsAutoSave = true;
         try
@@ -3859,17 +3864,15 @@ public partial class MainWindow
                 : T("尚未检查更新");
             SettingsDataPathText.Text = _paths.Data;
             UpdateDiagnosticsTexts();
-            ZLibraryEmailBox.Text = _zLibrarySettings.Email;
-            ZLibraryPasswordBox.Text = _zLibrarySettings.Password;
-            ZLibraryBaseUrlBox.Text = _zLibrarySettings.BaseUrl;
-            KindleEmailRecipientBox.Text = _kindleEmailSettings.KindleEmailAddress;
-            KindleEmailSenderBox.Text = _kindleEmailSettings.SenderEmailAddress;
-            KindleEmailSmtpHostBox.Text = _kindleEmailSettings.SmtpHost;
-            KindleEmailSmtpPortBox.Text = _kindleEmailSettings.SmtpPort.ToString(CultureInfo.InvariantCulture);
-            KindleEmailUsernameBox.Text = _kindleEmailSettings.SmtpUsername;
-            KindleEmailPasswordBox.Text = _kindleEmailSettings.SmtpPassword;
-            KindleEmailSslCheck.IsChecked = _kindleEmailSettings.EnableSsl;
-            PopulateS3SyncControls();
+            if (!preserveAccountDraft)
+            {
+                PopulateZLibraryControls();
+            }
+            if (!preserveEmailDraft)
+            {
+                PopulateKindleEmailControls();
+            }
+            if (!preserveS3Draft) PopulateS3SyncControls();
             UpdateZLibraryAccountStatus();
         }
         finally
@@ -3881,8 +3884,8 @@ public partial class MainWindow
     private void PopulateS3SyncControls(S3SyncSettings? settingsOverride = null)
     {
         var settings = settingsOverride ?? _s3SyncStoredSettings.Settings;
-        var wasSuppressing = _suppressS3SyncToggleAutoSave;
-        _suppressS3SyncToggleAutoSave = true;
+        var wasSuppressing = _suppressS3SettingsDraftTracking;
+        _suppressS3SettingsDraftTracking = true;
         try
         {
             S3SyncEnabledCheck.IsChecked = settings.Enabled;
@@ -3903,8 +3906,9 @@ public partial class MainWindow
         }
         finally
         {
-            _suppressS3SyncToggleAutoSave = wasSuppressing;
+            _suppressS3SettingsDraftTracking = wasSuppressing;
         }
+        UpdateS3SettingsDraftState();
     }
 
     private S3SyncSettings ReadS3SyncSettingsFromControls() => S3SyncSettings.Normalize(new S3SyncSettings
@@ -3925,81 +3929,56 @@ public partial class MainWindow
         ConcurrentRequests = S3ConcurrencyBox.Value is { } concurrency ? (int)concurrency : 4
     });
 
-    private async Task<bool> SaveS3SyncSettingsFromControlsAsync(bool showStatus = true, CancellationToken cancellationToken = default)
+    private Task<bool> SaveS3SyncSettingsFromControlsAsync(bool showStatus = true, CancellationToken cancellationToken = default)
+    {
+        if (_s3SettingsSaveTask is { IsCompleted: false } pending) return pending;
+        if (_s3SyncBusy) return Task.FromResult(false);
+        _s3SettingsSaveTask = PersistS3SyncSettingsAsync(showStatus, cancellationToken);
+        return _s3SettingsSaveTask;
+    }
+
+    private async Task<bool> PersistS3SyncSettingsAsync(bool showStatus, CancellationToken cancellationToken)
     {
         var settings = ReadS3SyncSettingsFromControls();
-        // Allow the feature to be disabled and saved before credentials are
-        // entered. Connection tests and actual sync still validate fully.
+        var editVersion = _s3SettingsEditVersion;
         var validation = settings.Enabled ? settings.Validate() : null;
         if (validation is not null)
         {
             S3SyncStatusText.Text = UiText.Localize(validation);
-            UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, S3SyncStatusText.Text);
-            SetTaskStatus(S3SyncStatusText.Text);
             return false;
         }
 
-        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token, cancellationToken);
-        await _s3SyncService.SaveSettingsAsync(
-            _s3SyncStoredSettings.DeviceId,
-            settings,
-            linkedCancellation.Token);
-        if (settings != _s3SyncStoredSettings.Settings)
-        {
-            _s3DeletionConfirmationPending = false;
-            _s3SyncCancelledByUser = false;
-        }
-        _s3SyncStoredSettings = new S3SyncStoredSettings(_s3SyncStoredSettings.DeviceId, settings);
-        RefreshS3SyncIndicatorFromSettings();
-        PopulateS3SyncControls();
-        if (IsAutomaticS3SyncReady())
-            ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce);
-        else
-            _s3LocalChangeSyncTimer.Stop();
-        if (showStatus) S3SyncStatusText.Text = T("S3 同步设置已保存。");
-        return true;
-    }
-
-    private async void S3SyncEnabledCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_suppressS3SyncToggleAutoSave || !_stage3Ready || _s3SyncBusy || _s3SyncToggleAutoSaveInProgress)
-            return;
-
-        _s3SyncToggleAutoSaveInProgress = true;
-        var enabled = S3SyncEnabledCheck.IsChecked == true;
+        _s3SettingsSaving = true;
+        SetS3SyncControlsBusy(_s3SyncBusy);
         try
         {
-            var saved = await SaveS3SyncSettingsFromControlsAsync();
-            if (!saved && enabled && !_s3SyncStoredSettings.Settings.Enabled)
+            using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token, cancellationToken);
+            await _s3SyncService.SaveSettingsAsync(_s3SyncStoredSettings.DeviceId, settings, linkedCancellation.Token);
+            if (settings != _s3SyncStoredSettings.Settings)
             {
-                // Keep the switch in sync with the persisted state when the
-                // user turns it on before completing the connection fields.
-                var wasSuppressing = _suppressS3SyncToggleAutoSave;
-                _suppressS3SyncToggleAutoSave = true;
-                try
-                {
-                    S3SyncEnabledCheck.IsChecked = false;
-                }
-                finally
-                {
-                    _suppressS3SyncToggleAutoSave = wasSuppressing;
-                }
+                _s3DeletionConfirmationPending = false;
+                _s3SyncCancelledByUser = false;
             }
-        }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
-        {
+            _s3SyncStoredSettings = new S3SyncStoredSettings(_s3SyncStoredSettings.DeviceId, settings);
+            RefreshS3SyncIndicatorFromSettings();
+            // An edit made while persistence was awaiting I/O belongs to the
+            // next draft and must not be replaced by the older saved snapshot.
+            if (_s3SettingsEditVersion == editVersion && ReadS3SyncSettingsFromControls() == settings) PopulateS3SyncControls();
+            else UpdateS3SettingsDraftState();
+            if (IsAutomaticS3SyncReady()) ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce);
+            else _s3LocalChangeSyncTimer.Stop();
+            if (showStatus) S3SyncStatusText.Text = T("S3 同步设置已保存。");
+            return true;
         }
         catch (Exception exception)
         {
             S3SyncStatusText.Text = T("保存 S3 设置失败：{0}", UiText.Localize(exception.Message));
+            return false;
         }
         finally
         {
-            _s3SyncToggleAutoSaveInProgress = false;
-            var wasSuppressing = _suppressS3SyncToggleAutoSave;
-            _suppressS3SyncToggleAutoSave = true;
-            try { S3SyncEnabledCheck.IsChecked = _s3SyncStoredSettings.Settings.Enabled; }
-            finally { _suppressS3SyncToggleAutoSave = wasSuppressing; }
+            _s3SettingsSaving = false;
+            SetS3SyncControlsBusy(_s3SyncBusy);
         }
     }
 
@@ -4092,7 +4071,7 @@ public partial class MainWindow
 
     private async void S3TestConnectionButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (_s3SyncBusy || _s3TestConnectionCancellation is not null) return;
+        if (_s3SyncBusy || _s3SettingsSaving || _s3TestConnectionCancellation is not null) return;
         if (!_appSettings.NetworkEnabled)
         {
             S3SyncStatusText.Text = T("请先开启“允许网络功能”。");
@@ -4131,7 +4110,7 @@ public partial class MainWindow
         finally
         {
             _s3TestConnectionCancellation = null;
-            S3TestConnectionButton.IsEnabled = !_s3SyncBusy;
+            UpdateS3SettingsActions();
         }
     }
 
@@ -4155,12 +4134,13 @@ public partial class MainWindow
             S3SyncEnabledCheck, S3AutomaticSyncCheck, S3SyncIntervalBox, S3EndpointBox,
             S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox,
             S3PathStyleCheck, S3SkipTlsVerifyCheck, S3EncryptionKeyBox, S3TimeoutBox,
-            S3ConcurrencyBox, S3SaveSettingsButton, S3TestConnectionButton, S3SyncNowButton,
+            S3ConcurrencyBox, S3SaveSettingsButton, S3DiscardSettingsButton, S3TestConnectionButton, S3SyncNowButton,
             S3ExportConnectionProfileButton, S3ImportConnectionProfileButton
         ];
-        foreach (var control in controls) control.IsEnabled = !busy;
+        foreach (var control in controls) control.IsEnabled = !busy && !_s3SettingsSaving;
         S3CancelSyncButton.IsVisible = busy;
         S3CancelSyncButton.IsEnabled = busy;
+        UpdateS3SettingsActions();
     }
 
     private void SetS3SyncStatus(string status, bool silent)
@@ -4189,6 +4169,8 @@ public partial class MainWindow
         _s3LocalChangeVersion++;
         _s3DeletionConfirmationPending = false;
         _s3SyncCancelledByUser = false;
+        if (kind == LocalDataChangeKind.Library)
+            MarkReadingMaterialsDirty();
         if (!_s3SyncBusy && _s3SyncStoredSettings.Settings is { Enabled: true, IsConfigured: true })
             UpdateS3SyncIndicator(S3SyncIndicatorState.Pending);
         if (!IsAutomaticS3SyncReady())
@@ -4330,28 +4312,45 @@ public partial class MainWindow
 
     private async Task CompleteWindowCloseAfterS3SyncAsync()
     {
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
-        cancellation.CancelAfter(TimeSpan.FromSeconds(30));
-        _s3SyncExitCancellation = cancellation;
         try
         {
             _s3LocalChangeSyncTimer.Stop();
-            if (_s3SyncBusy || (_s3SyncStoredSettings.Settings is { Enabled: true, AutomaticSyncEnabled: true, IsConfigured: true }
-                && _appSettings.NetworkEnabled && !_s3DeletionConfirmationPending && !_s3SyncCancelledByUser))
-                SetS3SyncStatus(T("正在退出前同步…"), silent: false);
-            await RunLifecycleS3SyncAsync(waitForExistingSync: true, cancellation.Token).WaitAsync(cancellation.Token);
+            if (!await PrepareSettingsForExitAsync()) return;
+            SettingsPage.IsEnabled = false;
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+            cancellation.CancelAfter(TimeSpan.FromSeconds(30));
+            _s3SyncExitCancellation = cancellation;
+            try
+            {
+                if (!_skipS3SyncOnExit)
+                {
+                    if (_s3SyncBusy || IsAutomaticS3SyncReady())
+                        SetS3SyncStatus(T("正在退出前同步…"), silent: false);
+                    await RunLifecycleS3SyncAsync(waitForExistingSync: true, cancellation.Token).WaitAsync(cancellation.Token);
+                }
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                _s3SyncCancellation?.Cancel();
+            }
+            // The close flag is set only after all pending and in-flight
+            // settings writes have completed successfully.
+            if (!await FlushAppSettingsAsync()) return;
+            _allowWindowCloseForS3Sync = true;
+            Close();
         }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        catch (Exception exception)
         {
-            _s3SyncCancellation?.Cancel();
+            ShowSettingsCapsule(T("退出前保存失败：{0}", UiText.Localize(exception.Message)), 4000);
         }
         finally
         {
             _s3SyncExitCancellation = null;
             if (!_allowWindowCloseForS3Sync)
             {
-                _allowWindowCloseForS3Sync = true;
-                Close();
+                SettingsPage.IsEnabled = true;
+                _s3SyncExitInProgress = false;
+                if (IsAutomaticS3SyncReady()) ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce);
             }
         }
     }
@@ -4383,6 +4382,13 @@ public partial class MainWindow
     private async Task<bool> RunS3SyncAsync(bool silent, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (!silent && (_s3SettingsDirty || _s3SettingsSaving))
+        {
+            OpenSettingsExpander("Data", SettingsS3Expander);
+            SetS3SyncStatus(T("请先保存或放弃 S3 修改，再执行同步。"), silent: false);
+            return false;
+        }
+        if (!silent && !await FlushAppSettingsAsync()) return false;
         if (_backupBusy)
         {
             if (!silent) SetS3SyncStatus(T("备份任务正在进行，请完成后再执行 S3 同步。"), silent: false);
@@ -4430,14 +4436,8 @@ public partial class MainWindow
         SetS3SyncControlsBusy(true);
         try
         {
-            if (!silent)
-            {
-                if (!await SaveS3SyncSettingsFromControlsAsync(showStatus: false, token)) return false;
-            }
-            else
-            {
-                _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(token);
-            }
+            if (_s3SettingsSaveTask is { IsCompleted: false } saving && !await saving) return false;
+            _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(token);
 
             var settings = _s3SyncStoredSettings.Settings;
             var validation = settings.Validate();
@@ -4460,8 +4460,22 @@ public partial class MainWindow
             SetS3SyncStatus(T("正在同步到 S3…"), silent);
             var progress = new Progress<string>(message =>
             {
-                if (ReferenceEquals(_s3SyncCancellation, cancellation) && !token.IsCancellationRequested)
-                    SetS3SyncStatus(UiText.Localize(message), silent);
+                if (!ReferenceEquals(_s3SyncCancellation, cancellation) || token.IsCancellationRequested)
+                    return;
+
+                void ApplyProgressOnUiThread()
+                {
+                    if (ReferenceEquals(_s3SyncCancellation, cancellation) && !token.IsCancellationRequested)
+                        SetS3SyncStatus(UiText.Localize(message), silent);
+                }
+
+                // S3 progress can be reported by an SDK worker thread. Both
+                // localization (it resolves Avalonia resources) and the
+                // status controls must therefore run on the UI thread.
+                if (Dispatcher.UIThread.CheckAccess())
+                    ApplyProgressOnUiThread();
+                else
+                    Dispatcher.UIThread.Post(ApplyProgressOnUiThread);
             });
             S3SyncOptions? options = null;
             S3SyncResult result;
@@ -4570,21 +4584,26 @@ public partial class MainWindow
 
     private async Task RefreshSettingsAfterS3SyncAsync(CancellationToken cancellationToken)
     {
-        _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
-        _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
-        _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
-        _readerAiSettings = await _aiSettingsStore.LoadAsync(cancellationToken);
-        // Preserve edits still waiting for their auto-save debounce.
-        while (_appSettingsAutoSaveCancellation is { } pendingSave)
+        if (!await FlushAppSettingsAsync()) return;
+        var editVersion = _appSettingsEditVersion;
+        var previousEmail = _kindleEmailSettings;
+        var previousAccount = _zLibrarySettings;
+        var refreshedSettings = await _appSettingsStore.LoadAsync(cancellationToken);
+        var refreshedAccount = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
+        var refreshedEmail = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
+        var refreshedAi = await _aiSettingsStore.LoadAsync(cancellationToken);
+        var preserveEmail = !KindleEmailSettingsEqual(ReadKindleEmailDraft(), previousEmail);
+        var preserveAccount = !ZLibrarySettingsEqual(ReadZLibraryDraft(), previousAccount);
+        if (_appSettingsEditVersion != editVersion)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            _appSettingsAutoSaveCancellation = null;
-            pendingSave.Cancel();
-            pendingSave.Dispose();
-            await SaveAppSettingsCoreAsync();
+            if (!await FlushAppSettingsAsync()) return;
         }
+        else _appSettings = refreshedSettings;
+        _zLibrarySettings = refreshedAccount;
+        _kindleEmailSettings = refreshedEmail;
+        _readerAiSettings = refreshedAi;
         if (Application.Current is App app) app.ApplyLanguage(_appSettings.UiLanguage);
-        PopulateSettingsControls();
+        PopulateSettingsControlsCore(_s3SettingsDirty, preserveEmail, preserveAccount);
         ApplyReaderAiSettingsToControls();
         UpdateZLibraryAccountStatus();
         _s3RemoteSettingsChanged = false;
@@ -4597,6 +4616,7 @@ public partial class MainWindow
     {
         if (_appSettingsAutoSaveConfigured) return;
         _appSettingsAutoSaveConfigured = true;
+        ConfigureS3SettingsDraftTracking();
         AiEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         NetworkEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoUpdateCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -4611,8 +4631,9 @@ public partial class MainWindow
         DefaultVerticalWritingCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        CalibrePathBox.TextChanged += (_, _) =>
+        CalibrePathBox.PropertyChanged += (_, e) =>
         {
+            if (e.Property != TextBox.TextProperty) return;
             UpdateCalibreDetectionStatus();
             ScheduleAppSettingsAutoSave();
         };
@@ -4630,7 +4651,6 @@ public partial class MainWindow
             : null);
         if (Application.Current is App app)
             app.ApplyLanguage(language);
-        _appSettings = AppSettings.Normalize(_appSettings with { UiLanguage = language });
         ScheduleAppSettingsAutoSave();
         UpdateLibraryUi();
         ViewModel.RefreshView();
@@ -4747,24 +4767,13 @@ public partial class MainWindow
 
     private void ScheduleAppSettingsAutoSave()
     {
-        if (_suppressAppSettingsAutoSave) return;
-        _appSettingsAutoSaveCancellation?.Cancel();
-        _appSettingsAutoSaveCancellation?.Dispose();
+        if (_suppressAppSettingsAutoSave || !_appSettingsAutoSaveConfigured) return;
+        if (ReadAppSettingsFromControls() == _appSettings && _appSettingsSavedVersion == _appSettingsEditVersion) return;
+        _appSettingsEditVersion++;
+        CancelAppSettingsDebounce();
         var cancellation = new CancellationTokenSource();
         _appSettingsAutoSaveCancellation = cancellation;
-        var token = cancellation.Token;
-        _ = Task.Delay(600, token).ContinueWith(
-            _ => Dispatcher.UIThread.Post(async () =>
-            {
-                if (token.IsCancellationRequested) return;
-                await SaveAppSettingsCoreAsync();
-                if (ReferenceEquals(_appSettingsAutoSaveCancellation, cancellation))
-                {
-                    _appSettingsAutoSaveCancellation = null;
-                    cancellation.Dispose();
-                }
-            }),
-            TaskScheduler.Default);
+        _ = DebounceAppSettingsAsync(cancellation);
     }
 
     // "设置已保存" feedback appears after every auto-save, then hides itself.
@@ -5029,16 +5038,14 @@ public partial class MainWindow
         }
     }
 
-    private async Task SaveAppSettingsCoreAsync()
+    private AppSettings ReadAppSettingsFromControls()
     {
-        var selectedFormat = (PreferredOpenFormatBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "epub";
-        var autoConnectChanged = _appSettings.AutoConnectDevice != (AutoConnectDeviceCheck.IsChecked != false);
-        _appSettings = AppSettings.Normalize(_appSettings with
+        return AppSettings.Normalize(_appSettings with
         {
             UiLanguage = UiText.NormalizeLanguage(UiLanguageBox.SelectedItem is ComboBoxItem languageItem
                 ? languageItem.Tag?.ToString()
                 : _appSettings.UiLanguage),
-            PreferredOpenFormat = selectedFormat,
+            PreferredOpenFormat = (PreferredOpenFormatBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "epub",
             CalibrePath = CalibrePathBox.Text ?? string.Empty,
             AutoBackupEnabled = AutoBackupCheck.IsChecked == true,
             AutoBackupRetention = AutoBackupRetentionBox.Value is { } retention ? (int)retention : 5,
@@ -5058,27 +5065,44 @@ public partial class MainWindow
                 VerticalWriting = DefaultVerticalWritingCheck.IsChecked == true
             }
         });
+    }
+
+    private async Task<bool> SaveAppSettingsCoreAsync()
+    {
+        await _appSettingsSaveGate.WaitAsync();
         try
         {
-            await _appSettingsStore.SaveAsync(_appSettings, _lifetimeCancellation.Token);
+            if (_appSettingsSavedVersion == _appSettingsEditVersion) return true;
+            var version = _appSettingsEditVersion;
+            var settings = ReadAppSettingsFromControls();
+            var autoConnectChanged = _appSettings.AutoConnectDevice != settings.AutoConnectDevice;
+            _appSettings = settings;
+            await _appSettingsStore.SaveAsync(settings, _lifetimeCancellation.Token);
+            _appSettingsSavedVersion = version;
             HandleLocalDataChanged(LocalDataChangeKind.Settings);
-            Environment.SetEnvironmentVariable(
-                "KKINDLE_CALIBRE_CONVERT",
-                string.IsNullOrWhiteSpace(_appSettings.CalibrePath) ? null : _appSettings.CalibrePath,
+            Environment.SetEnvironmentVariable("KKINDLE_CALIBRE_CONVERT",
+                string.IsNullOrWhiteSpace(settings.CalibrePath) ? null : settings.CalibrePath,
                 EnvironmentVariableTarget.Process);
             foreach (var group in ReadingMaterialGroups)
-                group.IsExpanded = !_appSettings.ReadingMaterialsCollapsedByDefault;
+                group.IsExpanded = !settings.ReadingMaterialsCollapsedByDefault;
             UpdateLibraryUi();
-            SettingsStatusText.Text = T("管理本地数据、阅读偏好与设备设置。");
-            if (_appSettingsStartupSettled)
-                ShowSettingsSavedStatus();
-            if (autoConnectChanged && _appSettings.AutoConnectDevice)
+            SettingsStatusText.Text = T("常用偏好自动保存；服务配置展开后编辑。");
+            if (_appSettingsStartupSettled && !_s3SyncExitInProgress) ShowSettingsSavedStatus();
+            if (autoConnectChanged && settings.AutoConnectDevice && !_s3SyncExitInProgress)
             {
                 _ignoredDeviceId = null;
-                await RefreshDevicesAsync(scanBooks: DevicePage.IsVisible, _lifetimeCancellation.Token);
+                _ = RefreshDevicesAsync(scanBooks: DevicePage.IsVisible, _lifetimeCancellation.Token);
             }
+            return true;
         }
-        catch (Exception exception) { ShowSettingsCapsule(T("保存失败：{0}", UiText.Localize(exception.Message)), 4000); }
+        catch (Exception exception)
+        {
+            var message = T("保存失败：{0}", UiText.Localize(exception.Message));
+            SettingsStatusText.Text = message;
+            ShowSettingsCapsule(message, 4000);
+            return false;
+        }
+        finally { _appSettingsSaveGate.Release(); }
     }
 
     private async void MigrateDataDirectoryButton_Click(object? sender, RoutedEventArgs e)
@@ -5608,34 +5632,32 @@ public partial class MainWindow
     private async void ZLibraryAccountButton_Click(object? sender, RoutedEventArgs e) =>
         await ShowZLibraryAccountAsync();
 
-    private async Task ShowZLibraryAccountAsync(string? status = null)
+    private Task ShowZLibraryAccountAsync(string? status = null)
     {
-        _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(_lifetimeCancellation.Token);
-        ZLibraryEmailBox.Text = _zLibrarySettings.Email;
-        ZLibraryPasswordBox.Text = _zLibrarySettings.Password;
-        ZLibraryBaseUrlBox.Text = _zLibrarySettings.BaseUrl;
-        ShowStage3Page(SettingsPage, ZLibraryAccountNavigationButton);
-        ShowSettingsSection("Kindle");
-        ZLibraryAccountStatusText.Text = status ?? string.Empty;
-        ShowSettingsPanel(ZLibraryAccountPane);
-        ZLibraryEmailBox.Focus();
+        OpenSettingsExpander("Kindle", SettingsAccountExpander);
+        if (status is not null) ZLibraryAccountStatusText.Text = status;
+        FocusSettingsControl(ZLibraryEmailBox);
+        return Task.CompletedTask;
     }
 
     private void KindleEmailSettingsCancelButton_Click(object? sender, RoutedEventArgs e)
     {
-        HideSettingsPanel();
+        PopulateKindleEmailControls();
+        SettingsEmailExpander.IsExpanded = false;
         KindleEmailSettingsStatusText.Text = string.Empty;
     }
 
     private void ZLibraryAccountCancelButton_Click(object? sender, RoutedEventArgs e)
     {
-        HideSettingsPanel();
+        PopulateZLibraryControls();
+        SettingsAccountExpander.IsExpanded = false;
         ZLibraryAccountStatusText.Text = string.Empty;
     }
 
-    private void MainReaderAiSettingsCancelButton_Click(object? sender, RoutedEventArgs e)
+    private async void MainReaderAiSettingsCancelButton_Click(object? sender, RoutedEventArgs e)
     {
-        HideSettingsPanel();
+        await LoadMainReaderAiSettingsAsync();
+        SettingsAiExpander.IsExpanded = false;
         MainReaderAiSettingsStatusText.Text = string.Empty;
     }
 
@@ -5665,7 +5687,7 @@ public partial class MainWindow
             _zLibrarySettings = settings;
             UpdateZLibraryAccountStatus();
             ZLibraryAccountStatusText.Text = T("账号已保存。");
-            HideSettingsPanel();
+            ShowSettingsSavedStatus();
         }
         catch (Exception exception) { ZLibraryAccountStatusText.Text = T("保存或验证失败：{0}", UiText.Localize(exception.Message)); }
     }
@@ -5694,7 +5716,7 @@ public partial class MainWindow
             HandleLocalDataChanged(LocalDataChangeKind.Settings);
             _kindleEmailSettings = settings;
             KindleEmailSettingsStatusText.Text = T("Kindle 邮箱设置已保存。");
-            HideSettingsPanel();
+            ShowSettingsSavedStatus();
         }
         catch (Exception exception) { KindleEmailSettingsStatusText.Text = T("保存失败：{0}", UiText.Localize(exception.Message)); }
     }
@@ -6064,6 +6086,13 @@ public sealed class PlatformDiagnosticViewModel : ObservableObject, IDisposable
     public PlatformDiagnostic Item { get; }
     public string Name => UiText.Localize(Item.Name);
     public string Detail => UiText.Localize(Item.Detail);
+    public bool CanRepair => Item.RepairKind != PlatformDiagnosticRepairKind.None;
+    public string RepairLabel => Item.RepairKind switch
+    {
+        PlatformDiagnosticRepairKind.InstallCalibre => UiText.Get("下载/安装 Calibre"),
+        PlatformDiagnosticRepairKind.InstallTts => UiText.Get("安装 TTS"),
+        _ => UiText.Get("修复")
+    };
     public string StatusLabel => Item.Status switch
     {
         PlatformDiagnosticStatus.Ready => UiText.Get("正常"),
@@ -6081,6 +6110,7 @@ public sealed class PlatformDiagnosticViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(Detail));
+        OnPropertyChanged(nameof(RepairLabel));
         OnPropertyChanged(nameof(StatusLabel));
     }
 

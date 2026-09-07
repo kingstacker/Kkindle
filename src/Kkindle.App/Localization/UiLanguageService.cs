@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Markup.Xaml.Styling;
+using Avalonia.Threading;
 using Kkindle.Core;
 
 namespace Kkindle;
@@ -44,6 +45,12 @@ public sealed class UiLanguageService
 
     private string? Resolve(string source)
     {
+        // UiText is also used by infrastructure services that run on worker
+        // threads. Avalonia resource dictionaries are UI-owned, so defer the
+        // actual lookup to the UI boundary instead of touching them here.
+        if (!Dispatcher.UIThread.CheckAccess())
+            return null;
+
         var key = UiText.ResourceKey(source);
         return _application.TryGetResource(key, _application.ActualThemeVariant, out var value)
             ? value?.ToString()

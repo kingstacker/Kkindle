@@ -19,6 +19,12 @@ public sealed class PlatformDiagnosticsTests
             Assert.Contains(diagnostics, item => item.Name == "回收站目录" && item.Status == PlatformDiagnosticStatus.Ready);
             Assert.Contains(diagnostics, item => item.Name == "PDF 文本解析" && item.Status == PlatformDiagnosticStatus.Ready);
             Assert.Contains(diagnostics, item => item.Name == "Kindle" && item.Status == PlatformDiagnosticStatus.Warning);
+            var calibre = Assert.Single(diagnostics, item => item.Name == "Calibre");
+            Assert.Equal(
+                calibre.Status == PlatformDiagnosticStatus.Ready
+                    ? PlatformDiagnosticRepairKind.None
+                    : PlatformDiagnosticRepairKind.InstallCalibre,
+                calibre.RepairKind);
             Assert.Empty(Directory.EnumerateFiles(paths.Data, ".kkindle-diagnostic-*", SearchOption.AllDirectories));
         }
         finally { TestHelpers.TryDelete(root); }

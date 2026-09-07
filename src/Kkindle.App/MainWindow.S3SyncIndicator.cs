@@ -137,10 +137,7 @@ public partial class MainWindow
         var settings = _s3SyncStoredSettings.Settings;
         if (_s3SyncBusy || !settings.Enabled || settings.Validate() is not null)
         {
-            ShowStage3Page(SettingsPage, SystemS3SyncNavigationButton);
-            ShowSettingsSection("Library");
-            ShowSystemSettingsSection("Sync");
-            ShowSettingsPanel(SystemSettingsPane);
+            OpenSettingsExpander("Data", SettingsS3Expander);
             if (_s3SyncBusy) return;
             S3SyncStatusText.Text = settings.Enabled
                 ? T("请先完善 S3 同步设置。")

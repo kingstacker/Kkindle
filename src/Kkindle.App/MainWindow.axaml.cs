@@ -471,8 +471,7 @@ public partial class MainWindow : Window
 
         RefreshInteractiveControlToolTips();
         UpdateS3SyncIndicator(_s3SyncIndicatorState, _s3SyncIndicatorError);
-        if (SystemSettingsPane.IsVisible)
-            SystemSettingsPaneTitle.Text = SettingsSyncSection.IsVisible ? T("S3 同步") : T("备份");
+        UpdateS3SettingsActions();
         S3SyncDeviceText.Text = T("当前设备 ID：{0}", _s3SyncStoredSettings.DeviceId[..Math.Min(12, _s3SyncStoredSettings.DeviceId.Length)]);
         RefreshOnboardingLocalizedChoices();
         if (_filterControlsReady)
@@ -821,16 +820,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_stage3Ready)
+        if (_stage3Ready || _appSettingsAutoSaveConfigured)
         {
+            e.Cancel = true;
             if (_s3SyncExitInProgress)
             {
-                _allowWindowCloseForS3Sync = true;
+                // A repeated close may skip network work, never a pending disk write.
+                _skipS3SyncOnExit = true;
                 _s3SyncCancellation?.Cancel();
                 _s3SyncExitCancellation?.Cancel();
                 return;
             }
-            e.Cancel = true;
+            _skipS3SyncOnExit = false;
             _s3SyncExitInProgress = true;
             _ = CompleteWindowCloseAfterS3SyncAsync();
         }
@@ -3788,15 +3789,8 @@ public partial class MainWindow : Window
     private void LibraryRoot_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
         if (LibraryRoot.ColumnDefinitions.Count < 3) return;
-        // Book details overlay the library workspace; the third column remains
-        // available only for full-page settings surfaces.
+        // All feature pages, including settings, share the main content column.
         SetGridColumnWidth(LibraryRoot.ColumnDefinitions[0], new GridLength(200));
-        if (_settingsPanelVisible)
-        {
-            SetGridColumnWidth(LibraryRoot.ColumnDefinitions[1], new GridLength(0));
-            SetGridColumnWidth(LibraryRoot.ColumnDefinitions[2], new GridLength(1, GridUnitType.Star));
-            return;
-        }
         SetGridColumnWidth(LibraryRoot.ColumnDefinitions[1], new GridLength(1, GridUnitType.Star));
         SetGridColumnWidth(LibraryRoot.ColumnDefinitions[2], new GridLength(0));
     }
@@ -3840,8 +3834,6 @@ public partial class MainWindow : Window
             DeviceManagementChildren.IsVisible = !DeviceManagementChildren.IsVisible;
         else if (ReferenceEquals(sender, ReadingSectionButton))
             ReadingChildren.IsVisible = !ReadingChildren.IsVisible;
-        else if (ReferenceEquals(sender, SystemSectionButton))
-            SystemChildren.IsVisible = !SystemChildren.IsVisible;
 
         UpdateSidebarSectionVisuals();
     }
@@ -3853,15 +3845,12 @@ public partial class MainWindow : Window
             DeviceManagementChildren.IsVisible ? SidebarChevronDownData : SidebarChevronRightData);
         ReadingChevron.Data = Geometry.Parse(
             ReadingChildren.IsVisible ? SidebarChevronDownData : SidebarChevronRightData);
-        SystemChevron.Data = Geometry.Parse(
-            SystemChildren.IsVisible ? SidebarChevronDownData : SidebarChevronRightData);
 
         var sectionButtons = new[]
         {
             BookManagementSectionButton,
             DeviceManagementSectionButton,
-            ReadingSectionButton,
-            SystemSectionButton
+            ReadingSectionButton
         };
         foreach (var button in sectionButtons)
         {

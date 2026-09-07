@@ -127,6 +127,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
         await EnsureDefaultCollectionAsync(connection, cancellationToken);
+        await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
     }
 
     // The "未收藏" collection is created automatically so every imported book

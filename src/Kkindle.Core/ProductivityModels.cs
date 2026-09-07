@@ -118,10 +118,18 @@ public enum PlatformDiagnosticStatus
     Unavailable
 }
 
+public enum PlatformDiagnosticRepairKind
+{
+    None,
+    InstallCalibre,
+    InstallTts
+}
+
 public sealed record PlatformDiagnostic(
     string Name,
     PlatformDiagnosticStatus Status,
-    string Detail);
+    string Detail,
+    PlatformDiagnosticRepairKind RepairKind = PlatformDiagnosticRepairKind.None);
 
 public sealed record ReadingDashboard(
     int BooksStarted,

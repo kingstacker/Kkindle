@@ -107,12 +107,20 @@ public sealed class PlatformDiagnosticsService
             using var setup = new CalibreSetupService();
             var path = setup.LocateCalibre(configuredPath);
             return string.IsNullOrWhiteSpace(path)
-                ? new PlatformDiagnostic("Calibre", PlatformDiagnosticStatus.Warning, "未检测到 Calibre；格式转换和 KFX 插件功能不可用。 ")
+                ? new PlatformDiagnostic(
+                    "Calibre",
+                    PlatformDiagnosticStatus.Warning,
+                    "未检测到 Calibre；格式转换和 KFX 插件功能不可用。 ",
+                    PlatformDiagnosticRepairKind.InstallCalibre)
                 : new PlatformDiagnostic("Calibre", PlatformDiagnosticStatus.Ready, path);
         }
         catch (Exception exception)
         {
-            return new PlatformDiagnostic("Calibre", PlatformDiagnosticStatus.Warning, $"检测失败：{exception.Message}");
+            return new PlatformDiagnostic(
+                "Calibre",
+                PlatformDiagnosticStatus.Warning,
+                $"检测失败：{exception.Message}",
+                PlatformDiagnosticRepairKind.InstallCalibre);
         }
     }
 }

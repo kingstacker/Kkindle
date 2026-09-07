@@ -396,6 +396,8 @@
             <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="SelectionBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{StaticResource PaperBrush}" />
         </Style>
         <Style Selector="TextBox:focus">
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
@@ -413,6 +415,12 @@
         <Style Selector="TextBox.readerAiQuestionInput:focus /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <!-- SelectableTextBlock uses the same native selection pipeline as a
+             TextBox. Keep read-only text selection inverted as well. -->
+        <Style Selector="SelectableTextBlock">
+            <Setter Property="SelectionBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{StaticResource PaperBrush}" />
         </Style>
 
         <!-- Caption buttons invert to black-on-white on hover, which is the
@@ -709,8 +717,74 @@
         <Style Selector="Button.sidebarSection:pressed Path, Button.sidebarSection.active Path">
             <Setter Property="Stroke" Value="{StaticResource InkBrush}" />
         </Style>
-        <!-- Sidebar entries: a restrained black bar and light-gray rectangular
-             wash mark the active item without changing its font weight. -->
+
+        <!-- Settings is a top-level destination, not another child row. Keep
+             its resting geometry aligned with the section headers, then use
+             a quiet gray active row to make the hierarchy clear without
+             creating a heavy filled block. -->
+        <Style Selector="Button.sidebarPrimaryItem">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Margin" Value="12,2,0,2" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}"
+                            Padding="4,6">
+                        <Border.Transitions>
+                            <Transitions>
+                                <BrushTransition Property="Background" Duration="0:0:0.12" />
+                            </Transitions>
+                        </Border.Transitions>
+                        <TextBlock Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   HorizontalAlignment="Stretch"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="Button.sidebarPrimaryItem:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.sidebarPrimaryItem:pressed">
+            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.sidebarPrimaryItem.active">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <Style Selector="Button.sidebarPrimaryItem.active:pointerover,
+                         Button.sidebarPrimaryItem.active:focus-visible">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+
+        <!-- Sidebar entries share one selection language: a square light-gray
+             row with a restrained black leading bar. This also applies to
+             grouped child entries. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Height" Value="34" />
@@ -728,7 +802,8 @@
             <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{TemplateBinding Background}" CornerRadius="0">
+                    <Border Background="{TemplateBinding Background}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
                         <Border.Transitions>
                             <Transitions>
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -763,43 +838,43 @@
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
             <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <!-- Keep the active row stable when the pointer remains over it. The
+             selected state should read as navigation, not as a rounded hover
+             capsule. -->
+        <Style Selector="Button.sidebarItem.active:pointerover,
+                         Button.sidebarItem.active:focus-visible">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="CornerRadius" Value="0" />
         </Style>
 
-        <!-- Settings category rail: same ink-dot language as the main
-             sidebar, so selection reads identically across the app. -->
+        <!-- Settings use one row of categories and a bounded reading width. -->
         <Style Selector="Button.settingsCategory">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="34" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="Margin" Value="0,1" />
-            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="Padding" Value="8,10" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{TemplateBinding Background}" CornerRadius="6">
-                        <Border.Transitions>
-                            <Transitions>
-                                <BrushTransition Property="Background" Duration="0:0:0.12" />
-                            </Transitions>
-                        </Border.Transitions>
-                        <Grid ColumnDefinitions="4,7,*">
-                            <Ellipse Width="4"
-                                     Height="4"
-                                     Fill="{TemplateBinding BorderBrush}"
-                                     VerticalAlignment="Center" />
-                            <ContentPresenter Grid.Column="2"
-                                              Content="{TemplateBinding Content}"
-                                              Foreground="{TemplateBinding Foreground}"
-                                              HorizontalAlignment="Stretch"
-                                              VerticalAlignment="Center" />
-                        </Grid>
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter Content="{TemplateBinding Content}"
+                                          Foreground="{TemplateBinding Foreground}"
+                                          VerticalAlignment="Center" />
                     </Border>
                 </ControlTemplate>
             </Setter>
@@ -812,6 +887,71 @@
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.settingsCategory:focus-visible">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Grid.settingsPage TextBox, Grid.settingsPage ComboBox, Grid.settingsPage NumericUpDown">
+            <Setter Property="MinHeight" Value="38" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+        <Style Selector="Grid.settingsPage Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+        <Style Selector="TextBlock.settingsSectionTitle">
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,4,0,0" />
+        </Style>
+        <Style Selector="Expander.settingsExpander">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1" CornerRadius="4">
+                        <StackPanel>
+                            <ToggleButton x:Name="PART_HeaderSite" Classes="settingsExpanderHeader"
+                                          Content="{TemplateBinding Header}" Tag="{TemplateBinding Tag}"
+                                          AutomationProperties.Name="{TemplateBinding Header}"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" />
+                            <Border x:Name="PART_ExpandSite" IsVisible="{TemplateBinding IsExpanded}" Padding="16,4,16,16">
+                                <ContentPresenter x:Name="PART_ContentPresenter"
+                                                  Content="{TemplateBinding Content}"
+                                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                  HorizontalContentAlignment="Stretch" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="ToggleButton.settingsExpanderHeader">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="{TemplateBinding Background}" Padding="16,12" MinHeight="60">
+                        <Grid ColumnDefinitions="*,20" ColumnSpacing="12">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{TemplateBinding Content}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Text="{TemplateBinding Tag}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Path x:Name="SettingsExpanderChevron" Grid.Column="1" Width="10" Height="10"
+                                  Data="M 2,1 L 6,5 L 2,9" Stroke="{StaticResource InkBrush}"
+                                  StrokeThickness="1.3" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="ToggleButton.settingsExpanderHeader:pointerover, ToggleButton.settingsExpanderHeader:focus-visible">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.settingsExpanderHeader:checked /template/ Path#SettingsExpanderChevron">
+            <Setter Property="Data" Value="M 1,2 L 5,6 L 9,2" />
         </Style>
 
         <!-- The library shell and its feature pages use the same black/white
@@ -1349,6 +1489,39 @@
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />
+        </Style>
+
+        <!-- Keep the compact track, but make the labeled row the hit target. -->
+        <Style Selector="ToggleSwitch.settingsToggle">
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border x:Name="SettingsToggleRow" Background="Transparent" Padding="8,6" CornerRadius="3"
+                            BorderBrush="Transparent" BorderThickness="1" MinHeight="44">
+                        <Grid ColumnDefinitions="*,36" ColumnSpacing="24">
+                            <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
+                                       FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            <Border x:Name="SwitchTrack" Grid.Column="1" Width="36" Height="20"
+                                    Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1" CornerRadius="10" VerticalAlignment="Center">
+                                <Grid x:Name="PART_MovingKnobs">
+                                    <Border x:Name="SwitchThumb" Width="14" Height="14" Margin="2"
+                                            Background="{StaticResource InkBrush}" CornerRadius="7"
+                                            HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="ToggleSwitch.settingsToggle:pointerover /template/ Border#SettingsToggleRow">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="ToggleSwitch.settingsToggle:focus-visible /template/ Border#SettingsToggleRow">
+            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
         </Style>
 
         <!-- The device card uses the same minimal vector eject mark as the
@@ -2121,6 +2294,35 @@
         <Style Selector="ListBoxItem:selected:pointerover">
             <Setter Property="Background" Value="{StaticResource InkBrush}" />
             <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+        </Style>
+
+        <!-- The Douban picker draws the selected state on the candidate card
+             itself. Keep the ListBoxItem shell transparent so its bottom
+             margin cannot leak the Fluent accent colour as a stray bar. -->
+        <Style Selector="ListBox.doubanCandidateList ListBoxItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <ContentPresenter Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                      HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                      VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="ListBox.doubanCandidateList ListBoxItem:selected,
+                         ListBox.doubanCandidateList ListBoxItem:pointerover,
+                         ListBox.doubanCandidateList ListBoxItem:selected:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox.doubanCandidateList ListBoxItem:selected Border.doubanCandidateRow">
+            <Setter Property="BoxShadow" Value="inset 0 0 0 1 #000000" />
         </Style>
 
         <!-- These TOC state overrides must follow the generic ListBoxItem

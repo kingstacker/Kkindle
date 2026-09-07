@@ -168,6 +168,7 @@ public sealed partial class ReaderDataService
             await EnsureReaderLayoutParagraphIndentColumnAsync(connection, cancellationToken);
             await EnsureReaderAnnotationStyleColumnAsync(connection, cancellationToken);
             await EnsureReaderBookmarkPositionColumnsAsync(connection, cancellationToken);
+            await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
 
             await using (var syncTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
             {

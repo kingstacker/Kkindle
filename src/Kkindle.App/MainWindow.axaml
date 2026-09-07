@@ -278,12 +278,12 @@
                                       IsVisible="False"
                                       IsHitTestVisible="False" />
                                 <Path x:Name="S3SyncFailureGlyph"
-                                      Data="M 6,1 H 10 L 9.4,10 H 6.6 Z M 6,12 H 10 V 16 H 6 Z"
+                                      Data="M 5.5,0.5 H 9.5 L 8.9,8.5 H 6.1 Z M 5.5,10.5 H 9.5 V 14.5 H 5.5 Z"
                                       Width="15"
                                       Height="15"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center"
-                                      Stretch="Uniform"
+                                      Stretch="None"
                                       Fill="{StaticResource InkBrush}"
                                       IsVisible="False"
                                       IsHitTestVisible="False" />
@@ -414,54 +414,10 @@
                                 </StackPanel>
                             </StackPanel>
 
-                            <StackPanel Spacing="3">
-                                <Button x:Name="SystemSectionButton"
-                                        Classes="sidebarSection"
-                                        Click="SidebarSectionButton_Click">
-                                    <Button.Content>
-                                        <Grid>
-                                            <TextBlock Text="{DynamicResource Ui.Auto.68EA5DD4D7AF20E6}" />
-                                            <Path x:Name="SystemChevron"
-                                                  Data="M 2,1 L 6,5 L 2,9"
-                                                  Width="10"
-                                                  Height="10"
-                                                  StrokeThickness="1.25"
-                                                  HorizontalAlignment="Right"
-                                                  VerticalAlignment="Center" />
-                                        </Grid>
-                                    </Button.Content>
-                                </Button>
-                                <StackPanel x:Name="SystemChildren" Spacing="3" IsVisible="False">
-                                    <Button x:Name="SettingsNavigationButton"
-                                            Classes="sidebarItem"
-                                            Content="{DynamicResource Ui.Auto.692873DDD8F40E66}"
-                                            ToolTip.Tip="{DynamicResource Ui.Auto.4EDA7761B6EB0BF3}"
-                                            Click="SettingsButton_Click" />
-                                    <Button x:Name="KindleEmailSettingsNavigationButton"
-                                            Classes="sidebarItem"
-                                            Content="{DynamicResource Ui.Auto.1EF0F672AC552C01}"
-                                            ToolTip.Tip="{DynamicResource Ui.Auto.D45E65951D169D87}"
-                                            Click="KindleEmailSettingsButton_Click" />
-                                    <Button x:Name="ZLibraryAccountNavigationButton"
-                                            Classes="sidebarItem"
-                                            Content="{DynamicResource Ui.Auto.DEC3634BEDD23D3D}"
-                                            ToolTip.Tip="{DynamicResource Ui.Auto.937B60677348A858}"
-                                            Click="ZLibraryAccountButton_Click" />
-                                    <Button x:Name="ReaderAiSettingsNavigationButton"
-                                            Classes="sidebarItem"
-                                            Content="{DynamicResource Ui.Auto.377C481D3C31ACE2}"
-                                            ToolTip.Tip="{DynamicResource Ui.Auto.59D7AD70A4016DE6}"
-                                            Click="ReaderAiSettingsButton_Click" />
-                                    <Button x:Name="SystemS3SyncNavigationButton"
-                                            Classes="sidebarItem"
-                                            Content="{DynamicResource Ui.Auto.03E350A22079004A}"
-                                            Click="SystemS3SyncNavigationButton_Click" />
-                                    <Button x:Name="SystemBackupNavigationButton"
-                                            Classes="sidebarItem"
-                                            Content="{DynamicResource Ui.Auto.70E372ABBAE5F619}"
-                                            Click="SystemBackupNavigationButton_Click" />
-                                </StackPanel>
-                            </StackPanel>
+                            <Button x:Name="SettingsNavigationButton"
+                                    Classes="sidebarPrimaryItem"
+                                    Content="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}"
+                                    Click="SettingsButton_Click" />
                         </StackPanel>
                     </ScrollViewer>
 
@@ -2138,143 +2094,376 @@
                 </Grid>
             </Grid>
 
-            <!-- Stage 3: the settings surface follows the WinUI reference:
-                 title/subtitle, a narrow category rail, and one focused card
-                 at a time. All fields remain in this view so the Avalonia port
-                 stays testable without platform-specific flyouts. -->
-            <Grid x:Name="SettingsPage"
-                  Grid.Column="1"
-                  Margin="30,24,30,18"
-                  IsVisible="False"
-                  RowDefinitions="Auto,*">
-                  <Grid.Transitions>
-                      <Transitions>
-                          <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
-                      </Transitions>
-                  </Grid.Transitions>
-                <StackPanel Spacing="3">
-                    <TextBlock Text="{DynamicResource Ui.Auto.692873DDD8F40E66}" FontSize="28" FontWeight="Bold" />
-                    <TextBlock x:Name="SettingsStatusText"
-                               Text="{DynamicResource Ui.Auto.6426A1A2141ECAD5}"
-                               FontSize="12"
-                               Foreground="{StaticResource MutedInkBrush}"
-                               TextWrapping="Wrap" />
-                </StackPanel>
-
-                <Grid Grid.Row="1" Margin="0,28,0,0" RowDefinitions="*,Auto" ColumnDefinitions="168,*" ColumnSpacing="26">
-                    <StackPanel Grid.RowSpan="2" Spacing="2">
-                        <StackPanel x:Name="SettingsCategoryButtons" Spacing="2">
-                            <Button x:Name="SettingsLibraryButton"
-                                    Classes="settingsCategory active"
-                                    Content="{DynamicResource Ui.Auto.C7FBA69838474F08}"
-                                    Tag="Library"
-                                    Click="SettingsCategoryButton_Click" />
-                            <Button x:Name="SettingsReadingButton"
-                                    Classes="settingsCategory"
-                                    Content="{DynamicResource Ui.Auto.CE9B12499C471759}"
-                                    Tag="Reading"
-                                    Click="SettingsCategoryButton_Click" />
-                            <Button x:Name="SettingsCalibreButton"
-                                    Classes="settingsCategory"
-                                    Content="Calibre"
-                                    Tag="Calibre"
-                                    Click="SettingsCategoryButton_Click" />
-                            <Button x:Name="SettingsKindleButton"
-                                    Classes="settingsCategory"
-                                    Content="Kindle"
-                                    Tag="Kindle"
-                                    Click="SettingsCategoryButton_Click" />
-                            <Button x:Name="SettingsAboutButton"
-                                    Classes="settingsCategory"
-                                    Content="{DynamicResource Ui.Auto.52D25A9E30BA94F1}"
-                                    Tag="About"
-                                    Click="SettingsCategoryButton_Click" />
-                            <Button x:Name="SettingsDiagnosticsButton"
-                                    Classes="settingsCategory"
-                                    Content="诊断"
-                                    Tag="Diagnostics"
-                                    Click="SettingsCategoryButton_Click" />
-                        </StackPanel>
+            <!-- One settings destination; inactive categories and collapsed forms leave the focus tree. -->
+            <Grid x:Name="SettingsPage" Classes="settingsPage" Grid.Column="1" Margin="30,24,30,18" IsVisible="False">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" MaxWidth="820" HorizontalAlignment="Left" Width="{Binding Bounds.Width, ElementName=SettingsPage}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap" />
+                        <TextBlock x:Name="SettingsStatusText" Text="{DynamicResource Ui.Auto.709BDE6F962E3F2A}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                     </StackPanel>
-
-                    <Rectangle Grid.Row="0"
-                               Grid.Column="1"
-                               Width="1"
-                               Height="{Binding Bounds.Height, ElementName=SettingsCategoryButtons}"
-                               Margin="0,20,0,0"
-                               HorizontalAlignment="Left"
-                               VerticalAlignment="Top"
-                               Fill="{StaticResource HairlineBrush}"
-                               IsHitTestVisible="False"
-                               ZIndex="1" />
-
-                    <ScrollViewer x:Name="SettingsScrollViewer"
-                                  Grid.Row="0"
-                                  Grid.Column="1"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
+                    <WrapPanel x:Name="SettingsCategoryButtons" Grid.Row="1" Margin="0,20,0,16" Orientation="Horizontal">
+                        <Button x:Name="SettingsLibraryButton" Content="{DynamicResource Ui.Auto.979ACDE39C51149E}" Classes="settingsCategory" Tag="Library" Click="SettingsCategoryButton_Click" />
+                        <Button x:Name="SettingsReadingButton" Content="{DynamicResource Ui.Auto.959378340D4DE6CD}" Classes="settingsCategory" Tag="Reading" Click="SettingsCategoryButton_Click" />
+                        <Button x:Name="SettingsKindleButton" Content="{DynamicResource Ui.Auto.EB97073E0CF6F3E8}" Classes="settingsCategory" Tag="Kindle" Click="SettingsCategoryButton_Click" />
+                        <Button x:Name="SettingsDataButton" Content="{DynamicResource Ui.Auto.1173D06BC2EA23F0}" Classes="settingsCategory" Tag="Data" Click="SettingsCategoryButton_Click" />
+                        <Button x:Name="SettingsAboutButton" Content="{DynamicResource Ui.Auto.0A114F362A5F259E}" Classes="settingsCategory" Tag="About" Click="SettingsCategoryButton_Click" />
+                    </WrapPanel>
+                    <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,12,20">
                         <StackPanel Spacing="16">
-                <Border x:Name="SettingsLibrarySection"
-                        Classes="flatPanel"
-                        BorderThickness="0"
-                        IsVisible="False"
-                        Padding="18,18,18,32"
-                        Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="14">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.C7FBA69838474F08}" FontSize="18" FontWeight="SemiBold" />
-                                    <StackPanel Spacing="15">
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.098925F827B88E7A}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="NetworkEnabledCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D7842A57D154C697}" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AutoDoubanMatchCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.4799DAF25FD6C6CC}" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.55A2226420BCBF78}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.8B0CC19DB0791E72}" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.F6A273284E344858}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" Grid.Column="1" VerticalAlignment="Center" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.2C8CB9CA53BDD3AB}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="CompareKindleLibraryCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.813C2B04E300E455}" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.DA96E037499D9296}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="GridGalleryDisplayCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.694BA13A98D0252A}" />
-                                        </Grid>
+                            <StackPanel Spacing="8" x:Name="SettingsLibrarySection" IsVisible="False">
+                                <TextBlock Text="{DynamicResource Ui.Auto.835B700E028C9B20}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                    <TextBlock Text="{DynamicResource Ui.Auto.3D13868593AE4EEB}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                    <ComboBox x:Name="UiLanguageBox" Grid.Column="1" Width="180" SelectedIndex="0" SelectionChanged="UiLanguageBox_SelectionChanged" AutomationProperties.Name="{DynamicResource Ui.Auto.3D13868593AE4EEB}" FontSize="14">
+                                        <ComboBoxItem Content="{DynamicResource Ui.Auto.9937E365AAF3A085}" Tag="zh-CN" />
+                                        <ComboBoxItem Content="English" Tag="en-US" />
+                                    </ComboBox>
+                                </Grid>
+                                <ToggleSwitch x:Name="NetworkEnabledCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D7842A57D154C697}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.098925F827B88E7A}" AutomationProperties.Name="{DynamicResource Ui.Auto.098925F827B88E7A}" />
+                                <TextBlock Text="{DynamicResource Ui.Auto.A183CEACD829707F}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
+                                <ToggleSwitch x:Name="GridGalleryDisplayCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.694BA13A98D0252A}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.DA96E037499D9296}" AutomationProperties.Name="{DynamicResource Ui.Auto.DA96E037499D9296}" />
+                                <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.F6A273284E344858}" AutomationProperties.Name="{DynamicResource Ui.Auto.F6A273284E344858}" />
+                                <ToggleSwitch x:Name="AutoDoubanMatchCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.4799DAF25FD6C6CC}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" AutomationProperties.Name="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" />
+                                <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.8B0CC19DB0791E72}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.55A2226420BCBF78}" AutomationProperties.Name="{DynamicResource Ui.Auto.55A2226420BCBF78}" />
+                                <Expander x:Name="SettingsCalibreExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.39F073ED740B19B8}" Tag="{DynamicResource Ui.Auto.76B87E0C608BEE4A}" AutomationProperties.Name="{DynamicResource Ui.Auto.39F073ED740B19B8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="SettingsCalibreSection" Padding="0">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.68DBD3556A19C150}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <StackPanel Spacing="5">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.6160F42DABA0438E}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                    <Ellipse x:Name="CalibreDetectionStatusDot" Width="7" Height="7" VerticalAlignment="Center" Fill="#D6A100" ToolTip.Tip="{DynamicResource Ui.Auto.FE66F3C4D3165B5D}" AutomationProperties.Name="{DynamicResource Ui.Auto.FE66F3C4D3165B5D}" />
+                                                </StackPanel>
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBox x:Name="CalibrePathBox" PlaceholderText="{DynamicResource Ui.Auto.A5D0920936DC7153}" AutomationProperties.Name="{DynamicResource Ui.Auto.68DBD3556A19C150}" FontSize="14" />
+                                                    <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A8C81F93F2E0E3B6}" Classes="quiet" Click="BrowseCalibreButton_Click" />
+                                                </Grid>
+                                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                                    <Button x:Name="InstallCalibreButton" Content="{DynamicResource Ui.Auto.53E06E722B8528B0}" Classes="quiet" Click="InstallCalibreButton_Click" />
+                                                    <Button x:Name="InstallKfxInputButton" Content="{DynamicResource Ui.Auto.E1D76CA786897DA7}" Classes="quiet" Click="InstallKfxInputButton_Click" />
+                                                </StackPanel>
+                                                <ProgressBar x:Name="CalibreSetupProgressBar" Height="3" Minimum="0" Maximum="100" IsVisible="False" />
+                                                <TextBlock x:Name="CalibreSetupStatusText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                            </StackPanel>
+                            <StackPanel Spacing="16" x:Name="SettingsReadingSection" IsVisible="False">
+                                <TextBlock Text="{DynamicResource Ui.Auto.494315CA7A0FAD60}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="{DynamicResource Ui.Auto.6FA2075CA9C20775}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                    <ComboBox x:Name="PreferredOpenFormatBox" SelectedIndex="0" MaxWidth="360" HorizontalAlignment="Left" AutomationProperties.Name="{DynamicResource Ui.Auto.6FA2075CA9C20775}" FontSize="14">
+                                        <ComboBoxItem Content="EPUB" Tag="epub" />
+                                        <ComboBoxItem Content="PDF" Tag="pdf" />
+                                        <ComboBoxItem Content="AZW3" Tag="azw3" />
+                                        <ComboBoxItem Content="{DynamicResource Ui.Auto.F117607AC0E397F4}" Tag="mobi" />
+                                    </ComboBox>
+                                </StackPanel>
+                                <ToggleSwitch x:Name="DefaultVerticalWritingCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.E0119B0BA5ACFA0F}" AutomationProperties.Name="{DynamicResource Ui.Auto.E0119B0BA5ACFA0F}" />
+                                <ToggleSwitch x:Name="ReadingMaterialsCollapsedByDefaultCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.737AC585CF7AD245}" AutomationProperties.Name="{DynamicResource Ui.Auto.737AC585CF7AD245}" IsVisible="False" />
+                                <Expander x:Name="SettingsLocalResourcesExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.CB3794787648BF83}" Tag="{DynamicResource Ui.Auto.ECFAB6DAC176937A}" AutomationProperties.Name="{DynamicResource Ui.Auto.CB3794787648BF83}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <StackPanel Spacing="16">
+                                        <Border x:Name="LocalResourcesSettingsSection" Padding="0">
+                                            <StackPanel Spacing="10">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.DB96383CD775A45D}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.8ACD464842C7EACB}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                <ListBox x:Name="ManagedFontList" ItemsSource="{Binding ManagedFonts}" MaxHeight="150" SelectionMode="Single" AutomationProperties.Name="{DynamicResource Ui.Auto.DB96383CD775A45D}" FontSize="14">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="core:ManagedFont">
+                                                            <TextBlock Text="{Binding DisplayName}" FontSize="12" TextWrapping="Wrap" />
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Button Content="{DynamicResource Ui.Auto.50751AA95894C7DB}" Click="ImportFontButton_Click" />
+                                                    <Button Content="{DynamicResource Ui.Auto.A194128B29390AEF}" Classes="quiet" Click="RemoveFontButton_Click" />
+                                                    <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}" Classes="quiet" IsVisible="False" Click="RefreshLocalResourcesButton_Click" />
+                                                    <TextBlock x:Name="FontManagementStatusText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border x:Name="DictionaryManagementSection" Padding="0" DragDrop.AllowDrop="True">
+                                            <StackPanel Spacing="10">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.F0486713A9BABBE5}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.7C456B8E16853FCF}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                <ListBox x:Name="ManagedDictionaryList" ItemsSource="{Binding ManagedDictionaries}" MaxHeight="150" SelectionMode="Single" AutomationProperties.Name="{DynamicResource Ui.Auto.F0486713A9BABBE5}" FontSize="14">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="core:DictionaryDefinition">
+                                                            <TextBlock Text="{Binding Name}" FontSize="12" TextWrapping="Wrap" />
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Button Content="{DynamicResource Ui.Auto.48C0179637D1C190}" Click="ImportDictionaryButton_Click" />
+                                                    <Button Content="{DynamicResource Ui.Auto.A194128B29390AEF}" Classes="quiet" Click="RemoveDictionaryButton_Click" />
+                                                </StackPanel>
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBox x:Name="DictionaryTestBox" PlaceholderText="{DynamicResource Ui.Auto.50C7ED7A45E82B5E}" KeyDown="DictionaryTestBox_KeyDown" AutomationProperties.Name="{DynamicResource Ui.Auto.F0486713A9BABBE5}" FontSize="14" />
+                                                    <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.BCD6771E08EC7CC7}" Classes="quiet" Click="DictionaryTestButton_Click" />
+                                                </Grid>
+                                                <TextBlock x:Name="DictionaryResultText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
-                                    <Border Classes="flatSubsection" Margin="0,4,0,0" Padding="0,14,0,0">
+                                </Expander>
+                                <TextBlock Text="{DynamicResource Ui.Auto.1B0049FCFD4163FE}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
+                                <ToggleSwitch x:Name="AiEnabledCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.0998EF96E5ED903E}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.538FD705CD18A10F}" AutomationProperties.Name="{DynamicResource Ui.Auto.538FD705CD18A10F}" />
+                                <Expander x:Name="SettingsAiExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.4E8CAA39D9545027}" Tag="{DynamicResource Ui.Auto.C2DB62BA340B2D27}" AutomationProperties.Name="{DynamicResource Ui.Auto.4E8CAA39D9545027}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="ReaderAiSettingsPane" Padding="0" SizeChanged="ReaderAiSettingsPane_SizeChanged">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.753CC20E7DA80BB0}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.EC309AB207EF7FA3}" FontSize="12" TextWrapping="Wrap" />
+                                                <ComboBox x:Name="MainReaderAiProviderBox" SelectedIndex="0" SelectionChanged="MainReaderAiProviderBox_SelectionChanged" AutomationProperties.Name="{DynamicResource Ui.Auto.EC309AB207EF7FA3}" FontSize="14">
+                                                    <ComboBoxItem Content="DeepSeek" Tag="deepseek" />
+                                                    <ComboBoxItem Content="OpenAI" Tag="openai" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.988FB59B290B037D}" Tag="custom" />
+                                                </ComboBox>
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="Base URL" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="MainReaderAiBaseUrlBox" PlaceholderText="https://api.deepseek.com" AutomationProperties.Name="Base URL" FontSize="14" />
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="12" TextWrapping="Wrap" />
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                                    <TextBox x:Name="MainReaderAiModelBox" PlaceholderText="{DynamicResource Ui.Auto.CB2F1709F983D2F4}" AutomationProperties.Name="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="14" />
+                                                    <ComboBox x:Name="MainReaderAiModelSelectorBox" Grid.Column="0" Classes="aiModelSelector" IsVisible="False" PlaceholderText="{DynamicResource Ui.Auto.1AFED6A81A2512D2}" SelectionChanged="MainReaderAiModelSelectorBox_SelectionChanged" AutomationProperties.Name="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="14" />
+                                                    <Button x:Name="MainReaderAiFetchModelsButton" Grid.Column="1" Classes="quiet" Content="{DynamicResource Ui.Auto.83FCFB4C1F2C1641}" Click="MainReaderAiFetchModelsButton_Click" />
+                                                </Grid>
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="API Key" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="MainReaderAiApiKeyBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.CA478C91D3839A44}" AutomationProperties.Name="API Key" FontSize="14" />
+                                            </StackPanel>
+                                            <TextBlock Text="{DynamicResource Ui.Auto.52DEA0A73AA860E1}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <Border Margin="0,4,0,0" Padding="12" Background="#F7F7F4" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1">
+                                                <StackPanel Spacing="8">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                        <StackPanel Spacing="3">
+                                                            <TextBlock Text="本地语义检索模型" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                            <TextBlock Text="用于书籍问答的向量检索；未安装时仍可使用关键词检索。" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <TextBlock x:Name="MainReaderEmbeddingModelStatusText" Grid.Column="1" MaxWidth="180" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextAlignment="Right" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                    <ProgressBar x:Name="MainReaderEmbeddingModelProgressBar" Height="5" IsVisible="False" IsIndeterminate="False" />
+                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                                                        <ComboBox x:Name="MainReaderEmbeddingModelSelectorBox" FontSize="14" MinWidth="180" VerticalAlignment="Center" SelectionChanged="MainReaderEmbeddingModelSelectorBox_SelectionChanged" AutomationProperties.Name="{DynamicResource Ui.Auto.753CC20E7DA80BB0}" />
+                                                        <Button x:Name="MainReaderEmbeddingModelDownloadButton" Grid.Column="1" Classes="quiet" Padding="10,5" FontSize="11" Content="下载模型" Click="MainReaderEmbeddingModelDownloadButton_Click" />
+                                                        <Button x:Name="MainReaderEmbeddingModelCancelButton" Grid.Column="2" Classes="quiet" Padding="10,5" FontSize="11" Content="取消" IsVisible="False" Click="MainReaderEmbeddingModelCancelButton_Click" />
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                            <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
+                                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="MainReaderAiSettingsCancelButton_Click" />
+                                                <Button x:Name="MainReaderAiSettingsTestButton" Grid.Column="1" Content="{DynamicResource Ui.Auto.D5061C58DDC3BB77}" Classes="quiet" Click="MainReaderAiSettingsTestButton_Click" />
+                                                <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="MainReaderAiSettingsSaveButton_Click" />
+                                                <TextBlock x:Name="MainReaderAiSettingsStatusText" Grid.Column="3" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                            </StackPanel>
+                            <StackPanel Spacing="16" x:Name="SettingsKindleSection" IsVisible="False">
+                                <TextBlock Text="{DynamicResource Ui.Auto.577B834EB53E4D5B}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
+                                <ToggleSwitch x:Name="AutoConnectDeviceCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.6EEF43E0AC64D477}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.272F8ECF4B340534}" AutomationProperties.Name="{DynamicResource Ui.Auto.272F8ECF4B340534}" />
+                                <ToggleSwitch x:Name="CompareKindleLibraryCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.813C2B04E300E455}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.2C8CB9CA53BDD3AB}" AutomationProperties.Name="{DynamicResource Ui.Auto.2C8CB9CA53BDD3AB}" />
+                                <Expander x:Name="SettingsEmailExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.541BC76EBCBC0228}" Tag="{DynamicResource Ui.Auto.4E68CFCEBD398D44}" AutomationProperties.Name="{DynamicResource Ui.Auto.541BC76EBCBC0228}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="KindleEmailSettingsPane" Padding="0">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.8609EBA830E79233}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <Button Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalAlignment="Left" Focusable="True" Click="KindleEmailGuideLink_Click">
+                                                <TextBlock FontSize="12" Foreground="{StaticResource InkBrush}" TextDecorations="Underline" Text="{DynamicResource Ui.Auto.F5C62A45859955BB}" TextWrapping="Wrap" />
+                                            </Button>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.4B4D02F3724BBD50}" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="KindleEmailRecipientBox" PlaceholderText="{DynamicResource Ui.Auto.88D320044CFC5366}" AutomationProperties.Name="{DynamicResource Ui.Auto.4B4D02F3724BBD50}" FontSize="14" />
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.F4D19C9EF4B8D010}" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="KindleEmailSenderBox" PlaceholderText="{DynamicResource Ui.Auto.B24BB0C6CC545A3A}" AutomationProperties.Name="{DynamicResource Ui.Auto.F4D19C9EF4B8D010}" FontSize="14" />
+                                            </StackPanel>
+                                            <Grid ColumnDefinitions="*,110" ColumnSpacing="8">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.6A85554C141A6383}" FontSize="12" TextWrapping="Wrap" />
+                                                    <TextBox x:Name="KindleEmailSmtpHostBox" PlaceholderText="smtp.example.com" AutomationProperties.Name="{DynamicResource Ui.Auto.6A85554C141A6383}" FontSize="14" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" Spacing="5">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.E71AC32B544B0EBF}" FontSize="12" TextWrapping="Wrap" />
+                                                    <TextBox x:Name="KindleEmailSmtpPortBox" Text="587" PlaceholderText="587" AutomationProperties.Name="{DynamicResource Ui.Auto.E71AC32B544B0EBF}" FontSize="14" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.CB6DE497BBC98EBB}" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="KindleEmailUsernameBox" AutomationProperties.Name="{DynamicResource Ui.Auto.CB6DE497BBC98EBB}" FontSize="14" />
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.8F6290CB91E90FFB}" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="KindleEmailPasswordBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.8CB9B8C5CF47397A}" AutomationProperties.Name="{DynamicResource Ui.Auto.8F6290CB91E90FFB}" FontSize="14" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="KindleEmailSslCheck" Content="{DynamicResource Ui.Auto.98BFA63342D1FDA2}" IsChecked="True" />
+                                            <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+                                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="KindleEmailSettingsCancelButton_Click" />
+                                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="KindleEmailSettingsSaveButton_Click" />
+                                                <TextBlock x:Name="KindleEmailSettingsStatusText" Grid.Column="2" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                                <Expander x:Name="SettingsAccountExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.5D978320212BD623}" Tag="{DynamicResource Ui.Auto.C87F02F2D8220D30}" AutomationProperties.Name="{DynamicResource Ui.Auto.5D978320212BD623}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="ZLibraryAccountPane" Padding="0">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.643DE2DA68E1AE9F}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.780A8542C562FD78}" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="ZLibraryEmailBox" PlaceholderText="{DynamicResource Ui.Auto.CDB45C04FD8D14BE}" AutomationProperties.Name="{DynamicResource Ui.Auto.780A8542C562FD78}" FontSize="14" />
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.A621AB606DB2A11F}" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="ZLibraryPasswordBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.5A2773913717DBD3}" AutomationProperties.Name="{DynamicResource Ui.Auto.A621AB606DB2A11F}" FontSize="14" />
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.34218E41087E6165}" FontSize="12" TextWrapping="Wrap" />
+                                                <TextBox x:Name="ZLibraryBaseUrlBox" PlaceholderText="https://api.z-lib.org" AutomationProperties.Name="{DynamicResource Ui.Auto.34218E41087E6165}" FontSize="14" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.464EB73BC23E797A}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+                                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="ZLibraryAccountCancelButton_Click" />
+                                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.31C1468A6EA3BBF1}" Classes="settingsActionSave" Click="ZLibraryAccountSaveButton_Click" />
+                                                <TextBlock x:Name="ZLibraryAccountStatusText" Grid.Column="2" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                            </StackPanel>
+                            <StackPanel Spacing="16" x:Name="SettingsDataSection" IsVisible="False">
+                                <Expander x:Name="SettingsS3Expander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.BB82E64487A01E21}" Tag="{DynamicResource Ui.Auto.947ACFD929442781}" AutomationProperties.Name="{DynamicResource Ui.Auto.BB82E64487A01E21}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="SettingsSyncSection" Padding="0">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.C93D480F9C6D096F}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="S3SyncEnabledCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.4E08C2329F790C28}" AutomationProperties.Name="{DynamicResource Ui.Auto.4E08C2329F790C28}" />
+                                            <ToggleSwitch x:Name="S3AutomaticSyncCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.1744BAADE68F9732}" AutomationProperties.Name="{DynamicResource Ui.Auto.1744BAADE68F9732}" />
+                                            <Grid ColumnDefinitions="*,150" ColumnSpacing="12">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <NumericUpDown x:Name="S3SyncIntervalBox" Grid.Column="1" Minimum="5" Maximum="1440" Increment="5" Value="30" AutomationProperties.Name="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" />
+                                            </Grid>
+                                            <Border Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
+                                                <StackPanel Spacing="9">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.72251455F2297070}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.70E98FFE2B292C81}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Text="Endpoint" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                        <TextBox x:Name="S3EndpointBox" Grid.Column="1" PlaceholderText="{DynamicResource Ui.Auto.3DF0B4CE64DC4FA2}" AutomationProperties.Name="Endpoint" FontSize="14" />
+                                                    </Grid>
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Text="Access Key" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                        <TextBox x:Name="S3AccessKeyBox" Grid.Column="1" AutomationProperties.Name="Access Key" FontSize="14" />
+                                                    </Grid>
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Text="Secret Key" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                        <TextBox x:Name="S3SecretKeyBox" Grid.Column="1" PasswordChar="●" AutomationProperties.Name="Secret Key" FontSize="14" />
+                                                    </Grid>
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Text="Bucket" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                        <TextBox x:Name="S3BucketBox" Grid.Column="1" AutomationProperties.Name="Bucket" FontSize="14" />
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                            <Expander x:Name="SettingsS3AdvancedExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Tag="{DynamicResource Ui.Auto.3A4B3495E5C89857}" AutomationProperties.Name="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                                <Border>
+                                                    <StackPanel Spacing="9">
+                                                        <TextBlock Text="{DynamicResource Ui.Auto.1FF53DB62A2A3A4C}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{DynamicResource Ui.Auto.F7C9C4CFD4F50703}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                            <TextBlock Text="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                            <TextBox x:Name="S3EncryptionKeyBox" Grid.Column="1" PasswordChar="●" AutomationProperties.Name="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="14" />
+                                                        </Grid>
+                                                        <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
+                                                            <TextBlock Text="{DynamicResource Ui.Auto.72EC61D7855C86A1}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                            <NumericUpDown x:Name="S3TimeoutBox" Grid.Column="1" Minimum="10" Maximum="600" Increment="10" Value="60" AutomationProperties.Name="{DynamicResource Ui.Auto.72EC61D7855C86A1}" FontSize="14" />
+                                                        </Grid>
+                                                        <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
+                                                            <TextBlock Text="{DynamicResource Ui.Auto.8267CD636CE539F9}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                            <NumericUpDown x:Name="S3ConcurrencyBox" Grid.Column="1" Minimum="1" Maximum="32" Increment="1" Value="4" AutomationProperties.Name="{DynamicResource Ui.Auto.8267CD636CE539F9}" FontSize="14" />
+                                                        </Grid>
+                                                        <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                            <TextBlock Text="Region" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                            <TextBox x:Name="S3RegionBox" Grid.Column="1" Text="us-east-1" AutomationProperties.Name="Region" FontSize="14" />
+                                                        </Grid>
+                                                        <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                            <TextBlock Text="{DynamicResource Ui.Auto.3AAE440415FDD869}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                            <TextBox x:Name="S3PrefixBox" Grid.Column="1" Text="kkindle" AutomationProperties.Name="{DynamicResource Ui.Auto.3AAE440415FDD869}" FontSize="14" />
+                                                        </Grid>
+                                                        <ToggleSwitch x:Name="S3PathStyleCheck" IsChecked="False" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.176EC00F33DEEA1C}" AutomationProperties.Name="{DynamicResource Ui.Auto.176EC00F33DEEA1C}" />
+                                                        <ToggleSwitch x:Name="S3SkipTlsVerifyCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.37E7E1EFA89D10E1}" AutomationProperties.Name="{DynamicResource Ui.Auto.37E7E1EFA89D10E1}" />
+                                                        <TextBlock x:Name="S3SyncDeviceText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Expander>
+                                            <Expander x:Name="SettingsS3ProfileExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.AF350F4FDBDCDD84}" Tag="{DynamicResource Ui.Auto.82FBE2C61593632C}" AutomationProperties.Name="{DynamicResource Ui.Auto.AF350F4FDBDCDD84}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                                <Border>
+                                                    <StackPanel Spacing="8">
+                                                        <TextBlock Text="{DynamicResource Ui.Auto.74ADE508B010AB31}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <Button x:Name="S3ExportConnectionProfileButton" Content="{DynamicResource Ui.Auto.6E7D7EA130A1FCFA}" Click="ExportS3ConnectionProfileButton_Click" />
+                                                            <Button x:Name="S3ImportConnectionProfileButton" Content="{DynamicResource Ui.Auto.9CD9DEE98B5E7988}" Classes="quiet" Click="ImportS3ConnectionProfileButton_Click" />
+                                                        </StackPanel>
+                                                        <TextBlock x:Name="S3ConnectionProfileStatusText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Expander>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                                <Expander x:Name="SettingsBackupExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.6BEDA481D19D4185}" Tag="{DynamicResource Ui.Auto.6D3D98941DB5554F}" AutomationProperties.Name="{DynamicResource Ui.Auto.6BEDA481D19D4185}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="SettingsBackupSection" Padding="0">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.9DD9F8A0E4DE0220}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.330BB890965835F9}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.E8CBC61A2FF1925A}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <ToggleSwitch x:Name="AutoBackupCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D4B94B23423B837F}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.E4AD8CC2EC98305C}" AutomationProperties.Name="{DynamicResource Ui.Auto.E4AD8CC2EC98305C}" />
+                                            <Grid ColumnDefinitions="*,160" ColumnSpacing="12">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.E5243ABDEA37FB82}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <NumericUpDown x:Name="AutoBackupRetentionBox" Grid.Column="1" Minimum="1" Maximum="30" Increment="1" Value="5" AutomationProperties.Name="{DynamicResource Ui.Auto.E5243ABDEA37FB82}" FontSize="14" />
+                                            </Grid>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button Content="{DynamicResource Ui.Auto.E9D3DD690A4E2593}" Click="ExportBackupButton_Click" />
+                                                <Button Content="{DynamicResource Ui.Auto.EC217804074AC0BD}" Classes="quiet" Click="ImportBackupButton_Click" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="SettingsBackupStatusText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                                <Expander x:Name="SettingsDataDirectoryExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.95AD5BF35F521BC6}" Tag="{DynamicResource Ui.Auto.42B74722A4C077FE}" AutomationProperties.Name="{DynamicResource Ui.Auto.95AD5BF35F521BC6}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border>
+                                        <StackPanel Spacing="8">
+                                            <TextBlock x:Name="SettingsDataPathText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.70B1291920CFED90}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button Content="{DynamicResource Ui.Auto.DA99EA1331DC3046}" Classes="quiet" Click="OpenDataDirectoryButton_Click" />
+                                                <Button Content="{DynamicResource Ui.Auto.D10D728410A62401}" Classes="quiet" Click="MigrateDataDirectoryButton_Click" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                                <Expander x:Name="SettingsTrashExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.BA35DC23B245E61E}" Tag="{DynamicResource Ui.Auto.B05633D82AC7B603}" AutomationProperties.Name="{DynamicResource Ui.Auto.BA35DC23B245E61E}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border>
                                         <StackPanel Spacing="9">
                                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                                                 <StackPanel Spacing="3">
-                                                    <TextBlock x:Name="SettingsTrashTitleText" Text="回收站" FontSize="16" FontWeight="SemiBold" />
-                                                    <TextBlock x:Name="SettingsTrashDescriptionText"
-                                                               Text="删除的书籍和格式会暂存于此，可恢复或永久清理。"
-                                                               FontSize="11"
-                                                               Foreground="{StaticResource MutedInkBrush}"
-                                                               TextWrapping="Wrap" />
+                                                    <TextBlock x:Name="SettingsTrashTitleText" Text="回收站" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <TextBlock x:Name="SettingsTrashDescriptionText" Text="删除的书籍和格式会暂存于此，可恢复或永久清理。" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                                 </StackPanel>
-                                                <Button x:Name="RefreshTrashButton"
-                                                        Grid.Column="1"
-                                                        Content="刷新"
-                                                        Classes="quiet"
-                                                        Click="RefreshTrashButton_Click" />
+                                                <Button x:Name="RefreshTrashButton" Grid.Column="1" Content="刷新" Classes="quiet" Click="RefreshTrashButton_Click" />
                                             </Grid>
-                                            <ListBox x:Name="LibraryTrashList"
-                                                     ItemsSource="{Binding LibraryTrashItems}"
-                                                     MaxHeight="220"
-                                                     SelectionMode="Single">
+                                            <ListBox x:Name="LibraryTrashList" ItemsSource="{Binding LibraryTrashItems}" MaxHeight="220" SelectionMode="Single" AutomationProperties.Name="回收站为空。" FontSize="14">
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate x:DataType="local:LibraryTrashItemViewModel">
                                                         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="7" Margin="0,3">
                                                             <StackPanel Spacing="2">
                                                                 <TextBlock Text="{Binding DisplayTitle}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                                <TextBlock Text="{Binding DetailText}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding DetailText}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextTrimming="CharacterEllipsis" />
                                                             </StackPanel>
                                                             <Button Grid.Column="1" Content="{Binding RestoreLabel}" Classes="quiet" Padding="8,4" Tag="{Binding}" Click="RestoreTrashButton_Click" />
                                                             <Button Grid.Column="2" Content="{Binding PurgeLabel}" Classes="quiet" Padding="8,4" Tag="{Binding}" Click="PurgeTrashButton_Click" />
@@ -2282,283 +2471,31 @@
                                                     </DataTemplate>
                                                 </ListBox.ItemTemplate>
                                             </ListBox>
-                                            <TextBlock x:Name="LibraryTrashEmptyText"
-                                                       Text="回收站为空。"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource MutedInkBrush}"
-                                                       IsVisible="True" />
-                                            <TextBlock x:Name="LibraryTrashStatusText"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource MutedInkBrush}"
-                                                       TextWrapping="Wrap" />
+                                            <TextBlock x:Name="LibraryTrashEmptyText" Text="回收站为空。" FontSize="12" Foreground="{StaticResource MutedInkBrush}" IsVisible="True" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="LibraryTrashStatusText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
-                                </StackPanel>
-                            </Border>
-
-                <Border x:Name="SettingsCalibreSection"
-                        Classes="flatPanel"
-                        BorderThickness="0"
-                        IsVisible="False"
-                        Padding="18,18,18,32"
-                        Background="{StaticResource PaperBrush}">
-                    <StackPanel Spacing="14">
-                        <TextBlock Text="Calibre" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="{DynamicResource Ui.Auto.68DBD3556A19C150}"
-                                   FontSize="12"
-                                   Foreground="{StaticResource MutedInkBrush}"
-                                   TextWrapping="Wrap" />
-                        <StackPanel Spacing="5">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="{DynamicResource Ui.Auto.6160F42DABA0438E}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
-                                <Ellipse x:Name="CalibreDetectionStatusDot"
-                                         Width="7"
-                                         Height="7"
-                                         VerticalAlignment="Center"
-                                         Fill="#D6A100"
-                                         ToolTip.Tip="{DynamicResource Ui.Auto.FE66F3C4D3165B5D}"
-                                         AutomationProperties.Name="{DynamicResource Ui.Auto.FE66F3C4D3165B5D}" />
+                                </Expander>
                             </StackPanel>
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                <TextBox x:Name="CalibrePathBox" PlaceholderText="{DynamicResource Ui.Auto.A5D0920936DC7153}" />
-                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A8C81F93F2E0E3B6}" Classes="quiet" Click="BrowseCalibreButton_Click" />
-                            </Grid>
-                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                                <Button x:Name="InstallCalibreButton"
-                                        Content="{DynamicResource Ui.Auto.53E06E722B8528B0}"
-                                        Classes="quiet"
-                                        Click="InstallCalibreButton_Click" />
-                                <Button x:Name="InstallKfxInputButton"
-                                        Content="{DynamicResource Ui.Auto.E1D76CA786897DA7}"
-                                        Classes="quiet"
-                                        Click="InstallKfxInputButton_Click" />
-                            </StackPanel>
-                            <ProgressBar x:Name="CalibreSetupProgressBar"
-                                         Height="3"
-                                         Minimum="0"
-                                         Maximum="100"
-                                         IsVisible="False" />
-                            <TextBlock x:Name="CalibreSetupStatusText"
-                                       FontSize="11"
-                                       Foreground="{StaticResource MutedInkBrush}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-
-                <Border x:Name="SettingsKindleSection"
-                        Classes="flatPanel"
-                        BorderThickness="0"
-                        IsVisible="False"
-                        Padding="18"
-                        Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="14">
-                                    <TextBlock Text="Kindle" FontSize="18" FontWeight="SemiBold" />
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,11,0,0">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.272F8ECF4B340534}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <ToggleSwitch x:Name="AutoConnectDeviceCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.6EEF43E0AC64D477}" />
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
-                <Border x:Name="SettingsReadingSection"
-                        Classes="flatPanel"
-                        BorderThickness="0"
-                        IsVisible="False"
-                        Padding="18"
-                        Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="16">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.6FA2075CA9C20775}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" />
-                                        <ComboBox x:Name="PreferredOpenFormatBox" SelectedIndex="0" MaxWidth="360" HorizontalAlignment="Left">
-                                            <ComboBoxItem Content="EPUB" Tag="epub" />
-                                            <ComboBoxItem Content="PDF" Tag="pdf" />
-                                            <ComboBoxItem Content="AZW3" Tag="azw3" />
-                                            <ComboBoxItem Content="{DynamicResource Ui.Auto.F117607AC0E397F4}" Tag="mobi" />
-                                        </ComboBox>
-                                    </StackPanel>
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.E0119B0BA5ACFA0F}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="DefaultVerticalWritingCheck" Grid.Column="1" VerticalAlignment="Center" />
-                                    </Grid>
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.538FD705CD18A10F}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <ToggleSwitch x:Name="AiEnabledCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.0998EF96E5ED903E}" />
-                                    </Grid>
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="False">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.737AC585CF7AD245}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <ToggleSwitch x:Name="ReadingMaterialsCollapsedByDefaultCheck" Grid.Column="1" VerticalAlignment="Center" />
-                                    </Grid>
-                            <Border x:Name="LocalResourcesSettingsSection"
-                                    Classes="flatSubsection"
-                                    Margin="0,11,0,0"
-                                    Padding="0,12,0,0">
-                                        <StackPanel Spacing="10">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.DB96383CD775A45D}" FontSize="16" FontWeight="SemiBold" />
-                                            <TextBlock Text="{DynamicResource Ui.Auto.8ACD464842C7EACB}"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource MutedInkBrush}"
-                                                       TextWrapping="Wrap" />
-                                            <ListBox x:Name="ManagedFontList" ItemsSource="{Binding ManagedFonts}" MaxHeight="150" SelectionMode="Single">
-                                                <ListBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="core:ManagedFont">
-                                                        <TextBlock Text="{Binding DisplayName}" FontSize="11" />
-                                                    </DataTemplate>
-                                                </ListBox.ItemTemplate>
-                                            </ListBox>
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <Button Content="{DynamicResource Ui.Auto.50751AA95894C7DB}" Click="ImportFontButton_Click" />
-                                                <Button Content="{DynamicResource Ui.Auto.A194128B29390AEF}" Classes="quiet" Click="RemoveFontButton_Click" />
-                                                <Button Content="{DynamicResource Ui.Auto.AEE88743413144A2}" Classes="quiet" IsVisible="False" Click="RefreshLocalResourcesButton_Click" />
-                                                <TextBlock x:Name="FontManagementStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
-                            <Border x:Name="DictionaryManagementSection"
-                                    Classes="flatSubsection"
-                                    Padding="0,12,0,0"
-                                    DragDrop.AllowDrop="True">
-                                        <StackPanel Spacing="10">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.F0486713A9BABBE5}" FontSize="16" FontWeight="SemiBold" />
-                                            <TextBlock Text="{DynamicResource Ui.Auto.7C456B8E16853FCF}"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource MutedInkBrush}"
-                                                       TextWrapping="Wrap" />
-                                            <ListBox x:Name="ManagedDictionaryList" ItemsSource="{Binding ManagedDictionaries}" MaxHeight="150" SelectionMode="Single">
-                                                <ListBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="core:DictionaryDefinition">
-                                                        <TextBlock Text="{Binding Name}" FontSize="11" />
-                                                    </DataTemplate>
-                                                </ListBox.ItemTemplate>
-                                            </ListBox>
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <Button Content="{DynamicResource Ui.Auto.48C0179637D1C190}" Click="ImportDictionaryButton_Click" />
-                                                <Button Content="{DynamicResource Ui.Auto.A194128B29390AEF}" Classes="quiet" Click="RemoveDictionaryButton_Click" />
-                                            </StackPanel>
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                <TextBox x:Name="DictionaryTestBox" PlaceholderText="{DynamicResource Ui.Auto.50C7ED7A45E82B5E}" KeyDown="DictionaryTestBox_KeyDown" />
-                                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.BCD6771E08EC7CC7}" Classes="quiet" Click="DictionaryTestButton_Click" />
-                                            </Grid>
-                                            <TextBlock x:Name="DictionaryResultText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                            </Border>
-
-                            <Border x:Name="SettingsDiagnosticsSection"
-                                    Classes="flatPanel"
-                                    BorderThickness="0"
-                                    IsVisible="False"
-                                    Padding="18"
-                                    Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="13">
-                                    <TextBlock x:Name="SettingsDiagnosticsTitleText" Text="跨平台诊断" FontSize="18" FontWeight="SemiBold" />
-                                    <TextBlock x:Name="SettingsDiagnosticsDescriptionText"
-                                               Text="检查数据目录、阅读器、PDF、Calibre 和设备能力；不会下载或修改系统组件。"
-                                               FontSize="12"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <Button x:Name="RefreshDiagnosticsButton"
-                                            Content="重新检测"
-                                            Classes="quiet"
-                                            HorizontalAlignment="Left"
-                                            Click="RefreshDiagnosticsButton_Click" />
-                                    <ItemsControl x:Name="PlatformDiagnosticsList"
-                                                  ItemsSource="{Binding PlatformDiagnostics}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="local:PlatformDiagnosticViewModel">
-                                                <Border BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="0,8">
-                                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="9">
-                                                        <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Top" Margin="0,4,0,0" />
-                                                        <StackPanel Grid.Column="1" Spacing="2">
-                                                            <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" />
-                                                            <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                        </StackPanel>
-                                                        <TextBlock Grid.Column="2" Text="{Binding StatusLabel}" FontSize="11" VerticalAlignment="Top" />
-                                                    </Grid>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <TextBlock x:Name="DiagnosticsStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-
-                            <StackPanel x:Name="SettingsAboutSection"
-                                        IsVisible="False"
-                                        Spacing="16">
-                                <Border Classes="flatPanel"
-                                        BorderThickness="0"
-                                        Padding="18"
-                                        Background="{StaticResource PaperBrush}">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.0A5C9BAD2BB94FF4}" FontSize="18" FontWeight="SemiBold" />
-                                        <TextBlock x:Name="SettingsDataPathText"
-                                                   FontSize="11"
-                                                   Foreground="{StaticResource MutedInkBrush}"
-                                                   TextWrapping="Wrap" />
-                                        <TextBlock Text="{DynamicResource Ui.Auto.70B1291920CFED90}"
-                                                   FontSize="11"
-                                                   Foreground="{StaticResource MutedInkBrush}"
-                                                   TextWrapping="Wrap" />
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <Button Content="{DynamicResource Ui.Auto.DA99EA1331DC3046}" Classes="quiet" Click="OpenDataDirectoryButton_Click" />
-                                            <Button Content="{DynamicResource Ui.Auto.D10D728410A62401}" Classes="quiet" Click="MigrateDataDirectoryButton_Click" />
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
-
-                                <Border Classes="flatPanel"
-                                        BorderThickness="0"
-                                        Padding="18"
-                                        Background="{StaticResource PaperBrush}">
+                            <StackPanel Spacing="16" x:Name="SettingsAboutSection" IsVisible="False">
+                                <Border>
                                     <StackPanel Spacing="14">
                                         <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" FontSize="18" FontWeight="SemiBold" />
-                                            <StackPanel Grid.Column="1"
-                                                        Orientation="Horizontal"
-                                                        Spacing="6"
-                                                        VerticalAlignment="Center">
-                                                        <TextBlock Text="{DynamicResource Ui.Auto.38084D301E3F1A31}" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
-                                                        <TextBlock Text="kingstacker" FontSize="12" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.38084D301E3F1A31}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                <TextBlock Text="kingstacker" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Grid>
+                                        <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <ToggleSwitch x:Name="AutoUpdateCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.85D1563FE0079783}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.4A09393CF96D5F86}" AutomationProperties.Name="{DynamicResource Ui.Auto.4A09393CF96D5F86}" />
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.3D13868593AE4EEB}" FontSize="13" VerticalAlignment="Center" />
-                                            <ComboBox x:Name="UiLanguageBox"
-                                                      Grid.Column="1"
-                                                      Width="180"
-                                                      SelectedIndex="0"
-                                                      SelectionChanged="UiLanguageBox_SelectionChanged">
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.9937E365AAF3A085}" Tag="zh-CN" />
-                                                <ComboBoxItem Content="English" Tag="en-US" />
-                                            </ComboBox>
-                                        </Grid>
-                                        <TextBlock x:Name="AboutVersionText"
-                                                   Text="{DynamicResource Ui.Auto.DC730979055D9FEF}"
-                                                   FontSize="12"
-                                                   Foreground="{StaticResource MutedInkBrush}" />
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.4A09393CF96D5F86}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="AutoUpdateCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.85D1563FE0079783}" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock x:Name="AboutUpdateStatusText"
-                                                       Text="{DynamicResource Ui.Auto.8642A3F7563F3F16}"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource MutedInkBrush}"
-                                                       TextWrapping="Wrap"
-                                                       VerticalAlignment="Center" />
-                                            <Button x:Name="CheckForUpdatesButton"
-                                                    Grid.Column="1"
-                                                    Content="{DynamicResource Ui.Auto.7F68EBAD19BA6BCD}"
-                                                    Classes="quiet"
-                                                    Click="CheckForUpdatesButton_Click" />
+                                            <TextBlock x:Name="AboutUpdateStatusText" Text="{DynamicResource Ui.Auto.8642A3F7563F3F16}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                            <Button x:Name="CheckForUpdatesButton" Grid.Column="1" Content="{DynamicResource Ui.Auto.7F68EBAD19BA6BCD}" Classes="quiet" Click="CheckForUpdatesButton_Click" />
                                         </Grid>
                                         <Rectangle Height="1" Fill="{StaticResource HairlineBrush}" />
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
                                             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                                <!-- Minimal black-and-white cat: outline, eyes and nose only. -->
                                                 <Grid Width="32" Height="30">
                                                     <Polygon Points="4,11 6,2 13,8" Fill="{StaticResource PaperBrush}" Stroke="{StaticResource InkBrush}" StrokeThickness="1.5" />
                                                     <Polygon Points="19,8 26,2 28,11" Fill="{StaticResource PaperBrush}" Stroke="{StaticResource InkBrush}" StrokeThickness="1.5" />
@@ -2568,467 +2505,64 @@
                                                     <Polygon Points="14,20 18,20 16,22.5" Fill="{StaticResource InkBrush}" />
                                                 </Grid>
                                                 <StackPanel Spacing="2" VerticalAlignment="Center">
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" FontSize="10" Foreground="{StaticResource MutedInkBrush}" />
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                                 </StackPanel>
                                             </StackPanel>
-                                            <Border Grid.Column="1"
-                                                    Width="88"
-                                                    Height="88"
-                                                    Background="{StaticResource PaperBrush}"
-                                                    BorderBrush="{StaticResource InkBrush}"
-                                                    BorderThickness="1">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.D84ED132DAB019E5}"
-                                                           FontSize="10"
-                                                           Foreground="{StaticResource MutedInkBrush}"
-                                                           HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center" />
+                                            <Border Grid.Column="1" Width="88" Height="88" Background="{StaticResource PaperBrush}" BorderBrush="{StaticResource InkBrush}" BorderThickness="1">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.D84ED132DAB019E5}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             </Border>
                                         </Grid>
                                     </StackPanel>
                                 </Border>
+                                <Expander x:Name="SettingsDiagnosticsExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Tag="{DynamicResource Ui.Auto.B66D6EE56E8CAEDF}" AutomationProperties.Name="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="SettingsDiagnosticsSection" Padding="0">
+                                        <StackPanel Spacing="13">
+                                            <TextBlock x:Name="SettingsDiagnosticsTitleText" Text="跨平台诊断" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="SettingsDiagnosticsDescriptionText" Text="检测数据目录、阅读器、PDF、Calibre 和设备能力；缺少可安装依赖时可在这里一键修复。" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button x:Name="RepairDiagnosticsButton" Content="一键修复" IsEnabled="False" Classes="quiet" Click="RepairDiagnosticsButton_Click" />
+                                                <Button x:Name="RefreshDiagnosticsButton" Content="重新检测" Classes="quiet" Click="RefreshDiagnosticsButton_Click" />
+                                            </StackPanel>
+                                            <ItemsControl x:Name="PlatformDiagnosticsList" ItemsSource="{Binding PlatformDiagnostics}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:PlatformDiagnosticViewModel">
+                                                        <Border BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="0,8">
+                                                            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="9">
+                                                                <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Top" Margin="0,4,0,0" />
+                                                                <StackPanel Grid.Column="1" Spacing="2">
+                                                                    <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                                    <TextBlock Text="{Binding Detail}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                                </StackPanel>
+                                                                <TextBlock Grid.Column="2" Text="{Binding StatusLabel}" FontSize="12" VerticalAlignment="Top" TextWrapping="Wrap" />
+                                                                <Button Grid.Column="3" Content="{Binding RepairLabel}" IsVisible="{Binding CanRepair}" Classes="quiet" Padding="8,3" VerticalAlignment="Top" Click="RepairDiagnosticButton_Click" />
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock x:Name="DiagnosticsStatusText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
+                    <Border x:Name="SettingsS3ActionBar" Grid.Row="3" IsVisible="False" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,1,0,0" Background="{StaticResource PaperBrush}" Padding="0,12,0,0">
+                        <StackPanel Spacing="4">
+                            <TextBlock x:Name="S3DraftStatusText" FontSize="12" TextWrapping="Wrap" />
+                            <WrapPanel Orientation="Horizontal">
+                                <Button x:Name="S3SaveSettingsButton" Content="{DynamicResource Ui.Auto.C8550237BA701F64}" Margin="0,0,8,8" Click="S3SaveSettingsButton_Click" />
+                                <Button x:Name="S3DiscardSettingsButton" Content="{DynamicResource Ui.Auto.9B7824CEFA1E8B16}" Classes="quiet" Margin="0,0,8,8" Click="S3DiscardSettingsButton_Click" />
+                                <Button x:Name="S3TestConnectionButton" Content="{DynamicResource Ui.Auto.0A98A48EAAAC4175}" Margin="0,0,8,8" Classes="quiet" Click="S3TestConnectionButton_Click" />
+                                <Button x:Name="S3SyncNowButton" Content="{DynamicResource Ui.Auto.36E7A43A1C674E50}" Margin="0,0,8,8" Classes="quiet" Click="S3SyncNowButton_Click" />
+                                <Button x:Name="S3CancelSyncButton" Content="{DynamicResource Ui.Auto.5034DDC8102C5DF8}" Margin="0,0,0,8" Classes="quiet" IsVisible="False" Click="S3CancelSyncButton_Click" />
+                            </WrapPanel>
+                            <TextBlock x:Name="S3SyncStatusText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Grid>
-
-            <!-- Backup and S3 are separate right-side system-setting panes,
-                 following the same interaction pattern as the AI assistant. -->
-            <Border x:Name="SystemSettingsPane"
-                    Grid.Column="2"
-                    Background="{StaticResource PaperBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}"
-                    BorderThickness="1,0,0,0"
-                    IsVisible="False">
-                <Grid RowDefinitions="Auto,*">
-                <StackPanel Spacing="3">
-                    <TextBlock x:Name="SystemSettingsPaneTitle"
-                               Text="系统设置"
-                               FontSize="18"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               Margin="20,50,20,12" />
-                </StackPanel>
-
-                <Grid Grid.Row="1" Margin="0" RowDefinitions="*" ColumnDefinitions="0,*">
-                    <ScrollViewer x:Name="SystemSettingsScrollViewer"
-                                  Grid.Row="0"
-                                  Grid.Column="1"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="20,16,20,14" Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
-                            <Border x:Name="SettingsBackupSection"
-                                    Classes="flatPanel"
-                                    BorderThickness="0"
-                                    IsVisible="False"
-                                    Padding="18"
-                                    Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="14">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.4F5B1DE92F8004CA}" FontSize="18" FontWeight="SemiBold" IsVisible="False" />
-                                    <TextBlock Text="{DynamicResource Ui.Auto.9DD9F8A0E4DE0220}"
-                                               FontSize="11"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <TextBlock Text="{DynamicResource Ui.Auto.330BB890965835F9}"
-                                               FontSize="11"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <TextBlock Text="{DynamicResource Ui.Auto.E8CBC61A2FF1925A}"
-                                               FontSize="11"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.E4AD8CC2EC98305C}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="AutoBackupCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D4B94B23423B837F}" />
-                                    </Grid>
-                                    <Grid ColumnDefinitions="*,160" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.E5243ABDEA37FB82}" FontSize="13" VerticalAlignment="Center" />
-                                        <NumericUpDown x:Name="AutoBackupRetentionBox" Grid.Column="1" Minimum="1" Maximum="30" Increment="1" Value="5" />
-                                    </Grid>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button Content="{DynamicResource Ui.Auto.E9D3DD690A4E2593}" Click="ExportBackupButton_Click" />
-                                        <Button Content="{DynamicResource Ui.Auto.EC217804074AC0BD}" Classes="quiet" Click="ImportBackupButton_Click" />
-                                    </StackPanel>
-                                    <TextBlock x:Name="SettingsBackupStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border x:Name="SettingsSyncSection"
-                                    Classes="flatPanel"
-                                    BorderThickness="0"
-                                    IsVisible="False"
-                                    Padding="18"
-                                    Background="{StaticResource PaperBrush}">
-                                <StackPanel Spacing="14">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.03E350A22079004A}" FontSize="18" FontWeight="SemiBold" IsVisible="False" />
-                                    <TextBlock Text="{DynamicResource Ui.Auto.74FF42E1909F20DC}"
-                                               FontSize="11"
-                                               Foreground="{StaticResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.4E08C2329F790C28}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="S3SyncEnabledCheck"
-                                                      Grid.Column="1"
-                                                      VerticalAlignment="Center"
-                                                      IsCheckedChanged="S3SyncEnabledCheck_IsCheckedChanged" />
-                                    </Grid>
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.1744BAADE68F9732}" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <ToggleSwitch x:Name="S3AutomaticSyncCheck" Grid.Column="1" VerticalAlignment="Center" />
-                                    </Grid>
-                                    <Grid ColumnDefinitions="*,150" ColumnSpacing="12">
-                                        <TextBlock Text="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="13" VerticalAlignment="Center" />
-                                        <NumericUpDown x:Name="S3SyncIntervalBox" Grid.Column="1" Minimum="5" Maximum="1440" Increment="5" Value="30" />
-                                    </Grid>
-
-                                    <Border Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
-                                        <StackPanel Spacing="9">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.72251455F2297070}" FontSize="15" FontWeight="SemiBold" />
-                                            <TextBlock Text="{DynamicResource Ui.Auto.70E98FFE2B292C81}"
-                                                       FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="Endpoint" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3EndpointBox" Grid.Column="1" PlaceholderText="{DynamicResource Ui.Auto.3DF0B4CE64DC4FA2}" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="Access Key" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3AccessKeyBox" Grid.Column="1" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="Secret Key" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3SecretKeyBox" Grid.Column="1" PasswordChar="●" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="Bucket" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3BucketBox" Grid.Column="1" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="Region" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3RegionBox" Grid.Column="1" Text="us-east-1" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.3AAE440415FDD869}" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3PrefixBox" Grid.Column="1" Text="kkindle" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.176EC00F33DEEA1C}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <ToggleSwitch x:Name="S3PathStyleCheck" Grid.Column="1" IsChecked="False" VerticalAlignment="Center" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.37E7E1EFA89D10E1}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <ToggleSwitch x:Name="S3SkipTlsVerifyCheck" Grid.Column="1" VerticalAlignment="Center" />
-                                            </Grid>
-                                            <Border Classes="flatSubsection" Padding="0,10,0,0" Margin="0,4,0,0">
-                                                <StackPanel Spacing="8">
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.AF350F4FDBDCDD84}" FontSize="13" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.74ADE508B010AB31}"
-                                                               FontSize="11"
-                                                               Foreground="{StaticResource MutedInkBrush}"
-                                                               TextWrapping="Wrap" />
-                                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                                        <Button x:Name="S3ExportConnectionProfileButton" Content="{DynamicResource Ui.Auto.6E7D7EA130A1FCFA}" Click="ExportS3ConnectionProfileButton_Click" />
-                                                        <Button x:Name="S3ImportConnectionProfileButton" Content="{DynamicResource Ui.Auto.9CD9DEE98B5E7988}" Classes="quiet" Click="ImportS3ConnectionProfileButton_Click" />
-                                                    </StackPanel>
-                                                    <TextBlock x:Name="S3ConnectionProfileStatusText"
-                                                               FontSize="11"
-                                                               Foreground="{StaticResource MutedInkBrush}"
-                                                               TextWrapping="Wrap" />
-                                                </StackPanel>
-                                            </Border>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <Border Classes="flatSubsection" Padding="0,12,0,0">
-                                        <StackPanel Spacing="9">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.92711FE519D1DCFD}" FontSize="15" FontWeight="SemiBold" />
-                                            <TextBlock Text="{DynamicResource Ui.Auto.1FF53DB62A2A3A4C}"
-                                                       FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <TextBlock Text="{DynamicResource Ui.Auto.F7C9C4CFD4F50703}"
-                                                       FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBox x:Name="S3EncryptionKeyBox" Grid.Column="1" PasswordChar="●" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.72EC61D7855C86A1}" FontSize="12" VerticalAlignment="Center" />
-                                                <NumericUpDown x:Name="S3TimeoutBox" Grid.Column="1" Minimum="10" Maximum="600" Increment="10" Value="60" />
-                                            </Grid>
-                                            <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.8267CD636CE539F9}" FontSize="12" VerticalAlignment="Center" />
-                                                <NumericUpDown x:Name="S3ConcurrencyBox" Grid.Column="1" Minimum="1" Maximum="32" Increment="1" Value="4" />
-                                            </Grid>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <WrapPanel Orientation="Horizontal">
-                                        <Button x:Name="S3SaveSettingsButton" Content="{DynamicResource Ui.Auto.C8550237BA701F64}" Margin="0,0,8,8" Click="S3SaveSettingsButton_Click" />
-                                        <Button x:Name="S3TestConnectionButton" Content="{DynamicResource Ui.Auto.0A98A48EAAAC4175}" Margin="0,0,8,8" Classes="quiet" Click="S3TestConnectionButton_Click" />
-                                        <Button x:Name="S3SyncNowButton" Content="{DynamicResource Ui.Auto.36E7A43A1C674E50}" Margin="0,0,8,8" Classes="quiet" Click="S3SyncNowButton_Click" />
-                                        <Button x:Name="S3CancelSyncButton" Content="{DynamicResource Ui.Auto.5034DDC8102C5DF8}" Margin="0,0,0,8" Classes="quiet" IsVisible="False" Click="S3CancelSyncButton_Click" />
-                                    </WrapPanel>
-                                    <TextBlock x:Name="S3SyncDeviceText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                    <TextBlock x:Name="S3SyncStatusText" FontSize="11" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
-                </Grid>
-            </Border>
-
-            <!-- The system-setting forms are separate right-side panes in
-                 the reference UI. Keeping them outside the settings pages
-                 preserves the same navigation flow on Avalonia. -->
-            <Border x:Name="KindleEmailSettingsPane"
-                    Grid.Column="2"
-                    Background="{StaticResource PaperBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}"
-                    BorderThickness="1,0,0,0"
-                    IsVisible="False">
-                <Grid RowDefinitions="Auto,*">
-                    <Grid Margin="20,50,20,12">
-                        <TextBlock Text="{DynamicResource Ui.Auto.5F52884AFBDA326B}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,0" />
-                    </Grid>
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="20,16,20,14" Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
-                            <TextBlock Text="{DynamicResource Ui.Auto.8609EBA830E79233}"
-                                       FontSize="11"
-                                       Foreground="{StaticResource MutedInkBrush}"
-                                       TextWrapping="Wrap" />
-                            <Button Padding="0"
-                                    Background="Transparent"
-                                    BorderThickness="0"
-                                    Cursor="Hand"
-                                    HorizontalAlignment="Left"
-                                    Focusable="False"
-                                    Click="KindleEmailGuideLink_Click">
-                                <TextBlock FontSize="11"
-                                           Foreground="{StaticResource InkBrush}"
-                                           TextDecorations="Underline"
-                                           Text="{DynamicResource Ui.Auto.F5C62A45859955BB}" />
-                            </Button>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.4B4D02F3724BBD50}" FontSize="11" />
-                                <TextBox x:Name="KindleEmailRecipientBox" PlaceholderText="{DynamicResource Ui.Auto.88D320044CFC5366}" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.F4D19C9EF4B8D010}" FontSize="11" />
-                                <TextBox x:Name="KindleEmailSenderBox" PlaceholderText="{DynamicResource Ui.Auto.B24BB0C6CC545A3A}" />
-                            </StackPanel>
-                            <Grid ColumnDefinitions="*,110" ColumnSpacing="8">
-                                <StackPanel Spacing="5">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.6A85554C141A6383}" FontSize="11" />
-                                    <TextBox x:Name="KindleEmailSmtpHostBox" PlaceholderText="smtp.example.com" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="5">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.E71AC32B544B0EBF}" FontSize="11" />
-                                    <TextBox x:Name="KindleEmailSmtpPortBox" Text="587" PlaceholderText="587" />
-                                </StackPanel>
-                            </Grid>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.CB6DE497BBC98EBB}" FontSize="11" />
-                                <TextBox x:Name="KindleEmailUsernameBox" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.8F6290CB91E90FFB}" FontSize="11" />
-                                <TextBox x:Name="KindleEmailPasswordBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.8CB9B8C5CF47397A}" />
-                            </StackPanel>
-                            <CheckBox x:Name="KindleEmailSslCheck" Content="{DynamicResource Ui.Auto.98BFA63342D1FDA2}" IsChecked="True" />
-                            <Grid Margin="0,4,0,0"
-                                  ColumnDefinitions="Auto,Auto,*"
-                                  ColumnSpacing="8">
-                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="KindleEmailSettingsCancelButton_Click" />
-                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="KindleEmailSettingsSaveButton_Click" />
-                                <TextBlock x:Name="KindleEmailSettingsStatusText"
-                                           Grid.Column="2"
-                                           FontSize="10"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           VerticalAlignment="Center"
-                                           TextWrapping="Wrap" />
-                            </Grid>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
-            </Border>
-
-            <Border x:Name="ZLibraryAccountPane"
-                    Grid.Column="2"
-                    Background="{StaticResource PaperBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}"
-                    BorderThickness="1,0,0,0"
-                    IsVisible="False">
-                <Grid RowDefinitions="Auto,*">
-                    <Grid Margin="20,50,20,12">
-                        <TextBlock Text="{DynamicResource Ui.Auto.04C7E918A97AA2D2}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    </Grid>
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="20,16,20,14" Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
-                            <TextBlock Text="{DynamicResource Ui.Auto.643DE2DA68E1AE9F}"
-                                       FontSize="11"
-                                       Foreground="{StaticResource MutedInkBrush}"
-                                       TextWrapping="Wrap" />
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.780A8542C562FD78}" FontSize="11" />
-                                <TextBox x:Name="ZLibraryEmailBox" PlaceholderText="{DynamicResource Ui.Auto.CDB45C04FD8D14BE}" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.A621AB606DB2A11F}" FontSize="11" />
-                                <TextBox x:Name="ZLibraryPasswordBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.5A2773913717DBD3}" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.34218E41087E6165}" FontSize="11" />
-                                <TextBox x:Name="ZLibraryBaseUrlBox" PlaceholderText="https://api.z-lib.org" />
-                                <TextBlock Text="{DynamicResource Ui.Auto.464EB73BC23E797A}"
-                                           FontSize="10"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                            <Grid Margin="0,4,0,0"
-                                  ColumnDefinitions="Auto,Auto,*"
-                                  ColumnSpacing="8">
-                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="ZLibraryAccountCancelButton_Click" />
-                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.31C1468A6EA3BBF1}" Classes="settingsActionSave" Click="ZLibraryAccountSaveButton_Click" />
-                                <TextBlock x:Name="ZLibraryAccountStatusText"
-                                           Grid.Column="2"
-                                           FontSize="10"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           VerticalAlignment="Center"
-                                           TextWrapping="Wrap" />
-                            </Grid>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
-            </Border>
-
-            <Border x:Name="ReaderAiSettingsPane"
-                    Grid.Column="2"
-                    Background="{StaticResource PaperBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}"
-                    BorderThickness="1,0,0,0"
-                    IsVisible="False"
-                    SizeChanged="ReaderAiSettingsPane_SizeChanged">
-                <Grid RowDefinitions="Auto,*">
-                    <Grid Margin="20,50,20,12">
-                        <TextBlock Text="{DynamicResource Ui.Auto.6F5D72AA32F2C95E}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    </Grid>
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="20,16,20,14" Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
-                            <TextBlock Text="{DynamicResource Ui.Auto.753CC20E7DA80BB0}"
-                                       FontSize="11"
-                                       Foreground="{StaticResource MutedInkBrush}"
-                                       TextWrapping="Wrap" />
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.EC309AB207EF7FA3}" FontSize="11" />
-                                <ComboBox x:Name="MainReaderAiProviderBox"
-                                          SelectedIndex="0"
-                                          SelectionChanged="MainReaderAiProviderBox_SelectionChanged">
-                                    <ComboBoxItem Content="DeepSeek" Tag="deepseek" />
-                                    <ComboBoxItem Content="OpenAI" Tag="openai" />
-                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.988FB59B290B037D}" Tag="custom" />
-                                </ComboBox>
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="Base URL" FontSize="11" />
-                                <TextBox x:Name="MainReaderAiBaseUrlBox" PlaceholderText="https://api.deepseek.com" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.C98E118E0A43F078}" FontSize="11" />
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                                    <TextBox x:Name="MainReaderAiModelBox" PlaceholderText="{DynamicResource Ui.Auto.CB2F1709F983D2F4}" />
-                                    <ComboBox x:Name="MainReaderAiModelSelectorBox"
-                                              Grid.Column="0"
-                                              Classes="aiModelSelector"
-                                              IsVisible="False"
-                                              PlaceholderText="{DynamicResource Ui.Auto.1AFED6A81A2512D2}"
-                                              SelectionChanged="MainReaderAiModelSelectorBox_SelectionChanged" />
-                                    <Button x:Name="MainReaderAiFetchModelsButton"
-                                            Grid.Column="1"
-                                            Classes="quiet"
-                                            Content="{DynamicResource Ui.Auto.83FCFB4C1F2C1641}"
-                                            Click="MainReaderAiFetchModelsButton_Click" />
-                                </Grid>
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="API Key" FontSize="11" />
-                                <TextBox x:Name="MainReaderAiApiKeyBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.CA478C91D3839A44}" />
-                            </StackPanel>
-                            <TextBlock Text="{DynamicResource Ui.Auto.52DEA0A73AA860E1}"
-                                       FontSize="10"
-                                       Foreground="{StaticResource MutedInkBrush}"
-                                       TextWrapping="Wrap" />
-                            <Border Margin="0,4,0,0"
-                                    Padding="12"
-                                    Background="#F7F7F4"
-                                    BorderBrush="{StaticResource HairlineBrush}"
-                                    BorderThickness="1">
-                                <StackPanel Spacing="8">
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <StackPanel Spacing="3">
-                                            <TextBlock Text="本地语义检索模型" FontSize="12" FontWeight="SemiBold" />
-                                            <TextBlock Text="用于书籍问答的向量检索；未安装时仍可使用关键词检索。"
-                                                       FontSize="10"
-                                                       Foreground="{StaticResource MutedInkBrush}"
-                                                       TextWrapping="Wrap" />
-                                        </StackPanel>
-                                        <TextBlock x:Name="MainReaderEmbeddingModelStatusText"
-                                                   Grid.Column="1"
-                                                   MaxWidth="180"
-                                                   FontSize="10"
-                                                   Foreground="{StaticResource MutedInkBrush}"
-                                                   TextAlignment="Right"
-                                                   TextWrapping="Wrap"
-                                                   VerticalAlignment="Center" />
-                                    </Grid>
-                                    <ProgressBar x:Name="MainReaderEmbeddingModelProgressBar"
-                                                 Height="5"
-                                                 IsVisible="False"
-                                                 IsIndeterminate="False" />
-                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
-                                        <ComboBox x:Name="MainReaderEmbeddingModelSelectorBox"
-                                                  FontSize="10"
-                                                  MinWidth="180"
-                                                  VerticalAlignment="Center"
-                                                  SelectionChanged="MainReaderEmbeddingModelSelectorBox_SelectionChanged" />
-                                        <Button x:Name="MainReaderEmbeddingModelDownloadButton"
-                                                Grid.Column="1"
-                                                Classes="quiet"
-                                                Padding="10,5"
-                                                FontSize="11"
-                                                Content="下载模型"
-                                                Click="MainReaderEmbeddingModelDownloadButton_Click" />
-                                        <Button x:Name="MainReaderEmbeddingModelCancelButton"
-                                                Grid.Column="2"
-                                                Classes="quiet"
-                                                Padding="10,5"
-                                                FontSize="11"
-                                                Content="取消"
-                                                IsVisible="False"
-                                                Click="MainReaderEmbeddingModelCancelButton_Click" />
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-                            <Grid Margin="0,4,0,0"
-                                  ColumnDefinitions="Auto,Auto,Auto,*"
-                                  ColumnSpacing="8">
-                                <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="MainReaderAiSettingsCancelButton_Click" />
-                                <Button x:Name="MainReaderAiSettingsTestButton"
-                                        Grid.Column="1"
-                                        Content="{DynamicResource Ui.Auto.D5061C58DDC3BB77}"
-                                        Classes="quiet"
-                                        Click="MainReaderAiSettingsTestButton_Click" />
-                                <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="MainReaderAiSettingsSaveButton_Click" />
-                                <TextBlock x:Name="MainReaderAiSettingsStatusText"
-                                           Grid.Column="3"
-                                           FontSize="10"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           VerticalAlignment="Center"
-                                           TextWrapping="Wrap" />
-                            </Grid>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
-            </Border>
 
             <!-- Format conversion progress, anchored bottom-right like the
                  WinUI reference. Tapping the card badge restores this popup;
@@ -3438,6 +2972,7 @@
                                     Click="DoubanResearchButton_Click" />
                         </Grid>
                         <ListBox x:Name="DoubanCandidateList"
+                                 Classes="doubanCandidateList"
                                  Grid.Row="3"
                                  ItemsSource="{Binding DoubanCandidates}"
                                  SelectionChanged="DoubanCandidateList_SelectionChanged"
@@ -3447,7 +2982,8 @@
                                  BorderThickness="0">
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="local:DoubanCandidateViewModel">
-                                    <Border Padding="12,10"
+                                    <Border Classes="doubanCandidateRow"
+                                            Padding="12,10"
                                             Margin="0,0,0,8"
                                             Background="{StaticResource PaperBrush}"
                                             BorderBrush="{StaticResource HairlineBrush}"
@@ -4439,7 +3975,9 @@
                                           ScrollChanged="ReaderLinuxTextFallbackScroll_ScrollChanged">
                                 <StackPanel Spacing="0">
                                     <SelectableTextBlock x:Name="ReaderLinuxTextFallbackText"
-                                                        IsVisible="False" />
+                                                        IsVisible="False"
+                                                        SelectionBrush="{StaticResource InkBrush}"
+                                                        SelectionForegroundBrush="{StaticResource PaperBrush}" />
                                     <ItemsControl ItemsSource="{Binding ReaderLinuxTextFallbackBlocks}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
@@ -4453,7 +3991,7 @@
                                                                                                   MaxWidth="{Binding MaxWidth}"
                                                                                                   Width="{Binding Width}"
                                                                                                   Foreground="{StaticResource InkBrush}"
-                                                                                                  SelectionBrush="#C9C9C9"
+                                                                                                   SelectionBrush="{StaticResource InkBrush}"
                                                                                                   AnnotationRanges="{Binding AnnotationRanges}"
                                                                                                   InvertedSelectionBackground="{StaticResource InkBrush}"
                                                                                                   InvertedSelectionForeground="{StaticResource PaperBrush}"
@@ -4490,7 +4028,7 @@
                                                         Grid.Column="0"
                                                         FontFamily="{StaticResource DefaultAppFontFamily}"
                                                         Foreground="{StaticResource InkBrush}"
-                                                        SelectionBrush="#C9C9C9"
+                                                        SelectionBrush="{StaticResource InkBrush}"
                                                         InvertedSelectionBackground="{StaticResource InkBrush}"
                                                         InvertedSelectionForeground="{StaticResource PaperBrush}"
                                                         TextAlignment="Left"
@@ -4515,7 +4053,7 @@
                                                         Grid.Column="2"
                                                         FontFamily="{StaticResource DefaultAppFontFamily}"
                                                         Foreground="{StaticResource InkBrush}"
-                                                        SelectionBrush="#C9C9C9"
+                                                        SelectionBrush="{StaticResource InkBrush}"
                                                         InvertedSelectionBackground="{StaticResource InkBrush}"
                                                         InvertedSelectionForeground="{StaticResource PaperBrush}"
                                                         TextAlignment="Left"

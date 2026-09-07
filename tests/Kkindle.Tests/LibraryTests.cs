@@ -273,6 +273,68 @@ public sealed class LibraryTests
     }
 
     [Fact]
+    public async Task DeletingBookAlsoDeletesItsReaderAnnotations()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "带批注.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            await library.ImportAsync([source]);
+            var book = Assert.Single(await library.SearchAsync());
+
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            await reader.SaveAnnotationAsync(new ReaderAnnotation
+            {
+                BookId = book.Id,
+                BookFileId = book.Files[0].Id,
+                ChapterPath = "chapter.xhtml",
+                SelectedText = "要随书删除的内容",
+                Note = "这条笔记不应成为孤儿记录。",
+                EndOffset = 8
+            });
+            Assert.Single(await reader.GetAllAnnotationsAsync());
+
+            await library.DeleteAsync(book.Id);
+
+            Assert.Empty(await reader.GetAllAnnotationsAsync());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task ReinitializingReaderDataRemovesHistoricalOrphanAnnotations()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            await reader.SaveAnnotationAsync(new ReaderAnnotation
+            {
+                BookId = Guid.NewGuid(),
+                BookFileId = Guid.NewGuid(),
+                ChapterPath = "orphan.xhtml",
+                SelectedText = "历史孤儿记录",
+                EndOffset = 6
+            });
+            Assert.Single(await reader.GetAllAnnotationsAsync());
+
+            await reader.InitializeAsync();
+
+            Assert.Empty(await reader.GetAllAnnotationsAsync());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task BatchImportReportsMetadataFailureAndContinuesWithOtherFiles()
     {
         var root = TestHelpers.CreateTempDirectory();
