@@ -542,14 +542,20 @@
 
         <!-- Destructive action: the detail-pane delete button uses the
              WinUI reference's red outline language (#B3261E). -->
-        <!-- Book-library scrollbar auto-collapse: the thumb is invisible while
-             idle, appears while scrolling (the .scrolling class is toggled from
-             code with a short idle delay) and stays visible while the pointer
-             rests on the bar itself (IsExpanded). -->
+        <!-- Scrollbar auto-collapse: the thumb is invisible while idle, appears
+             while scrolling (the .scrolling class is toggled from code with a
+             short idle delay) and stays visible while the pointer rests on the
+             bar itself (IsExpanded). -->
         <Style Selector="ScrollViewer.bookScroll:not(.scrolling) /template/ ScrollBar /template/ Grid#Root Thumb">
             <Setter Property="Opacity" Value="0" />
         </Style>
         <Style Selector="ScrollViewer.bookScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="ScrollViewer.settingsScroll:not(.scrolling) /template/ ScrollBar /template/ Grid#Root Thumb">
+            <Setter Property="Opacity" Value="0" />
+        </Style>
+        <Style Selector="ScrollViewer.settingsScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
             <Setter Property="Opacity" Value="1" />
         </Style>
         <!-- The reader TOC uses the same transient thumb behavior, but owns a
@@ -908,15 +914,28 @@
         <Style Selector="Expander.settingsExpander">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="ContentTransition">
+                <Setter.Value>
+                    <CompositePageTransition>
+                        <PageSlide Duration="0:0:0.09"
+                                   Orientation="Vertical"
+                                   SlideInEasing="CubicEaseOut"
+                                   SlideOutEasing="CubicEaseIn" />
+                        <CrossFade Duration="0:0:0.09" />
+                    </CompositePageTransition>
+                </Setter.Value>
+            </Setter>
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1" CornerRadius="4">
+                    <Border BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1" CornerRadius="4"
+                            ClipToBounds="True">
                         <StackPanel>
                             <ToggleButton x:Name="PART_HeaderSite" Classes="settingsExpanderHeader"
                                           Content="{TemplateBinding Header}" Tag="{TemplateBinding Tag}"
                                           AutomationProperties.Name="{TemplateBinding Header}"
                                           IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" />
-                            <Border x:Name="PART_ExpandSite" IsVisible="{TemplateBinding IsExpanded}" Padding="16,4,16,16">
+                            <Border x:Name="PART_ExpandSite" IsVisible="{TemplateBinding IsExpanded}" Padding="16,4,16,16"
+                                    ClipToBounds="True">
                                 <ContentPresenter x:Name="PART_ContentPresenter"
                                                   Content="{TemplateBinding Content}"
                                                   ContentTemplate="{TemplateBinding ContentTemplate}"
@@ -931,6 +950,10 @@
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="RenderTransform" Value="none" />
+            <Setter Property="Transitions">
+                <Transitions />
+            </Setter>
             <Setter Property="Template">
                 <ControlTemplate>
                     <Border Background="{TemplateBinding Background}" Padding="16,12" MinHeight="60">
@@ -949,6 +972,9 @@
         </Style>
         <Style Selector="ToggleButton.settingsExpanderHeader:pointerover, ToggleButton.settingsExpanderHeader:focus-visible">
             <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.settingsExpanderHeader:pressed">
+            <Setter Property="RenderTransform" Value="none" />
         </Style>
         <Style Selector="ToggleButton.settingsExpanderHeader:checked /template/ Path#SettingsExpanderChevron">
             <Setter Property="Data" Value="M 1,2 L 5,6 L 9,2" />
@@ -1498,7 +1524,7 @@
             <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border x:Name="SettingsToggleRow" Background="Transparent" Padding="8,6" CornerRadius="3"
+                    <Border x:Name="SettingsToggleRow" Background="Transparent" Padding="0,6" CornerRadius="3"
                             BorderBrush="Transparent" BorderThickness="1" MinHeight="44">
                         <Grid ColumnDefinitions="*,36" ColumnSpacing="24">
                             <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"

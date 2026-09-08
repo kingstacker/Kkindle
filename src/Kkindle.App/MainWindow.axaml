@@ -216,7 +216,7 @@
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
                                 <!-- Update badge: hovering shows the release notes; after
-                                     download, clicking starts the explicit exit/install flow. -->
+                                     download, clicking opens the exit/install confirmation. -->
                                 <Button x:Name="UpdateBadgeButton"
                                         IsVisible="False"
                                         Click="UpdateBadgeButton_Click"
@@ -2108,7 +2108,7 @@
                         <Button x:Name="SettingsDataButton" Content="{DynamicResource Ui.Auto.1173D06BC2EA23F0}" Classes="settingsCategory" Tag="Data" Click="SettingsCategoryButton_Click" />
                         <Button x:Name="SettingsAboutButton" Content="{DynamicResource Ui.Auto.0A114F362A5F259E}" Classes="settingsCategory" Tag="About" Click="SettingsCategoryButton_Click" />
                     </WrapPanel>
-                    <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,12,20">
+                    <ScrollViewer x:Name="SettingsScrollViewer" Classes="settingsScroll" Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,12,20">
                         <StackPanel Spacing="16">
                             <StackPanel Spacing="8" x:Name="SettingsLibrarySection" IsVisible="False">
                                 <TextBlock Text="{DynamicResource Ui.Auto.835B700E028C9B20}" Classes="settingsSectionTitle" TextWrapping="Wrap" />

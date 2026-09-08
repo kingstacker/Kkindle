@@ -413,6 +413,7 @@ public partial class MainWindow : Window
                 popup.Width = _authorPopupWidth;
         };
         Dispatcher.UIThread.Post(UpdateBookGridLayout, DispatcherPriority.Loaded);
+        AttachSettingsAutoHideScrollbar();
         AttachBookGridAutoHideScrollbar();
     }
 
@@ -455,6 +456,30 @@ public partial class MainWindow : Window
             idleTimer.Stop();
             idleTimer.Start();
         };
+    }
+
+    // The settings page owns its ScrollViewer directly, so it can use the same
+    // transient thumb behavior without waiting for a ListBox template rebuild.
+    private void AttachSettingsAutoHideScrollbar()
+    {
+        if (SettingsScrollViewer.Classes.Contains("settingsScroll"))
+        {
+            SettingsScrollViewer.Classes.Add("scrolling");
+            var idleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            idleTimer.Tick += (_, _) =>
+            {
+                idleTimer.Stop();
+                SettingsScrollViewer.Classes.Remove("scrolling");
+            };
+            SettingsScrollViewer.ScrollChanged += (_, e) =>
+            {
+                if (e.OffsetDelta.Y == 0) return;
+                SettingsScrollViewer.Classes.Add("scrolling");
+                idleTimer.Stop();
+                idleTimer.Start();
+            };
+            Dispatcher.UIThread.Post(idleTimer.Start, DispatcherPriority.Loaded);
+        }
     }
 
     public LibraryViewModel ViewModel { get; }
@@ -811,11 +836,6 @@ public partial class MainWindow : Window
         if (TryGetPendingUpdatePackage(out var packagePath, out var version))
         {
             e.Cancel = true;
-            // The download-complete notice is an informational overlay. If
-            // the user closes from it, dismiss it first so the install
-            // confirmation is visible instead of being stacked underneath.
-            if (MessageOverlay.IsVisible)
-                CompleteMessage();
             _ = PromptPendingUpdateInstallAsync(packagePath, version);
             return;
         }

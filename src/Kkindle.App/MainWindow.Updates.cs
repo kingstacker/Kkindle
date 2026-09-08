@@ -13,7 +13,7 @@ public partial class MainWindow
     private bool _automaticUpdateCheckStarted;
     private bool _updateCheckInProgress;
     private bool _allowWindowCloseForPendingUpdate;
-    private bool _pendingUpdateExitPromptInProgress;
+    private bool _pendingUpdatePromptInProgress;
 
     // Display-only record of an available update. It drives the title-bar badge;
     // the actual download always starts from a fresh release lookup so package
@@ -159,7 +159,13 @@ public partial class MainWindow
             AboutUpdateStatusText.Text = T("发现新版本 {0}", update.Version);
             if (!userInitiated) return;
 
-            if (!await ConfirmUpdateInstallAsync(currentVersion, update)) return;
+            // On install-capable platforms, clicking update starts the download
+            // immediately. The install confirmation is shown after the package
+            // has been downloaded and verified. Platforms without an in-app
+            // installer still need confirmation before opening the release page.
+            if (!_updateService.CanInstall
+                && !await ConfirmUpdateInstallAsync(currentVersion, update))
+                return;
             if (_updateService.CanInstall) updateProgressVisible = true;
             await DownloadAndInstallAsync(update);
         }
@@ -223,12 +229,10 @@ public partial class MainWindow
             _lifetimeCancellation.Token);
         TaskProgressPopupBar.IsIndeterminate = false;
         TaskProgressPopupBar.Value = 100;
-        TaskProgressPopupText.Text = T("下载完成，等待退出应用…");
+        TaskProgressPopupText.Text = T("下载完成");
         await MarkPendingUpdateReadyAsync(update, packagePath);
         HideTaskProgressPopup();
-        await ShowMessageAsync(
-            T("更新已下载"),
-            T("Kkindle {0} 更新包已下载完成。当前窗口保持打开；退出应用时会提示并完成安装。", update.Version));
+        await PromptPendingUpdateInstallAsync(packagePath, update.Version);
     }
 
     private async Task ApplyUpdateCheckResultAsync(AppUpdateInfo? update)
@@ -333,8 +337,8 @@ public partial class MainWindow
 
     private async Task PromptPendingUpdateInstallAsync(string packagePath, string version)
     {
-        if (_pendingUpdateExitPromptInProgress) return;
-        _pendingUpdateExitPromptInProgress = true;
+        if (_pendingUpdatePromptInProgress) return;
+        _pendingUpdatePromptInProgress = true;
         try
         {
             if (!File.Exists(packagePath))
@@ -371,7 +375,7 @@ public partial class MainWindow
         }
         finally
         {
-            _pendingUpdateExitPromptInProgress = false;
+            _pendingUpdatePromptInProgress = false;
         }
     }
 
