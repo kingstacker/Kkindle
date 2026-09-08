@@ -42,6 +42,7 @@ internal sealed class HorizontalComposer
         var previousBlockWasHeading = false;
         foreach (var block in content.Blocks)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             switch (block.Kind)
             {
                 case BlockKind.Image:
@@ -108,6 +109,7 @@ internal sealed class HorizontalComposer
 
         for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             if (_cursorY + lineHeight > ContentBottom + 0.01f)
             {
                 _pages.NextIfUsed();
@@ -259,6 +261,7 @@ internal sealed class HorizontalComposer
 
         foreach (var cell in cells)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             if (cell.IsLineBreak)
             {
                 line.EndsWithForcedBreak = true;

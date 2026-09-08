@@ -97,30 +97,22 @@ public partial class MainWindow
         index + 1 < _readerTocItems.Count
         && _readerTocItems[index + 1].Level > _readerTocItems[index].Level;
 
-    private bool IsReaderTocRowVisible(int index)
+    private bool ExpandReaderTocAncestors(int index)
     {
-        // A row shows when every ancestor above it is expanded. Walk back to
-        // the nearest shallower entry, which is that row's parent.
+        if (index < 0 || index >= _readerTocRows.Length) return false;
+        var changed = false;
         var level = _readerTocRows[index].Level;
         for (var scan = index - 1; scan >= 0 && level > 0; scan--)
         {
             if (_readerTocRows[scan].Level >= level) continue;
-            if (!_readerTocRows[scan].IsExpanded) return false;
+            if (!_readerTocRows[scan].IsExpanded)
+            {
+                _readerTocRows[scan].IsExpanded = true;
+                changed = true;
+            }
             level = _readerTocRows[scan].Level;
         }
-        return true;
-    }
-
-    private void ExpandReaderTocAncestors(int index)
-    {
-        if (index < 0 || index >= _readerTocRows.Length) return;
-        var level = _readerTocRows[index].Level;
-        for (var scan = index - 1; scan >= 0 && level > 0; scan--)
-        {
-            if (_readerTocRows[scan].Level >= level) continue;
-            _readerTocRows[scan].IsExpanded = true;
-            level = _readerTocRows[scan].Level;
-        }
+        return changed;
     }
 
     private void SetReaderTocCurrentRow(ReaderTocRow? current)
@@ -131,11 +123,17 @@ public partial class MainWindow
 
     private void RefreshReaderTocRows()
     {
-        var visible = _readerTocRows
-            .Select((row, index) => (row, index))
-            .Where(entry => IsReaderTocRowVisible(entry.index))
-            .Select(entry => entry.row)
-            .ToArray();
+        // The rows are already in tree order. Skip a collapsed subtree in a
+        // single pass instead of walking back through every preceding sibling
+        // for each chapter of a large novel.
+        var visible = new List<ReaderTocRow>();
+        int? collapsedLevel = null;
+        foreach (var row in _readerTocRows)
+        {
+            if (collapsedLevel is { } level && row.Level > level) continue;
+            collapsedLevel = row.HasChildren && !row.IsExpanded ? row.Level : null;
+            visible.Add(row);
+        }
 
         // Replacing ItemsSource resets the virtualizing panel, which throws
         // away the measured row heights it estimates scroll offsets from. Rows

@@ -95,6 +95,41 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         InsetVertical = 24f,
     };
 
+    [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb)]
+    [InlineData(TypesetWritingMode.VerticalRl)]
+    public void CancellingCompositionStopsAnInProgressChapter(TypesetWritingMode mode)
+    {
+        using var engine = CreateEngine();
+        using var cancellation = new CancellationTokenSource();
+        var content = new XhtmlChapterLoader().Load(WriteChapter("<p>第一段正文。</p><p>取消后不再处理这一段。</p>"));
+        var cancellable = new ChapterContent
+        {
+            ChapterPath = content.ChapterPath,
+            BodyText = content.BodyText,
+            Blocks = new CancelAfterFirstBlock(content.Blocks, cancellation),
+            FragmentIds = content.FragmentIds,
+            FragmentTextOffsets = content.FragmentTextOffsets
+        };
+        var exception = Assert.Throws<OperationCanceledException>(() => engine.Compose(cancellable, Options(mode), cancellation.Token));
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        Assert.NotEmpty(engine.Compose(content, Options(mode)).Pages);
+    }
+
+    private sealed class CancelAfterFirstBlock(IReadOnlyList<ContentBlock> blocks, CancellationTokenSource cancellation)
+        : IReadOnlyList<ContentBlock>
+    {
+        public int Count => blocks.Count;
+        public ContentBlock this[int index] => blocks[index];
+        public IEnumerator<ContentBlock> GetEnumerator()
+        {
+            yield return blocks[0];
+            cancellation.Cancel();
+            for (var index = 1; index < blocks.Count; index++) yield return blocks[index];
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     [Fact]
     public void Horizontal_PaginationCoversTextWithoutOverflow()
     {

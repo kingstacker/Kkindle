@@ -3598,7 +3598,7 @@
                                 VerticalAlignment="Stretch"
                                 HorizontalAlignment="Stretch"
                                 BorderThickness="0"
-                                Classes="readerToolbar"
+                                Classes="readerToolbar readerCloseButton"
                                 Click="CloseReaderButton_Click" />
                     </Border>
                 </Grid>
@@ -4212,7 +4212,7 @@
                                     ToolTip.Tip="{DynamicResource Ui.Auto.987BA0B5C2710754}"
                                     Click="ReaderExitZenButton_Click" />
                             <Button x:Name="ReaderZenCloseButton"
-                                    Classes="icon"
+                                    Classes="icon readerCloseButton"
                                     Content="×"
                                     FontSize="15"
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.A8B1F579ACBCC5D5}"

@@ -1661,6 +1661,14 @@
         <Style Selector="Button.readerToolbar:disabled">
             <Setter Property="Opacity" Value="0.35" />
         </Style>
+        <!-- Returning to the bookshelf is an immediate view switch. Keep the
+             close action from inheriting any future transform transition. -->
+        <Style Selector="Grid.readerShell Button.readerCloseButton">
+            <Setter Property="RenderTransform" Value="none" />
+            <Setter Property="Transitions">
+                <Transitions />
+            </Setter>
+        </Style>
 
         <Style Selector="Button.readerSearchResult">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
@@ -1761,13 +1769,14 @@
 
         <Style Selector="Button.readerAssistantTab">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="38" />
+            <Setter Property="Height" Value="30" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
@@ -2228,13 +2237,12 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#000000" />
         </Style>
-        <!-- A folded TOC can be shorter than the left rail. Fluent's default
-             ItemsPresenter alignment centers short lists, which makes the
-             whole directory appear to drift downward whenever a chapter
-             switch rebuilds the visible branch. Keep the TOC anchored at the
-             top while allowing long lists to scroll normally. -->
+        <!-- The virtualizing panel needs the full viewport after a branch
+             expands. Top-aligning its presenter leaves it sized to the old
+             collapsed list, so only the first child is realized and the
+             remaining viewport stays blank. Rows already stack from the top. -->
         <Style Selector="ListBox.readerTocList /template/ ItemsPresenter">
-            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
         </Style>
 
         <!-- Glyphs are drawn as vectors rather than Segoe MDL2 Assets glyphs:

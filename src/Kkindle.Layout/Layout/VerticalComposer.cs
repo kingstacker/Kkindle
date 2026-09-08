@@ -55,6 +55,7 @@ internal sealed class VerticalComposer
         var previousBlockWasHeading = false;
         foreach (var block in content.Blocks)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             switch (block.Kind)
             {
                 case BlockKind.Image:
@@ -112,6 +113,7 @@ internal sealed class VerticalComposer
         var firstColumnOfBlock = true;
         while (index < cells.Count)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             EnsureColumnSpace();
             if (firstColumnOfBlock)
             {
@@ -714,6 +716,7 @@ internal sealed class VerticalComposer
     {
         for (var i = 0; i < cells.Count; i++)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             var cell = cells[i];
             if (cell.IsLineBreak
                 || cell.Sideways

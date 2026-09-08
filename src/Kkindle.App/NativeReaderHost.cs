@@ -216,13 +216,21 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     }
 
     /// <summary>Loads and lays out a chapter. The URI fragment selects the anchor.</summary>
-    public void Navigate(Uri uri)
+    public void Navigate(Uri uri) => Navigate(uri, _settings, _showVerticalDebugBoxes);
+
+    internal void Navigate(Uri uri, ReaderLayoutSettings settings, bool showVerticalDebugBoxes)
     {
         if (_disposed)
         {
             return;
         }
 
+        // Apply the book's settings before the background layout. Configuring
+        // only after NavigationCompleted would compose the first chapter twice,
+        // with the second (potentially large) pass blocking the UI thread.
+        _settings = settings;
+        _presentation = DerivePresentation(settings);
+        _showVerticalDebugBoxes = showVerticalDebugBoxes;
         Source = uri;
         var path = uri.IsFile ? uri.LocalPath : uri.AbsolutePath;
         string? fragment = null;
@@ -1018,6 +1026,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private void NavigateCore(string chapterPath, string? fragment)
     {
         _composePending = true;
+        _relayoutTimer?.Stop();
         _navigationCts?.Cancel();
         _navigationCts?.Dispose();
         var navigationCts = new CancellationTokenSource();
@@ -1050,6 +1059,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         if (startingArgs.Cancel)
         {
             navigationCts.Cancel();
+            _composePending = false;
             NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, false));
             return;
         }
@@ -1062,16 +1072,15 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 {
                     navigationToken.ThrowIfCancellationRequested();
                     var loader = new XhtmlChapterLoader(settings.ParagraphIndent);
-                    var content = loader.Load(chapterPath);
+                    var content = loader.Load(chapterPath, navigationToken);
                     var options = BuildOptions(settings, width, height);
-                    var layout = Compose(content, options);
+                    var layout = Compose(content, options, navigationToken);
                     return (content, options, layout);
                 }, navigationToken);
 
                 navigationToken.ThrowIfCancellationRequested();
                 if (_disposed || version != Volatile.Read(ref _navigationVersion))
                 {
-                    NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, false));
                     return;
                 }
 
@@ -1088,13 +1097,20 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 EmitScroll();
                 NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, true));
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (navigationToken.IsCancellationRequested)
             {
-                NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, false));
+                // A superseded request must not complete a newer waiter for
+                // the same URI or report a spurious chapter-load failure.
+                if (!_disposed && version == Volatile.Read(ref _navigationVersion))
+                    _composePending = false;
             }
             catch
             {
-                NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, false));
+                if (!_disposed && version == Volatile.Read(ref _navigationVersion))
+                {
+                    _composePending = false;
+                    NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, false));
+                }
             }
         });
     }
@@ -1115,11 +1131,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
     }
 
-    private ChapterLayout Compose(ChapterContent content, TypesetLayoutOptions options)
+    private ChapterLayout Compose(
+        ChapterContent content,
+        TypesetLayoutOptions options,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_engineGate)
         {
-            return Engine.Compose(content, options);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Engine.Compose(content, options, cancellationToken);
         }
     }
 
@@ -1218,8 +1239,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var content = new XhtmlChapterLoader(settings.ParagraphIndent).Load(chapterPaths[index]);
-                counts[index] = Math.Max(1, engine.Compose(content, options).Pages.Count);
+                var content = new XhtmlChapterLoader(settings.ParagraphIndent).Load(chapterPaths[index], cancellationToken);
+                counts[index] = Math.Max(1, engine.Compose(content, options, cancellationToken).Pages.Count);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

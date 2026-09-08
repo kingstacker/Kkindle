@@ -25,13 +25,18 @@ public sealed class TypesetEngine : IDisposable
     /// <summary>The engine takes ownership of the font library it was built with.</summary>
     public void Dispose() => _fonts.Dispose();
 
-    public ChapterLayout Compose(ChapterContent content, TypesetLayoutOptions options)
+    public ChapterLayout Compose(
+        ChapterContent content,
+        TypesetLayoutOptions options,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var context = new ComposerContext
         {
             Options = options,
             Fonts = _fonts,
             Shaper = _shaper,
+            CancellationToken = cancellationToken,
         };
         var cells = new CellFactory(context);
         var pages = new PageBuilder(options);
@@ -62,6 +67,7 @@ public sealed class TypesetEngine : IDisposable
         // first-page mapping.
         foreach (var (fragmentId, offset) in content.FragmentTextOffsets)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var fragmentPage = layout.GetPageIndexOfOffset(offset);
             if (fragmentPage >= 0)
             {

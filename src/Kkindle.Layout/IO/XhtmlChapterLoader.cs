@@ -53,14 +53,17 @@ public sealed class XhtmlChapterLoader
     private MicroCss? _css;
     private string _chapterPath = string.Empty;
     private string _chapterDir = string.Empty;
+    private CancellationToken _cancellationToken;
 
     public XhtmlChapterLoader(bool paragraphIndent = true)
     {
         _paragraphIndent = paragraphIndent;
     }
 
-    public ChapterContent Load(string chapterPath)
+    public ChapterContent Load(string chapterPath, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        _cancellationToken = cancellationToken;
         _body.Clear();
         _blocks.Clear();
         _fragmentIds.Clear();
@@ -73,6 +76,7 @@ public sealed class XhtmlChapterLoader
         _chapterDir = Path.GetDirectoryName(_chapterPath) ?? string.Empty;
 
         var document = LoadDocument(_chapterPath);
+        cancellationToken.ThrowIfCancellationRequested();
         if (document?.Root is null)
         {
             return new ChapterContent
@@ -102,6 +106,7 @@ public sealed class XhtmlChapterLoader
 
         PromoteLeadingTitle();
         MergeAdjacentHeadingBlocks();
+        cancellationToken.ThrowIfCancellationRequested();
 
         return new ChapterContent
         {
@@ -294,6 +299,7 @@ public sealed class XhtmlChapterLoader
     {
         foreach (var node in element.Nodes())
         {
+            _cancellationToken.ThrowIfCancellationRequested();
             switch (node)
             {
                 case XText text:
@@ -483,6 +489,7 @@ public sealed class XhtmlChapterLoader
     {
         foreach (var node in element.Nodes())
         {
+            _cancellationToken.ThrowIfCancellationRequested();
             switch (node)
             {
                 case XText text:

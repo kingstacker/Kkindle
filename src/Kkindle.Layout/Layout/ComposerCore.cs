@@ -66,6 +66,7 @@ internal sealed class ComposerContext
     public required TypesetLayoutOptions Options { get; init; }
     public required TypesetFontLibrary Fonts { get; init; }
     public required GlyphShaper Shaper { get; init; }
+    public CancellationToken CancellationToken { get; init; }
 
     public string MainFont => Fonts.MainFontPath;
 
@@ -289,6 +290,7 @@ internal sealed class CellFactory
         string? footnoteText = null,
         bool footnoteMarker = false)
     {
+        _context.CancellationToken.ThrowIfCancellationRequested();
         var fontSize = _context.Options.BaseFontSize;
         if (style.Superscript)
         {
@@ -507,6 +509,7 @@ internal sealed class CellFactory
         var units = TypesetText.Itemize(item.Text, 0, item.Text.Length);
         foreach (var unit in units)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             if (unit.Kind == TextUnitKind.Space && cells.Count > 0 && cells[^1].IsSpace)
             {
                 continue; // collapse consecutive whitespace
@@ -598,6 +601,7 @@ internal sealed class CellFactory
         var previousWasLineBreak = cells.Count > 0 && cells[^1].IsLineBreak;
         foreach (var unit in units)
         {
+            _context.CancellationToken.ThrowIfCancellationRequested();
             if (unit.IsLineBreak)
             {
                 cells.Add(new LayoutCell

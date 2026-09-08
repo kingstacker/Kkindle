@@ -23,6 +23,9 @@ public partial class MainWindow
     private bool _readerShowingPreload;
     private CancellationTokenSource? _readerSessionCancellation;
     private CancellationTokenSource? _readerNavigationCancellation;
+    private CancellationTokenSource? _readerChapterPreloadCancellation;
+    private Uri? _readerChapterPreloadTarget;
+    private readonly Dictionary<IReaderHost, Uri> _readerLoadedHostSources = new();
     private int _readerCloseInProgress;
     private readonly SemaphoreSlim _readerActiveHostNavigationGate = new(1, 1);
     private readonly SemaphoreSlim _readerPreloadHostNavigationGate = new(1, 1);
@@ -212,6 +215,8 @@ public partial class MainWindow
     {
         if (_readerActiveHost is not null && !IsReaderHostTypeCompatible(_readerActiveHost))
         {
+            CancelReaderChapterPreload();
+            _readerLoadedHostSources.Clear();
             // The reader surface follows the opened format: self-drawn engine
             // for EPUB, the platform webview only for PDF rendering.
             ReaderActiveHostSlot.Content = null;
@@ -330,9 +335,11 @@ public partial class MainWindow
     private async Task<bool> NavigateReaderHostAndWaitAsync(
         IReaderHost host,
         Uri target,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool isPreload = false)
     {
         var timing = Stopwatch.StartNew();
+        if (!isPreload) CancelReaderChapterPreload(target);
         var gate = ReferenceEquals(host, _readerPreloadHost)
             ? _readerPreloadHostNavigationGate
             : _readerActiveHostNavigationGate;
@@ -359,7 +366,7 @@ public partial class MainWindow
             // is not guaranteed to raise NavigationCompleted, so reuse the
             // loaded document and let ApplyReaderLocationAsync perform the
             // exact anchor/offset jump after the host swap.
-            if (ReaderNavigationLocationPolicy.TargetsSameDocument(host.Source, target))
+            if (ReaderHostHasLoadedDocument(host, target))
             {
                 await ConfigureReaderHostAsync(host, cancellationToken);
                 return true;
@@ -377,6 +384,7 @@ public partial class MainWindow
             host.NavigationCompleted += handler;
             try
             {
+                _readerLoadedHostSources.Remove(host);
                 if (!await NavigateReaderHostCoreAsync(host, target, cancellationToken))
                     return false;
                 var loaded = await completion.Task.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken);
@@ -392,6 +400,8 @@ public partial class MainWindow
                         _ = await WaitForReaderViewportToMatchHostAsync(host, cancellationToken);
                     LogReaderChapterTiming("nav.viewportSettled", timing);
                     await ConfigureReaderHostAsync(host, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _readerLoadedHostSources[host] = target;
                     LogReaderChapterTiming("nav.configured", timing);
                 }
                 return loaded;
@@ -401,17 +411,38 @@ public partial class MainWindow
                 host.NavigationCompleted -= handler;
             }
         }
+        catch (Exception exception) when (exception is OperationCanceledException or TimeoutException)
+        {
+            // Release the host for a foreground jump and stop the abandoned
+            // load itself. Source is assigned before loading finishes, so it
+            // must not make a cancelled document look ready for reuse.
+            _readerLoadedHostSources.Remove(host);
+            host.Stop();
+            throw;
+        }
         finally
         {
             gate.Release();
         }
     }
 
+    private bool ReaderHostHasLoadedDocument(IReaderHost host, Uri target) =>
+        _readerLoadedHostSources.TryGetValue(host, out var loaded)
+        && ReaderNavigationLocationPolicy.TargetsSameDocument(loaded, target)
+        && ReaderNavigationLocationPolicy.TargetsSameDocument(host.Source, target);
+
     private async Task<bool> NavigateReaderHostCoreAsync(
         IReaderHost host,
         Uri target,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (host is NativeReaderHost nativeReader)
+        {
+            nativeReader.Navigate(target, _readerLayout, ShouldShowReaderVerticalDebugBoxes());
+            return true;
+        }
+
         if (OperatingSystem.IsLinux()
             && Environment.GetEnvironmentVariable("KKINDLE_LINUX_HTML_STRING") == "1"
             && !_readerIsPdf
@@ -442,14 +473,19 @@ public partial class MainWindow
             || _readerChapterIndex >= _readerDocument.Chapters.Count - 1) return;
 
         var target = new Uri(_readerDocument.Chapters[_readerChapterIndex + 1]);
+        CancelReaderChapterPreload();
+        using var preloadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _readerChapterPreloadCancellation = preloadCancellation;
+        _readerChapterPreloadTarget = target;
         try
         {
             await NavigateReaderHostAndWaitAsync(
                 host,
                 target,
-                cancellationToken);
+                preloadCancellation.Token,
+                isPreload: true);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (preloadCancellation.IsCancellationRequested)
         {
         }
         catch
@@ -457,6 +493,27 @@ public partial class MainWindow
             // Preloading is an optimization. The visible host remains usable
             // and will load the chapter on demand if this fails.
         }
+        finally
+        {
+            if (ReferenceEquals(_readerChapterPreloadCancellation, preloadCancellation))
+            {
+                _readerChapterPreloadCancellation = null;
+                _readerChapterPreloadTarget = null;
+            }
+        }
+    }
+
+    private void CancelReaderChapterPreload(Uri? requestedTarget = null)
+    {
+        if (_readerChapterPreloadCancellation is not { } preload) return;
+        // A click on the chapter already being prepared can use that work.
+        // All other foreground destinations take priority over speculation.
+        if (requestedTarget is not null
+            && ReaderNavigationLocationPolicy.TargetsSameDocument(_readerChapterPreloadTarget, requestedTarget))
+            return;
+        _readerChapterPreloadCancellation = null;
+        _readerChapterPreloadTarget = null;
+        preload.Cancel();
     }
 
     /// <summary>
@@ -809,6 +866,15 @@ public partial class MainWindow
     private async Task CloseReaderAsync()
     {
         if (Interlocked.Exchange(ref _readerCloseInProgress, 1) != 0) return;
+        // The bookshelf close action must never leave a page snapshot, hold
+        // layer or in-flight reader transition animating over the switch.
+        // Cancel the session before waiting on persistence so an active page
+        // turn releases its gate immediately.
+        _readerSessionCancellation?.Cancel();
+        _readerNavigationCancellation?.Cancel();
+        CancelReaderChapterPreload();
+        Interlocked.Exchange(ref _readerPendingKeyboardNavigation, 0);
+        StopReaderTransitionOverlays();
         // Invalidate debounced bridge saves before waiting for the authoritative
         // close checkpoint. The close path below is the only save that should
         // survive a return to the bookshelf.
@@ -859,6 +925,8 @@ public partial class MainWindow
         await FlushReaderActiveSecondsAsync();
         ExitReaderZenMode();
         Interlocked.Exchange(ref _readerPendingKeyboardNavigation, 0);
+        CancelReaderChapterPreload();
+        _readerLoadedHostSources.Clear();
         _readerNavigationCancellation?.Cancel();
         _readerNavigationCancellation?.Dispose();
         _readerNavigationCancellation = null;

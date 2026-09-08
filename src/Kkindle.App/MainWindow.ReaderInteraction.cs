@@ -5621,6 +5621,7 @@ public partial class MainWindow
             CompleteReaderTtsNavigationRequest(navigationRequestVersion);
             return false;
         }
+        CancelReaderChapterPreload(target);
         PruneReaderPendingLocations(intent);
         HideReaderSelectionPopup();
         if (!ReaderNavigationLocationPolicy.UsesRestorePosition(intent))
@@ -5637,7 +5638,7 @@ public partial class MainWindow
             _readerLinuxTextFallbackEndFragment = null;
 
         var current = CurrentReaderHost;
-        if (ReaderNavigationLocationPolicy.TargetsSameDocument(current.Source, target))
+        if (ReaderHostHasLoadedDocument(current, target))
         {
             var sameDocumentSessionToken = _readerSessionCancellation?.Token ?? cancellationToken;
             _readerNavigationCancellation?.Cancel();
@@ -6006,9 +6007,8 @@ public partial class MainWindow
         var index = item is null ? -1 : FindReaderTocIndex(item);
         // A selected entry nested under a collapsed parent would be invisible
         // and unreachable, so open its branch before selecting it.
-        if (index >= 0)
+        if (index >= 0 && ExpandReaderTocAncestors(index))
         {
-            ExpandReaderTocAncestors(index);
             RefreshReaderTocRows();
         }
 
@@ -8392,6 +8392,9 @@ public partial class MainWindow
         CancellationToken cancellationToken,
         bool animate = true)
     {
+        if (Volatile.Read(ref _readerCloseInProgress) != 0)
+            return await changeContentAsync();
+
         var animation = animate ? _readerPageAnimation : ReaderAnimationNone;
         if (animation == ReaderAnimationNone)
         {
@@ -8429,6 +8432,46 @@ public partial class MainWindow
         }
 
         return await changeContentAsync();
+    }
+
+    private void StopReaderTransitionOverlays()
+    {
+        ReaderNativeTransitionSnapshot.Source = null;
+        ReaderNativeTransitionSnapshot.IsVisible = false;
+        ReaderNativeTransitionSnapshot.Opacity = 1;
+        ReaderNativeTransitionSnapshot.OpacityMask = null;
+        ReaderNativeTransitionSnapshot.Clip = null;
+        ReaderNativeTransitionSnapshot.RenderTransform = null;
+        ReaderNativeTransitionTrail.IsVisible = false;
+        ReaderNativeTransitionTrail.Opacity = 1;
+        ReaderNativeTransitionTrail.RenderTransform = null;
+        ReaderNativeTransitionFront.IsVisible = false;
+        ReaderNativeTransitionFront.Opacity = 1;
+        ReaderNativeTransitionFront.RenderTransform = null;
+        ReaderNativeTransitionEdge.IsVisible = false;
+        ReaderNativeTransitionEdge.Opacity = 1;
+        ReaderNativeTransitionEdge.RenderTransform = null;
+
+        ReaderLinuxTextFallbackTransitionSnapshot.Source = null;
+        ReaderLinuxTextFallbackTransitionSnapshot.IsVisible = false;
+        ReaderLinuxTextFallbackTransitionSnapshot.Opacity = 1;
+        ReaderLinuxTextFallbackTransitionSnapshot.OpacityMask = null;
+        ReaderLinuxTextFallbackTransitionSnapshot.Clip = null;
+        ReaderLinuxTextFallbackTransitionSnapshot.RenderTransform = null;
+        ReaderLinuxTextFallbackTransitionTrail.IsVisible = false;
+        ReaderLinuxTextFallbackTransitionTrail.Opacity = 1;
+        ReaderLinuxTextFallbackTransitionTrail.RenderTransform = null;
+        ReaderLinuxTextFallbackTransitionFront.IsVisible = false;
+        ReaderLinuxTextFallbackTransitionFront.Opacity = 1;
+        ReaderLinuxTextFallbackTransitionFront.RenderTransform = null;
+        ReaderLinuxTextFallbackTransitionEdge.IsVisible = false;
+        ReaderLinuxTextFallbackTransitionEdge.Opacity = 1;
+        ReaderLinuxTextFallbackTransitionEdge.RenderTransform = null;
+
+        ReaderChapterHoldLayer.IsVisible = false;
+        ReaderChapterHoldLayer.Opacity = 0;
+        ReaderChapterHoldImage.Source = null;
+        ReaderTransitionCover.Opacity = 0;
     }
 
     private ReaderTransitionSurface? BuildReaderNativeTransitionSurface(
