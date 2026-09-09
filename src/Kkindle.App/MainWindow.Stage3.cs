@@ -1526,10 +1526,16 @@ public partial class MainWindow
     private async Task<PreparedKindleTransfer> PrepareKindleTransferAsync(
         Book book,
         IProgress<TransferProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BookFile? requestedSource = null)
     {
-        var sourceFile = KindleTransferPolicy.SelectPreferred(book.Files)
-            ?? throw new NotSupportedException(T("没有可发送到 Kindle 的 AZW3、MOBI、EPUB 或 PDF 文件。"));
+        var sourceCandidates = KindleTransferPolicy.GetCandidates(book.Files);
+        var sourceFile = requestedSource is not null
+            ? sourceCandidates.FirstOrDefault(file => file.Id == requestedSource.Id)
+                ?? sourceCandidates.FirstOrDefault()
+            : sourceCandidates.FirstOrDefault();
+        if (sourceFile is null)
+            throw new NotSupportedException(T("没有可发送到 Kindle 的 AZW3、MOBI、EPUB 或 PDF 文件。"));
         var sourcePath = _library.GetAbsoluteFilePath(sourceFile);
         if (!File.Exists(sourcePath))
             throw new FileNotFoundException(T("找不到本地书籍文件，请先刷新书库。"), sourcePath);
@@ -1848,7 +1854,10 @@ public partial class MainWindow
         }
     }
 
-    private async Task SendSelectedBookToKindleCoreAsync()
+    private Task SendSelectedBookToKindleCoreAsync() =>
+        SendSelectedBookToKindleCoreAsync(requestedSource: null);
+
+    private async Task SendSelectedBookToKindleCoreAsync(BookFile? requestedSource)
     {
         // Snapshot the card: awaits below (device refresh, confirm dialog) can
         // re-enter UI handlers that clear _selectedCard, which previously
@@ -1896,7 +1905,11 @@ public partial class MainWindow
                     TaskProgressPopupText.Text = UiText.Localize(value.Message);
                     ShowTransferToast(T("发送到 Kindle 设备"), UiText.Localize(value.Message), progress: value.Percentage);
                 });
-                using var prepared = await PrepareKindleTransferAsync(card.Book, progress, cancellation.Token);
+                using var prepared = await PrepareKindleTransferAsync(
+                    card.Book,
+                    progress,
+                    cancellation.Token,
+                    requestedSource);
                 await _kindle.SendBookAsync(
                     device,
                     prepared.File,
@@ -1930,9 +1943,12 @@ public partial class MainWindow
         }
     }
 
-    private async void SendSelectedBookByEmailButton_Click(object? sender, RoutedEventArgs e)
+    private async void SendSelectedBookByEmailButton_Click(object? sender, RoutedEventArgs e) =>
+        await SendSelectedBookByEmailCoreAsync();
+
+    private async Task SendSelectedBookByEmailCoreAsync(BookFile? requestedSource = null)
     {
-        if (_selectedCard is null)
+        if (_selectedCard is not { } card)
         {
             SetTaskStatus(T("请先选择一本书。"));
             return;
@@ -1946,11 +1962,16 @@ public partial class MainWindow
         if (!_kindleEmailSettings.IsConfigured)
         {
             await ShowMessageAsync(T("无法发送"), T("请先在设置与备份中填写并保存 Kindle 邮箱设置。"));
-            KindleEmailSettingsButton_Click(null, e);
+            KindleEmailSettingsButton_Click(null, new RoutedEventArgs());
             return;
         }
 
-        var file = KindleEmailSelectionPolicy.SelectPreferred(_selectedCard.Book.Files);
+        var file = requestedSource is null
+            ? null
+            : card.Book.Files.FirstOrDefault(candidate =>
+                candidate.Id == requestedSource.Id
+                && KindleEmailSelectionPolicy.IsSupportedFormat(candidate.Format));
+        file ??= KindleEmailSelectionPolicy.SelectPreferred(card.Book.Files);
         if (file is null)
         {
             await ShowMessageAsync(T("无法发送"), T("发送到 Kindle 邮箱目前只支持 EPUB 或 PDF 文件。"));
@@ -1965,17 +1986,17 @@ public partial class MainWindow
 
         try
         {
-            if (!await EnsureKindleEmailAttachmentWithinLimitAsync(_selectedCard.Title, sourcePath))
+            if (!await EnsureKindleEmailAttachmentWithinLimitAsync(card.Title, sourcePath))
                 return;
-            if (!await ConfirmAsync(T("发送到 Kindle 邮箱"), T("确定将《{0}》发送到 {1}？", _selectedCard.Title, _kindleEmailSettings.KindleEmailAddress)))
+            if (!await ConfirmAsync(T("发送到 Kindle 邮箱"), T("确定将《{0}》发送到 {1}？", card.Title, _kindleEmailSettings.KindleEmailAddress)))
                 return;
-            SetTaskStatus(T("正在通过邮件发送《{0}》…", _selectedCard.Title));
+            SetTaskStatus(T("正在通过邮件发送《{0}》…", card.Title));
             await _kindleEmailSender.SendAsync(
                 _kindleEmailSettings,
                 sourcePath,
-                $"Kkindle：{_selectedCard.Title}",
+                $"Kkindle：{card.Title}",
                 _lifetimeCancellation.Token);
-            SetTaskStatus(T("已通过邮件发送《{0}》。", _selectedCard.Title));
+            SetTaskStatus(T("已通过邮件发送《{0}》。", card.Title));
             await ShowMessageAsync(T("发送成功"), T("邮件已发送。Amazon 完成转换后，书籍会出现在 Kindle 或 Kindle 应用中。"));
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -1983,7 +2004,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            LogSendDiagnostic("SendSelectedBookByEmailButton_Click", exception);
+            LogSendDiagnostic("SendSelectedBookByEmailCoreAsync", exception);
             SetTaskStatus(T("邮件发送失败：{0}", UiText.Localize(exception.Message)));
             await ShowMessageAsync(T("发送失败"), UiText.Localize(exception.Message));
         }
@@ -3856,7 +3877,10 @@ public partial class MainWindow
             CompareKindleLibraryCheck.IsChecked = _appSettings.CompareKindleLibraryEnabled;
             GridGalleryDisplayCheck.IsChecked = _appSettings.GridGalleryDisplay;
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
+            PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
+            PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
             DefaultVerticalWritingCheck.IsChecked = _appSettings.DefaultReaderLayout.VerticalWriting;
+            PopulateBookTranslationControls();
             AboutVersionText.Text = T("版本 {0}", ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly));
             CheckForUpdatesButton.IsEnabled = _updateService is not null;
             AboutUpdateStatusText.Text = _updateService is null
@@ -4626,6 +4650,8 @@ public partial class MainWindow
         AutoGenerateReaderFormatsCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         CompareKindleLibraryCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         GridGalleryDisplayCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        PinyinContextMenuEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        PinyinLocalOnlyCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoConnectDeviceCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         DefaultVerticalWritingCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -5059,6 +5085,9 @@ public partial class MainWindow
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
             GridGalleryDisplay = GridGalleryDisplayCheck.IsChecked == true,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
+            PinyinContextMenuEnabled = PinyinContextMenuEnabledCheck.IsChecked == true,
+            PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,
+            Translation = ReadBookTranslationSettingsFromControls(),
             // 排版默认值已在阅读器内设置，这里只同步竖排开关。
             DefaultReaderLayout = _appSettings.DefaultReaderLayout with
             {

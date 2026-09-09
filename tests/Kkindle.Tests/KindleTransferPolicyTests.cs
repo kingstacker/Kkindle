@@ -26,6 +26,18 @@ public sealed class KindleTransferPolicyTests
     }
 
     [Fact]
+    public void ExposesAllSupportedFilesForExplicitUsbSelection()
+    {
+        var original = new BookFile { Format = "epub", RelativePath = "book.epub" };
+        var bilingual = new BookFile { Format = "epub", RelativePath = "book-双语.epub" };
+        var azw3 = new BookFile { Format = "azw3", RelativePath = "book.azw3" };
+
+        var candidates = KindleTransferPolicy.GetCandidates([original, bilingual, azw3]);
+
+        Assert.Equal([azw3, original, bilingual], candidates);
+    }
+
+    [Fact]
     public void CreatesConciseUtf8BoundedKindleFileName()
     {
         var title = "毛姆短篇小说全集（套装共7册，“英语文学中最好的短篇故事”——这是很长的副标题）";

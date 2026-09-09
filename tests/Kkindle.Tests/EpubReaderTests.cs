@@ -327,6 +327,50 @@ public sealed class EpubReaderTests
     }
 
     [Fact]
+    public async Task ReadsBilingualLabelsFromTranslatedNavigationSpans()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var epub = Path.Combine(root, "bilingual-toc.epub");
+            using (var archive = ZipFile.Open(epub, ZipArchiveMode.Create))
+            {
+                TestHelpers.AddZipEntry(archive, "META-INF/container.xml", """
+                    <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                      <rootfiles><rootfile full-path="EPUB/package.opf" /></rootfiles>
+                    </container>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/package.opf", """
+                    <package xmlns="http://www.idpf.org/2007/opf">
+                      <manifest>
+                        <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />
+                        <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" />
+                      </manifest>
+                      <spine><itemref idref="chapter" /></spine>
+                    </package>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/nav.xhtml", """
+                    <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+                      <body><nav epub:type="toc"><ol>
+                        <li><a href="chapter.xhtml">Chapter One</a><br />
+                          <span class="kkindle-translation" lang="zh-CN">第一章</span></li>
+                      </ol></nav></body>
+                    </html>
+                    """);
+                TestHelpers.AddZipEntry(archive, "EPUB/chapter.xhtml", "<html><body><h1>Chapter One</h1></body></html>");
+            }
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var document = await new EpubReaderPreparationService(paths)
+                .PrepareAsync(epub, new string('a', 64));
+
+            Assert.Equal($"Chapter One{Environment.NewLine}第一章", document.Navigation[0].Title);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task PrefersEpub2GuideTocWhenNcxTargetsAreWrong()
     {
         var root = TestHelpers.CreateTempDirectory();

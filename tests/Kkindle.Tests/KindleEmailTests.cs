@@ -24,6 +24,19 @@ public sealed class KindleEmailTests
     }
 
     [Fact]
+    public void ExposesAllSupportedFilesForExplicitEmailSelection()
+    {
+        var original = new BookFile { Format = "epub", RelativePath = "book.epub" };
+        var bilingual = new BookFile { Format = "epub", RelativePath = "book-双语.epub" };
+        var pdf = new BookFile { Format = "pdf", RelativePath = "book.pdf" };
+        var mobi = new BookFile { Format = "mobi", RelativePath = "book.mobi" };
+
+        var candidates = KindleEmailSelectionPolicy.GetCandidates([original, bilingual, pdf, mobi]);
+
+        Assert.Equal([original, bilingual, pdf], candidates);
+    }
+
+    [Fact]
     public void AllowsAttachmentsUpToFiftyMegabytes()
     {
         Assert.True(KindleEmailSelectionPolicy.IsWithinAttachmentLimit(KindleEmailSelectionPolicy.MaximumAttachmentBytes));

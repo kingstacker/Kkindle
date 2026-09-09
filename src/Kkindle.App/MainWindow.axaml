@@ -20,6 +20,7 @@
         Background="Transparent"
         TransparencyLevelHint="Transparent"
         UseLayoutRounding="True"
+        ShowInTaskbar="True"
         WindowDecorations="None"
         DragDrop.AllowDrop="True"
         ExtendClientAreaToDecorationsHint="True"
@@ -2191,7 +2192,7 @@
                                                 <ListBox x:Name="ManagedDictionaryList" ItemsSource="{Binding ManagedDictionaries}" MaxHeight="150" SelectionMode="Single" AutomationProperties.Name="{DynamicResource Ui.Auto.F0486713A9BABBE5}" FontSize="14">
                                                     <ListBox.ItemTemplate>
                                                         <DataTemplate x:DataType="core:DictionaryDefinition">
-                                                            <TextBlock Text="{Binding Name}" FontSize="12" TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding Name}" FontSize="14" TextWrapping="Wrap" />
                                                         </DataTemplate>
                                                     </ListBox.ItemTemplate>
                                                 </ListBox>
@@ -2262,6 +2263,83 @@
                                                 <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="MainReaderAiSettingsSaveButton_Click" />
                                                 <TextBlock x:Name="MainReaderAiSettingsStatusText" Grid.Column="3" FontSize="12" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                                <Expander x:Name="SettingsTranslationExpander"
+                                          Classes="settingsExpander"
+                                          Header="{DynamicResource Ui.Auto.A2D7EC91766FEC01}"
+                                          Tag="{DynamicResource Ui.Auto.11263C1334642C63}"
+                                          AutomationProperties.Name="{DynamicResource Ui.Auto.A2D7EC91766FEC01}"
+                                          Expanded="SettingsExpander_Expanded"
+                                          Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="BookTranslationSettingsPane" Padding="0">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.35BBC274E55537BF}"
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource MutedInkBrush}"
+                                                       TextWrapping="Wrap" />
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.DB4688DFA170AF88}" FontSize="12" TextWrapping="Wrap" />
+                                                <ComboBox x:Name="TranslationProviderBox"
+                                                          SelectedIndex="0"
+                                                          SelectionChanged="TranslationProviderBox_SelectionChanged"
+                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.DB4688DFA170AF88}"
+                                                          FontSize="14">
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.5239FBB2909810D6}" Tag="ai" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.587DAC91F8146163}" Tag="bing-free" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.A60334722AD27ABC}" Tag="google-free" />
+                                                </ComboBox>
+                                            </StackPanel>
+                                            <Grid ColumnDefinitions="*,220" ColumnSpacing="12">
+                                                <TextBlock Text="原文语言" FontSize="12" VerticalAlignment="Center" />
+                                                <ComboBox x:Name="TranslationSourceLanguageBox"
+                                                          Grid.Column="1"
+                                                          SelectionChanged="TranslationSourceLanguageBox_SelectionChanged"
+                                                          AutomationProperties.Name="原文语言"
+                                                          FontSize="14" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="*,220" ColumnSpacing="12">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.966A23E84AEDEEA5}" FontSize="12" VerticalAlignment="Center" />
+                                                <ComboBox x:Name="TranslationTargetLanguageBox"
+                                                          Grid.Column="1"
+                                                          SelectionChanged="TranslationTargetLanguageBox_SelectionChanged"
+                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.966A23E84AEDEEA5}"
+                                                          FontSize="14" />
+                                            </Grid>
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Text="生成结果（可多选）" FontSize="12" TextWrapping="Wrap" />
+                                                <WrapPanel Orientation="Horizontal" ItemSpacing="14" LineSpacing="6">
+                                                    <CheckBox x:Name="TranslationOriginalOutputCheck" Content="原文件" IsChecked="False" IsCheckedChanged="TranslationOutputCheck_Changed" />
+                                                    <CheckBox x:Name="TranslationTranslatedOutputCheck" Content="单翻译文件" IsChecked="True" IsCheckedChanged="TranslationOutputCheck_Changed" />
+                                                    <CheckBox x:Name="TranslationBilingualOutputCheck" Content="双语对照版本" IsChecked="False" IsCheckedChanged="TranslationOutputCheck_Changed" />
+                                                </WrapPanel>
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="TranslationContextMenuEnabledCheck"
+                                                          Classes="settingsToggle"
+                                                          Content="在书籍右键菜单中显示“书籍翻译”"
+                                                          AutomationProperties.Name="在书籍右键菜单中显示书籍翻译"
+                                                          IsCheckedChanged="TranslationContextMenuEnabledCheck_Changed" />
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+                                <Expander x:Name="SettingsPinyinExpander"
+                                          Classes="settingsExpander"
+                                          Header="{DynamicResource Ui.Auto.3940D977411EAE5B}"
+                                          Tag="{DynamicResource Ui.Auto.C0175B3A281235B8}"
+                                          AutomationProperties.Name="{DynamicResource Ui.Auto.3940D977411EAE5B}"
+                                          Expanded="SettingsExpander_Expanded"
+                                          Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="PinyinBookSettingsPane" Padding="0">
+                                        <StackPanel Spacing="14">
+                                            <ToggleSwitch x:Name="PinyinLocalOnlyCheck"
+                                                          Classes="settingsToggle"
+                                                          Content="{DynamicResource Ui.Auto.D28FB2D23923B1E5}"
+                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.D28FB2D23923B1E5}" />
+                                            <ToggleSwitch x:Name="PinyinContextMenuEnabledCheck"
+                                                          Classes="settingsToggle"
+                                                          Content="{DynamicResource Ui.Auto.72FEAA8FECA9631D}"
+                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.F5DFAFE0E87B2553}" />
                                         </StackPanel>
                                     </Border>
                                 </Expander>
@@ -3754,7 +3832,7 @@
                                       StrokeThickness="1.5"
                                       StrokeLineCap="Round"
                                       StrokeJoin="Round"
-                                      Data="M4.5 6h1.5 M9.5 6h10 M4.5 12h1.5 M9.5 12h10 M4.5 18h1.5 M9.5 18h10" />
+                                      Data="M5 5.5H19 M8 12H19 M8 18.5H15" />
                             </Button>
                             <Button x:Name="ReaderSearchToolbarButton"
                                     Classes="readerHeader"
@@ -5296,6 +5374,11 @@
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionAiButton_Click" />
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="#D5D5D1" VerticalAlignment="Center" />
+                        <Button x:Name="ReaderSelectionTranslationButton"
+                                Content="{DynamicResource Ui.Auto.A52A08335185F048}"
+                                Classes="readerSelectionAction"
+                                Click="ReaderSelectionTranslationButton_Click" />
+                        <Rectangle Width="1" Height="18" Margin="2,0" Fill="#D5D5D1" VerticalAlignment="Center" />
                         <Button Content="{DynamicResource Ui.Auto.44CE7AE909BBB28B}"
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionSearchButton_Click" />
@@ -5304,6 +5387,80 @@
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionDictionaryButton_Click" />
                     </StackPanel>
+                </Border>
+            </Popup>
+
+            <Popup x:Name="ReaderTranslationHostPopup"
+                   IsOpen="False"
+                   IsLightDismissEnabled="True"
+                   OverlayDismissEventPassThrough="True"
+                   ShouldUseOverlayLayer="True"
+                   TakesFocusFromNativeControl="False"
+                   Closed="ReaderTranslationHostPopup_Closed">
+                <Border x:Name="ReaderTranslationPopup"
+                        Width="420"
+                        MaxHeight="420"
+                        Padding="12"
+                        Background="{StaticResource PaperBrush}"
+                        BorderBrush="#000000"
+                        BorderThickness="1"
+                        CornerRadius="0">
+                    <Grid RowDefinitions="Auto,Auto,*,Auto"
+                          RowSpacing="9">
+                        <Grid ColumnDefinitions="*,Auto"
+                              ColumnSpacing="8">
+                            <TextBlock x:Name="ReaderTranslationProviderText"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <Button x:Name="ReaderTranslationCloseButton"
+                                    Grid.Column="1"
+                                    Classes="quiet"
+                                    Content="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
+                                    Click="ReaderTranslationCloseButton_Click" />
+                        </Grid>
+                        <Border Grid.Row="1"
+                                Padding="8"
+                                Background="#F3F3F0"
+                                BorderBrush="#D5D5D1"
+                                BorderThickness="1">
+                            <StackPanel Spacing="4">
+                                <TextBlock Foreground="{StaticResource MutedInkBrush}"
+                                           FontSize="11"
+                                           Text="{DynamicResource Ui.Auto.354B28C853334568}" />
+                                <TextBlock x:Name="ReaderTranslationSourceText"
+                                           MaxHeight="62"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                        <ScrollViewer Grid.Row="2"
+                                      MaxHeight="220"
+                                      VerticalScrollBarVisibility="Auto">
+                            <StackPanel Spacing="4">
+                                <TextBlock Foreground="{StaticResource MutedInkBrush}"
+                                           FontSize="11"
+                                           Text="{DynamicResource Ui.Auto.80461C2DECC549DC}" />
+                                <TextBlock x:Name="ReaderTranslationResultText"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </ScrollViewer>
+                        <Grid Grid.Row="3"
+                              ColumnDefinitions="*,Auto"
+                              ColumnSpacing="8">
+                            <TextBlock x:Name="ReaderTranslationStatusText"
+                                       Foreground="{StaticResource MutedInkBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                            <Button x:Name="ReaderTranslationCopyButton"
+                                    Grid.Column="1"
+                                    Classes="quiet"
+                                    Content="{DynamicResource Ui.Auto.032EB48C7A431EC0}"
+                                    IsEnabled="False"
+                                    Click="ReaderTranslationCopyButton_Click" />
+                        </Grid>
+                    </Grid>
                 </Border>
             </Popup>
 

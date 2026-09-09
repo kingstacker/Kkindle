@@ -63,6 +63,29 @@ public sealed class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task BookContextMenuFeaturesDefaultToOffAndPersistWhenEnabled() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var translationToggle = scope.Get<ToggleSwitch>("TranslationContextMenuEnabledCheck");
+        var pinyinToggle = scope.Get<ToggleSwitch>("PinyinContextMenuEnabledCheck");
+        var pinyinLocalOnlyToggle = scope.Get<ToggleSwitch>("PinyinLocalOnlyCheck");
+        Assert.False(translationToggle.IsChecked);
+        Assert.False(pinyinToggle.IsChecked);
+        Assert.False(pinyinLocalOnlyToggle.IsChecked);
+
+        translationToggle.IsChecked = true;
+        pinyinToggle.IsChecked = true;
+        pinyinLocalOnlyToggle.IsChecked = true;
+        scope.Window.Close();
+        await Until(() => !scope.Window.IsVisible);
+
+        var stored = await new AppSettingsStore(scope.Paths).LoadAsync();
+        Assert.True(stored.Translation.ContextMenuEnabled);
+        Assert.True(stored.PinyinContextMenuEnabled);
+        Assert.True(stored.PinyinLocalOnly);
+    });
+
+    [Fact]
     public Task RepeatedCloseWaitsForInFlightSaveAndLatestEdits() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -242,7 +265,7 @@ public sealed class SettingsTests(SettingsUiSession session)
         scope.Window.MouseUp(labelPoint, MouseButton.Left, RawInputModifiers.None);
         Assert.True(toggle.IsChecked);
         Assert.True(toggle.Bounds.Height >= 44);
-        foreach (var name in new[] { "NetworkEnabledCheck", "GridGalleryDisplayCheck", "S3SecretKeyBox",
+        foreach (var name in new[] { "NetworkEnabledCheck", "GridGalleryDisplayCheck", "PinyinContextMenuEnabledCheck", "PinyinLocalOnlyCheck", "S3SecretKeyBox",
                      "MainReaderAiApiKeyBox", "KindleEmailPasswordBox", "PreferredOpenFormatBox" })
             Assert.False(string.IsNullOrWhiteSpace(ControlAutomationPeer.CreatePeerForElement(scope.Get<Control>(name))!.GetName()), name);
     });

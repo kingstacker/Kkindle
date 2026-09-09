@@ -575,6 +575,8 @@ public sealed partial class S3SyncService
                 CompareKindleLibraryEnabled = app.CompareKindleLibraryEnabled,
                 GridGalleryDisplay = app.GridGalleryDisplay,
                 ReadingMaterialsCollapsedByDefault = app.ReadingMaterialsCollapsedByDefault,
+                PinyinContextMenuEnabled = app.PinyinContextMenuEnabled,
+                PinyinLocalOnly = app.PinyinLocalOnly,
                 DefaultReaderLayout = app.DefaultReaderLayout
             },
             Ai = new S3SyncAiSettings
@@ -2880,6 +2882,8 @@ public sealed partial class S3SyncService
                 CompareKindleLibraryEnabled = remoteApp.CompareKindleLibraryEnabled,
                 GridGalleryDisplay = remoteApp.GridGalleryDisplay,
                 ReadingMaterialsCollapsedByDefault = remoteApp.ReadingMaterialsCollapsedByDefault,
+                PinyinContextMenuEnabled = remoteApp.PinyinContextMenuEnabled,
+                PinyinLocalOnly = remoteApp.PinyinLocalOnly,
                 DefaultReaderLayout = remoteApp.DefaultReaderLayout ?? new ReaderLayoutSettings()
             });
             await _appSettingsStore.SaveUnderLockAsync(mergedApp, cancellationToken, remoteUpdatedAt);

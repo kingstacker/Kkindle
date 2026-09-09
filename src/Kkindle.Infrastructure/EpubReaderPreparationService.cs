@@ -30,7 +30,7 @@ public sealed class EpubReaderPreparationService
 {
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     private const string ReaderIndexFileName = ".kkindle-reader-index.json";
-    private const string ReaderIndexFormatVersion = "1";
+    private const string ReaderIndexFormatVersion = "2";
     private const int PhysicalTocFullScanChapterLimit = 256;
     // Bump whenever sanitization changes. Existing reader caches otherwise
     // keep stale sanitized markup indefinitely.
@@ -591,7 +591,7 @@ public sealed class EpubReaderPreparationService
             .Where(element => element.Name.LocalName is
                 "title" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6"
                 or "p" or "div" or "section")
-            .Any(element => IsTocHeading(element.Value));
+            .Any(element => IsTocHeading(GetGeneratedAwareText(element)));
     }
 
     private static string GetPhysicalTocTitle(XDocument document)
@@ -600,14 +600,14 @@ public sealed class EpubReaderPreparationService
             .Where(element => element.Name.LocalName is
                 "h1" or "h2" or "h3" or "h4" or "h5" or "h6"
                 or "p" or "div" or "section")
-            .Select(element => NormalizeTitle(element.Value))
+            .Select(GetGeneratedAwareText)
             .FirstOrDefault(IsTocHeading);
         if (!string.IsNullOrWhiteSpace(visibleTitle))
             return visibleTitle;
 
         return document.Descendants()
             .Where(element => element.Name.LocalName == "title")
-            .Select(element => NormalizeTitle(element.Value))
+            .Select(GetGeneratedAwareText)
             .FirstOrDefault(IsTocHeading)
             ?? "目录";
     }
@@ -726,6 +726,40 @@ public sealed class EpubReaderPreparationService
         return result;
     }
 
+    // The bilingual translator keeps the original link text in <a> and adds
+    // the translated title as a sibling span. Reading anchor.Value alone
+    // therefore loses the translation in Kreader's own TOC even though it is
+    // present in nav.xhtml. Keep the two lines together for the reader UI.
+    private static string GetNavigationTitle(XElement anchor)
+    {
+        var original = GetGeneratedAwareText(anchor);
+        var translated = anchor.Parent?
+            .Elements()
+            .Where(IsGeneratedTranslationElement)
+            .Select(element => NormalizeTitle(element.Value))
+            .FirstOrDefault(value => value.Length > 0);
+
+        translated ??= anchor.Descendants()
+            .Where(IsGeneratedTranslationElement)
+            .Select(element => NormalizeTitle(element.Value))
+            .FirstOrDefault(value => value.Length > 0);
+
+        if (string.IsNullOrWhiteSpace(translated)) return original;
+        if (string.IsNullOrWhiteSpace(original)) return translated;
+        return $"{original}{Environment.NewLine}{translated}";
+    }
+
+    private static string GetGeneratedAwareText(XElement element) =>
+        NormalizeTitle(string.Concat(
+            element
+                .DescendantNodes()
+                .OfType<XText>()
+                .Where(node => !node.Ancestors().Any(IsGeneratedTranslationElement))
+                .Select(node => node.Value)));
+
+    private static bool IsGeneratedTranslationElement(XElement element) =>
+        HasToken(GetAttributeValue(element, "class"), "kkindle-translation");
+
     private static IEnumerable<(string Title, string? Href, int Level)> GetNavigationLinks(XElement? navigation)
     {
         if (navigation is null) return [];
@@ -742,7 +776,7 @@ public sealed class EpubReaderPreparationService
         var depths = anchors.Select(anchor => CountListAncestors(anchor, navigation)).ToArray();
         var baseline = depths.Min();
         return anchors.Select((anchor, index) => (
-            Title: NormalizeTitle(anchor.Value),
+            Title: GetNavigationTitle(anchor),
             Href: anchor.Attributes().FirstOrDefault(attribute =>
                 attribute.Name.LocalName.Equals("href", StringComparison.OrdinalIgnoreCase))?.Value,
             Level: ClampNavigationLevel(depths[index] - baseline)));

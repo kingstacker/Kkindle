@@ -26,10 +26,17 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     public string DataRoot { get; }
     public string Title => UiText.Localize(Book.Title);
     public string Authors => UiText.Localize(Book.Authors);
-    public string FormatLabel => Book.FormatSummary;
+    // A book can contain several EPUB files (for example the original plus a
+    // translated or bilingual edition). The old gallery only showed the
+    // distinct extension, which made a successfully imported edition look as
+    // if it had never been added. Keep the list view's detailed summary
+    // separate and surface the file count in the compact gallery label.
+    public string FormatLabel => Book.Files.Count <= 1
+        ? Book.FormatSummary
+        : UiText.Get("{0} · {1}", Book.FormatSummary, FileCountLabel);
     public string FileCountLabel => Book.Files.Count == 0 ? string.Empty : UiText.Get("{0} 个文件", Book.Files.Count);
     public string TotalSizeLabel => Book.Files.Count == 0 ? UiText.Get("暂无文件") : FormatSize(Book.Files.Sum(file => file.Size));
-    public string FileSummaryLabel => string.Join(" · ", new[] { FormatLabel, FileCountLabel, TotalSizeLabel }
+    public string FileSummaryLabel => string.Join(" · ", new[] { Book.FormatSummary, FileCountLabel, TotalSizeLabel }
         .Where(value => value.Length > 0));
     public string ReadingStatusLabel => Book.ReadingStatus switch
     {

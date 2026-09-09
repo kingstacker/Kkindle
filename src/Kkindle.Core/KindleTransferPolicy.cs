@@ -8,17 +8,24 @@ public static class KindleTransferPolicy
     private static readonly string[] PreferredFormats = ["azw3", "mobi", "epub", "pdf"];
     private static readonly char[] SubtitleSeparators = ['（', '(', '【', '['];
 
-    public static BookFile? SelectPreferred(IEnumerable<BookFile>? files)
+    public static BookFile? SelectPreferred(IEnumerable<BookFile>? files) =>
+        GetCandidates(files).FirstOrDefault();
+
+    // Keep every Kindle-compatible file available to an explicit send action.
+    // A book can contain several editions of the same format, such as the
+    // original, translated, bilingual, and pinyin EPUBs.
+    public static IReadOnlyList<BookFile> GetCandidates(IEnumerable<BookFile>? files)
     {
-        if (files is null) return null;
+        if (files is null) return [];
+
         var available = files.ToArray();
-        foreach (var format in PreferredFormats)
-        {
-            var match = available.FirstOrDefault(file =>
-                string.Equals(file.Format.Trim().TrimStart('.'), format, StringComparison.OrdinalIgnoreCase));
-            if (match is not null) return match;
-        }
-        return null;
+        return available
+            .Where(file => PreferredFormats.Contains(
+                file.Format.Trim().TrimStart('.'),
+                StringComparer.OrdinalIgnoreCase))
+            .OrderByDescending(PinyinBookPolicy.IsGeneratedPinyinVersion)
+            .ThenBy(file => Array.IndexOf(PreferredFormats, file.Format.Trim().TrimStart('.').ToLowerInvariant()))
+            .ToArray();
     }
 
     public static bool RequiresConversionToAzw3(BookFile file) =>

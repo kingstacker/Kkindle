@@ -198,6 +198,8 @@ internal sealed class S3SyncAppSettings
     public bool CompareKindleLibraryEnabled { get; set; } = true;
     public bool GridGalleryDisplay { get; set; }
     public bool ReadingMaterialsCollapsedByDefault { get; set; } = true;
+    public bool PinyinContextMenuEnabled { get; set; }
+    public bool PinyinLocalOnly { get; set; }
     public ReaderLayoutSettings DefaultReaderLayout { get; set; } = new();
 }
 

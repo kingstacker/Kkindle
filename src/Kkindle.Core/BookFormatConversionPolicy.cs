@@ -12,15 +12,23 @@ public static class BookFormatConversionPolicy
     public static BookFile? SelectSource(
         IEnumerable<BookFile>? files,
         string? targetFormat)
+        => GetSourceCandidates(files, targetFormat).FirstOrDefault();
+
+    // Keep all eligible files available to the UI. A single book may contain
+    // several EPUB editions (original, translated, bilingual, or pinyin),
+    // and conversion must let the user choose which one is the source.
+    public static IReadOnlyList<BookFile> GetSourceCandidates(
+        IEnumerable<BookFile>? files,
+        string? targetFormat)
     {
-        if (files is null) return null;
+        if (files is null) return [];
 
         var target = Normalize(targetFormat);
         return files
             .Where(file => IsConvertibleFormat(file.Format)
                 && !string.Equals(Normalize(file.Format), target, StringComparison.OrdinalIgnoreCase))
             .OrderBy(file => GetPriority(file.Format))
-            .FirstOrDefault();
+            .ToArray();
     }
 
     public static string Normalize(string? format) =>

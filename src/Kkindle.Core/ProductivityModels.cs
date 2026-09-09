@@ -76,6 +76,9 @@ public sealed record AppSettings
     public bool CompareKindleLibraryEnabled { get; init; } = true;
     public bool GridGalleryDisplay { get; init; }
     public bool ReadingMaterialsCollapsedByDefault { get; init; } = true;
+    public bool PinyinContextMenuEnabled { get; init; }
+    public bool PinyinLocalOnly { get; init; }
+    public BookTranslationSettings Translation { get; init; } = new();
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ReaderVerticalDebugBoxesEnabled { get; init; }
     public ReaderLayoutSettings DefaultReaderLayout { get; init; } = new();
@@ -100,7 +103,8 @@ public sealed record AppSettings
                 || settings.AutoGenerateAzw3OnImport,
             AutoGenerateAzw3OnImport = false,
             AutoBackupRetention = Math.Clamp(settings.AutoBackupRetention, 1, 30),
-            DefaultReaderLayout = ReaderLayoutDefaults.Normalize(settings.DefaultReaderLayout ?? new ReaderLayoutSettings())
+            DefaultReaderLayout = ReaderLayoutDefaults.Normalize(settings.DefaultReaderLayout ?? new ReaderLayoutSettings()),
+            Translation = BookTranslationSettings.Normalize(settings.Translation)
         };
     }
 }

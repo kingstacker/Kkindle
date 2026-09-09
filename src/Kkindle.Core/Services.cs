@@ -59,6 +59,40 @@ public interface IBookFormatConverter
         FormatConversionMetadata? metadata = null);
 }
 
+public interface IPinyinBookService
+{
+    Task<PinyinBookResumeInfo?> FindResumeAsync(
+        string sourcePath,
+        string destinationPath,
+        PinyinBookOptions options,
+        CancellationToken cancellationToken = default);
+
+    Task<PinyinBookResult> GenerateAsync(
+        string sourcePath,
+        string destinationPath,
+        PinyinBookOptions? options = null,
+        IProgress<PinyinBookProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        PinyinBookResumeMode resumeMode = PinyinBookResumeMode.Restart);
+}
+
+public interface IEpubTranslationService : IDisposable
+{
+    Task<BookTranslationResumeInfo?> FindResumeAsync(
+        string epubPath,
+        string outputDirectory,
+        BookTranslationSettings settings,
+        CancellationToken cancellationToken = default);
+
+    Task<BookTranslationResult> TranslateAsync(
+        string epubPath,
+        string outputDirectory,
+        BookTranslationSettings settings,
+        IProgress<BookTranslationProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        BookTranslationResumeMode resumeMode = BookTranslationResumeMode.Restart);
+}
+
 public interface IMetadataService
 {
     Task<BookMetadata> ReadMetadataAsync(string path, CancellationToken cancellationToken = default);

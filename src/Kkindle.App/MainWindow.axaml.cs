@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private double BookGridSlotHeight => _appSettings.GridGalleryDisplay ? 226 : 304;
     private const string InstantMenuHoverClass = "instantMenuHover";
     private const int LibraryDetailSlideDurationMs = 520;
+    private const int WindowStateAnimationDurationMs = 160;
     // Supersedes in-flight detail-pane animations whenever a newer show/hide
     // command arrives, so a close that was interrupted by a re-select can
     // never collapse a freshly re-opened pane.
@@ -48,6 +49,9 @@ public partial class MainWindow : Window
     private DispatcherTimer? _bookDetailClickTimer;
     private BookCardViewModel? _pendingBookDetailCard;
     private CancellationTokenSource? _detailPaneAnimationCancellation;
+    private CancellationTokenSource? _windowStateAnimationCancellation;
+    private bool _windowMinimizeAnimationInProgress;
+    private int _windowStateAnimationVersion;
 
     private readonly AppPaths _paths;
     private readonly string _rootConfigurationDirectory;
@@ -75,6 +79,8 @@ public partial class MainWindow : Window
     private readonly PdfTextService _pdfTextService;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly AiChatClient _aiChatClient;
+    private readonly TranslationService _translationService;
+    private readonly IEpubTranslationService _epubTranslationService;
     private readonly QueryRewriteService _queryRewriteService;
     private readonly TtsSettingsStore _ttsSettingsStore;
     private readonly TtsCacheManager _ttsCacheManager;
@@ -182,6 +188,8 @@ public partial class MainWindow : Window
         _pdfTextService = new PdfTextService();
         _aiSettingsStore = new AiSettingsStore(paths, _secretProtector);
         _aiChatClient = new AiChatClient();
+        _translationService = new TranslationService(_aiChatClient);
+        _epubTranslationService = new EpubTranslationService(paths, _secretProtector, _aiChatClient);
         _queryRewriteService = new QueryRewriteService(
             _aiChatClient,
             message => Debug.WriteLine($"[RAG] {message}"));
@@ -212,6 +220,11 @@ public partial class MainWindow : Window
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
+        // Keep the reader's nested menu on the same hover branch and chevron
+        // state as the book-library context menu.
+        if (ReaderMoreButton.Flyout is MenuFlyout readerMoreMenu)
+            AttachInstantMenuHover(readerMoreMenu);
+        InitializeBookTranslationControls();
         InitializeReaderEmbeddingModelSelectors();
         // AcceptsReturn lets the TextBox handle Enter before a normal bubbled
         // handler can see it. Observe the tunneling phase, including an event
@@ -512,6 +525,7 @@ public partial class MainWindow : Window
         UpdateDeviceBookEmptyState();
         UpdateReaderAiLanguageText();
         ApplyReaderAiSettingsToControls();
+        RefreshReaderTranslationLocalizedText();
         _ = ObserveReaderTaskAsync(
             RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         UpdateCalibreDetectionStatus();
@@ -729,12 +743,23 @@ public partial class MainWindow : Window
         base.OnPropertyChanged(change);
         if (change.Property == WindowStateProperty)
         {
-            if (change.NewValue is WindowState newState
-                && newState == WindowState.Minimized)
+            if (change.NewValue is WindowState newState)
             {
-                // Minimize parks the single instance in the tray instead of
-                // leaving a taskbar button; the tray click brings it back.
-                Hide();
+                if (change.OldValue is WindowState.Minimized
+                    && newState != WindowState.Minimized)
+                {
+                    BeginWindowRestoreAnimation();
+                }
+                else if (newState == WindowState.Minimized
+                         && !_windowMinimizeAnimationInProgress)
+                {
+                    // A platform-initiated minimize has already crossed the
+                    // native boundary by the time this notification arrives.
+                    // Keep the next taskbar restore consistent with the
+                    // button-initiated path.
+                    CancelWindowStateAnimation();
+                    Opacity = 0;
+                }
             }
             if (MaximizeWindowGlyph is not null
                 && MaximizeWindowButton is not null)
@@ -859,6 +884,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        CancelWindowStateAnimation();
         _library.DataChanged -= LocalLibraryDataChanged;
         _readerData.DataChanged -= LocalReaderDataChanged;
         _s3SyncService.RemoteSettingsApplied -= S3RemoteSettingsApplied;
@@ -878,6 +904,9 @@ public partial class MainWindow : Window
         _calibreDetectionCancellation?.Dispose();
         _calibreDetectionCancellation = null;
         _conversionCancellation?.Cancel();
+        CancelPinyinGeneration();
+        CancelBookTranslation();
+        CancelReaderTranslationRequest();
         _transferCancellation?.Cancel();
         _isTransferring = false;
         _doubanCandidateCompletion?.TrySetResult(null);
@@ -926,6 +955,8 @@ public partial class MainWindow : Window
         _douban.Dispose();
         _doubanBatchService?.Dispose();
         _zLibraryService.Dispose();
+        _epubTranslationService.Dispose();
+        _translationService.Dispose();
         _aiChatClient.Dispose();
         _embeddingModelDownloader.Dispose();
         (_embeddingService as IDisposable)?.Dispose();
@@ -1934,20 +1965,57 @@ public partial class MainWindow : Window
         var openMenu = new MenuItem { Header = T("打开书籍") };
         ApplyLegacyMenuItemSize(openMenu);
         openMenu.Resources["FlyoutThemeMinWidth"] = 0d;
-        foreach (var format in new[] { "EPUB", "PDF", "AZW3" })
+        var supportedFiles = ReaderBookSelectionPolicy.GetSupportedFiles(card.Book.Files);
+        foreach (var fileGroup in supportedFiles.GroupBy(
+                     file => file.Format.Trim().TrimStart('.'),
+                     StringComparer.OrdinalIgnoreCase))
         {
-            var item = new MenuItem
+            var files = fileGroup.ToArray();
+            var format = fileGroup.Key.ToUpperInvariant();
+            if (files.Length == 1)
+            {
+                var item = new MenuItem
+                {
+                    Header = format,
+                    Width = 80,
+                    MinWidth = 0,
+                    IsEnabled = true,
+                    Tag = files[0]
+                };
+                ApplyLegacyMenuItemSize(item);
+                item.Click += async (_, _) =>
+                {
+                    if (item.Tag is BookFile selectedFile)
+                        await OpenBookAsync(card, selectedFile);
+                };
+                openMenu.Items.Add(item);
+                continue;
+            }
+
+            // Keep same-format editions together, but expose every file. This
+            // is important for translation: original, translated and
+            // bilingual EPUBs intentionally belong to one book record.
+            var formatMenu = new MenuItem
             {
                 Header = format,
-                Width = 64,
+                Width = 80,
                 MinWidth = 0,
-                IsEnabled = card.Book.Files.Any(file =>
-                    string.Equals(file.Format, format, StringComparison.OrdinalIgnoreCase)
-                    && ReaderBookSelectionPolicy.GetSupportedFiles([file]).Count > 0)
+                IsEnabled = true
             };
-            ApplyLegacyMenuItemSize(item);
-            item.Click += async (_, _) => await OpenBookFormatAsync(card, format);
-            openMenu.Items.Add(item);
+            ApplyLegacyMenuItemSize(formatMenu);
+            var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in files)
+            {
+                var baseLabel = GetBookFileMenuLabel(file);
+                labels.TryGetValue(baseLabel, out var occurrence);
+                occurrence++;
+                labels[baseLabel] = occurrence;
+                var label = occurrence == 1 ? baseLabel : $"{baseLabel} ({occurrence})";
+                formatMenu.Items.Add(CreateMenuItem(
+                    label,
+                    () => OpenBookAsync(card, file)));
+            }
+            openMenu.Items.Add(formatMenu);
         }
         openMenu.IsEnabled = openMenu.Items.OfType<MenuItem>().Any(item => item.IsEnabled);
         menu.Items.Add(openMenu);
@@ -1958,22 +2026,53 @@ public partial class MainWindow : Window
         convertMenu.Resources["FlyoutThemeMinWidth"] = 0d;
         foreach (var target in new[] { "epub", "azw3", "pdf" })
         {
-            var item = new MenuItem
-            {
-                Header = target.ToUpperInvariant(),
-                Width = 64,
-                MinWidth = 0,
-                Tag = target
-            };
-            ApplyLegacyMenuItemSize(item);
-            item.Click += async (_, _) => await ConvertBookAsync(card, target);
-            convertMenu.Items.Add(item);
+            var sourceCandidates = BookFormatConversionPolicy.GetSourceCandidates(card.Book.Files, target);
+            convertMenu.Items.Add(CreateBookVariantMenuItem(
+                target.ToUpperInvariant(),
+                sourceCandidates,
+                sourceFile => ConvertBookAsync(card, target, sourceFile),
+                width: 80));
         }
         menu.Items.Add(convertMenu);
         menu.Items.Add(new Separator());
 
-        menu.Items.Add(CreateMenuItem(T("发送到 Kindle 设备"), SendSelectedBookToKindleCoreAsync));
-        menu.Items.Add(CreateMenuItem(T("发送到 Kindle 邮箱"), SendSelectedBooksByEmailAsync));
+        var pinyinFile = FindPinyinBookFile(card.Book.Files);
+        var pinyinContextMenuEnabled = PinyinContextMenuEnabledCheck?.IsChecked
+            ?? _appSettings.PinyinContextMenuEnabled;
+        if (pinyinContextMenuEnabled == true)
+        {
+            var pinyinMenuItem = CreateMenuItem(
+                T("书籍注音"),
+                () => GeneratePinyinBookAsync(card));
+            pinyinMenuItem.IsEnabled = pinyinFile is null && SelectPinyinSourceFile(card.Book.Files) is not null;
+            menu.Items.Add(pinyinMenuItem);
+            if (pinyinFile is not null)
+            {
+                menu.Items.Add(CreateMenuItem(
+                    T("打开书籍注音"),
+                    () => OpenBookAsync(card, pinyinFile)));
+            }
+            menu.Items.Add(new Separator());
+        }
+
+        var translationContextMenuEnabled = TranslationContextMenuEnabledCheck?.IsChecked
+            ?? _appSettings.Translation.ContextMenuEnabled;
+        if (translationContextMenuEnabled == true
+            && card.Book.Files.Any(file =>
+                file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase)))
+        {
+            menu.Items.Add(CreateMenuItem(T("书籍翻译…"), () => TranslateBookFromContextAsync(card)));
+            menu.Items.Add(new Separator());
+        }
+
+        menu.Items.Add(CreateBookVariantMenuItem(
+            T("发送到 Kindle 设备"),
+            KindleTransferPolicy.GetCandidates(card.Book.Files),
+            sourceFile => SendSelectedBookToKindleCoreAsync(sourceFile)));
+        menu.Items.Add(CreateBookVariantMenuItem(
+            T("发送到 Kindle 邮箱"),
+            KindleEmailSelectionPolicy.GetCandidates(card.Book.Files),
+            sourceFile => SendSelectedBookByEmailCoreAsync(sourceFile)));
 
         var collectionMenu = new MenuItem { Header = T("收藏夹") };
         ApplyLegacyMenuItemSize(collectionMenu);
@@ -2030,7 +2129,7 @@ public partial class MainWindow : Window
             var item = new MenuItem
             {
                 Header = format,
-                Width = 64,
+                Width = 80,
                 MinWidth = 0,
                 IsEnabled = file is not null,
                 Tag = file
@@ -2043,6 +2142,10 @@ public partial class MainWindow : Window
             };
             deleteFormatMenu.Items.Add(item);
         }
+        if (pinyinFile is not null)
+            deleteFormatMenu.Items.Add(CreateMenuItem(
+                T("书籍注音版"),
+                () => DeleteFileAsync(pinyinFile)));
         deleteFormatMenu.IsEnabled = deleteFormatMenu.Items.OfType<MenuItem>().Any(item => item.IsEnabled);
         menu.Items.Add(deleteFormatMenu);
         deleteFormatMenu.Items.Add(new Separator());
@@ -2050,6 +2153,63 @@ public partial class MainWindow : Window
 
         AttachInstantMenuHover(menu);
         return menu;
+    }
+
+    private static string GetBookFileMenuLabel(BookFile file)
+    {
+        var stem = Path.GetFileNameWithoutExtension(file.RelativePath);
+        if (stem.Contains("-双语", StringComparison.OrdinalIgnoreCase)
+            || stem.Contains("_双语", StringComparison.OrdinalIgnoreCase))
+            return T("双语");
+        if (stem.Contains("-译文", StringComparison.OrdinalIgnoreCase)
+            || stem.Contains("_译文", StringComparison.OrdinalIgnoreCase))
+            return T("译文");
+        if (stem.Contains("-原文", StringComparison.OrdinalIgnoreCase)
+            || stem.Contains("_原文", StringComparison.OrdinalIgnoreCase))
+            return T("原文");
+        if (PinyinBookPolicy.IsGeneratedPinyinVersion(file))
+            return T("拼音版");
+
+        return string.IsNullOrWhiteSpace(stem)
+            ? file.Format.Trim().TrimStart('.').ToUpperInvariant()
+            : stem;
+    }
+
+    private static MenuItem CreateBookVariantMenuItem(
+        string header,
+        IReadOnlyList<BookFile> files,
+        Func<BookFile?, Task> action,
+        double? width = null)
+    {
+        MenuItem item;
+        if (files.Count <= 1)
+        {
+            item = CreateMenuItem(header, () => action(files.FirstOrDefault()));
+        }
+        else
+        {
+            item = new MenuItem { Header = header };
+            ApplyLegacyMenuItemSize(item);
+            item.Resources["FlyoutThemeMinWidth"] = 0d;
+            var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in files)
+            {
+                var baseLabel = GetBookFileMenuLabel(file);
+                labels.TryGetValue(baseLabel, out var occurrence);
+                occurrence++;
+                labels[baseLabel] = occurrence;
+                var label = occurrence == 1 ? baseLabel : $"{baseLabel} ({occurrence})";
+                item.Items.Add(CreateMenuItem(label, () => action(file)));
+            }
+        }
+
+        if (width is { } fixedWidth)
+        {
+            item.Width = fixedWidth;
+            item.MinWidth = 0;
+        }
+
+        return item;
     }
 
     private async Task OpenBookFormatAsync(BookCardViewModel card, string format)
@@ -2085,6 +2245,14 @@ public partial class MainWindow : Window
     }
 
     private static void AttachInstantMenuHover(ContextMenu menu)
+    {
+        foreach (var item in EnumerateMenuItems(menu.Items))
+            item.PointerEntered += (_, _) => ActivateInstantMenuBranch(menu.Items, item);
+
+        menu.Closed += (_, _) => ClearInstantMenuHover(menu.Items);
+    }
+
+    private static void AttachInstantMenuHover(MenuFlyout menu)
     {
         foreach (var item in EnumerateMenuItems(menu.Items))
             item.PointerEntered += (_, _) => ActivateInstantMenuBranch(menu.Items, item);
@@ -2277,8 +2445,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ConvertBookAsync(BookCardViewModel card, string targetFormat)
+    private async Task ConvertBookAsync(
+        BookCardViewModel card,
+        string targetFormat,
+        BookFile? requestedSource = null)
     {
+        if (_pinyinGenerationInProgress)
+        {
+            await ShowMessageAsync(T("格式转换"), T("已有一本书正在进行书籍注音，请稍候。"));
+            return;
+        }
+
         if (_conversionInProgress)
         {
             await ShowMessageAsync(T("格式转换"), T("已有一本书正在转换，请稍候。"));
@@ -2294,7 +2471,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        var sourceFile = BookFormatConversionPolicy.SelectSource(card.Book.Files, target);
+        var sourceCandidates = BookFormatConversionPolicy.GetSourceCandidates(card.Book.Files, target);
+        var sourceFile = requestedSource is not null
+            ? sourceCandidates.FirstOrDefault(file => file.Id == requestedSource.Id)
+                ?? sourceCandidates.FirstOrDefault()
+            : sourceCandidates.FirstOrDefault();
         if (sourceFile is null)
         {
             await ShowMessageAsync(T("格式转换"), T("需要 EPUB、AZW3、PDF 或 MOBI 作为转换源。"));
@@ -2403,7 +2584,7 @@ public partial class MainWindow : Window
             .ToArray();
         if (books.Length == 0)
             return new AutomaticReaderFormatGenerationResult(0, []);
-        if (_conversionInProgress || _automaticReaderFormatGenerationInProgress)
+        if (_conversionInProgress || _automaticReaderFormatGenerationInProgress || _pinyinGenerationInProgress)
             return new AutomaticReaderFormatGenerationResult(
                 0,
                 [T("已有格式转换正在进行，未启动 EPUB/AZW3 自动补齐。")]);
@@ -3778,22 +3959,190 @@ public partial class MainWindow : Window
     }
 
     private void MinimizeWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-        => WindowState = WindowState.Minimized;
+    {
+        if (WindowState == WindowState.Minimized || _windowMinimizeAnimationInProgress)
+            return;
+
+        _windowMinimizeAnimationInProgress = true;
+        var animationVersion = ++_windowStateAnimationVersion;
+        var animationCancellation = BeginWindowStateAnimation();
+        var animationToken = animationCancellation.Token;
+        _ = FinishWindowMinimizeAnimationAsync(
+            animationVersion,
+            animationCancellation,
+            animationToken,
+            Math.Clamp(Opacity, 0, 1));
+    }
+
+    private async Task FinishWindowMinimizeAnimationAsync(
+        int animationVersion,
+        CancellationTokenSource animationCancellation,
+        CancellationToken animationToken,
+        double fromOpacity)
+    {
+        try
+        {
+            await RunWindowOpacityAnimationAsync(
+                fromOpacity,
+                0,
+                new CubicEaseIn(),
+                animationToken);
+            if (animationVersion == _windowStateAnimationVersion
+                && IsVisible
+                && WindowState != WindowState.Minimized)
+            {
+                WindowState = WindowState.Minimized;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // A platform compositor failure must not leave the window in a
+            // half-faded, interactive state. The version guard prevents an
+            // older animation from changing a newer restore/minimize request.
+            if (animationVersion == _windowStateAnimationVersion)
+            {
+                Opacity = 0;
+                if (IsVisible && WindowState != WindowState.Minimized)
+                    WindowState = WindowState.Minimized;
+            }
+        }
+        finally
+        {
+            if (animationVersion == _windowStateAnimationVersion)
+            {
+                _windowMinimizeAnimationInProgress = false;
+                CompleteWindowStateAnimation(animationCancellation);
+            }
+        }
+    }
+
+    private void BeginWindowRestoreAnimation()
+    {
+        var animationVersion = ++_windowStateAnimationVersion;
+        var animationCancellation = BeginWindowStateAnimation();
+        var animationToken = animationCancellation.Token;
+        Opacity = 0;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (animationVersion != _windowStateAnimationVersion
+                    || animationToken.IsCancellationRequested
+                    || !IsVisible
+                    || WindowState == WindowState.Minimized)
+                    return;
+
+                _ = FinishWindowRestoreAnimationAsync(
+                    animationVersion,
+                    animationCancellation,
+                    animationToken);
+            },
+            DispatcherPriority.Render);
+    }
+
+    private async Task FinishWindowRestoreAnimationAsync(
+        int animationVersion,
+        CancellationTokenSource animationCancellation,
+        CancellationToken animationToken)
+    {
+        try
+        {
+            await RunWindowOpacityAnimationAsync(
+                0,
+                1,
+                new CubicEaseOut(),
+                animationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // Restoring the window must remain reliable even when an optional
+            // compositor does not support animated top-level opacity.
+        }
+        finally
+        {
+            if (animationVersion == _windowStateAnimationVersion)
+            {
+                if (!animationToken.IsCancellationRequested
+                    && IsVisible
+                    && WindowState != WindowState.Minimized)
+                {
+                    Opacity = 1;
+                }
+                CompleteWindowStateAnimation(animationCancellation);
+            }
+        }
+    }
+
+    private CancellationTokenSource BeginWindowStateAnimation()
+    {
+        CancelWindowStateAnimation();
+        var cancellation = new CancellationTokenSource();
+        _windowStateAnimationCancellation = cancellation;
+        return cancellation;
+    }
+
+    private void CompleteWindowStateAnimation(CancellationTokenSource cancellation)
+    {
+        if (!ReferenceEquals(_windowStateAnimationCancellation, cancellation))
+            return;
+
+        _windowStateAnimationCancellation = null;
+        cancellation.Dispose();
+    }
+
+    private void CancelWindowStateAnimation()
+    {
+        var cancellation = _windowStateAnimationCancellation;
+        _windowStateAnimationCancellation = null;
+        if (cancellation is null)
+            return;
+
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+
+    private async Task RunWindowOpacityAnimationAsync(
+        double from,
+        double to,
+        Easing easing,
+        CancellationToken cancellationToken)
+    {
+        var animation = new Animation
+        {
+            Duration = TimeSpan.FromMilliseconds(WindowStateAnimationDurationMs),
+            Easing = easing,
+            FillMode = FillMode.Forward
+        };
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(0d),
+            Setters = { new Avalonia.Styling.Setter(Visual.OpacityProperty, from) }
+        });
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(1d),
+            Setters = { new Avalonia.Styling.Setter(Visual.OpacityProperty, to) }
+        });
+        await animation.RunAsync(this, cancellationToken);
+    }
 
     private void MaximizeWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => ToggleMaximized();
 
-    // While Kreader is open the caption X acts as "close the reader" and
-    // returns to the main interface (same default as the reader's 返回书架
-    // button); only a second click on the library exits the application.
-    private async void CloseWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    // The custom caption X parks the whole application in the system tray.
+    // The tray menu's 退出 command remains the explicit application exit path.
+    private void CloseWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (ReaderRoot.IsVisible)
-        {
-            await CloseReaderAsync();
-            return;
-        }
-        Close();
+        _windowStateAnimationVersion++;
+        _windowMinimizeAnimationInProgress = false;
+        CancelWindowStateAnimation();
+        Opacity = 1;
+        Hide();
     }
 
     private void ToggleMaximized()

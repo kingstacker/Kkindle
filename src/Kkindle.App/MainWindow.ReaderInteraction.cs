@@ -7539,6 +7539,8 @@ public partial class MainWindow
     // reference's selection-bar handlers.
     private void ShowReaderSelectionPopup(Point? placementPoint = null, double? selectionBottom = null)
     {
+        if (ReaderTranslationHostPopup.IsOpen)
+            HideReaderTranslationPopup(clearSelection: false);
         if (string.IsNullOrWhiteSpace(_readerPendingSelection))
         {
             HideReaderSelectionPopup();
@@ -7552,7 +7554,7 @@ public partial class MainWindow
         ShowReaderPopupNearSelection(
             ReaderSelectionHostPopup,
             ReaderSelectionPopupBar,
-            fallbackWidth: 360,
+            fallbackWidth: 430,
             fallbackHeight: 38,
             placementPoint,
             selectionBottom);
@@ -7627,6 +7629,7 @@ public partial class MainWindow
 
     private void HideReaderSelectionPopup()
     {
+        HideReaderTranslationPopup(clearSelection: false);
         StopReaderSelectionHighlightPointerTracking();
         if (ReaderSelectionHighlightMenuButton?.Flyout is PopupFlyoutBase { IsOpen: true } flyout)
             flyout.Hide();
@@ -7636,7 +7639,7 @@ public partial class MainWindow
 
     private void ReaderRoot_SelectionDismissPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!ReaderSelectionHostPopup.IsOpen
+        if ((!ReaderSelectionHostPopup.IsOpen && !ReaderTranslationHostPopup.IsOpen)
             || string.IsNullOrWhiteSpace(_readerPendingSelection)
             || !e.GetCurrentPoint(ReaderRoot).Properties.IsLeftButtonPressed)
             return;
@@ -7649,7 +7652,10 @@ public partial class MainWindow
             && (ReferenceEquals(source, ReaderSelectionPopupBar)
                 || source.GetVisualAncestors().Contains(ReaderSelectionPopupBar)
                 || source is MenuFlyoutPresenter
-                || source.GetVisualAncestors().OfType<MenuFlyoutPresenter>().Any()))
+                || source.GetVisualAncestors().OfType<MenuFlyoutPresenter>().Any()
+                || ReferenceEquals(source, ReaderTranslationPopup)
+                || source.GetVisualAncestors().Contains(ReaderTranslationPopup)
+                || source is ComboBoxItem))
             return;
 
         e.Handled = true;

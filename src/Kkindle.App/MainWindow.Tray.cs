@@ -67,9 +67,12 @@ public partial class MainWindow
 
     private void RestoreFromTray()
     {
+        var wasHidden = !IsVisible;
         Show();
         if (WindowState == WindowState.Minimized)
             WindowState = WindowState.Normal;
+        else if (wasHidden)
+            BeginWindowRestoreAnimation();
         Activate();
     }
 }

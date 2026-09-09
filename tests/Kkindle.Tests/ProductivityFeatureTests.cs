@@ -34,12 +34,22 @@ public sealed class ProductivityFeatureTests
                 AutoUpdateCheckEnabled = false,
                 AutoConnectDevice = true,
                 CompareKindleLibraryEnabled = false,
+                PinyinContextMenuEnabled = true,
+                PinyinLocalOnly = true,
                 ReaderVerticalDebugBoxesEnabled = true,
                 LastAutoUpdateCheckAt = new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)),
                 PendingUpdateVersion = "1.2.3",
                 PendingUpdateReleaseNotes = "修复阅读器翻页问题",
                 PendingUpdatePackagePath = Path.Combine(root, "update.exe"),
                 PendingUpdateDownloadedAt = new DateTimeOffset(2026, 8, 23, 9, 35, 0, TimeSpan.FromHours(8)),
+                Translation = new BookTranslationSettings
+                {
+                    Provider = (BookTranslationProvider)999,
+                    SourceLanguage = "not-supported",
+                    TargetLanguage = "auto",
+                    OutputMode = BookTranslationOutputMode.None,
+                    ContextMenuEnabled = false
+                },
                 DefaultReaderLayout = new ReaderLayoutSettings(FontScale: 9, LineHeight: -1)
             });
 
@@ -55,17 +65,27 @@ public sealed class ProductivityFeatureTests
             Assert.False(restored.AutoUpdateCheckEnabled);
             Assert.True(restored.AutoConnectDevice);
             Assert.False(restored.CompareKindleLibraryEnabled);
+            Assert.True(restored.PinyinContextMenuEnabled);
+            Assert.True(restored.PinyinLocalOnly);
             Assert.True(restored.ReaderVerticalDebugBoxesEnabled);
             Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)), restored.LastAutoUpdateCheckAt);
             Assert.Equal("1.2.3", restored.PendingUpdateVersion);
             Assert.Equal("修复阅读器翻页问题", restored.PendingUpdateReleaseNotes);
             Assert.Equal(Path.Combine(root, "update.exe"), restored.PendingUpdatePackagePath);
             Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 35, 0, TimeSpan.FromHours(8)), restored.PendingUpdateDownloadedAt);
+            Assert.Equal(BookTranslationProvider.Ai, restored.Translation.Provider);
+            Assert.Equal("auto", restored.Translation.SourceLanguage);
+            Assert.Equal("zh-CN", restored.Translation.TargetLanguage);
+            Assert.Equal(BookTranslationOutputMode.Translated, restored.Translation.OutputMode);
+            Assert.False(restored.Translation.ContextMenuEnabled);
             Assert.Equal(restored, store.LoadSynchronously());
 
             // Defaults start clean; a fresh install has never checked for updates.
             var freshSettings = new AppSettings();
             Assert.False(freshSettings.OnboardingCompleted);
+            Assert.False(freshSettings.PinyinContextMenuEnabled);
+            Assert.False(freshSettings.PinyinLocalOnly);
+            Assert.False(freshSettings.Translation.ContextMenuEnabled);
             Assert.Null(freshSettings.LastAutoUpdateCheckAt);
             Assert.Null(freshSettings.PendingUpdateVersion);
             Assert.Null(freshSettings.PendingUpdatePackagePath);
@@ -84,6 +104,9 @@ public sealed class ProductivityFeatureTests
             Assert.True(defaults.AutoConnectDevice);
             Assert.True(defaults.CompareKindleLibraryEnabled);
             Assert.True(defaults.AutoUpdateCheckEnabled);
+            Assert.False(defaults.PinyinContextMenuEnabled);
+            Assert.False(defaults.PinyinLocalOnly);
+            Assert.False(defaults.Translation.ContextMenuEnabled);
         }
         finally { TestHelpers.TryDelete(root); }
     }

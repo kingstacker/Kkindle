@@ -67,7 +67,7 @@ public partial class MainWindow
         S3SyncIndicatorButton.Classes.Set("failed", needsAttention);
         S3SyncIndicatorButton.Classes.Set("unconfigured", state == S3SyncIndicatorState.NotConfigured);
         S3SyncCloudIcon.IsVisible = true;
-        S3SyncSpinnerIcon.IsVisible = syncing;
+        S3SyncSpinnerIcon.IsVisible = syncing || state == S3SyncIndicatorState.Pending;
         S3SyncSuccessGlyph.IsVisible = state == S3SyncIndicatorState.Succeeded;
         S3SyncFailureGlyph.IsVisible = needsAttention;
         S3SyncCloudIcon.Stroke = state == S3SyncIndicatorState.NotConfigured
