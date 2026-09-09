@@ -47,8 +47,8 @@
                 <ContentPresenter Content="{TemplateBinding Content}"
                                   ContentTemplate="{TemplateBinding ContentTemplate}"
                                   Foreground="{TemplateBinding Foreground}"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
                                   HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
                                   VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
             </Border>
@@ -1963,6 +1963,22 @@
         </Style>
         <Style Selector="Button.readerHeader:pressed">
             <Setter Property="Background" Value="#D9D9D5" />
+        </Style>
+        <!-- KReader header glyphs share one full button slot. The presenter
+             fills the slot and the content alignment, rather than the glyph's
+             desired size, determines the exact centre of every rectangle. -->
+        <Style Selector="Grid.readerShell Button.readerHeader,
+                        Grid.readerShell Button.readerHeaderIcon">
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Grid.readerShell Button.readerHeader Path">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Stretch" Value="None" />
+            <Setter Property="UseLayoutRounding" Value="True" />
         </Style>
         <Style Selector="Button.readerHeader.ttsActive">
             <Setter Property="Background" Value="Transparent" />

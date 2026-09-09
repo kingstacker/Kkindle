@@ -3735,7 +3735,9 @@
                         BorderBrush="#E2E2DE"
                         BorderThickness="0,0,0,1">
                     <Grid Margin="12,8" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                        <StackPanel Orientation="Horizontal" Spacing="5">
+                        <StackPanel Orientation="Horizontal"
+                                    Spacing="5"
+                                    VerticalAlignment="Center">
                             <Button x:Name="ReaderTocToggleButton"
                                     Classes="readerHeader"
                                     Width="38"
@@ -3744,8 +3746,8 @@
                                     ToolTip.Tip="{DynamicResource Ui.Auto.741925AF773FDAE3}"
                                     Click="ReaderTocButton_Click">
                                 <Path x:Name="ReaderTocToggleIcon"
-                                      Width="18"
-                                      Height="18"
+                                      Width="24"
+                                      Height="24"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center"
                                       Stroke="{Binding $parent[Button].Foreground}"
@@ -3761,8 +3763,8 @@
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.D40E1B4E4A622EB2}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.43A641217D7F134F}"
                                     Click="ReaderSearchToolbarButton_Click">
-                                <Path Width="18"
-                                      Height="18"
+                                <Path Width="24"
+                                      Height="24"
                                       Stroke="{Binding $parent[Button].Foreground}"
                                       StrokeThickness="1.5"
                                       StrokeLineCap="Round"
@@ -3776,11 +3778,13 @@
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.50E6C34A9A5257C7}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.57E9D77DA9EFA036}"
                                     Click="ReaderTtsButton_Click">
-                                <Grid Width="28"
-                                      Height="24">
+                                <Grid Width="24"
+                                      Height="24"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center">
                                     <Path x:Name="ReaderTtsButtonIcon"
-                                          Width="18"
-                                          Height="18"
+                                          Width="24"
+                                          Height="24"
                                           HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           Stroke="{Binding $parent[Button].Foreground}"
@@ -3827,7 +3831,9 @@
                                       HorizontalScrollBarVisibility="Hidden"
                                       VerticalScrollBarVisibility="Hidden"
                                       VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" Spacing="5">
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="5"
+                                        VerticalAlignment="Center">
                                 <Button x:Name="ReaderZoomOutButton"
                                         Classes="readerHeaderIcon"
                                         Content="A−"
@@ -3853,8 +3859,8 @@
                                         ToolTip.Tip="{DynamicResource Ui.Auto.12856C8BCE9C08EF}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.0498D4E5A749540F}">
                                     <Path x:Name="ReaderFlowIcon"
-                                          Width="18"
-                                          Height="18"
+                                          Width="24"
+                                          Height="24"
                                           Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeThickness="1.5"
                                           StrokeLineCap="Round"
@@ -3888,8 +3894,8 @@
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.3FF66E53453FEC82}"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.3FF66E53453FEC82}"
                                         Click="ReaderBookmarkButton_Click">
-                                    <Path Width="18"
-                                          Height="18"
+                                    <Path Width="24"
+                                          Height="24"
                                           Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeThickness="1.5"
                                           StrokeLineCap="Round"
@@ -3902,8 +3908,8 @@
                                         MinWidth="38"
                                         IsVisible="False"
                                         Click="ReaderPdfNoteButton_Click">
-                                    <Path Width="18"
-                                          Height="18"
+                                    <Path Width="24"
+                                          Height="24"
                                           Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeThickness="1.5"
                                           StrokeLineCap="Round"
@@ -3917,8 +3923,8 @@
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.11FB682BE0A0233D}"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.90298AE01BB88F61}"
                                         Click="ReaderAssistantToggleButton_Click">
-                                    <Path Width="18"
-                                          Height="18"
+                                    <Path Width="24"
+                                          Height="24"
                                           HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           Stroke="{Binding $parent[Button].Foreground}"
@@ -3933,8 +3939,8 @@
                                         MinWidth="38"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.863C2A1656503DF6}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.863C2A1656503DF6}">
-                                    <Path Width="18"
-                                          Height="18"
+                                    <Path Width="24"
+                                          Height="24"
                                           Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeThickness="2.4"
                                           StrokeLineCap="Round"
