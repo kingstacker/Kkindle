@@ -8651,7 +8651,15 @@ public partial class MainWindow
         ReaderTwoPageModeItem.IsEnabled = !vertical;
         ReaderSinglePageModeItem.IsEnabled = true;
         if (ReaderFlowButton is not null)
-            ReaderFlowButton.Content = flowMode == 0 ? T("滚动") : twoPage ? T("双栏") : T("单页");
+        {
+            // Icon-only button: keep the current mode in tooltip and
+            // accessibility name, mirroring UpdateReaderToolbar.
+            var flowLabel = flowMode == 0 ? T("滚动") : twoPage ? T("双栏") : T("单页");
+            ToolTip.SetTip(ReaderFlowButton, flowLabel);
+            AutomationProperties.SetName(ReaderFlowButton, flowLabel);
+            if (ReaderFlowIcon is not null)
+                ReaderFlowIcon.Data = GetReaderFlowIcon(flowMode, twoPage);
+        }
     }
 
     private void ReaderZenMenuItem_Click(object? sender, RoutedEventArgs e)
@@ -9330,15 +9338,35 @@ public partial class MainWindow
             _readerZenChromeHideTimer?.Stop();
     }
 
+    // 滚动 / 单页 / 双栏 three-state icon for the flow (模式) button.
+    private static readonly Geometry ReaderFlowScrollIcon =
+        Geometry.Parse("M5 4.5h14v15h-14Z M12 8.5v6.5 M9.3 12.3L12 15L14.7 12.3");
+    // 单页：折角文档页，避免与双栏共用空心矩形观感。
+    private static readonly Geometry ReaderFlowSingleIcon =
+        Geometry.Parse("M6 4h7.5l4.5 4.5V20H6Z M13.5 4v4.5H18");
+    private static readonly Geometry ReaderFlowDoubleIcon =
+        Geometry.Parse("M5 4.5h14v15h-14Z M12 4.5v15");
+
+    private static Geometry GetReaderFlowIcon(int flowMode, bool twoPage)
+        => flowMode == 0 ? ReaderFlowScrollIcon : twoPage ? ReaderFlowDoubleIcon : ReaderFlowSingleIcon;
+
     private void UpdateReaderToolbar()
     {
         if (ReaderFlowButton is not null)
         {
-            ReaderFlowButton.Content = _readerIsPdf
+            // The flow button is icon-only; the current mode lives in the
+            // tooltip and accessibility name instead of the button face.
+            var flowLabel = _readerIsPdf
                 ? T("PDF 页")
                 : _readerLayout.FlowMode == 0
                 ? T("滚动")
                 : _readerLayout.TwoPageMode ? T("双栏") : T("单页");
+            ToolTip.SetTip(ReaderFlowButton, flowLabel);
+            AutomationProperties.SetName(ReaderFlowButton, flowLabel);
+            if (ReaderFlowIcon is not null)
+                ReaderFlowIcon.Data = GetReaderFlowIcon(
+                    _readerIsPdf ? 1 : _readerLayout.FlowMode,
+                    _readerLayout.TwoPageMode);
             // The WinUI reference hides the flow selector entirely for PDF.
             ReaderFlowButton.IsVisible = !_readerIsPdf;
         }
@@ -9387,7 +9415,6 @@ public partial class MainWindow
         if (ReaderPdfNoteButton is not null)
         {
             ReaderPdfNoteButton.IsVisible = _readerIsPdf;
-            ReaderPdfNoteButton.Content = T("页面笔记");
             ToolTip.SetTip(ReaderPdfNoteButton, T("为当前 PDF 页面添加笔记"));
             AutomationProperties.SetName(ReaderPdfNoteButton, T("页面笔记"));
         }

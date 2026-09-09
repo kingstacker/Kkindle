@@ -249,7 +249,12 @@ public sealed class TtsService : IDisposable
         if (_environmentSetup is not null)
         {
             SetEnvironmentStatus("正在自动准备 TTS 环境…", inProgress: true);
-            var setupProgress = new Progress<TtsSetupProgress>(update =>
+            // Setup progress MUST flip the in-progress flag synchronously on
+            // this workflow thread. A UI-posted Progress<T> would queue the
+            // "in progress" callbacks behind a busy startup UI thread and
+            // replay them AFTER the final ready transition, permanently
+            // leaving EnvironmentSetupInProgress=true (grey, disabled button).
+            var setupProgress = new SynchronousProgress<TtsSetupProgress>(update =>
             {
                 SetEnvironmentStatus(update.Message, inProgress: true);
                 progress?.Report(update);
@@ -953,6 +958,21 @@ public sealed class TtsService : IDisposable
         {
             // Environment diagnostics must never terminate startup or playback.
         }
+    }
+
+    /// <summary>
+    /// IProgress<T> that reports inline on the caller's thread. Unlike
+    /// Progress<T> it never defers callbacks to a SynchronizationContext, so
+    /// state transitions cannot be reordered by a busy UI thread.
+    /// </summary>
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _callback;
+
+        public SynchronousProgress(Action<T> callback)
+            => _callback = callback ?? throw new ArgumentNullException(nameof(callback));
+
+        public void Report(T value) => _callback(value);
     }
 
     private void ClearCurrentHighlight()

@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -6,6 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Kkindle.Core;
+using System.Text.Json;
 
 namespace Kkindle;
 
@@ -74,6 +76,37 @@ public partial class MainWindow
             or TtsPlaybackState.Playing
             or TtsPlaybackState.Paused
             or TtsPlaybackState.AdvancingChapter;
+
+    /// <summary>
+    /// DEBUG TTS tracer: appends one line per event to tts-debug.log so a
+    /// "点击无反应" report can be attributed to state, environment prep or
+    /// availability without guessing.
+    /// </summary>
+    private void LogTtsDebug(string stage, string detail)
+    {
+        try
+        {
+            var entry = JsonSerializer.Serialize(new
+            {
+                timestamp = DateTimeOffset.Now,
+                stage,
+                detail,
+                state = _readerTts?.State.ToString(),
+                setupInProgress = _readerTts?.EnvironmentSetupInProgress,
+                canOpen = _readerTts?.CanOpen,
+                thread = Environment.CurrentManagedThreadId,
+                uiThread = Dispatcher.UIThread.CheckAccess()
+            });
+            Directory.CreateDirectory(_paths.Logs);
+            File.AppendAllText(
+                Path.Combine(_paths.Logs, "tts-debug.log"),
+                entry + Environment.NewLine);
+        }
+        catch
+        {
+            // Diagnostics only; never break TTS because of logging.
+        }
+    }
 
     private long BeginReaderTtsNavigationRequest(bool shouldResume)
     {
@@ -492,13 +525,19 @@ public partial class MainWindow
 
     private async Task InitializeTtsEnvironmentCoreAsync()
     {
+        // Reports posted through Progress<T> can execute on the UI thread
+        // after the bootstrap finished (stale callbacks); ignore them.
+        var bootstrapCompleted = false;
         try
         {
+            LogTtsDebug("env.begin", "bootstrap starting");
             _readerTtsNotice = T("正在自动准备听书环境…");
             UpdateReaderTtsUi();
             var progress = new Progress<TtsSetupProgress>(update =>
             {
+                if (bootstrapCompleted) return;
                 _readerTtsNotice = update.Message;
+                LogTtsDebug("env.progress", update.Message);
                 UpdateReaderTtsUi();
             });
             var availability = await _readerTts.EnsureEnvironmentReadyAsync(
@@ -509,10 +548,12 @@ public partial class MainWindow
             _readerTtsNotice = availability.IsAvailable
                 ? null
                 : availability.Message;
+            LogTtsDebug("env.done", $"isAvailable={availability.IsAvailable} message={availability.Message}");
         }
         catch (OperationCanceledException)
             when (_lifetimeCancellation.IsCancellationRequested)
         {
+            LogTtsDebug("env.cancelled", "lifetime token cancelled");
         }
         catch (Exception exception)
         {
@@ -520,9 +561,11 @@ public partial class MainWindow
             _readerTtsNotice = T(
                 "自动准备听书环境失败：{0}",
                 UiText.Localize(exception.Message));
+            LogTtsDebug("env.exception", exception.ToString());
         }
         finally
         {
+            bootstrapCompleted = true;
             UpdateReaderTtsUi();
         }
     }
@@ -639,7 +682,9 @@ public partial class MainWindow
                 TtsPlaybackState.AdvancingChapter => T("跳转中"),
                 _ => T("听书")
             };
-        ReaderTtsButtonText.Text = buttonText;
+        // The header button is icon-only now; the state text keeps living in
+        // the accessibility name so screen readers still announce 状态.
+        AutomationProperties.SetName(ReaderTtsButton, buttonText);
         ToolTip.SetTip(
             ReaderTtsButton,
             _readerTts.EnvironmentSetupInProgress
@@ -727,7 +772,7 @@ public partial class MainWindow
     private void UpdateReaderTtsButtonVisualState(TtsPlaybackState state)
     {
         if (ReaderTtsButton is null
-            || ReaderTtsButtonText is null
+            || ReaderTtsButtonIcon is null
             || ReaderTtsSpectrum is null)
         {
             return;
@@ -736,8 +781,16 @@ public partial class MainWindow
         var active = IsReaderTtsActiveState(state);
         var playing = state == TtsPlaybackState.Playing;
         ReaderTtsButton.Classes.Set("ttsActive", active);
-        ReaderTtsButtonText.IsVisible = !playing;
+        ReaderTtsButtonIcon.IsVisible = !playing;
+        // Icon-only header button: active-but-not-yet-speaking states
+        // (环境准备、生成中、跳转中、已暂停) dim the speaker so a click
+        // visibly registers instead of looking ignored.
+        ReaderTtsButtonIcon.Opacity =
+            !playing && (active || _readerTts.EnvironmentSetupInProgress) ? 0.35 : 1;
         ReaderTtsSpectrum.IsVisible = playing;
+        LogTtsDebug(
+            "visualState",
+            $"state={state} active={active} playing={playing} dim={ReaderTtsButtonIcon.Opacity < 1} enabled={ReaderTtsButton.IsEnabled} documentAvailable={_readerIsPdf || (_readerDocument is not null && CurrentReaderHost is not null)}");
         if (!playing)
         {
             _readerTtsButtonBreathingTimer?.Stop();
@@ -768,15 +821,18 @@ public partial class MainWindow
     {
         var active = _readerTts.State == TtsPlaybackState.Playing;
         if (ReaderTtsButton is null
-            || ReaderTtsButtonText is null
+            || ReaderTtsButtonIcon is null
             || ReaderTtsSpectrum is null
             || !active)
         {
             _readerTtsButtonBreathingTimer?.Stop();
             if (ReaderTtsButton is not null)
                 ReaderTtsButton.Classes.Set("ttsActive", false);
-            if (ReaderTtsButtonText is not null)
-                ReaderTtsButtonText.IsVisible = true;
+            if (ReaderTtsButtonIcon is not null)
+            {
+                ReaderTtsButtonIcon.IsVisible = true;
+                ReaderTtsButtonIcon.Opacity = 1;
+            }
             if (ReaderTtsSpectrum is not null)
                 ReaderTtsSpectrum.IsVisible = false;
             ResetReaderTtsSpectrum();
@@ -1246,6 +1302,7 @@ public partial class MainWindow
         object? sender,
         RoutedEventArgs e)
     {
+        LogTtsDebug("header.click.enter", $"active={IsReaderTtsActiveState(_readerTts.State)} floatingRequested={_readerTtsFloatingRequested} resumeAfterNav={_readerTtsResumeAfterNavigation}");
         try
         {
             if (IsReaderTtsActiveState(_readerTts.State)
@@ -1255,11 +1312,13 @@ public partial class MainWindow
                 // The header button is deliberately a start/stop toggle. The
                 // floating wheel remains available so its MENU is the only
                 // place where voice and playback settings are configured.
+                LogTtsDebug("header.click.stop", "stopping active tts");
                 CancelReaderTtsContinuation();
                 await _readerTts.StopAsync();
                 return;
             }
 
+            LogTtsDebug("header.click.start", "calling StartReaderTtsWithSavedSettingsAsync");
             await StartReaderTtsWithSavedSettingsAsync("启动听书失败：{0}");
         }
         catch (OperationCanceledException)
@@ -1490,22 +1549,26 @@ public partial class MainWindow
     {
         try
         {
+            LogTtsDebug("start.begin", $"isNavigationResume={isNavigationResume}");
             if (!isNavigationResume)
                 CancelReaderTtsContinuation();
             _readerTtsNotice = null;
             _readerTtsFloatingRequested = true;
             ShowReaderTtsFloatingPanelTemporarily();
             await _readerTts.StartAsync(_readerTtsSettings, ReaderToken);
+            LogTtsDebug("start.done", "StartAsync returned");
             UpdateReaderTtsUi();
             return true;
         }
         catch (OperationCanceledException)
             when (ReaderToken.IsCancellationRequested)
         {
+            LogTtsDebug("start.cancelled", "reader token cancelled");
             return false;
         }
         catch (Exception exception)
         {
+            LogTtsDebug("start.exception", exception.ToString());
             _readerTtsNotice = T(
                 failureFormat,
                 UiText.Localize(exception.Message));
