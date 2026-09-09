@@ -83,8 +83,7 @@ public sealed class PlatformDiagnosticsService
                      "libwebkit2gtk-4.0.so.0"
                  })
         {
-            if (!NativeLibrary.TryLoad(library, out var handle)) continue;
-            NativeLibrary.Free(handle);
+            if (!KeepAliveNativeLibrary.TryLoad(library)) continue;
             return new PlatformDiagnostic("阅读器 WebView", PlatformDiagnosticStatus.Ready, $"检测到 {library}。 ");
         }
 

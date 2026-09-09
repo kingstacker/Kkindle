@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Kkindle.Infrastructure;
 
 namespace Kkindle;
 
@@ -138,9 +139,10 @@ internal sealed class LinuxWebKitSnapshotLibrary
 
         // The WPE adapter ships on fewer distributions; Avalonia falls back to
         // the WebKitGTK adapter, so both sonames are valid entry points. The
-        // libraries are already loaded by the running adapter and stay alive
-        // for the process lifetime; the handles are released here only to drop
-        // this resolver's extra dlopen reference.
+        // loaded handles stay alive for the process lifetime: dlclose of
+        // WebKit is not safe (its TLS destructors and helper threads outlive
+        // the unload) and the delegates below must keep pointing at mapped
+        // code. See KeepAliveNativeLibrary.
         foreach (var soname in new[]
                  {
                      "libWPEWebKit-2.0.so.1",
@@ -148,48 +150,36 @@ internal sealed class LinuxWebKitSnapshotLibrary
                      "libwebkit2gtk-4.0.so.0"
                  })
         {
-            if (!NativeLibrary.TryLoad(soname, out var webkit))
+            if (!KeepAliveNativeLibrary.TryLoad(soname, out var webkit))
                 continue;
-            try
-            {
-                var getSnapshot = TryGetDelegate<WebKitGetSnapshotDelegate>(
-                    webkit, "webkit_web_view_get_snapshot");
-                var snapshotFinish = TryGetDelegate<WebKitSnapshotFinishDelegate>(
-                    webkit, "webkit_web_view_snapshot_finish")
-                    ?? TryGetDelegate<WebKitSnapshotFinishDelegate>(
-                        webkit, "webkit_web_view_get_snapshot_finish");
-                if (getSnapshot is null || snapshotFinish is null)
-                    continue;
 
-                if (!NativeLibrary.TryLoad("libcairo.so.2", out var cairo))
-                    continue;
-                try
-                {
-                    var writeToPngStream = TryGetDelegate<CairoWriteToPngStreamDelegate>(
-                        cairo, "cairo_surface_write_to_png_stream");
-                    var surfaceDestroy = TryGetDelegate<CairoSurfaceDestroyDelegate>(
-                        cairo, "cairo_surface_destroy");
-                    if (writeToPngStream is null || surfaceDestroy is null)
-                        continue;
+            var getSnapshot = TryGetDelegate<WebKitGetSnapshotDelegate>(
+                webkit, "webkit_web_view_get_snapshot");
+            var snapshotFinish = TryGetDelegate<WebKitSnapshotFinishDelegate>(
+                webkit, "webkit_web_view_snapshot_finish")
+                ?? TryGetDelegate<WebKitSnapshotFinishDelegate>(
+                    webkit, "webkit_web_view_get_snapshot_finish");
+            if (getSnapshot is null || snapshotFinish is null)
+                continue;
 
-                    var callbackThunk = new GAsyncReadyCallback(DispatchSnapshotReady);
-                    return new LinuxWebKitSnapshotLibrary(
-                        getSnapshot,
-                        snapshotFinish,
-                        writeToPngStream,
-                        surfaceDestroy,
-                        callbackThunk,
-                        Marshal.GetFunctionPointerForDelegate(callbackThunk));
-                }
-                finally
-                {
-                    NativeLibrary.Free(cairo);
-                }
-            }
-            finally
-            {
-                NativeLibrary.Free(webkit);
-            }
+            if (!KeepAliveNativeLibrary.TryLoad("libcairo.so.2", out var cairo))
+                continue;
+
+            var writeToPngStream = TryGetDelegate<CairoWriteToPngStreamDelegate>(
+                cairo, "cairo_surface_write_to_png_stream");
+            var surfaceDestroy = TryGetDelegate<CairoSurfaceDestroyDelegate>(
+                cairo, "cairo_surface_destroy");
+            if (writeToPngStream is null || surfaceDestroy is null)
+                continue;
+
+            var callbackThunk = new GAsyncReadyCallback(DispatchSnapshotReady);
+            return new LinuxWebKitSnapshotLibrary(
+                getSnapshot,
+                snapshotFinish,
+                writeToPngStream,
+                surfaceDestroy,
+                callbackThunk,
+                Marshal.GetFunctionPointerForDelegate(callbackThunk));
         }
 
         return null;

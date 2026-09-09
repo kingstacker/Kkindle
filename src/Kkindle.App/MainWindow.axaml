@@ -2026,6 +2026,7 @@
                     </ScrollViewer>
                     <Border x:Name="ZLibraryDetailPanel"
                             x:DataType="local:ZLibraryBookCardViewModel"
+                            DataContext="{x:Null}"
                             Grid.Column="1"
                             Width="330"
                             Background="{StaticResource PaperBrush}"

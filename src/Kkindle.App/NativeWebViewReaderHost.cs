@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Kkindle.Core;
+using Kkindle.Infrastructure;
 using System.Runtime.InteropServices;
 using SkiaSharp;
 
@@ -347,9 +348,9 @@ public sealed class NativeWebViewReaderHost : IReaderHost, IReaderHtmlHost, IRea
     private static bool CanLoadLinuxWpeWebKit()
     {
         if (!OperatingSystem.IsLinux()) return false;
-        if (!NativeLibrary.TryLoad("libWPEWebKit-2.0.so.1", out var handle)) return false;
-        NativeLibrary.Free(handle);
-        return true;
+        // The handle is intentionally kept alive; dlclose of WebKit crashes
+        // the process later (see KeepAliveNativeLibrary).
+        return KeepAliveNativeLibrary.TryLoad("libWPEWebKit-2.0.so.1");
     }
 
     private void View_NavigationStarted(
