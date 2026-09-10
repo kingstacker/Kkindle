@@ -875,7 +875,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 if (mode == BookTranslationOutputMode.Bilingual)
                 {
                     if (page.IsNavigation)
-                        AppendBilingualNavigationText(segment.Element, translated);
+                        AppendBilingualNavigationText(segment.Element, translated, targetLanguage);
                     else
                         AppendBilingualText(segment.Element, translated, targetLanguage);
                 }
@@ -1004,11 +1004,18 @@ public sealed class EpubTranslationService : IEpubTranslationService
     // Kindle and a number of EPUB converters build the table of contents from
     // the text inside the navigation link itself. Keep the bilingual label in
     // the <a> text rather than relying on Kkindle's reader-only sibling span.
-    private static void AppendBilingualNavigationText(XElement element, string translated)
+    private static void AppendBilingualNavigationText(
+        XElement element,
+        string translated,
+        string targetLanguage)
     {
         var anchor = element.DescendantsAndSelf().FirstOrDefault(child =>
             child.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase));
-        if (anchor is null) return;
+        if (anchor is null)
+        {
+            AppendBilingualText(element, translated, targetLanguage);
+            return;
+        }
 
         var original = NormalizeSegmentText(string.Concat(
             GetVisibleTextNodes(anchor)
