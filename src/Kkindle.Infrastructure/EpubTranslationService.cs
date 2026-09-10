@@ -874,7 +874,10 @@ public sealed class EpubTranslationService : IEpubTranslationService
 
                 if (mode == BookTranslationOutputMode.Bilingual)
                 {
-                    AppendBilingualText(segment.Element, translated, targetLanguage);
+                    if (page.IsNavigation)
+                        AppendBilingualNavigationText(segment.Element, translated);
+                    else
+                        AppendBilingualText(segment.Element, translated, targetLanguage);
                 }
                 else
                 {
@@ -998,6 +1001,29 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 translated));
     }
 
+    // Kindle and a number of EPUB converters build the table of contents from
+    // the text inside the navigation link itself. Keep the bilingual label in
+    // the <a> text rather than relying on Kkindle's reader-only sibling span.
+    private static void AppendBilingualNavigationText(XElement element, string translated)
+    {
+        var anchor = element.DescendantsAndSelf().FirstOrDefault(child =>
+            child.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase));
+        if (anchor is null) return;
+
+        var original = NormalizeSegmentText(string.Concat(
+            GetVisibleTextNodes(anchor)
+                .Where(node => !node.Ancestors().Any(HasGeneratedTranslationClass))
+                .Select(node => node.Value)));
+        var translatedTitle = NormalizeSegmentText(translated);
+        if (translatedTitle.Length == 0) return;
+
+        anchor.RemoveNodes();
+        anchor.Add(new XText(
+            original.Length == 0
+                ? translatedTitle
+                : $"{original} / {translatedTitle}"));
+    }
+
     private static void AddBilingualStylesheet(XDocument document)
     {
         var root = document.Root;
@@ -1093,7 +1119,10 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 var href = anchor?.Attribute("href")?.Value;
                 if (anchor is null || string.IsNullOrWhiteSpace(href)) continue;
 
-                var originalTitle = NormalizeSegmentText(anchor.Value);
+                var originalTitle = NormalizeSegmentText(string.Concat(
+                    GetVisibleTextNodes(anchor)
+                        .Where(node => !node.Ancestors().Any(HasGeneratedTranslationClass))
+                        .Select(node => node.Value)));
                 var translatedTitle = NormalizeSegmentText(translatedText);
                 if (translatedTitle.Length == 0) continue;
 

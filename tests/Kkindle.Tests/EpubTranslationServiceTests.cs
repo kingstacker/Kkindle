@@ -122,7 +122,10 @@ public sealed class EpubTranslationServiceTests
             Assert.Single(result.OutputPaths);
             var nav = ReadArchiveEntry(result.OutputPaths[0], "OEBPS/nav.xhtml");
             var ncx = ReadArchiveEntry(result.OutputPaths[0], "OEBPS/toc.ncx");
-            Assert.Contains("章节标题", nav, StringComparison.Ordinal);
+            Assert.Contains(
+                "<a href=\"chapter.xhtml\">Chapter title / 章节标题</a>",
+                nav,
+                StringComparison.Ordinal);
             Assert.Contains("Chapter title / 章节标题", ncx, StringComparison.Ordinal);
         }
         finally
