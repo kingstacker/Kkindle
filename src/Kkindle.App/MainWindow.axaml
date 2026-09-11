@@ -48,6 +48,48 @@
         </DataTemplate>
     </Window.Resources>
 
+    <Window.Styles>
+        <Style Selector="ComboBox.librarySort /template/ Path, ComboBox.librarySort /template/ PathIcon">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Border.librarySort">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Border.librarySort:pointerover">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="ComboBox.librarySort /template/ Border#Background, ComboBox.librarySort /template/ Border#HighlightBackground">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.libraryToolbar">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.libraryToolbar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.libraryToolbar:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#D9D9D9" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.libraryToolbar.active /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="Button.libraryToolbar TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+        </Style>
+        <Style Selector="ComboBox.librarySort ComboBoxItem">
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+    </Window.Styles>
+
     <!-- The content reaches the client-area edges. Resize handles are layered
          over those edges instead of reserving a transparent outer gutter; on
          Windows that gutter can be composed as an opaque white strip. -->
@@ -508,48 +550,126 @@
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
                       </Transitions>
                   </Grid.Transitions>
-                <StackPanel Spacing="3">
-                    <StackPanel Orientation="Horizontal" Spacing="9">
+                <Grid x:Name="LibraryHeader" ColumnDefinitions="*,Auto" ColumnSpacing="20" Margin="0,14,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
                         <Border Background="{StaticResource InkBrush}" Padding="7,3" VerticalAlignment="Center">
                             <TextBlock Text="{DynamicResource Ui.Auto.BF4AD761840FCD0A}" Foreground="{StaticResource PaperBrush}" FontSize="11" FontWeight="Bold" />
                         </Border>
                         <TextBlock Text="{DynamicResource Ui.Auto.FAFE70E30BE14271}" FontSize="28" FontWeight="Bold" />
+                        <TextBlock x:Name="LibrarySummaryText"
+                                   Text="{Binding ViewModel.StatusText}"
+                                   Margin="5,0,0,0"
+                                   MaxWidth="160"
+                                   FontSize="12"
+                                   Foreground="{StaticResource MutedInkBrush}"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center"
+                                   ToolTip.Tip="{Binding ViewModel.StatusText}" />
                     </StackPanel>
-                    <TextBlock x:Name="LibrarySummaryText"
-                               Text="{Binding ViewModel.StatusText}"
-                               FontSize="12"
-                               Foreground="#666666"
-                               IsVisible="False" />
-                </StackPanel>
+                </Grid>
 
-                <Grid Grid.Row="1" Margin="0,22,0,18" ColumnDefinitions="420,*">
+                <Grid x:Name="LibraryToolbar"
+                      Grid.Row="1"
+                      Margin="0,22,0,18"
+                      ColumnDefinitions="*,Auto"
+                      RowDefinitions="Auto,Auto"
+                      ColumnSpacing="24"
+                      LayoutUpdated="LibraryToolbar_LayoutUpdated"
+                      SizeChanged="LibraryToolbar_SizeChanged">
                     <TextBox x:Name="SearchBox"
+                             Width="420"
+                             HorizontalAlignment="Left"
                              Height="38"
                              Padding="13,7"
                              PlaceholderText="{DynamicResource Ui.Auto.168A769EBA62A8E8}"
                              Text="{Binding ViewModel.SearchText, Mode=TwoWay}"
                              TextChanged="SearchBox_TextChanged" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="10,0,0,0">
-                        <Button x:Name="FilterButton" Classes="icon" ToolTip.Tip="{DynamicResource Ui.Auto.0289E5BA6BFEA5E2}" Click="FilterButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.B5F15473FDC0FEFE}">
-                            <Path Classes="libraryGlyph"
-                                  UseLayoutRounding="True"
-                                  Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
+                    <StackPanel x:Name="LibraryToolbarActions"
+                                Grid.Column="1"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                SizeChanged="LibraryToolbar_SizeChanged">
+                        <Button x:Name="FilterButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.0289E5BA6BFEA5E2}" Click="FilterButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.B5F15473FDC0FEFE}">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <Path Classes="libraryGlyph"
+                                      UseLayoutRounding="True"
+                                      Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
+                                <TextBlock Text="{DynamicResource Ui.Auto.B5F15473FDC0FEFE}" VerticalAlignment="Center" />
+                            </StackPanel>
                         </Button>
-                        <!-- One click cycles 网格 → 列表 → 收藏夹; the glyph
-                             mirrors the active view and the tooltip names what
-                             the next click switches to. -->
+                        <Border Classes="librarySort" Padding="10,0,10,0" Height="38"
+                                VerticalAlignment="Center" PointerPressed="LibrarySort_PointerPressed">
+                        <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                            <Path Classes="libraryGlyph" Stroke="{StaticResource InkBrush}" Data="M 7,3 V 21 M 3,7 L 7,3 L 11,7 M 17,3 V 21 M 13,17 L 17,21 L 21,17" />
+                            <ComboBox x:Name="LibrarySortBox"
+                                      Classes="filterCombo librarySort"
+                                      Background="Transparent"
+                                      MinWidth="0"
+                                      HorizontalAlignment="Left"
+                                      Height="38"
+                                      FontSize="13"
+                                      BorderThickness="0"
+                                      Padding="0,7"
+                                      PlaceholderText="{DynamicResource Ui.Auto.A96C9A854190874D}"
+                                      ToolTip.Tip="{DynamicResource Ui.Auto.A96C9A854190874D}"
+                                      AutomationProperties.Name="{DynamicResource Ui.Auto.A96C9A854190874D}"
+                                      SelectionChanged="FilterComboBox_SelectionChanged" />
+                        </StackPanel>
+                        </Border>
                         <Button x:Name="LibraryViewToggleButton"
-                                Classes="icon"
-                                ToolTip.Tip="{DynamicResource Ui.Auto.8882BD88D4E7E80F}"
+                                Classes="quiet libraryToolbar"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.EE20B1318E9AFE1B}"
                                 Click="LibraryViewToggleButton_Click"
                                 AutomationProperties.Name="{DynamicResource Ui.Auto.EE20B1318E9AFE1B}">
-                            <Path x:Name="LibraryViewToggleIcon"
-                                  Classes="libraryGlyph"
-                                  Data="M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z" />
+                            <Button.ContextMenu>
+                                <ContextMenu Placement="BottomEdgeAlignedRight">
+                                    <ContextMenu.Styles>
+                                        <Style Selector="MenuItem">
+                                            <Setter Property="FontSize" Value="13" />
+                                            <Setter Property="Padding" Value="{DynamicResource ComboBoxItemThemePadding}" />
+                                            <Setter Property="Template">
+                                                <ControlTemplate>
+                                                    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                                                        <TextBlock Text="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}"
+                                                                   FontSize="{TemplateBinding FontSize}" VerticalAlignment="Center" />
+                                                    </Border>
+                                                </ControlTemplate>
+                                            </Setter>
+                                        </Style>
+                                        <Style Selector="MenuItem:checked, MenuItem:pointerover">
+                                            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+                                            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+                                        </Style>
+                                    </ContextMenu.Styles>
+                                    <MenuItem x:Name="LibraryGridViewMenuItem" Header="{DynamicResource Ui.Auto.A35441DB5CD16882}" Tag="Grid" ToggleType="Radio" Click="LibraryViewMenuItem_Click" />
+                                    <MenuItem x:Name="LibraryListViewMenuItem" Header="{DynamicResource Ui.Auto.D56220435194BC1E}" Tag="List" ToggleType="Radio" Click="LibraryViewMenuItem_Click" />
+                                    <MenuItem x:Name="LibraryCollectionsViewMenuItem" Header="{DynamicResource Ui.Auto.5495D963C9CA791A}" Tag="Collections" ToggleType="Radio" Click="LibraryViewMenuItem_Click" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <Path x:Name="LibraryViewToggleIcon"
+                                      Classes="libraryGlyph"
+                                      Data="M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z" />
+                                <TextBlock x:Name="LibraryViewModeText" VerticalAlignment="Center" />
+                            </StackPanel>
                         </Button>
-                        <Button x:Name="ImportButton" Classes="icon" ToolTip.Tip="{DynamicResource Ui.Auto.A76D4E4052F3FA6F}" Click="ImportButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.576D81BB0631B165}">
-                            <Path Classes="libraryGlyph"
-                                  Data="M 12,3 V 16 M 7,11 L 12,16 L 17,11 M 4,21 H 20" />
+                        <Button x:Name="ImportButton"
+                                Classes="quiet libraryToolbar"
+                                Height="38"
+                                VerticalAlignment="Center"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.A76D4E4052F3FA6F}"
+                                Click="ImportButton_Click"
+                                AutomationProperties.Name="{DynamicResource Ui.Library.ImportBooks}">
+                            <Grid ColumnDefinitions="16,Auto" ColumnSpacing="7" Height="18" VerticalAlignment="Center">
+                                <Path Width="16" Height="16" Stretch="Fill" Data="M 8,0 V 16 M 0,8 H 16"
+                                      Stroke="{StaticResource InkBrush}" StrokeThickness="1.5"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      RenderTransform="translate(0px,-1px)" />
+                                <TextBlock Grid.Column="1" Text="{DynamicResource Ui.Library.ImportBooks}"
+                                           FontSize="13" LineHeight="18" Height="18" VerticalAlignment="Center" />
+                            </Grid>
                         </Button>
                     </StackPanel>
                 </Grid>
@@ -596,13 +716,6 @@
                                   Margin="0,0,6,6"
                                   PlaceholderText="{DynamicResource Ui.Auto.0A379C1E7398FBA1}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <ComboBox x:Name="LibrarySortBox"
-                                  Classes="filterCombo"
-                                  Width="145"
-                                  FontSize="12"
-                                  Margin="0,0,6,6"
-                                  PlaceholderText="{DynamicResource Ui.Auto.A96C9A854190874D}"
-                                  SelectionChanged="FilterComboBox_SelectionChanged" />
                         <CheckBox x:Name="FavoritesOnlyCheckBox"
                                   Content="{DynamicResource Ui.Auto.60A53514EB9228A2}"
                                   Margin="0,0,12,6"
@@ -615,8 +728,8 @@
                     </WrapPanel>
                 </Border>
 
+            <Grid x:Name="LibraryBody" Grid.Row="3" ColumnDefinitions="*,Auto" ClipToBounds="True">
             <Grid x:Name="LibraryContentHost"
-                  Grid.Row="3"
                   RowDefinitions="Auto,*,Auto"
                   Background="Transparent">
                     <Border x:Name="CollectionHeader"
@@ -930,32 +1043,35 @@
                     </Grid>
                 </Grid>
 
-                <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
-                    <TextBlock x:Name="TaskStatusText"
-                               Text="{DynamicResource Ui.Auto.1BD1893C09003D8A}"
-                               FontSize="11"
-                               Foreground="#666666"
-                               VerticalAlignment="Center"
-                               IsVisible="False" />
-                    <ProgressBar x:Name="LibraryBusyProgress" Grid.Column="1" Width="120" Height="5" IsIndeterminate="True" IsVisible="False" />
-                </Grid>
-            </Grid>
-
-            <!-- Details panel: the layout follows the old WinUI detail pane:
-                 cover and three square action buttons first, then labelled
-                 metadata fields and the save/delete row. -->
+            <!-- Details share the book area so the header and toolbar remain
+                 accessible. The auto column returns its width when closed. -->
             <Border x:Name="LibraryDetailPane"
                     Grid.Column="1"
                     Width="320"
+                    Margin="24,0,0,0"
                     HorizontalAlignment="Right"
                     ZIndex="40"
                     Background="{StaticResource PaperBrush}"
                     BorderBrush="{StaticResource HairlineBrush}"
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
-                <Grid>
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel x:Name="DetailContentStack" Margin="24,70,24,24" Spacing="13">
+                <Grid RowDefinitions="Auto,*">
+                    <Grid ColumnDefinitions="*,Auto" Margin="20,0,4,8">
+                        <TextBlock Text="{DynamicResource Ui.Auto.326DE7898C2A6278}"
+                                   FontSize="13"
+                                   Foreground="{StaticResource MutedInkBrush}"
+                                   VerticalAlignment="Center" />
+                        <Button x:Name="LibraryDetailCloseButton"
+                                Grid.Column="1"
+                                Classes="icon"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.D7B60ECE792129FF}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.D7B60ECE792129FF}"
+                                Click="LibraryDetailCloseButton_Click">
+                            <Path Classes="libraryGlyph" Width="13" Height="13" Data="M 4,4 L 20,20 M 20,4 L 4,20" />
+                        </Button>
+                    </Grid>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="DetailContentStack" Margin="24,0,24,24" Spacing="13">
                             <Grid HorizontalAlignment="Left" ColumnDefinitions="180,34" ColumnSpacing="12">
                                 <Border Width="180"
                                         Height="250"
@@ -1032,6 +1148,7 @@
                                 </Grid>
                             </Grid>
 
+                            <TextBlock x:Name="DetailFormatText" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                             <StackPanel Spacing="5">
                                 <TextBlock Text="{DynamicResource Ui.Auto.C3405F8C7D9D392A}" FontSize="11" Foreground="{StaticResource MutedInkBrush}" />
                                 <TextBox x:Name="DetailTitleText" FontSize="16" FontWeight="SemiBold" />
@@ -1123,14 +1240,20 @@
                         </StackPanel>
                     </ScrollViewer>
 
-                    <!-- Keep scrolled detail content out of the custom title-bar
-                         drag area, as in the old WinUI pane. -->
-                    <Border Height="38"
-                            VerticalAlignment="Top"
-                            Background="{StaticResource PaperBrush}"
-                            IsHitTestVisible="False" />
                 </Grid>
             </Border>
+            </Grid>
+
+                <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+                    <TextBlock x:Name="TaskStatusText"
+                               Text="{DynamicResource Ui.Auto.1BD1893C09003D8A}"
+                               FontSize="11"
+                               Foreground="#666666"
+                               VerticalAlignment="Center"
+                               IsVisible="False" />
+                    <ProgressBar x:Name="LibraryBusyProgress" Grid.Column="1" Width="120" Height="5" IsIndeterminate="True" IsVisible="False" />
+                </Grid>
+            </Grid>
 
             <!-- Stage 3: Kindle book library. The page stays deliberately
                  simple and monochrome; all device work is performed by the

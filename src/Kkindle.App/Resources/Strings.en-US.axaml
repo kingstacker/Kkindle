@@ -1612,4 +1612,5 @@
     <x:String x:Key="Sync.WebDavPasswordLabel">Password / app password</x:String>
     <x:String x:Key="Sync.WebDavHelp">Enter the URL of an existing WebDAV directory. Sync files will be stored in a subdirectory created automatically. Enter credentials if required; some services use an app password.</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">The sync subdirectory cannot contain control characters.</x:String>
+    <x:String x:Key="Ui.Library.ImportBooks">Import books</x:String>
 </ResourceDictionary>

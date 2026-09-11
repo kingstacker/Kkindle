@@ -32,7 +32,7 @@ public sealed class SettingsUiSession : IDisposable
 public sealed class SettingsUiCollection : ICollectionFixture<SettingsUiSession>;
 
 [Collection("Settings UI")]
-public sealed class SettingsTests(SettingsUiSession session)
+public sealed partial class SettingsTests(SettingsUiSession session)
 {
     [Fact]
     public Task ClosingImmediatelyFlushesPreferencesAndLanguage() => Run(async () =>

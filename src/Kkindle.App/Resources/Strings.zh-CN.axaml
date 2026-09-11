@@ -1612,4 +1612,5 @@
     <x:String x:Key="Sync.WebDavPasswordLabel">密码 / 应用密码</x:String>
     <x:String x:Key="Sync.WebDavHelp">填写已存在的 WebDAV 目录地址；同步文件会自动保存到其下的同步子目录。需要认证时填写用户名和密码，部分服务使用应用密码。</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">同步子目录不能包含控制字符。</x:String>
+    <x:String x:Key="Ui.Library.ImportBooks">导入书籍</x:String>
 </ResourceDictionary>

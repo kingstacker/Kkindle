@@ -1071,6 +1071,12 @@ public partial class MainWindow : Window
     {
         LibraryBusyProgress.IsVisible = ViewModel.IsBusy;
         LibrarySummaryText.Text = ViewModel.StatusText;
+        LibraryViewModeText.Text = DescribeLibraryViewMode(_libraryViewMode);
+        LibraryGridViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.Grid;
+        LibraryListViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.List;
+        LibraryCollectionsViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.Collections;
+        FilterButton.Classes.Set("active", FilterPanel.IsVisible || ViewModel.HasActiveFilters);
+        AutomationProperties.SetName(LibraryViewToggleButton, $"{T("切换视图")} · {DescribeLibraryViewMode(_libraryViewMode)}");
         TaskStatusText.Text = ViewModel.StatusText;
         SidebarCountText.Text = ViewModel.BookCount.ToString();
         foreach (var card in ViewModel.Books)
@@ -1145,6 +1151,8 @@ public partial class MainWindow : Window
 
     private void SetLibraryViewMode(LibraryViewMode mode)
     {
+        if (mode == LibraryViewMode.Collections && _selectedCard is not null)
+            ClearSelectedBook();
         _libraryViewMode = mode;
         BookGrid.IsVisible = mode == LibraryViewMode.Grid;
         BookList.IsVisible = mode == LibraryViewMode.List;
@@ -1158,17 +1166,8 @@ public partial class MainWindow : Window
             LibraryViewMode.Collections => LibraryCollectionsGlyphData,
             _ => LibraryGridGlyphData
         });
-        ToolTip.SetTip(LibraryViewToggleButton, T("当前：{0}，点击切换到{1}", DescribeLibraryViewMode(mode), DescribeLibraryViewMode(NextLibraryViewMode(mode))));
         UpdateLibraryUi();
     }
-
-    // The view button cycles through the modes in display order.
-    private static LibraryViewMode NextLibraryViewMode(LibraryViewMode mode) => mode switch
-    {
-        LibraryViewMode.Grid => LibraryViewMode.List,
-        LibraryViewMode.List => LibraryViewMode.Collections,
-        _ => LibraryViewMode.Grid
-    };
 
     private static string DescribeLibraryViewMode(LibraryViewMode mode) => mode switch
     {
@@ -1185,6 +1184,7 @@ public partial class MainWindow : Window
         DetailCoverPlaceholder.IsVisible = card.CoverImage is null;
         DetailTitleText.Text = card.Title;
         DetailAuthorsText.Text = card.Authors;
+        DetailFormatText.Text = $"{card.FormatLabel} · {card.ReadingStateLabel}";
         DetailDoubanRatingBox.Text = card.Book.DoubanRating is null
             ? string.Empty
             : T("{0:0.0}（{1} 人评价）", card.Book.DoubanRating, card.Book.DoubanRatingCount ?? 0);
@@ -1377,8 +1377,8 @@ public partial class MainWindow : Window
         await animation.RunAsync(target, token);
     }
 
-    // Finishes a deselection: hides the pane, frees the column and resets the
-    // detail fields. Kept separate from ClearSelectedBook so an animated exit
+    // Finishes a deselection: hiding the pane releases its auto-sized column.
+    // Kept separate from ClearSelectedBook so an animated exit
     // can run with the old content visible before this resets everything.
     private void CompleteClearSelectedBook()
     {
@@ -1386,12 +1386,11 @@ public partial class MainWindow : Window
         LibraryDetailPane.IsVisible = false;
         LibraryDetailPane.RenderTransform = new TranslateTransform(0, 0);
         LibraryDetailPane.Opacity = 1;
-        if (LibraryRoot.ColumnDefinitions.Count >= 3)
-            LibraryRoot.ColumnDefinitions[2].Width = new GridLength(0);
         DetailCoverImage.Source = null;
         DetailCoverPlaceholder.IsVisible = true;
         DetailTitleText.Text = T("请选择一本书");
         DetailAuthorsText.Text = string.Empty;
+        DetailFormatText.Text = string.Empty;
         DetailDoubanRatingBox.Text = string.Empty;
         DetailStateText.Text = string.Empty;
         DetailOrganizationText.Text = string.Empty;
@@ -1767,6 +1766,8 @@ public partial class MainWindow : Window
         if (!LibraryDetailPane.IsVisible
             || !e.GetCurrentPoint(LibraryRoot).Properties.IsLeftButtonPressed
             || IsSourceWithin(e.Source, LibraryDetailPane)
+            || IsSourceWithin(e.Source, LibraryToolbar)
+            || IsSourceWithin(e.Source, FilterPanel)
             || IsBookCardSource(e.Source))
             return;
 
@@ -1963,6 +1964,9 @@ public partial class MainWindow : Window
     {
         SyncCardSelectionVisuals();
         var selectedCount = GetSelectedCards().Count;
+        // Batch actions need the shelf's full width, especially at 1024px.
+        if (selectedCount > 1 && LibraryDetailPane.IsVisible && _selectedCard is not null)
+            ClearSelectedBook();
         MultiSelectionBar.IsVisible = selectedCount > 1;
         MultiSelectionText.Text = selectedCount > 0 ? T("已选择 {0} 本书", selectedCount) : string.Empty;
     }
@@ -3422,18 +3426,23 @@ public partial class MainWindow : Window
     private void FilterButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         FilterPanel.IsVisible = !FilterPanel.IsVisible;
+        FilterButton.Classes.Set("active", FilterPanel.IsVisible || ViewModel.HasActiveFilters);
     }
 
     private void LibraryViewToggleButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => LibraryViewToggleButton.ContextMenu?.Open(LibraryViewToggleButton);
+
+    private void LibraryViewMenuItem_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        var next = NextLibraryViewMode(_libraryViewMode);
-        if (next == LibraryViewMode.Collections && ViewModel.CollectionFilterId is not null)
+        if (sender is not MenuItem { Tag: string value }
+            || !Enum.TryParse<LibraryViewMode>(value, out var mode)) return;
+        if (mode == LibraryViewMode.Collections && ViewModel.CollectionFilterId is not null)
         {
             ViewModel.CollectionFilterId = null;
             ViewModel.CollectionFilterName = null;
             ViewModel.RefreshView();
         }
-        SetLibraryViewMode(next);
+        SetLibraryViewMode(mode);
     }
 
     private void LibraryPreviousPageButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
