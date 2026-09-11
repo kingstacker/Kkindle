@@ -76,7 +76,7 @@ public partial class MainWindow
             _readerBookFile = file;
             _readerChapterIndex = 0;
             _readerShowingPreload = false;
-            await InitializeReaderInteractionAsync(document, file, sessionToken);
+            await InitializeReaderInteractionAsync(document, sessionToken);
 
             var savedProgress = restoreProgress
                 ? await _readerData.GetProgressAsync(file.Id, sessionToken)
@@ -914,10 +914,8 @@ public partial class MainWindow
         catch
         {
             // Returning to the bookshelf must still complete if the settings
-            // file is temporarily unavailable; the per-book layout save below
-            // remains best-effort as well.
+            // file is temporarily unavailable.
         }
-        await SaveReaderLayoutAsync(CancellationToken.None);
         StopReaderStatsTimer();
         // Reading time is accounted by the active-seconds flush (the stats
         // timer), matching the WinUI reference: time only accrues while the

@@ -7,7 +7,7 @@ using Kkindle.Core;
 namespace Kkindle.Infrastructure;
 
 /// <summary>
-/// Persists S3 connection metadata as JSON while keeping credentials and the
+/// Persists sync connection metadata as JSON while keeping credentials and the
 /// optional client-side encryption key protected in the platform secret store.
 /// The device id is intentionally stable and is used as the owner's snapshot
 /// prefix in the shared bucket.
@@ -55,12 +55,16 @@ public sealed class S3SyncSettingsStore
             var deviceId = NormalizeDeviceId(persisted.DeviceId);
             var settings = S3SyncSettings.Normalize(new S3SyncSettings
             {
+                Provider = persisted.Provider,
                 Enabled = persisted.Enabled,
                 AutomaticSyncEnabled = persisted.AutomaticSyncEnabled,
                 IntervalMinutes = persisted.IntervalMinutes,
                 Endpoint = persisted.Endpoint ?? string.Empty,
                 AccessKey = Unprotect(persisted.ProtectedAccessKey),
                 SecretKey = Unprotect(persisted.ProtectedSecretKey),
+                WebDavEndpoint = persisted.WebDavEndpoint ?? string.Empty,
+                WebDavUsername = Unprotect(persisted.ProtectedWebDavUsername),
+                WebDavPassword = Unprotect(persisted.ProtectedWebDavPassword),
                 Bucket = persisted.Bucket ?? string.Empty,
                 Region = persisted.Region ?? "us-east-1",
                 PathStyle = persisted.PathStyle,
@@ -70,6 +74,14 @@ public sealed class S3SyncSettingsStore
                 Prefix = persisted.Prefix ?? "kkindle",
                 EncryptionKey = Unprotect(persisted.ProtectedEncryptionKey)
             });
+
+            // An unavailable machine-bound credential is not an intentional
+            // anonymous WebDAV configuration. Never auto-connect anonymously
+            // after copying settings to a machine that cannot decrypt them.
+            if (settings.Provider == SyncProvider.WebDav
+                && ((!string.IsNullOrEmpty(persisted.ProtectedWebDavUsername) && settings.WebDavUsername.Length == 0)
+                    || (!string.IsNullOrEmpty(persisted.ProtectedWebDavPassword) && settings.WebDavPassword.Length == 0)))
+                settings = settings with { Enabled = false };
 
             if (!string.Equals(deviceId, persisted.DeviceId, StringComparison.Ordinal))
                 await SaveAsync(deviceId, settings, cancellationToken);
@@ -82,7 +94,7 @@ public sealed class S3SyncSettingsStore
             or Win32Exception)
         {
             // A malformed or machine-bound secret must not prevent the app
-            // from opening. The user can re-enter the S3 credentials.
+            // from opening. The user can re-enter the sync credentials.
             return new S3SyncStoredSettings(Guid.NewGuid().ToString("N"), new S3SyncSettings());
         }
     }
@@ -97,12 +109,16 @@ public sealed class S3SyncSettingsStore
         var persisted = new PersistedS3SyncSettings
         {
             DeviceId = NormalizeDeviceId(deviceId),
+            Provider = normalized.Provider,
             Enabled = normalized.Enabled,
             AutomaticSyncEnabled = normalized.AutomaticSyncEnabled,
             IntervalMinutes = normalized.IntervalMinutes,
             Endpoint = normalized.Endpoint,
             ProtectedAccessKey = Protect(normalized.AccessKey),
             ProtectedSecretKey = Protect(normalized.SecretKey),
+            WebDavEndpoint = normalized.WebDavEndpoint,
+            ProtectedWebDavUsername = Protect(normalized.WebDavUsername),
+            ProtectedWebDavPassword = Protect(normalized.WebDavPassword),
             Bucket = normalized.Bucket,
             Region = normalized.Region,
             PathStyle = normalized.PathStyle,
@@ -155,12 +171,16 @@ public sealed class S3SyncSettingsStore
     private sealed class PersistedS3SyncSettings
     {
         public string? DeviceId { get; set; }
+        public SyncProvider Provider { get; set; }
         public bool Enabled { get; set; }
         public bool AutomaticSyncEnabled { get; set; } = true;
         public int IntervalMinutes { get; set; } = 30;
         public string? Endpoint { get; set; }
         public string? ProtectedAccessKey { get; set; }
         public string? ProtectedSecretKey { get; set; }
+        public string? WebDavEndpoint { get; set; }
+        public string? ProtectedWebDavUsername { get; set; }
+        public string? ProtectedWebDavPassword { get; set; }
         public string? Bucket { get; set; }
         public string? Region { get; set; }
         public bool PathStyle { get; set; }

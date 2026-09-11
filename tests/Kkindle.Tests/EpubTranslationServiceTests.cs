@@ -61,8 +61,8 @@ public sealed class EpubTranslationServiceTests
                 await File.ReadAllBytesAsync(sourcePath),
                 await File.ReadAllBytesAsync(original));
 
-            var translated = result.OutputPaths.Single(path => path.EndsWith("-译文.epub", StringComparison.Ordinal));
-            var bilingual = result.OutputPaths.Single(path => path.EndsWith("-双语.epub", StringComparison.Ordinal));
+            var translated = result.OutputPaths.Single(path => path.EndsWith("_单译版.epub", StringComparison.Ordinal));
+            var bilingual = result.OutputPaths.Single(path => path.EndsWith("_双语版.epub", StringComparison.Ordinal));
             var translatedMarkup = ReadArchiveEntry(translated, "OEBPS/chapter.xhtml");
             Assert.True(translatedMarkup.Contains("Hello", StringComparison.Ordinal), translatedMarkup);
             Assert.Contains("world", translatedMarkup, StringComparison.Ordinal);

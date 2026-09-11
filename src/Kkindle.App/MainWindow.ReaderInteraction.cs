@@ -1387,19 +1387,12 @@ public partial class MainWindow
 
     private async Task InitializeReaderInteractionAsync(
         EpubReaderDocument document,
-        BookFile file,
         CancellationToken cancellationToken)
     {
-        var settings = await _readerData.GetLayoutSettingsAsync(file.Id, cancellationToken);
-        var bookLayout = settings ?? _appSettings.DefaultReaderLayout;
-        // Typography and margins remain per-book, but writing direction and
-        // paragraph indentation are global reader preferences. Ignore stale
-        // per-book values left by older builds so opening another book cannot
-        // silently change either global option.
-        _readerLayout = NormalizeReaderLayoutForPlatform(
-            ReaderLayoutDefaults.ApplyGlobalPreferences(
-                bookLayout,
-                _appSettings.DefaultReaderLayout));
+        // Every reader layout option comes from the global profile. Legacy
+        // per-book rows remain in the database for compatibility, but opening
+        // another book must never replace the current global layout.
+        _readerLayout = NormalizeReaderLayoutForPlatform(_appSettings.DefaultReaderLayout);
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
@@ -6372,7 +6365,7 @@ public partial class MainWindow
                 var nativeQuery = query.Trim();
                 var nativeBody = nativeReader.BodyText ?? string.Empty;
                 var nativeHits = ReaderSearchTextPolicy
-                    .FindMatches(nativeBody, nativeQuery)
+                    .FindMatches(nativeBody, nativeQuery, nativeReader.RubyAnnotationRanges)
                     .Select(match => (match.Start, match.Length))
                     .ToList();
 
@@ -6564,38 +6557,14 @@ public partial class MainWindow
         }
     }
 
-    private async Task SaveReaderLayoutAsync(CancellationToken cancellationToken)
-    {
-        if (_readerBookCard is null || _readerBookFile is null) return;
-        var bookId = _readerBookCard.Book.Id;
-        var bookFileId = _readerBookFile.Id;
-        var layout = NormalizeReaderLayoutForPlatform(_readerLayout);
-        try
-        {
-            await _readerData.SaveLayoutSettingsAsync(
-                bookId,
-                bookFileId,
-                layout,
-                cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch
-        {
-        }
-    }
-
     private async Task SaveCurrentReaderGlobalPreferencesAsync(
         CancellationToken cancellationToken)
     {
+        var layout = NormalizeReaderLayoutForPlatform(_readerLayout);
+        _readerLayout = layout;
         _appSettings = AppSettings.Normalize(_appSettings with
         {
-            DefaultReaderLayout = _appSettings.DefaultReaderLayout with
-            {
-                VerticalWriting = _readerLayout.VerticalWriting,
-                ParagraphIndent = _readerLayout.ParagraphIndent
-            }
+            DefaultReaderLayout = layout
         });
 
         // Keep the basic-settings switch in lockstep without scheduling a
@@ -8629,7 +8598,7 @@ public partial class MainWindow
         });
         SyncReaderFlowMenu();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-        await SaveReaderLayoutAsync(CancellationToken.None);
+        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
         ShowReaderTransientStatus(
             _readerLayout.FlowMode == 0 ? T("已切换为滚动阅读。") : _readerLayout.TwoPageMode ? T("已切换为双栏阅读。") : T("已切换为单页阅读。"));
     }
@@ -8732,7 +8701,7 @@ public partial class MainWindow
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with { FontScale = _readerLayout.FontScale + delta });
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-        await SaveReaderLayoutAsync(CancellationToken.None);
+        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
     }
 
     private void ReaderBookmarkButton_Click(object? sender, RoutedEventArgs e)

@@ -310,9 +310,16 @@ public sealed class AiChatClient : IDisposable
         }
 
         var producedOutput = false;
+        var completed = false;
         await foreach (var eventData in ReadServerSentEventsAsync(response, cancellationToken))
         {
-            var chunk = ParseChatCompletionChunk(eventData);
+            if (eventData == "[DONE]")
+            {
+                completed = true;
+                break;
+            }
+            var chunk = ParseChatCompletionChunk(eventData, out var choiceCompleted);
+            completed |= choiceCompleted;
             if (chunk is null) continue;
             producedOutput = true;
             yield return chunk;
@@ -320,6 +327,8 @@ public sealed class AiChatClient : IDisposable
 
         if (!producedOutput)
             throw new InvalidDataException("AI 服务返回了无法识别的流式响应格式。");
+        if (!completed)
+            throw new InvalidDataException("AI 响应意外中断，未收到完整结束标记，请重试。");
     }
 
     private async IAsyncEnumerable<AiStreamChunk> StreamOpenAiResponsesAsync(
@@ -359,16 +368,25 @@ public sealed class AiChatClient : IDisposable
         }
 
         var producedOutput = false;
+        var producedText = false;
+        var completed = false;
         await foreach (var eventData in ReadServerSentEventsAsync(response, cancellationToken))
         {
-            var chunk = ParseOpenAiResponseChunk(eventData);
+            if (eventData == "[DONE]") break;
+            var chunk = ParseOpenAiResponseChunk(eventData, out var responseCompleted);
+            completed |= responseCompleted;
+            // The terminal event may include a full copy of text already streamed.
+            if (responseCompleted && producedText) continue;
             if (chunk is null) continue;
             producedOutput = true;
+            producedText |= chunk.Text.Length > 0;
             yield return chunk;
         }
 
         if (!producedOutput)
             throw new InvalidDataException("OpenAI 返回了无法识别的 Responses API 流式响应。");
+        if (!completed)
+            throw new InvalidDataException("AI 响应意外中断，未收到完整结束事件，请重试。");
     }
 
     private static void AddChatReasoningOption(Dictionary<string, object?> request, string reasoningDepth)
@@ -400,6 +418,7 @@ public sealed class AiChatClient : IDisposable
         var eventData = new StringBuilder();
         var plainBody = new StringBuilder();
         var sawServerSentEvent = false;
+        var eventName = string.Empty;
 
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
@@ -409,12 +428,23 @@ public sealed class AiChatClient : IDisposable
                 sawServerSentEvent = true;
                 var data = eventData.ToString().Trim();
                 eventData.Clear();
-                if (data.Equals("[DONE]", StringComparison.OrdinalIgnoreCase)) yield break;
+                if (eventName.Equals("error", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"AI 服务返回流式错误：{Limit(data, 500)}");
+                eventName = string.Empty;
+                if (data.Equals("[DONE]", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return "[DONE]";
+                    yield break;
+                }
                 if (data.Length > 0) yield return data;
                 continue;
             }
 
-            if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+            {
+                eventName = line[6..].Trim();
+            }
+            else if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
             {
                 sawServerSentEvent = true;
                 if (eventData.Length > 0) eventData.Append('\n');
@@ -425,12 +455,18 @@ public sealed class AiChatClient : IDisposable
                 plainBody.AppendLine(line);
             }
 
-            if (eventData.ToString().Trim().Equals("[DONE]", StringComparison.OrdinalIgnoreCase)) yield break;
+            if (eventData.ToString().Trim().Equals("[DONE]", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "[DONE]";
+                yield break;
+            }
         }
 
         if (eventData.Length > 0)
         {
             var data = eventData.ToString().Trim();
+            if (eventName.Equals("error", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"AI 服务返回流式错误：{Limit(data, 500)}");
             if (data.Length > 0 && !data.Equals("[DONE]", StringComparison.OrdinalIgnoreCase)) yield return data;
         }
         else if (!sawServerSentEvent && plainBody.Length > 0)
@@ -439,42 +475,69 @@ public sealed class AiChatClient : IDisposable
         }
     }
 
-    private static AiStreamChunk? ParseChatCompletionChunk(string payload)
+    private static AiStreamChunk? ParseChatCompletionChunk(string payload, out bool completed)
     {
+        completed = false;
         try
         {
             using var document = JsonDocument.Parse(payload);
             var root = document.RootElement;
+            ThrowIfStreamError(root);
             if (!root.TryGetProperty("choices", out var choices)
                 || choices.ValueKind != JsonValueKind.Array
                 || choices.GetArrayLength() == 0)
                 return null;
 
             var choice = choices[0];
+            if (choice.TryGetProperty("finish_reason", out var reason)
+                && reason.ValueKind == JsonValueKind.String)
+            {
+                var value = reason.GetString();
+                if (!string.Equals(value, "stop", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"AI 未完整返回答案（结束原因：{value}），请重试。");
+                completed = true;
+            }
             var source = choice.TryGetProperty("delta", out var delta) ? delta
                 : choice.TryGetProperty("message", out var message) ? message
                 : default;
             if (source.ValueKind == JsonValueKind.Undefined) return null;
 
+            if (ReadTextProperty(source, "refusal").Length > 0)
+                throw new InvalidDataException("AI 服务拒绝了本次请求，未生成完整答案。");
+
             var text = ReadTextProperty(source, "content");
             var reasoning = ReadTextProperty(source, "reasoning_content", "reasoning", "thinking", "reasoning_summary");
             return text.Length == 0 && reasoning.Length == 0 ? null : new AiStreamChunk(text, reasoning);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            return null;
+            throw new InvalidDataException("AI 服务返回了损坏的响应数据。", exception);
         }
     }
 
-    private static AiStreamChunk? ParseOpenAiResponseChunk(string payload)
+    private static AiStreamChunk? ParseOpenAiResponseChunk(string payload, out bool completed)
     {
+        completed = false;
         try
         {
             using var document = JsonDocument.Parse(payload);
             var root = document.RootElement;
+            ThrowIfStreamError(root);
             var type = root.TryGetProperty("type", out var typeValue) && typeValue.ValueKind == JsonValueKind.String
                 ? typeValue.GetString() ?? string.Empty
                 : string.Empty;
+
+            var response = root.TryGetProperty("response", out var nestedResponse)
+                && nestedResponse.ValueKind == JsonValueKind.Object ? nestedResponse : root;
+            ThrowIfStreamError(response);
+            var status = ReadTextProperty(response, "status");
+            if (type is "response.failed" or "response.incomplete" or "response.cancelled"
+                || status is "failed" or "incomplete" or "cancelled")
+                throw new InvalidDataException($"AI 未完整返回答案（状态：{status}，事件：{type}），请重试。");
+            if (type.Contains("refusal", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("AI 服务拒绝了本次请求，未生成完整答案。");
+            completed = type == "response.completed" || status == "completed";
+            if (completed) return ParseOpenAiResponseBody(response);
 
             if (type.Equals("response.output_text.delta", StringComparison.OrdinalIgnoreCase))
                 return new AiStreamChunk(ReadTextProperty(root, "delta"), string.Empty);
@@ -494,16 +557,33 @@ public sealed class AiChatClient : IDisposable
             var fallbackText = ReadTextProperty(root, "delta");
             return fallbackText.Length == 0 ? null : new AiStreamChunk(fallbackText, string.Empty);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            return null;
+            throw new InvalidDataException("AI 服务返回了损坏的响应数据。", exception);
         }
+    }
+
+    private static void ThrowIfStreamError(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("AI 服务返回的响应格式无法识别。");
+        if (root.TryGetProperty("error", out var error)
+            && error.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            var detail = error.ValueKind == JsonValueKind.String
+                ? error.GetString() ?? string.Empty
+                : ReadTextProperty(error, "message", "code", "type");
+            throw new InvalidDataException($"AI 服务返回错误：{Limit(detail, 500)}");
+        }
+        if (ReadTextProperty(root, "type") == "error")
+            throw new InvalidDataException($"AI 服务返回错误：{Limit(ReadTextProperty(root, "message", "code"), 500)}");
     }
 
     private static AiStreamChunk? ParseOpenAiResponseBody(JsonElement root)
     {
         var text = ReadTextProperty(root, "output_text");
         var reasoning = string.Empty;
+        var hasCombinedText = text.Length > 0;
         if (root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in output.EnumerateArray())
@@ -514,7 +594,7 @@ public sealed class AiChatClient : IDisposable
                     : string.Empty;
                 var itemText = ReadTextProperty(item, "text", "content", "summary");
                 if (itemType.Contains("reasoning", StringComparison.OrdinalIgnoreCase)) reasoning += itemText;
-                else if (text.Length == 0) text += itemText;
+                else if (!hasCombinedText) text += itemText;
             }
         }
         return text.Length == 0 && reasoning.Length == 0 ? null : new AiStreamChunk(text, reasoning);
@@ -522,6 +602,7 @@ public sealed class AiChatClient : IDisposable
 
     private static string ReadTextProperty(JsonElement element, params string[] names)
     {
+        if (element.ValueKind != JsonValueKind.Object) return string.Empty;
         foreach (var name in names)
         {
             if (!element.TryGetProperty(name, out var value)) continue;

@@ -63,6 +63,24 @@ public sealed class ReaderBookSelectionTests
     }
 
     [Fact]
+    public void PrefersGeneratedPinyinEditionWhenOpeningTheBook()
+    {
+        var original = new BookFile
+        {
+            Format = "epub",
+            RelativePath = "book.epub"
+        };
+        var pinyin = new BookFile
+        {
+            Format = "epub",
+            RelativePath = "book-拼音版.epub"
+        };
+
+        Assert.Same(pinyin, ReaderBookSelectionPolicy.SelectPreferred([original, pinyin]));
+        Assert.Same(pinyin, ReaderBookSelectionPolicy.SelectPreferred([original, pinyin], "epub"));
+    }
+
+    [Fact]
     public void SelectEpubOnlyReturnsEpubForAnnotationMaterials()
     {
         var pdf = new BookFile { Format = "pdf" };

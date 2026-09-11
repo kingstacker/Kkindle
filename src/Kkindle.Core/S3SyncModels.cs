@@ -1,19 +1,28 @@
 namespace Kkindle.Core;
 
+public enum SyncProvider
+{
+    S3 = 0,
+    WebDav = 1
+}
+
 /// <summary>
-/// Configuration for the S3-compatible synchronisation backend. The access
-/// key, secret key and optional encryption key are stored through the platform
-/// secret protector by <c>S3SyncSettingsStore</c>; this model only describes
-/// the values used by the sync service.
+/// Sync configuration. The historical type and settings file names are kept
+/// for compatibility. Provider credentials are independent and are protected
+/// by <c>S3SyncSettingsStore</c>; scheduling and encryption settings are shared.
 /// </summary>
 public sealed record S3SyncSettings
 {
+    public SyncProvider Provider { get; init; } = SyncProvider.S3;
     public bool Enabled { get; init; }
     public bool AutomaticSyncEnabled { get; init; } = true;
     public int IntervalMinutes { get; init; } = 30;
     public string Endpoint { get; init; } = string.Empty;
     public string AccessKey { get; init; } = string.Empty;
     public string SecretKey { get; init; } = string.Empty;
+    public string WebDavEndpoint { get; init; } = string.Empty;
+    public string WebDavUsername { get; init; } = string.Empty;
+    public string WebDavPassword { get; init; } = string.Empty;
     public string Bucket { get; init; } = string.Empty;
     public string Region { get; init; } = "us-east-1";
     // AWS S3 uses virtual-hosted-style addressing by default. S3-compatible
@@ -26,9 +35,27 @@ public sealed record S3SyncSettings
     public string EncryptionKey { get; init; } = string.Empty;
 
     public bool IsConfigured => Validate() is null;
+    public string ProviderName => Provider == SyncProvider.WebDav ? "WebDAV" : "S3";
 
     public string? Validate()
     {
+        if (Provider is not (SyncProvider.S3 or SyncProvider.WebDav))
+            return "请选择受支持的同步方式。";
+        if (Provider == SyncProvider.WebDav)
+        {
+            if (!Uri.TryCreate(WebDavEndpoint, UriKind.Absolute, out var webDav)
+                || webDav.Scheme is not ("http" or "https") || webDav.Host.Length == 0
+                || WebDavEndpoint.Contains('\\') || WebDavEndpoint.Any(char.IsControl))
+                return "WebDAV 服务地址必须是 HTTP 或 HTTPS 地址。";
+            if (webDav.UserInfo.Length > 0 || webDav.Query.Length > 0 || webDav.Fragment.Length > 0)
+                return "WebDAV 服务地址不能包含账号密码、查询参数或片段，请在下方填写凭据。";
+            if (WebDavUsername.Contains(':') || WebDavUsername.Any(char.IsControl))
+                return "WebDAV 用户名不能包含冒号或控制字符。";
+            if (WebDavPassword.Length > 0 && string.IsNullOrWhiteSpace(WebDavUsername))
+                return "请输入 WebDAV 用户名。";
+            if (Prefix.Any(char.IsControl)) return "同步子目录不能包含控制字符。";
+            return string.IsNullOrWhiteSpace(Prefix) ? "请输入同步目录前缀。" : null;
+        }
         if (string.IsNullOrWhiteSpace(AccessKey)) return "请输入 S3 Access Key。";
         if (string.IsNullOrWhiteSpace(SecretKey)) return "请输入 S3 Secret Key。";
         if (string.IsNullOrWhiteSpace(Bucket)) return "请输入 S3 Bucket。";
@@ -61,6 +88,9 @@ public sealed record S3SyncSettings
             Endpoint = endpoint,
             AccessKey = (settings.AccessKey ?? string.Empty).Trim(),
             SecretKey = settings.SecretKey ?? string.Empty,
+            WebDavEndpoint = NormalizeWebDavEndpoint(settings.WebDavEndpoint),
+            WebDavUsername = (settings.WebDavUsername ?? string.Empty).Trim(),
+            WebDavPassword = settings.WebDavPassword ?? string.Empty,
             Bucket = (settings.Bucket ?? string.Empty).Trim(),
             Region = string.IsNullOrWhiteSpace(settings.Region) ? "us-east-1" : settings.Region.Trim(),
             TimeoutSeconds = Math.Clamp(settings.TimeoutSeconds, 10, 600),
@@ -68,6 +98,16 @@ public sealed record S3SyncSettings
             Prefix = string.IsNullOrWhiteSpace(prefix) ? "kkindle" : prefix,
             EncryptionKey = settings.EncryptionKey ?? string.Empty
         };
+    }
+
+    private static string NormalizeWebDavEndpoint(string? value)
+    {
+        var endpoint = (value ?? string.Empty).Trim().TrimEnd('/');
+        // Preserve invalid input for validation instead of silently changing
+        // a malformed path or embedded credential into another destination.
+        return !endpoint.Contains('\\') && !endpoint.Any(char.IsControl) && Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https"
+            ? uri.AbsoluteUri.TrimEnd('/') : endpoint;
     }
 }
 
@@ -139,6 +179,7 @@ public sealed record S3ConnectionProfile
 
     public S3SyncSettings ApplyTo(S3SyncSettings current) => S3SyncSettings.Normalize(current with
     {
+        Provider = SyncProvider.S3,
         Endpoint = Endpoint,
         AccessKey = AccessKey,
         SecretKey = SecretKey,

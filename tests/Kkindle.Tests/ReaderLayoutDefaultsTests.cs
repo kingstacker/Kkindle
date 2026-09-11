@@ -16,7 +16,7 @@ public sealed class ReaderLayoutDefaultsTests
         Assert.Equal(1, defaults.FlowMode);
         Assert.False(defaults.VerticalWriting);
         Assert.False(defaults.TwoPageMode);
-        Assert.True(defaults.ParagraphIndent);
+        Assert.False(defaults.ParagraphIndent);
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public sealed class ReaderLayoutDefaultsTests
     }
 
     [Fact]
-    public void ApplyGlobalPreferencesKeepsBookTypographyAndUsesGlobalDirection()
+    public void ApplyGlobalPreferencesUsesGlobalLayoutForEveryOption()
     {
         var bookLayout = new ReaderLayoutSettings(
             FontScale: 1.5,
@@ -118,20 +118,23 @@ public sealed class ReaderLayoutDefaultsTests
         var globalLayout = new ReaderLayoutSettings(
             FontScale: 1.0,
             LineHeight: 1.5,
-            FlowMode: 1,
+            MaxWidth: 720,
+            BodyPadding: 36,
+            FontFamily: "SimHei",
+            FlowMode: 0,
             VerticalWriting: true,
-            TwoPageMode: false)
+            TwoPageMode: true)
         {
             ParagraphIndent = false
         };
 
         var merged = ReaderLayoutDefaults.ApplyGlobalPreferences(bookLayout, globalLayout);
 
-        Assert.Equal(bookLayout.FontScale, merged.FontScale);
-        Assert.Equal(bookLayout.LineHeight, merged.LineHeight);
-        Assert.Equal(bookLayout.MaxWidth, merged.MaxWidth);
-        Assert.Equal(bookLayout.BodyPadding, merged.BodyPadding);
-        Assert.Equal(bookLayout.FontFamily, merged.FontFamily);
+        Assert.Equal(globalLayout.FontScale, merged.FontScale);
+        Assert.Equal(globalLayout.LineHeight, merged.LineHeight);
+        Assert.Equal(globalLayout.MaxWidth, merged.MaxWidth);
+        Assert.Equal(globalLayout.BodyPadding, merged.BodyPadding);
+        Assert.Equal(globalLayout.FontFamily, merged.FontFamily);
         Assert.True(merged.VerticalWriting);
         Assert.False(merged.ParagraphIndent);
         Assert.Equal(1, merged.FlowMode);

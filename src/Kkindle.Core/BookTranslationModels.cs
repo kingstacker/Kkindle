@@ -20,11 +20,15 @@ public enum BookTranslationOutputMode
 
 public sealed record BookTranslationSettings
 {
+    public const int MaxAiRequestsPerMinute = 65_536;
+
     public BookTranslationProvider Provider { get; init; } = BookTranslationProvider.Ai;
     public string SourceLanguage { get; init; } = "auto";
     public string TargetLanguage { get; init; } = "zh-CN";
     public BookTranslationOutputMode OutputMode { get; init; } = BookTranslationOutputMode.Translated;
-    public bool ContextMenuEnabled { get; init; }
+    public int AiRequestsPerMinute { get; init; }
+    public string GoogleProxyAddress { get; init; } = string.Empty;
+    public bool ContextMenuEnabled { get; init; } = true;
 
     public static BookTranslationSettings Normalize(BookTranslationSettings? settings)
     {
@@ -46,7 +50,12 @@ public sealed record BookTranslationSettings
             Provider = provider,
             SourceLanguage = source,
             TargetLanguage = target,
-            OutputMode = output
+            OutputMode = output,
+            AiRequestsPerMinute = Math.Clamp(
+                settings.AiRequestsPerMinute,
+                0,
+                MaxAiRequestsPerMinute),
+            GoogleProxyAddress = (settings.GoogleProxyAddress ?? string.Empty).Trim()
         };
     }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
@@ -20,12 +21,13 @@ public sealed class EpubTranslationService : IEpubTranslationService
 {
     private const string BingTranslatorUrl = "https://www.bing.com/translator";
     private const string GoogleTranslatorUrl = "https://translate.googleapis.com/translate_a/single";
+    private const string GoogleLegacyTranslatorUrl = "https://clients5.google.com/translate_a/t";
     private const int GoogleRequestCharacterLimit = 1_400;
     private const int BingRequestCharacterLimit = 950;
     private const int AiRequestCharacterLimit = 5_500;
     private const int MaxArchiveEntryBytes = 64 * 1024 * 1024;
     private const int MaxRetryCount = 2;
-    private const int TranslationCacheVersion = 1;
+    private const int TranslationCacheVersion = 2;
     private const string TranslationCacheFileName = ".kkindle-translation-cache.jsonl";
     private static readonly TimeSpan BingSessionLifetime = TimeSpan.FromMinutes(25);
     private static readonly JsonSerializerOptions TranslationCacheJsonOptions = new()
@@ -48,10 +50,6 @@ public sealed class EpubTranslationService : IEpubTranslationService
     private static readonly Regex SegmentMarkerPattern = new(
         @"__KKINDLE_SEG_(?<id>\d{1,6})__",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex InlineWhitespacePattern = new(
-        @"\s+",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
     private static readonly HashSet<string> TranslatableBlockNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "address", "article", "aside", "blockquote", "caption", "dd", "div", "dl", "dt",
@@ -60,19 +58,16 @@ public sealed class EpubTranslationService : IEpubTranslationService
         "th", "thead", "tr", "ul", "body"
     };
 
-    private static readonly HashSet<string> HiddenElementNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "head", "script", "style", "noscript", "svg", "math"
-    };
-
     private readonly AppPaths _paths;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly AiChatClient _aiChatClient;
     private readonly bool _ownsAiChatClient;
     private readonly HttpClient _httpClient;
     private readonly SemaphoreSlim _bingSessionGate = new(1, 1);
+    private readonly AiRequestsPerMinuteLimiter _aiRequestsPerMinuteLimiter = new();
+    private readonly object _googleProxyClientsGate = new();
+    private readonly Dictionary<string, HttpClient> _googleProxyClients = new(StringComparer.OrdinalIgnoreCase);
     private BingSession? _bingSession;
-    private AiConnectionSettings? _aiSettings;
     private bool _disposed;
 
     public EpubTranslationService(
@@ -100,16 +95,22 @@ public sealed class EpubTranslationService : IEpubTranslationService
         {
             _httpClient = new HttpClient(httpHandler, disposeHandler: true);
         }
-        _httpClient.Timeout = TimeSpan.FromSeconds(90);
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "Mozilla/5.0 (compatible; Kkindle EPUB Translator/1.0)");
+        ConfigureHttpClient(_httpClient);
     }
 
-    public async Task<BookTranslationResumeInfo?> FindResumeAsync(
+    public Task<BookTranslationResumeInfo?> FindResumeAsync(
         string epubPath,
         string outputDirectory,
         BookTranslationSettings settings,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) => Task.Run(
+            () => FindResumeCoreAsync(epubPath, outputDirectory, settings, cancellationToken),
+            cancellationToken);
+
+    private async Task<BookTranslationResumeInfo?> FindResumeCoreAsync(
+        string epubPath,
+        string outputDirectory,
+        BookTranslationSettings settings,
+        CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -166,13 +167,23 @@ public sealed class EpubTranslationService : IEpubTranslationService
         }
     }
 
-    public async Task<BookTranslationResult> TranslateAsync(
+    public Task<BookTranslationResult> TranslateAsync(
         string epubPath,
         string outputDirectory,
         BookTranslationSettings settings,
         IProgress<BookTranslationProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        BookTranslationResumeMode resumeMode = BookTranslationResumeMode.Restart)
+        BookTranslationResumeMode resumeMode = BookTranslationResumeMode.Restart) => Task.Run(
+            () => TranslateCoreAsync(epubPath, outputDirectory, settings, progress, cancellationToken, resumeMode),
+            cancellationToken);
+
+    private async Task<BookTranslationResult> TranslateCoreAsync(
+        string epubPath,
+        string outputDirectory,
+        BookTranslationSettings settings,
+        IProgress<BookTranslationProgress>? progress,
+        CancellationToken cancellationToken,
+        BookTranslationResumeMode resumeMode)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -258,7 +269,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 totalCharacters,
                 cancellationToken,
                 resumeSnapshot?.Segments,
-                cacheWriter);
+                cacheWriter,
+                new TranslationRequestContext(normalizedSettings, resumeSnapshot?.Parts, resumeSnapshot?.SplitPlans, cacheWriter));
 
             var renderedPages = new Dictionary<BookTranslationOutputMode, IReadOnlyDictionary<string, byte[]>>();
             if (normalizedSettings.OutputMode.HasFlag(BookTranslationOutputMode.Translated))
@@ -267,7 +279,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     pages,
                     translations,
                     BookTranslationOutputMode.Translated,
-                    normalizedSettings.TargetLanguage);
+                    normalizedSettings.TargetLanguage,
+                    cancellationToken);
             }
 
             if (normalizedSettings.OutputMode.HasFlag(BookTranslationOutputMode.Bilingual))
@@ -276,7 +289,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     pages,
                     translations,
                     BookTranslationOutputMode.Bilingual,
-                    normalizedSettings.TargetLanguage);
+                    normalizedSettings.TargetLanguage,
+                    cancellationToken);
             }
 
             var modesToWrite = new[]
@@ -297,19 +311,18 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     totalCharacters,
                     totalCharacters));
 
-                var suffix = mode == BookTranslationOutputMode.Bilingual ? "双语" : "译文";
-                var destination = CreateOutputPath(targetDirectory, sourcePath, suffix);
-                var navigationEntries = await RenderNavigationEntriesAsync(
+                var suffix = mode == BookTranslationOutputMode.Bilingual ? "双语版" : "单译版";
+                var destination = CreateOutputPath(targetDirectory, sourcePath, suffix, '_');
+                var packageEntries = await RenderPackageEntriesAsync(
                     sourcePath,
-                    pages,
-                    translations,
                     mode,
+                    normalizedSettings.TargetLanguage,
                     cancellationToken);
                 await WriteArchiveAsync(
                     sourcePath,
                     destination,
                     pageBytes,
-                    navigationEntries,
+                    packageEntries,
                     cancellationToken);
                 outputPaths.Add(destination);
             }
@@ -347,19 +360,19 @@ public sealed class EpubTranslationService : IEpubTranslationService
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (entry.Length > MaxArchiveEntryBytes || !IsXhtmlEntry(entry.FullName)) continue;
+            var isNcx = Path.GetExtension(entry.FullName).Equals(".ncx", StringComparison.OrdinalIgnoreCase);
+            if (entry.Length > MaxArchiveEntryBytes || (!IsXhtmlEntry(entry.FullName) && !isNcx)) continue;
             EnsureSafeArchiveEntryName(entry.FullName);
 
             var markup = await ReadArchiveTextAsync(entry, cancellationToken);
             if (!TryParseDocument(markup, out var document)) continue;
             var segments = ExtractSegments(document, entry.FullName);
-            if (segments.Count == 0) continue;
-
             pages.Add(new TranslationPage(
                 entry.FullName,
                 markup,
                 segments,
-                IsTocNavigationDocument(document)));
+                IsTocNavigationDocument(document),
+                isNcx));
             Report(progress, new BookTranslationProgress(
                 "正在扫描 EPUB",
                 entry.FullName,
@@ -367,7 +380,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 0));
         }
 
-        if (pages.Count == 0)
+        if (pages.Count == 0 || pages.All(page => page.Segments.Count == 0))
             throw new InvalidDataException("EPUB 中没有找到可翻译的正文。 ");
         return pages;
     }
@@ -379,13 +392,29 @@ public sealed class EpubTranslationService : IEpubTranslationService
         long totalCharacters,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<int, TranslationCacheSegmentLine>? resumedSegments,
-        TranslationCacheWriter cacheWriter)
+        TranslationCacheWriter cacheWriter,
+        TranslationRequestContext requestContext)
     {
         var translations = new Dictionary<string, string>(StringComparer.Ordinal);
         var cache = new Dictionary<string, string>(StringComparer.Ordinal);
         var processed = 0;
         long processedCharacters = 0;
         var index = 0;
+        var batchingEnabled = true;
+
+        bool TryGetResumed(TranslationSegment segment, out string value)
+        {
+            value = string.Empty;
+            if (resumedSegments?.TryGetValue(segment.Index, out var resumed) != true
+                || resumed is null
+                || resumed.Status != BookTranslationSegmentStatus.Completed
+                || string.IsNullOrWhiteSpace(resumed.TranslatedText)
+                || resumed.OriginalText != segment.Text
+                || resumed.RequestText != segment.Markup.RequestText
+                || !segment.Markup.IsValidTranslation(resumed.TranslatedText)) return false;
+            value = resumed.TranslatedText;
+            return true;
+        }
 
         void ReportSegmentState(
             IProgress<BookTranslationProgress>? currentProgress,
@@ -414,11 +443,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = segments[index];
-            var cacheKey = CreateTranslationCacheKey(settings, current.Text);
-            if (resumedSegments?.TryGetValue(current.Index, out var resumed) == true
-                && resumed.Status == BookTranslationSegmentStatus.Completed
-                && !string.IsNullOrWhiteSpace(resumed.TranslatedText)
-                && string.Equals(resumed.OriginalText, current.Text, StringComparison.Ordinal))
+            var cacheKey = CreateTranslationCacheKey(settings, current.Markup.RequestText);
+            if (TryGetResumed(current, out var resumedText))
             {
                 ReportSegmentState(
                     progress,
@@ -430,8 +456,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     BookTranslationSegmentStatus.Processing,
                     string.Empty,
                     "读取原文 → 恢复本地缓存");
-                cache[cacheKey] = resumed.TranslatedText;
-                translations[current.Key] = resumed.TranslatedText;
+                cache[cacheKey] = resumedText;
+                translations[current.Key] = resumedText;
                 index++;
                 processed++;
                 processedCharacters += current.Text.Length;
@@ -443,7 +469,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     processedCharacters,
                     totalCharacters,
                     BookTranslationSegmentStatus.Completed,
-                    resumed.TranslatedText,
+                    resumedText,
                     "读取原文 → 恢复本地缓存 → 写入译文");
                 continue;
             }
@@ -480,17 +506,19 @@ public sealed class EpubTranslationService : IEpubTranslationService
             var batchLimit = GetBatchCharacterLimit(settings.Provider);
             var batch = new List<TranslationSegment>();
             var batchLength = 0;
-            while (index + batch.Count < segments.Count)
+            while (batchingEnabled && index + batch.Count < segments.Count)
             {
                 var candidate = segments[index + batch.Count];
-                var candidateCacheKey = CreateTranslationCacheKey(settings, candidate.Text);
+                var candidateCacheKey = CreateTranslationCacheKey(settings, candidate.Markup.RequestText);
                 if (cache.ContainsKey(candidateCacheKey)) break;
-                if (candidate.Text.Length > batchLimit) break;
+                if (TryGetResumed(candidate, out _)) break;
+                if (candidate.Markup.RequestText.Contains("__KKINDLE_SEG_", StringComparison.Ordinal)) break;
+                var candidateLength = candidate.Markup.RequestText.Length + 2 * CreateMarker(batch.Count).Length;
                 var separatorLength = batch.Count == 0 ? 0 : Environment.NewLine.Length;
-                if (batch.Count > 0 && batchLength + separatorLength + candidate.Text.Length > batchLimit)
+                if (batchLength + separatorLength + candidateLength > batchLimit)
                     break;
                 batch.Add(candidate);
-                batchLength += separatorLength + candidate.Text.Length;
+                batchLength += separatorLength + candidateLength;
             }
 
             if (batch.Count > 1)
@@ -512,14 +540,15 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 var markerPayload = string.Join(
                     Environment.NewLine,
                     batch.Select((segment, offset) =>
-                        $"{CreateMarker(offset)}{segment.Text}{CreateMarker(offset)}"));
+                        $"{CreateMarker(offset)}{segment.Markup.RequestText}{CreateMarker(offset)}"));
                 string batchResult;
                 try
                 {
                     batchResult = await TranslateTextWithRetryAsync(
                         markerPayload,
-                        settings,
-                        cancellationToken);
+                        requestContext,
+                        cancellationToken,
+                        cacheParts: false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -545,13 +574,14 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     throw;
                 }
 
-                if (TryReadMarkedTranslations(batchResult, batch.Count, out var markedTranslations))
+                if (TryReadMarkedTranslations(batchResult, batch.Count, out var markedTranslations)
+                    && batch.Select((segment, offset) => segment.Markup.IsValidTranslation(markedTranslations[offset])).All(valid => valid))
                 {
                     for (var offset = 0; offset < batch.Count; offset++)
                     {
                         var segment = batch[offset];
                         var value = markedTranslations[offset];
-                        var key = CreateTranslationCacheKey(settings, segment.Text);
+                        var key = CreateTranslationCacheKey(settings, segment.Markup.RequestText);
                         cache[key] = value;
                         translations[segment.Key] = value;
                         processed++;
@@ -572,6 +602,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     continue;
                 }
 
+                batchingEnabled = false;
                 foreach (var segment in batch)
                 {
                     ReportSegmentState(
@@ -604,9 +635,9 @@ public sealed class EpubTranslationService : IEpubTranslationService
             string translated;
             try
             {
-                translated = await TranslateTextWithRetryAsync(
-                    current.Text,
-                    settings,
+                translated = await TranslateSegmentAsync(
+                    current,
+                    requestContext,
                     cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -649,43 +680,111 @@ public sealed class EpubTranslationService : IEpubTranslationService
         return translations;
     }
 
-    private async Task<string> TranslateTextWithRetryAsync(
-        string text,
-        BookTranslationSettings settings,
+    private async Task<string> TranslateSegmentAsync(
+        TranslationSegment segment,
+        TranslationRequestContext context,
         CancellationToken cancellationToken)
     {
+        var markup = segment.Markup;
+        if (!markup.HasMarkers || markup.RequestText.Length <= GetSingleRequestCharacterLimit(context.Settings.Provider))
+        {
+            var translated = await TranslateTextWithRetryAsync(
+                markup.RequestText, context, cancellationToken, cacheParts: !markup.HasMarkers);
+            if (markup.IsValidTranslation(translated)) return translated;
+            if (!markup.HasMarkers)
+                throw new InvalidDataException("翻译结果包含无法写入 EPUB 的字符，请重试。");
+        }
+
+        // Providers that strip markup markers cannot safely align a translated
+        // sentence with links/emphasis. Translate its text runs independently
+        // and retain the original local element boundaries instead.
+        var builder = new StringBuilder();
+        foreach (var part in markup.Parts())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (part.IsMarker || !ContainsTranslatableCharacters(part.Text))
+            {
+                builder.Append(part.Text);
+                continue;
+            }
+            var text = part.Text.Trim();
+            var leading = part.Text.Length - part.Text.TrimStart().Length;
+            var trailing = part.Text.Length - part.Text.TrimEnd().Length;
+            builder.Append(part.Text.AsSpan(0, leading));
+            builder.Append(await TranslateTextWithRetryAsync(text, context, cancellationToken));
+            if (trailing > 0) builder.Append(part.Text.AsSpan(part.Text.Length - trailing));
+        }
+        var result = builder.ToString();
+        if (!markup.IsValidTranslation(result))
+            throw new InvalidDataException("翻译结果的行内结构校验失败，请重试。");
+        return result;
+    }
+
+    private async Task<string> TranslateTextWithRetryAsync(
+        string text,
+        TranslationRequestContext context,
+        CancellationToken cancellationToken,
+        bool cacheParts = true)
+    {
+        var settings = context.Settings;
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
         if (IsSameLanguage(settings.SourceLanguage, settings.TargetLanguage)) return text;
+        if (cacheParts && context.Parts.TryGetValue(text, out var completedPart)) return completedPart;
+
+        async Task<string> TranslatePartAsync(string part)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (cacheParts && context.Parts.TryGetValue(part, out var cached)) return cached;
+            var value = await TranslateSingleWithRetryAsync(part, context, cancellationToken);
+            if (cacheParts)
+            {
+                context.Parts[part] = value;
+                context.CacheWriter.AppendPart(part, value);
+            }
+            return value;
+        }
 
         var maxLength = GetSingleRequestCharacterLimit(settings.Provider);
-        if (text.Length > maxLength)
+        var hasSavedPlan = cacheParts && context.SplitPlans.TryGetValue(text, out _);
+        if (hasSavedPlan || text.Length > maxLength)
         {
-            var parts = SplitText(text, maxLength);
+            var parts = hasSavedPlan ? context.SplitPlans[text] : SplitText(text, maxLength);
+            if (cacheParts && !hasSavedPlan && parts.Count > 1)
+            {
+                context.SplitPlans[text] = parts;
+                context.CacheWriter.AppendSplitPlan(text, parts);
+            }
             var translatedParts = new List<string>(parts.Count);
             foreach (var part in parts)
             {
-                translatedParts.Add(await TranslateSingleWithRetryAsync(part, settings, cancellationToken));
+                // Keep the previous provider's successful chunk boundaries when
+                // switching engines. Only unfinished oversized chunks need splitting.
+                translatedParts.Add(parts.Count > 1 && part.Length > maxLength
+                    ? await TranslateTextWithRetryAsync(part, context, cancellationToken, cacheParts)
+                    : await TranslatePartAsync(part));
             }
             return string.Join(" ", translatedParts.Where(part => part.Length > 0));
         }
 
-        return await TranslateSingleWithRetryAsync(text, settings, cancellationToken);
+        return await TranslatePartAsync(text);
     }
 
     private async Task<string> TranslateSingleWithRetryAsync(
         string text,
-        BookTranslationSettings settings,
+        TranslationRequestContext context,
         CancellationToken cancellationToken)
     {
+        var settings = context.Settings;
         Exception? lastFailure = null;
         for (var attempt = 0; attempt <= MaxRetryCount; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var translated = await TranslateSingleAsync(text, settings, cancellationToken);
+                var translated = await TranslateSingleAsync(text, context, cancellationToken);
                 if (string.IsNullOrWhiteSpace(translated))
                     throw new InvalidDataException("翻译服务返回了空文本。 ");
+                XmlConvert.VerifyXmlChars(translated);
                 return translated.Trim();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -707,22 +806,23 @@ public sealed class EpubTranslationService : IEpubTranslationService
 
     private async Task<string> TranslateSingleAsync(
         string text,
-        BookTranslationSettings settings,
-        CancellationToken cancellationToken) => settings.Provider switch
+        TranslationRequestContext context,
+        CancellationToken cancellationToken) => context.Settings.Provider switch
         {
-            BookTranslationProvider.Ai => await TranslateWithAiAsync(text, settings, cancellationToken),
-            BookTranslationProvider.BingFree => await TranslateWithBingAsync(text, settings, cancellationToken),
-            BookTranslationProvider.GoogleFree => await TranslateWithGoogleAsync(text, settings, cancellationToken),
+            BookTranslationProvider.Ai => await TranslateWithAiAsync(text, context, cancellationToken),
+            BookTranslationProvider.BingFree => await TranslateWithBingAsync(text, context.Settings, cancellationToken),
+            BookTranslationProvider.GoogleFree => await TranslateWithGoogleAsync(text, context.Settings, cancellationToken),
             _ => throw new NotSupportedException("未知的翻译服务。 ")
         };
 
     private async Task<string> TranslateWithAiAsync(
         string text,
-        BookTranslationSettings settings,
+        TranslationRequestContext context,
         CancellationToken cancellationToken)
     {
-        _aiSettings ??= await _aiSettingsStore.LoadAsync(cancellationToken);
-        if (!_aiSettings.IsConfigured)
+        var settings = context.Settings;
+        context.AiSettings ??= await _aiSettingsStore.LoadAsync(cancellationToken);
+        if (!context.AiSettings.IsConfigured)
             throw new InvalidOperationException("请先在“阅读 → AI 设置”中配置 AI 服务、模型和 API Key。 ");
 
         var source = TranslationLanguageCatalog.Find(settings.SourceLanguage).DisplayName;
@@ -730,9 +830,12 @@ public sealed class EpubTranslationService : IEpubTranslationService
         var instructions =
             $"你是专业的书籍翻译引擎。请将文本从{source}翻译成{target}。"
             + "只输出译文，不要解释、不要加引号、不要添加标题。"
-            + "必须原样保留形如 __KKINDLE_SEG_0__ 的标记及其顺序；标记之间的正文需要翻译。";
+            + "必须原样保留形如 __KKINDLE_SEG_0__、__KKINDLE_INLINE_0__ 的标记及其顺序；标记之间的正文需要翻译。";
+        await _aiRequestsPerMinuteLimiter.WaitAsync(
+            settings.AiRequestsPerMinute,
+            cancellationToken);
         return await _aiChatClient.CompleteAsync(
-            _aiSettings,
+            context.AiSettings,
             instructions,
             text,
             Array.Empty<AiConversationTurn>(),
@@ -750,12 +853,43 @@ public sealed class EpubTranslationService : IEpubTranslationService
         var endpoint = $"{GoogleTranslatorUrl}?client=gtx&sl={source}&tl={target}&dt=t&q={query}";
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        using var response = await _httpClient.SendAsync(
+        var httpClient = GetGoogleHttpClient(settings.GoogleProxyAddress);
+        using var response = await httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            return await TranslateWithGoogleLegacyAsync(
+                text,
+                settings,
+                httpClient,
+                cancellationToken);
+        }
         EnsureSuccess(response, body, "Google 免费翻译");
+        return ParseGoogleTranslation(body);
+    }
+
+    private async Task<string> TranslateWithGoogleLegacyAsync(
+        string text,
+        BookTranslationSettings settings,
+        HttpClient httpClient,
+        CancellationToken cancellationToken)
+    {
+        var source = Uri.EscapeDataString(ToGoogleLanguageCode(settings.SourceLanguage));
+        var target = Uri.EscapeDataString(ToGoogleLanguageCode(settings.TargetLanguage));
+        var query = Uri.EscapeDataString(text);
+        var endpoint = $"{GoogleLegacyTranslatorUrl}?client=dict-chrome-ex&sl={source}&tl={target}&q={query}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Referrer = new Uri("https://translate.google.com/");
+        using var response = await httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        EnsureSuccess(response, body, "Google 免费翻译备用接口");
         return ParseGoogleTranslation(body);
     }
 
@@ -854,40 +988,79 @@ public sealed class EpubTranslationService : IEpubTranslationService
         }
     }
 
+    private HttpClient GetGoogleHttpClient(string? proxyAddress)
+    {
+        var normalizedAddress = TranslationProxy.NormalizeAddress(proxyAddress);
+        if (normalizedAddress.Length == 0) return _httpClient;
+
+        lock (_googleProxyClientsGate)
+        {
+            if (_googleProxyClients.TryGetValue(normalizedAddress, out var existing))
+                return existing;
+
+            var client = new HttpClient(
+                TranslationProxy.CreateHandler(normalizedAddress),
+                disposeHandler: true);
+            ConfigureHttpClient(client);
+            _googleProxyClients[normalizedAddress] = client;
+            return client;
+        }
+    }
+
+    private static void ConfigureHttpClient(HttpClient client)
+    {
+        client.Timeout = TimeSpan.FromSeconds(90);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(
+            "Mozilla/5.0 (compatible; Kkindle EPUB Translator/1.0)");
+    }
+
     private static IReadOnlyDictionary<string, byte[]> RenderPages(
         IReadOnlyList<TranslationPage> pages,
         IReadOnlyDictionary<string, string> translations,
         BookTranslationOutputMode mode,
-        string targetLanguage)
+        string targetLanguage,
+        CancellationToken cancellationToken)
     {
         var rendered = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var page in pages)
         {
-            if (!TryParseDocument(page.OriginalMarkup, out var document)) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryParseDocument(page.OriginalMarkup, out var document))
+                throw new InvalidDataException($"无法回填 EPUB 页面：{page.EntryName}");
             var segments = ExtractSegments(document, page.EntryName);
             var changed = false;
             foreach (var segment in segments)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!translations.TryGetValue(segment.Key, out var translated)
                     || string.IsNullOrWhiteSpace(translated))
-                    continue;
+                    throw new InvalidDataException($"EPUB 文本段缺少完整译文：{page.EntryName}");
 
                 if (mode == BookTranslationOutputMode.Bilingual)
                 {
-                    if (page.IsNavigation)
-                        AppendBilingualNavigationText(segment.Element, translated, targetLanguage);
+                    if (page.IsNcx)
+                        segment.Element.Value = $"{segment.Text} / {segment.Markup.DisplayText(translated)}";
+                    else if (page.IsNavigation && segment.Element.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase))
+                        AppendBilingualNavigationText(segment, translated, targetLanguage);
                     else
-                        AppendBilingualText(segment.Element, translated, targetLanguage);
+                        AppendBilingualText(segment, translated, targetLanguage);
                 }
                 else
                 {
-                    ReplaceInlineText(segment.Element, translated);
+                    ReplaceInlineText(segment, translated);
                 }
                 changed = true;
             }
 
-            if (mode == BookTranslationOutputMode.Bilingual && changed)
+            if (mode == BookTranslationOutputMode.Bilingual && changed && !page.IsNcx)
                 AddBilingualStylesheet(document);
+            if (mode == BookTranslationOutputMode.Translated && document.Root is { } root)
+            {
+                UpdateLanguageAttributes(root, targetLanguage);
+                root.SetAttributeValue(XNamespace.Xml + "lang", targetLanguage);
+                if (!page.IsNcx) root.SetAttributeValue("lang", targetLanguage);
+                changed = true;
+            }
             if (changed)
                 rendered[page.EntryName] = Encoding.UTF8.GetBytes(SerializeDocument(document));
         }
@@ -898,137 +1071,108 @@ public sealed class EpubTranslationService : IEpubTranslationService
         XDocument document,
         string entryName)
     {
+        var segments = new List<TranslationSegment>();
+        var ordinal = 0;
+        if (document.Root?.Name.LocalName.Equals("ncx", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            foreach (var label in document.Descendants().Where(element =>
+                         element.Name.LocalName.Equals("text", StringComparison.OrdinalIgnoreCase)
+                         && element.Parent?.Name.LocalName.Equals("navLabel", StringComparison.OrdinalIgnoreCase) == true))
+                AddSegment(label, label.Nodes().ToArray());
+            return segments;
+        }
+
         var body = document.Descendants().FirstOrDefault(element =>
             element.Name.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase));
         if (body is null) return [];
-
-        var segments = new List<TranslationSegment>();
-        var ordinal = 0;
-        var candidates = body
-            .DescendantsAndSelf()
-            .Where(element => TranslatableBlockNames.Contains(element.Name.LocalName))
-            .Where(element => !element.Descendants().Any(child =>
-                TranslatableBlockNames.Contains(child.Name.LocalName)
-                && !child.Name.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase)));
-        foreach (var element in candidates)
-        {
-            if (HasGeneratedTranslationClass(element)) continue;
-            var nodes = GetVisibleTextNodes(element).ToArray();
-            var text = NormalizeSegmentText(string.Concat(nodes.Select(node => node.Value)));
-            var key = CreateSegmentKey(entryName, ordinal++);
-            if (text.Length == 0 || !ContainsTranslatableCharacters(text)) continue;
-            segments.Add(new TranslationSegment(key, text, element));
-        }
-
+        var isNavigation = IsTocNavigationDocument(document);
+        Visit(body);
         return segments;
-    }
 
-    private static IEnumerable<XText> GetVisibleTextNodes(XElement element)
-    {
-        foreach (var node in element.DescendantNodes().OfType<XText>())
+        void AddSegment(XElement container, IReadOnlyList<XNode> nodes)
         {
-            var hidden = false;
-            for (var parent = node.Parent; parent is not null && !ReferenceEquals(parent, element); parent = parent.Parent)
+            if (nodes.Count == 0) return;
+            var markup = new EpubTranslationMarkup(nodes);
+            var key = CreateSegmentKey(entryName, ordinal++);
+            if (!markup.HasTranslatableText) return;
+            segments.Add(new TranslationSegment(key, markup.Text, container, markup));
+        }
+
+        bool IsBoundary(XElement element) => TranslatableBlockNames.Contains(element.Name.LocalName)
+            || (isNavigation && element.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase));
+
+        void Visit(XElement container)
+        {
+            if (EpubTranslationMarkup.IsHidden(container)) return;
+            var run = new List<XNode>();
+            foreach (var node in container.Nodes())
             {
-                if (HiddenElementNames.Contains(parent.Name.LocalName))
+                if (node is XElement element && !EpubTranslationMarkup.IsHidden(element)
+                    && (IsBoundary(element) || element.Descendants().Any(IsBoundary)))
                 {
-                    hidden = true;
-                    break;
+                    AddSegment(container, run.ToArray());
+                    run.Clear();
+                    Visit(element);
                 }
+                else run.Add(node);
             }
-            if (!hidden) yield return node;
+            AddSegment(container, run.ToArray());
         }
     }
 
-    private static void ReplaceInlineText(XElement element, string translated)
+    private static IReadOnlyList<XNode> RenderInlineNodes(TranslationSegment segment, string translated)
     {
-        var nodes = GetVisibleTextNodes(element).ToArray();
-        if (nodes.Length == 0) return;
-        if (nodes.Length == 1)
-        {
-            nodes[0].Value = translated;
-            return;
-        }
-
-        var originalLength = nodes.Sum(node => Math.Max(1, NormalizeSegmentText(node.Value).Length));
-        var cursor = 0;
-        for (var index = 0; index < nodes.Length; index++)
-        {
-            var remaining = translated.Length - cursor;
-            if (remaining <= 0)
-            {
-                nodes[index].Value = string.Empty;
-                continue;
-            }
-
-            var originalPartLength = Math.Max(1, NormalizeSegmentText(nodes[index].Value).Length);
-            var desired = index == nodes.Length - 1
-                ? remaining
-                : Math.Clamp(
-                    (int)Math.Round(translated.Length * originalPartLength / (double)originalLength),
-                    1,
-                    remaining);
-            var end = index == nodes.Length - 1
-                ? translated.Length
-                : FindNaturalSplit(translated, cursor + desired, cursor + 1, translated.Length);
-            nodes[index].Value = translated[cursor..end];
-            cursor = end;
-        }
+        if (!segment.Markup.TryRender(translated, out var nodes))
+            throw new InvalidDataException("译文中的行内结构标记不完整，请重新翻译该段。");
+        return nodes;
     }
 
-    private static int FindNaturalSplit(string text, int desired, int minimum, int maximum)
+    private static void ReplaceInlineText(TranslationSegment segment, string translated)
     {
-        desired = Math.Clamp(desired, minimum, maximum);
-        for (var index = desired; index < Math.Min(maximum, desired + 30); index++)
-        {
-            if (char.IsWhiteSpace(text[index - 1])
-                || text[index - 1] is '。' or '！' or '？' or '，' or ',' or '.' or '!' or '?')
-                return index;
-        }
-        return desired;
+        var nodes = RenderInlineNodes(segment, translated);
+        segment.Markup.Nodes[0].AddBeforeSelf(nodes);
+        foreach (var node in segment.Markup.Nodes) node.Remove();
     }
 
-    private static void AppendBilingualText(XElement element, string translated, string targetLanguage)
+    private static void AppendBilingualText(TranslationSegment segment, string translated, string targetLanguage)
     {
-        if (element.Descendants().Any(child => HasGeneratedTranslationClass(child))) return;
-        var ns = element.Name.Namespace;
-        element.Add(
+        var ns = segment.Element.Name.Namespace;
+        var span = new XElement(ns + "span",
+            new XAttribute("class", "kkindle-translation"),
+            new XAttribute("lang", targetLanguage),
+            new XAttribute(XNamespace.Xml + "lang", targetLanguage),
+            RenderInlineNodes(segment, translated));
+        PrepareBilingualCopy(span, targetLanguage);
+        segment.Markup.Nodes[^1].AddAfterSelf(
             new XElement(ns + "br"),
-            new XElement(
-                ns + "span",
-                new XAttribute("class", "kkindle-translation"),
-                new XAttribute("lang", TranslationLanguageCatalog.Find(targetLanguage).Code),
-                translated));
+            span);
     }
 
     // Kindle and a number of EPUB converters build the table of contents from
     // the text inside the navigation link itself. Keep the bilingual label in
     // the <a> text rather than relying on Kkindle's reader-only sibling span.
     private static void AppendBilingualNavigationText(
-        XElement element,
+        TranslationSegment segment,
         string translated,
         string targetLanguage)
     {
-        var anchor = element.DescendantsAndSelf().FirstOrDefault(child =>
-            child.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase));
-        if (anchor is null)
-        {
-            AppendBilingualText(element, translated, targetLanguage);
-            return;
-        }
+        var nodes = RenderInlineNodes(segment, translated);
+        foreach (var element in nodes.OfType<XElement>()) PrepareBilingualCopy(element, targetLanguage);
+        segment.Element.Add(new XText(" / "), nodes);
+    }
 
-        var original = NormalizeSegmentText(string.Concat(
-            GetVisibleTextNodes(anchor)
-                .Where(node => !node.Ancestors().Any(HasGeneratedTranslationClass))
-                .Select(node => node.Value)));
-        var translatedTitle = NormalizeSegmentText(translated);
-        if (translatedTitle.Length == 0) return;
+    private static void PrepareBilingualCopy(XElement root, string targetLanguage)
+    {
+        foreach (var id in root.DescendantsAndSelf().Attributes().Where(attribute => attribute.Name.LocalName == "id").ToArray())
+            id.Remove();
+        UpdateLanguageAttributes(root, targetLanguage);
+    }
 
-        anchor.RemoveNodes();
-        anchor.Add(new XText(
-            original.Length == 0
-                ? translatedTitle
-                : $"{original} / {translatedTitle}"));
+    private static void UpdateLanguageAttributes(XElement root, string targetLanguage)
+    {
+        foreach (var attribute in root.DescendantsAndSelf().Attributes().Where(attribute =>
+                     attribute.Name == XNamespace.Xml + "lang" || attribute.Name == "lang"))
+            attribute.Value = targetLanguage;
     }
 
     private static void AddBilingualStylesheet(XDocument document)
@@ -1055,91 +1199,45 @@ public sealed class EpubTranslationService : IEpubTranslationService
             ".kkindle-translation{display:block;margin-top:.55em;opacity:.82;}"));
     }
 
-    // EPUB 3 nav.xhtml is translated as ordinary XHTML above, but EPUB 2
-    // readers may still build their table of contents from toc.ncx. Reuse the
-    // translated labels from the navigation XHTML instead of sending a second
-    // request to the provider, and write the matching NCX labels as well.
-    private static async Task<IReadOnlyDictionary<string, byte[]>> RenderNavigationEntriesAsync(
+    private static async Task<IReadOnlyDictionary<string, byte[]>> RenderPackageEntriesAsync(
         string sourcePath,
-        IReadOnlyList<TranslationPage> pages,
-        IReadOnlyDictionary<string, string> translations,
         BookTranslationOutputMode mode,
+        string targetLanguage,
         CancellationToken cancellationToken)
     {
-        var labels = BuildNavigationLabels(pages, translations, mode);
         var rendered = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-        if (labels.Count == 0) return rendered;
-
+        XNamespace dc = "http://purl.org/dc/elements/1.1/";
         using var archive = ZipFile.OpenRead(sourcePath);
         foreach (var entry in archive.Entries.Where(entry =>
-                     Path.GetExtension(entry.FullName).Equals(".ncx", StringComparison.OrdinalIgnoreCase)))
+                     Path.GetExtension(entry.FullName).Equals(".opf", StringComparison.OrdinalIgnoreCase)))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (entry.Length > MaxArchiveEntryBytes)
+                throw new InvalidDataException("EPUB 的语言元数据文件过大。");
             var markup = await ReadArchiveTextAsync(entry, cancellationToken);
-            if (!TryParseDocument(markup, out var document)) continue;
-
-            var changed = false;
-            foreach (var navPoint in document.Descendants().Where(element =>
-                         element.Name.LocalName.Equals("navPoint", StringComparison.OrdinalIgnoreCase)))
+            if (!TryParseDocument(markup, out var document) || document.Root is null)
+                throw new InvalidDataException("无法更新 EPUB 的语言元数据。");
+            var metadata = document.Root.Elements().FirstOrDefault(element => element.Name.LocalName == "metadata");
+            if (metadata is null)
             {
-                var content = navPoint.Elements().FirstOrDefault(element =>
-                    element.Name.LocalName.Equals("content", StringComparison.OrdinalIgnoreCase));
-                var href = content?.Attribute("src")?.Value;
-                if (string.IsNullOrWhiteSpace(href)) continue;
-
-                var label = navPoint.Elements().FirstOrDefault(element =>
-                        element.Name.LocalName.Equals("navLabel", StringComparison.OrdinalIgnoreCase))?
-                    .Descendants().FirstOrDefault(element =>
-                        element.Name.LocalName.Equals("text", StringComparison.OrdinalIgnoreCase));
-                if (label is null) continue;
-                if (!labels.TryGetValue(CreateNavigationTargetKey(entry.FullName, href), out var translatedTitle))
-                    continue;
-
-                if (string.Equals(label.Value, translatedTitle, StringComparison.Ordinal)) continue;
-                label.Value = translatedTitle;
-                changed = true;
+                metadata = new XElement(document.Root.Name.Namespace + "metadata");
+                document.Root.AddFirst(metadata);
             }
-
-            if (changed)
-                rendered[entry.FullName] = Encoding.UTF8.GetBytes(SerializeDocument(document));
+            var languages = metadata.Elements(dc + "language").ToArray();
+            if (mode == BookTranslationOutputMode.Translated)
+            {
+                if (languages.Length == 0) metadata.Add(new XElement(dc + "language", targetLanguage));
+                else
+                {
+                    languages[0].Value = targetLanguage;
+                    foreach (var language in languages.Skip(1)) language.Remove();
+                }
+            }
+            else if (!languages.Any(language => language.Value.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase)))
+                metadata.Add(new XElement(dc + "language", targetLanguage));
+            rendered[entry.FullName] = Encoding.UTF8.GetBytes(SerializeDocument(document));
         }
-
         return rendered;
-    }
-
-    private static IReadOnlyDictionary<string, string> BuildNavigationLabels(
-        IReadOnlyList<TranslationPage> pages,
-        IReadOnlyDictionary<string, string> translations,
-        BookTranslationOutputMode mode)
-    {
-        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var page in pages.Where(page => page.IsNavigation))
-        {
-            foreach (var segment in page.Segments)
-            {
-                if (!translations.TryGetValue(segment.Key, out var translatedText)
-                    || string.IsNullOrWhiteSpace(translatedText))
-                    continue;
-
-                var anchor = segment.Element.DescendantsAndSelf().FirstOrDefault(element =>
-                    element.Name.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase));
-                var href = anchor?.Attribute("href")?.Value;
-                if (anchor is null || string.IsNullOrWhiteSpace(href)) continue;
-
-                var originalTitle = NormalizeSegmentText(string.Concat(
-                    GetVisibleTextNodes(anchor)
-                        .Where(node => !node.Ancestors().Any(HasGeneratedTranslationClass))
-                        .Select(node => node.Value)));
-                var translatedTitle = NormalizeSegmentText(translatedText);
-                if (translatedTitle.Length == 0) continue;
-
-                labels[CreateNavigationTargetKey(page.EntryName, href)] = mode == BookTranslationOutputMode.Bilingual
-                    ? $"{originalTitle} / {translatedTitle}"
-                    : translatedTitle;
-            }
-        }
-
-        return labels;
     }
 
     private static bool IsTocNavigationDocument(XDocument document) =>
@@ -1148,48 +1246,6 @@ public sealed class EpubTranslationService : IEpubTranslationService
             && (HasToken(GetAttributeValue(element, "type"), "toc")
                 || HasToken(GetAttributeValue(element, "role"), "doc-toc")));
 
-    private static string CreateNavigationTargetKey(string declaringEntryName, string href)
-    {
-        var parts = href.Split('#', 2);
-        var pathPart = parts[0].Split('?', 2)[0];
-        var declaringPath = NormalizeArchivePath(declaringEntryName);
-        var separator = declaringPath.LastIndexOf('/');
-        var directory = separator >= 0 ? declaringPath[..separator] : string.Empty;
-        var combinedPath = string.IsNullOrWhiteSpace(pathPart)
-            ? declaringPath
-            : string.IsNullOrEmpty(directory)
-                ? pathPart
-                : $"{directory}/{pathPart}";
-        var fragment = parts.Length == 2 ? DecodeNavigationFragment(parts[1]) : string.Empty;
-        return $"{NormalizeArchivePath(combinedPath)}\0{fragment}";
-    }
-
-    private static string NormalizeArchivePath(string value)
-    {
-        var segments = new List<string>();
-        foreach (var rawSegment in value.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries))
-        {
-            string segment;
-            try { segment = Uri.UnescapeDataString(rawSegment); }
-            catch { segment = rawSegment; }
-
-            if (segment.Length == 0 || segment == ".") continue;
-            if (segment == "..")
-            {
-                if (segments.Count > 0) segments.RemoveAt(segments.Count - 1);
-                continue;
-            }
-            segments.Add(segment);
-        }
-
-        return string.Join('/', segments);
-    }
-
-    private static string DecodeNavigationFragment(string value)
-    {
-        try { return Uri.UnescapeDataString(value); }
-        catch { return value; }
-    }
 
     private static bool HasToken(string? value, string token) =>
         value?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
@@ -1364,6 +1420,14 @@ public sealed class EpubTranslationService : IEpubTranslationService
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0)
             throw new InvalidDataException("Google 翻译返回的数据格式无法识别。 ");
+        if (root[0].ValueKind == JsonValueKind.String)
+        {
+            var text = root[0].GetString();
+            if (!string.IsNullOrWhiteSpace(text)) return text;
+            throw new InvalidDataException("Google 翻译返回了空结果。 ");
+        }
+        if (root[0].ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Google 翻译返回的数据格式无法识别。 ");
         var builder = new StringBuilder();
         foreach (var item in root[0].EnumerateArray())
         {
@@ -1444,6 +1508,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
     private static IReadOnlyList<string> SplitText(string text, int maxLength)
     {
         var parts = new List<string>();
+        var boundaries = StringInfo.ParseCombiningCharacters(text);
         var start = 0;
         while (start < text.Length)
         {
@@ -1452,6 +1517,14 @@ public sealed class EpubTranslationService : IEpubTranslationService
             {
                 var boundary = text.LastIndexOfAny(['\n', '。', '！', '？', '!', '?', '.', '；', ';', ' '], end - 1, end - start);
                 if (boundary > start + maxLength / 3) end = boundary + 1;
+                var offset = Array.BinarySearch(boundaries, end);
+                if (offset < 0)
+                {
+                    offset = ~offset;
+                    end = offset > 0 && boundaries[offset - 1] > start
+                        ? boundaries[offset - 1]
+                        : offset < boundaries.Length ? boundaries[offset] : text.Length;
+                }
             }
             parts.Add(text[start..end].Trim());
             start = end;
@@ -1459,17 +1532,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
         return parts.Where(part => part.Length > 0).ToArray();
     }
 
-    private static string NormalizeSegmentText(string value) =>
-        InlineWhitespacePattern.Replace(WebUtility.HtmlDecode(value).Replace('\u00A0', ' '), " ").Trim();
-
     private static bool ContainsTranslatableCharacters(string text) =>
-        text.Any(character => char.IsLetter(character));
-
-    private static bool HasGeneratedTranslationClass(XElement element) =>
-        element.Attributes().Any(attribute =>
-            attribute.Name.LocalName.Equals("class", StringComparison.OrdinalIgnoreCase)
-            && attribute.Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-                .Contains("kkindle-translation", StringComparer.Ordinal));
+        text.EnumerateRunes().Any(Rune.IsLetter);
 
     private static bool IsSameLanguage(string source, string target) =>
         TranslationLanguageCatalog.Find(source).Code.Equals(
@@ -1507,14 +1571,18 @@ public sealed class EpubTranslationService : IEpubTranslationService
     private static string GetOutputModeLabel(BookTranslationOutputMode mode) =>
         mode == BookTranslationOutputMode.Bilingual ? "双语对照" : "单翻译";
 
-    private static string CreateOutputPath(string directory, string sourcePath, string suffix)
+    private static string CreateOutputPath(
+        string directory,
+        string sourcePath,
+        string suffix,
+        char separator = '-')
     {
         var name = Path.GetFileNameWithoutExtension(sourcePath);
         var invalid = Path.GetInvalidFileNameChars();
         var safe = string.Concat(name.Select(character => invalid.Contains(character) ? '_' : character)).Trim();
         if (safe.Length == 0) safe = "书籍";
         if (safe.Length > 120) safe = safe[..120].TrimEnd();
-        return Path.Combine(directory, $"{safe}-{suffix}.epub");
+        return Path.Combine(directory, $"{safe}{separator}{suffix}.epub");
     }
 
     private static bool IsXhtmlEntry(string name)
@@ -1558,11 +1626,11 @@ public sealed class EpubTranslationService : IEpubTranslationService
             segment.Index,
             segment.Key.Split('\u001F')[0],
             segment.Text,
-            translatedText,
+            segment.Markup.DisplayText(translatedText),
             status,
             processFlow,
             errorMessage);
-        cacheWriter.Append(update);
+        cacheWriter.Append(update, segment.Markup.RequestText, translatedText);
         Report(progress, new BookTranslationProgress(
             "正在翻译",
             segment.Key.Split('\u001F')[0],
@@ -1588,6 +1656,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
         var lines = await File.ReadAllLinesAsync(cachePath, Encoding.UTF8, cancellationToken);
         TranslationCacheHeader? header = null;
         var segments = new Dictionary<int, TranslationCacheSegmentLine>();
+        var parts = new Dictionary<string, string>(StringComparer.Ordinal);
+        var splitPlans = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         var updatedAt = DateTimeOffset.MinValue;
         foreach (var line in lines)
         {
@@ -1616,8 +1686,23 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     segments[segment.Index] = segment;
                     if (segment.UpdatedAt > updatedAt) updatedAt = segment.UpdatedAt;
                 }
+                else if (string.Equals(kind, "part", StringComparison.OrdinalIgnoreCase))
+                {
+                    var part = JsonSerializer.Deserialize<TranslationCachePartLine>(line, TranslationCacheJsonOptions);
+                    if (part is null || string.IsNullOrWhiteSpace(part.SourceText) || string.IsNullOrWhiteSpace(part.TranslatedText)) continue;
+                    XmlConvert.VerifyXmlChars(part.TranslatedText);
+                    parts[part.SourceText] = part.TranslatedText;
+                    if (part.UpdatedAt > updatedAt) updatedAt = part.UpdatedAt;
+                }
+                else if (string.Equals(kind, "split", StringComparison.OrdinalIgnoreCase))
+                {
+                    var split = JsonSerializer.Deserialize<TranslationCacheSplitLine>(line, TranslationCacheJsonOptions);
+                    if (split is null || !IsValidSplitPlan(split.SourceText, split.Parts)) continue;
+                    splitPlans[split.SourceText] = split.Parts;
+                    if (split.UpdatedAt > updatedAt) updatedAt = split.UpdatedAt;
+                }
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is JsonException or XmlException)
             {
                 // An interrupted write can leave one incomplete final line;
                 // earlier flushed entries are still valid and recoverable.
@@ -1640,6 +1725,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
         return new TranslationCacheSnapshot(
             header,
             segments,
+            parts,
+            splitPlans,
             updatedAt == DateTimeOffset.MinValue ? header.UpdatedAt : updatedAt);
     }
 
@@ -1647,6 +1734,21 @@ public sealed class EpubTranslationService : IEpubTranslationService
     {
         var inferredTotal = snapshot.Segments.Keys.DefaultIfEmpty(-1).Max() + 1;
         return Math.Max(snapshot.Header.TotalSegments, inferredTotal);
+    }
+
+    private static bool IsValidSplitPlan(string source, IReadOnlyList<string> parts)
+    {
+        if (string.IsNullOrEmpty(source) || parts is null || parts.Count < 2) return false;
+        var offset = 0;
+        foreach (var part in parts)
+        {
+            if (string.IsNullOrEmpty(part) || part.Length >= source.Length) return false;
+            while (offset < source.Length && char.IsWhiteSpace(source[offset])) offset++;
+            if (!source.AsSpan(offset).StartsWith(part, StringComparison.Ordinal)) return false;
+            offset += part.Length;
+        }
+        while (offset < source.Length && char.IsWhiteSpace(source[offset])) offset++;
+        return offset == source.Length;
     }
 
     private static void TryDeleteTranslationCache(string cachePath)
@@ -1666,7 +1768,16 @@ public sealed class EpubTranslationService : IEpubTranslationService
     {
         if (_disposed) return;
         _disposed = true;
+        _aiRequestsPerMinuteLimiter.Dispose();
         _bingSessionGate.Dispose();
+        HttpClient[] proxyClients;
+        lock (_googleProxyClientsGate)
+        {
+            proxyClients = _googleProxyClients.Values.ToArray();
+            _googleProxyClients.Clear();
+        }
+        foreach (var proxyClient in proxyClients)
+            proxyClient.Dispose();
         _httpClient.Dispose();
         if (_ownsAiChatClient) _aiChatClient.Dispose();
     }
@@ -1685,15 +1796,30 @@ public sealed class EpubTranslationService : IEpubTranslationService
         int Index,
         string EntryName,
         string OriginalText,
+        string RequestText,
         string TranslatedText,
         BookTranslationSegmentStatus Status,
         string ProcessFlow,
         string? ErrorMessage,
         DateTimeOffset UpdatedAt);
 
+    private sealed record TranslationCachePartLine(
+        string Kind,
+        string SourceText,
+        string TranslatedText,
+        DateTimeOffset UpdatedAt);
+
     private sealed record TranslationCacheSnapshot(
         TranslationCacheHeader Header,
         IReadOnlyDictionary<int, TranslationCacheSegmentLine> Segments,
+        IReadOnlyDictionary<string, string> Parts,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> SplitPlans,
+        DateTimeOffset UpdatedAt);
+
+    private sealed record TranslationCacheSplitLine(
+        string Kind,
+        string SourceText,
+        IReadOnlyList<string> Parts,
         DateTimeOffset UpdatedAt);
 
     private sealed class TranslationCacheWriter : IDisposable
@@ -1719,7 +1845,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
             WriteHeader(header);
         }
 
-        public void Append(BookTranslationSegmentProgress segment)
+        public void Append(BookTranslationSegmentProgress segment, string requestText, string translatedText)
         {
             if (_disposed) return;
             var line = new TranslationCacheSegmentLine(
@@ -1727,11 +1853,28 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 segment.Index,
                 segment.EntryName,
                 segment.OriginalText,
-                segment.TranslatedText,
+                requestText,
+                translatedText,
                 segment.Status,
                 segment.ProcessFlow,
                 segment.ErrorMessage,
                 DateTimeOffset.UtcNow);
+            _writer.WriteLine(JsonSerializer.Serialize(line, TranslationCacheJsonOptions));
+            _writer.Flush();
+        }
+
+        public void AppendPart(string sourceText, string translatedText)
+        {
+            if (_disposed) return;
+            var line = new TranslationCachePartLine("part", sourceText, translatedText, DateTimeOffset.UtcNow);
+            _writer.WriteLine(JsonSerializer.Serialize(line, TranslationCacheJsonOptions));
+            _writer.Flush();
+        }
+
+        public void AppendSplitPlan(string sourceText, IReadOnlyList<string> parts)
+        {
+            if (_disposed) return;
+            var line = new TranslationCacheSplitLine("split", sourceText, parts, DateTimeOffset.UtcNow);
             _writer.WriteLine(JsonSerializer.Serialize(line, TranslationCacheJsonOptions));
             _writer.Flush();
         }
@@ -1754,13 +1897,32 @@ public sealed class EpubTranslationService : IEpubTranslationService
         string EntryName,
         string OriginalMarkup,
         IReadOnlyList<TranslationSegment> Segments,
-        bool IsNavigation);
+        bool IsNavigation,
+        bool IsNcx);
 
     private sealed record TranslationSegment(
         string Key,
         string Text,
         XElement Element,
+        EpubTranslationMarkup Markup,
         int Index = -1);
+
+    private sealed class TranslationRequestContext(
+        BookTranslationSettings settings,
+        IReadOnlyDictionary<string, string>? parts,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? splitPlans,
+        TranslationCacheWriter cacheWriter)
+    {
+        public BookTranslationSettings Settings { get; } = settings;
+        public AiConnectionSettings? AiSettings { get; set; }
+        public Dictionary<string, string> Parts { get; } = parts is null
+            ? new(StringComparer.Ordinal)
+            : new(parts, StringComparer.Ordinal);
+        public TranslationCacheWriter CacheWriter { get; } = cacheWriter;
+        public Dictionary<string, IReadOnlyList<string>> SplitPlans { get; } = splitPlans is null
+            ? new(StringComparer.Ordinal)
+            : new(splitPlans, StringComparer.Ordinal);
+    }
 
     private sealed record BingSession(
         string Ig,

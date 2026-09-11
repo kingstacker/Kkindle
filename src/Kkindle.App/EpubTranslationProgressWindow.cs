@@ -5,17 +5,26 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Kkindle.Core;
+using Ellipse = Avalonia.Controls.Shapes.Ellipse;
 
 namespace Kkindle;
 
 /// <summary>
 /// A separate, modeless window keeps long-running EPUB translation visible
 /// while the library window remains usable. The lower half is a live,
-/// append-only paragraph stream so the original text, translated text and
-/// provider flow can be inspected without waiting for the whole book.
+/// reordered paragraph stream so completed paragraphs stay at the front, the
+/// paragraph currently being translated follows them, and the remaining queue
+/// stays behind it in source order.
 /// </summary>
 internal sealed class EpubTranslationProgressWindow : Window
 {
+    private const string White = "#FFFFFF";
+    private const string Ink = "#111111";
+    private const string MutedInk = "#737373";
+    private const string Hairline = "#E1E1E1";
+    private const string SoftGray = "#F5F5F5";
+    private const string GrayDot = "#B5B5B5";
+
     private readonly TextBlock _bookText = new();
     private readonly TextBlock _engineText = new();
     private readonly TextBlock _stageText = new();
@@ -28,22 +37,33 @@ internal sealed class EpubTranslationProgressWindow : Window
     private readonly ProgressBar _progressBar = new();
     private readonly ScrollViewer _segmentScrollViewer = new();
     private readonly StackPanel _segmentPanel = new();
+    private readonly ComboBox _providerBox = new();
+    private readonly Button _pauseButton = new();
+    private readonly Button _resumeButton = new();
     private readonly Button _cancelButton = new();
     private readonly Button _openFolderButton = new();
     private readonly Button _closeButton = new();
     private readonly Dictionary<int, SegmentRowView> _segmentRows = [];
+    private readonly string _sourceLanguage;
+    private readonly string _targetLanguage;
     private bool _finished;
     private bool _cancelRaised;
+    private bool _updatingProvider;
+    private bool _progressUpdatesEnabled = true;
     private bool _scrollQueued;
+    private int? _currentSegmentIndex;
+    private int? _pendingCenterSegmentIndex;
 
     public EpubTranslationProgressWindow(
         string bookTitle,
-        string provider,
+        BookTranslationProvider provider,
         string sourceLanguage,
         string targetLanguage,
         string outputDirectory)
     {
         OutputDirectory = outputDirectory;
+        _sourceLanguage = sourceLanguage;
+        _targetLanguage = targetLanguage;
         Title = "书籍翻译";
         Width = 920;
         Height = 720;
@@ -51,23 +71,33 @@ internal sealed class EpubTranslationProgressWindow : Window
         MinHeight = 460;
         CanResize = true;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new SolidColorBrush(Color.Parse("#FFFDFC"));
+        Background = new SolidColorBrush(Color.Parse(White));
 
         _bookText.Text = bookTitle;
         _bookText.FontSize = 20;
         _bookText.FontWeight = FontWeight.SemiBold;
+        _bookText.Foreground = new SolidColorBrush(Color.Parse(Ink));
         _bookText.TextWrapping = TextWrapping.Wrap;
 
-        _engineText.Text = $"{provider}  ·  {sourceLanguage} → {targetLanguage}";
-        _engineText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _engineText.Text = $"{GetProviderDisplayName(provider)}  ·  {sourceLanguage} → {targetLanguage}";
+        _engineText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _engineText.FontSize = 12;
         _engineText.TextWrapping = TextWrapping.Wrap;
+
+        _providerBox.ItemsSource = ProviderChoices;
+        _providerBox.SelectedItem = ProviderChoices.FirstOrDefault(
+            choice => choice.Provider == provider)
+            ?? ProviderChoices[0];
+        _providerBox.MinWidth = 180;
+        _providerBox.FontSize = 12;
+        _providerBox.IsEnabled = false;
+        _providerBox.SelectionChanged += ProviderBox_SelectionChanged;
 
         _stageText.Text = "准备翻译";
         _stageText.FontSize = 14;
         _stageText.FontWeight = FontWeight.SemiBold;
 
-        _currentText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _currentText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _currentText.FontSize = 12;
         _currentText.TextWrapping = TextWrapping.Wrap;
         _currentText.MaxLines = 2;
@@ -76,13 +106,15 @@ internal sealed class EpubTranslationProgressWindow : Window
         _progressBar.Maximum = 100;
         _progressBar.Height = 8;
         _progressBar.Margin = new Thickness(0, 8, 0, 0);
+        _progressBar.Foreground = new SolidColorBrush(Color.Parse(Ink));
+        _progressBar.Background = new SolidColorBrush(Color.Parse(Hairline));
 
         _percentageText.Text = "0%";
         _percentageText.HorizontalAlignment = HorizontalAlignment.Right;
         _percentageText.FontSize = 13;
         _percentageText.FontWeight = FontWeight.SemiBold;
 
-        _detailsText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _detailsText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _detailsText.FontSize = 11;
         _detailsText.TextWrapping = TextWrapping.Wrap;
 
@@ -93,18 +125,18 @@ internal sealed class EpubTranslationProgressWindow : Window
             FontWeight = FontWeight.SemiBold
         };
         _segmentSummaryText.Text = "等待扫描…";
-        _segmentSummaryText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _segmentSummaryText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _segmentSummaryText.FontSize = 11;
         _segmentSummaryText.HorizontalAlignment = HorizontalAlignment.Right;
         _segmentSummaryText.VerticalAlignment = VerticalAlignment.Center;
 
-        _emptySegmentText.Text = "扫描到正文段落后，会在这里按处理顺序显示原文、译文和流程。";
-        _emptySegmentText.Foreground = new SolidColorBrush(Color.Parse("#888880"));
+        _emptySegmentText.Text = "扫描到正文段落后，会在这里显示翻译瀑布流。";
+        _emptySegmentText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _emptySegmentText.FontSize = 12;
         _emptySegmentText.TextWrapping = TextWrapping.Wrap;
         _emptySegmentText.Margin = new Thickness(4, 6, 4, 6);
         _segmentPanel.Orientation = Orientation.Vertical;
-        _segmentPanel.Spacing = 10;
+        _segmentPanel.Spacing = 8;
         _segmentPanel.Children.Add(_emptySegmentText);
 
         _segmentScrollViewer.Content = _segmentPanel;
@@ -112,9 +144,18 @@ internal sealed class EpubTranslationProgressWindow : Window
         _segmentScrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         _segmentScrollViewer.Padding = new Thickness(0, 2, 8, 2);
 
-        _resultText.Foreground = new SolidColorBrush(Color.Parse("#3F6B4A"));
+        _resultText.Foreground = new SolidColorBrush(Color.Parse(Ink));
         _resultText.FontSize = 11;
         _resultText.TextWrapping = TextWrapping.Wrap;
+
+        _pauseButton.Content = "暂停";
+        _pauseButton.Classes.Add("quiet");
+        _pauseButton.Click += (_, _) => RequestPause();
+
+        _resumeButton.Content = "继续";
+        _resumeButton.IsVisible = false;
+        _resumeButton.IsEnabled = false;
+        _resumeButton.Click += (_, _) => RequestResume();
 
         _cancelButton.Content = "取消";
         _cancelButton.Classes.Add("quiet");
@@ -129,6 +170,14 @@ internal sealed class EpubTranslationProgressWindow : Window
         _closeButton.Classes.Add("quiet");
         _closeButton.IsEnabled = false;
         _closeButton.Click += (_, _) => Close();
+
+        var engineHeader = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            ColumnSpacing = 12,
+            Children = { _engineText, _providerBox }
+        };
+        Grid.SetColumn(_providerBox, 1);
 
         var progressHeader = new Grid
         {
@@ -151,7 +200,14 @@ internal sealed class EpubTranslationProgressWindow : Window
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
             Spacing = 8,
-            Children = { _openFolderButton, _cancelButton, _closeButton }
+            Children =
+            {
+                _openFolderButton,
+                _pauseButton,
+                _resumeButton,
+                _cancelButton,
+                _closeButton
+            }
         };
 
         Content = new Border
@@ -166,7 +222,7 @@ internal sealed class EpubTranslationProgressWindow : Window
                 Children =
                 {
                     _bookText,
-                    _engineText,
+                    engineHeader,
                     progressHeader,
                     _progressBar,
                     _currentText,
@@ -178,7 +234,7 @@ internal sealed class EpubTranslationProgressWindow : Window
                 }
             }
         };
-        Grid.SetRow(_engineText, 1);
+        Grid.SetRow(engineHeader, 1);
         Grid.SetRow(progressHeader, 2);
         Grid.SetRow(_progressBar, 3);
         Grid.SetRow(_currentText, 4);
@@ -195,7 +251,58 @@ internal sealed class EpubTranslationProgressWindow : Window
 
     public event EventHandler? CancelRequested;
 
+    public event EventHandler? PauseRequested;
+
+    public event EventHandler? ResumeRequested;
+
+    public event EventHandler? ProviderChanged;
+
     public event EventHandler? OpenFolderRequested;
+
+    public BookTranslationProvider SelectedProvider => _providerBox.SelectedItem is ProviderChoice choice
+        ? choice.Provider
+        : BookTranslationProvider.Ai;
+
+    public void SetSelectedProvider(BookTranslationProvider provider)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => SetSelectedProvider(provider));
+            return;
+        }
+
+        _updatingProvider = true;
+        try
+        {
+            _providerBox.SelectedItem = ProviderChoices.FirstOrDefault(
+                choice => choice.Provider == provider)
+                ?? ProviderChoices[0];
+        }
+        finally
+        {
+            _updatingProvider = false;
+        }
+        UpdateEngineText();
+    }
+
+    public void MarkRunning(BookTranslationProvider provider)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => MarkRunning(provider));
+            return;
+        }
+
+        SetSelectedProvider(provider);
+        _progressUpdatesEnabled = true;
+        _stageText.Text = "正在翻译";
+        _pauseButton.IsVisible = true;
+        _pauseButton.IsEnabled = true;
+        _resumeButton.IsVisible = false;
+        _resumeButton.IsEnabled = false;
+        _providerBox.IsEnabled = false;
+        _cancelButton.IsEnabled = true;
+    }
 
     public void Update(BookTranslationProgress progress)
     {
@@ -204,7 +311,7 @@ internal sealed class EpubTranslationProgressWindow : Window
             Dispatcher.UIThread.Post(() => Update(progress));
             return;
         }
-        if (_finished) return;
+        if (_finished || !_progressUpdatesEnabled) return;
 
         _stageText.Text = progress.Stage;
         _currentText.Text = progress.CurrentItem;
@@ -231,6 +338,11 @@ internal sealed class EpubTranslationProgressWindow : Window
 
         _stageText.Text = "正在加入书库";
         _currentText.Text = $"正在登记 {fileCount:N0} 个翻译文件，自动合并为同一本书的不同格式。";
+        _progressUpdatesEnabled = false;
+        _pauseButton.IsEnabled = false;
+        _resumeButton.IsVisible = false;
+        _resumeButton.IsEnabled = false;
+        _providerBox.IsEnabled = false;
     }
 
     public void MarkCompleted(BookTranslationResult result)
@@ -242,6 +354,10 @@ internal sealed class EpubTranslationProgressWindow : Window
         }
 
         _finished = true;
+        _progressUpdatesEnabled = false;
+        _currentSegmentIndex = null;
+        _pendingCenterSegmentIndex = null;
+        ReorderSegmentRows();
         _progressBar.Value = 100;
         _percentageText.Text = "100%";
         _stageText.Text = "翻译完成";
@@ -251,8 +367,8 @@ internal sealed class EpubTranslationProgressWindow : Window
         _resultText.Text = result.OutputPaths.Count == 0
             ? string.Empty
             : string.Join("\n", result.OutputPaths.Select(path => $"• {Path.GetFileName(path)}"));
-        QueueScrollToEnd();
         SetFinishedState(canOpenFolder: result.OutputPaths.Count > 0);
+        QueueScrollToTop();
     }
 
     public void MarkLibraryImportResult(ImportBatchResult result)
@@ -301,6 +417,7 @@ internal sealed class EpubTranslationProgressWindow : Window
         }
 
         _finished = true;
+        _progressUpdatesEnabled = false;
         _stageText.Text = "已取消";
         _currentText.Text = "翻译任务已取消，已处理段落的缓存会保留，下次可选择继续或重新翻译。";
         _resultText.Text = string.Empty;
@@ -308,6 +425,49 @@ internal sealed class EpubTranslationProgressWindow : Window
             row.MarkCanceled();
         _segmentSummaryText.Text = $"已显示 {_segmentRows.Count:N0} 段";
         SetFinishedState(canOpenFolder: Directory.Exists(OutputDirectory));
+    }
+
+    public void MarkPausing()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(MarkPausing);
+            return;
+        }
+
+        _stageText.Text = "正在暂停";
+        _currentText.Text = "正在结束当前请求并保存翻译缓存…";
+        _progressUpdatesEnabled = false;
+        _pauseButton.IsEnabled = false;
+        _resumeButton.IsVisible = false;
+        _resumeButton.IsEnabled = false;
+        _providerBox.IsEnabled = false;
+        _cancelButton.IsEnabled = true;
+    }
+
+    public void MarkPaused()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(MarkPaused);
+            return;
+        }
+
+        _stageText.Text = "已暂停";
+        _currentText.Text = "已暂停，已完成内容已保存。可切换翻译引擎后点击继续。";
+        _progressUpdatesEnabled = false;
+        _pauseButton.IsVisible = false;
+        _pauseButton.IsEnabled = false;
+        _resumeButton.IsVisible = true;
+        _resumeButton.IsEnabled = true;
+        _providerBox.IsEnabled = true;
+        _cancelButton.IsEnabled = true;
+        _currentSegmentIndex = null;
+        foreach (var row in _segmentRows.Values)
+            row.MarkPaused();
+        ReorderSegmentRows();
+        var completedCount = _segmentRows.Values.Count(item => item.IsCompleted);
+        _segmentSummaryText.Text = $"已完成 {completedCount:N0} / {_segmentRows.Count:N0} 段";
     }
 
     public void MarkFailed(string message)
@@ -318,13 +478,29 @@ internal sealed class EpubTranslationProgressWindow : Window
             return;
         }
 
-        _finished = true;
+        // A provider failure is recoverable: keep this window alive so the
+        // user can choose another provider and resume from the saved cache.
+        _finished = false;
+        _progressUpdatesEnabled = false;
         _stageText.Text = "翻译失败";
         _currentText.Text = message;
         _resultText.Text = _segmentRows.Count > 0
-            ? "已保存当前翻译缓存；下次点击翻译时可继续，并为未完成段选择其他模型。"
-            : string.Empty;
-        SetFinishedState(canOpenFolder: Directory.Exists(OutputDirectory));
+            ? "已保存当前翻译缓存；可切换翻译引擎后点击“继续”。"
+            : "可切换翻译引擎后点击“继续”重试。";
+        _pauseButton.IsVisible = false;
+        _pauseButton.IsEnabled = false;
+        _resumeButton.IsVisible = true;
+        _resumeButton.IsEnabled = true;
+        _providerBox.IsEnabled = true;
+        _cancelButton.IsEnabled = true;
+        _closeButton.IsEnabled = true;
+        _openFolderButton.IsEnabled = Directory.Exists(OutputDirectory);
+        _currentSegmentIndex = null;
+        ReorderSegmentRows();
+        var completedCount = _segmentRows.Values.Count(item => item.IsCompleted);
+        _segmentSummaryText.Text = _segmentRows.Count > 0
+            ? $"已完成 {completedCount:N0} / {_segmentRows.Count:N0} 段"
+            : "等待重试…";
     }
 
     private void UpdateSegment(BookTranslationSegmentProgress segment)
@@ -340,28 +516,134 @@ internal sealed class EpubTranslationProgressWindow : Window
         }
 
         row.Update(segment);
+        _currentSegmentIndex = _segmentRows.Values
+            .Where(item => item.IsProcessing)
+            .OrderBy(item => item.Index)
+            .Select(item => (int?)item.Index)
+            .FirstOrDefault();
+
+        ReorderSegmentRows();
         var completedCount = _segmentRows.Values.Count(item => item.IsCompleted);
-        _segmentSummaryText.Text = $"已显示 {_segmentRows.Count:N0} 段  ·  已完成 {completedCount:N0} 段";
-        QueueScrollToEnd();
+        _segmentSummaryText.Text = $"已完成 {completedCount:N0} / {_segmentRows.Count:N0} 段";
+        if (_currentSegmentIndex is { } currentIndex
+            && _segmentRows.TryGetValue(currentIndex, out var currentRow)
+            && currentRow.IsProcessing)
+        {
+            QueueScrollToSegment(currentIndex);
+        }
     }
 
-    private void QueueScrollToEnd()
+    private void ReorderSegmentRows()
     {
+        if (_segmentRows.Count == 0) return;
+
+        var orderedRows = ProgressWaterfallOrder.Order(
+            _segmentRows.Values,
+            _currentSegmentIndex,
+            item => item.Index,
+            item => item.IsCompleted,
+            item => item.IsProcessing);
+        for (var position = 0; position < orderedRows.Length; position++)
+        {
+            var row = orderedRows[position].Control;
+            if (position < _segmentPanel.Children.Count
+                && ReferenceEquals(_segmentPanel.Children[position], row))
+            {
+                continue;
+            }
+
+            _segmentPanel.Children.Remove(row);
+            _segmentPanel.Children.Insert(position, row);
+        }
+    }
+
+    private void QueueScrollToSegment(int segmentIndex)
+    {
+        _pendingCenterSegmentIndex = segmentIndex;
         if (_scrollQueued) return;
         _scrollQueued = true;
         Dispatcher.UIThread.Post(() =>
         {
             _scrollQueued = false;
-            if (IsVisible)
-                _segmentScrollViewer.ScrollToEnd();
-        });
+            if (!IsVisible || _pendingCenterSegmentIndex is not { } currentIndex)
+            {
+                _pendingCenterSegmentIndex = null;
+                return;
+            }
+
+            _pendingCenterSegmentIndex = null;
+            if (!_segmentRows.TryGetValue(currentIndex, out var row)
+                || !row.IsProcessing)
+            {
+                return;
+            }
+
+            _segmentScrollViewer.UpdateLayout();
+            var viewportHeight = _segmentScrollViewer.Viewport.Height;
+            if (viewportHeight <= 0 || row.Control.Bounds.Height <= 0) return;
+
+            // Keep the last completed row in the rendered order as the first
+            // visible item so the processing row follows it immediately. Do
+            // not use source indexes here: a batch or AI review can complete
+            // segments out of source order.
+            var orderedRows = ProgressWaterfallOrder.Order(
+                _segmentRows.Values,
+                _currentSegmentIndex,
+                item => item.Index,
+                item => item.IsCompleted,
+                item => item.IsProcessing);
+            var scrollAnchor = orderedRows
+                .LastOrDefault(item => item.IsCompleted)?.Control
+                ?? row.Control;
+            var rowTop = scrollAnchor.TranslatePoint(new Point(0, 0), _segmentScrollViewer);
+            if (rowTop is not { } top) return;
+
+            var targetOffset = _segmentScrollViewer.Offset.Y + top.Y;
+            var maximumOffset = Math.Max(
+                0,
+                _segmentScrollViewer.Extent.Height - viewportHeight);
+            var offset = Math.Clamp(targetOffset, 0, maximumOffset);
+            _segmentScrollViewer.Offset = new Vector(
+                _segmentScrollViewer.Offset.X,
+                offset);
+        }, DispatcherPriority.Render);
+    }
+
+    private void QueueScrollToTop()
+    {
+        _pendingCenterSegmentIndex = null;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsVisible) return;
+            _segmentScrollViewer.UpdateLayout();
+            _segmentScrollViewer.Offset = new Vector(
+                _segmentScrollViewer.Offset.X,
+                0);
+        }, DispatcherPriority.Render);
     }
 
     private void SetFinishedState(bool canOpenFolder)
     {
+        _pauseButton.IsVisible = false;
+        _pauseButton.IsEnabled = false;
+        _resumeButton.IsVisible = false;
+        _resumeButton.IsEnabled = false;
+        _providerBox.IsEnabled = false;
         _cancelButton.IsEnabled = false;
         _closeButton.IsEnabled = true;
         _openFolderButton.IsEnabled = canOpenFolder;
+    }
+
+    private void RequestPause()
+    {
+        if (_finished) return;
+        PauseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RequestResume()
+    {
+        if (_finished) return;
+        ResumeRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void RequestCancel()
@@ -371,10 +653,39 @@ internal sealed class EpubTranslationProgressWindow : Window
         CancelRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void ProviderBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingProvider) return;
+        UpdateEngineText();
+        ProviderChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateEngineText() => _engineText.Text =
+        $"{GetProviderDisplayName(SelectedProvider)}  ·  {_sourceLanguage} → {_targetLanguage}";
+
+    private static string GetProviderDisplayName(BookTranslationProvider provider) => provider switch
+    {
+        BookTranslationProvider.BingFree => "Bing 免费翻译",
+        BookTranslationProvider.GoogleFree => "Google 免费翻译",
+        _ => "AI 翻译"
+    };
+
+    private sealed record ProviderChoice(BookTranslationProvider Provider, string DisplayName)
+    {
+        public override string ToString() => DisplayName;
+    }
+
+    private static readonly ProviderChoice[] ProviderChoices =
+    [
+        new(BookTranslationProvider.Ai, "AI 翻译"),
+        new(BookTranslationProvider.BingFree, "Bing 免费翻译"),
+        new(BookTranslationProvider.GoogleFree, "Google 免费翻译")
+    ];
+
     private sealed class SegmentRowView
     {
         private readonly Border _card;
-        private readonly TextBlock _statusGlyph = new();
+        private readonly Ellipse _statusDot = new();
         private readonly TextBlock _indexText = new();
         private readonly TextBlock _statusText = new();
         private readonly TextBlock _originalText = new();
@@ -387,14 +698,14 @@ internal sealed class EpubTranslationProgressWindow : Window
 
         public SegmentRowView(BookTranslationSegmentProgress segment)
         {
-            _statusGlyph.FontSize = 20;
-            _statusGlyph.FontWeight = FontWeight.Bold;
-            _statusGlyph.Width = 28;
-            _statusGlyph.TextAlignment = TextAlignment.Center;
-            _statusGlyph.VerticalAlignment = VerticalAlignment.Top;
+            Index = segment.Index;
+            _statusDot.Width = 8;
+            _statusDot.Height = 8;
+            _statusDot.HorizontalAlignment = HorizontalAlignment.Center;
+            _statusDot.VerticalAlignment = VerticalAlignment.Center;
 
             _indexText.FontSize = 11;
-            _indexText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+            _indexText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
             _indexText.TextTrimming = TextTrimming.CharacterEllipsis;
 
             _statusText.FontSize = 11;
@@ -406,11 +717,11 @@ internal sealed class EpubTranslationProgressWindow : Window
             _translatedText.TextWrapping = TextWrapping.Wrap;
 
             _flowText.FontSize = 11;
-            _flowText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+            _flowText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
             _flowText.TextWrapping = TextWrapping.Wrap;
 
             _errorText.FontSize = 11;
-            _errorText.Foreground = new SolidColorBrush(Color.Parse("#A2382A"));
+            _errorText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
             _errorText.TextWrapping = TextWrapping.Wrap;
 
             _originalBlock = new Border
@@ -449,17 +760,17 @@ internal sealed class EpubTranslationProgressWindow : Window
 
             var content = new Grid
             {
-                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-                ColumnSpacing = 10,
-                Children = { _statusGlyph, body }
+                ColumnDefinitions = new ColumnDefinitions("18,*"),
+                ColumnSpacing = 12,
+                Children = { _statusDot, body }
             };
             Grid.SetColumn(body, 1);
 
             _card = new Border
             {
-                Padding = new Thickness(10, 9),
-                CornerRadius = new CornerRadius(4),
-                BorderThickness = new Thickness(3, 1, 1, 1),
+                Padding = new Thickness(12, 11),
+                CornerRadius = new CornerRadius(0),
+                BorderThickness = new Thickness(1),
                 Child = content
             };
             Control = _card;
@@ -468,7 +779,11 @@ internal sealed class EpubTranslationProgressWindow : Window
 
         public Control Control { get; }
 
+        public int Index { get; }
+
         public bool IsCompleted => _status == BookTranslationSegmentStatus.Completed;
+
+        public bool IsProcessing => _status == BookTranslationSegmentStatus.Processing;
 
         public void Update(BookTranslationSegmentProgress segment)
         {
@@ -491,26 +806,24 @@ internal sealed class EpubTranslationProgressWindow : Window
                 : $"原因：{segment.ErrorMessage}";
             _errorText.IsVisible = !string.IsNullOrWhiteSpace(segment.ErrorMessage);
 
-            var (glyph, label, accent, background, translatedBackground) = segment.Status switch
+            var label = segment.Status switch
             {
-                BookTranslationSegmentStatus.Completed =>
-                    ("√", "已完成", "#3F6B4A", "#F4FAF5", "#EDF7EF"),
-                BookTranslationSegmentStatus.Failed =>
-                    ("×", "失败", "#A2382A", "#FFF4F2", "#FDEBE8"),
-                BookTranslationSegmentStatus.Canceled =>
-                    ("—", "已取消", "#777770", "#F3F3F0", "#ECECE8"),
-                _ =>
-                    ("…", "处理中", "#8A5A00", "#FFFAF0", "#FFF5D9")
+                BookTranslationSegmentStatus.Completed => "已完成",
+                BookTranslationSegmentStatus.Failed => "失败",
+                BookTranslationSegmentStatus.Canceled => "已取消",
+                _ => "处理中"
             };
-            var accentBrush = new SolidColorBrush(Color.Parse(accent));
-            _statusGlyph.Text = glyph;
-            _statusGlyph.Foreground = accentBrush;
+            var completed = segment.Status == BookTranslationSegmentStatus.Completed;
+            var statusBrush = new SolidColorBrush(Color.Parse(completed ? Ink : MutedInk));
+            _statusDot.Fill = new SolidColorBrush(Color.Parse(completed ? Ink : GrayDot));
             _statusText.Text = label;
-            _statusText.Foreground = accentBrush;
-            _card.BorderBrush = accentBrush;
-            _card.Background = new SolidColorBrush(Color.Parse(background));
-            _originalBlock.Background = new SolidColorBrush(Color.Parse("#FFFFFF"));
-            _translatedBlock.Background = new SolidColorBrush(Color.Parse(translatedBackground));
+            _statusText.Foreground = statusBrush;
+            _card.BorderBrush = segment.Status == BookTranslationSegmentStatus.Processing
+                ? statusBrush
+                : new SolidColorBrush(Color.Parse(Hairline));
+            _card.Background = new SolidColorBrush(Color.Parse(White));
+            _originalBlock.Background = new SolidColorBrush(Color.Parse(White));
+            _translatedBlock.Background = new SolidColorBrush(Color.Parse(SoftGray));
         }
 
         public void MarkCanceled()
@@ -521,14 +834,32 @@ internal sealed class EpubTranslationProgressWindow : Window
             _flowText.Text = "流程：任务取消";
             _errorText.Text = string.Empty;
             _errorText.IsVisible = false;
-            var accentBrush = new SolidColorBrush(Color.Parse("#777770"));
-            _statusGlyph.Text = "—";
-            _statusGlyph.Foreground = accentBrush;
+            var statusBrush = new SolidColorBrush(Color.Parse(MutedInk));
+            _statusDot.Fill = new SolidColorBrush(Color.Parse(GrayDot));
             _statusText.Text = "已取消";
-            _statusText.Foreground = accentBrush;
-            _card.BorderBrush = accentBrush;
-            _card.Background = new SolidColorBrush(Color.Parse("#F3F3F0"));
-            _translatedBlock.Background = new SolidColorBrush(Color.Parse("#ECECE8"));
+            _statusText.Foreground = statusBrush;
+            _card.BorderBrush = new SolidColorBrush(Color.Parse(Hairline));
+            _card.Background = new SolidColorBrush(Color.Parse(White));
+            _originalBlock.Background = new SolidColorBrush(Color.Parse(White));
+            _translatedBlock.Background = new SolidColorBrush(Color.Parse(SoftGray));
+        }
+
+        public void MarkPaused()
+        {
+            if (_status is not BookTranslationSegmentStatus.Processing) return;
+            _status = BookTranslationSegmentStatus.Canceled;
+            _translatedText.Text = "等待继续…";
+            _flowText.Text = "流程：任务暂停";
+            _errorText.Text = string.Empty;
+            _errorText.IsVisible = false;
+            var statusBrush = new SolidColorBrush(Color.Parse(MutedInk));
+            _statusDot.Fill = new SolidColorBrush(Color.Parse(GrayDot));
+            _statusText.Text = "已暂停";
+            _statusText.Foreground = statusBrush;
+            _card.BorderBrush = new SolidColorBrush(Color.Parse(Hairline));
+            _card.Background = new SolidColorBrush(Color.Parse(White));
+            _originalBlock.Background = new SolidColorBrush(Color.Parse(White));
+            _translatedBlock.Background = new SolidColorBrush(Color.Parse(SoftGray));
         }
 
         private static TextBlock CreateLabel(string text) => new()
@@ -536,7 +867,7 @@ internal sealed class EpubTranslationProgressWindow : Window
             Text = text,
             FontSize = 10,
             FontWeight = FontWeight.SemiBold,
-            Foreground = new SolidColorBrush(Color.Parse("#777770"))
+            Foreground = new SolidColorBrush(Color.Parse(MutedInk))
         };
     }
 }

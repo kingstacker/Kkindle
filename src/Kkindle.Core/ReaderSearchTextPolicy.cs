@@ -14,9 +14,10 @@ public static class ReaderSearchTextPolicy
 {
     public static IReadOnlyList<ReaderSearchMatch> FindMatches(
         string? text,
-        string? query)
+        string? query,
+        IReadOnlyList<(int Start, int Length)>? excludedRanges = null)
     {
-        var normalizedText = Normalize(text);
+        var normalizedText = Normalize(text, excludedRanges);
         var normalizedQuery = Normalize(query).Text;
         if (normalizedText.Text.Length == 0 || normalizedQuery.Length == 0)
             return [];
@@ -51,9 +52,10 @@ public static class ReaderSearchTextPolicy
         string? text,
         string? query,
         string? context,
-        int offsetHint = -1)
+        int offsetHint = -1,
+        IReadOnlyList<(int Start, int Length)>? excludedRanges = null)
     {
-        var normalizedText = Normalize(text);
+        var normalizedText = Normalize(text, excludedRanges);
         var normalizedQuery = Normalize(query).Text;
         if (normalizedText.Text.Length == 0 || normalizedQuery.Length == 0)
             return -1;
@@ -86,7 +88,7 @@ public static class ReaderSearchTextPolicy
         }
 
         if (candidates.Count == 0)
-            candidates.AddRange(FindMatches(text, query).Select(match => match.Start));
+            candidates.AddRange(FindMatches(text, query, excludedRanges).Select(match => match.Start));
         if (candidates.Count == 0)
             return -1;
 
@@ -98,15 +100,35 @@ public static class ReaderSearchTextPolicy
                 .First();
     }
 
-    private static NormalizedText Normalize(string? value)
+    private static NormalizedText Normalize(
+        string? value,
+        IReadOnlyList<(int Start, int Length)>? excludedRanges = null)
     {
         var source = value ?? string.Empty;
         var builder = new StringBuilder(source.Length);
         var rawOffsets = new List<int>(source.Length);
         var pendingWhitespace = -1;
+        // Ruby stays in the source coordinate space for bookmarks and highlights,
+        // but pronunciation text must not split a searchable word in two.
+        var ranges = (excludedRanges ?? [])
+            .Where(range => range.Length > 0 && range.Start < source.Length
+                && (long)range.Start + range.Length > 0)
+            .Select(range => (
+                Start: Math.Max(0, range.Start),
+                End: (int)Math.Min(source.Length, (long)range.Start + range.Length)))
+            .OrderBy(range => range.Start)
+            .ToArray();
+        var rangeIndex = 0;
 
         for (var index = 0; index < source.Length; index++)
         {
+            while (rangeIndex < ranges.Length && index >= ranges[rangeIndex].End)
+                rangeIndex++;
+            if (rangeIndex < ranges.Length && index >= ranges[rangeIndex].Start)
+            {
+                index = ranges[rangeIndex].End - 1;
+                continue;
+            }
             if (char.IsWhiteSpace(source[index]))
             {
                 if (builder.Length > 0 && pendingWhitespace < 0)

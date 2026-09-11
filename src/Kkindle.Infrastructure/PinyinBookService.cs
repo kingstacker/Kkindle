@@ -18,7 +18,7 @@ public sealed class PinyinBookService : IPinyinBookService
 {
     private const long MaxArchiveEntryBytes = 128L * 1024 * 1024;
     private const int MaxAiReviewContextCharacters = 120;
-    private const int PinyinCacheVersion = 1;
+    private const int PinyinCacheVersion = 2;
     private const string PinyinCacheFileSuffix = ".kkindle-pinyin-cache.jsonl";
 
     private static readonly JsonSerializerOptions PinyinCacheJsonOptions = new()
@@ -46,20 +46,29 @@ public sealed class PinyinBookService : IPinyinBookService
         "pre", "code", "ruby", "rt", "rp"
     };
 
+    private static readonly HashSet<string> BlockElementNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "address", "article", "aside", "blockquote", "caption", "dd", "div", "dl", "dt",
+        "fieldset", "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+        "header", "li", "main", "nav", "ol", "p", "section", "table", "tbody", "td",
+        "tfoot", "th", "thead", "tr", "ul"
+    };
+
     private readonly IBookFormatConverter? _formatConverter;
     private readonly PinyinPhraseDictionary _phraseDictionary;
-    private readonly ChineseG2PEngine _pinyinEngine;
+    private readonly IPinyinEngine _pinyinEngine;
     private readonly AiChatClient? _aiChatClient;
     private readonly AiConnectionSettings? _aiSettings;
 
     public PinyinBookService(
         IBookFormatConverter? formatConverter = null,
         AiChatClient? aiChatClient = null,
-        AiConnectionSettings? aiSettings = null)
+        AiConnectionSettings? aiSettings = null,
+        IPinyinEngine? pinyinEngine = null)
     {
         _formatConverter = formatConverter;
         _phraseDictionary = PinyinPhraseDictionary.LoadEmbedded();
-        _pinyinEngine = new ChineseG2PEngine();
+        _pinyinEngine = pinyinEngine ?? new DotNetG2PPinyinEngine();
         _aiChatClient = aiChatClient;
         _aiSettings = aiSettings?.Clone();
     }
@@ -96,7 +105,9 @@ public sealed class PinyinBookService : IPinyinBookService
                 item.Index >= 0
                 && item.Index < totalSegments
                 && item.Status == PinyinBookSegmentStatus.Completed
-                && !string.IsNullOrWhiteSpace(item.AnnotatedMarkup));
+                && !string.IsNullOrWhiteSpace(item.AnnotatedMarkup)
+                && item.ReviewTargets is not null
+                && (!options.EnableAiReview || item.ReviewTargets.All(target => target.Reviewed)));
             var failedSegments = snapshot.Segments.Values.Count(item =>
                 item.Index >= 0
                 && item.Index < totalSegments
@@ -128,6 +139,7 @@ public sealed class PinyinBookService : IPinyinBookService
         CancellationToken cancellationToken = default,
         PinyinBookResumeMode resumeMode = PinyinBookResumeMode.Restart)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var source = Path.GetFullPath(sourcePath);
         var destination = Path.GetFullPath(destinationPath);
         if (!File.Exists(source))
@@ -196,7 +208,7 @@ public sealed class PinyinBookService : IPinyinBookService
                     cancellationToken);
             }
 
-            return await GenerateFromEpubAsync(
+            return await Task.Run(() => GenerateFromEpubAsync(
                 epubSource,
                 destination,
                 normalizedOptions,
@@ -204,7 +216,7 @@ public sealed class PinyinBookService : IPinyinBookService
                 cancellationToken,
                 source,
                 sourceHash,
-                resumeMode);
+                resumeMode), cancellationToken);
         }
         finally
         {
@@ -263,7 +275,7 @@ public sealed class PinyinBookService : IPinyinBookService
                         index + 1,
                         totalPages,
                         0,
-                        OverallPercentage: totalPages <= 0 ? 0 : (index + 1) * 15d / totalPages));
+                        OverallPercentage: totalPages <= 0 ? 0 : (index + 1) * 30d / totalPages));
                     continue;
                 }
 
@@ -274,13 +286,7 @@ public sealed class PinyinBookService : IPinyinBookService
                         element.Name.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase));
                     if (body is not null)
                     {
-                        var pageSegments = GetPinyinTextNodes(body)
-                            .Select(node => new PinyinSegment(
-                                -1,
-                                entry.FullName,
-                                node,
-                                node.Value))
-                            .ToArray();
+                        var pageSegments = GetPinyinSegments(body, entry.FullName);
                         pages.Add(new PinyinPage(entry.FullName, document, pageSegments));
                     }
                 }
@@ -291,7 +297,7 @@ public sealed class PinyinBookService : IPinyinBookService
                     index + 1,
                     totalPages,
                     0,
-                    OverallPercentage: totalPages <= 0 ? 0 : 15 + (index + 1) * 15d / totalPages));
+                    OverallPercentage: totalPages <= 0 ? 0 : (index + 1) * 30d / totalPages));
             }
         }
 
@@ -310,7 +316,6 @@ public sealed class PinyinBookService : IPinyinBookService
             throw new InvalidDataException("EPUB 中没有找到可注音的中文正文。 ");
 
         var totalSegments = segments.Length;
-        var totalCharacters = segments.Sum(segment => (long)segment.OriginalText.Length);
         var cachePath = GetPinyinCachePath(destinationPath);
         var resumeSnapshot = resumeMode == PinyinBookResumeMode.Resume
             ? await TryLoadPinyinCacheAsync(
@@ -337,73 +342,39 @@ public sealed class PinyinBookService : IPinyinBookService
                 append: resumeSnapshot is not null);
 
             var renderedDocuments = new Dictionary<string, XDocument>(StringComparer.OrdinalIgnoreCase);
-            var reviewTargets = new List<PinyinReviewTarget>();
-            var workStates = new List<PinyinWorkState>();
+            var workStates = new Dictionary<int, PinyinWorkState>();
             var processedSegments = 0;
+            var locallyProcessedSegments = 0;
             var annotatedCharacters = 0;
             var reviewCandidateCount = 0;
             var reviewedCandidates = 0;
+            var localProgressRange = options.EnableAiReview ? 40d : 60d;
+            var reviewing = false;
 
-            Report(progress, new PinyinBookProgress(
-                "正在生成拼音",
-                $"共发现 {totalSegments:N0} 个正文段",
-                0,
-                xhtmlEntryNames.Count,
-                0,
-                OverallPercentage: 30,
-                ProcessedSegments: 0,
-                TotalSegments: totalSegments));
-
-            void ReportSegment(
-                PinyinSegment segment,
-                int pageIndex,
+            void PersistWork(
+                PinyinWorkState work,
                 PinyinBookSegmentStatus status,
-                string annotatedText,
                 string processFlow,
-                string? errorMessage,
-                int currentProcessedSegments,
-                int currentAnnotatedCharacters,
-                int currentReviewCandidates,
-                int currentReviewedCandidates,
-                string? annotatedMarkup,
-                int segmentAnnotatedCharacters,
-                int segmentReviewCandidates,
-                int segmentReviewedCandidates,
-                bool persist)
+                double percentage,
+                string? error = null)
             {
+                if (status == PinyinBookSegmentStatus.Completed
+                    && work.Status != PinyinBookSegmentStatus.Completed)
+                    processedSegments++;
+                work.Status = status;
+                var annotation = work.Annotation;
                 var update = new PinyinBookSegmentProgress(
-                    segment.Index,
-                    segment.EntryName,
-                    segment.OriginalText,
-                    annotatedText,
-                    status,
-                    processFlow,
-                    errorMessage);
-                if (persist)
-                {
-                    cacheWriter.Append(
-                        update,
-                        annotatedMarkup ?? string.Empty,
-                        segmentAnnotatedCharacters,
-                        segmentReviewCandidates,
-                        segmentReviewedCandidates);
-                }
-
-                var localPercentage = totalSegments <= 0
-                    ? 0
-                    : Math.Min(70, currentProcessedSegments * 70d / totalSegments);
+                    work.Segment.Index, work.Segment.EntryName, work.Segment.OriginalText,
+                    CreateAnnotatedDisplayText(annotation.Nodes), status, processFlow, error);
+                cacheWriter.Append(
+                    update, SerializeNodes(annotation.Nodes), annotation.AnnotatedCharacters,
+                    annotation.Targets.Count, annotation.Targets.Count(target => target.Reviewed),
+                    annotation.Targets);
                 Report(progress, new PinyinBookProgress(
-                    status == PinyinBookSegmentStatus.Failed ? "正在生成拼音" : "正在生成拼音",
-                    segment.EntryName,
-                    Math.Min(pageIndex + 1, xhtmlEntryNames.Count),
-                    xhtmlEntryNames.Count,
-                    currentAnnotatedCharacters,
-                    currentReviewCandidates,
-                    currentReviewedCandidates,
-                    localPercentage,
-                    update,
-                    currentProcessedSegments,
-                    totalSegments));
+                    reviewing ? "正在复核疑问拼音" : "正在生成拼音",
+                    work.Segment.EntryName, Math.Min(work.PageIndex + 1, xhtmlEntryNames.Count),
+                    xhtmlEntryNames.Count, annotatedCharacters, reviewCandidateCount, reviewedCandidates,
+                    percentage, update, processedSegments, totalSegments));
             }
 
             for (var pageIndex = 0; pageIndex < pages.Count; pageIndex++)
@@ -412,131 +383,90 @@ public sealed class PinyinBookService : IPinyinBookService
                 foreach (var segment in page.Segments)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    PinyinCacheSegmentLine? cached = null;
-                    var canRestore = resumeSnapshot is not null
-                        && resumeSnapshot.Segments.TryGetValue(segment.Index, out cached)
-                        && cached is not null
-                        && cached.Status == PinyinBookSegmentStatus.Completed
-                        && cached.AnnotatedMarkup.Length > 0
-                        && string.Equals(cached.OriginalText, segment.OriginalText, StringComparison.Ordinal);
-                    if (canRestore && cached is not null && !TryApplyAnnotatedMarkup(segment, cached.AnnotatedMarkup))
-                        canRestore = false;
-                    if (canRestore && cached is not null)
+                    // Show the source paragraph before model loading/inference.
+                    // This is not durable work yet, so do not write it over a
+                    // completed resume-cache entry or count it as processed.
+                    Report(progress, new PinyinBookProgress(
+                        "正在生成拼音", segment.EntryName, pageIndex + 1, xhtmlEntryNames.Count,
+                        annotatedCharacters, reviewCandidateCount, reviewedCandidates,
+                        30 + locallyProcessedSegments * localProgressRange / totalSegments,
+                        new PinyinBookSegmentProgress(
+                            segment.Index, segment.EntryName, segment.OriginalText, string.Empty,
+                            PinyinBookSegmentStatus.Processing, "读取原文 → 正在本地注音"),
+                        processedSegments, totalSegments));
+                    cancellationToken.ThrowIfCancellationRequested();
+                    PinyinAnnotationResult annotation;
+                    var restored = false;
+                    if (resumeSnapshot is not null
+                        && resumeSnapshot.Segments.TryGetValue(segment.Index, out var cached)
+                        && TryRestoreAnnotation(segment, cached, out var cachedAnnotation))
                     {
-                        renderedDocuments[page.EntryName] = page.Document;
-                        reviewCandidateCount += cached.ReviewCandidateCount;
-                        reviewedCandidates += cached.ReviewedCandidateCount;
-                        ReportSegment(
-                            segment,
-                            pageIndex,
-                            PinyinBookSegmentStatus.Processing,
-                            cached.AnnotatedText,
-                            "读取原文 → 恢复本地缓存",
-                            null,
-                            processedSegments,
-                            annotatedCharacters,
-                            reviewCandidateCount,
-                            reviewedCandidates,
-                            cached.AnnotatedMarkup,
-                            cached.AnnotatedCharacterCount,
-                            cached.ReviewCandidateCount,
-                            cached.ReviewedCandidateCount,
-                            persist: false);
-                        processedSegments++;
-                        annotatedCharacters += cached.AnnotatedCharacterCount;
-                        ReportSegment(
-                            segment,
-                            pageIndex,
-                            PinyinBookSegmentStatus.Completed,
-                            cached.AnnotatedText,
-                            "读取原文 → 恢复本地缓存 → 写入 EPUB",
-                            null,
-                            processedSegments,
-                            annotatedCharacters,
-                            reviewCandidateCount,
-                            reviewedCandidates,
-                            cached.AnnotatedMarkup,
-                            cached.AnnotatedCharacterCount,
-                            cached.ReviewCandidateCount,
-                            cached.ReviewedCandidateCount,
-                            persist: true);
-                        continue;
+                        annotation = cachedAnnotation;
+                        restored = true;
+                    }
+                    else
+                    {
+                        annotation = AnnotateTextNode(segment, options, cancellationToken);
                     }
 
-                    var annotation = AnnotateTextNode(segment, options);
+                    var work = new PinyinWorkState(segment, pageIndex, annotation);
+                    workStates.Add(segment.Index, work);
                     renderedDocuments[page.EntryName] = page.Document;
-                    reviewTargets.AddRange(annotation.Targets);
-                    reviewCandidateCount += annotation.Targets.Count;
-                    var localMarkup = SerializeNodes(annotation.Nodes);
-                    ReportSegment(
-                        segment,
-                        pageIndex,
-                        PinyinBookSegmentStatus.Processing,
-                        annotation.AnnotatedText,
-                        annotation.Targets.Count > 0
-                            ? "读取原文 → 本地注音 → 检测疑问多音字"
-                            : "读取原文 → 本地注音 → 写入 EPUB",
-                        null,
-                        processedSegments,
-                        annotatedCharacters,
-                        reviewCandidateCount,
-                        reviewedCandidates,
-                        localMarkup,
-                        annotation.AnnotatedCharacters,
-                        annotation.Targets.Count,
-                        0,
-                        persist: true);
-                    workStates.Add(new PinyinWorkState(segment, pageIndex, annotation));
                     annotatedCharacters += annotation.AnnotatedCharacters;
+                    reviewCandidateCount += annotation.Targets.Count;
+                    reviewedCandidates += annotation.Targets.Count(target => target.Reviewed);
+                    locallyProcessedSegments++;
+                    var percentage = 30 + locallyProcessedSegments * localProgressRange / totalSegments;
+                    var processFlow = restored ? "读取原文 → 恢复本地缓存" : "读取原文 → 本地注音";
+                    PersistWork(work, PinyinBookSegmentStatus.Processing, processFlow, percentage);
+
+                    // Local work is durable even if cancellation arrives in the
+                    // progress report. Only unresolved review targets remain.
+                    if (!options.EnableAiReview || annotation.Targets.All(target => target.Reviewed))
+                        PersistWork(work, PinyinBookSegmentStatus.Completed,
+                            processFlow + " → 写入 EPUB", percentage);
                 }
             }
 
-            var reviewResult = await ReviewPinyinAsync(
+            var reviewTargets = workStates.Values.SelectMany(work => work.Annotation.Targets).ToArray();
+            reviewing = options.EnableAiReview;
+            var reviewError = await ReviewPinyinAsync(
                 reviewTargets,
                 options,
-                processedSegments,
-                totalSegments,
-                xhtmlEntryNames.Count,
-                annotatedCharacters,
-                reviewCandidateCount,
-                progress,
+                (stage, item, percentage) => Report(progress, new PinyinBookProgress(
+                    stage, item, xhtmlEntryNames.Count, xhtmlEntryNames.Count,
+                    annotatedCharacters, reviewCandidateCount, reviewedCandidates, percentage,
+                    ProcessedSegments: processedSegments, TotalSegments: totalSegments)),
+                (checkedTargets, percentage) =>
+                {
+                    reviewedCandidates += checkedTargets.Count;
+                    foreach (var segmentIndex in checkedTargets.Select(target => target.SegmentIndex).Distinct())
+                    {
+                        var work = workStates[segmentIndex];
+                        var complete = work.Annotation.Targets.All(target => target.Reviewed);
+                        PersistWork(
+                            work,
+                            complete ? PinyinBookSegmentStatus.Completed : PinyinBookSegmentStatus.Processing,
+                            complete ? "读取原文 → 本地注音 → AI 复核 → 写入 EPUB"
+                                : "读取原文 → 本地注音 → AI 部分复核，已保存",
+                            percentage);
+                    }
+                },
                 cancellationToken);
-            reviewedCandidates += reviewResult.ReviewedCount;
 
             var failedSegments = 0;
-            foreach (var work in workStates)
+            foreach (var work in workStates.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var hasTargets = work.Annotation.Targets.Count > 0;
-                var allTargetsChecked = !hasTargets
-                    || work.Annotation.Targets.All(target =>
-                        reviewResult.CheckedSegmentIndexes.Contains(target.SegmentIndex));
-                var failed = reviewResult.Error is not null && hasTargets && !allTargetsChecked;
-                var finalMarkup = SerializeNodes(work.Annotation.Nodes);
-                var finalText = CreateAnnotatedDisplayText(work.Annotation.Nodes);
+                if (work.Status == PinyinBookSegmentStatus.Completed) continue;
+                var failed = options.EnableAiReview && work.Annotation.Targets.Any(target => !target.Reviewed);
                 if (failed) failedSegments++;
-                processedSegments++;
-                ReportSegment(
-                    work.Segment,
-                    work.PageIndex,
+                PersistWork(
+                    work,
                     failed ? PinyinBookSegmentStatus.Failed : PinyinBookSegmentStatus.Completed,
-                    finalText,
-                    failed
-                        ? "读取原文 → 本地注音 → AI 复核失败，保留本地拼音"
-                        : hasTargets
-                            ? "读取原文 → 本地注音 → AI 复核 → 写入 EPUB"
-                            : "读取原文 → 本地注音 → 写入 EPUB",
-                    failed ? reviewResult.Error : null,
-                    processedSegments,
-                    annotatedCharacters,
-                    reviewCandidateCount,
-                    reviewedCandidates,
-                    finalMarkup,
-                    work.Annotation.AnnotatedCharacters,
-                    work.Annotation.Targets.Count,
-                    work.Annotation.Targets.Count(target =>
-                        reviewResult.CheckedSegmentIndexes.Contains(target.SegmentIndex)),
-                    persist: true);
+                    failed ? "读取原文 → 本地注音 → AI 复核未完成，已保存" : "读取原文 → 本地注音 → 写入 EPUB",
+                    90,
+                    failed ? reviewError : null);
             }
 
             var renderedPages = renderedDocuments.ToDictionary(
@@ -556,7 +486,7 @@ public sealed class PinyinBookService : IPinyinBookService
                 TotalSegments: totalSegments));
             await WriteArchiveAsync(epubSourcePath, destinationPath, renderedPages, cancellationToken);
 
-            generationCompleted = failedSegments == 0 && reviewResult.Error is null;
+            generationCompleted = failedSegments == 0 && reviewError is null;
             var result = new PinyinBookResult(
                 cacheSourcePath,
                 destinationPath,
@@ -565,7 +495,7 @@ public sealed class PinyinBookService : IPinyinBookService
                 annotatedCharacters,
                 reviewCandidateCount,
                 reviewedCandidates,
-                reviewResult.Error,
+                reviewError,
                 failedSegments);
             Report(progress, new PinyinBookProgress(
                 failedSegments == 0 ? "完成" : "部分完成",
@@ -592,98 +522,131 @@ public sealed class PinyinBookService : IPinyinBookService
 
     private PinyinAnnotationResult AnnotateTextNode(
         PinyinSegment segment,
-        PinyinBookOptions options)
+        PinyinBookOptions options,
+        CancellationToken cancellationToken)
     {
         var textNode = segment.TextNode;
         var value = segment.OriginalText;
-        if (value.Length == 0 || !value.Any(IsHanCharacter))
-            return new PinyinAnnotationResult([], 0, [], string.Empty);
-
         var parent = textNode.Parent;
-        if (parent is null)
+        if (parent is null || value.Length == 0)
             return new PinyinAnnotationResult([], 0, [], string.Empty);
 
+        var analysis = segment.Context.Analysis ??= AnalyzeContext(segment.Context.Text, options, cancellationToken);
         var nodes = new List<XNode>();
         var reviewTargets = new List<PinyinReviewTarget>();
         var annotatedCharacters = 0;
         var cursor = 0;
         while (cursor < value.Length)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!IsHanCharacter(value[cursor]))
             {
-                var plainStart = cursor;
+                var plainStart = cursor++;
                 while (cursor < value.Length && !IsHanCharacter(value[cursor])) cursor++;
                 nodes.Add(new XText(value[plainStart..cursor]));
                 continue;
             }
 
-            var hanStart = cursor;
-            while (cursor < value.Length && IsHanCharacter(value[cursor])) cursor++;
-            var hanText = value[hanStart..cursor];
-            var pinyins = _pinyinEngine.ToPinyinList(hanText, GetPinyinStyle(options.OutputStyle));
-            var decisions = AnalyzeHanRun(hanText, pinyins);
-            for (var index = 0; index < hanText.Length; index++)
+            var characterIndex = cursor++;
+            var character = value[characterIndex];
+            var contextIndex = segment.ContextOffset + characterIndex;
+            var pinyin = analysis.Pinyins[contextIndex];
+            if (string.IsNullOrWhiteSpace(pinyin) || !_pinyinEngine.ContainsChar(character))
             {
-                var character = hanText[index];
-                var pinyin = index < pinyins.Length ? pinyins[index] : string.Empty;
-                if (string.IsNullOrWhiteSpace(pinyin)
-                    || !IsHanCharacter(character)
-                    || !_pinyinEngine.ContainsChar(character))
-                {
-                    nodes.Add(new XText(character.ToString()));
-                    continue;
-                }
-
-                var ns = parent.Name.Namespace;
-                var ruby = new XElement(
-                    ns + "ruby",
-                    new XText(character.ToString()),
-                    new XElement(ns + "rt", pinyin));
-                nodes.Add(ruby);
-                var decision = index < decisions.Count ? decisions[index] : null;
-                if (decision is { Candidates.Count: > 1 })
-                {
-                    reviewTargets.Add(new PinyinReviewTarget(
-                        segment.Index,
-                        ruby,
-                        character,
-                        pinyin,
-                        decision.Candidates,
-                        ExtractReviewContext(value, hanStart + index)));
-                }
-                annotatedCharacters++;
+                nodes.Add(new XText(character.ToString()));
+                continue;
             }
+
+            var ns = parent.Name.Namespace;
+            var ruby = new XElement(ns + "ruby",
+                new XText(character.ToString()), new XElement(ns + "rt", pinyin));
+            nodes.Add(ruby);
+            if (analysis.Decisions[contextIndex] is { Candidates.Count: > 1 } decision)
+            {
+                var context = ExtractReviewContext(segment.Context.Text, contextIndex);
+                reviewTargets.Add(new PinyinReviewTarget(
+                    segment.Index, characterIndex, ruby, character, pinyin,
+                    decision.Candidates, context.Text, context.CharacterIndex));
+            }
+            annotatedCharacters++;
         }
 
         textNode.ReplaceWith(nodes);
         return new PinyinAnnotationResult(
-            nodes,
-            annotatedCharacters,
-            reviewTargets,
-            CreateAnnotatedDisplayText(nodes));
+            nodes, annotatedCharacters, reviewTargets, CreateAnnotatedDisplayText(nodes));
     }
 
-    private static IReadOnlyList<XText> GetPinyinTextNodes(XElement body)
+    private PinyinContextAnalysis AnalyzeContext(
+        string text,
+        PinyinBookOptions options,
+        CancellationToken cancellationToken)
     {
-        var nodes = new List<XText>();
-        foreach (var node in body.DescendantNodes().OfType<XText>())
+        var pinyins = _pinyinEngine.ToPinyinList(text, options.OutputStyle, cancellationToken);
+        if (pinyins.Length != text.Length)
+            throw new InvalidDataException("注音引擎返回的字符位置与原文不一致。");
+        var decisions = new LocalPinyinDecision?[text.Length];
+        var cursor = 0;
+        while (cursor < text.Length)
         {
-            if (!node.Value.Any(IsHanCharacter)) continue;
-
-            var skipped = false;
-            for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsHanCharacter(text[cursor]))
             {
-                if (ShouldSkipElement(parent))
-                {
-                    skipped = true;
-                    break;
-                }
-                if (ReferenceEquals(parent, body)) break;
+                cursor++;
+                continue;
             }
-
-            if (!skipped) nodes.Add(node);
+            var start = cursor++;
+            while (cursor < text.Length && IsHanCharacter(text[cursor])) cursor++;
+            var runDecisions = AnalyzeHanRun(text[start..cursor], pinyins[start..cursor]);
+            for (var index = 0; index < runDecisions.Count; index++)
+                decisions[start + index] = runDecisions[index];
         }
-        return nodes;
+        return new PinyinContextAnalysis(pinyins, decisions);
+    }
+
+    private static IReadOnlyList<PinyinSegment> GetPinyinSegments(XElement body, string entryName)
+    {
+        var segments = new List<PinyinSegment>();
+        var pending = new List<XText>();
+        void FlushContext()
+        {
+            if (pending.Count == 0) return;
+            var context = new PinyinTextContext(string.Concat(pending.Select(node => node.Value)));
+            var offset = 0;
+            foreach (var node in pending)
+            {
+                if (node.Value.Any(IsHanCharacter))
+                    segments.Add(new PinyinSegment(-1, entryName, node, node.Value, context, offset));
+                offset += node.Value.Length;
+            }
+            pending.Clear();
+        }
+
+        void Walk(XNode node)
+        {
+            if (node is XText text)
+            {
+                pending.Add(text);
+                return;
+            }
+            if (node is not XElement element) return;
+            var name = element.Name.LocalName;
+            if (ShouldSkipElement(element)
+                || name.Equals("br", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("hr", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("img", StringComparison.OrdinalIgnoreCase))
+            {
+                FlushContext();
+                return;
+            }
+            var block = BlockElementNames.Contains(name);
+            if (block) FlushContext();
+            foreach (var child in element.Nodes()) Walk(child);
+            if (block) FlushContext();
+        }
+
+        Walk(body);
+        FlushContext();
+        return segments;
     }
 
     private IReadOnlyList<LocalPinyinDecision> AnalyzeHanRun(
@@ -741,110 +704,59 @@ public sealed class PinyinBookService : IPinyinBookService
         return decisions;
     }
 
-    private static string ExtractReviewContext(string value, int characterIndex)
+    private static PinyinReviewContext ExtractReviewContext(string value, int characterIndex)
     {
-        if (value.Length <= MaxAiReviewContextCharacters) return value;
-
+        if (value.Length <= MaxAiReviewContextCharacters)
+            return new PinyinReviewContext(value, characterIndex);
         var half = MaxAiReviewContextCharacters / 2;
         var start = Math.Clamp(characterIndex - half, 0, Math.Max(0, value.Length - MaxAiReviewContextCharacters));
-        var length = Math.Min(MaxAiReviewContextCharacters, value.Length - start);
+        var end = Math.Min(value.Length, start + MaxAiReviewContextCharacters);
+        if (start > 0 && char.IsSurrogatePair(value, start - 1)) start--;
+        if (end < value.Length && char.IsSurrogatePair(value, end - 1)) end++;
         var prefix = start > 0 ? "…" : string.Empty;
-        var suffix = start + length < value.Length ? "…" : string.Empty;
-        return prefix + value.Substring(start, length) + suffix;
+        var suffix = end < value.Length ? "…" : string.Empty;
+        return new PinyinReviewContext(prefix + value[start..end] + suffix, characterIndex - start + prefix.Length);
     }
 
-    private async Task<AiReviewResult> ReviewPinyinAsync(
+    private async Task<string?> ReviewPinyinAsync(
         IReadOnlyList<PinyinReviewTarget> targets,
         PinyinBookOptions options,
-        int processedSegments,
-        int totalSegments,
-        int totalPages,
-        int annotatedCharacters,
-        int reviewCandidateCount,
-        IProgress<PinyinBookProgress>? progress,
+        Action<string, string, double> report,
+        Action<IReadOnlyList<PinyinReviewTarget>, double> persistBatch,
         CancellationToken cancellationToken)
     {
-        if (targets.Count == 0)
-            return new AiReviewResult(0, null, new HashSet<int>());
-
-        if (!options.EnableAiReview)
-        {
-            ReportReviewSkipped(
-                "已跳过 AI 复核",
-                "本次未启用 AI，保留本地拼音。",
-                processedSegments,
-                totalSegments,
-                totalPages,
-                annotatedCharacters,
-                reviewCandidateCount,
-                progress);
-            return new AiReviewResult(
-                0,
-                null,
-                targets.Select(target => target.SegmentIndex).ToHashSet());
-        }
-
+        if (!options.EnableAiReview) return null;
+        var pendingTargets = targets.Where(target => !target.Reviewed).ToArray();
+        if (pendingTargets.Length == 0) return null;
         if (_aiChatClient is null || _aiSettings is null || !_aiSettings.IsConfigured)
-        {
-            ReportReviewSkipped(
-                "已跳过 AI 复核",
-                "AI 未配置，待下次复核。",
-                processedSegments,
-                totalSegments,
-                totalPages,
-                annotatedCharacters,
-                reviewCandidateCount,
-                progress);
-            return new AiReviewResult(0, "AI 未配置", new HashSet<int>());
-        }
+            return "AI 未配置";
 
-        var requests = targets
+        var requests = pendingTargets
             .GroupBy(CreateReviewKey, StringComparer.Ordinal)
             .Select((group, index) =>
             {
                 var first = group.First();
                 return new PinyinReviewRequest(
-                    index + 1,
-                    first.Character,
-                    NormalizeToneMarkedPinyin(first.CurrentPinyin),
-                    first.Candidates,
-                    first.Context,
-                    group.ToArray());
+                    index + 1, first.Character, NormalizeToneMarkedPinyin(first.CurrentPinyin),
+                    first.Candidates, first.Context, first.ContextCharacterIndex, group.ToArray());
             })
             .ToArray();
 
-        var reviewedCount = 0;
-        string? error = null;
-        var checkedSegmentIndexes = new HashSet<int>();
         for (var offset = 0; offset < requests.Length; offset += options.AiReviewBatchSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var batch = requests
-                .Skip(offset)
-                .Take(options.AiReviewBatchSize)
-                .ToArray();
+            var batch = requests.Skip(offset).Take(options.AiReviewBatchSize).ToArray();
             var batchEnd = offset + batch.Length;
-            Report(progress, new PinyinBookProgress(
-                "正在复核疑问拼音",
+            report("正在复核疑问拼音",
                 $"正在请求 AI：{offset + 1}-{batchEnd} / {requests.Length} 项",
-                totalPages,
-                totalPages,
-                annotatedCharacters,
-                reviewCandidateCount,
-                reviewedCount,
-                70 + offset * 20d / Math.Max(1, requests.Length),
-                ProcessedSegments: processedSegments,
-                TotalSegments: totalSegments));
+                70 + offset * 20d / requests.Length);
 
             string answer;
             try
             {
                 answer = await _aiChatClient.CompleteAsync(
-                    _aiSettings,
-                    AiReviewInstructions,
-                    BuildAiReviewQuestion(batch),
-                    Array.Empty<AiConversationTurn>(),
-                    cancellationToken);
+                    _aiSettings, AiReviewInstructions, BuildAiReviewQuestion(batch),
+                    Array.Empty<AiConversationTurn>(), cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -852,68 +764,43 @@ public sealed class PinyinBookService : IPinyinBookService
             }
             catch (Exception exception)
             {
-                error = $"AI 请求失败：{exception.Message}";
-                ReportReviewSkipped(
-                    "AI 复核失败",
-                    "请求失败，已保留本地拼音。",
-                    processedSegments,
-                    totalSegments,
-                    totalPages,
-                    annotatedCharacters,
-                    reviewCandidateCount,
-                    progress,
-                    reviewedCount,
-                    90);
-                break;
+                return $"AI 请求失败：{exception.Message}";
             }
 
             if (!TryReadAiReview(answer, batch, out var decisions))
-            {
-                error = "AI 返回格式无法识别";
-                ReportReviewSkipped(
-                    "AI 复核失败",
-                    "返回格式无法识别，已保留本地拼音。",
-                    processedSegments,
-                    totalSegments,
-                    totalPages,
-                    annotatedCharacters,
-                    reviewCandidateCount,
-                    progress,
-                    reviewedCount,
-                    90);
-                break;
-            }
+                return "AI 返回格式无法识别";
 
+            var checkedTargets = new List<PinyinReviewTarget>();
+            var missingDecisions = false;
             foreach (var request in batch)
             {
-                foreach (var target in request.Targets)
-                    checkedSegmentIndexes.Add(target.SegmentIndex);
-                if (!decisions.TryGetValue(request.Id, out var selectedPinyin)) continue;
-                var renderedPinyin = ApplyPinyinStyle(selectedPinyin, options.OutputStyle);
+                if (!decisions.TryGetValue(request.Id, out var selectedPinyin))
+                {
+                    missingDecisions = true;
+                    continue;
+                }
                 foreach (var target in request.Targets)
                 {
-                    var rt = target.Ruby.Elements().FirstOrDefault(element =>
-                        element.Name.LocalName.Equals("rt", StringComparison.OrdinalIgnoreCase));
-                    if (rt is null) continue;
-                    rt.Value = renderedPinyin;
-                    reviewedCount++;
+                    if (selectedPinyin is not null)
+                    {
+                        var rt = target.Ruby.Elements().First(element =>
+                            element.Name.LocalName.Equals("rt", StringComparison.OrdinalIgnoreCase));
+                        rt.Value = ApplyPinyinStyle(selectedPinyin, options.OutputStyle);
+                    }
+                    target.Reviewed = true;
+                    checkedTargets.Add(target);
                 }
             }
 
-            Report(progress, new PinyinBookProgress(
-                "正在复核疑问拼音",
-                $"已复核 {reviewedCount:N0} 项",
-                totalPages,
-                totalPages,
-                annotatedCharacters,
-                reviewCandidateCount,
-                reviewedCount,
-                70 + batchEnd * 20d / Math.Max(1, requests.Length),
-                ProcessedSegments: processedSegments,
-                TotalSegments: totalSegments));
+            // Commit each successful target before another request/cancellation.
+            // A paragraph may span several batches; its index alone is insufficient.
+            var percentage = 70 + batchEnd * 20d / requests.Length;
+            if (checkedTargets.Count > 0) persistBatch(checkedTargets, percentage);
+            if (missingDecisions)
+                return "AI 返回缺少有效的复核结果，未完成项已保存。";
+            report("正在复核疑问拼音", $"已处理 {batchEnd:N0} / {requests.Length:N0} 项", percentage);
         }
-
-        return new AiReviewResult(reviewedCount, error, checkedSegmentIndexes);
+        return null;
     }
 
     private static string BuildAiReviewQuestion(IReadOnlyList<PinyinReviewRequest> requests)
@@ -922,11 +809,13 @@ public sealed class PinyinBookService : IPinyinBookService
         {
             id = request.Id,
             character = request.Character.ToString(),
-            context = request.Context,
+            context = request.Context.Insert(request.ContextCharacterIndex + 1, "⟧")
+                .Insert(request.ContextCharacterIndex, "⟦"),
             current = request.CurrentPinyin,
             candidates = request.Candidates
         });
         return "请判断下面这些汉字在各自上下文中的普通话拼音。"
+            + "只判断 context 中 ⟦⟧ 标出的那个字；同一句中其他位置的同字可能读音不同。"
             + "每项只能从 candidates 中选择一个；无法确定时 pinyin 返回 null。"
             + "不要改写句子，不要添加候选之外的读音。只返回 JSON 数组："
             + Environment.NewLine
@@ -936,40 +825,37 @@ public sealed class PinyinBookService : IPinyinBookService
     private bool TryReadAiReview(
         string answer,
         IReadOnlyList<PinyinReviewRequest> requests,
-        out Dictionary<int, string> decisions)
+        out Dictionary<int, string?> decisions)
     {
-        decisions = new Dictionary<int, string>();
+        decisions = new Dictionary<int, string?>();
         var json = ExtractJsonPayload(answer);
         if (json.Length == 0) return false;
-
         try
         {
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
-            var items = root.ValueKind == JsonValueKind.Array
-                ? root
-                : FindReviewItems(root);
+            var items = root.ValueKind == JsonValueKind.Array ? root : FindReviewItems(root);
             if (items.ValueKind != JsonValueKind.Array) return false;
-
             var requestById = requests.ToDictionary(request => request.Id);
             foreach (var item in items.EnumerateArray())
             {
                 if (!TryReadReviewId(item, out var id)
-                    || !requestById.TryGetValue(id, out var request))
+                    || !requestById.TryGetValue(id, out var request)
+                    || !item.TryGetProperty("pinyin", out var pinyinValue))
                     continue;
-                if (!item.TryGetProperty("pinyin", out var pinyinValue)
-                    || pinyinValue.ValueKind != JsonValueKind.String)
+                if (pinyinValue.ValueKind == JsonValueKind.Null)
+                {
+                    // Explicit uncertainty is a reviewed result; omitted ids or
+                    // invalid pronunciations must still be retried.
+                    decisions[id] = null;
                     continue;
-
+                }
+                if (pinyinValue.ValueKind != JsonValueKind.String) continue;
                 var selected = NormalizeToneMarkedPinyin(pinyinValue.GetString() ?? string.Empty);
-                if (selected.Length == 0 || selected.Equals("unknown", StringComparison.OrdinalIgnoreCase))
-                    continue;
                 var allowed = request.Candidates.FirstOrDefault(candidate =>
                     NormalizeToneMarkedPinyin(candidate).Equals(selected, StringComparison.OrdinalIgnoreCase));
-                if (allowed is not null)
-                    decisions[id] = NormalizeToneMarkedPinyin(allowed);
+                if (allowed is not null) decisions[id] = NormalizeToneMarkedPinyin(allowed);
             }
-
             return true;
         }
         catch (JsonException)
@@ -980,6 +866,7 @@ public sealed class PinyinBookService : IPinyinBookService
 
     private static JsonElement FindReviewItems(JsonElement root)
     {
+        if (root.ValueKind != JsonValueKind.Object) return default;
         foreach (var propertyName in new[] { "items", "results", "decisions" })
         {
             if (root.TryGetProperty(propertyName, out var value)
@@ -993,6 +880,7 @@ public sealed class PinyinBookService : IPinyinBookService
     private static bool TryReadReviewId(JsonElement item, out int id)
     {
         id = 0;
+        if (item.ValueKind != JsonValueKind.Object) return false;
         if (!item.TryGetProperty("id", out var value)) return false;
         if (value.ValueKind == JsonValueKind.Number)
             return value.TryGetInt32(out id);
@@ -1026,7 +914,7 @@ public sealed class PinyinBookService : IPinyinBookService
 
     private static string CreateReviewKey(PinyinReviewTarget target) =>
         $"{target.Character}\u001F{NormalizeToneMarkedPinyin(target.CurrentPinyin)}\u001F"
-        + $"{target.Context}\u001F{string.Join('\u001E', target.Candidates)}";
+        + $"{target.Context}\u001F{target.ContextCharacterIndex}\u001F{string.Join('\u001E', target.Candidates)}";
 
     private static string NormalizeToneMarkedPinyin(string value)
     {
@@ -1124,39 +1012,11 @@ public sealed class PinyinBookService : IPinyinBookService
         return -1;
     }
 
-    private static void ReportReviewSkipped(
-        string stage,
-        string currentItem,
-        int processedSegments,
-        int totalSegments,
-        int totalPages,
-        int annotatedCharacters,
-        int reviewCandidateCount,
-        IProgress<PinyinBookProgress>? progress,
-        int reviewedCandidates = 0,
-        double overallPercentage = 70) => Report(progress, new PinyinBookProgress(
-        stage,
-        currentItem,
-        totalPages,
-        totalPages,
-        annotatedCharacters,
-        reviewCandidateCount,
-        reviewedCandidates,
-        overallPercentage,
-        ProcessedSegments: processedSegments,
-        TotalSegments: totalSegments));
 
     private const string AiReviewInstructions = "你是中文普通话拼音校对器。只处理指定的多音字，严格遵守用户给出的候选读音。";
 
     private static bool ShouldSkipElement(XElement element) =>
         SkippedElementNames.Contains(element.Name.LocalName);
-
-    private static PinyinStyle GetPinyinStyle(PinyinBookOutputStyle style) => style switch
-    {
-        PinyinBookOutputStyle.ToneNumber => PinyinStyle.ToneNumber,
-        PinyinBookOutputStyle.NoTone => PinyinStyle.Normal,
-        _ => PinyinStyle.ToneMarked
-    };
 
     private static bool IsHanCharacter(char character) =>
         character is >= '\u3400' and <= '\u4DBF'
@@ -1326,15 +1186,72 @@ public sealed class PinyinBookService : IPinyinBookService
         return builder.ToString().Trim();
     }
 
-    private static bool TryApplyAnnotatedMarkup(PinyinSegment segment, string markup)
+    private static bool TryRestoreAnnotation(
+        PinyinSegment segment,
+        PinyinCacheSegmentLine cached,
+        out PinyinAnnotationResult annotation)
     {
-        if (segment.TextNode.Parent is null || string.IsNullOrWhiteSpace(markup)) return false;
+        annotation = null!;
+        if (segment.TextNode.Parent is null
+            || !string.Equals(cached.EntryName, segment.EntryName, StringComparison.Ordinal)
+            || !string.Equals(cached.OriginalText, segment.OriginalText, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(cached.AnnotatedMarkup)
+            || cached.ReviewTargets is null
+            || cached.ReviewTargets.Count != cached.ReviewCandidateCount)
+            return false;
         try
         {
             var wrapper = XElement.Parse(
-                $"<kkindle-fragment>{markup}</kkindle-fragment>",
+                $"<kkindle-fragment>{cached.AnnotatedMarkup}</kkindle-fragment>",
                 LoadOptions.PreserveWhitespace);
-            segment.TextNode.ReplaceWith(wrapper.Nodes().ToList());
+            var nodes = wrapper.Nodes().ToList();
+            var baseText = new StringBuilder();
+            var rubies = new Dictionary<int, XElement>();
+            foreach (var node in nodes)
+            {
+                if (node is XText text)
+                {
+                    baseText.Append(text.Value);
+                    continue;
+                }
+                if (node is not XElement ruby || ruby.Name.LocalName != "ruby") return false;
+                var character = string.Concat(ruby.Nodes().OfType<XText>().Select(text => text.Value));
+                if (character.Length != 1 || ruby.Elements().All(element => element.Name.LocalName != "rt"))
+                    return false;
+                rubies.Add(baseText.Length, ruby);
+                baseText.Append(character);
+            }
+            if (baseText.ToString() != segment.OriginalText
+                || rubies.Count != cached.AnnotatedCharacterCount)
+                return false;
+
+            var targets = new List<PinyinReviewTarget>();
+            var positions = new HashSet<int>();
+            foreach (var target in cached.ReviewTargets)
+            {
+                if (!positions.Add(target.CharacterIndex)
+                    || !rubies.TryGetValue(target.CharacterIndex, out var ruby)
+                    || target.Candidates is not { Count: > 1 })
+                    return false;
+                var context = ExtractReviewContext(
+                    segment.Context.Text, segment.ContextOffset + target.CharacterIndex);
+                targets.Add(new PinyinReviewTarget(
+                    segment.Index, target.CharacterIndex, ruby,
+                    segment.OriginalText[target.CharacterIndex], target.CurrentPinyin,
+                    target.Candidates, context.Text, context.CharacterIndex)
+                {
+                    Reviewed = target.Reviewed
+                });
+            }
+            if (targets.Count(target => target.Reviewed) != cached.ReviewedCandidateCount)
+                return false;
+
+            // Avoid LINQ to XML cloning parented nodes: subsequent review must
+            // update the same ruby objects that are attached to the output page.
+            foreach (var node in nodes) node.Remove();
+            segment.TextNode.ReplaceWith(nodes);
+            annotation = new PinyinAnnotationResult(
+                nodes, rubies.Count, targets, CreateAnnotatedDisplayText(nodes));
             return true;
         }
         catch (XmlException)
@@ -1392,7 +1309,7 @@ public sealed class PinyinBookService : IPinyinBookService
     {
         if (!File.Exists(cachePath)) return null;
 
-        var lines = await File.ReadAllLinesAsync(cachePath, Encoding.UTF8, cancellationToken);
+        var lines = await File.ReadAllLinesAsync(cachePath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
         PinyinCacheHeader? header = null;
         var segments = new Dictionary<int, PinyinCacheSegmentLine>();
         var updatedAt = DateTimeOffset.MinValue;
@@ -1440,7 +1357,8 @@ public sealed class PinyinBookService : IPinyinBookService
             return null;
 
         var cachedOptions = PinyinBookOptions.Normalize(header.Options);
-        if (cachedOptions.OutputStyle != options.OutputStyle
+        if (cachedOptions.Engine != options.Engine
+            || cachedOptions.OutputStyle != options.OutputStyle
             || cachedOptions.EnableAiReview != options.EnableAiReview)
             return null;
 
@@ -1486,11 +1404,16 @@ public sealed class PinyinBookService : IPinyinBookService
 
     private sealed record PinyinReviewTarget(
         int SegmentIndex,
+        int CharacterIndex,
         XElement Ruby,
         char Character,
         string CurrentPinyin,
         IReadOnlyList<string> Candidates,
-        string Context);
+        string Context,
+        int ContextCharacterIndex)
+    {
+        public bool Reviewed { get; set; }
+    }
 
     private sealed record PinyinReviewRequest(
         int Id,
@@ -1498,7 +1421,18 @@ public sealed class PinyinBookService : IPinyinBookService
         string CurrentPinyin,
         IReadOnlyList<string> Candidates,
         string Context,
+        int ContextCharacterIndex,
         IReadOnlyList<PinyinReviewTarget> Targets);
+
+    private sealed record PinyinReviewContext(string Text, int CharacterIndex);
+
+    private sealed class PinyinTextContext(string text)
+    {
+        public string Text { get; } = text;
+        public PinyinContextAnalysis? Analysis { get; set; }
+    }
+
+    private sealed record PinyinContextAnalysis(string[] Pinyins, LocalPinyinDecision?[] Decisions);
 
     private sealed record PinyinAnnotationResult(
         IReadOnlyList<XNode> Nodes,
@@ -1515,17 +1449,23 @@ public sealed class PinyinBookService : IPinyinBookService
         int Index,
         string EntryName,
         XText TextNode,
-        string OriginalText);
+        string OriginalText,
+        PinyinTextContext Context,
+        int ContextOffset);
 
     private sealed record PinyinWorkState(
         PinyinSegment Segment,
         int PageIndex,
-        PinyinAnnotationResult Annotation);
+        PinyinAnnotationResult Annotation)
+    {
+        public PinyinBookSegmentStatus Status { get; set; }
+    }
 
-    private sealed record AiReviewResult(
-        int ReviewedCount,
-        string? Error,
-        IReadOnlySet<int> CheckedSegmentIndexes);
+    private sealed record PinyinCacheReviewTarget(
+        int CharacterIndex,
+        string CurrentPinyin,
+        IReadOnlyList<string> Candidates,
+        bool Reviewed);
 
     private sealed record PinyinCacheHeader(
         string Kind,
@@ -1549,7 +1489,8 @@ public sealed class PinyinBookService : IPinyinBookService
         PinyinBookSegmentStatus Status,
         string ProcessFlow,
         string? ErrorMessage,
-        DateTimeOffset UpdatedAt);
+        DateTimeOffset UpdatedAt,
+        IReadOnlyList<PinyinCacheReviewTarget>? ReviewTargets = null);
 
     private sealed record PinyinCacheSnapshot(
         PinyinCacheHeader Header,
@@ -1586,7 +1527,8 @@ public sealed class PinyinBookService : IPinyinBookService
             string annotatedMarkup,
             int annotatedCharacterCount,
             int reviewCandidateCount,
-            int reviewedCandidateCount)
+            int reviewedCandidateCount,
+            IReadOnlyList<PinyinReviewTarget> targets)
         {
             if (_disposed) return;
             var line = new PinyinCacheSegmentLine(
@@ -1602,7 +1544,12 @@ public sealed class PinyinBookService : IPinyinBookService
                 segment.Status,
                 segment.ProcessFlow,
                 segment.ErrorMessage,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                targets.Select(target => new PinyinCacheReviewTarget(
+                    target.CharacterIndex,
+                    target.CurrentPinyin,
+                    target.Candidates,
+                    target.Reviewed)).ToArray());
             _writer.WriteLine(JsonSerializer.Serialize(line, PinyinCacheJsonOptions));
             _writer.Flush();
         }

@@ -32,7 +32,8 @@ public partial class MainWindow
             nativeBody,
             nativeQuery,
             searchContext,
-            offset);
+            offset,
+            nativeReader.RubyAnnotationRanges);
         nativeReader.ScrollToOffset(nativeHit >= 0 ? nativeHit : Math.Max(0, offset));
     }
 }

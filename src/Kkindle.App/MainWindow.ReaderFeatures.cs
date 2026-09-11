@@ -260,7 +260,6 @@ public partial class MainWindow
             // progress / bookmark / AI context index underneath it.
             await InitializeReaderInteractionAsync(
                 new EpubReaderDocument(Path.GetDirectoryName(path) ?? string.Empty, [], [], []),
-                file,
                 token);
             _readerIsPdf = true;
             _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with
@@ -1472,7 +1471,6 @@ public partial class MainWindow
             _suppressReaderLayoutChange = false;
         }
         UpdateReaderLayoutSliderLabels();
-        UpdateReaderLayoutStatus();
         ReaderLayoutSettingsPopup.PlacementTarget = ReaderRoot;
         ReaderLayoutSettingsPopup.Placement = PlacementMode.AnchorAndGravity;
         ReaderLayoutSettingsPopup.PlacementAnchor = PopupAnchor.TopLeft;
@@ -1505,14 +1503,12 @@ public partial class MainWindow
     {
         if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
         UpdateReaderLayoutSliderLabels();
-        UpdateReaderLayoutStatus();
         ScheduleReaderLayoutApply();
     }
 
     private void ReaderFontFamilyBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
-        UpdateReaderLayoutStatus();
         ScheduleReaderLayoutApply();
     }
 
@@ -1525,41 +1521,24 @@ public partial class MainWindow
 
         _readerLayout = NormalizeReaderLayoutForPlatform(ReadReaderLayoutFromControls());
         SyncReaderFlowMenu();
-        UpdateReaderLayoutStatus();
         try
         {
             UpdateReaderZoomLabel();
             await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
             await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
-            await SaveReaderLayoutAsync(CancellationToken.None);
-            ReaderLayoutSettingsStatusText.Text = _readerLayout.VerticalWriting
-                ? T("竖排已全局开启；段首缩进也对所有书生效，自绘阅读器使用单页阅读。")
-                : T("竖排已全局关闭；段首缩进仍对所有书生效，现在可选择滚动、单页或双栏。");
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
         {
         }
         catch
         {
-            ReaderLayoutSettingsStatusText.Text = T("竖排设置保存失败，请重试。");
         }
     }
 
     private void ReaderParagraphIndentCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
     {
         if (_suppressReaderLayoutChange || !AreReaderLayoutControlsReady()) return;
-        UpdateReaderLayoutStatus();
         ScheduleReaderLayoutApply();
-    }
-
-    private void UpdateReaderLayoutStatus()
-    {
-        var (flowMode, twoPageMode) = GetSelectedReaderFlowMode();
-        ReaderLayoutSettingsStatusText.Text = ReaderVerticalWritingCheck.IsChecked == true
-            ? T("竖排和段首缩进是全局设置；自绘阅读器固定使用单页阅读。")
-            : twoPageMode && flowMode != 1
-            ? T("双页仅用于分页模式；当前模式下暂不生效。")
-            : T("设置立即生效；段首缩进为全局设置，其他排版参数按书保存。");
     }
 
     private void ScheduleReaderLayoutApply()
@@ -1582,7 +1561,6 @@ public partial class MainWindow
                     UpdateReaderZoomLabel();
                     await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
                     await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
-                    await SaveReaderLayoutAsync(CancellationToken.None);
                 }
                 catch
                 {
@@ -1617,7 +1595,7 @@ public partial class MainWindow
             ReaderMaxWidthSlider.Value = ReaderLayoutDefaults.DefaultMaxWidth;
             ReaderBodyPaddingSlider.Value = ReaderLayoutDefaults.DefaultBodyPadding;
             ReaderVerticalWritingCheck.IsChecked = false;
-            ReaderParagraphIndentCheck.IsChecked = true;
+            ReaderParagraphIndentCheck.IsChecked = false;
             SelectReaderFontFamily(ReaderFontDefaults.DefaultFamily);
             SelectReaderFlowMode(1, false);
             SelectReaderPageAnimation(ReaderAnimationFade);
@@ -1632,8 +1610,6 @@ public partial class MainWindow
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
         await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
-        await SaveReaderLayoutAsync(CancellationToken.None);
-        ReaderLayoutSettingsStatusText.Text = T("已恢复默认排版。");
     }
 
     private void UpdateReaderLayoutSliderLabels()

@@ -7,8 +7,34 @@ public enum PinyinBookOutputStyle
     NoTone = 2
 }
 
+public enum PinyinBookEngineKind
+{
+    DotNetG2P = 0,
+    G2PW = 1
+}
+
+public static class PinyinBookEngineCatalog
+{
+    public const string DotNetG2PId = "dotnet-g2p";
+    public const string G2PWId = "g2pw";
+
+    public static string NormalizeId(string? id) =>
+        string.Equals(id?.Trim(), G2PWId, StringComparison.OrdinalIgnoreCase)
+            ? G2PWId
+            : DotNetG2PId;
+
+    public static PinyinBookEngineKind Parse(string? id) =>
+        NormalizeId(id).Equals(G2PWId, StringComparison.Ordinal)
+            ? PinyinBookEngineKind.G2PW
+            : PinyinBookEngineKind.DotNetG2P;
+
+    public static string ToId(PinyinBookEngineKind engine) =>
+        engine == PinyinBookEngineKind.G2PW ? G2PWId : DotNetG2PId;
+}
+
 public sealed record PinyinBookOptions
 {
+    public PinyinBookEngineKind Engine { get; init; } = PinyinBookEngineKind.DotNetG2P;
     public PinyinBookOutputStyle OutputStyle { get; init; } = PinyinBookOutputStyle.ToneMarked;
 
     /// <summary>
@@ -27,6 +53,9 @@ public sealed record PinyinBookOptions
         options ??= new PinyinBookOptions();
         return options with
         {
+            Engine = Enum.IsDefined(options.Engine)
+                ? options.Engine
+                : PinyinBookEngineKind.DotNetG2P,
             OutputStyle = Enum.IsDefined(options.OutputStyle)
                 ? options.OutputStyle
                 : PinyinBookOutputStyle.ToneMarked,
@@ -104,11 +133,49 @@ public sealed record PinyinBookResult(
 
 public static class PinyinBookPolicy
 {
+    public const string GeneratedTitleSuffix = "_pinyin";
+    private const string LegacyGeneratedTitleSuffix = "+pinyin";
+    private const string LegacyGeneratedTitleSuffixWithoutSeparator = "pinyin";
+    private static readonly string[] LegacyGeneratedTitleSuffixes =
+    [
+        LegacyGeneratedTitleSuffix,
+        "-拼音版",
+        "_拼音版"
+    ];
+
+    public static string CreateGeneratedTitle(string? title)
+    {
+        var normalized = string.IsNullOrWhiteSpace(title) ? "未命名书籍" : title.Trim();
+        while (true)
+        {
+            if (normalized.EndsWith(GeneratedTitleSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized[..^GeneratedTitleSuffix.Length].TrimEnd();
+                continue;
+            }
+
+            var legacySuffix = LegacyGeneratedTitleSuffixes.FirstOrDefault(suffix =>
+                normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+            if (legacySuffix is null && HasLegacySuffixWithoutSeparator(normalized))
+                legacySuffix = LegacyGeneratedTitleSuffixWithoutSeparator;
+            if (legacySuffix is null) break;
+            normalized = normalized[..^legacySuffix.Length].TrimEnd();
+        }
+
+        return normalized + GeneratedTitleSuffix;
+    }
+
     public static bool IsGeneratedPinyinVersion(BookFile? file)
     {
         if (file is null) return false;
-        var stem = Path.GetFileNameWithoutExtension(file.RelativePath);
-        return stem.EndsWith("-拼音版", StringComparison.OrdinalIgnoreCase)
-            || stem.EndsWith("_拼音版", StringComparison.OrdinalIgnoreCase);
+        var stem = Path.GetFileNameWithoutExtension(file.RelativePath).Trim();
+        return stem.EndsWith(GeneratedTitleSuffix, StringComparison.OrdinalIgnoreCase)
+            || LegacyGeneratedTitleSuffixes.Any(suffix =>
+                stem.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            || HasLegacySuffixWithoutSeparator(stem);
     }
+
+    private static bool HasLegacySuffixWithoutSeparator(string value) =>
+        value.Length > LegacyGeneratedTitleSuffixWithoutSeparator.Length
+        && value.EndsWith(LegacyGeneratedTitleSuffixWithoutSeparator, StringComparison.OrdinalIgnoreCase);
 }

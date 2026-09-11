@@ -18,6 +18,11 @@
     <PackageReference Include="xxHash.Core" Version="2.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="ThirdParty/G2PW/bert-base-chinese_s2t_dict.txt" />
+    <None Update="ThirdParty/G2PW/LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="ThirdParty/G2PW/NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Kindle scan caching and book classification stay internal: they are
          helpers for whichever platform implements IKindleDeviceService, not
          part of Infrastructure's contract. Each platform assembly that hosts a

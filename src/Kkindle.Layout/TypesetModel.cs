@@ -21,6 +21,7 @@ public enum BlockKind
 public enum InlineKind
 {
     Text,
+    Ruby,
     LineBreak,
     Image,
     FootnoteMarker,
@@ -84,7 +85,9 @@ public sealed class InlineItem
     public string? FootnoteHref { get; init; }
     /// <summary>Inline note text for publishers that encode a footnote in an image alt attribute.</summary>
     public string? FootnoteText { get; init; }
-    /// <summary>Ghost text is part of the offset stream (ruby rt) but never rendered.</summary>
+    /// <summary>The small pronunciation text rendered above or beside a ruby base.</summary>
+    public string? RubyText { get; init; }
+    /// <summary>Ghost text is part of the offset stream but never rendered.</summary>
     public bool Ghost { get; init; }
 }
 
@@ -119,6 +122,8 @@ public sealed class ChapterContent
     public required string ChapterPath { get; init; }
     public required string BodyText { get; init; }
     public required IReadOnlyList<ContentBlock> Blocks { get; init; }
+    /// <summary>Pronunciation text to exclude from searches without changing source offsets.</summary>
+    public IReadOnlyList<(int Start, int Length)> RubyAnnotationRanges { get; init; } = [];
     /// <summary>Element ids that must still answer fragment navigation.</summary>
     public IReadOnlySet<string> FragmentIds { get; init; } = new HashSet<string>();
     /// <summary>Text offsets at which visible fragment ids begin, when they have one.</summary>

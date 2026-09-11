@@ -156,7 +156,8 @@ public partial class MainWindow
     {
         ToggleSwitch[] switches = [S3SyncEnabledCheck, S3AutomaticSyncCheck, S3PathStyleCheck, S3SkipTlsVerifyCheck];
         foreach (var control in switches) control.IsCheckedChanged += (_, _) => S3SettingsFieldChanged();
-        TextBox[] fields = [S3EndpointBox, S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox, S3EncryptionKeyBox];
+        TextBox[] fields = [S3EndpointBox, S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox, S3EncryptionKeyBox,
+            WebDavEndpointBox, WebDavUsernameBox, WebDavPasswordBox];
         foreach (var control in fields)
             control.PropertyChanged += (_, e) =>
             {
@@ -164,12 +165,28 @@ public partial class MainWindow
             };
         NumericUpDown[] numbers = [S3SyncIntervalBox, S3TimeoutBox, S3ConcurrencyBox];
         foreach (var control in numbers) control.ValueChanged += (_, _) => S3SettingsFieldChanged();
+        SyncProviderBox.SelectionChanged += (_, _) =>
+        {
+            UpdateSyncProviderControls();
+            S3SettingsFieldChanged();
+        };
+        UpdateSyncProviderControls();
         UpdateS3SettingsDraftState();
+    }
+
+    private void UpdateSyncProviderControls()
+    {
+        var webDav = SyncProviderBox.SelectedIndex == (int)SyncProvider.WebDav;
+        S3ConnectionPanel.IsVisible = !webDav;
+        WebDavConnectionPanel.IsVisible = webDav;
+        S3RegionRow.IsVisible = !webDav;
+        S3PathStyleCheck.IsVisible = !webDav;
     }
 
     private void S3SettingsFieldChanged()
     {
         if (_suppressS3SettingsDraftTracking) return;
+        _s3TestConnectionCancellation?.Cancel();
         _s3SettingsEditVersion++;
         S3SyncStatusText.Text = string.Empty;
         UpdateS3SettingsDraftState();
@@ -186,7 +203,7 @@ public partial class MainWindow
         if (SettingsS3ActionBar is null) return;
         SettingsS3ActionBar.IsVisible = _activeSettingsCategory.Equals("Data", StringComparison.OrdinalIgnoreCase)
             && SettingsS3Expander.IsExpanded;
-        S3DraftStatusText.Text = "S3 · " + (_s3SettingsSaving ? T("正在保存 S3 设置…")
+        S3DraftStatusText.Text = ReadS3SyncSettingsFromControls().ProviderName + " · " + (_s3SettingsSaving ? T("正在保存同步设置…")
             : _s3SettingsDirty ? T("有未保存的修改 · 保存后生效")
             : _s3SyncStoredSettings.Settings.IsConfigured ? T("配置已保存 · 立即同步使用当前保存的配置")
             : T("尚未配置 · 填写连接信息后保存"));
@@ -248,8 +265,8 @@ public partial class MainWindow
         UpdateS3SettingsDraftState();
         if (!_s3SettingsDirty) return true;
         OpenSettingsExpander("Data", SettingsS3Expander);
-        if (!await ConfirmAsync(T("S3 设置尚未保存"),
-                T("S3 配置中有未保存的修改。返回设置可保存；继续退出将放弃这些修改。"), T("放弃修改并退出")))
+        if (!await ConfirmAsync(T("同步设置尚未保存"),
+                T("同步配置中有未保存的修改。返回设置可保存；继续退出将放弃这些修改。"), T("放弃修改并退出")))
             return false;
         PopulateS3SyncControls();
         return true;

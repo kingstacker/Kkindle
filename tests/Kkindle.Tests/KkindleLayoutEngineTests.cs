@@ -1333,6 +1333,127 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         Assert.True(layout.GetPageIndexOfFragment("footnote-1") >= 0);
     }
 
+    [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb)]
+    [InlineData(TypesetWritingMode.VerticalRl)]
+    public void RubyPronunciationIsLoadedAndPaintedInBothWritingModes(TypesetWritingMode mode)
+    {
+        var path = WriteChapter("<p><ruby>银<rt>yín</rt></ruby>行</p>");
+        var content = new XhtmlChapterLoader().Load(path);
+
+        var ruby = Assert.Single(content.Blocks.SelectMany(block => block.Items), item =>
+            item.Kind == InlineKind.Ruby);
+        Assert.Equal("银", ruby.Text);
+        Assert.Equal("yín", ruby.RubyText);
+        Assert.Equal("银yín行", content.BodyText);
+
+        using var engine = CreateEngine();
+        var options = Options(mode);
+        var layout = engine.Compose(content, options);
+        var runs = layout.Pages.SelectMany(page => page.Runs).ToList();
+        var rubyRun = Assert.Single(runs, run =>
+            run.TextStart < 0
+            && run.TextLength == 0
+            && run.FontSize >= options.BaseFontSize * 0.55f
+            && run.FontSize < options.BaseFontSize
+            && run.Glyphs.Length > 0);
+        var baseRun = Assert.Single(runs, run => run.TextStart == 0 && run.TextLength == 1);
+        Assert.True(
+            rubyRun.OriginY < baseRun.OriginY,
+            $"Ruby baseline {rubyRun.OriginY} must be above base baseline {baseRun.OriginY}.");
+    }
+
+    [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb, 17f)]
+    [InlineData(TypesetWritingMode.HorizontalTb, 28f)]
+    [InlineData(TypesetWritingMode.HorizontalTb, 40f)]
+    [InlineData(TypesetWritingMode.VerticalRl, 17f)]
+    [InlineData(TypesetWritingMode.VerticalRl, 28f)]
+    [InlineData(TypesetWritingMode.VerticalRl, 40f)]
+    public void RubyKeepsUniformSizeAndFitsItsBaseAcrossWrappingAndJustification(TypesetWritingMode mode, float fontSize)
+    {
+        var syllables = new[]
+        {
+            ("书", "shū"), ("名", "míng"), ("规", "guī"), ("模", "mó"),
+            ("中", "zhōng"), ("信", "xìn"), ("窗", "chuāng"), ("女", "nu\u0308\u030c"),
+        };
+        var markup = string.Concat(Enumerable.Range(0, 8).SelectMany(_ => syllables)
+            .Select(pair => $"<ruby>{pair.Item1}<rt>{pair.Item2}</rt></ruby>"));
+        var content = new XhtmlChapterLoader().Load(WriteChapter(
+            "<p style=\"text-indent:0;text-align:justify\">" + markup + "</p>"));
+        var options = new TypesetLayoutOptions
+        {
+            WritingMode = mode, BaseFontSize = fontSize, LineHeight = 1.1f,
+            LetterSpacingEm = 0f, ParagraphIndent = false,
+            ViewportWidth = 220f, ViewportHeight = 240f,
+            InsetHorizontal = 24f, InsetVertical = 24f,
+        };
+        using var fonts = new TypesetFontLibrary(_fontPath);
+        using var engine = new TypesetEngine(fonts);
+        var layout = engine.Compose(content, options);
+        var annotations = layout.Pages.SelectMany(page => page.Runs).Where(run => run.TextStart < 0).ToArray();
+        Assert.Equal(syllables.Length * 8, annotations.Length);
+        Assert.True(layout.Pages.Count > 1);
+        Assert.All(annotations, run =>
+        {
+            Assert.Equal(annotations[0].FontSize, run.FontSize, precision: 3);
+            Assert.True(run.FontSize >= Math.Min(14f, fontSize * 0.55f));
+        });
+
+        foreach (var page in layout.Pages)
+        {
+            var ink = page.Runs.Select(run => (Run: run, Bounds: MeasureRunInk(fonts, run))).ToArray();
+            foreach (var (run, bounds) in ink.Where(item => item.Run.TextStart < 0))
+            {
+                Assert.True(bounds.Left >= options.InsetHorizontal - 0.1f, $"Ruby left edge: {bounds.Left}");
+                Assert.True(bounds.Top >= options.InsetVertical - 0.1f, $"Ruby top edge: {bounds.Top}");
+                Assert.True(bounds.Right <= page.Width - options.InsetHorizontal + 0.1f, $"Ruby right edge: {bounds.Right}");
+                Assert.True(bounds.Bottom <= page.Height - options.InsetVertical + 0.1f, $"Ruby bottom edge: {bounds.Bottom}");
+                foreach (var other in ink.Where(item => !ReferenceEquals(item.Run, run)))
+                {
+                    Assert.False(bounds.IntersectsWith(other.Bounds), $"Ruby overlaps a neighboring run in {mode}.");
+                }
+            }
+
+            for (var index = 1; index < ink.Length; index++)
+            {
+                if (ink[index].Run.TextStart >= 0) continue;
+                var annotation = ink[index].Run;
+                var baseRun = ink[index - 1].Run;
+                var baseInk = ink[index - 1].Bounds;
+                Assert.True(baseRun.TextStart >= 0);
+                var annotationCenter = mode == TypesetWritingMode.HorizontalTb
+                    ? annotation.OriginX + annotation.FlowAdvance / 2f
+                    : annotation.OriginY + annotation.FlowAdvance / 2f;
+                var baseCenter = mode == TypesetWritingMode.HorizontalTb ? baseInk.MidX : baseInk.MidY;
+                Assert.InRange(Math.Abs(annotationCenter - baseCenter), 0f, fontSize * 0.08f);
+                var hit = layout.HitTest(page.Index, new SKPoint(baseInk.MidX, baseInk.MidY));
+                Assert.InRange(hit, baseRun.TextStart, baseRun.TextStart + baseRun.TextLength);
+                Assert.NotNull(layout.GetCharRect(page.Index, baseRun.TextStart));
+            }
+        }
+    }
+
+    private static SKRect MeasureRunInk(TypesetFontLibrary fonts, PlacedRun run)
+    {
+        using var font = new SKFont(fonts.GetTypeface(run.FontPath), run.FontSize);
+        _ = font.GetGlyphWidths(run.Glyphs.AsSpan(), out var bounds, null);
+        var result = SKRect.Empty;
+        for (var index = 0; index < bounds.Length; index++)
+        {
+            if (bounds[index].IsEmpty) continue;
+            var left = (run.X[index] + bounds[index].Left) * run.Scale;
+            var right = (run.X[index] + bounds[index].Right) * run.Scale;
+            var top = (run.Y[index] + bounds[index].Top) * run.Scale;
+            var bottom = (run.Y[index] + bounds[index].Bottom) * run.Scale;
+            var transformed = run.Sideways
+                ? new SKRect(run.OriginX - bottom, run.OriginY + left, run.OriginX - top, run.OriginY + right)
+                : new SKRect(run.OriginX + left, run.OriginY + top, run.OriginX + right, run.OriginY + bottom);
+            result = result.IsEmpty ? transformed : SKRect.Union(result, transformed);
+        }
+        return result;
+    }
+
     [Fact]
     public void Loader_MicroCssResolvesPublisherEmphasis()
     {

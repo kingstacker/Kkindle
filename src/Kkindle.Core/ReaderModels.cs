@@ -46,11 +46,11 @@ public sealed record BookContentChunkDraft(
     string Content);
 
 // ------------------------------------------------------------------
-// Reader persistence: progress restore, bookmarks, per-book layout
-// settings and cumulative reading stats. All rows are keyed by the
-// BookFile so every format of the same book keeps its own position. The
-// vertical-writing switch is a global preference; the app overlays that
-// global value when a per-book layout row is restored.
+// Reader persistence: progress restore, bookmarks, legacy per-book layout
+// rows and cumulative reading stats. All rows are keyed by the BookFile so
+// every format of the same book keeps its own position. The active reader
+// layout is now stored in the global app profile; old layout rows remain only
+// for compatibility with existing data.
 // ------------------------------------------------------------------
 
 public sealed record ReaderProgressRow(
@@ -102,9 +102,8 @@ public sealed record ReaderLayoutSettings(
 {
     // Keep this as an initialized property instead of a new positional
     // constructor parameter. Older JSON settings do not contain the field;
-    // the initializer therefore preserves the long-standing indented layout
-    // when those settings are deserialized.
-    public bool ParagraphIndent { get; init; } = true;
+    // the initializer therefore gives new settings the current default.
+    public bool ParagraphIndent { get; init; } = false;
 }
 
 // ------------------------------------------------------------------
@@ -133,15 +132,15 @@ public static class ReaderLayoutDefaults
     public const double MinBodyPadding = 24;
     public const double MaxBodyPadding = 160;
 
+    // All reader layout options are global. Keep this helper for callers that
+    // still pass a legacy per-book layout, but never let that layout override
+    // the current global profile.
     public static ReaderLayoutSettings ApplyGlobalPreferences(
         ReaderLayoutSettings bookLayout,
         ReaderLayoutSettings globalLayout)
     {
-        return Normalize(bookLayout with
-        {
-            VerticalWriting = globalLayout.VerticalWriting,
-            ParagraphIndent = globalLayout.ParagraphIndent
-        });
+        _ = bookLayout;
+        return Normalize(globalLayout);
     }
 
     public static ReaderLayoutSettings Normalize(ReaderLayoutSettings settings)

@@ -1,6 +1,4 @@
 using System.Globalization;
-using Amazon.S3;
-using Amazon.S3.Model;
 using Kkindle.Core;
 using Microsoft.Data.Sqlite;
 
@@ -577,6 +575,7 @@ public sealed partial class S3SyncService
                 ReadingMaterialsCollapsedByDefault = app.ReadingMaterialsCollapsedByDefault,
                 PinyinContextMenuEnabled = app.PinyinContextMenuEnabled,
                 PinyinLocalOnly = app.PinyinLocalOnly,
+                PinyinEngineId = app.PinyinEngineId,
                 DefaultReaderLayout = app.DefaultReaderLayout
             },
             Ai = new S3SyncAiSettings
@@ -617,7 +616,7 @@ public sealed partial class S3SyncService
     private static DateTimeOffset Max(DateTimeOffset left, DateTimeOffset right) => left >= right ? left : right;
 
     private async Task<DatabaseMergeResult> ApplyRemoteSnapshotsAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         S3SyncSnapshot localSnapshot,
         IReadOnlyList<S3SyncSnapshot> remoteSnapshots,
@@ -864,9 +863,9 @@ public sealed partial class S3SyncService
                 preparedFilesByLocalId[localFileId] = prepared;
                 plannedRelativePaths.Add(prepared.RelativePath);
             }
-            catch (AmazonS3Exception exception) when (IsMissingObjectForRead(exception))
+            catch (SyncObjectNotFoundException)
             {
-                warnings.Add(UiText.Get("《{0}》的 S3 文件对象不存在，已跳过。", remoteFile.FileName));
+                warnings.Add(UiText.Get("《{0}》的远端文件对象不存在，已跳过。", remoteFile.FileName));
                 isPartial = true;
             }
             catch (InvalidDataException exception)
@@ -912,7 +911,7 @@ public sealed partial class S3SyncService
                 }
                 coverUpdates[localBookId] = (Path.GetRelativePath(_paths.Data, absolutePath), remoteBook.UpdatedAt);
             }
-            catch (AmazonS3Exception exception) when (IsMissingObjectForRead(exception))
+            catch (SyncObjectNotFoundException)
             {
                 warnings.Add(UiText.Get("有封面对象不存在，已跳过封面同步。"));
                 isPartial = true;
@@ -2280,7 +2279,7 @@ public sealed partial class S3SyncService
     }
 
     private async Task<bool> EnsureLocalBlobAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         string hash,
         string targetPath,
@@ -2309,9 +2308,7 @@ public sealed partial class S3SyncService
         var temporaryPath = targetPath + $".sync-{Guid.NewGuid():N}.part";
         try
         {
-            using var response = await client.GetObjectAsync(
-                new GetObjectRequest { BucketName = settings.Bucket, Key = BlobKey(settings, hash) },
-                cancellationToken);
+            using var response = await client.OpenReadAsync(BlobKey(settings, hash), cancellationToken);
             if (settings.EncryptionKey.Length == 0)
             {
                 await using var output = new FileStream(
@@ -2884,6 +2881,9 @@ public sealed partial class S3SyncService
                 ReadingMaterialsCollapsedByDefault = remoteApp.ReadingMaterialsCollapsedByDefault,
                 PinyinContextMenuEnabled = remoteApp.PinyinContextMenuEnabled,
                 PinyinLocalOnly = remoteApp.PinyinLocalOnly,
+                PinyinEngineId = string.IsNullOrWhiteSpace(remoteApp.PinyinEngineId)
+                    ? currentApp.PinyinEngineId
+                    : remoteApp.PinyinEngineId,
                 DefaultReaderLayout = remoteApp.DefaultReaderLayout ?? new ReaderLayoutSettings()
             });
             await _appSettingsStore.SaveUnderLockAsync(mergedApp, cancellationToken, remoteUpdatedAt);

@@ -3879,6 +3879,7 @@ public partial class MainWindow
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
             PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
             PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
+            ApplyPinyinEngineSelection();
             DefaultVerticalWritingCheck.IsChecked = _appSettings.DefaultReaderLayout.VerticalWriting;
             PopulateBookTranslationControls();
             AboutVersionText.Text = T("版本 {0}", ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly));
@@ -3912,12 +3913,16 @@ public partial class MainWindow
         _suppressS3SettingsDraftTracking = true;
         try
         {
+            SyncProviderBox.SelectedIndex = (int)settings.Provider;
             S3SyncEnabledCheck.IsChecked = settings.Enabled;
             S3AutomaticSyncCheck.IsChecked = settings.AutomaticSyncEnabled;
             S3SyncIntervalBox.Value = settings.IntervalMinutes;
             S3EndpointBox.Text = settings.Endpoint;
             S3AccessKeyBox.Text = settings.AccessKey;
             S3SecretKeyBox.Text = settings.SecretKey;
+            WebDavEndpointBox.Text = settings.WebDavEndpoint;
+            WebDavUsernameBox.Text = settings.WebDavUsername;
+            WebDavPasswordBox.Text = settings.WebDavPassword;
             S3BucketBox.Text = settings.Bucket;
             S3RegionBox.Text = settings.Region;
             S3PrefixBox.Text = settings.Prefix;
@@ -3927,6 +3932,7 @@ public partial class MainWindow
             S3TimeoutBox.Value = settings.TimeoutSeconds;
             S3ConcurrencyBox.Value = settings.ConcurrentRequests;
             S3SyncDeviceText.Text = T("当前设备 ID：{0}", _s3SyncStoredSettings.DeviceId[..Math.Min(12, _s3SyncStoredSettings.DeviceId.Length)]);
+            UpdateSyncProviderControls();
         }
         finally
         {
@@ -3937,12 +3943,16 @@ public partial class MainWindow
 
     private S3SyncSettings ReadS3SyncSettingsFromControls() => S3SyncSettings.Normalize(new S3SyncSettings
     {
+        Provider = (SyncProvider)SyncProviderBox.SelectedIndex,
         Enabled = S3SyncEnabledCheck.IsChecked == true,
         AutomaticSyncEnabled = S3AutomaticSyncCheck.IsChecked == true,
         IntervalMinutes = S3SyncIntervalBox.Value is { } interval ? (int)interval : 30,
         Endpoint = S3EndpointBox.Text?.Trim() ?? string.Empty,
         AccessKey = S3AccessKeyBox.Text?.Trim() ?? string.Empty,
         SecretKey = S3SecretKeyBox.Text ?? string.Empty,
+        WebDavEndpoint = WebDavEndpointBox.Text ?? string.Empty,
+        WebDavUsername = WebDavUsernameBox.Text ?? string.Empty,
+        WebDavPassword = WebDavPasswordBox.Text ?? string.Empty,
         Bucket = S3BucketBox.Text?.Trim() ?? string.Empty,
         Region = S3RegionBox.Text?.Trim() ?? string.Empty,
         Prefix = S3PrefixBox.Text?.Trim() ?? string.Empty,
@@ -3982,6 +3992,10 @@ public partial class MainWindow
             {
                 _s3DeletionConfirmationPending = false;
                 _s3SyncCancelledByUser = false;
+                // A newly selected target needs an initial sync even if the
+                // previous provider was up to date a moment ago.
+                _lastS3SyncAt = null;
+                _s3LocalChangeVersion++;
             }
             _s3SyncStoredSettings = new S3SyncStoredSettings(_s3SyncStoredSettings.DeviceId, settings);
             RefreshS3SyncIndicatorFromSettings();
@@ -3991,12 +4005,12 @@ public partial class MainWindow
             else UpdateS3SettingsDraftState();
             if (IsAutomaticS3SyncReady()) ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce);
             else _s3LocalChangeSyncTimer.Stop();
-            if (showStatus) S3SyncStatusText.Text = T("S3 同步设置已保存。");
+            if (showStatus) S3SyncStatusText.Text = T("云端同步设置已保存。");
             return true;
         }
         catch (Exception exception)
         {
-            S3SyncStatusText.Text = T("保存 S3 设置失败：{0}", UiText.Localize(exception.Message));
+            S3SyncStatusText.Text = T("保存 同步设置失败：{0}", UiText.Localize(exception.Message));
             return false;
         }
         finally
@@ -4014,31 +4028,30 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            S3SyncStatusText.Text = T("保存 S3 设置失败：{0}", UiText.Localize(exception.Message));
+            S3SyncStatusText.Text = T("保存 同步设置失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
     private async void ExportS3ConnectionProfileButton_Click(object? sender, RoutedEventArgs e)
     {
+        var settings = ReadS3SyncSettingsFromControls();
+        var extension = SyncConnectionProfileService.FileExtension(settings.Provider);
         if (!await ConfirmAsync(
-                T("导出 S3 连接参数"),
-                T("导出的文件会包含 Access Key 和 Secret Key，请像密码一样妥善保管，不要上传到公共位置。确定继续吗？")))
+                T("导出同步连接参数"),
+                T("导出的文件会包含当前同步方式的账号和密码，请像密码一样妥善保管，不要上传到公共位置。确定继续吗？")))
             return;
 
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel is null) return;
         var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = T("导出 S3 连接参数"),
-            SuggestedFileName = T(
-                "Kkindle-S3连接参数-{0}{1}",
-                DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture),
-                S3ConnectionProfileService.FileExtension),
+            Title = T("导出同步连接参数"),
+            SuggestedFileName = $"Kkindle-{settings.ProviderName}-{DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}{extension}",
             FileTypeChoices =
             [
-                new FilePickerFileType(T("S3 连接参数"))
+                new FilePickerFileType(T("同步连接参数"))
                 {
-                    Patterns = [$"*{S3ConnectionProfileService.FileExtension}"]
+                    Patterns = [$"*{extension}"]
                 }
             ]
         });
@@ -4047,15 +4060,15 @@ public partial class MainWindow
 
         try
         {
-            await S3ConnectionProfileService.ExportAsync(
+            await SyncConnectionProfileService.ExportAsync(
                 path,
-                ReadS3SyncSettingsFromControls(),
+                settings,
                 _lifetimeCancellation.Token);
-            S3ConnectionProfileStatusText.Text = T("已导出 S3 连接参数：{0}", path);
+            S3ConnectionProfileStatusText.Text = T("已导出同步连接参数：{0}", path);
         }
         catch (Exception exception)
         {
-            S3ConnectionProfileStatusText.Text = T("导出 S3 连接参数失败：{0}", UiText.Localize(exception.Message));
+            S3ConnectionProfileStatusText.Text = T("导出同步连接参数失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
@@ -4065,13 +4078,13 @@ public partial class MainWindow
         if (topLevel is null) return;
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = T("导入 S3 连接参数"),
+            Title = T("导入同步连接参数"),
             AllowMultiple = false,
             FileTypeFilter =
             [
-                new FilePickerFileType(T("S3 连接参数"))
+                new FilePickerFileType(T("同步连接参数"))
                 {
-                    Patterns = [$"*{S3ConnectionProfileService.FileExtension}"]
+                    Patterns = [$"*{S3ConnectionProfileService.FileExtension}", $"*{SyncConnectionProfileService.WebDavFileExtension}"]
                 }
             ]
         });
@@ -4080,16 +4093,16 @@ public partial class MainWindow
 
         try
         {
-            var imported = await S3ConnectionProfileService.ImportAsync(
+            var imported = await SyncConnectionProfileService.ImportAsync(
                 path,
                 ReadS3SyncSettingsFromControls(),
                 _lifetimeCancellation.Token);
             PopulateS3SyncControls(imported);
-            S3ConnectionProfileStatusText.Text = T("已导入 S3 连接参数；请检查后点击“保存设置”写入。 ");
+            S3ConnectionProfileStatusText.Text = T("已导入同步连接参数；请检查后点击“保存设置”写入。");
         }
         catch (Exception exception)
         {
-            S3ConnectionProfileStatusText.Text = T("导入 S3 连接参数失败：{0}", UiText.Localize(exception.Message));
+            S3ConnectionProfileStatusText.Text = T("导入同步连接参数失败：{0}", UiText.Localize(exception.Message));
         }
     }
 
@@ -4113,13 +4126,13 @@ public partial class MainWindow
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         _s3TestConnectionCancellation = cancellation;
         S3TestConnectionButton.IsEnabled = false;
-        S3SyncStatusText.Text = T("正在测试 S3 连接…");
+        S3SyncStatusText.Text = T("正在测试 {0} 连接…", settings.ProviderName);
         try
         {
             await _s3SyncService.TestConnectionAsync(settings, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
-            S3SyncStatusText.Text = T("S3 连接成功。");
-            RefreshS3SyncIndicatorFromSettings();
+            S3SyncStatusText.Text = T("{0} 连接成功。", settings.ProviderName);
+            if (settings == _s3SyncStoredSettings.Settings) RefreshS3SyncIndicatorFromSettings();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -4128,8 +4141,8 @@ public partial class MainWindow
         {
             if (cancellation.IsCancellationRequested || _s3SyncBusy) return;
             var error = UiText.Localize(exception.Message);
-            S3SyncStatusText.Text = T("S3 连接失败：{0}", error);
-            UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, error);
+            S3SyncStatusText.Text = T("{0} 连接失败：{1}", settings.ProviderName, error);
+            if (settings == _s3SyncStoredSettings.Settings) UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, error);
         }
         finally
         {
@@ -4155,6 +4168,7 @@ public partial class MainWindow
     {
         Control[] controls =
         [
+            SyncProviderBox, WebDavEndpointBox, WebDavUsernameBox, WebDavPasswordBox,
             S3SyncEnabledCheck, S3AutomaticSyncCheck, S3SyncIntervalBox, S3EndpointBox,
             S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox,
             S3PathStyleCheck, S3SkipTlsVerifyCheck, S3EncryptionKeyBox, S3TimeoutBox,
@@ -4319,7 +4333,7 @@ public partial class MainWindow
         catch (Exception exception)
         {
             var error = UiText.Localize(exception.Message);
-            S3SyncStatusText.Text = T("自动 S3 同步失败：{0}", error);
+            S3SyncStatusText.Text = T("自动 云端同步失败：{0}", error);
             UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, error);
         }
     }
@@ -4398,7 +4412,7 @@ public partial class MainWindow
         catch (Exception exception)
         {
             var error = UiText.Localize(exception.Message);
-            S3SyncStatusText.Text = T("自动 S3 同步失败：{0}", error);
+            S3SyncStatusText.Text = T("自动 云端同步失败：{0}", error);
             UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, error);
         }
     }
@@ -4409,13 +4423,13 @@ public partial class MainWindow
         if (!silent && (_s3SettingsDirty || _s3SettingsSaving))
         {
             OpenSettingsExpander("Data", SettingsS3Expander);
-            SetS3SyncStatus(T("请先保存或放弃 S3 修改，再执行同步。"), silent: false);
+            SetS3SyncStatus(T("请先保存或放弃 同步配置修改，再执行同步。"), silent: false);
             return false;
         }
         if (!silent && !await FlushAppSettingsAsync()) return false;
         if (_backupBusy)
         {
-            if (!silent) SetS3SyncStatus(T("备份任务正在进行，请完成后再执行 S3 同步。"), silent: false);
+            if (!silent) SetS3SyncStatus(T("备份任务正在进行，请完成后再执行 云端同步。"), silent: false);
             return false;
         }
         if (_s3SyncBusy)
@@ -4481,7 +4495,7 @@ public partial class MainWindow
             }
 
             UpdateS3SyncIndicator(S3SyncIndicatorState.Syncing);
-            SetS3SyncStatus(T("正在同步到 S3…"), silent);
+            SetS3SyncStatus(T("正在同步到 {0}…", settings.ProviderName), silent);
             var progress = new Progress<string>(message =>
             {
                 if (!ReferenceEquals(_s3SyncCancellation, cancellation) || token.IsCancellationRequested)
@@ -4562,14 +4576,14 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            var status = T("S3 同步已取消。");
+            var status = T("云端同步已取消。");
             SetS3SyncStatus(status, silent);
             UpdateS3SyncIndicator(S3SyncIndicatorState.Warning, status);
         }
         catch (Exception exception)
         {
             var error = UiText.Localize(exception.Message);
-            var status = T("S3 同步失败：{0}", error);
+            var status = T("云端同步失败：{0}", error);
             SetS3SyncStatus(status, silent);
             UpdateS3SyncIndicator(S3SyncIndicatorState.Failed, error);
         }
@@ -4642,7 +4656,11 @@ public partial class MainWindow
         _appSettingsAutoSaveConfigured = true;
         ConfigureS3SettingsDraftTracking();
         AiEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        NetworkEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        NetworkEnabledCheck.IsCheckedChanged += (_, _) =>
+        {
+            RefreshPinyinEngineStatus();
+            ScheduleAppSettingsAutoSave();
+        };
         AutoUpdateCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoDoubanMatchCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         CollectionsMutuallyExclusiveCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -4657,6 +4675,12 @@ public partial class MainWindow
         DefaultVerticalWritingCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        TranslationAiRpmBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        TranslationGoogleProxyBox.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != TextBox.TextProperty) return;
+            ScheduleAppSettingsAutoSave();
+        };
         CalibrePathBox.PropertyChanged += (_, e) =>
         {
             if (e.Property != TextBox.TextProperty) return;
@@ -5087,8 +5111,9 @@ public partial class MainWindow
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
             PinyinContextMenuEnabled = PinyinContextMenuEnabledCheck.IsChecked == true,
             PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,
+            PinyinEngineId = GetSelectedPinyinEngineId(),
             Translation = ReadBookTranslationSettingsFromControls(),
-            // 排版默认值已在阅读器内设置，这里只同步竖排开关。
+            // 阅读器排版参数均为全局设置；这里同步基础设置中的竖排开关。
             DefaultReaderLayout = _appSettings.DefaultReaderLayout with
             {
                 VerticalWriting = DefaultVerticalWritingCheck.IsChecked == true
@@ -5252,7 +5277,7 @@ public partial class MainWindow
         if (_backupBusy) return;
         if (_s3SyncBusy)
         {
-            await ShowMessageAsync(T("请稍候"), T("S3 同步正在进行，请完成后再导入备份。"));
+            await ShowMessageAsync(T("请稍候"), T("云端同步正在进行，请完成后再导入备份。"));
             return;
         }
         if (_readerDocument is not null || _readerIsPdf)
@@ -5273,7 +5298,7 @@ public partial class MainWindow
         if (_backupBusy) return;
         if (_s3SyncBusy)
         {
-            await ShowMessageAsync(T("请稍候"), T("S3 同步正在进行，请完成后再导入备份。"));
+            await ShowMessageAsync(T("请稍候"), T("云端同步正在进行，请完成后再导入备份。"));
             return;
         }
         _backupBusy = true;
@@ -5303,7 +5328,7 @@ public partial class MainWindow
             await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
             await RefreshCollectionsAsync();
             SettingsBackupStatusText.Text = T("已导入 {0} 本书、{1} 个文件。", result.BookCount, result.FileCount);
-            S3SyncStatusText.Text = T("本地备份已导入；下次 S3 同步将按导入内容建立新的本地基线。 ");
+            S3SyncStatusText.Text = T("本地备份已导入；下次 云端同步将按导入内容建立新的本地基线。 ");
             TaskProgressPopupText.Text = T("已导入 {0} 本书、{1} 个文件。", result.BookCount, result.FileCount);
             UpdateLibraryUi();
             HandleLocalDataChanged(LocalDataChangeKind.Library);

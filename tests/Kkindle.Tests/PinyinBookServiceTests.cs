@@ -46,6 +46,7 @@ public sealed class PinyinBookServiceTests
             Assert.Equal("mimetype", archive.Entries[0].FullName);
             Assert.Equal("application/epub+zip", ReadArchiveEntry(destinationPath, "mimetype"));
             Assert.NotEqual(await File.ReadAllBytesAsync(sourcePath), await File.ReadAllBytesAsync(destinationPath));
+
         }
         finally
         {
@@ -108,11 +109,56 @@ public sealed class PinyinBookServiceTests
         var pinyin = new BookFile
         {
             Format = "epub",
+            RelativePath = "library/book/book_pinyin.epub"
+        };
+        var legacyPinyin = new BookFile
+        {
+            Format = "epub",
+            RelativePath = "library/book/book+pinyin.epub"
+        };
+        var legacyPinyinWithoutSeparator = new BookFile
+        {
+            Format = "epub",
+            RelativePath = "library/book/bookpinyin.epub"
+        };
+        var legacyChinesePinyin = new BookFile
+        {
+            Format = "epub",
             RelativePath = "library/book/book-拼音版.epub"
         };
 
         Assert.Same(pinyin, KindleTransferPolicy.SelectPreferred([original, pinyin]));
         Assert.Same(pinyin, KindleEmailSelectionPolicy.SelectPreferred([original, pinyin]));
+        Assert.True(PinyinBookPolicy.IsGeneratedPinyinVersion(legacyPinyin));
+        Assert.True(PinyinBookPolicy.IsGeneratedPinyinVersion(legacyPinyinWithoutSeparator));
+        Assert.True(PinyinBookPolicy.IsGeneratedPinyinVersion(legacyChinesePinyin));
+    }
+
+    [Theory]
+    [InlineData("书名", "书名_pinyin")]
+    [InlineData("书名_pinyin", "书名_pinyin")]
+    [InlineData("书名+pinyin", "书名_pinyin")]
+    [InlineData("书名+PINYIN", "书名_pinyin")]
+    [InlineData("书名pinyin", "书名_pinyin")]
+    [InlineData("pinyin", "pinyin_pinyin")]
+    [InlineData("书名-拼音版", "书名_pinyin")]
+    public void GeneratedPinyinTitleAlwaysUsesTheRequiredSuffix(string title, string expected)
+    {
+        Assert.Equal(expected, PinyinBookPolicy.CreateGeneratedTitle(title));
+    }
+
+    [Fact]
+    public void LegacyPinyinFileWithTrailingWhitespaceStillGetsTheRequiredSeparator()
+    {
+        var file = new BookFile
+        {
+            Format = "epub",
+            RelativePath = "library/book/规模pinyin .epub"
+        };
+
+        Assert.True(PinyinBookPolicy.IsGeneratedPinyinVersion(file));
+        Assert.Equal("规模_pinyin", PinyinBookPolicy.CreateGeneratedTitle(
+            Path.GetFileNameWithoutExtension(file.RelativePath).Trim()));
     }
 
     [Fact]

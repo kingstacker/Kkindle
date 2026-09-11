@@ -8,6 +8,17 @@ namespace Kkindle.Tests;
 public sealed class TranslationServiceTests
 {
     [Fact]
+    public void NormalizesGoogleProxyAddress()
+    {
+        Assert.Equal(
+            "http://127.0.0.1:7890",
+            TranslationProxy.NormalizeAddress("  127.0.0.1:7890/  "));
+        Assert.Equal(string.Empty, TranslationProxy.NormalizeAddress("  "));
+        Assert.Throws<ArgumentException>(
+            () => TranslationProxy.NormalizeAddress("socks5://127.0.0.1:1080"));
+    }
+
+    [Fact]
     public async Task TranslatesWithGoogleWebEndpoint()
     {
         using var aiClient = new AiChatClient();
@@ -26,6 +37,36 @@ public sealed class TranslationServiceTests
             "zh-CN");
 
         Assert.Equal("你好，世界", result);
+    }
+
+    [Fact]
+    public async Task FallsBackToLegacyGoogleEndpointWhenPrimaryIsRateLimited()
+    {
+        var requests = new List<HttpRequestMessage>();
+        using var aiClient = new AiChatClient();
+        using var service = CreateService(request =>
+        {
+            requests.Add(request);
+            if (requests.Count == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                {
+                    Content = new StringContent("rate limited", Encoding.UTF8, "text/plain")
+                };
+            }
+
+            Assert.Equal("clients5.google.com", request.RequestUri?.Host);
+            Assert.Contains("dict-chrome-ex", request.RequestUri?.Query);
+            return JsonResponse("[\"你好，世界\"]");
+        }, aiClient);
+
+        var result = await service.TranslateAsync(
+            "Hello world",
+            ReaderTranslationProvider.Google,
+            "zh-CN");
+
+        Assert.Equal("你好，世界", result);
+        Assert.Equal(2, requests.Count);
     }
 
     [Fact]

@@ -27,6 +27,8 @@ internal sealed class VerticalComposer
     private readonly PageBuilder _pages;
     private readonly Dictionary<(string FontPath, float FontSize, ushort GlyphId), SKRect> _glyphBoundsCache = new();
     private float _cursorX;
+    private float _rubySideWidth;
+    private float _rubyBaseWidth;
 
     public VerticalComposer(ComposerContext context, CellFactory cells, PageBuilder pages)
     {
@@ -36,7 +38,9 @@ internal sealed class VerticalComposer
         _cursorX = context.Options.ViewportWidth - context.Options.InsetHorizontal;
     }
 
-    private float ColumnPitch => _context.Options.BodyLineHeight;
+    private float ColumnPitch => Math.Max(_context.Options.BodyLineHeight, _rubyBaseWidth + _rubySideWidth);
+
+    private float BodyColumnWidth => ColumnPitch - _rubySideWidth;
 
     private float CellPitch => _context.Options.BaseFontSize + _context.LetterSpacing;
 
@@ -56,6 +60,8 @@ internal sealed class VerticalComposer
         foreach (var block in content.Blocks)
         {
             _context.CancellationToken.ThrowIfCancellationRequested();
+            _rubySideWidth = 0f;
+            _rubyBaseWidth = 0f;
             switch (block.Kind)
             {
                 case BlockKind.Image:
@@ -94,6 +100,16 @@ internal sealed class VerticalComposer
         CellFactory.CollapseWhitespace(cells);
 
         ResolveUprightGlyphs(cells);
+        // Reuse the normal column spacing where possible, but reserve a
+        // separate strip so full-size annotations never paint over a neighbor.
+        _rubySideWidth = cells
+            .Where(cell => cell.RubyAnnotation is not null)
+            .Select(cell => cell.RubyAnnotation!.Ascent + cell.RubyAnnotation.Descent + _context.RubyGap)
+            .DefaultIfEmpty(0f)
+            .Max();
+        _rubyBaseWidth = _rubySideWidth > 0f
+            ? cells.Where(cell => cell.ImagePath is null).Select(cell => cell.FontSize).DefaultIfEmpty(0f).Max()
+            : 0f;
 
         if (startsAtPageTop)
         {
@@ -123,7 +139,7 @@ internal sealed class VerticalComposer
             }
 
             var columnLeft = _cursorX - ColumnPitch;
-            var colCenter = _cursorX - ColumnPitch / 2f;
+            var colCenter = columnLeft + BodyColumnWidth / 2f;
             _lastColumnFirstRun = _pages.Current.Runs.Count;
             _lastColumnFirstDecoration = _pages.Current.Decorations.Count;
             _lastColumnFirstHotZone = _pages.Current.HotZones.Count;
@@ -394,7 +410,8 @@ internal sealed class VerticalComposer
             var ascent = cell.Ascent;
             var descent = cell.Descent;
             var originX = colCenter - (ascent - descent) / 2f;
-            var originY = paintY + superscriptShift - descent * 0f;
+            var originY = paintY + superscriptShift
+                + (cell.RubyAnnotation is not null ? Math.Max(0f, (flowAdvance - cell.Advance) / 2f) : 0f);
             var run = new PlacedRun
             {
                 FontPath = cell.FontPath,
@@ -419,8 +436,8 @@ internal sealed class VerticalComposer
         {
             var advance = Math.Max(1f, cell.Advance);
             var scale = Math.Min(1f, _context.Options.BaseFontSize / advance);
-            var baseline = paintY + CellPitch / 2f + (cell.Ascent - cell.Descent) / 2f + superscriptShift;
-            var originX = columnLeft + (ColumnPitch - advance * scale) / 2f;
+            var baseline = paintY + flowAdvance / 2f + (cell.Ascent - cell.Descent) / 2f + superscriptShift;
+            var originX = columnLeft + (BodyColumnWidth - advance * scale) / 2f;
             var glyphX = new float[cell.GlyphX.Length];
             for (var i = 0; i < glyphX.Length; i++)
             {
@@ -436,14 +453,14 @@ internal sealed class VerticalComposer
                 Y = Zeroed(cell.GlyphY.Length),
                 OriginX = originX,
                 OriginY = baseline,
-                FlowAdvance = CellPitch,
+                FlowAdvance = flowAdvance,
                 SyntheticBold = cell.Style.Bold,
                 TextStart = cell.TextStart,
                 TextLength = cell.TextLength,
                 Clusters = CloneClusters(cell),
                 Style = cell.Style,
                 Scale = scale,
-                CellWidth = ColumnPitch,
+                CellWidth = BodyColumnWidth,
             };
             _pages.AddRun(run);
             AddDebugGlyphBox(cell, run);
@@ -458,7 +475,7 @@ internal sealed class VerticalComposer
             // font-size box leaves those glyphs visibly offset from the CJK
             // characters around them.
             var glyphAdvance = Math.Max(0f, cell.Advance);
-            var glyphOffsetX = (ColumnPitch - glyphAdvance) / 2f;
+            var glyphOffsetX = (BodyColumnWidth - glyphAdvance) / 2f;
             if (inkBounds is { } bounds
                 && (!TypesetText.IsPunctuation(cell.Text)
                     || TypesetText.IsVerticallyCenteredMark(cell.Text)))
@@ -478,14 +495,14 @@ internal sealed class VerticalComposer
                     || TypesetText.TryGetFirstScalar(cell.Text, out var scalar)
                     && TypesetText.IsCjk(scalar))
                 {
-                    glyphOffsetX = ColumnPitch / 2f - (bounds.Left + bounds.Right) / 2f;
+                    glyphOffsetX = BodyColumnWidth / 2f - (bounds.Left + bounds.Right) / 2f;
                 }
                 baselineCorrection = -(cell.Ascent - cell.Descent) / 2f
                     - (bounds.Top + bounds.Bottom) / 2f;
             }
 
             var baseline = paintY
-                + CellPitch / 2f
+                + flowAdvance / 2f
                 + (cell.Ascent - cell.Descent) / 2f
                 + baselineCorrection
                 + superscriptShift;
@@ -515,10 +532,15 @@ internal sealed class VerticalComposer
                 TextLength = cell.TextLength,
                 Clusters = CloneClusters(cell),
                 Style = cell.Style,
-                CellWidth = ColumnPitch,
+                CellWidth = BodyColumnWidth,
             };
             _pages.AddRun(run);
             AddDebugGlyphBox(cell, run);
+        }
+
+        if (cell.RubyAnnotation is not null)
+        {
+            PlaceRubyAnnotation(cell, columnLeft, paintY, flowAdvance);
         }
 
         if (cell.TextStart >= 0 && cell.TextLength > 0)
@@ -533,7 +555,7 @@ internal sealed class VerticalComposer
             _pages.AddHotZone(new PlacedHotZone
             {
                 Kind = cell.FootnoteHref is not null ? HotZoneKind.FootnoteMarker : HotZoneKind.Link,
-                Rect = new SKRect(colCenter - ColumnPitch / 2f, top, colCenter + ColumnPitch / 2f, top + height),
+                Rect = new SKRect(columnLeft, top, columnLeft + ColumnPitch, top + height),
                 Href = cell.FootnoteHref ?? cell.LinkHref!,
                 FootnoteText = cell.FootnoteText,
             });
@@ -551,6 +573,38 @@ internal sealed class VerticalComposer
                 TextLength = cell.TextLength,
             });
         }
+    }
+
+    private void PlaceRubyAnnotation(
+        LayoutCell baseCell,
+        float columnLeft,
+        float paintY,
+        float flowAdvance)
+    {
+        var annotation = baseCell.RubyAnnotation!;
+        if (annotation.Glyphs.Length == 0)
+        {
+            return;
+        }
+
+        _pages.AddRun(new PlacedRun
+        {
+            FontPath = annotation.FontPath,
+            FontSize = annotation.FontSize,
+            Glyphs = annotation.Glyphs,
+            X = annotation.GlyphX,
+            Y = annotation.GlyphY,
+            // Ruby in vertical writing is a compact sideways run placed on
+            // the reading side of the base glyph.
+            OriginX = columnLeft + BodyColumnWidth + _context.RubyGap + annotation.Descent,
+            OriginY = paintY + Math.Max(0f, (flowAdvance - annotation.Advance) / 2f),
+            FlowAdvance = annotation.Advance,
+            Sideways = true,
+            TextStart = -1,
+            TextLength = 0,
+            Clusters = Array.Empty<int>(),
+            Style = annotation.Style,
+        });
     }
 
     private static bool IsCompatibilityCell(LayoutCell cell)
@@ -695,16 +749,19 @@ internal sealed class VerticalComposer
             return 0f;
         }
 
+        var rubyAdvance = cell.RubyAnnotation is { } ruby
+            ? ruby.Advance + 2f * _context.RubyGap
+            : 0f;
         if (cell.ImagePath is not null || cell.Sideways)
         {
             // A rotated run is already measured in the same physical units as
             // the canvas. Reserve that measured extent instead of rounding it
             // up to whole CJK rows; the rounded remainder was the blank gap
             // visible before the following upright character.
-            return Math.Max(CellPitch, cell.Advance);
+            return Math.Max(Math.Max(CellPitch, cell.Advance), rubyAdvance);
         }
 
-        return CellPitch;
+        return Math.Max(CellPitch, rubyAdvance);
     }
 
     /// <summary>

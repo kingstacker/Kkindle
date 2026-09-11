@@ -29,6 +29,8 @@ public partial class MainWindow
             return;
         }
 
+        var generatedTitle = PinyinBookPolicy.CreateGeneratedTitle(card.Title);
+
         var sourceFile = SelectPinyinSourceFile(card.Book.Files);
         if (sourceFile is null)
         {
@@ -45,10 +47,34 @@ public partial class MainWindow
             return;
         }
 
+        var pinyinEngineKind = PinyinBookEngineCatalog.Parse(GetSelectedPinyinEngineId());
+        if (pinyinEngineKind == PinyinBookEngineKind.G2PW)
+        {
+            var g2pwInstalled = false;
+            try
+            {
+                g2pwInstalled = _g2pwModelDownloader.IsInstalled();
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Unable to inspect g2pW model before annotation: {exception.Message}");
+            }
+            if (!g2pwInstalled)
+            {
+                await ShowMessageAsync(
+                    T("书籍注音"),
+                    T("请先在设置的书籍注音中下载 g2pW 模型，下载完成后即可使用。"));
+                return;
+            }
+        }
+
+        using var pinyinEngine = PinyinEngineFactory.Create(_paths, pinyinEngineKind);
+
         var outputDirectory = GetPinyinOutputDirectory(card.Title);
         var outputPath = Path.Combine(
             outputDirectory,
-            KindleTransferPolicy.CreateSafeFileName($"{card.Title}-拼音版", ".epub"));
+            KindleTransferPolicy.CreateSafeFileName(generatedTitle, ".epub"));
         var pinyinLocalOnly = PinyinLocalOnlyCheck?.IsChecked
             ?? _appSettings.PinyinLocalOnly;
         AiConnectionSettings? aiSettings = null;
@@ -67,8 +93,16 @@ public partial class MainWindow
         }
 
         var aiReviewEnabled = !pinyinLocalOnly && aiSettings is not null;
-        var pinyinOptions = new PinyinBookOptions { EnableAiReview = aiReviewEnabled };
-        var pinyinService = new PinyinBookService(_formatConverter, _aiChatClient, aiSettings);
+        var pinyinOptions = new PinyinBookOptions
+        {
+            Engine = pinyinEngineKind,
+            EnableAiReview = aiReviewEnabled
+        };
+        var pinyinService = new PinyinBookService(
+            _formatConverter,
+            _aiChatClient,
+            aiSettings,
+            pinyinEngine);
         var resumeMode = PinyinBookResumeMode.Restart;
         PinyinBookResumeInfo? resumeInfo = null;
         try
@@ -91,7 +125,7 @@ public partial class MainWindow
         if (resumeInfo is not null)
         {
             var choice = await ChoosePinyinResumeAsync(
-                card.Title,
+                generatedTitle,
                 resumeInfo,
                 pinyinOptions,
                 _lifetimeCancellation.Token);
@@ -103,20 +137,20 @@ public partial class MainWindow
             resumeMode = choice.Mode;
         }
 
-        var progressWindow = new PinyinBookProgressWindow(card.Title, aiReviewEnabled);
+        var progressWindow = new PinyinBookProgressWindow(generatedTitle, aiReviewEnabled);
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         _pinyinGenerationInProgress = true;
         _pinyinGenerationCancellation = cancellation;
         _pinyinProgressWindow = progressWindow;
         progressWindow.CancelRequested += (_, _) => cancellation.Cancel();
         progressWindow.Show(this);
+        using var progress = new PinyinBookProgressReporter(progressWindow);
 
         var imported = false;
         var keepGeneratedOutput = false;
         try
         {
             Directory.CreateDirectory(outputDirectory);
-            var progress = new Progress<PinyinBookProgress>(progressWindow.Update);
             var result = await pinyinService.GenerateAsync(
                 sourcePath,
                 outputPath,
@@ -124,6 +158,7 @@ public partial class MainWindow
                 progress,
                 cancellation.Token,
                 resumeMode);
+            await progress.FlushAsync();
 
             if (result.AnnotatedCharacterCount == 0)
             {
@@ -170,11 +205,13 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+            progress.Dispose();
             progressWindow.MarkCanceled();
             SetTaskStatus("书籍注音已取消，已完成内容已保存，可下次继续。 ");
         }
         catch (Exception exception)
         {
+            progress.Dispose();
             var message = UiText.Localize(exception.Message);
             progressWindow.MarkFailed(message);
             SetTaskStatus("书籍注音失败，缓存已保存。 ");

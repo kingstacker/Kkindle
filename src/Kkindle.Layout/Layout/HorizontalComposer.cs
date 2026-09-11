@@ -90,6 +90,19 @@ internal sealed class HorizontalComposer
                 .Select(cell => cell.ImageHeight)
                 .DefaultIfEmpty(0f)
                 .Max());
+        var rubyGap = _context.RubyGap;
+        var rubyShelf = cells
+            .Where(cell => cell.RubyAnnotation is not null)
+            .Select(cell => cell.RubyAnnotation!.Ascent + cell.RubyAnnotation.Descent + rubyGap)
+            .DefaultIfEmpty(0f)
+            .Max();
+        if (rubyShelf > 0f)
+        {
+            // Move the base line down by the full annotation shelf. Merely
+            // increasing lineHeight leaves the baseline centered in the old
+            // position, which makes the larger ruby overlap the base text.
+            lineHeight += rubyShelf;
+        }
 
         if (startsAtPageTop)
         {
@@ -122,7 +135,10 @@ internal sealed class HorizontalComposer
                 _pages.RecordFragment(block.ElementId);
                 _pages.RecordFragments(block.FragmentIds);
             }
-            var baseline = _cursorY + lineHeight / 2f + (line.Ascent - line.Descent) / 2f;
+            var baseline = _cursorY
+                + lineHeight / 2f
+                + (line.Ascent - line.Descent) / 2f
+                + rubyShelf / 2f;
 
             var startX = blockLeft + line.Indent;
             var isLastLine = lineIndex == lines.Count - 1 || line.EndsWithForcedBreak;
@@ -139,14 +155,20 @@ internal sealed class HorizontalComposer
                 }
             }
 
-            PlaceLine(line, startX, baseline, _cursorY, lineHeight);
+            PlaceLine(line, startX, baseline, _cursorY, lineHeight, rubyGap);
             _cursorY += lineHeight;
         }
 
         _cursorY += block.SpaceAfterLines * BodyLineHeight;
     }
 
-    private void PlaceLine(LineBox line, float startX, float baseline, float lineTop, float lineHeight)
+    private void PlaceLine(
+        LineBox line,
+        float startX,
+        float baseline,
+        float lineTop,
+        float lineHeight,
+        float rubyGap)
     {
         float penX = startX;
         RunAccumulator? run = null;
@@ -200,11 +222,14 @@ internal sealed class HorizontalComposer
                 run = new RunAccumulator(cellBaseline);
             }
 
-            run.BeginCell(cell);
+            var baseInset = cell.RubyAnnotation is { } ruby
+                ? (Math.Max(cell.RubyBaseAdvance, ruby.Advance + 2f * rubyGap) - cell.RubyBaseAdvance) / 2f
+                : 0f;
+            run.BeginCell(cell, baseInset);
             for (var i = 0; i < cell.Glyphs.Length; i++)
             {
                 var cluster = i < cell.Clusters.Length ? cell.Clusters[i] : i;
-                run.AddGlyph(cell.Glyphs[i], penX + cell.GlyphX[i], cell.GlyphY[i], cluster);
+                run.AddGlyph(cell.Glyphs[i], penX + baseInset + cell.GlyphX[i], cell.GlyphY[i], cluster);
             }
 
             if (cell.LinkHref is not null || cell.FootnoteHref is not null)
@@ -242,10 +267,49 @@ internal sealed class HorizontalComposer
                 });
             }
 
+            if (cell.RubyAnnotation is not null)
+            {
+                run?.Flush(_pages);
+                run = null;
+                PlaceRubyAnnotation(cell, penX, baseline, rubyGap);
+            }
+
             penX += cell.Advance;
         }
 
         run?.Flush(_pages);
+    }
+
+    private void PlaceRubyAnnotation(
+        LayoutCell baseCell,
+        float baseLeft,
+        float baseline,
+        float rubyGap)
+    {
+        var annotation = baseCell.RubyAnnotation!;
+        if (annotation.Glyphs.Length == 0)
+        {
+            return;
+        }
+
+        _pages.AddRun(new PlacedRun
+        {
+            FontPath = annotation.FontPath,
+            FontSize = annotation.FontSize,
+            Glyphs = annotation.Glyphs,
+            X = annotation.GlyphX,
+            Y = annotation.GlyphY,
+            // Justification adds space after this unit. It must not move the
+            // annotation away from the base's original center.
+            OriginX = baseLeft
+                + (Math.Max(baseCell.RubyBaseAdvance, annotation.Advance + 2f * rubyGap) - annotation.Advance) / 2f,
+            OriginY = baseline - baseCell.Ascent - annotation.Descent - rubyGap,
+            FlowAdvance = annotation.Advance,
+            TextStart = -1,
+            TextLength = 0,
+            Clusters = Array.Empty<int>(),
+            Style = annotation.Style,
+        });
     }
 
     /// <summary>
@@ -450,7 +514,7 @@ internal sealed class HorizontalComposer
             Used += cell.Advance;
             Ascent = Math.Max(Ascent, cell.Ascent);
             Descent = Math.Max(Descent, cell.Descent);
-            GlyphCount += cell.FootnoteMarker
+            GlyphCount += cell.JustifyAsUnit
                 ? 1
                 : Math.Max(1, cell.Glyphs.Length);
         }
@@ -465,7 +529,7 @@ internal sealed class HorizontalComposer
             var removed = Cells[^1];
             Cells.RemoveAt(Cells.Count - 1);
             Used -= removed.Advance;
-            GlyphCount -= removed.FootnoteMarker
+            GlyphCount -= removed.JustifyAsUnit
                 ? 1
                 : Math.Max(1, removed.Glyphs.Length);
             Ascent = 0f;
@@ -491,7 +555,7 @@ internal sealed class HorizontalComposer
             {
                 var cell = Cells[index];
                 var shiftedX = new float[cell.GlyphX.Length];
-                if (!cell.FootnoteMarker)
+                if (!cell.JustifyAsUnit)
                 {
                     for (var i = 0; i < cell.GlyphX.Length; i++)
                     {
@@ -504,16 +568,15 @@ internal sealed class HorizontalComposer
                 }
                 else
                 {
-                    // A marker is an atomic visual unit. Justification may add
-                    // space after it, but must never stretch the distance
-                    // between its paired brackets and the reference number.
+                    // Markers and ruby bases stay intact. Justification adds
+                    // space after the unit, not between its own glyphs.
                     Array.Copy(cell.GlyphX, shiftedX, cell.GlyphX.Length);
                 }
 
                 var glyphCount = Math.Max(1, cell.Glyphs.Length);
                 var gapsAfter = index == Cells.Count - 1
-                    ? cell.FootnoteMarker ? 0 : Math.Max(0, glyphCount - 1)
-                    : cell.FootnoteMarker ? 1 : glyphCount;
+                    ? cell.JustifyAsUnit ? 0 : Math.Max(0, glyphCount - 1)
+                    : cell.JustifyAsUnit ? 1 : glyphCount;
                 Cells[index] = cell with
                 {
                     GlyphX = shiftedX,
@@ -537,6 +600,7 @@ internal sealed class HorizontalComposer
         private LayoutCell? _last;
         private int _cellClusterBase;
         private float _flowAdvance;
+        private float _leadingInset;
 
         public RunAccumulator(float baseline)
         {
@@ -556,8 +620,9 @@ internal sealed class HorizontalComposer
                 && cell.TextStart == _last.TextStart + _last.TextLength;
         }
 
-        public void BeginCell(LayoutCell cell)
+        public void BeginCell(LayoutCell cell, float leadingInset)
         {
+            if (_first is null) _leadingInset = leadingInset;
             _first ??= cell;
             _last = cell;
             _cellClusterBase = _first.TextStart >= 0 && cell.TextStart >= 0
@@ -609,7 +674,7 @@ internal sealed class HorizontalComposer
                 Y = y,
                 OriginX = originX,
                 OriginY = _baseline,
-                FlowAdvance = _flowAdvance,
+                FlowAdvance = _flowAdvance - _leadingInset,
                 TextStart = textStart,
                 TextLength = textLength,
                 Clusters = _clusters.ToArray(),
@@ -624,6 +689,7 @@ internal sealed class HorizontalComposer
             _first = null;
             _last = null;
             _flowAdvance = 0f;
+            _leadingInset = 0f;
             _glyphs.Clear();
             _x.Clear();
             _y.Clear();

@@ -7,6 +7,8 @@ namespace Kkindle.Infrastructure;
 
 public sealed partial class ReaderDataService
 {
+    // Version 2 excludes ruby pronunciation from the searchable body text.
+    private const int CurrentTextExtractionVersion = 2;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
     private bool _ftsAvailable;
@@ -78,7 +80,8 @@ public sealed partial class ReaderDataService
                     ChapterPath TEXT NOT NULL,
                     StartOffset INTEGER NOT NULL,
                     EndOffset INTEGER NOT NULL,
-                    Content TEXT NOT NULL
+                    Content TEXT NOT NULL,
+                    TextExtractionVersion INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS UX_BookContentChunks_Position
                     ON BookContentChunks(BookFileId, SourceHash, ChapterIndex, ChunkIndex);
@@ -168,6 +171,7 @@ public sealed partial class ReaderDataService
             await EnsureReaderLayoutParagraphIndentColumnAsync(connection, cancellationToken);
             await EnsureReaderAnnotationStyleColumnAsync(connection, cancellationToken);
             await EnsureReaderBookmarkPositionColumnsAsync(connection, cancellationToken);
+            await EnsureTextExtractionVersionColumnAsync(connection, cancellationToken);
             await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
 
             await using (var syncTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
@@ -542,6 +546,25 @@ public sealed partial class ReaderDataService
         await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task EnsureTextExtractionVersionColumnAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        using var inspect = connection.CreateCommand();
+        inspect.CommandText = "PRAGMA table_info(BookContentChunks);";
+        await using (var reader = await inspect.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), "TextExtractionVersion", StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+        }
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE BookContentChunks ADD COLUMN TextExtractionVersion INTEGER NOT NULL DEFAULT 1;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task EnsureReaderAnnotationStyleColumnAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
@@ -891,10 +914,12 @@ public sealed partial class ReaderDataService
         command.CommandText = """
             SELECT EXISTS(
                 SELECT 1 FROM BookContentChunks
-                WHERE BookFileId = $bookFileId AND SourceHash = $sourceHash LIMIT 1);
+                WHERE BookFileId = $bookFileId AND SourceHash = $sourceHash
+                    AND TextExtractionVersion = $textVersion LIMIT 1);
             """;
         command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
         command.Parameters.AddWithValue("$sourceHash", sourceHash);
+        command.Parameters.AddWithValue("$textVersion", CurrentTextExtractionVersion);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
     }
 
@@ -948,10 +973,10 @@ public sealed partial class ReaderDataService
             insert.CommandText = """
                 INSERT INTO BookContentChunks (
                     BookId, BookFileId, SourceHash, ChapterIndex, ChunkIndex, ChapterTitle,
-                    ChapterPath, StartOffset, EndOffset, Content)
+                    ChapterPath, StartOffset, EndOffset, Content, TextExtractionVersion)
                 VALUES (
                     $bookId, $bookFileId, $sourceHash, $chapterIndex, $chunkIndex, $chapterTitle,
-                    $chapterPath, $startOffset, $endOffset, $content);
+                    $chapterPath, $startOffset, $endOffset, $content, $textVersion);
                 """;
             insert.Parameters.Add("$bookId", SqliteType.Text);
             insert.Parameters.Add("$bookFileId", SqliteType.Text);
@@ -963,6 +988,7 @@ public sealed partial class ReaderDataService
             insert.Parameters.Add("$startOffset", SqliteType.Integer);
             insert.Parameters.Add("$endOffset", SqliteType.Integer);
             insert.Parameters.Add("$content", SqliteType.Text);
+            insert.Parameters.AddWithValue("$textVersion", CurrentTextExtractionVersion);
 
             var count = 0;
             await foreach (var chunk in chunks.WithCancellation(cancellationToken))

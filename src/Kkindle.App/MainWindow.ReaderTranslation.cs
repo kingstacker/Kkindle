@@ -27,10 +27,16 @@ public partial class MainWindow
             _ => ReaderTranslationProvider.Ai
         };
         _readerTranslationTargetLanguage = TranslationLanguageCatalog.NormalizeTarget(settings.TargetLanguage);
-        await TranslateReaderSelectionAsync(_readerTranslationProvider);
+        await TranslateReaderSelectionAsync(
+            _readerTranslationProvider,
+            settings.AiRequestsPerMinute,
+            settings.GoogleProxyAddress);
     }
 
-    private async Task TranslateReaderSelectionAsync(ReaderTranslationProvider provider)
+    private async Task TranslateReaderSelectionAsync(
+        ReaderTranslationProvider provider,
+        int aiRequestsPerMinute,
+        string googleProxyAddress)
     {
         var source = (_readerPendingSelection ?? string.Empty).Trim();
         if (source.Length == 0) return;
@@ -79,7 +85,9 @@ public partial class MainWindow
                 provider,
                 _readerTranslationTargetLanguage,
                 provider == ReaderTranslationProvider.Ai ? _readerAiSettings : null,
-                cancellation.Token);
+                cancellation.Token,
+                aiRequestsPerMinute,
+                googleProxyAddress);
             if (requestSequence != _readerTranslationRequestSequence
                 || !ReferenceEquals(_readerTranslationCancellation, cancellation))
                 return;

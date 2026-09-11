@@ -1,20 +1,33 @@
+using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
+using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.Core;
+using Ellipse = Avalonia.Controls.Shapes.Ellipse;
 
 namespace Kkindle;
 
 /// <summary>
 /// Modeless progress window for book pinyin generation. Its layout mirrors
-/// the translation window: a total progress header followed by an append-only
+/// the translation window: a total progress header followed by a reordered
 /// waterfall of original text, pinyin output and the processing flow.
 /// </summary>
 internal sealed class PinyinBookProgressWindow : Window
 {
+    private const string White = "#FFFFFF";
+    private const string Ink = "#111111";
+    private const string MutedInk = "#737373";
+    private const string Hairline = "#E1E1E1";
+    private const string SoftGray = "#F5F5F5";
+    private const string GrayDot = "#B5B5B5";
+
     private readonly TextBlock _bookText = new();
     private readonly TextBlock _engineText = new();
     private readonly TextBlock _stageText = new();
@@ -25,14 +38,19 @@ internal sealed class PinyinBookProgressWindow : Window
     private readonly TextBlock _segmentSummaryText = new();
     private readonly TextBlock _emptySegmentText = new();
     private readonly ProgressBar _progressBar = new();
-    private readonly ScrollViewer _segmentScrollViewer = new();
-    private readonly StackPanel _segmentPanel = new();
+    private readonly ListBox _segmentList = new();
+    private readonly ObservableCollection<SegmentRow> _orderedSegmentRows = [];
     private readonly Button _cancelButton = new();
     private readonly Button _closeButton = new();
-    private readonly Dictionary<int, SegmentRowView> _segmentRows = [];
+    private readonly Dictionary<int, SegmentRow> _segmentRows = [];
+    private readonly SortedSet<int> _processingSegmentIndices = [];
+    private int _completedSegmentCount;
+    private int _failedSegmentCount;
     private bool _finished;
     private bool _cancelRaised;
     private bool _scrollQueued;
+    private int? _currentSegmentIndex;
+    private int? _pendingCenterSegmentIndex;
 
     public PinyinBookProgressWindow(string bookTitle, bool aiReviewEnabled)
     {
@@ -43,17 +61,18 @@ internal sealed class PinyinBookProgressWindow : Window
         MinHeight = 460;
         CanResize = true;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new SolidColorBrush(Color.Parse("#FFFDFC"));
+        Background = new SolidColorBrush(Color.Parse(White));
 
         _bookText.Text = bookTitle;
         _bookText.FontSize = 20;
         _bookText.FontWeight = FontWeight.SemiBold;
+        _bookText.Foreground = new SolidColorBrush(Color.Parse(Ink));
         _bookText.TextWrapping = TextWrapping.Wrap;
 
         _engineText.Text = aiReviewEnabled
             ? "本地注音  ·  AI 疑难复核"
             : "本地注音  ·  仅本地生成";
-        _engineText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _engineText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _engineText.FontSize = 12;
         _engineText.TextWrapping = TextWrapping.Wrap;
 
@@ -61,7 +80,7 @@ internal sealed class PinyinBookProgressWindow : Window
         _stageText.FontSize = 14;
         _stageText.FontWeight = FontWeight.SemiBold;
 
-        _currentText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _currentText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _currentText.FontSize = 12;
         _currentText.TextWrapping = TextWrapping.Wrap;
         _currentText.MaxLines = 2;
@@ -70,13 +89,15 @@ internal sealed class PinyinBookProgressWindow : Window
         _progressBar.Maximum = 100;
         _progressBar.Height = 8;
         _progressBar.Margin = new Thickness(0, 8, 0, 0);
+        _progressBar.Foreground = new SolidColorBrush(Color.Parse(Ink));
+        _progressBar.Background = new SolidColorBrush(Color.Parse(Hairline));
 
         _percentageText.Text = "0%";
         _percentageText.HorizontalAlignment = HorizontalAlignment.Right;
         _percentageText.FontSize = 13;
         _percentageText.FontWeight = FontWeight.SemiBold;
 
-        _detailsText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _detailsText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _detailsText.FontSize = 11;
         _detailsText.TextWrapping = TextWrapping.Wrap;
 
@@ -87,26 +108,40 @@ internal sealed class PinyinBookProgressWindow : Window
             FontWeight = FontWeight.SemiBold
         };
         _segmentSummaryText.Text = "等待扫描…";
-        _segmentSummaryText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+        _segmentSummaryText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _segmentSummaryText.FontSize = 11;
         _segmentSummaryText.HorizontalAlignment = HorizontalAlignment.Right;
         _segmentSummaryText.VerticalAlignment = VerticalAlignment.Center;
 
-        _emptySegmentText.Text = "扫描到正文段落后，会在这里按处理顺序显示原文、注音结果和流程。";
-        _emptySegmentText.Foreground = new SolidColorBrush(Color.Parse("#888880"));
+        _emptySegmentText.Text = "扫描到正文段落后，会在这里显示注音瀑布流。";
+        _emptySegmentText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
         _emptySegmentText.FontSize = 12;
         _emptySegmentText.TextWrapping = TextWrapping.Wrap;
         _emptySegmentText.Margin = new Thickness(4, 6, 4, 6);
-        _segmentPanel.Orientation = Orientation.Vertical;
-        _segmentPanel.Spacing = 10;
-        _segmentPanel.Children.Add(_emptySegmentText);
+        _emptySegmentText.VerticalAlignment = VerticalAlignment.Top;
+        _segmentList.ItemsSource = _orderedSegmentRows;
+        _segmentList.ItemsPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel());
+        _segmentList.ItemTemplate = new FuncDataTemplate<SegmentRow>((_, _) => new SegmentRowControl
+        {
+            [!SegmentRowControl.SegmentProperty] = new Binding(nameof(SegmentRow.Segment))
+        }, supportsRecycling: true);
+        _segmentList.Background = Brushes.Transparent;
+        _segmentList.BorderThickness = new Thickness(0);
+        _segmentList.Padding = new Thickness(0, 2, 8, 2);
+        ScrollViewer.SetVerticalScrollBarVisibility(_segmentList, ScrollBarVisibility.Auto);
+        ScrollViewer.SetHorizontalScrollBarVisibility(_segmentList, ScrollBarVisibility.Disabled);
+        _segmentList.Styles.Add(new Style(selector => selector.OfType<ListBoxItem>())
+        {
+            Setters =
+            {
+                new Setter(ListBoxItem.PaddingProperty, new Thickness(0)),
+                new Setter(ListBoxItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
+                new Setter(ListBoxItem.FocusableProperty, false)
+            }
+        });
+        var streamBody = new Grid { Children = { _segmentList, _emptySegmentText } };
 
-        _segmentScrollViewer.Content = _segmentPanel;
-        _segmentScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        _segmentScrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        _segmentScrollViewer.Padding = new Thickness(0, 2, 8, 2);
-
-        _resultText.Foreground = new SolidColorBrush(Color.Parse("#3F6B4A"));
+        _resultText.Foreground = new SolidColorBrush(Color.Parse(Ink));
         _resultText.FontSize = 11;
         _resultText.TextWrapping = TextWrapping.Wrap;
 
@@ -161,7 +196,7 @@ internal sealed class PinyinBookProgressWindow : Window
                     _currentText,
                     _detailsText,
                     streamHeader,
-                    _segmentScrollViewer,
+                    streamBody,
                     _resultText,
                     buttons
                 }
@@ -173,7 +208,7 @@ internal sealed class PinyinBookProgressWindow : Window
         Grid.SetRow(_currentText, 4);
         Grid.SetRow(_detailsText, 5);
         Grid.SetRow(streamHeader, 6);
-        Grid.SetRow(_segmentScrollViewer, 7);
+        Grid.SetRow(streamBody, 7);
         Grid.SetRow(_resultText, 8);
         Grid.SetRow(buttons, 9);
 
@@ -182,23 +217,38 @@ internal sealed class PinyinBookProgressWindow : Window
 
     public event EventHandler? CancelRequested;
 
-    public void Update(PinyinBookProgress progress)
+    public void Update(PinyinBookProgress progress) => UpdateBatch([progress]);
+
+    public void UpdateBatch(IReadOnlyList<PinyinBookProgress> updates)
     {
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            Dispatcher.UIThread.Post(() => Update(progress));
+            Dispatcher.UIThread.Post(() => UpdateBatch(updates), DispatcherPriority.Background);
             return;
         }
-        if (_finished) return;
+        if (_finished || updates.Count == 0) return;
 
+        var progress = updates[^1];
         _stageText.Text = progress.Stage;
         _currentText.Text = progress.CurrentItem;
         _progressBar.Value = Math.Clamp(progress.Percentage, 0, 100);
         _percentageText.Text = $"{progress.Percentage:0}%";
         _detailsText.Text = BuildProgressDetails(progress);
 
-        if (progress.Segment is { } segment)
+        // A fast local engine may finish a paragraph within one frame. Apply
+        // its latest state once, while retaining every paragraph in the stream.
+        var segments = new Dictionary<int, PinyinBookSegmentProgress>();
+        foreach (var update in updates)
+            if (update.Segment is { } segment) segments[segment.Index] = segment;
+        foreach (var segment in segments.Values)
             UpdateSegment(segment);
+        if (segments.Count == 0) return;
+
+        _segmentSummaryText.Text = $"已显示 {_segmentRows.Count:N0} 段  ·  已完成 {_completedSegmentCount:N0} 段"
+            + (_failedSegmentCount > 0 ? $"  ·  待复核 {_failedSegmentCount:N0} 段" : string.Empty);
+        // Local-only work often has no Processing row by the next render.
+        // Follow the latest completed row in that case instead of staying put.
+        QueueScrollToSegment(_currentSegmentIndex ?? segments.Values.Last().Index);
     }
 
     public void MarkAddingToLibrary()
@@ -235,7 +285,9 @@ internal sealed class PinyinBookProgressWindow : Window
         _resultText.Text = result.AiReviewError is null
             ? string.Empty
             : $"提示：{result.AiReviewError}，缓存已保留，可下次继续复核。";
-        QueueScrollToEnd();
+        _currentSegmentIndex = null;
+        ReorderSegmentRows();
+        QueueScrollToTop();
         SetFinishedState();
     }
 
@@ -305,6 +357,8 @@ internal sealed class PinyinBookProgressWindow : Window
         foreach (var row in _segmentRows.Values)
             row.MarkCanceled();
         _segmentSummaryText.Text = $"已显示 {_segmentRows.Count:N0} 段";
+        _currentSegmentIndex = null;
+        ReorderSegmentRows();
         SetFinishedState();
     }
 
@@ -324,6 +378,8 @@ internal sealed class PinyinBookProgressWindow : Window
             : string.Empty;
         foreach (var row in _segmentRows.Values)
             row.MarkCanceled();
+        _currentSegmentIndex = null;
+        ReorderSegmentRows();
         SetFinishedState();
     }
 
@@ -331,32 +387,120 @@ internal sealed class PinyinBookProgressWindow : Window
     {
         if (!_segmentRows.TryGetValue(segment.Index, out var row))
         {
-            if (_emptySegmentText.Parent is Panel parent)
-                parent.Children.Remove(_emptySegmentText);
-
-            row = new SegmentRowView(segment);
+            _emptySegmentText.IsVisible = false;
+            row = new SegmentRow(segment);
             _segmentRows[segment.Index] = row;
-            _segmentPanel.Children.Add(row.Control);
+        }
+        else
+        {
+            if (row.IsCompleted) _completedSegmentCount--;
+            if (row.IsFailed) _failedSegmentCount--;
+            _processingSegmentIndices.Remove(row.Index);
+            row.Update(segment);
         }
 
-        row.Update(segment);
-        var completedCount = _segmentRows.Values.Count(item => item.IsCompleted);
-        var failedCount = _segmentRows.Values.Count(item => item.IsFailed);
-        _segmentSummaryText.Text = $"已显示 {_segmentRows.Count:N0} 段  ·  已完成 {completedCount:N0} 段"
-            + (failedCount > 0 ? $"  ·  待复核 {failedCount:N0} 段" : string.Empty);
-        QueueScrollToEnd();
+        if (row.IsCompleted) _completedSegmentCount++;
+        if (row.IsFailed) _failedSegmentCount++;
+        if (row.IsProcessing) _processingSegmentIndices.Add(row.Index);
+        _currentSegmentIndex = _processingSegmentIndices.Count > 0 ? _processingSegmentIndices.Min : null;
+        PlaceSegmentRow(row);
     }
 
-    private void QueueScrollToEnd()
+    private void PlaceSegmentRow(SegmentRow row)
     {
+        var previous = row.Position;
+        // Sequential local annotation normally appends a row, then completes
+        // it in place. Avoid sorting/scanning the whole book for either update.
+        if (previous >= 0
+            && (previous == 0 || CompareRows(_orderedSegmentRows[previous - 1], row) <= 0)
+            && (previous == _orderedSegmentRows.Count - 1 || CompareRows(row, _orderedSegmentRows[previous + 1]) <= 0))
+            return;
+
+        var low = 0;
+        var high = _orderedSegmentRows.Count - (previous >= 0 ? 1 : 0);
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            var candidate = previous >= 0 && middle >= previous ? middle + 1 : middle;
+            if (CompareRows(_orderedSegmentRows[candidate], row) < 0) low = middle + 1;
+            else high = middle;
+        }
+        if (previous >= 0)
+        {
+            _orderedSegmentRows.Move(previous, low);
+            UpdateRowPositions(Math.Min(previous, low), Math.Max(previous, low));
+        }
+        else
+        {
+            _orderedSegmentRows.Insert(low, row);
+            UpdateRowPositions(low, _orderedSegmentRows.Count - 1);
+        }
+    }
+
+    private static int CompareRows(SegmentRow left, SegmentRow right)
+    {
+        static int Group(SegmentRow row) => row.IsCompleted ? 0 : row.IsProcessing ? 1 : 2;
+        var group = Group(left).CompareTo(Group(right));
+        return group != 0 ? group : left.Index.CompareTo(right.Index);
+    }
+
+    private void UpdateRowPositions(int first, int last)
+    {
+        for (var index = first; index <= last; index++)
+            _orderedSegmentRows[index].Position = index;
+    }
+
+    private void ReorderSegmentRows()
+    {
+        if (_segmentRows.Count == 0) return;
+
+        var orderedRows = ProgressWaterfallOrder.Order(
+            _segmentRows.Values,
+            _currentSegmentIndex,
+            item => item.Index,
+            item => item.IsCompleted,
+            item => item.IsProcessing);
+        for (var position = 0; position < orderedRows.Length; position++)
+        {
+            var previous = orderedRows[position].Position;
+            if (previous == position) continue;
+            _orderedSegmentRows.Move(previous, position);
+            UpdateRowPositions(Math.Min(previous, position), Math.Max(previous, position));
+        }
+    }
+
+    private void QueueScrollToSegment(int segmentIndex)
+    {
+        _pendingCenterSegmentIndex = segmentIndex;
         if (_scrollQueued) return;
         _scrollQueued = true;
         Dispatcher.UIThread.Post(() =>
         {
             _scrollQueued = false;
-            if (IsVisible)
-                _segmentScrollViewer.ScrollToEnd();
-        });
+            if (!IsVisible || _pendingCenterSegmentIndex is not { } currentIndex)
+            {
+                _pendingCenterSegmentIndex = null;
+                return;
+            }
+
+            _pendingCenterSegmentIndex = null;
+            if (!_segmentRows.TryGetValue(currentIndex, out var row))
+            {
+                return;
+            }
+
+            _segmentList.ScrollIntoView(row);
+        }, DispatcherPriority.Render);
+    }
+
+    private void QueueScrollToTop()
+    {
+        _pendingCenterSegmentIndex = null;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (IsVisible && _orderedSegmentRows.Count > 0)
+                _segmentList.ScrollIntoView(_orderedSegmentRows[0]);
+        }, DispatcherPriority.Render);
     }
 
     private static string BuildProgressDetails(PinyinBookProgress progress)
@@ -389,10 +533,32 @@ internal sealed class PinyinBookProgressWindow : Window
         CancelRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private sealed class SegmentRowView
+    private sealed class SegmentRow(PinyinBookSegmentProgress segment) : ObservableObject
     {
+        private PinyinBookSegmentProgress _segment = segment;
+        public PinyinBookSegmentProgress Segment => _segment;
+        public int Index => Segment.Index;
+        public int Position { get; set; } = -1;
+        public bool IsProcessing => Segment.Status == PinyinBookSegmentStatus.Processing;
+        public bool IsCompleted => Segment.Status == PinyinBookSegmentStatus.Completed;
+        public bool IsFailed => Segment.Status == PinyinBookSegmentStatus.Failed;
+
+        public void Update(PinyinBookSegmentProgress value) => SetProperty(ref _segment, value, nameof(Segment));
+
+        public void MarkCanceled()
+        {
+            if (IsProcessing)
+                Update(Segment with { Status = PinyinBookSegmentStatus.Canceled, ProcessFlow = "任务取消", ErrorMessage = null });
+        }
+    }
+
+    private sealed class SegmentRowControl : Border
+    {
+        public static readonly StyledProperty<PinyinBookSegmentProgress?> SegmentProperty =
+            AvaloniaProperty.Register<SegmentRowControl, PinyinBookSegmentProgress?>(nameof(Segment));
+
         private readonly Border _card;
-        private readonly TextBlock _statusGlyph = new();
+        private readonly Ellipse _statusDot = new();
         private readonly TextBlock _indexText = new();
         private readonly TextBlock _statusText = new();
         private readonly TextBlock _originalText = new();
@@ -401,18 +567,16 @@ internal sealed class PinyinBookProgressWindow : Window
         private readonly TextBlock _errorText = new();
         private readonly Border _originalBlock;
         private readonly Border _annotatedBlock;
-        private PinyinBookSegmentStatus _status;
 
-        public SegmentRowView(PinyinBookSegmentProgress segment)
+        public SegmentRowControl()
         {
-            _statusGlyph.FontSize = 20;
-            _statusGlyph.FontWeight = FontWeight.Bold;
-            _statusGlyph.Width = 28;
-            _statusGlyph.TextAlignment = TextAlignment.Center;
-            _statusGlyph.VerticalAlignment = VerticalAlignment.Top;
+            _statusDot.Width = 8;
+            _statusDot.Height = 8;
+            _statusDot.HorizontalAlignment = HorizontalAlignment.Center;
+            _statusDot.VerticalAlignment = VerticalAlignment.Center;
 
             _indexText.FontSize = 11;
-            _indexText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+            _indexText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
             _indexText.TextTrimming = TextTrimming.CharacterEllipsis;
 
             _statusText.FontSize = 11;
@@ -424,11 +588,11 @@ internal sealed class PinyinBookProgressWindow : Window
             _annotatedText.TextWrapping = TextWrapping.Wrap;
 
             _flowText.FontSize = 11;
-            _flowText.Foreground = new SolidColorBrush(Color.Parse("#6B6B66"));
+            _flowText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
             _flowText.TextWrapping = TextWrapping.Wrap;
 
             _errorText.FontSize = 11;
-            _errorText.Foreground = new SolidColorBrush(Color.Parse("#A2382A"));
+            _errorText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
             _errorText.TextWrapping = TextWrapping.Wrap;
 
             _originalBlock = new Border
@@ -467,32 +631,35 @@ internal sealed class PinyinBookProgressWindow : Window
 
             var content = new Grid
             {
-                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-                ColumnSpacing = 10,
-                Children = { _statusGlyph, body }
+                ColumnDefinitions = new ColumnDefinitions("18,*"),
+                ColumnSpacing = 12,
+                Children = { _statusDot, body }
             };
             Grid.SetColumn(body, 1);
 
-            _card = new Border
-            {
-                Padding = new Thickness(10, 9),
-                CornerRadius = new CornerRadius(4),
-                BorderThickness = new Thickness(3, 1, 1, 1),
-                Child = content
-            };
-            Control = _card;
-            Update(segment);
+            _card = this;
+            Padding = new Thickness(12, 11);
+            Margin = new Thickness(0, 0, 0, 8);
+            CornerRadius = new CornerRadius(0);
+            BorderThickness = new Thickness(1);
+            Child = content;
         }
 
-        public Control Control { get; }
-
-        public bool IsCompleted => _status == PinyinBookSegmentStatus.Completed;
-
-        public bool IsFailed => _status == PinyinBookSegmentStatus.Failed;
-
-        public void Update(PinyinBookSegmentProgress segment)
+        public PinyinBookSegmentProgress? Segment
         {
-            _status = segment.Status;
+            get => GetValue(SegmentProperty);
+            set => SetValue(SegmentProperty, value);
+        }
+
+        protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+        {
+            base.OnPropertyChanged(change);
+            if (change.Property == SegmentProperty && Segment is { } segment)
+                Update(segment);
+        }
+
+        private void Update(PinyinBookSegmentProgress segment)
+        {
             var entryName = string.IsNullOrWhiteSpace(segment.EntryName)
                 ? "正文"
                 : Path.GetFileName(segment.EntryName);
@@ -515,44 +682,24 @@ internal sealed class PinyinBookProgressWindow : Window
                 : $"原因：{segment.ErrorMessage}";
             _errorText.IsVisible = !string.IsNullOrWhiteSpace(segment.ErrorMessage);
 
-            var (glyph, label, accent, background, annotatedBackground) = segment.Status switch
+            var label = segment.Status switch
             {
-                PinyinBookSegmentStatus.Completed =>
-                    ("√", "已完成", "#3F6B4A", "#F4FAF5", "#EDF7EF"),
-                PinyinBookSegmentStatus.Failed =>
-                    ("×", "待复核", "#A2382A", "#FFF4F2", "#FDEBE8"),
-                PinyinBookSegmentStatus.Canceled =>
-                    ("—", "已取消", "#777770", "#F3F3F0", "#ECECE8"),
-                _ =>
-                    ("…", "处理中", "#8A5A00", "#FFFAF0", "#FFF5D9")
+                PinyinBookSegmentStatus.Completed => "已完成",
+                PinyinBookSegmentStatus.Failed => "失败",
+                PinyinBookSegmentStatus.Canceled => "已取消",
+                _ => "处理中"
             };
-            var accentBrush = new SolidColorBrush(Color.Parse(accent));
-            _statusGlyph.Text = glyph;
-            _statusGlyph.Foreground = accentBrush;
+            var completed = segment.Status == PinyinBookSegmentStatus.Completed;
+            var statusBrush = new SolidColorBrush(Color.Parse(completed ? Ink : MutedInk));
+            _statusDot.Fill = new SolidColorBrush(Color.Parse(completed ? Ink : GrayDot));
             _statusText.Text = label;
-            _statusText.Foreground = accentBrush;
-            _card.BorderBrush = accentBrush;
-            _card.Background = new SolidColorBrush(Color.Parse(background));
-            _originalBlock.Background = new SolidColorBrush(Color.Parse("#FFFFFF"));
-            _annotatedBlock.Background = new SolidColorBrush(Color.Parse(annotatedBackground));
-        }
-
-        public void MarkCanceled()
-        {
-            if (_status is not PinyinBookSegmentStatus.Processing) return;
-            _status = PinyinBookSegmentStatus.Canceled;
-            _annotatedText.Text = "未完成";
-            _flowText.Text = "流程：任务取消";
-            _errorText.Text = string.Empty;
-            _errorText.IsVisible = false;
-            var accentBrush = new SolidColorBrush(Color.Parse("#777770"));
-            _statusGlyph.Text = "—";
-            _statusGlyph.Foreground = accentBrush;
-            _statusText.Text = "已取消";
-            _statusText.Foreground = accentBrush;
-            _card.BorderBrush = accentBrush;
-            _card.Background = new SolidColorBrush(Color.Parse("#F3F3F0"));
-            _annotatedBlock.Background = new SolidColorBrush(Color.Parse("#ECECE8"));
+            _statusText.Foreground = statusBrush;
+            _card.BorderBrush = segment.Status == PinyinBookSegmentStatus.Processing
+                ? statusBrush
+                : new SolidColorBrush(Color.Parse(Hairline));
+            _card.Background = new SolidColorBrush(Color.Parse(White));
+            _originalBlock.Background = new SolidColorBrush(Color.Parse(White));
+            _annotatedBlock.Background = new SolidColorBrush(Color.Parse(SoftGray));
         }
 
         private static TextBlock CreateLabel(string text) => new()
@@ -560,7 +707,7 @@ internal sealed class PinyinBookProgressWindow : Window
             Text = text,
             FontSize = 10,
             FontWeight = FontWeight.SemiBold,
-            Foreground = new SolidColorBrush(Color.Parse("#777770"))
+            Foreground = new SolidColorBrush(Color.Parse(MutedInk))
         };
     }
 }

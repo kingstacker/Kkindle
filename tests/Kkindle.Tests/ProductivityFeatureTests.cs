@@ -48,6 +48,8 @@ public sealed class ProductivityFeatureTests
                     SourceLanguage = "not-supported",
                     TargetLanguage = "auto",
                     OutputMode = BookTranslationOutputMode.None,
+                    AiRequestsPerMinute = BookTranslationSettings.MaxAiRequestsPerMinute + 1,
+                    GoogleProxyAddress = "  http://127.0.0.1:7890  ",
                     ContextMenuEnabled = false
                 },
                 DefaultReaderLayout = new ReaderLayoutSettings(FontScale: 9, LineHeight: -1)
@@ -77,15 +79,23 @@ public sealed class ProductivityFeatureTests
             Assert.Equal("auto", restored.Translation.SourceLanguage);
             Assert.Equal("zh-CN", restored.Translation.TargetLanguage);
             Assert.Equal(BookTranslationOutputMode.Translated, restored.Translation.OutputMode);
+            Assert.Equal(BookTranslationSettings.MaxAiRequestsPerMinute, restored.Translation.AiRequestsPerMinute);
+            Assert.Equal("http://127.0.0.1:7890", restored.Translation.GoogleProxyAddress);
             Assert.False(restored.Translation.ContextMenuEnabled);
             Assert.Equal(restored, store.LoadSynchronously());
 
             // Defaults start clean; a fresh install has never checked for updates.
             var freshSettings = new AppSettings();
             Assert.False(freshSettings.OnboardingCompleted);
-            Assert.False(freshSettings.PinyinContextMenuEnabled);
-            Assert.False(freshSettings.PinyinLocalOnly);
-            Assert.False(freshSettings.Translation.ContextMenuEnabled);
+            Assert.True(freshSettings.PinyinContextMenuEnabled);
+            Assert.True(freshSettings.PinyinLocalOnly);
+            Assert.True(freshSettings.Translation.ContextMenuEnabled);
+            Assert.Equal(0, freshSettings.Translation.AiRequestsPerMinute);
+            Assert.Equal(string.Empty, freshSettings.Translation.GoogleProxyAddress);
+            Assert.Equal(
+                0,
+                BookTranslationSettings.Normalize(new BookTranslationSettings { AiRequestsPerMinute = -1 })
+                    .AiRequestsPerMinute);
             Assert.Null(freshSettings.LastAutoUpdateCheckAt);
             Assert.Null(freshSettings.PendingUpdateVersion);
             Assert.Null(freshSettings.PendingUpdatePackagePath);
@@ -104,9 +114,9 @@ public sealed class ProductivityFeatureTests
             Assert.True(defaults.AutoConnectDevice);
             Assert.True(defaults.CompareKindleLibraryEnabled);
             Assert.True(defaults.AutoUpdateCheckEnabled);
-            Assert.False(defaults.PinyinContextMenuEnabled);
-            Assert.False(defaults.PinyinLocalOnly);
-            Assert.False(defaults.Translation.ContextMenuEnabled);
+            Assert.True(defaults.PinyinContextMenuEnabled);
+            Assert.True(defaults.PinyinLocalOnly);
+            Assert.True(defaults.Translation.ContextMenuEnabled);
         }
         finally { TestHelpers.TryDelete(root); }
     }

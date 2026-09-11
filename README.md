@@ -14,13 +14,21 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 - **Kreader** — Paginated or scrolling reading, table of contents, bookmarks, search, annotations, typography settings, reading progress, and Windows read-aloud.
 - **AI assistant** — Ask questions about the current book, summarize chapters, explain selections, and choose from discovered models through DeepSeek, OpenAI, or compatible endpoints. Requests use relevant local excerpts only.
 - **Kindle** — Detect USB/WPD/MTP devices, transfer books, manage fonts and dictionaries, and import `My Clippings.txt`.
-- **Tools and sync** — Calibre conversion, Z-Library downloads, local backups, encrypted credentials, and optional S3 synchronization.
+- **Tools and sync** — Calibre conversion, Z-Library downloads, local backups, encrypted credentials, and optional S3 / WebDAV synchronization.
 
 ## Download
 
 Download the latest Windows, Linux, or macOS package from [GitHub Releases](https://github.com/kingstacker/Kkindle/releases).
 
 Calibre is required separately for format conversion. macOS packages are available, but target-device validation is still in progress.
+
+## Cloud sync
+
+Choose **S3** or **WebDAV** in **Settings → Data & sync → Cloud sync**, enter the connection details, and select **Save settings**. Both providers retain their own addresses and credentials. Manual, startup, exit, and scheduled sync use the saved selection.
+
+For WebDAV, enter the URL of an existing directory, such as `https://dav.example.com/dav/`, and credentials if required. Some services require an app password. Kkindle creates a sync subdirectory named `kkindle` by default; change it in Advanced options. The connection test verifies read/write access and removes its test file. The server must support standard PROPFIND, MKCOL, GET, PUT, MOVE, and DELETE operations. Completed uploads are published with MOVE so interrupted transfers do not replace existing snapshots.
+
+The sync subdirectory, encryption, scheduling, and transfer options are shared between providers. Devices syncing the same directory need the same encryption key; use a new subdirectory when changing keys. Connection profile exports include only the selected provider's credentials. Existing `.kkindle-s3.json` profiles remain supported; WebDAV profiles use `.kkindle-webdav.json`. Local backups exclude connection passwords and encryption keys.
 
 ## Run from source
 

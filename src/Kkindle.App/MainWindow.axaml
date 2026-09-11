@@ -157,32 +157,37 @@
                     <Path Data="M 0,0 L 10,10 M 10,0 L 0,10" />
                 </Button>
             </StackPanel>
-            <!-- Modal overlays live in the content layer below this custom
-                 title bar. Mirror their visibility over the caption-button
-                 column so minimize/maximize/close are dimmed and blocked too. -->
-            <Border Grid.Column="1"
-                    Background="#66000000"
-                    ZIndex="100">
-                <Border.IsVisible>
-                    <MultiBinding Converter="{x:Static converters:BoolConverters.Or}">
-                        <Binding Path="IsVisible" ElementName="DevicePromptOverlay" />
-                        <Binding Path="IsVisible" ElementName="ConfirmationOverlay" />
-                        <Binding Path="IsVisible" ElementName="CollectionNameOverlay" />
-                        <Binding Path="IsVisible" ElementName="DeviceModelInputOverlay" />
-                        <Binding Path="IsVisible" ElementName="DoubanCandidateOverlay" />
-                        <Binding Path="IsVisible" ElementName="DoubanPreviewOverlay" />
-                        <Binding Path="IsVisible" ElementName="ImportFormatSelectionOverlay" />
-                        <Binding Path="IsVisible" ElementName="ImportConflictOverlay" />
-                        <!-- MessageOverlay lives above the complete window content
-                             layer, so it already covers the caption column and
-                             must not be mirrored here a second time. -->
-                        <!-- ReaderLayoutSettingsPopup is intentionally absent:
-                             its own dim overlay is a native popup window that
-                             already covers the caption column; adding it here
-                             stacks a second mask and darkens the corner. -->
-                    </MultiBinding>
-                </Border.IsVisible>
-            </Border>
+            <!-- Content dialogs sit below the title bar. Mirror their brush,
+                 visibility and animated opacity so the caption buttons dim
+                 with the rest of the window, including the first fade-in frame. -->
+            <Grid x:Name="CaptionModalOverlays" Grid.Column="1" ZIndex="100">
+                <Border Background="{Binding Background, ElementName=DevicePromptOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=DevicePromptOverlay}"
+                        Opacity="{Binding Opacity, ElementName=DevicePromptOverlay}" />
+                <Border Background="{Binding Background, ElementName=ConfirmationOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=ConfirmationOverlay}"
+                        Opacity="{Binding Opacity, ElementName=ConfirmationOverlay}" />
+                <Border Background="{Binding Background, ElementName=CollectionNameOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=CollectionNameOverlay}"
+                        Opacity="{Binding Opacity, ElementName=CollectionNameOverlay}" />
+                <Border Background="{Binding Background, ElementName=DeviceModelInputOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=DeviceModelInputOverlay}"
+                        Opacity="{Binding Opacity, ElementName=DeviceModelInputOverlay}" />
+                <Border Background="{Binding Background, ElementName=DoubanCandidateOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=DoubanCandidateOverlay}"
+                        Opacity="{Binding Opacity, ElementName=DoubanCandidateOverlay}" />
+                <Border Background="{Binding Background, ElementName=DoubanPreviewOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=DoubanPreviewOverlay}"
+                        Opacity="{Binding Opacity, ElementName=DoubanPreviewOverlay}" />
+                <Border Background="{Binding Background, ElementName=ImportFormatSelectionOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=ImportFormatSelectionOverlay}"
+                        Opacity="{Binding Opacity, ElementName=ImportFormatSelectionOverlay}" />
+                <Border Background="{Binding Background, ElementName=ImportConflictOverlay}"
+                        IsVisible="{Binding IsVisible, ElementName=ImportConflictOverlay}"
+                        Opacity="{Binding Opacity, ElementName=ImportConflictOverlay}" />
+                <!-- MessageOverlay and the native ReaderLayoutSettingsPopup
+                     already cover the title bar; mirroring them would dim it twice. -->
+            </Grid>
         </Grid>
 
         <Grid x:Name="LibraryRoot"
@@ -240,8 +245,8 @@
                                 Classes="syncIndicator"
                                 Click="S3SyncIndicatorButton_Click"
                                 Cursor="Hand"
-                                ToolTip.Tip="{DynamicResource Ui.Auto.A02FDF126DDFD0CB}"
-                                AutomationProperties.Name="{DynamicResource Ui.Auto.EEFCC7D924EF25BA}"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.08E9893FADDB6B0C}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.D530725A500152B4}"
                                 VerticalAlignment="Center">
                             <Grid Width="28" Height="28">
                                 <Path x:Name="S3SyncCloudIcon"
@@ -2291,6 +2296,41 @@
                                                     <ComboBoxItem Content="{DynamicResource Ui.Auto.A60334722AD27ABC}" Tag="google-free" />
                                                 </ComboBox>
                                             </StackPanel>
+                                            <Grid x:Name="TranslationAiRpmPane" ColumnDefinitions="*,220" ColumnSpacing="12">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.2C97F5ECD0B7DBC0}"
+                                                               FontSize="12"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.2A33E57EC21CE3BA}"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource MutedInkBrush}"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <NumericUpDown x:Name="TranslationAiRpmBox"
+                                                               Grid.Column="1"
+                                                               Minimum="0"
+                                                               Maximum="65536"
+                                                               Increment="1"
+                                                               Value="0"
+                                                               AutomationProperties.Name="{DynamicResource Ui.Auto.2C97F5ECD0B7DBC0}"
+                                                               FontSize="14" />
+                                            </Grid>
+                                            <Grid x:Name="TranslationGoogleProxyPane" ColumnDefinitions="*,220" ColumnSpacing="12">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.4D6C4A7B0E6E3A11}"
+                                                               FontSize="12"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.8B7B5D7E5F3A1C20}"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource MutedInkBrush}"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <TextBox x:Name="TranslationGoogleProxyBox"
+                                                         Grid.Column="1"
+                                                         PlaceholderText="http://127.0.0.1:7890"
+                                                         AutomationProperties.Name="{DynamicResource Ui.Auto.4D6C4A7B0E6E3A11}"
+                                                         FontSize="14" />
+                                            </Grid>
                                             <Grid ColumnDefinitions="*,220" ColumnSpacing="12">
                                                 <TextBlock Text="原文语言" FontSize="12" VerticalAlignment="Center" />
                                                 <ComboBox x:Name="TranslationSourceLanguageBox"
@@ -2310,7 +2350,6 @@
                                             <StackPanel Spacing="6">
                                                 <TextBlock Text="生成结果（可多选）" FontSize="12" TextWrapping="Wrap" />
                                                 <WrapPanel Orientation="Horizontal" ItemSpacing="14" LineSpacing="6">
-                                                    <CheckBox x:Name="TranslationOriginalOutputCheck" Content="原文件" IsChecked="False" IsCheckedChanged="TranslationOutputCheck_Changed" />
                                                     <CheckBox x:Name="TranslationTranslatedOutputCheck" Content="单翻译文件" IsChecked="True" IsCheckedChanged="TranslationOutputCheck_Changed" />
                                                     <CheckBox x:Name="TranslationBilingualOutputCheck" Content="双语对照版本" IsChecked="False" IsCheckedChanged="TranslationOutputCheck_Changed" />
                                                 </WrapPanel>
@@ -2319,6 +2358,7 @@
                                                           Classes="settingsToggle"
                                                           Content="在书籍右键菜单中显示“书籍翻译”"
                                                           AutomationProperties.Name="在书籍右键菜单中显示书籍翻译"
+                                                          IsChecked="True"
                                                           IsCheckedChanged="TranslationContextMenuEnabledCheck_Changed" />
                                         </StackPanel>
                                     </Border>
@@ -2332,14 +2372,36 @@
                                           Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="PinyinBookSettingsPane" Padding="0">
                                         <StackPanel Spacing="14">
+                                            <Border Padding="12" Background="#F7F7F4" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1">
+                                                <StackPanel Spacing="8">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                        <StackPanel Spacing="3">
+                                                            <TextBlock Text="{DynamicResource Ui.Auto.9D0A5E7D2C8F41A1}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                            <TextBlock Text="{DynamicResource Ui.Auto.6F5C5D1B7A224C2E}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <TextBlock x:Name="PinyinEngineStatusText" Grid.Column="1" MaxWidth="180" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextAlignment="Right" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                    <ProgressBar x:Name="PinyinEngineDownloadProgressBar" Height="5" IsVisible="False" IsIndeterminate="False" />
+                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                                                        <ComboBox x:Name="PinyinEngineSelector" FontSize="14" MinWidth="180" VerticalAlignment="Center" SelectionChanged="PinyinEngineSelector_SelectionChanged" AutomationProperties.Name="{DynamicResource Ui.Auto.9D0A5E7D2C8F41A1}">
+                                                            <ComboBoxItem Content="{DynamicResource Ui.Auto.4D6E2C7F0A9B43C1}" Tag="dotnet-g2p" />
+                                                            <ComboBoxItem Content="{DynamicResource Ui.Auto.7A8E3B1C5D6F4A20}" Tag="g2pw" />
+                                                        </ComboBox>
+                                                        <Button x:Name="PinyinEngineDownloadButton" Grid.Column="1" Classes="quiet" Padding="10,5" FontSize="11" Content="{DynamicResource Ui.Auto.BAC3414011D0C5C2}" Click="PinyinEngineDownloadButton_Click" />
+                                                        <Button x:Name="PinyinEngineCancelButton" Grid.Column="2" Classes="quiet" Padding="10,5" FontSize="11" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" IsVisible="False" Click="PinyinEngineCancelButton_Click" />
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
                                             <ToggleSwitch x:Name="PinyinLocalOnlyCheck"
                                                           Classes="settingsToggle"
                                                           Content="{DynamicResource Ui.Auto.D28FB2D23923B1E5}"
-                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.D28FB2D23923B1E5}" />
+                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.D28FB2D23923B1E5}"
+                                                          IsChecked="True" />
                                             <ToggleSwitch x:Name="PinyinContextMenuEnabledCheck"
                                                           Classes="settingsToggle"
                                                           Content="{DynamicResource Ui.Auto.72FEAA8FECA9631D}"
-                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.F5DFAFE0E87B2553}" />
+                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.F5DFAFE0E87B2553}"
+                                                          IsChecked="True" />
                                         </StackPanel>
                                     </Border>
                                 </Expander>
@@ -2417,17 +2479,19 @@
                                 </Expander>
                             </StackPanel>
                             <StackPanel Spacing="16" x:Name="SettingsDataSection" IsVisible="False">
-                                <Expander x:Name="SettingsS3Expander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.BB82E64487A01E21}" Tag="{DynamicResource Ui.Auto.947ACFD929442781}" AutomationProperties.Name="{DynamicResource Ui.Auto.BB82E64487A01E21}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                <Expander x:Name="SettingsS3Expander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.5F30FB70507CBC2C}" Tag="{DynamicResource Ui.Auto.947ACFD929442781}" AutomationProperties.Name="{DynamicResource Ui.Auto.5F30FB70507CBC2C}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsSyncSection" Padding="0">
                                         <StackPanel Spacing="14">
                                             <TextBlock Text="{DynamicResource Ui.Auto.C93D480F9C6D096F}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <ToggleSwitch x:Name="S3SyncEnabledCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.4E08C2329F790C28}" AutomationProperties.Name="{DynamicResource Ui.Auto.4E08C2329F790C28}" />
-                                            <ToggleSwitch x:Name="S3AutomaticSyncCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.1744BAADE68F9732}" AutomationProperties.Name="{DynamicResource Ui.Auto.1744BAADE68F9732}" />
-                                            <Grid ColumnDefinitions="*,150" ColumnSpacing="12">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <NumericUpDown x:Name="S3SyncIntervalBox" Grid.Column="1" Minimum="5" Maximum="1440" Increment="5" Value="30" AutomationProperties.Name="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" />
+                                            <ToggleSwitch x:Name="S3SyncEnabledCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.26A77111AC6A6A14}" AutomationProperties.Name="{DynamicResource Ui.Auto.26A77111AC6A6A14}" />
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="{DynamicResource Sync.ProviderLabel}" FontSize="14" VerticalAlignment="Center" />
+                                                <ComboBox x:Name="SyncProviderBox" Grid.Column="1" SelectedIndex="0" MinWidth="160" HorizontalAlignment="Left" AutomationProperties.Name="{DynamicResource Sync.ProviderLabel}">
+                                                    <ComboBoxItem Content="S3" />
+                                                    <ComboBoxItem Content="WebDAV" />
+                                                </ComboBox>
                                             </Grid>
-                                            <Border Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
+                                            <Border x:Name="S3ConnectionPanel" Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
                                                 <StackPanel Spacing="9">
                                                     <TextBlock Text="{DynamicResource Ui.Auto.72251455F2297070}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                     <TextBlock Text="{DynamicResource Ui.Auto.70E98FFE2B292C81}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
@@ -2449,11 +2513,34 @@
                                                     </Grid>
                                                 </StackPanel>
                                             </Border>
-                                            <Expander x:Name="SettingsS3AdvancedExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Tag="{DynamicResource Ui.Auto.3A4B3495E5C89857}" AutomationProperties.Name="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                            <Border x:Name="WebDavConnectionPanel" Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0" IsVisible="False">
+                                                <StackPanel Spacing="9">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.72251455F2297070}" FontSize="15" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{DynamicResource Sync.WebDavHelp}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Text="{DynamicResource Sync.WebDavEndpointLabel}" FontSize="12" VerticalAlignment="Center" />
+                                                        <TextBox x:Name="WebDavEndpointBox" Grid.Column="1" PlaceholderText="https://dav.example.com/dav/" AutomationProperties.Name="{DynamicResource Sync.WebDavEndpointLabel}" FontSize="14" />
+                                                    </Grid>
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Text="{DynamicResource Sync.WebDavUsernameLabel}" FontSize="12" VerticalAlignment="Center" />
+                                                        <TextBox x:Name="WebDavUsernameBox" Grid.Column="1" AutomationProperties.Name="{DynamicResource Sync.WebDavUsernameLabel}" FontSize="14" />
+                                                    </Grid>
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Text="{DynamicResource Sync.WebDavPasswordLabel}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                        <TextBox x:Name="WebDavPasswordBox" Grid.Column="1" PasswordChar="●" AutomationProperties.Name="{DynamicResource Sync.WebDavPasswordLabel}" FontSize="14" />
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                            <ToggleSwitch x:Name="S3AutomaticSyncCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.1744BAADE68F9732}" AutomationProperties.Name="{DynamicResource Ui.Auto.1744BAADE68F9732}" />
+                                            <Grid ColumnDefinitions="*,150" ColumnSpacing="12">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <NumericUpDown x:Name="S3SyncIntervalBox" Grid.Column="1" Minimum="5" Maximum="1440" Increment="5" Value="30" AutomationProperties.Name="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" />
+                                            </Grid>
+                                            <Expander x:Name="SettingsS3AdvancedExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Tag="{DynamicResource Ui.Auto.A78088A8B78D2E46}" AutomationProperties.Name="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                                 <Border>
                                                     <StackPanel Spacing="9">
                                                         <TextBlock Text="{DynamicResource Ui.Auto.1FF53DB62A2A3A4C}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                        <TextBlock Text="{DynamicResource Ui.Auto.F7C9C4CFD4F50703}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{DynamicResource Ui.Auto.99D7D216F6EF2268}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                                         <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
                                                             <TextBlock Text="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                             <TextBox x:Name="S3EncryptionKeyBox" Grid.Column="1" PasswordChar="●" AutomationProperties.Name="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="14" />
@@ -2466,13 +2553,13 @@
                                                             <TextBlock Text="{DynamicResource Ui.Auto.8267CD636CE539F9}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                             <NumericUpDown x:Name="S3ConcurrencyBox" Grid.Column="1" Minimum="1" Maximum="32" Increment="1" Value="4" AutomationProperties.Name="{DynamicResource Ui.Auto.8267CD636CE539F9}" FontSize="14" />
                                                         </Grid>
-                                                        <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <Grid x:Name="S3RegionRow" ColumnDefinitions="150,*" ColumnSpacing="10">
                                                             <TextBlock Text="Region" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                             <TextBox x:Name="S3RegionBox" Grid.Column="1" Text="us-east-1" AutomationProperties.Name="Region" FontSize="14" />
                                                         </Grid>
                                                         <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
-                                                            <TextBlock Text="{DynamicResource Ui.Auto.3AAE440415FDD869}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                            <TextBox x:Name="S3PrefixBox" Grid.Column="1" Text="kkindle" AutomationProperties.Name="{DynamicResource Ui.Auto.3AAE440415FDD869}" FontSize="14" />
+                                                            <TextBlock Text="{DynamicResource Ui.Auto.047FD23D813F5592}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                            <TextBox x:Name="S3PrefixBox" Grid.Column="1" Text="kkindle" AutomationProperties.Name="{DynamicResource Ui.Auto.047FD23D813F5592}" FontSize="14" />
                                                         </Grid>
                                                         <ToggleSwitch x:Name="S3PathStyleCheck" IsChecked="False" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.176EC00F33DEEA1C}" AutomationProperties.Name="{DynamicResource Ui.Auto.176EC00F33DEEA1C}" />
                                                         <ToggleSwitch x:Name="S3SkipTlsVerifyCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.37E7E1EFA89D10E1}" AutomationProperties.Name="{DynamicResource Ui.Auto.37E7E1EFA89D10E1}" />
@@ -2483,7 +2570,7 @@
                                             <Expander x:Name="SettingsS3ProfileExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.AF350F4FDBDCDD84}" Tag="{DynamicResource Ui.Auto.82FBE2C61593632C}" AutomationProperties.Name="{DynamicResource Ui.Auto.AF350F4FDBDCDD84}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                                 <Border>
                                                     <StackPanel Spacing="8">
-                                                        <TextBlock Text="{DynamicResource Ui.Auto.74ADE508B010AB31}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{DynamicResource Ui.Auto.4E06970E43D74425}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                                             <Button x:Name="S3ExportConnectionProfileButton" Content="{DynamicResource Ui.Auto.6E7D7EA130A1FCFA}" Click="ExportS3ConnectionProfileButton_Click" />
                                                             <Button x:Name="S3ImportConnectionProfileButton" Content="{DynamicResource Ui.Auto.9CD9DEE98B5E7988}" Classes="quiet" Click="ImportS3ConnectionProfileButton_Click" />
@@ -2500,7 +2587,7 @@
                                         <StackPanel Spacing="14">
                                             <TextBlock Text="{DynamicResource Ui.Auto.9DD9F8A0E4DE0220}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <TextBlock Text="{DynamicResource Ui.Auto.330BB890965835F9}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <TextBlock Text="{DynamicResource Ui.Auto.E8CBC61A2FF1925A}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.23221B10528D86C7}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <ToggleSwitch x:Name="AutoBackupCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D4B94B23423B837F}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.E4AD8CC2EC98305C}" AutomationProperties.Name="{DynamicResource Ui.Auto.E4AD8CC2EC98305C}" />
                                             <Grid ColumnDefinitions="*,160" ColumnSpacing="12">
                                                 <TextBlock Text="{DynamicResource Ui.Auto.E5243ABDEA37FB82}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
@@ -3416,14 +3503,16 @@
                                 MinWidth="38"
                                 Height="34"
                                 VerticalAlignment="Center"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center"
                                 AutomationProperties.Name="{DynamicResource Ui.Auto.0474752B788B123E}"
                                 ToolTip.Tip="{DynamicResource Ui.Auto.0474752B788B123E}"
                                 Click="ReaderTocMinimalToggleButton_Click">
-                            <Path Width="18"
-                                  Height="18"
+                            <Path Width="24"
+                                  Height="24"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
-                                  Data="M2.5 2.5h13v13h-13Z M5.5 6.5h7 M5.5 9h7 M5.5 11.5h7"
+                                  Data="M4.5 6H19.5 M4.5 12H19.5 M4.5 18H15.5"
                                   Stroke="#242424"
                                   StrokeThickness="1.5"
                                   StrokeLineCap="Round"
@@ -3712,14 +3801,16 @@
                                 Height="34"
                                 Padding="0"
                                 VerticalAlignment="Center"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center"
                                 AutomationProperties.Name="{DynamicResource Ui.Auto.EDCDBACEBE531DBF}"
                                 ToolTip.Tip="{DynamicResource Ui.Auto.EDCDBACEBE531DBF}"
                                 Click="ReaderTocCompactExpandButton_Click">
-                            <Path Width="18"
-                                  Height="18"
+                            <Path Width="24"
+                                  Height="24"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
-                                  Data="M2.5 2.5h13v13h-13Z M5.5 6.5h7 M5.5 9h7 M5.5 11.5h7"
+                                  Data="M4.5 6H19.5 M4.5 12H19.5 M4.5 18H15.5"
                                   Stroke="#242424"
                                   StrokeThickness="1.5"
                                   StrokeLineCap="Round"
@@ -3820,6 +3911,8 @@
                                     Classes="readerHeader"
                                     Width="38"
                                     MinWidth="38"
+                                    HorizontalContentAlignment="Center"
+                                    VerticalContentAlignment="Center"
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.ECDD3E4A16F4CD30}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.741925AF773FDAE3}"
                                     Click="ReaderTocButton_Click">
@@ -3832,7 +3925,7 @@
                                       StrokeThickness="1.5"
                                       StrokeLineCap="Round"
                                       StrokeJoin="Round"
-                                      Data="M5 5.5H19 M8 12H19 M8 18.5H15" />
+                                      Data="M4.5 6h1.5 M9.5 6h10 M4.5 12h1.5 M9.5 12h10 M4.5 18h1.5 M9.5 18h10" />
                             </Button>
                             <Button x:Name="ReaderSearchToolbarButton"
                                     Classes="readerHeader"
@@ -5194,8 +5287,7 @@
                 </Border>
             </Popup>
 
-            <!-- Reading layout settings. Typography remains per book while
-                 the vertical-writing switch is global. A native popup is required:
+            <!-- Reading layout settings. All layout options are global. A native popup is required:
                  the WebView2 HWND island covers ordinary Avalonia overlays. -->
             <Popup x:Name="ReaderLayoutSettingsPopup"
                    IsOpen="False"
@@ -5308,10 +5400,6 @@
                                           Content="{DynamicResource Ui.Auto.F7044E3D685ABD03}"
                                           FontSize="12"
                                           IsCheckedChanged="ReaderParagraphIndentCheck_IsCheckedChanged" />
-                                <TextBlock x:Name="ReaderLayoutSettingsStatusText"
-                                           FontSize="10"
-                                           Foreground="{StaticResource MutedInkBrush}"
-                                           TextWrapping="Wrap" />
                                 <Button Classes="quiet"
                                         Content="{DynamicResource Ui.Auto.F242C947972CE621}"
                                         HorizontalAlignment="Left"

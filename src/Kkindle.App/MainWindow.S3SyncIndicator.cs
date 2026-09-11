@@ -85,22 +85,22 @@ public partial class MainWindow
             StopS3SyncIndicatorAnimation();
     }
 
-    private string BuildS3SyncIndicatorTooltip() => _s3SyncIndicatorState switch
+    private string BuildS3SyncIndicatorTooltip() => _s3SyncStoredSettings.Settings.ProviderName + " · " + (_s3SyncIndicatorState switch
     {
-        S3SyncIndicatorState.Ready => T("S3 同步已就绪；点击立即同步"),
+        S3SyncIndicatorState.Ready => T("云端同步已就绪；点击立即同步"),
         S3SyncIndicatorState.Pending when !_s3SyncStoredSettings.Settings.AutomaticSyncEnabled
             || !_appSettings.NetworkEnabled || _s3SyncCancelledByUser => T("有本地变更待同步；点击立即同步"),
         S3SyncIndicatorState.Pending => T("有本地变更待同步；即将自动同步"),
         S3SyncIndicatorState.Syncing when _s3SyncExitInProgress => T("正在退出前同步；再次关闭窗口可取消并退出"),
-        S3SyncIndicatorState.Syncing => T("正在同步到 S3；点击打开设置可取消"),
-        S3SyncIndicatorState.Succeeded => T("S3 同步完成；点击再次同步"),
-        S3SyncIndicatorState.Warning => T("{0} 点击重试", _s3SyncIndicatorError ?? T("S3 同步需要注意。")),
-        S3SyncIndicatorState.ConfirmationRequired => T("S3 同步已暂停：大量删除需要确认；点击审核"),
+        S3SyncIndicatorState.Syncing => T("正在同步；点击打开设置可取消"),
+        S3SyncIndicatorState.Succeeded => T("云端同步完成；点击再次同步"),
+        S3SyncIndicatorState.Warning => T("{0} 点击重试", _s3SyncIndicatorError ?? T("云端同步需要注意。")),
+        S3SyncIndicatorState.ConfirmationRequired => T("云端同步已暂停：大量删除需要确认；点击审核"),
         S3SyncIndicatorState.Failed when !string.IsNullOrWhiteSpace(_s3SyncIndicatorError)
-            => T("S3 同步失败：{0}；点击重试", _s3SyncIndicatorError),
-        S3SyncIndicatorState.Failed => T("S3 同步失败；点击重试"),
-        _ => T("S3 同步未启用或未配置；点击打开设置")
-    };
+            => T("云端同步失败：{0}；点击重试", _s3SyncIndicatorError),
+        S3SyncIndicatorState.Failed => T("云端同步失败；点击重试"),
+        _ => T("云端同步未启用或未配置；点击打开设置")
+    });
 
     private void StartS3SyncIndicatorAnimation()
     {
@@ -140,8 +140,8 @@ public partial class MainWindow
             OpenSettingsExpander("Data", SettingsS3Expander);
             if (_s3SyncBusy) return;
             S3SyncStatusText.Text = settings.Enabled
-                ? T("请先完善 S3 同步设置。")
-                : T("请先开启 S3 同步。 ");
+                ? T("请先完善 云端同步设置。")
+                : T("请先开启 云端同步。 ");
             return;
         }
 

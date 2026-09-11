@@ -12,7 +12,8 @@ public static class ReaderBookSelectionPolicy
 
         return files
             .Where(file => IsSupportedFormat(file.Format))
-            .OrderBy(file => GetPriority(file.Format))
+            .OrderByDescending(PinyinBookPolicy.IsGeneratedPinyinVersion)
+            .ThenBy(file => GetPriority(file.Format))
             .ToArray();
     }
 

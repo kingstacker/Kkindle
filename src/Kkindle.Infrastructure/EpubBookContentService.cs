@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using HtmlAgilityPack;
 using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
@@ -120,11 +121,11 @@ public sealed partial class EpubBookContentService
         }
         catch (Exception exception) when (exception is System.Xml.XmlException or InvalidDataException)
         {
-            var html = await File.ReadAllTextAsync(chapterPath, cancellationToken);
-            html = HiddenContentRegex().Replace(html, " ");
-            html = BreakRegex().Replace(html, "\n");
-            html = TagRegex().Replace(html, " ");
-            return NormalizeExtractedText(WebUtility.HtmlDecode(html));
+            var html = new HtmlDocument();
+            html.LoadHtml(await File.ReadAllTextAsync(chapterPath, cancellationToken));
+            var builder = new StringBuilder();
+            AppendHtmlText(html.DocumentNode.SelectSingleNode("//body") ?? html.DocumentNode, builder);
+            return NormalizeExtractedText(builder.ToString());
         }
     }
 
@@ -132,7 +133,7 @@ public sealed partial class EpubBookContentService
     {
         if (builder.Length >= MaxChapterTextCharacters) return;
         var name = element.Name.LocalName.ToLowerInvariant();
-        if (name is "script" or "style" or "noscript" or "svg" or "math") return;
+        if (name is "script" or "style" or "noscript" or "svg" or "math" or "rt" or "rp") return;
         var isBlock = BlockElements.Contains(name);
         if (isBlock && builder.Length > 0) AppendBounded(builder, "\n");
 
@@ -165,6 +166,31 @@ public sealed partial class EpubBookContentService
         var remaining = MaxChapterTextCharacters - builder.Length;
         if (remaining <= 0 || value.Length == 0) return;
         builder.Append(value.AsSpan(0, Math.Min(remaining, value.Length)));
+    }
+
+    private static void AppendHtmlText(HtmlNode node, StringBuilder builder)
+    {
+        if (builder.Length >= MaxChapterTextCharacters) return;
+        if (node is HtmlTextNode text)
+        {
+            AppendBounded(builder, text.Text);
+            return;
+        }
+        var name = node.Name.ToLowerInvariant();
+        if (name is "script" or "style" or "noscript" or "svg" or "math" or "rt" or "rp") return;
+        var isBlock = BlockElements.Contains(name);
+        if (isBlock && builder.Length > 0) AppendBounded(builder, "\n");
+        if (name == "br") AppendBounded(builder, "\n");
+        else if (name == "img")
+        {
+            var alt = node.GetAttributeValue("alt", string.Empty);
+            if (!string.IsNullOrWhiteSpace(alt)) AppendBounded(builder, $" {alt} ");
+        }
+        else
+        {
+            foreach (var child in node.ChildNodes) AppendHtmlText(child, builder);
+        }
+        if (isBlock) AppendBounded(builder, "\n");
     }
 
     private static string NormalizeExtractedText(string value)
@@ -205,15 +231,6 @@ public sealed partial class EpubBookContentService
         "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "li", "main", "nav",
         "ol", "p", "pre", "section", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"
     };
-
-    [GeneratedRegex(@"<(script|style|noscript|svg|math)\b[^>]*>.*?</\1>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
-    private static partial Regex HiddenContentRegex();
-
-    [GeneratedRegex(@"<(br\s*/?|/p|/div|/li|/h[1-6]|/section|/tr)>", RegexOptions.IgnoreCase)]
-    private static partial Regex BreakRegex();
-
-    [GeneratedRegex(@"<[^>]+>", RegexOptions.Singleline)]
-    private static partial Regex TagRegex();
 
     [GeneratedRegex(@"[\t\f\v ]+")]
     private static partial Regex InlineWhitespaceRegex();

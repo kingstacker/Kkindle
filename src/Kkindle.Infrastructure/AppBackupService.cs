@@ -8,8 +8,8 @@ namespace Kkindle.Infrastructure;
 /// <summary>
 /// Creates and restores a portable Kkindle backup package.
 ///
-/// The package deliberately contains only non-secret settings. API keys, S3
-/// credentials, the S3 client-side encryption key and SMTP passwords stay
+/// The package deliberately contains only non-secret settings. API keys, sync
+/// credentials, the client-side encryption key and SMTP passwords stay
 /// protected by Windows on the current machine and are never written to an
 /// export file.
 /// </summary>
@@ -241,10 +241,13 @@ public sealed class AppBackupService
             },
             S3 = new BackupS3Settings
             {
+                Provider = s3.Settings.Provider,
                 Enabled = s3.Settings.Enabled,
                 AutomaticSyncEnabled = s3.Settings.AutomaticSyncEnabled,
                 IntervalMinutes = s3.Settings.IntervalMinutes,
                 Endpoint = s3.Settings.Endpoint,
+                WebDavEndpoint = s3.Settings.WebDavEndpoint,
+                WebDavAuthenticationRequired = s3.Settings.WebDavUsername.Length > 0,
                 Bucket = s3.Settings.Bucket,
                 Region = s3.Settings.Region,
                 PathStyle = s3.Settings.PathStyle,
@@ -433,12 +436,16 @@ public sealed class AppBackupService
         if (imported is null) return current.Settings;
 
         var currentSettings = current.Settings;
-        var credentialsReady = !string.IsNullOrWhiteSpace(currentSettings.AccessKey)
-            && !string.IsNullOrWhiteSpace(currentSettings.SecretKey);
+        var credentialsReady = imported.Provider == SyncProvider.WebDav
+            ? currentSettings.Provider == SyncProvider.WebDav
+                && currentSettings.WebDavEndpoint == S3SyncSettings.Normalize(new S3SyncSettings { WebDavEndpoint = imported.WebDavEndpoint ?? string.Empty }).WebDavEndpoint
+                && (!imported.WebDavAuthenticationRequired || currentSettings.WebDavUsername.Length > 0)
+            : !string.IsNullOrWhiteSpace(currentSettings.AccessKey) && !string.IsNullOrWhiteSpace(currentSettings.SecretKey);
         var encryptionReady = !imported.EncryptionEnabled
             || !string.IsNullOrWhiteSpace(currentSettings.EncryptionKey);
         return S3SyncSettings.Normalize(currentSettings with
         {
+            Provider = imported.Provider,
             // A portable package does not contain credentials. Keep an
             // imported endpoint/configuration visible, but avoid enabling an
             // automatic sync that cannot authenticate on a new machine.
@@ -446,6 +453,8 @@ public sealed class AppBackupService
             AutomaticSyncEnabled = imported.AutomaticSyncEnabled,
             IntervalMinutes = imported.IntervalMinutes,
             Endpoint = imported.Endpoint ?? string.Empty,
+            // Older S3-only backups do not carry a WebDAV field.
+            WebDavEndpoint = imported.WebDavEndpoint ?? currentSettings.WebDavEndpoint,
             Bucket = imported.Bucket ?? string.Empty,
             Region = imported.Region ?? "us-east-1",
             PathStyle = imported.PathStyle,
@@ -725,10 +734,13 @@ public sealed class AppBackupService
 
     private sealed class BackupS3Settings
     {
+        public SyncProvider Provider { get; set; }
         public bool Enabled { get; set; }
         public bool AutomaticSyncEnabled { get; set; } = true;
         public int IntervalMinutes { get; set; } = 30;
         public string? Endpoint { get; set; }
+        public string? WebDavEndpoint { get; set; }
+        public bool WebDavAuthenticationRequired { get; set; }
         public string? Bucket { get; set; }
         public string? Region { get; set; }
         public bool PathStyle { get; set; }

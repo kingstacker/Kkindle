@@ -12,8 +12,7 @@ namespace Kkindle.Layout;
 /// concatenation of every body text node in document order, so annotations
 /// and search jumps captured against the live document keep pointing at the
 /// same characters. Footnote definitions stay in the offset stream, but are
-/// skipped by layout so their references can show the definition in a popup;
-/// ruby phonetics remain marked ghost / skipped.
+/// skipped by layout so their references can show the definition in a popup.
 /// </summary>
 public sealed class XhtmlChapterLoader
 {
@@ -49,6 +48,7 @@ public sealed class XhtmlChapterLoader
     private readonly Dictionary<string, int> _fragmentTextOffsets = new(StringComparer.Ordinal);
     private readonly List<string> _pendingFragmentIds = new();
     private readonly List<InlineItem> _pending = new();
+    private readonly List<(int Start, int Length)> _rubyAnnotationRanges = new();
     private readonly List<PlainFootnoteSection> _plainFootnoteSections = new();
     private MicroCss? _css;
     private string _chapterPath = string.Empty;
@@ -71,6 +71,7 @@ public sealed class XhtmlChapterLoader
         _pendingFragmentIds.Clear();
         _pending.Clear();
         _plainFootnoteSections.Clear();
+        _rubyAnnotationRanges.Clear();
         _css = null;
         _chapterPath = Path.GetFullPath(chapterPath);
         _chapterDir = Path.GetDirectoryName(_chapterPath) ?? string.Empty;
@@ -113,6 +114,7 @@ public sealed class XhtmlChapterLoader
             ChapterPath = _chapterPath,
             BodyText = _body.ToString(),
             Blocks = _blocks,
+            RubyAnnotationRanges = _rubyAnnotationRanges.ToArray(),
             FragmentIds = _fragmentIds,
             FragmentTextOffsets = _fragmentTextOffsets,
         };
@@ -550,6 +552,10 @@ public sealed class XhtmlChapterLoader
                 TrackId(element);
                 AddSvgImageBlock(element, ctx);
                 break;
+            case "ruby":
+                TrackId(element);
+                AppendRuby(element, ctx);
+                break;
             case "rt":
             case "rp":
                 TrackId(element);
@@ -648,6 +654,70 @@ public sealed class XhtmlChapterLoader
             AppendBodyText(text.Value);
         }
     }
+
+    private void AppendRuby(XElement element, FlowContext ctx)
+    {
+        // The generated pinyin EPUB uses the compact form
+        // <ruby>汉<rt>hàn</rt></ruby>. Keep the base and annotation in the
+        // original body-text coordinate space, while exposing only the base
+        // as a normal text range and carrying the pronunciation separately
+        // for the native painter.
+        foreach (var child in element.DescendantsAndSelf())
+        {
+            TrackId(child);
+        }
+
+        var baseText = string.Concat(element
+            .DescendantNodes()
+            .OfType<XText>()
+            .Where(text => !text.Ancestors().Any(IsRubyAnnotation))
+            .Select(text => text.Value));
+        var rubyText = string.Concat(element
+            .Descendants()
+            .Where(child => child.Name.LocalName.Equals("rt", StringComparison.OrdinalIgnoreCase))
+            .DescendantNodes()
+            .OfType<XText>()
+            .Select(text => text.Value));
+        var annotationMarkupText = string.Concat(element
+            .DescendantNodes()
+            .OfType<XText>()
+            .Where(text => text.Ancestors().Any(IsRubyAnnotation))
+            .Select(text => text.Value));
+
+        if (baseText.Length == 0)
+        {
+            // Malformed ruby without a base should still preserve its text
+            // for search and TTS, but must not create an empty visual item.
+            if (annotationMarkupText.Length > 0)
+            {
+                AppendBodyText(annotationMarkupText);
+            }
+
+            return;
+        }
+
+        var start = AppendBodyText(baseText);
+        if (annotationMarkupText.Length > 0)
+        {
+            var annotationStart = AppendBodyText(annotationMarkupText);
+            _rubyAnnotationRanges.Add((annotationStart, annotationMarkupText.Length));
+        }
+
+        _pending.Add(new InlineItem
+        {
+            Kind = InlineKind.Ruby,
+            Text = baseText,
+            TextStart = start,
+            Style = ctx.BaseStyle,
+            LinkHref = ctx.LinkHref,
+            FootnoteHref = ctx.FootnoteHref,
+            RubyText = string.IsNullOrWhiteSpace(rubyText) ? null : rubyText,
+        });
+    }
+
+    private static bool IsRubyAnnotation(XElement element) =>
+        element.Name.LocalName.Equals("rt", StringComparison.OrdinalIgnoreCase)
+        || element.Name.LocalName.Equals("rp", StringComparison.OrdinalIgnoreCase);
 
     private void WalkGhost(XElement element)
     {
@@ -1761,13 +1831,14 @@ public sealed class XhtmlChapterLoader
         // chapter title. The dedication page uses a quote graphic followed by
         // one bold character; promoting that mixed inline line would center
         // and re-space the graphic instead of honoring the EPUB layout.
-        if (first.Items.Any(item => item.Kind != InlineKind.Text || item.Ghost))
+        if (first.Items.Any(item =>
+                item.Kind is not (InlineKind.Text or InlineKind.Ruby) || item.Ghost))
         {
             return;
         }
 
         var text = string.Concat(first.Items
-            .Where(i => !i.Ghost && i.Kind == InlineKind.Text)
+            .Where(i => !i.Ghost && (i.Kind is InlineKind.Text or InlineKind.Ruby))
             .Select(i => i.Text));
         if (text.Length == 0 || text.Length > 40)
         {

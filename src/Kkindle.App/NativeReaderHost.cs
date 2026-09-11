@@ -68,7 +68,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     // The paragraph-indent flag is baked into the loaded blocks by the
     // chapter loader, so a runtime toggle must re-run the load, not just the
     // layout pass. Tracked to detect that change in Configure.
-    private bool _loadedParagraphIndent = true;
+    private bool _loadedParagraphIndent = false;
 
     // Scroll-mode content offset in DIP from the chapter top. Composed pages
     // stack vertically and the viewport slices one or two of them.
@@ -685,6 +685,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     }
 
     public string? BodyText => _content?.BodyText;
+
+    public IReadOnlyList<(int Start, int Length)> RubyAnnotationRanges =>
+        _content?.RubyAnnotationRanges ?? [];
 
     /// <summary>
     /// Returns the text that is actually represented by visible content

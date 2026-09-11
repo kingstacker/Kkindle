@@ -7,6 +7,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
+using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
     private readonly ReaderDataService _readerData;
     private readonly EpubBookContentService _bookContent;
     private readonly EmbeddingModelDownloadService _embeddingModelDownloader;
+    private readonly G2PWModelDownloadService _g2pwModelDownloader;
     private readonly LocalEmbeddingService _embeddingService;
     private readonly ReaderEmbeddingIndexService _readerEmbeddingIndex;
     private readonly IReaderRetriever _readerRetriever;
@@ -103,6 +105,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _embeddingModelDownloadCancellation;
     private Task? _embeddingModelDownloadTask;
     private bool _embeddingModelDownloadBusy;
+    private CancellationTokenSource? _g2pwModelDownloadCancellation;
+    private Task? _g2pwModelDownloadTask;
+    private bool _g2pwModelDownloadBusy;
+    private bool _updatingPinyinEngineSelector;
     private string? _deviceDisplayName;
     private Button? _activeNavigationSectionButton;
     private IReaderHost? _readerActiveHost;
@@ -177,6 +183,9 @@ public partial class MainWindow : Window
         _readerData = new ReaderDataService(paths);
         _bookContent = new EpubBookContentService(_readerData);
         _embeddingModelDownloader = new EmbeddingModelDownloadService(paths);
+        _g2pwModelDownloader = new G2PWModelDownloadService(
+            paths,
+            proxyAddress: _appSettings.Translation.GoogleProxyAddress);
         _embeddingService = new LocalEmbeddingService(paths, _appSettings.EmbeddingModelId);
         _readerEmbeddingIndex = new ReaderEmbeddingIndexService(_readerData, _embeddingService);
         _readerRetriever = new HybridRetriever(
@@ -549,7 +558,6 @@ public partial class MainWindow : Window
             UpdateReaderToolbar();
             UpdateReaderZenTocToggle();
             UpdateReaderLayoutSliderLabels();
-            UpdateReaderLayoutStatus();
             UpdateReaderStatsDisplay();
             UpdateReaderTtsUi();
         }
@@ -938,6 +946,7 @@ public partial class MainWindow : Window
         _zLibrarySearchCancellation?.Dispose();
         _zLibrarySearchCancellation = null;
         _embeddingModelDownloadCancellation?.Cancel();
+        _g2pwModelDownloadCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
         if (_embeddingModelDownloadTask is { } embeddingModelDownloadTask)
         {
@@ -951,6 +960,17 @@ public partial class MainWindow : Window
                 // model download. Its cancellation token has already fired.
             }
         }
+        if (_g2pwModelDownloadTask is { } g2pwModelDownloadTask)
+        {
+            try
+            {
+                await g2pwModelDownloadTask.WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            catch
+            {
+                // Closing the window must not be held up by a slow model download.
+            }
+        }
         _lifetimeCancellation.Dispose();
         _douban.Dispose();
         _doubanBatchService?.Dispose();
@@ -959,6 +979,7 @@ public partial class MainWindow : Window
         _translationService.Dispose();
         _aiChatClient.Dispose();
         _embeddingModelDownloader.Dispose();
+        _g2pwModelDownloader.Dispose();
         (_embeddingService as IDisposable)?.Dispose();
         _readerTts.EnvironmentChanged -= ReaderTts_EnvironmentChanged;
         _readerTts.StateChanged -= ReaderTts_StateChanged;
@@ -1974,10 +1995,13 @@ public partial class MainWindow : Window
             var format = fileGroup.Key.ToUpperInvariant();
             if (files.Length == 1)
             {
+                var isPinyinVersion = PinyinBookPolicy.IsGeneratedPinyinVersion(files[0]);
                 var item = new MenuItem
                 {
-                    Header = format,
-                    Width = 80,
+                    Header = isPinyinVersion
+                        ? $"{format} · {GetBookFileMenuLabel(files[0])}"
+                        : format,
+                    Width = isPinyinVersion ? double.NaN : 80,
                     MinWidth = 0,
                     IsEnabled = true,
                     Tag = files[0]
@@ -2046,12 +2070,6 @@ public partial class MainWindow : Window
                 () => GeneratePinyinBookAsync(card));
             pinyinMenuItem.IsEnabled = pinyinFile is null && SelectPinyinSourceFile(card.Book.Files) is not null;
             menu.Items.Add(pinyinMenuItem);
-            if (pinyinFile is not null)
-            {
-                menu.Items.Add(CreateMenuItem(
-                    T("打开书籍注音"),
-                    () => OpenBookAsync(card, pinyinFile)));
-            }
             menu.Items.Add(new Separator());
         }
 
@@ -2061,7 +2079,7 @@ public partial class MainWindow : Window
             && card.Book.Files.Any(file =>
                 file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase)))
         {
-            menu.Items.Add(CreateMenuItem(T("书籍翻译…"), () => TranslateBookFromContextAsync(card)));
+            menu.Items.Add(CreateMenuItem(T("书籍翻译"), () => TranslateBookFromContextAsync(card)));
             menu.Items.Add(new Separator());
         }
 
@@ -2124,12 +2142,31 @@ public partial class MainWindow : Window
         deleteFormatMenu.Resources["FlyoutThemeMinWidth"] = 0d;
         foreach (var format in new[] { "EPUB", "PDF", "MOBI", "AZW3" })
         {
-            var file = card.Book.Files.FirstOrDefault(candidate =>
+            var files = card.Book.Files.Where(candidate =>
                 string.Equals(candidate.Format, format, StringComparison.OrdinalIgnoreCase));
+            var formatFiles = files.ToArray();
+            if (formatFiles.Length > 1)
+            {
+                // A book can contain several EPUBs (original, translated,
+                // bilingual, and pinyin). Keep the format entry, but expose
+                // every file below it so no edition is hidden behind the
+                // first matching format.
+                deleteFormatMenu.Items.Add(CreateBookVariantMenuItem(
+                    format,
+                    formatFiles,
+                    file => file is null ? Task.CompletedTask : DeleteFileAsync(file),
+                    width: 80));
+                continue;
+            }
+
+            var file = formatFiles.FirstOrDefault();
+            var isPinyinVersion = file is not null && PinyinBookPolicy.IsGeneratedPinyinVersion(file);
             var item = new MenuItem
             {
-                Header = format,
-                Width = 80,
+                Header = isPinyinVersion
+                    ? $"{format} · {GetBookFileMenuLabel(file!)}"
+                    : format,
+                Width = isPinyinVersion ? double.NaN : 80,
                 MinWidth = 0,
                 IsEnabled = file is not null,
                 Tag = file
@@ -2142,10 +2179,6 @@ public partial class MainWindow : Window
             };
             deleteFormatMenu.Items.Add(item);
         }
-        if (pinyinFile is not null)
-            deleteFormatMenu.Items.Add(CreateMenuItem(
-                T("书籍注音版"),
-                () => DeleteFileAsync(pinyinFile)));
         deleteFormatMenu.IsEnabled = deleteFormatMenu.Items.OfType<MenuItem>().Any(item => item.IsEnabled);
         menu.Items.Add(deleteFormatMenu);
         deleteFormatMenu.Items.Add(new Separator());
@@ -2157,7 +2190,11 @@ public partial class MainWindow : Window
 
     private static string GetBookFileMenuLabel(BookFile file)
     {
-        var stem = Path.GetFileNameWithoutExtension(file.RelativePath);
+        var stem = Path.GetFileNameWithoutExtension(file.RelativePath).Trim();
+        if (PinyinBookPolicy.IsGeneratedPinyinVersion(file))
+            return PinyinBookPolicy.CreateGeneratedTitle(stem);
+        if (GetGeneratedTranslationKind(file.RelativePath) is not null)
+            return stem;
         if (stem.Contains("-双语", StringComparison.OrdinalIgnoreCase)
             || stem.Contains("_双语", StringComparison.OrdinalIgnoreCase))
             return T("双语");
@@ -2167,8 +2204,6 @@ public partial class MainWindow : Window
         if (stem.Contains("-原文", StringComparison.OrdinalIgnoreCase)
             || stem.Contains("_原文", StringComparison.OrdinalIgnoreCase))
             return T("原文");
-        if (PinyinBookPolicy.IsGeneratedPinyinVersion(file))
-            return T("拼音版");
 
         return string.IsNullOrWhiteSpace(stem)
             ? file.Format.Trim().TrimStart('.').ToUpperInvariant()
@@ -2236,6 +2271,23 @@ public partial class MainWindow : Window
 
     private static void ApplyLegacyMenuItemSize(MenuItem item)
     {
+        // Book names are literal text: the default access-key presenter hides
+        // underscores (for example, "规模_pinyin" becomes "规模pinyin").
+        item.HeaderTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<string>(
+            (text, _) =>
+            {
+                var textBlock = new TextBlock { Text = text };
+                textBlock[!TextBlock.ForegroundProperty] = new Binding
+                {
+                    Path = nameof(MenuItem.Foreground),
+                    RelativeSource = new RelativeSource
+                    {
+                        Mode = RelativeSourceMode.FindAncestor,
+                        AncestorType = typeof(MenuItem)
+                    }
+                };
+                return textBlock;
+            });
         // Avalonia uses device-independent units: 32 units become the legacy
         // menu's 40 physical pixels on a 125%-scaled Windows display.
         item.Height = 32;

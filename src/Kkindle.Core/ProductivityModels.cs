@@ -39,6 +39,7 @@ public sealed record LibraryBookDisplayInfo(Guid Id, string Title, string? Cover
 public sealed record AppSettings
 {
     public const string DefaultEmbeddingModelId = "BAAI/bge-small-zh-v1.5";
+    public const string DefaultPinyinEngineId = PinyinBookEngineCatalog.DotNetG2PId;
 
     public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
     public bool OnboardingCompleted { get; init; }
@@ -55,6 +56,7 @@ public sealed record AppSettings
     public bool AiEnabled { get; init; } = true;
     public bool NetworkEnabled { get; init; } = true;
     public string EmbeddingModelId { get; init; } = DefaultEmbeddingModelId;
+    public string PinyinEngineId { get; init; } = DefaultPinyinEngineId;
     public bool AutoUpdateCheckEnabled { get; init; } = true;
 
     // Update checks run at most once per calendar day; the timestamp and the
@@ -76,8 +78,8 @@ public sealed record AppSettings
     public bool CompareKindleLibraryEnabled { get; init; } = true;
     public bool GridGalleryDisplay { get; init; }
     public bool ReadingMaterialsCollapsedByDefault { get; init; } = true;
-    public bool PinyinContextMenuEnabled { get; init; }
-    public bool PinyinLocalOnly { get; init; }
+    public bool PinyinContextMenuEnabled { get; init; } = true;
+    public bool PinyinLocalOnly { get; init; } = true;
     public BookTranslationSettings Translation { get; init; } = new();
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ReaderVerticalDebugBoxesEnabled { get; init; }
@@ -99,6 +101,7 @@ public sealed record AppSettings
             EmbeddingModelId = string.IsNullOrWhiteSpace(settings.EmbeddingModelId)
                 ? DefaultEmbeddingModelId
                 : settings.EmbeddingModelId.Trim(),
+            PinyinEngineId = PinyinBookEngineCatalog.NormalizeId(settings.PinyinEngineId),
             AutoGenerateEpubAndAzw3OnImport = settings.AutoGenerateEpubAndAzw3OnImport
                 || settings.AutoGenerateAzw3OnImport,
             AutoGenerateAzw3OnImport = false,

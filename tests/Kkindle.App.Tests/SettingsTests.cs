@@ -63,26 +63,39 @@ public sealed class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task BookContextMenuFeaturesDefaultToOffAndPersistWhenEnabled() => Run(async () =>
+    public Task BookContextMenuFeaturesDefaultToOnAndPersistWhenDisabled() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
         var translationToggle = scope.Get<ToggleSwitch>("TranslationContextMenuEnabledCheck");
         var pinyinToggle = scope.Get<ToggleSwitch>("PinyinContextMenuEnabledCheck");
         var pinyinLocalOnlyToggle = scope.Get<ToggleSwitch>("PinyinLocalOnlyCheck");
-        Assert.False(translationToggle.IsChecked);
-        Assert.False(pinyinToggle.IsChecked);
-        Assert.False(pinyinLocalOnlyToggle.IsChecked);
+        Assert.True(translationToggle.IsChecked);
+        Assert.True(pinyinToggle.IsChecked);
+        Assert.True(pinyinLocalOnlyToggle.IsChecked);
 
-        translationToggle.IsChecked = true;
-        pinyinToggle.IsChecked = true;
-        pinyinLocalOnlyToggle.IsChecked = true;
+        translationToggle.IsChecked = false;
+        pinyinToggle.IsChecked = false;
+        pinyinLocalOnlyToggle.IsChecked = false;
         scope.Window.Close();
         await Until(() => !scope.Window.IsVisible);
 
         var stored = await new AppSettingsStore(scope.Paths).LoadAsync();
-        Assert.True(stored.Translation.ContextMenuEnabled);
-        Assert.True(stored.PinyinContextMenuEnabled);
-        Assert.True(stored.PinyinLocalOnly);
+        Assert.False(stored.Translation.ContextMenuEnabled);
+        Assert.False(stored.PinyinContextMenuEnabled);
+        Assert.False(stored.PinyinLocalOnly);
+    });
+
+    [Fact]
+    public Task PinyinEngineSelectionPersists() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var selector = scope.Get<ComboBox>("PinyinEngineSelector");
+        Assert.Equal(0, selector.SelectedIndex);
+        selector.SelectedIndex = 1;
+        scope.Window.Close();
+        await Until(() => !scope.Window.IsVisible);
+        Assert.Equal(PinyinBookEngineCatalog.G2PWId,
+            (await new AppSettingsStore(scope.Paths).LoadAsync()).PinyinEngineId);
     });
 
     [Fact]
@@ -152,6 +165,110 @@ public sealed class SettingsTests(SettingsUiSession session)
         scope.Call("S3DiscardSettingsButton_Click", null, new RoutedEventArgs());
         Assert.Equal("test-bucket", scope.Get<TextBox>("S3BucketBox").Text);
         Assert.False(scope.Get<Button>("S3SaveSettingsButton").IsEnabled);
+    });
+
+    [Fact]
+    public Task WebDavChoicePersistsWithoutLosingS3AndDraftsDoNotChangeSavedProvider() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Call("SystemS3SyncNavigationButton_Click", null, new RoutedEventArgs());
+        scope.Get<ToggleSwitch>("S3SyncEnabledCheck").IsChecked = true;
+        scope.Get<ToggleSwitch>("S3AutomaticSyncCheck").IsChecked = false;
+        scope.Get<TextBox>("S3EndpointBox").Text = "https://s3.example.test";
+        scope.Get<TextBox>("S3AccessKeyBox").Text = "keep-access";
+        scope.Get<TextBox>("S3SecretKeyBox").Text = "keep-secret";
+        scope.Get<TextBox>("S3BucketBox").Text = "keep-bucket";
+        Assert.True(await scope.Call<Task<bool>>("SaveS3SyncSettingsFromControlsAsync", true, CancellationToken.None));
+        scope.Set("_lastS3SyncAt", DateTimeOffset.UtcNow);
+
+        scope.Get<ComboBox>("SyncProviderBox").SelectedIndex = (int)SyncProvider.WebDav;
+        Assert.False(scope.Get<Control>("S3ConnectionPanel").IsVisible);
+        Assert.True(scope.Get<Control>("WebDavConnectionPanel").IsVisible);
+        Assert.False(scope.Get<Control>("S3RegionRow").IsVisible);
+        Assert.False(scope.Get<Control>("S3PathStyleCheck").IsVisible);
+        scope.Get<TextBox>("WebDavEndpointBox").Text = "https://dav.example.test/dav/";
+        scope.Get<TextBox>("WebDavUsernameBox").Text = "webdav-user";
+        scope.Get<TextBox>("WebDavPasswordBox").Text = " webdav-password ";
+        Assert.Equal(SyncProvider.S3, (await scope.Sync.LoadSettingsAsync()).Settings.Provider);
+        Assert.False(scope.Get<Button>("S3SyncNowButton").IsEnabled);
+        Assert.False(await scope.Call<Task<bool>>("RunS3SyncAsync", false, CancellationToken.None));
+        Assert.True(await scope.Call<Task<bool>>("SaveS3SyncSettingsFromControlsAsync", true, CancellationToken.None));
+        var saved = await scope.Sync.LoadSettingsAsync();
+        Assert.Equal(SyncProvider.WebDav, saved.Settings.Provider);
+        Assert.Equal("keep-secret", saved.Settings.SecretKey);
+        Assert.Equal("keep-bucket", saved.Settings.Bucket);
+        Assert.Equal("https://dav.example.test/dav", saved.Settings.WebDavEndpoint);
+        Assert.Equal(" webdav-password ", saved.Settings.WebDavPassword);
+        Assert.True(scope.Get<Button>("S3SyncNowButton").IsEnabled);
+        Assert.Null(scope.Field<DateTimeOffset?>("_lastS3SyncAt"));
+        Assert.Contains("WebDAV", scope.Call<string>("BuildS3SyncIndicatorTooltip"));
+
+        scope.Get<ComboBox>("SyncProviderBox").SelectedIndex = (int)SyncProvider.S3;
+        Assert.Equal("keep-secret", scope.Get<TextBox>("S3SecretKeyBox").Text);
+        scope.Call("S3DiscardSettingsButton_Click", null, new RoutedEventArgs());
+        Assert.Equal((int)SyncProvider.WebDav, scope.Get<ComboBox>("SyncProviderBox").SelectedIndex);
+        Assert.Equal(" webdav-password ", scope.Get<TextBox>("WebDavPasswordBox").Text);
+
+        // Startup, exit and timer sync all share this readiness predicate.
+        var app = scope.Field<AppSettings>("_appSettings");
+        scope.Set("_appSettings", app with { NetworkEnabled = true });
+        scope.Set("_s3SyncStoredSettings", saved with { Settings = saved.Settings with { AutomaticSyncEnabled = true } });
+        Assert.True(scope.Call<bool>("IsAutomaticS3SyncReady"));
+        scope.Set("_appSettings", app);
+        scope.Set("_s3SyncStoredSettings", saved);
+    });
+
+    [Fact]
+    public Task ChangingProviderCancelsAnOutdatedConnectionTest() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        using var pending = new CancellationTokenSource();
+        scope.Set("_s3TestConnectionCancellation", pending);
+        scope.Get<ComboBox>("SyncProviderBox").SelectedIndex = (int)SyncProvider.WebDav;
+        Assert.True(pending.IsCancellationRequested);
+        scope.Set("_s3TestConnectionCancellation", null!);
+    });
+
+    [Theory]
+    [InlineData("zh-CN")]
+    [InlineData("en-US")]
+    public Task WebDavLayoutAndActionsRemainAccessibleAtSmallWindowSize(string language) => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Window.Width = 1024;
+        scope.Window.Height = 664;
+        ((Kkindle.App)Application.Current!).ApplyLanguage(language);
+        scope.Call("SystemS3SyncNavigationButton_Click", null, new RoutedEventArgs());
+        scope.Get<ComboBox>("SyncProviderBox").SelectedIndex = (int)SyncProvider.WebDav;
+        await Render();
+        Assert.Equal(language == "en-US" ? "Cloud sync" : "云端同步", scope.Get<Expander>("SettingsS3Expander").Header);
+        Assert.Equal(language == "en-US" ? "Sync method" : "同步方式",
+            ControlAutomationPeer.CreatePeerForElement(scope.Get<Control>("SyncProviderBox"))!.GetName());
+        foreach (var name in new[] { "WebDavEndpointBox", "WebDavUsernameBox", "WebDavPasswordBox", "S3SaveSettingsButton", "S3TestConnectionButton" })
+        {
+            var control = scope.Get<Control>(name);
+            Assert.True(control.IsEffectivelyVisible, name);
+            Assert.False(string.IsNullOrWhiteSpace(ControlAutomationPeer.CreatePeerForElement(control)!.GetName()), name);
+        }
+        Assert.False(scope.Get<Control>("S3EndpointBox").IsEffectivelyVisible);
+        AssertWithinWindow(scope.Get<Button>("S3SaveSettingsButton"), scope.Window);
+        Capture(scope.Window, $"{language}-1024-webdav");
+        scope.Get<TextBox>("WebDavPasswordBox").BringIntoView();
+        await Render();
+        var viewport = scope.Get<ScrollViewer>("SettingsScrollViewer");
+        foreach (var name in new[] { "WebDavEndpointBox", "WebDavUsernameBox", "WebDavPasswordBox" })
+        {
+            var control = scope.Get<Control>(name);
+            var position = control.TranslatePoint(default, viewport)!.Value;
+            Assert.True(position.Y >= 0 && position.Y + control.Bounds.Height <= viewport.Bounds.Height + 1, name);
+        }
+        Capture(scope.Window, $"{language}-1024-webdav-connection");
+        scope.Get<Expander>("SettingsS3AdvancedExpander").IsExpanded = true;
+        scope.Get<ScrollViewer>("SettingsScrollViewer").Offset = new Vector(0, 10000);
+        await Render();
+        Assert.False(scope.Get<Control>("S3RegionBox").IsEffectivelyVisible);
+        AssertWithinWindow(scope.Get<Button>("S3SaveSettingsButton"), scope.Window);
+        Capture(scope.Window, $"{language}-1024-webdav-bottom");
     });
 
     [Fact]

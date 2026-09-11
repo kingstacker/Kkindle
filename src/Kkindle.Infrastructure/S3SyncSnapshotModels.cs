@@ -200,6 +200,7 @@ internal sealed class S3SyncAppSettings
     public bool ReadingMaterialsCollapsedByDefault { get; set; } = true;
     public bool PinyinContextMenuEnabled { get; set; }
     public bool PinyinLocalOnly { get; set; }
+    public string PinyinEngineId { get; set; } = string.Empty;
     public ReaderLayoutSettings DefaultReaderLayout { get; set; } = new();
 }
 

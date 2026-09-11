@@ -29,6 +29,13 @@ internal sealed record LayoutCell
     public string? LinkHref { get; init; }
     public string? FootnoteHref { get; init; }
     public string? FootnoteText { get; init; }
+    /// <summary>Small pronunciation text to paint above or beside this base cell.</summary>
+    public string? RubyText { get; init; }
+    /// <summary>Annotation shaped once at a size determined by the base font, not syllable length.</summary>
+    public LayoutCell? RubyAnnotation { get; init; }
+    /// <summary>Measured base width before reserving room for its annotation.</summary>
+    public float RubyBaseAdvance { get; init; }
+    public bool JustifyAsUnit => FootnoteMarker || RubyAnnotation is not null;
     /// <summary>Resolved raster for an inline image; null for text cells.</summary>
     public string? ImagePath { get; init; }
     /// <summary>Physical width of the unrotated inline image.</summary>
@@ -71,6 +78,7 @@ internal sealed class ComposerContext
     public string MainFont => Fonts.MainFontPath;
 
     public float LetterSpacing => Options.LetterSpacingEm * Options.BaseFontSize;
+    public float RubyGap => Math.Max(1f, Options.BaseFontSize * 0.06f);
 }
 
 /// <summary>
@@ -288,11 +296,12 @@ internal sealed class CellFactory
         string? footnoteHref,
         bool vertical,
         string? footnoteText = null,
-        bool footnoteMarker = false)
+        bool footnoteMarker = false,
+        float? fontSizeOverride = null)
     {
         _context.CancellationToken.ThrowIfCancellationRequested();
-        var fontSize = _context.Options.BaseFontSize;
-        if (style.Superscript)
+        var fontSize = fontSizeOverride ?? _context.Options.BaseFontSize;
+        if (fontSizeOverride is null && style.Superscript)
         {
             // Footnote references use a compact marker size. Other <sup>
             // content keeps the slightly larger superscript scale so ordinary
@@ -365,6 +374,37 @@ internal sealed class CellFactory
             FootnoteMarker = footnoteMarker,
             Character = unitText.Length == 1 && !TypesetText.IsSpace(unitText[0]) ? unitText[0] : null,
         };
+    }
+
+    private LayoutCell ShapeRubyCell(LayoutCell baseCell)
+    {
+        var rubyText = baseCell.RubyText;
+        if (string.IsNullOrWhiteSpace(rubyText))
+        {
+            throw new ArgumentException("The base cell does not contain ruby text.", nameof(baseCell));
+        }
+
+        var style = baseCell.Style with
+        {
+            Bold = false,
+            Italic = false,
+            Underline = false,
+            Strikeout = false,
+            Superscript = false,
+            NoWrap = true,
+        };
+        // Keep equal-size bases' annotations at the same readable font size.
+        // Longer syllables need more layout space, not a smaller font.
+        var fontSize = Math.Clamp(baseCell.FontSize * 0.60f, 8f, 14f);
+        return ShapeCell(
+            rubyText,
+            globalTextStart: -1,
+            style,
+            linkHref: null,
+            footnoteHref: null,
+            vertical: false,
+            fontSizeOverride: fontSize);
+
     }
 
     /// <summary>
@@ -495,7 +535,10 @@ internal sealed class CellFactory
             return cells;
         }
 
-        if (item.Kind != InlineKind.Text || item.Text.Length == 0 || item.Ghost)
+        var isRuby = item.Kind == InlineKind.Ruby;
+        if (item.Kind is not (InlineKind.Text or InlineKind.Ruby)
+            || item.Text.Length == 0
+            || item.Ghost)
         {
             return cells;
         }
@@ -503,56 +546,73 @@ internal sealed class CellFactory
         if (vertical)
         {
             AppendVerticalCells(cells, item);
-            return cells;
         }
-
-        var units = TypesetText.Itemize(item.Text, 0, item.Text.Length);
-        foreach (var unit in units)
+        else
         {
-            _context.CancellationToken.ThrowIfCancellationRequested();
-            if (unit.Kind == TextUnitKind.Space && cells.Count > 0 && cells[^1].IsSpace)
+            var units = TypesetText.Itemize(item.Text, 0, item.Text.Length);
+            foreach (var unit in units)
             {
-                continue; // collapse consecutive whitespace
-            }
-
-            var unitText = item.Text.Substring(unit.Start, unit.Length);
-            var cell = ShapeCell(
-                unitText,
-                item.TextStart + unit.Start,
-                item.Style,
-                item.LinkHref,
-                item.FootnoteHref,
-                vertical: false);
-            if (unit.Kind == TextUnitKind.LatinWord
-                && unitText.Length > 1
-                && cell.Advance > _context.Options.ContentWidth + 0.01f)
-            {
-                // A URL or an unspaced Latin token can be wider than the
-                // entire content box. Keep ordinary words atomic, but split
-                // this exceptional case into source-preserving glyph units so
-                // one cell can never force a line past the right edge.
-                for (var offset = 0; offset < unitText.Length;)
+                _context.CancellationToken.ThrowIfCancellationRequested();
+                if (unit.Kind == TextUnitKind.Space && cells.Count > 0 && cells[^1].IsSpace)
                 {
-                    var length = char.IsHighSurrogate(unitText[offset])
-                        && offset + 1 < unitText.Length
-                        && char.IsLowSurrogate(unitText[offset + 1])
-                        ? 2
-                        : 1;
-                    cells.Add(ShapeCell(
-                        unitText.Substring(offset, length),
-                        item.TextStart + unit.Start + offset,
-                        item.Style,
-                        item.LinkHref,
-                        item.FootnoteHref,
-                        vertical: false));
-                    offset += length;
+                    continue; // collapse consecutive whitespace
+                }
+
+                var unitText = item.Text.Substring(unit.Start, unit.Length);
+                var cell = ShapeCell(
+                    unitText,
+                    item.TextStart + unit.Start,
+                    item.Style,
+                    item.LinkHref,
+                    item.FootnoteHref,
+                    vertical: false);
+                if (unit.Kind == TextUnitKind.LatinWord
+                    && unitText.Length > 1
+                    && cell.Advance > _context.Options.ContentWidth + 0.01f)
+                {
+                    // A URL or an unspaced Latin token can be wider than the
+                    // entire content box. Keep ordinary words atomic, but split
+                    // this exceptional case into source-preserving glyph units so
+                    // one cell can never force a line past the right edge.
+                    for (var offset = 0; offset < unitText.Length;)
+                    {
+                        var length = char.IsHighSurrogate(unitText[offset])
+                            && offset + 1 < unitText.Length
+                            && char.IsLowSurrogate(unitText[offset + 1])
+                            ? 2
+                            : 1;
+                        cells.Add(ShapeCell(
+                            unitText.Substring(offset, length),
+                            item.TextStart + unit.Start + offset,
+                            item.Style,
+                            item.LinkHref,
+                            item.FootnoteHref,
+                            vertical: false));
+                        offset += length;
+                    }
+                }
+                else
+                {
+                    cell = cell with { IsSpace = unit.Kind == TextUnitKind.Space };
+                    cells.Add(cell);
                 }
             }
-            else
+        }
+
+        if (isRuby && cells.Count > 0 && !string.IsNullOrWhiteSpace(item.RubyText))
+        {
+            var baseCell = cells[0] with { RubyText = item.RubyText };
+            var annotation = ShapeRubyCell(baseCell);
+            cells[0] = baseCell with
             {
-                cell = cell with { IsSpace = unit.Kind == TextUnitKind.Space };
-                cells.Add(cell);
-            }
+                RubyAnnotation = annotation,
+                RubyBaseAdvance = baseCell.Advance,
+                // Line fitting must see the full annotation width before it
+                // wraps or justifies the text. Vertical flow reserves height.
+                Advance = vertical
+                    ? baseCell.Advance
+                    : Math.Max(baseCell.Advance, annotation.Advance + 2f * _context.RubyGap),
+            };
         }
 
         return cells;

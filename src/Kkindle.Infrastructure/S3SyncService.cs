@@ -4,16 +4,13 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Amazon;
-using Amazon.Runtime;
 using Amazon.S3;
-using Amazon.S3.Model;
 using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
 
 /// <summary>
-/// S3-compatible synchronisation for Kkindle's logical data.
+/// S3/WebDAV synchronisation for Kkindle's logical data.
 ///
 /// The live SQLite database is never placed in the bucket. Each device owns a
 /// compressed snapshot and book bytes are stored as content-addressed objects:
@@ -44,7 +41,7 @@ public sealed partial class S3SyncService
 
     private readonly AppPaths _paths;
     private readonly S3SyncSettingsStore _settingsStore;
-    private readonly Func<S3SyncSettings, IAmazonS3> _clientFactory;
+    private readonly Func<S3SyncSettings, ISyncObjectStore> _clientFactory;
     private readonly AppSettingsStore _appSettingsStore;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
@@ -73,11 +70,16 @@ public sealed partial class S3SyncService
     }
 
     public S3SyncService(AppPaths paths, ISecretProtector protector)
-        : this(paths, protector, CreateClient)
+        : this(paths, protector, CreateObjectStore)
     {
     }
 
     internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, IAmazonS3> clientFactory)
+        : this(paths, protector, settings => new S3SyncObjectStore(settings, clientFactory(settings)))
+    {
+    }
+
+    internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, ISyncObjectStore> clientFactory)
     {
         _paths = paths;
         _clientFactory = clientFactory;
@@ -105,13 +107,11 @@ public sealed partial class S3SyncService
         {
             var current = await _settingsStore.LoadAsync(cancellationToken);
             if (current.Settings.EncryptionKey != normalized.EncryptionKey
-                && current.Settings.Endpoint == normalized.Endpoint
-                && current.Settings.Bucket == normalized.Bucket
-                && current.Settings.Prefix == normalized.Prefix)
+                && SameRemoteDirectory(current.Settings, normalized))
             {
                 var state = await LoadStateAsync(NormalizeDeviceId(deviceId), BuildStorageIdentity(current.Settings), cancellationToken);
                 if (state.LastUploadedSnapshot is not null)
-                    throw new InvalidOperationException(UiText.Get("当前同步目录已使用原加密配置。更换密钥或启停加密时，请改用新的对象前缀，并在其他设备上配置相同的前缀和密钥。"));
+                    throw new InvalidOperationException(UiText.Get("当前同步目录已使用原加密配置。更换密钥或启停加密时，请改用新的同步子目录，并在其他设备上配置相同的前缀和密钥。"));
             }
             await _settingsStore.SaveAsync(deviceId, normalized, cancellationToken);
         }
@@ -162,6 +162,7 @@ public sealed partial class S3SyncService
         using var client = _clientFactory(normalized);
         var keys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
         await DownloadRemoteSnapshotsAsync(client, normalized, keys, string.Empty, false, null, cancellationToken);
+        await client.TestWriteAsync(normalized.Prefix, cancellationToken);
     }
 
     public async Task<S3SyncResult> SyncAsync(
@@ -197,7 +198,7 @@ public sealed partial class S3SyncService
                 state.Tombstones,
                 detectedDeletions.Concat(GetRecordedTombstones(recordedDeletionTimes, local, state.LastUploadedSnapshot)));
 
-            progress?.Report(UiText.Get("正在连接 S3…"));
+            progress?.Report(UiText.Get("正在连接 {0}…", normalized.ProviderName));
             using var client = _clientFactory(normalized);
             var snapshotKeys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
 
@@ -301,7 +302,18 @@ public sealed partial class S3SyncService
             ? parsed.ToString("N")
             : (deviceId ?? string.Empty).Trim();
 
-    private static string BuildStorageIdentity(S3SyncSettings settings) =>
+    private static bool SameRemoteDirectory(S3SyncSettings left, S3SyncSettings right) =>
+        left.Provider == right.Provider && left.Prefix == right.Prefix
+        && (left.Provider == SyncProvider.WebDav
+            ? left.WebDavEndpoint == right.WebDavEndpoint && left.WebDavUsername == right.WebDavUsername
+            : left.Endpoint == right.Endpoint && left.Bucket == right.Bucket);
+
+    private static string BuildStorageIdentity(S3SyncSettings settings) => settings.Provider == SyncProvider.WebDav
+        ? string.Join("|", "WebDAV", settings.WebDavEndpoint, EncryptionKeyFingerprint(settings.WebDavUsername), settings.Prefix,
+            settings.EncryptionKey.Length > 0 ? $"encrypted:{EncryptionKeyFingerprint(settings.EncryptionKey)}" : "plain")
+        // Keep the legacy S3 identity unchanged so existing baselines survive
+        // an upgrade. A provider, account or remote-root change starts fresh.
+        :
         string.Join(
             "|",
             settings.Endpoint,
@@ -379,86 +391,24 @@ public sealed partial class S3SyncService
     private static string EncryptionKeyFingerprint(string encryptionKey) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(encryptionKey))).ToLowerInvariant();
 
-    private static AmazonS3Client CreateClient(S3SyncSettings settings)
+    private static ISyncObjectStore CreateObjectStore(S3SyncSettings settings) => settings.Provider switch
     {
-        var config = new AmazonS3Config
-        {
-            ForcePathStyle = settings.PathStyle,
-            Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds),
-            AuthenticationRegion = settings.Region,
-            // Alibaba Cloud OSS accepts the S3 API but does not accept the
-            // optional trailer checksum that the AWS SDK 4.x sends by
-            // default. Only relax optional checksum generation for a custom
-            // S3-compatible endpoint; native AWS S3 keeps its normal defaults.
-            RequestChecksumCalculation = string.IsNullOrWhiteSpace(settings.Endpoint)
-                ? RequestChecksumCalculation.WHEN_SUPPORTED
-                : RequestChecksumCalculation.WHEN_REQUIRED,
-            ResponseChecksumValidation = string.IsNullOrWhiteSpace(settings.Endpoint)
-                ? ResponseChecksumValidation.WHEN_SUPPORTED
-                : ResponseChecksumValidation.WHEN_REQUIRED
-        };
-
-        // AWS SDK treats a custom ServiceURL and RegionEndpoint as mutually
-        // exclusive. AuthenticationRegion still controls SigV4 for MinIO,
-        // Cloudflare R2, Wasabi and other S3-compatible endpoints.
-        if (string.IsNullOrWhiteSpace(settings.Endpoint))
-            config.RegionEndpoint = RegionEndpoint.GetBySystemName(settings.Region);
-        else
-            config.ServiceURL = settings.Endpoint;
-
-        if (settings.SkipTlsVerify)
-            config.HttpClientFactory = new InsecureHttpClientFactory();
-
-        return new AmazonS3Client(settings.AccessKey, settings.SecretKey, config);
-    }
-
-    private sealed class InsecureHttpClientFactory : HttpClientFactory
-    {
-        public override HttpClient CreateHttpClient(IClientConfig clientConfig)
-        {
-            var handler = new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-            };
-            return new HttpClient(handler, disposeHandler: true);
-        }
-
-        public override bool UseSDKHttpClientCaching(IClientConfig clientConfig) => false;
-
-        public override bool DisposeHttpClientsAfterUse(IClientConfig clientConfig) => true;
-    }
+        SyncProvider.S3 => new S3SyncObjectStore(settings),
+        SyncProvider.WebDav => new WebDavSyncObjectStore(settings),
+        _ => throw new InvalidOperationException(UiText.Get("请选择受支持的同步方式。"))
+    };
 
     private static async Task<List<string>> ListSnapshotKeysAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         CancellationToken cancellationToken)
     {
-        var result = new List<string>();
-        string? continuation = null;
-        do
-        {
-            var request = new ListObjectsV2Request
-            {
-                BucketName = settings.Bucket,
-                Prefix = $"{settings.Prefix}/devices/",
-                ContinuationToken = continuation,
-                MaxKeys = 1000
-            };
-            var response = await client.ListObjectsV2Async(request, cancellationToken);
-            // Some S3-compatible services omit <Contents> completely for an
-            // empty prefix. The AWS SDK then exposes a null collection.
-            result.AddRange((response.S3Objects ?? [])
-                .Select(item => item.Key)
-                .Where(key => key.EndsWith("/snapshot.bin", StringComparison.OrdinalIgnoreCase)));
-            continuation = response.IsTruncated == true ? response.NextContinuationToken : null;
-        }
-        while (!string.IsNullOrWhiteSpace(continuation));
-
-        return result;
+        var keys = await client.ListKeysAsync($"{settings.Prefix}/devices/", cancellationToken);
+        return keys.Where(key => key.EndsWith("/snapshot.bin", StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
     private async Task<string?> UploadLocalObjectsAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         S3SyncSnapshot snapshot,
         IProgress<string>? progress,
@@ -543,7 +493,7 @@ public sealed partial class S3SyncService
     }
 
     private async Task UploadObjectIfMissingAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         LocalSyncObject item,
         ConcurrentDictionary<string, byte>? existingKeys,
@@ -554,7 +504,7 @@ public sealed partial class S3SyncService
         {
             if (existingKeys.ContainsKey(key)) return;
         }
-        else if (await ObjectExistsAsync(client, settings.Bucket, key, cancellationToken))
+        else if (await client.ExistsAsync(key, cancellationToken))
         {
             return;
         }
@@ -571,18 +521,9 @@ public sealed partial class S3SyncService
         string? temporaryEncryptedPath = null;
         try
         {
-            PutObjectRequest request;
             if (settings.EncryptionKey.Length == 0)
             {
-                request = new PutObjectRequest
-                {
-                    BucketName = settings.Bucket,
-                    Key = key,
-                    InputStream = input,
-                    ContentType = item.ContentType,
-                    AutoCloseStream = false
-                };
-                ConfigureCompatibleUpload(request, settings, input.Length);
+                await client.PutAsync(key, input, item.ContentType, cancellationToken);
             }
             else
             {
@@ -594,17 +535,10 @@ public sealed partial class S3SyncService
                     temporaryEncryptedPath,
                     settings.EncryptionKey,
                     cancellationToken);
-                request = new PutObjectRequest
-                {
-                    BucketName = settings.Bucket,
-                    Key = key,
-                    FilePath = temporaryEncryptedPath,
-                    ContentType = item.ContentType,
-                    AutoCloseStream = true
-                };
-                ConfigureCompatibleUpload(request, settings, new FileInfo(temporaryEncryptedPath).Length);
+                await using var encrypted = new FileStream(temporaryEncryptedPath, FileMode.Open,
+                    FileAccess.Read, FileShare.Read, 128 * 1024, useAsync: true);
+                await client.PutAsync(key, encrypted, item.ContentType, cancellationToken);
             }
-            await client.PutObjectAsync(request, cancellationToken);
             existingKeys?.TryAdd(key, 0);
         }
         finally
@@ -615,7 +549,7 @@ public sealed partial class S3SyncService
     }
 
     private static async Task<ConcurrentDictionary<string, byte>?> TryListBlobKeysAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         CancellationToken cancellationToken)
     {
@@ -625,64 +559,19 @@ public sealed partial class S3SyncService
                 ? $"encrypted/{EncryptionKeyFingerprint(settings.EncryptionKey)}"
                 : "plain")
             + "/";
-        string? continuation = null;
         try
         {
-            do
-            {
-                var response = await client.ListObjectsV2Async(
-                    new ListObjectsV2Request
-                    {
-                        BucketName = settings.Bucket,
-                        Prefix = prefix,
-                        ContinuationToken = continuation,
-                        MaxKeys = 1000
-                    },
-                    cancellationToken);
-                foreach (var item in response.S3Objects ?? [])
-                    if (!string.IsNullOrWhiteSpace(item.Key)) keys.TryAdd(item.Key, 0);
-                continuation = response.IsTruncated == true ? response.NextContinuationToken : null;
-            }
-            while (!string.IsNullOrWhiteSpace(continuation));
+            foreach (var key in await client.ListKeysAsync(prefix, cancellationToken)) keys.TryAdd(key, 0);
             return keys;
         }
-        catch (AmazonS3Exception exception) when (
-            exception.StatusCode is System.Net.HttpStatusCode.Forbidden
-            || exception.StatusCode is System.Net.HttpStatusCode.BadRequest
-            || exception.StatusCode is System.Net.HttpStatusCode.MethodNotAllowed
-            || exception.StatusCode is System.Net.HttpStatusCode.NotImplemented
-            || string.Equals(exception.ErrorCode, "AccessDenied", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(exception.ErrorCode, "Forbidden", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(exception.ErrorCode, "InvalidRequest", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(exception.ErrorCode, "InvalidArgument", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(exception.ErrorCode, "MethodNotAllowed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(exception.ErrorCode, "NotImplemented", StringComparison.OrdinalIgnoreCase))
+        catch (SyncListingUnavailableException)
         {
             return null;
         }
     }
 
-    private static async Task<bool> ObjectExistsAsync(
-        IAmazonS3 client,
-        string bucket,
-        string key,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await client.GetObjectMetadataAsync(
-                new GetObjectMetadataRequest { BucketName = bucket, Key = key },
-                cancellationToken);
-            return true;
-        }
-        catch (AmazonS3Exception exception) when (IsNotFound(exception))
-        {
-            return false;
-        }
-    }
-
     private async Task UploadSnapshotAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         S3SyncSnapshot snapshot,
         CancellationToken cancellationToken)
@@ -692,35 +581,12 @@ public sealed partial class S3SyncService
             ? compressed
             : ProtectPayloadForSync(compressed, settings.EncryptionKey);
         using var stream = new MemoryStream(payload, writable: false);
-        var request = new PutObjectRequest
-        {
-            BucketName = settings.Bucket,
-            Key = SnapshotKey(settings, snapshot.DeviceId),
-            InputStream = stream,
-            ContentType = "application/octet-stream",
-            AutoCloseStream = false
-        };
-        ConfigureCompatibleUpload(request, settings, payload.LongLength);
-        await client.PutObjectAsync(request, cancellationToken);
-    }
-
-    private static void ConfigureCompatibleUpload(
-        PutObjectRequest request,
-        S3SyncSettings settings,
-        long contentLength)
-    {
-        // OSS requires a regular HTTP request with Content-Length. Its S3
-        // compatibility layer rejects AWS's streaming chunk signature and
-        // trailing checksum format (STREAMING-AWS4-*-PAYLOAD-TRAILER).
-        request.Headers.ContentLength = contentLength;
-        if (string.IsNullOrWhiteSpace(settings.Endpoint)) return;
-
-        request.UseChunkEncoding = false;
-        request.DisableDefaultChecksumValidation = true;
+        await client.PutAsync(SnapshotKey(settings, snapshot.DeviceId), stream,
+            "application/octet-stream", cancellationToken);
     }
 
     private async Task<List<S3SyncSnapshot>> DownloadRemoteSnapshotsAsync(
-        IAmazonS3 client,
+        ISyncObjectStore client,
         S3SyncSettings settings,
         IReadOnlyList<string> snapshotKeys,
         string localDeviceId,
@@ -736,7 +602,7 @@ public sealed partial class S3SyncService
         foreach (var key in keysToRead)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var payload = await DownloadObjectBytesAsync(client, settings.Bucket, key, cancellationToken);
+            var payload = await DownloadObjectBytesAsync(client, key, cancellationToken);
             var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, cancellationToken);
             if (snapshot.Version > SnapshotVersion)
                 throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
@@ -767,16 +633,13 @@ public sealed partial class S3SyncService
     }
 
     private static async Task<byte[]> DownloadObjectBytesAsync(
-        IAmazonS3 client,
-        string bucket,
+        ISyncObjectStore client,
         string key,
         CancellationToken cancellationToken)
     {
-        using var response = await client.GetObjectAsync(
-            new GetObjectRequest { BucketName = bucket, Key = key },
-            cancellationToken);
+        using var response = await client.OpenReadAsync(key, cancellationToken);
         if (response.ContentLength > MaxSnapshotBytes)
-            throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
+            throw new InvalidDataException("云端同步快照过大，已拒绝读取。");
 
         using var memory = new MemoryStream(
             response.ContentLength is > 0 and <= int.MaxValue
@@ -788,7 +651,7 @@ public sealed partial class S3SyncService
             var read = await response.ResponseStream.ReadAsync(buffer.AsMemory(), cancellationToken);
             if (read == 0) break;
             if (memory.Length > MaxSnapshotBytes - read)
-                throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
+                throw new InvalidDataException("云端同步快照过大，已拒绝读取。");
             await memory.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
         }
         return memory.ToArray();
@@ -810,9 +673,9 @@ public sealed partial class S3SyncService
         CancellationToken cancellationToken)
     {
         if (HasMagic(payload) && encryptionKey.Length == 0)
-            throw new InvalidDataException("S3 同步对象已加密，请配置相同的加密密钥。");
+            throw new InvalidDataException("云端同步对象已加密，请配置相同的加密密钥。");
         if (!HasMagic(payload) && encryptionKey.Length > 0)
-            throw new InvalidDataException(UiText.Get("此同步目录尚未加密。请保持原加密配置，或改用新的对象前缀创建加密同步目录。"));
+            throw new InvalidDataException(UiText.Get("此同步目录尚未加密。请保持原加密配置，或改用新的同步子目录创建加密同步目录。"));
 
         var compressed = HasMagic(payload)
             ? UnprotectPayloadWithCache(payload, encryptionKey)
@@ -821,7 +684,7 @@ public sealed partial class S3SyncService
         await using var gzip = new GZipStream(input, CompressionMode.Decompress);
         await using var limited = new SnapshotReadLimitStream(gzip, MaxSnapshotBytes);
         return await JsonSerializer.DeserializeAsync<S3SyncSnapshot>(limited, JsonOptions, cancellationToken)
-            ?? throw new InvalidDataException("S3 同步快照为空。");
+            ?? throw new InvalidDataException("云端同步快照为空。");
     }
 
     private sealed class SnapshotReadLimitStream(Stream inner, long maximumBytes) : Stream
@@ -885,7 +748,7 @@ public sealed partial class S3SyncService
         {
             if (read <= 0) return read;
             if (_bytesRead > maximumBytes - read)
-                throw new InvalidDataException("S3 同步快照过大，已拒绝读取。");
+                throw new InvalidDataException("云端同步快照过大，已拒绝读取。");
             _bytesRead += read;
             return read;
         }
@@ -952,7 +815,7 @@ public sealed partial class S3SyncService
             + EncryptionNonceBytes
             + EncryptionTagBytes;
         if (value.Length < minimum || !HasMagic(value))
-            throw new InvalidDataException("S3 同步对象的加密头无效。");
+            throw new InvalidDataException("云端同步对象的加密头无效。");
 
         var offset = EncryptionMagic.Length;
         var salt = value.AsSpan(offset, EncryptionSaltBytes).ToArray();
@@ -972,7 +835,7 @@ public sealed partial class S3SyncService
         }
         catch (CryptographicException exception)
         {
-            throw new InvalidDataException("S3 同步加密密钥不匹配，或同步对象已损坏。", exception);
+            throw new InvalidDataException("云端同步加密密钥不匹配，或同步对象已损坏。", exception);
         }
     }
 
@@ -1069,7 +932,7 @@ public sealed partial class S3SyncService
         await ReadExactlyAsync(encryptedStream, salt, cancellationToken);
         var chunkSize = await ReadInt32Async(encryptedStream, cancellationToken);
         if (chunkSize is <= 0 or > 16 * 1024 * 1024)
-            throw new InvalidDataException("S3 同步对象的分块大小无效。");
+            throw new InvalidDataException("云端同步对象的分块大小无效。");
 
         var key = GetOrDeriveEncryptionKey(passphrase, salt);
         using var aes = new AesGcm(key, EncryptionTagBytes);
@@ -1086,7 +949,7 @@ public sealed partial class S3SyncService
             var length = await ReadInt32Async(encryptedStream, cancellationToken);
             if (length == 0) break;
             if (length < 0 || length > chunkSize)
-                throw new InvalidDataException("S3 同步对象的分块长度无效。");
+                throw new InvalidDataException("云端同步对象的分块长度无效。");
 
             var nonce = new byte[EncryptionNonceBytes];
             var tag = new byte[EncryptionTagBytes];
@@ -1106,7 +969,7 @@ public sealed partial class S3SyncService
             }
             catch (CryptographicException exception)
             {
-                throw new InvalidDataException("S3 同步加密密钥不匹配，或同步对象已损坏。", exception);
+                throw new InvalidDataException("云端同步加密密钥不匹配，或同步对象已损坏。", exception);
             }
             await output.WriteAsync(plaintext, cancellationToken);
         }
@@ -1170,7 +1033,7 @@ public sealed partial class S3SyncService
         {
             var read = await stream.ReadAsync(buffer[offset..], cancellationToken);
             if (read == 0)
-                throw new InvalidDataException("S3 同步对象提前结束。");
+                throw new InvalidDataException("云端同步对象提前结束。");
             offset += read;
         }
     }
@@ -1214,21 +1077,6 @@ public sealed partial class S3SyncService
     private static bool HasMagic(byte[] value) =>
         value.Length >= EncryptionMagic.Length
         && value.AsSpan(0, EncryptionMagic.Length).SequenceEqual(EncryptionMagic);
-
-    private static bool IsNotFound(AmazonS3Exception exception) =>
-        exception.StatusCode is System.Net.HttpStatusCode.NotFound
-        || exception.StatusCode is System.Net.HttpStatusCode.Forbidden
-        || string.Equals(exception.ErrorCode, "NoSuchKey", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(exception.ErrorCode, "NoSuchObject", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(exception.ErrorCode, "NotFound", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(exception.ErrorCode, "Forbidden", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(exception.ErrorCode, "AccessDenied", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsMissingObjectForRead(AmazonS3Exception exception) =>
-        exception.StatusCode is System.Net.HttpStatusCode.NotFound
-        || string.Equals(exception.ErrorCode, "NoSuchKey", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(exception.ErrorCode, "NoSuchObject", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(exception.ErrorCode, "NotFound", StringComparison.OrdinalIgnoreCase);
 
     private async Task<string> GetCachedFileHashAsync(
         string path,
