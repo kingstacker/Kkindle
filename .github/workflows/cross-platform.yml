@@ -38,7 +38,20 @@ jobs:
       - name: Run platform-common tests
         run: dotnet test tests/Kkindle.Platform.Common.Tests/Kkindle.Platform.Common.Tests.csproj -c Release
       - name: Run settings UI regression tests
-        run: dotnet test tests/Kkindle.App.Tests/Kkindle.App.Tests.csproj -c Release
+        run: >-
+          dotnet test tests/Kkindle.App.Tests/Kkindle.App.Tests.csproj -c Release
+          --logger "console;verbosity=normal" --logger trx
+          --blame --results-directory artifacts/test-results/ui
+      - name: Upload UI test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-test-diagnostics-${{ matrix.name }}
+          path: |
+            artifacts/test-results/ui
+            ~/Library/Logs/DiagnosticReports/*testhost*
+            ~/Library/Logs/DiagnosticReports/*dotnet*
+          if-no-files-found: ignore
       - name: Build native package
         run: ${{ matrix.package_command }}
       - name: Install and smoke-test Linux package
