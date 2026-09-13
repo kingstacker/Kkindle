@@ -396,7 +396,7 @@ internal sealed class CellFactory
         // Keep equal-size bases' annotations at the same readable font size.
         // Longer syllables need more layout space, not a smaller font.
         var fontSize = Math.Clamp(baseCell.FontSize * 0.60f, 8f, 14f);
-        return ShapeCell(
+        var annotation = ShapeCell(
             rubyText,
             globalTextStart: -1,
             style,
@@ -405,6 +405,31 @@ internal sealed class CellFactory
             vertical: false,
             fontSizeOverride: fontSize);
 
+        // Font-wide ascent/descent do not always contain hinted accents or
+        // combining marks. Reserve the actual positioned glyph ink as well,
+        // using the same Skia font settings as the painter on each platform.
+        using var font = new SKFont(_context.Fonts.GetTypeface(annotation.FontPath), fontSize);
+        _ = font.GetGlyphWidths(annotation.Glyphs.AsSpan(), out var bounds, null);
+        var left = 0f;
+        var right = annotation.Advance;
+        var ascent = annotation.Ascent;
+        var descent = annotation.Descent;
+        for (var index = 0; index < bounds.Length; index++)
+        {
+            if (bounds[index].IsEmpty) continue;
+            left = Math.Min(left, annotation.GlyphX[index] + bounds[index].Left);
+            right = Math.Max(right, annotation.GlyphX[index] + bounds[index].Right);
+            ascent = Math.Max(ascent, -annotation.GlyphY[index] - bounds[index].Top);
+            descent = Math.Max(descent, annotation.GlyphY[index] + bounds[index].Bottom);
+        }
+
+        return annotation with
+        {
+            GlyphX = annotation.GlyphX.Select(x => x - left).ToArray(),
+            Advance = right - left,
+            Ascent = ascent,
+            Descent = descent,
+        };
     }
 
     /// <summary>
