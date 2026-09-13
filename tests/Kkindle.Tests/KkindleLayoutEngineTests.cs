@@ -1411,7 +1411,8 @@ public sealed class KkindleLayoutEngineTests : IDisposable
                 Assert.True(bounds.Bottom <= page.Height - options.InsetVertical + 0.1f, $"Ruby bottom edge: {bounds.Bottom}");
                 foreach (var other in ink.Where(item => !ReferenceEquals(item.Run, run)))
                 {
-                    Assert.False(bounds.IntersectsWith(other.Bounds), $"Ruby overlaps a neighboring run in {mode}.");
+                    Assert.False(bounds.IntersectsWith(other.Bounds),
+                        $"Ruby {bounds} overlaps run at text offset {other.Run.TextStart} ({other.Bounds}) in {mode}, font size {fontSize}.");
                 }
             }
 

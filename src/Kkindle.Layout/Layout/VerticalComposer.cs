@@ -101,14 +101,17 @@ internal sealed class VerticalComposer
 
         ResolveUprightGlyphs(cells);
         // Reuse the normal column spacing where possible, but reserve a
-        // separate strip so full-size annotations never paint over a neighbor.
+        // separate strip with a gap on both sides so annotations cannot touch
+        // either neighboring column, even with platform-specific glyph hinting.
         _rubySideWidth = cells
             .Where(cell => cell.RubyAnnotation is not null)
-            .Select(cell => cell.RubyAnnotation!.Ascent + cell.RubyAnnotation.Descent + _context.RubyGap)
+            .Select(cell => cell.RubyAnnotation!.Ascent + cell.RubyAnnotation.Descent + 2f * _context.RubyGap)
             .DefaultIfEmpty(0f)
             .Max();
         _rubyBaseWidth = _rubySideWidth > 0f
-            ? cells.Where(cell => cell.ImagePath is null).Select(cell => cell.FontSize).DefaultIfEmpty(0f).Max()
+            ? cells.Where(cell => cell.ImagePath is null)
+                .Select(cell => Math.Max(cell.FontSize, GetUprightGlyphInkBounds(cell)?.Width ?? 0f))
+                .DefaultIfEmpty(0f).Max()
             : 0f;
 
         if (startsAtPageTop)
