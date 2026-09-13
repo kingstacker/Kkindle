@@ -35,7 +35,7 @@ internal sealed class BookTranslationResumeDialog : Window
         MinHeight = 350;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new SolidColorBrush(Color.Parse("#FFFDFC"));
+        Background = AppAppearanceResources.GetBrush("PaperBrush");
 
         var titleText = new TextBlock
         {
@@ -48,14 +48,14 @@ internal sealed class BookTranslationResumeDialog : Window
         {
             Text = BuildSummary(resumeInfo),
             FontSize = 13,
-            Foreground = new SolidColorBrush(Color.Parse("#55554F")),
+            Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
             TextWrapping = TextWrapping.Wrap
         };
         var hintText = new TextBlock
         {
             Text = "选择“从上次继续”会保留已完成段，只重新处理失败或未完成段；选择“重新翻译”会清空缓存并从第一段开始。",
             FontSize = 12,
-            Foreground = new SolidColorBrush(Color.Parse("#777770")),
+            Foreground = AppAppearanceResources.GetBrush("SubtleInkBrush"),
             TextWrapping = TextWrapping.Wrap
         };
 
@@ -126,15 +126,15 @@ internal sealed class BookTranslationResumeDialog : Window
 
         var cacheHintBorder = new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#F7F7F4")),
-            BorderBrush = new SolidColorBrush(Color.Parse("#E2E2DC")),
+            Background = AppAppearanceResources.GetBrush("SoftHoverBrush"),
+            BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(12),
             Child = new TextBlock
             {
                 Text = "已完成段会从本地缓存恢复；更换模型后，新的模型只会处理未完成或失败段。",
                 FontSize = 12,
-                Foreground = new SolidColorBrush(Color.Parse("#66665F")),
+                Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
                 TextWrapping = TextWrapping.Wrap
             }
         };

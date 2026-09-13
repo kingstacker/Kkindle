@@ -266,12 +266,31 @@ public sealed class ReaderSearchHighlightTextBlock : TextBlock
         AvaloniaProperty.Register<ReaderSearchHighlightTextBlock, IReadOnlyList<ReaderSearchHighlightRange>?>(
             nameof(HighlightRanges));
 
+    public static readonly StyledProperty<IBrush> HighlightBrushProperty =
+        AvaloniaProperty.Register<ReaderSearchHighlightTextBlock, IBrush>(nameof(HighlightBrush), Brushes.Black);
+    public static readonly StyledProperty<IBrush> HighlightForegroundProperty =
+        AvaloniaProperty.Register<ReaderSearchHighlightTextBlock, IBrush>(nameof(HighlightForeground), Brushes.White);
+
+    public IBrush HighlightBrush
+    {
+        get => GetValue(HighlightBrushProperty);
+        set => SetValue(HighlightBrushProperty, value);
+    }
+
+    public IBrush HighlightForeground
+    {
+        get => GetValue(HighlightForegroundProperty);
+        set => SetValue(HighlightForegroundProperty, value);
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
         if (change.Property == SourceProperty
             || change.Property == QueryProperty
-            || change.Property == HighlightRangesProperty)
+            || change.Property == HighlightRangesProperty
+            || change.Property == HighlightBrushProperty
+            || change.Property == HighlightForegroundProperty)
         {
             RebuildHighlightedInlines();
         }
@@ -307,8 +326,6 @@ public sealed class ReaderSearchHighlightTextBlock : TextBlock
             return;
         }
 
-        var highlight = new SolidColorBrush(Color.FromRgb(255, 255, 255));
-        var highlightBackground = new SolidColorBrush(Color.FromRgb(0, 0, 0));
         var ranges = HighlightRanges ?? ReaderSearchPresentation.FindTermOccurrences(text, query);
         var cursor = 0;
         foreach (var range in ranges)
@@ -322,8 +339,8 @@ public sealed class ReaderSearchHighlightTextBlock : TextBlock
             Inlines.Add(new Run
             {
                 Text = text[start..end],
-                Foreground = highlight,
-                Background = highlightBackground
+                Foreground = HighlightForeground,
+                Background = HighlightBrush
             });
             cursor = end;
         }

@@ -401,7 +401,7 @@ public partial class MainWindow
                 ? T("更新包已下载，点击此处或退出应用即可完成安装")
                 : T("点击黄点即可下载并安装最新版"),
             FontSize = 11,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x8A, 0x8A)),
+            Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
             TextWrapping = TextWrapping.Wrap
         });
         ToolTip.SetTip(UpdateBadgeButton, tip);

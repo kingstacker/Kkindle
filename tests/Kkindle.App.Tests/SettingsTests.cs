@@ -484,13 +484,13 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         public object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, args);
         public T Call<T>(string name, params object?[] args) => (T)Call(name, args)!;
 
-        public static async Task<TestWindow> Create()
+        public static async Task<TestWindow> Create(AppSettings? settings = null)
         {
             ((Kkindle.App)Application.Current!).ApplyLanguage("zh-CN");
             var directory = Path.Combine(Path.GetTempPath(), "kkindle-settings-tests", Guid.NewGuid().ToString("N"));
             var paths = new AppPaths(directory);
             paths.EnsureDirectories();
-            var initial = new AppSettings
+            var initial = settings ?? new AppSettings
             {
                 UiLanguage = "zh-CN", OnboardingCompleted = true, NetworkEnabled = false,
                 AutoUpdateCheckEnabled = false, AutoConnectDevice = false, GridGalleryDisplay = false

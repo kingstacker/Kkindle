@@ -1613,4 +1613,24 @@
     <x:String x:Key="Sync.WebDavHelp">填写已存在的 WebDAV 目录地址；同步文件会自动保存到其下的同步子目录。需要认证时填写用户名和密码，部分服务使用应用密码。</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">同步子目录不能包含控制字符。</x:String>
     <x:String x:Key="Ui.Library.ImportBooks">导入书籍</x:String>
+    <x:String x:Key="Ui.Reader.Settings">阅读设置</x:String>
+    <x:String x:Key="Ui.Reader.Appearance">主题与纸感</x:String>
+    <x:String x:Key="Ui.Appearance.MainTheme">主界面主题</x:String>
+    <x:String x:Key="Ui.Appearance.MainThemeHint">书库、侧栏与设置的配色；阅读器主题可单独设置。</x:String>
+    <x:String x:Key="Ui.Appearance.Classic">黑白（默认）</x:String>
+    <x:String x:Key="Ui.Appearance.Night">夜间</x:String>
+    <x:String x:Key="Ui.Appearance.Green">绿色</x:String>
+    <x:String x:Key="Ui.Appearance.WarmBrown">暖棕色</x:String>
+    <x:String x:Key="Ui.Appearance.Ivory">米白</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Classic">黑白（默认）</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Night">夜晚</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Green">绿色</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Brown">暖棕色</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Ivory">米白</x:String>
+    <x:String x:Key="Ui.Reader.Paper">启用纸感</x:String>
+    <x:String x:Key="Ui.Reader.PaperStrength">纸感强度</x:String>
+    <x:String x:Key="Ui.Reader.Fibers">叠加纸张纤维</x:String>
+    <x:String x:Key="Ui.Reader.PaperHint">细颗粒与轻微明暗起伏，可单独叠加纤维。设置自动保存，适用于所有书籍。</x:String>
+    <x:String x:Key="Ui.Reader.NightPaperHint">夜晚主题会自动减弱纸感，保持暗处阅读清晰。</x:String>
+    <x:String x:Key="Ui.Reader.Layout">排版</x:String>
 </ResourceDictionary>

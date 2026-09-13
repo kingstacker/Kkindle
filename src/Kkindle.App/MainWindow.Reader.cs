@@ -201,10 +201,13 @@ public partial class MainWindow
         }
     }
 
-    private IReaderHost CreateReaderHostForCurrentFormat() =>
-        _readerIsPdf
-            ? _readerHostFactory()
-            : new NativeReaderHost();
+    private IReaderHost CreateReaderHostForCurrentFormat()
+    {
+        if (_readerIsPdf) return _readerHostFactory();
+        var host = new NativeReaderHost();
+        host.SetAppearance(_appSettings.ReaderAppearance);
+        return host;
+    }
 
     private bool IsReaderHostTypeCompatible(IReaderHost host) =>
         _readerIsPdf
@@ -612,17 +615,6 @@ public partial class MainWindow
         try
         {
             ReaderStatusText.Text = string.Empty;
-            var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(token);
-            var loaded = await NavigateReaderHostAndWaitAsync(host, target, token);
-            LogReaderChapterTiming("move.navigated", chapterTiming);
-            if (!loaded) throw new InvalidOperationException(T("章节加载失败。"));
-
-            await ApplySavedAnnotationsAsync(host, token);
-            await PositionReaderChapterBoundaryAsync(
-                host,
-                moveToEnd: offset < 0 && !positionAtStart,
-                token);
-            LogReaderChapterTiming("move.boundary", chapterTiming);
             var outgoingHost = CurrentReaderHost;
             await RunReaderContentTransitionAsync(
                 outgoingHost,
@@ -630,6 +622,16 @@ public partial class MainWindow
                 offset,
                 async () =>
                 {
+                    var loaded = await NavigateReaderHostAndWaitAsync(host, target, token);
+                    LogReaderChapterTiming("move.navigated", chapterTiming);
+                    if (!loaded) throw new InvalidOperationException(T("章节加载失败。"));
+
+                    await ApplySavedAnnotationsAsync(host, token);
+                    await PositionReaderChapterBoundaryAsync(
+                        host,
+                        moveToEnd: offset < 0 && !positionAtStart,
+                        token);
+                    LogReaderChapterTiming("move.boundary", chapterTiming);
                     _readerChapterIndex = targetIndex;
                     // host was picked as the hidden host, so the layer must flip
                     // unconditionally; deriving it from CurrentReaderHost would read
@@ -644,7 +646,7 @@ public partial class MainWindow
                     return true;
                 },
                 token,
-                animate: !holdOverlay);
+                holdOutgoingPage: true);
             LogReaderChapterTiming("move.transition", chapterTiming);
             FocusCurrentReaderHost();
             PrimeReaderContinuousEdgeTracking();
@@ -665,7 +667,6 @@ public partial class MainWindow
         }
         finally
         {
-            await HideReaderChapterHoldOverlayAsync();
             if (ReferenceEquals(_readerNavigationCancellation, navigationCancellation))
                 _readerNavigationCancellation = null;
             navigationCancellation.Dispose();
@@ -866,8 +867,12 @@ public partial class MainWindow
     private async Task CloseReaderAsync()
     {
         if (Interlocked.Exchange(ref _readerCloseInProgress, 1) != 0) return;
-        // The bookshelf close action must never leave a page snapshot, hold
-        // layer or in-flight reader transition animating over the switch.
+        // Preserve the reading viewport until its progress has been saved.
+        _readerToolbarAutoHideEnabled = false;
+        _readerToolbarHideTimer?.Stop();
+        _readerToolbarLayoutTimer?.Stop();
+        // The bookshelf close action must never leave a page snapshot or
+        // in-flight reader transition animating over the switch.
         // Cancel the session before waiting on persistence so an active page
         // turn releases its gate immediately.
         _readerSessionCancellation?.Cancel();
@@ -909,6 +914,7 @@ public partial class MainWindow
         }
         try
         {
+            await _readerAppearanceSaveTask;
             await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
         }
         catch

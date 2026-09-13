@@ -79,35 +79,43 @@ internal static class ReaderTransitionPlayer
         int animation,
         int visualDirection,
         Func<Task<T>> changeContentAsync,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool holdOutgoingPage = false)
     {
-        if (animation == AnimationNone)
+        cancellationToken.ThrowIfCancellationRequested();
+        if (animation == AnimationNone && !holdOutgoingPage)
             return await changeContentAsync();
 
         // Clear stale overlays before photographing so the snapshot shows
         // only live reader content.
         Reset(surface);
         var snapshot = Capture(surface.SnapshotSource);
-        if (snapshot is null || cancellationToken.IsCancellationRequested)
+        if (snapshot is null)
         {
-            snapshot?.Dispose();
             Reset(surface);
             return await changeContentAsync();
         }
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Begin(surface, snapshot, animation);
             // Keep the outgoing snapshot visible while the new content is
             // being composed/configured. Starting the clock before this task
             // completes could expose a blank or partially laid-out page on a
             // slow chapter switch.
             var changedContent = await changeContentAsync();
-            await PlayFramesAsync(
-                surface,
-                animation,
-                visualDirection,
-                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            // With animation disabled, chapter loads still keep the old page
+            // in place until the new one is ready, then reveal it immediately.
+            if (animation != AnimationNone)
+            {
+                await PlayFramesAsync(
+                    surface,
+                    animation,
+                    visualDirection,
+                    cancellationToken);
+            }
             return changedContent;
         }
         finally

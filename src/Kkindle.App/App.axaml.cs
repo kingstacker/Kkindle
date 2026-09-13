@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 
@@ -31,10 +32,18 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        ApplyTheme(AppTheme.Classic);
+        ReaderAppearanceResources.Populate(Resources, new ReaderAppearanceSettings());
         _uiLanguageService = new UiLanguageService(this);
     }
 
     public void ApplyLanguage(string? language) => _uiLanguageService?.Apply(language);
+
+    public void ApplyTheme(AppTheme theme)
+    {
+        AppAppearanceResources.Populate(Resources, AppPalette.For(theme));
+        RequestedThemeVariant = theme == AppTheme.Night ? ThemeVariant.Dark : ThemeVariant.Light;
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -45,6 +54,7 @@ public partial class App : Application
                 ?? new AppPaths(AppRootConfiguration.ResolveRoot(applicationDirectory));
             var startupSettings = new AppSettingsStore(paths).LoadSynchronously();
             ApplyLanguage(startupSettings.UiLanguage);
+            ApplyTheme(startupSettings.MainTheme);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
             var window = new MainWindow(
                 paths,

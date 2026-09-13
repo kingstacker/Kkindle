@@ -39,6 +39,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private ChapterLayout? _layout;
     private TypesetLayoutOptions? _options;
     private ReaderLayoutSettings _settings = new();
+    private ReaderAppearanceSettings _appearance = new();
+    private ReaderPalette _palette = ReaderPalette.For(ReaderTheme.Classic);
+    private TypesetPaintTheme _paintTheme = ReaderPalette.For(ReaderTheme.Classic).PaintTheme;
     private CancellationTokenSource? _navigationCts;
     private long _navigationVersion;
     private bool _disposed;
@@ -51,6 +54,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private int _bitmapPixelWidth;
     private int _bitmapPixelHeight;
     private DispatcherTimer? _relayoutTimer;
+    private ViewportReadingAnchor? _viewportReadingAnchor;
+    private ViewportReadingState? _viewportReadingState;
+    private bool _preserveViewportPosition;
     private DispatcherTimer? _selectionAutoPageTurnTimer;
     private bool _selectionAutoPageTurnArmed;
     private int _selectionAutoPageTurnDirection;
@@ -201,6 +207,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _navigationCts?.Dispose();
         _navigationCts = null;
         _relayoutTimer?.Stop();
+        _viewportReadingAnchor = null;
+        _viewportReadingState = null;
+        _preserveViewportPosition = false;
         StopSelectionAutoPageTurn();
         lock (_engineGate)
         {
@@ -1030,6 +1039,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         _composePending = true;
         _relayoutTimer?.Stop();
+        _viewportReadingAnchor = null;
+        _viewportReadingState = null;
+        _preserveViewportPosition = false;
         _navigationCts?.Cancel();
         _navigationCts?.Dispose();
         var navigationCts = new CancellationTokenSource();
@@ -1407,6 +1419,74 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     // ---- rendering --------------------------------------------------------
 
+    private sealed record ViewportReadingAnchor(int TextOffset, int PageIndex, double RunY, double SliceFraction);
+    private sealed record ViewportReadingState(
+        ChapterContent Content, ChapterLayout Layout, ReaderLayoutSettings Settings, int PageIndex, double ScrollOffset);
+
+    /// <summary>
+    /// Pins the visible text while temporary reader chrome changes the viewport.
+    /// Reuse the anchor until navigation changes the position, so repeated
+    /// expand/collapse cycles cannot walk backwards through page boundaries.
+    /// </summary>
+    public void PreservePositionForViewportChange()
+    {
+        if (_disposed || _content is null || _layout is null || _layout.Pages.Count == 0) return;
+        if (!ViewportReadingPositionMatches())
+            _viewportReadingAnchor = CaptureViewportReadingAnchor();
+        RememberViewportReadingPosition();
+        _preserveViewportPosition = true;
+    }
+
+    private bool ViewportReadingPositionMatches() => _viewportReadingState is { } state
+        && ReferenceEquals(state.Content, _content) && ReferenceEquals(state.Layout, _layout)
+        && state.Settings == _settings && state.PageIndex == _pageIndex
+        && Math.Abs(state.ScrollOffset - _scrollOffset) < 0.001;
+
+    private void RememberViewportReadingPosition() => _viewportReadingState =
+        new(_content!, _layout!, _settings, _pageIndex, _scrollOffset);
+
+    private ViewportReadingAnchor CaptureViewportReadingAnchor()
+    {
+        var height = Math.Max(1, _layout!.Pages[0].Height);
+        var first = IsScroll ? (int)(_scrollOffset / height) : _pageIndex;
+        first = Math.Clamp(first, 0, _layout.Pages.Count - 1);
+        var page = _layout.Pages[first];
+        if (!IsScroll) return new(page.TextStartOffset, first, 0, 0);
+
+        var slice = _scrollOffset - first * height;
+        for (var index = first; index <= Math.Min(first + 1, _layout.Pages.Count - 1); index++)
+        {
+            var localTop = _scrollOffset - index * height;
+            var run = _layout.Pages[index].Runs
+                .Where(run => run.TextStart >= 0 && run.TextLength > 0 && run.OriginY >= localTop)
+                .OrderBy(run => run.OriginY).ThenBy(run => run.TextStart).FirstOrDefault();
+            if (run is not null)
+                return new(run.TextStart, index, run.OriginY - localTop, slice / height);
+        }
+        var fallback = page.Runs.FirstOrDefault(run => run.TextStart >= 0 && run.TextLength > 0);
+        return new(fallback?.TextStart ?? page.TextStartOffset, first,
+            (fallback?.OriginY ?? page.InsetVertical) - slice, slice / height);
+    }
+
+    private void RestoreViewportReadingAnchor(ViewportReadingAnchor anchor)
+    {
+        if (_layout is null || _layout.Pages.Count == 0) return;
+        var page = anchor.TextOffset >= 0 ? _layout.GetPageIndexOfOffset(anchor.TextOffset) : -1;
+        if (page < 0) page = Math.Clamp(anchor.PageIndex, 0, _layout.Pages.Count - 1);
+        if (IsScroll)
+        {
+            var height = Math.Max(1, _layout.Pages[0].Height);
+            var run = _layout.Pages[page].Runs.FirstOrDefault(run => run.TextStart >= 0
+                && run.TextStart <= anchor.TextOffset && run.TextStart + run.TextLength > anchor.TextOffset);
+            var slice = run is not null ? run.OriginY - anchor.RunY : anchor.SliceFraction * height;
+            _scrollOffset = ClampScrollOffset(page * height + slice);
+        }
+        else
+        {
+            _pageIndex = IsSpread ? page - page % 2 : page;
+        }
+    }
+
     private void ScheduleRelayout()
     {
         if (_disposed || _content is null)
@@ -1438,6 +1518,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return;
         }
 
+        var viewportAnchor = _preserveViewportPosition && ViewportReadingPositionMatches()
+            ? _viewportReadingAnchor : null;
+        _preserveViewportPosition = false;
         var width = Math.Max(1, ComposePageWidth(Bounds.Width));
         var height = Math.Max(1, Bounds.Height);
         var startOffset = _layout is not null
@@ -1473,6 +1556,29 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 _pageIndex = page >= 0 ? page : 0;
             }
         }
+        if (viewportAnchor is not null)
+        {
+            RestoreViewportReadingAnchor(viewportAnchor);
+            RememberViewportReadingPosition();
+        }
+        else
+        {
+            _viewportReadingAnchor = null;
+            _viewportReadingState = null;
+        }
+    }
+
+    /// <summary>Repaint only: selection, layout, page index and scroll offset stay intact.</summary>
+    public void SetAppearance(ReaderAppearanceSettings appearance)
+    {
+        appearance = ReaderAppearanceSettings.Normalize(appearance);
+        if (_appearance == appearance) return;
+        _appearance = appearance;
+        _palette = ReaderPalette.For(appearance.Theme);
+        _paintTheme = _palette.PaintTheme;
+        ReaderAppearanceResources.PopulateControls(_scrollBar.Resources, appearance);
+        _bitmapDirty = true;
+        InvalidateVisual();
     }
 
     private double CurrentScaling => TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
@@ -1500,7 +1606,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             _bitmapDirty = true;
         }
 
-        if (_bitmapDirty && _layout is not null && _options is not null)
+        if (_bitmapDirty)
         {
             PaintPageIntoBitmap(pixelWidth, pixelHeight, scaling);
             _bitmapDirty = false;
@@ -1512,13 +1618,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
         else
         {
-            context.FillRectangle(Brushes.White, new Rect(0, 0, width, height));
+            context.FillRectangle(new SolidColorBrush(_palette.Page), new Rect(0, 0, width, height));
         }
     }
 
     private void PaintPageIntoBitmap(int pixelWidth, int pixelHeight, double scaling)
     {
-        if (_bitmap is null || _layout is null || _options is null)
+        if (_bitmap is null)
         {
             return;
         }
@@ -1532,9 +1638,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var canvas = surface.Canvas;
-        canvas.Clear(SKColors.White);
+        canvas.Clear(ReaderPalette.ToSkia(_palette.Page));
         canvas.Save();
         canvas.Scale((float)scaling);
+        ReaderPaperTexture.Paint(canvas,
+            new SKRect(0, 0, (float)Bounds.Width, (float)Bounds.Height), _palette.Page, _appearance);
 
         switch (_presentation)
         {
@@ -1585,7 +1693,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var focusedSearchBands = FocusedSearchBandsFor(page);
         lock (_engineGate)
         {
-            var painter = new TypesetPainter(Engine.Fonts, TypesetPaintTheme.Paper, ResolveImage);
+            var painter = new TypesetPainter(Engine.Fonts, _paintTheme, ResolveImage);
             painter.Paint(
                 canvas,
                 page,
@@ -1594,7 +1702,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 searchBands: searchBands,
                 annotationOverlays: annotationOverlays,
                 showVerticalDebugBoxes: _showVerticalDebugBoxes,
-                focusedSearchBands: focusedSearchBands);
+                focusedSearchBands: focusedSearchBands,
+                paintBackground: false);
         }
 
         canvas.Restore();
@@ -1687,7 +1796,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         return overlays.Count > 0 ? overlays : null;
     }
 
-    private static SKColor ParseAnnotationColor(string? value)
+    private SKColor ParseAnnotationColor(string? value)
     {
         if (value is { Length: 7 }
             && value[0] == '#'
@@ -1697,13 +1806,25 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 CultureInfo.InvariantCulture,
                 out var rgb))
         {
-            return new SKColor(
+            var color = new SKColor(
                 (byte)(rgb >> 16),
                 (byte)(rgb >> 8),
                 (byte)rgb);
+            // Existing annotations use black ink. Keep that semantic ink
+            // readable on every paper, including previously saved notes.
+            if (color.Red <= 0x33 && color.Green <= 0x33 && color.Blue <= 0x33)
+                return _paintTheme.Text;
+            if (_appearance.Theme == ReaderTheme.Night)
+            {
+                return new SKColor(
+                    (byte)((color.Red + _paintTheme.Text.Red) / 2),
+                    (byte)((color.Green + _paintTheme.Text.Green) / 2),
+                    (byte)((color.Blue + _paintTheme.Text.Blue) / 2));
+            }
+            return color;
         }
 
-        return SKColors.Black;
+        return _paintTheme.Text;
     }
 
     private IReadOnlyList<SKRect>? SearchBandsFor(LayoutPage page)
@@ -2835,6 +2956,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         if (bitmap is null)
         {
             return Task.FromResult<byte[]?>(null);
+        }
+
+        if (_bitmapDirty)
+        {
+            PaintPageIntoBitmap(_bitmapPixelWidth, _bitmapPixelHeight, CurrentScaling);
+            _bitmapDirty = false;
         }
 
         try

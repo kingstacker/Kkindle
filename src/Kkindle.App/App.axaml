@@ -2,8 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="Kkindle.App"
              RequestedThemeVariant="Light">
-    <!-- Kkindle is a paper-white reading tool: the palette is fixed light, not
-         system-following. Dark mode is not a supported variant (AI_HANDOFF #13). -->
+    <!-- Black and white is the default. Kreader owns an independent theme scope. -->
 
     <Application.Resources>
         <ResourceDictionary>
@@ -11,7 +10,7 @@
                 <ResourceInclude Source="avares://Kkindle.App/ScrollBarTheme.axaml" />
             </ResourceDictionary.MergedDictionaries>
 
-        <!-- The whole product is black, white and grey with square corners.
+        <!-- Default black, white and grey resources; AppAppearanceResources supplies themes.
              Every value here is quoted from the WinUI App.xaml so the port can
              be compared against docs/images/ pixel by pixel. -->
         <Color x:Key="PaperColor">#FFFFFF</Color>
@@ -22,14 +21,14 @@
         <Color x:Key="SidebarIndicatorColor">#BFBFBF</Color>
         <Color x:Key="SoftHoverColor">#F2F2F2</Color>
 
-        <SolidColorBrush x:Key="PaperBrush" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="InkBrush" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="PressedBrush" Color="{StaticResource PressedColor}" />
-        <SolidColorBrush x:Key="HairlineBrush" Color="{StaticResource HairlineColor}" />
-        <SolidColorBrush x:Key="MutedInkBrush" Color="{StaticResource MutedInkColor}" />
-        <SolidColorBrush x:Key="SidebarIndicatorBrush" Color="{StaticResource SidebarIndicatorColor}" />
-        <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource SidebarIndicatorColor}" />
-        <SolidColorBrush x:Key="SoftHoverBrush" Color="{StaticResource SoftHoverColor}" />
+        <SolidColorBrush x:Key="PaperBrush" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="InkBrush" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="PressedBrush" Color="{DynamicResource PressedColor}" />
+        <SolidColorBrush x:Key="HairlineBrush" Color="{DynamicResource HairlineColor}" />
+        <SolidColorBrush x:Key="MutedInkBrush" Color="{DynamicResource MutedInkColor}" />
+        <SolidColorBrush x:Key="SidebarIndicatorBrush" Color="{DynamicResource SidebarIndicatorColor}" />
+        <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource SidebarIndicatorColor}" />
+        <SolidColorBrush x:Key="SoftHoverBrush" Color="{DynamicResource SoftHoverColor}" />
 
         <!-- The font is bundled with the portable app. The suffix is the
              internal family name, not the filename. -->
@@ -85,7 +84,7 @@
                                       VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
                 </Border>
                 <Border x:Name="HoverInkOutline"
-                        BorderBrush="#000000"
+                        BorderBrush="{DynamicResource ReaderBorderBrush}"
                         BorderThickness="1"
                         IsHitTestVisible="False"
                         Opacity="0" />
@@ -134,7 +133,7 @@
 
         <!-- Fluent paints the focused TextBox border with the accent colour;
              the reader search box and AI input must stay black-on-white. -->
-        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="{DynamicResource InkColor}" />
 
         <!-- Fluent's popup templates read these values through DynamicResource
              from inside their templates. Keep the entire popup layer in the
@@ -164,27 +163,27 @@
         <Thickness x:Key="MenuInputGestureTextMargin">0</Thickness>
         <Thickness x:Key="MenuFlyoutSeparatorThemePadding">0</Thickness>
         <Thickness x:Key="MenuFlyoutScrollerMargin">0</Thickness>
-        <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemBackground" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="{StaticResource PressedColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundDisabled" Color="{StaticResource SoftHoverColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemBackground" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="{DynamicResource PressedColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundDisabled" Color="{DynamicResource SoftHoverColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemForegroundDisabled" Color="#8A8A8A" />
-        <SolidColorBrush x:Key="MenuFlyoutSubItemChevron" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronPointerOver" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronPressed" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutSubItemChevron" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronPointerOver" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronPressed" Color="{DynamicResource InkColor}" />
         <!-- Opening the submenu must not make the parent chevron disappear
              against its white row. Its position remains controlled by the
              unchanged MenuFlyoutItemChevronMargin resource above. -->
-        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronSubMenuOpened" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutSubItemChevronSubMenuOpened" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutSubItemChevronDisabled" Color="#8A8A8A" />
-        <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForeground" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundPointerOver" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundPressed" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForeground" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundPointerOver" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundPressed" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundDisabled" Color="#8A8A8A" />
 
         <x:Double x:Key="ComboBoxThemeMinWidth">64</x:Double>
@@ -193,57 +192,67 @@
         <Thickness x:Key="ComboBoxDropdownBorderPadding">0</Thickness>
         <Thickness x:Key="ComboBoxDropdownContentMargin">0</Thickness>
         <Thickness x:Key="ComboBoxItemThemePadding">7,4,7,5</Thickness>
-        <SolidColorBrush x:Key="ComboBoxItemForeground" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemForegroundPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemForegroundPointerOver" Color="{StaticResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemForeground" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemForegroundPressed" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemForegroundPointerOver" Color="{DynamicResource PaperColor}" />
         <SolidColorBrush x:Key="ComboBoxItemForegroundDisabled" Color="#8A8A8A" />
-        <SolidColorBrush x:Key="ComboBoxItemForegroundSelected" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPressed" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPointerOver" Color="{StaticResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemForegroundSelected" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPressed" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPointerOver" Color="{DynamicResource PaperColor}" />
         <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedDisabled" Color="#8A8A8A" />
-        <SolidColorBrush x:Key="ComboBoxItemBackground" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="{StaticResource PressedColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBackgroundDisabled" Color="{StaticResource SoftHoverColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedDisabled" Color="{StaticResource SoftHoverColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBorderBrushPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBorderBrushPointerOver" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackground" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="{DynamicResource PressedColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackgroundDisabled" Color="{DynamicResource SoftHoverColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedDisabled" Color="{DynamicResource SoftHoverColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBorderBrushPressed" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBorderBrushPointerOver" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="ComboBoxItemBorderBrushDisabled" Color="#BFBFBF" />
-        <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelected" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPointerOver" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelected" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPressed" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedPointerOver" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="ComboBoxItemBorderBrushSelectedDisabled" Color="#BFBFBF" />
-        <SolidColorBrush x:Key="ComboBoxBackground" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="{StaticResource SoftHoverColor}" />
-        <SolidColorBrush x:Key="ComboBoxBackgroundUnfocused" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushUnfocused" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxForeground" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxBackground" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="{DynamicResource SoftHoverColor}" />
+        <SolidColorBrush x:Key="ComboBoxBackgroundUnfocused" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushUnfocused" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxForeground" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="ComboBoxForegroundDisabled" Color="#8A8A8A" />
-        <SolidColorBrush x:Key="ComboBoxForegroundFocused" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxForegroundFocusedPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxPlaceHolderForeground" Color="{StaticResource MutedInkColor}" />
-        <SolidColorBrush x:Key="ComboBoxPlaceHolderForegroundFocusedPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxForegroundFocused" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxForegroundFocusedPressed" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxPlaceHolderForeground" Color="{DynamicResource MutedInkColor}" />
+        <SolidColorBrush x:Key="ComboBoxPlaceHolderForegroundFocusedPressed" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="ComboBoxBorderBrushDisabled" Color="#BFBFBF" />
-        <SolidColorBrush x:Key="ComboBoxDropDownGlyphForeground" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxDropDownGlyphForeground" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundDisabled" Color="#8A8A8A" />
-        <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocused" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocusedPressed" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="{StaticResource PaperColor}" />
-        <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="{StaticResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocused" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxDropDownGlyphForegroundFocusedPressed" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="{DynamicResource PaperColor}" />
+        <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="{DynamicResource InkColor}" />
         </ResourceDictionary>
     </Application.Resources>
 
     <Application.Styles>
         <FluentTheme />
+
+        <Style Selector="Window">
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
+        </Style>
 
         <!-- Tooltips use the same restrained square treatment as the other
              popup surfaces: paper-white body, one-pixel ink outline, no
@@ -251,16 +260,16 @@
         <Style Selector="ToolTip">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Padding" Value="8,5" />
         </Style>
         <Style Selector="ToolTip /template/ Border#PART_Border">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
@@ -280,15 +289,15 @@
              override sizes and spacing without changing the palette. -->
         <Style Selector="TextBlock">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinHeight" Value="35" />
             <Setter Property="FontSize" Value="14" />
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Padding" Value="14,7" />
@@ -303,19 +312,19 @@
             </Setter>
         </Style>
         <Style Selector="Button:pointerover">
-            <Setter Property="Background" Value="#1F1F1F" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="#1F1F1F" />
+            <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         </Style>
         <Style Selector="Button:pressed">
-            <Setter Property="Background" Value="#3F3F3F" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="#3F3F3F" />
+            <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
         </Style>
         <Style Selector="Button.readerSelectionAction">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -330,18 +339,18 @@
             </Setter>
         </Style>
         <Style Selector="Button.readerSelectionAction:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <Style Selector="Button.readerSelectionAction:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerFootnoteMarker">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -355,17 +364,17 @@
             </Setter>
         </Style>
         <Style Selector="Button.readerFootnoteMarker:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerFootnoteMarker:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAiCitationMarker">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -382,30 +391,36 @@
             </Setter>
         </Style>
         <Style Selector="Button.readerAiCitationMarker:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAiCitationMarker:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="TextBox">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="PlaceholderForeground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="SelectionBrush" Value="{StaticResource InkBrush}" />
-            <Setter Property="SelectionForegroundBrush" Value="{StaticResource PaperBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="TextBox:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <!-- Fluent fades placeholders to half opacity. The palette already
+             supplies a muted ink, so a second fade makes night fields illegible. -->
+        <Style Selector="TextBox:not(:disabled) /template/ TextBlock#PART_Placeholder">
+            <Setter Property="Opacity" Value="1" />
         </Style>
         <!-- Fluent replaces the template border thickness on focus. Override
              that inner state as well so typing never draws a rectangle. -->
         <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
         <Style Selector="TextBox.readerAiQuestionInput /template/ Border#PART_BorderElement">
@@ -419,8 +434,8 @@
         <!-- SelectableTextBlock uses the same native selection pipeline as a
              TextBox. Keep read-only text selection inverted as well. -->
         <Style Selector="SelectableTextBlock">
-            <Setter Property="SelectionBrush" Value="{StaticResource InkBrush}" />
-            <Setter Property="SelectionForegroundBrush" Value="{StaticResource PaperBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{DynamicResource PaperBrush}" />
         </Style>
 
         <!-- Caption buttons invert to black-on-white on hover, which is the
@@ -430,8 +445,8 @@
             <Setter Property="Width" Value="46" />
             <Setter Property="Height" Value="38" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -453,12 +468,12 @@
             </Setter>
         </Style>
         <Style Selector="Button.caption:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="Button.caption:pressed">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
 
         <!-- The WinUI reference uses a small set of named visual languages:
@@ -469,9 +484,9 @@
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinHeight" Value="35" />
             <Setter Property="FontSize" Value="14" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Padding" Value="14,7" />
@@ -479,14 +494,14 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.quiet:pointerover">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.quiet:pressed">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <!-- Settings actions follow the onboarding button language: a white
@@ -497,23 +512,23 @@
             <Setter Property="Padding" Value="14,7" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="Normal" />
-            <Setter Property="Background" Value="#000000" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.settingsActionSave:pointerover">
-            <Setter Property="Background" Value="#2A2A2A" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
-            <Setter Property="BorderBrush" Value="#2A2A2A" />
+            <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         </Style>
         <Style Selector="Button.settingsActionSave:pressed">
-            <Setter Property="Background" Value="#444444" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
-            <Setter Property="BorderBrush" Value="#444444" />
+            <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
         </Style>
         <Style Selector="Button.settingsActionCancel">
             <Setter Property="MinWidth" Value="84" />
@@ -521,23 +536,23 @@
             <Setter Property="Padding" Value="14,7" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="Normal" />
-            <Setter Property="Background" Value="#FFFFFF" />
-            <Setter Property="Foreground" Value="#000000" />
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.settingsActionCancel:pointerover">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="#000000" />
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.settingsActionCancel:pressed">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="#000000" />
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <!-- Destructive action: the detail-pane delete button uses the
@@ -574,34 +589,34 @@
              hover on the template's ContentPresenter, so these overrides keep
              the pair consistent there too. -->
         <Style Selector="Button.detailSave">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.detailSave:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#1F1F1F" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="#1F1F1F" />
+            <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         </Style>
         <Style Selector="Button.detailSave:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#3F3F3F" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="#3F3F3F" />
+            <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
         </Style>
         <Style Selector="Button.detailDelete">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.detailDelete:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.detailDelete:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <Style Selector="Button.icon">
@@ -610,9 +625,9 @@
             <Setter Property="MinWidth" Value="38" />
             <Setter Property="Height" Value="38" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -620,15 +635,15 @@
         </Style>
         <Style Selector="Button.icon:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.icon:pressed">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.icon.active">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
 
@@ -643,7 +658,7 @@
             <Setter Property="MinHeight" Value="31" />
             <Setter Property="Padding" Value="1" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -657,12 +672,12 @@
             </Setter>
         </Style>
         <Style Selector="Button.syncIndicator:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.syncIndicator:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <!-- Section headers: same size as items but semibold gray, so the
@@ -674,7 +689,7 @@
             <Setter Property="Margin" Value="12,2,0,2" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -703,25 +718,25 @@
             </Setter>
         </Style>
         <Style Selector="Button.sidebarSection:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection.active">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection Path">
-            <Setter Property="Stroke" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Stroke" Value="{DynamicResource MutedInkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection:pointerover Path">
-            <Setter Property="Stroke" Value="{StaticResource InkBrush}" />
+            <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection:pressed Path, Button.sidebarSection.active Path">
-            <Setter Property="Stroke" Value="{StaticResource InkBrush}" />
+            <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <!-- Settings is a top-level destination, not another child row. Keep
@@ -735,7 +750,7 @@
             <Setter Property="Margin" Value="12,2,0,2" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -764,16 +779,16 @@
             </Setter>
         </Style>
         <Style Selector="Button.sidebarPrimaryItem:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarPrimaryItem:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarPrimaryItem.active">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="BorderThickness" Value="0" />
@@ -781,8 +796,8 @@
         </Style>
         <Style Selector="Button.sidebarPrimaryItem.active:pointerover,
                          Button.sidebarPrimaryItem.active:focus-visible">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -800,7 +815,7 @@
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
             <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -832,18 +847,18 @@
             </Setter>
         </Style>
         <Style Selector="Button.sidebarItem:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarItem:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarItem.active">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="FontWeight" Value="Normal" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
         <!-- Keep the active row stable when the pointer remains over it. The
@@ -851,9 +866,9 @@
              capsule. -->
         <Style Selector="Button.sidebarItem.active:pointerover,
                          Button.sidebarItem.active:focus-visible">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
 
@@ -867,7 +882,7 @@
             <Setter Property="Margin" Value="0,0,12,0" />
             <Setter Property="Padding" Value="8,10" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0,0,0,2" />
             <Setter Property="CornerRadius" Value="0" />
@@ -886,17 +901,17 @@
             </Setter>
         </Style>
         <Style Selector="Button.settingsCategory:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.settingsCategory.active">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style Selector="Button.settingsCategory:focus-visible">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.settingsPage TextBox, Grid.settingsPage ComboBox, Grid.settingsPage NumericUpDown">
             <Setter Property="MinHeight" Value="38" />
@@ -927,7 +942,7 @@
             </Setter>
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1" CornerRadius="4"
+                    <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="4"
                             ClipToBounds="True">
                         <StackPanel>
                             <ToggleButton x:Name="PART_HeaderSite" Classes="settingsExpanderHeader"
@@ -949,7 +964,7 @@
         <Style Selector="ToggleButton.settingsExpanderHeader">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="RenderTransform" Value="none" />
             <Setter Property="Transitions">
                 <Transitions />
@@ -960,10 +975,10 @@
                         <Grid ColumnDefinitions="*,20" ColumnSpacing="12">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{TemplateBinding Content}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                <TextBlock Text="{TemplateBinding Tag}" FontSize="12" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" />
+                                <TextBlock Text="{TemplateBinding Tag}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                             </StackPanel>
                             <Path x:Name="SettingsExpanderChevron" Grid.Column="1" Width="10" Height="10"
-                                  Data="M 2,1 L 6,5 L 2,9" Stroke="{StaticResource InkBrush}"
+                                  Data="M 2,1 L 6,5 L 2,9" Stroke="{DynamicResource InkBrush}"
                                   StrokeThickness="1.3" VerticalAlignment="Center" />
                         </Grid>
                     </Border>
@@ -971,7 +986,7 @@
             </Setter>
         </Style>
         <Style Selector="ToggleButton.settingsExpanderHeader:pointerover, ToggleButton.settingsExpanderHeader:focus-visible">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
         </Style>
         <Style Selector="ToggleButton.settingsExpanderHeader:pressed">
             <Setter Property="RenderTransform" Value="none" />
@@ -988,23 +1003,23 @@
             <Setter Property="MinHeight" Value="35" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="Padding" Value="14,7" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Grid.libraryShell Button.quiet:pointerover">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.quiet:pressed">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <!-- Kindle resource pages use the same filled primary and outlined
@@ -1014,9 +1029,9 @@
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="35" />
             <Setter Property="Padding" Value="14,7" />
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="14" />
@@ -1025,12 +1040,12 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourcePrimary:pointerover">
-            <Setter Property="Background" Value="#2A2A2A" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourcePrimary:pressed">
-            <Setter Property="Background" Value="#000000" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourcePrimary:disabled">
             <Setter Property="Opacity" Value="0.35" />
@@ -1041,9 +1056,9 @@
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="35" />
             <Setter Property="Padding" Value="14,7" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="14" />
@@ -1052,29 +1067,29 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceAction:pointerover">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceAction:pressed">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceAction:disabled">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
             <Setter Property="Opacity" Value="0.45" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceDestructive:pointerover">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceDestructive:pressed">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <Style Selector="Grid.libraryShell Button.deviceResourceBack">
@@ -1082,9 +1097,9 @@
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="35" />
             <Setter Property="Padding" Value="14,7" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="14" />
@@ -1093,59 +1108,59 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceBack:pointerover">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.deviceResourceBack:pressed">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <Style Selector="Grid.libraryShell Button.icon">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
         </Style>
         <Style Selector="Grid.libraryShell Button.icon:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell Button.icon:pressed">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell TextBox">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Padding" Value="2,7" />
         </Style>
         <Style Selector="Grid.libraryShell TextBox:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell ComboBox">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
         <Style Selector="Grid.libraryShell ComboBox:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell NumericUpDown">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
         <Style Selector="Grid.libraryShell CheckBox">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Grid ColumnDefinitions="18,Auto" ColumnSpacing="8" MinHeight="22">
@@ -1158,7 +1173,7 @@
                                 VerticalAlignment="Center">
                             <Path x:Name="FlatCheckGlyph"
                                   Data="M 3,8 L 7,12 L 15,4"
-                                  Stroke="{StaticResource PaperBrush}"
+                                  Stroke="{DynamicResource PaperBrush}"
                                   StrokeThickness="2"
                                   IsVisible="False" />
                         </Border>
@@ -1172,10 +1187,10 @@
             </Setter>
         </Style>
         <Style Selector="Grid.libraryShell CheckBox:pointerover /template/ Border#FlatCheckIndicator">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell CheckBox:checked /template/ Border#FlatCheckIndicator">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Grid.libraryShell CheckBox:checked /template/ Path#FlatCheckGlyph">
             <Setter Property="IsVisible" Value="True" />
@@ -1184,23 +1199,23 @@
             <Setter Property="Opacity" Value="0.45" />
         </Style>
         <Style Selector="Grid.libraryShell Border.flatPanel">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="3,0,0,0" />
         </Style>
         <Style Selector="Grid.libraryShell Border.flatMetric">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,1,0,0" />
         </Style>
         <Style Selector="Grid.libraryShell Border.flatRow">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
         <Style Selector="Grid.libraryShell Border.flatSubsection">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="0,1,0,0" />
         </Style>
 
@@ -1209,12 +1224,12 @@
              settings or feature pages. -->
         <Style Selector="CheckBox">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="CheckBox:pointerover">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <!-- The TTS popup is a separate native popup tree, so give its
              auto-advance checkbox the same explicit monochrome indicator as
@@ -1222,9 +1237,9 @@
              leaking into the checked state. -->
         <Style Selector="CheckBox.readerTtsCheck">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Grid ColumnDefinitions="18,Auto" ColumnSpacing="8" MinHeight="22">
@@ -1237,7 +1252,7 @@
                                 VerticalAlignment="Center">
                             <Path x:Name="ReaderTtsCheckGlyph"
                                   Data="M 3,8 L 7,12 L 15,4"
-                                  Stroke="{StaticResource PaperBrush}"
+                                  Stroke="{DynamicResource ReaderInputBrush}"
                                   StrokeThickness="2"
                                   IsVisible="False" />
                         </Border>
@@ -1251,10 +1266,10 @@
             </Setter>
         </Style>
         <Style Selector="CheckBox.readerTtsCheck:pointerover /template/ Border#ReaderTtsCheckIndicator">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="CheckBox.readerTtsCheck:checked /template/ Border#ReaderTtsCheckIndicator">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="CheckBox.readerTtsCheck:checked /template/ Path#ReaderTtsCheckGlyph">
             <Setter Property="IsVisible" Value="True" />
@@ -1265,9 +1280,9 @@
         <!-- Reader layout switches use an explicit monochrome template so
              Fluent's blue system accent cannot leak into the checked state. -->
         <Style Selector="CheckBox.readerLayoutCheck">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Grid ColumnDefinitions="18,Auto" ColumnSpacing="8" MinHeight="22">
@@ -1280,7 +1295,7 @@
                                 VerticalAlignment="Center">
                             <Path x:Name="ReaderLayoutCheckGlyph"
                                   Data="M 3,8 L 7,12 L 15,4"
-                                  Stroke="{StaticResource PaperBrush}"
+                                  Stroke="{DynamicResource ReaderInputBrush}"
                                   StrokeThickness="2"
                                   IsVisible="False" />
                         </Border>
@@ -1294,10 +1309,10 @@
             </Setter>
         </Style>
         <Style Selector="CheckBox.readerLayoutCheck:pointerover /template/ Border#ReaderLayoutCheckIndicator">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="CheckBox.readerLayoutCheck:checked /template/ Border#ReaderLayoutCheckIndicator">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="CheckBox.readerLayoutCheck:checked /template/ Path#ReaderLayoutCheckGlyph">
             <Setter Property="IsVisible" Value="True" />
@@ -1307,9 +1322,9 @@
         </Style>
         <Style Selector="ComboBox">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
@@ -1318,15 +1333,15 @@
              palette even when the native theme has a blue accent. -->
         <Style Selector="ComboBox.readerTtsVoice">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="ComboBox.readerTtsVoice /template/ TextBox">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="SelectionBrush" Value="{StaticResource InkBrush}" />
-            <Setter Property="SelectionForegroundBrush" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{DynamicResource ReaderPageBrush}" />
         </Style>
         <!-- Long selected text (e.g. author names in a 145px filter box) must
              trim instead of pushing the dropdown chevron out of the border. -->
@@ -1334,8 +1349,8 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
         <Style Selector="ComboBox /template/ Border#PopupBorder">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -1353,8 +1368,8 @@
         </Style>
         <Style Selector="ComboBoxItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -1397,32 +1412,32 @@
             <Setter Property="TextWrapping" Value="NoWrap" />
         </Style>
         <Style Selector="ComboBoxItem:pointerover">
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ComboBoxItem:selected">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="ComboBoxItem:selected:pointerover">
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <!-- Fluent paints the ProgressBar fill with the accent colour; keep
              every progress bar (import, transfer, conversion) ink-on-paper. -->
         <Style Selector="ProgressBar">
             <Style.Resources>
-                <SolidColorBrush x:Key="SystemControlHighlightAccentBrush" Color="{StaticResource InkColor}" />
-                <SolidColorBrush x:Key="SystemControlForegroundBaseHighBrush" Color="{StaticResource InkColor}" />
+                <SolidColorBrush x:Key="SystemControlHighlightAccentBrush" Color="{DynamicResource InkColor}" />
+                <SolidColorBrush x:Key="SystemControlForegroundBaseHighBrush" Color="{DynamicResource InkColor}" />
                 <SolidColorBrush x:Key="SystemControlHighlightTransparentBrush" Color="#00FFFFFF" />
-                <SolidColorBrush x:Key="SystemControlBackgroundBaseLowBrush" Color="{StaticResource HairlineColor}" />
+                <SolidColorBrush x:Key="SystemControlBackgroundBaseLowBrush" Color="{DynamicResource HairlineColor}" />
             </Style.Resources>
         </Style>
         <Style Selector="NumericUpDown">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
@@ -1437,38 +1452,38 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="NumericUpDown /template/ ButtonSpinner#PART_Spinner /template/ RepeatButton:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <!-- Fluent paints pressed/focused/disabled spinner arrows as filled
              rectangles too (a hit max/min disables one arrow); flatten those. -->
         <Style Selector="NumericUpDown /template/ ButtonSpinner#PART_Spinner /template/ RepeatButton:pressed">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="NumericUpDown /template/ ButtonSpinner#PART_Spinner /template/ RepeatButton:focus">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="BorderThickness" Value="0" />
         </Style>
         <Style Selector="NumericUpDown /template/ ButtonSpinner#PART_Spinner /template/ RepeatButton:disabled">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
         </Style>
         <Style Selector="NumericUpDown /template/ TextBox#PART_TextBox">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="SelectionBrush" Value="{StaticResource InkBrush}" />
-            <Setter Property="SelectionForegroundBrush" Value="{StaticResource PaperBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="NumericUpDown:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="NumericUpDown:focus /template/ Border#BackgroundBorder">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <!-- The setting label already provides the meaning, so the switch stays
@@ -1476,9 +1491,9 @@
              accent colour must not enter the control. -->
         <Style Selector="ToggleSwitch">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="IsThreeState" Value="False" />
             <Setter Property="Template">
                 <ControlTemplate>
@@ -1495,7 +1510,7 @@
                                         Width="14"
                                         Height="14"
                                         Margin="2"
-                                        Background="{StaticResource InkBrush}"
+                                        Background="{DynamicResource InkBrush}"
                                         CornerRadius="7"
                                         HorizontalAlignment="Left"
                                         VerticalAlignment="Center" />
@@ -1506,12 +1521,12 @@
             </Setter>
         </Style>
         <Style Selector="ToggleSwitch:checked">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:checked /template/ Border#SwitchThumb">
             <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />
@@ -1534,7 +1549,7 @@
                                     BorderThickness="1" CornerRadius="10" VerticalAlignment="Center">
                                 <Grid x:Name="PART_MovingKnobs">
                                     <Border x:Name="SwitchThumb" Width="14" Height="14" Margin="2"
-                                            Background="{StaticResource InkBrush}" CornerRadius="7"
+                                            Background="{DynamicResource InkBrush}" CornerRadius="7"
                                             HorizontalAlignment="Left" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
@@ -1544,10 +1559,10 @@
             </Setter>
         </Style>
         <Style Selector="ToggleSwitch.settingsToggle:pointerover /template/ Border#SettingsToggleRow">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
         </Style>
         <Style Selector="ToggleSwitch.settingsToggle:focus-visible /template/ Border#SettingsToggleRow">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <!-- The device card uses the same minimal vector eject mark as the
@@ -1559,7 +1574,7 @@
             <Setter Property="Height" Value="23" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -1579,13 +1594,13 @@
             </Setter>
         </Style>
         <Style Selector="Button.eject:pointerover">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="Button.eject:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
         </Style>
         <Style Selector="Polygon.ejectGlyph">
-            <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource InkBrush}" />
             <Setter Property="RenderTransformOrigin" Value="50%,50%" />
             <Setter Property="RenderTransform" Value="scale(1)" />
             <Setter Property="Transitions">
@@ -1622,7 +1637,7 @@
 
         <Style Selector="ListBoxItem.bookCard">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -1630,7 +1645,7 @@
         </Style>
         <Style Selector="ListBoxItem.bookCard:selected">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ListBoxItem.bookCard:pointerover">
             <Setter Property="Background" Value="Transparent" />
@@ -1642,8 +1657,8 @@
             <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="9,5" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#242424" />
-            <Setter Property="BorderBrush" Value="#D5D5D1" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="12" />
@@ -1653,10 +1668,10 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerToolbar:pointerover">
-            <Setter Property="Background" Value="#ECECEA" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Button.readerToolbar:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
         <Style Selector="Button.readerToolbar:disabled">
             <Setter Property="Opacity" Value="0.35" />
@@ -1676,7 +1691,7 @@
             <Setter Property="MinHeight" Value="62" />
             <Setter Property="Padding" Value="10,8" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -1698,73 +1713,73 @@
              plane, dark ink glyphs. -->
         <Style Selector="Grid.readerShell Button.icon">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#242424" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
         </Style>
         <Style Selector="Grid.readerShell Button.icon:pointerover">
-            <Setter Property="Background" Value="#ECECEA" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Grid.readerShell Button.icon:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
         <!-- Quiet buttons in the reader stay outlined white boxes with a
              soft grey hover (WinUI QuietButtonStyle), no scale animation. -->
         <Style Selector="Grid.readerShell Button.quiet">
-            <Setter Property="Background" Value="#FFFFFF" />
-            <Setter Property="Foreground" Value="#000000" />
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
         <Style Selector="Grid.readerShell Button.quiet:pointerover">
-            <Setter Property="Background" Value="#ECECEA" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Grid.readerShell Button.quiet:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <!-- Reader inputs are black-framed square boxes (WinUI App.xaml
              TextBox/ComboBox baseline), not underline fields. -->
         <Style Selector="Grid.readerShell TextBox">
-            <Setter Property="Background" Value="#FFFFFF" />
-            <Setter Property="Foreground" Value="#000000" />
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
         <Style Selector="Grid.readerShell TextBox:focus">
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Grid.readerShell ComboBox">
-            <Setter Property="Background" Value="#FFFFFF" />
-            <Setter Property="Foreground" Value="#000000" />
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
         <Style Selector="Grid.readerShell ComboBox:focus">
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
 
         <!-- AI settings reuse the library form language inside the otherwise
              black-framed reader surface. -->
         <Style Selector="Grid.readerShell TextBox.readerSettingsField">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="Padding" Value="2,7" />
         </Style>
         <Style Selector="Grid.readerShell TextBox.readerSettingsField:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Grid.readerShell ComboBox.readerSettingsField">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
         <Style Selector="Grid.readerShell ComboBox.readerSettingsField:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
 
         <Style Selector="Button.readerAssistantTab">
@@ -1772,7 +1787,7 @@
             <Setter Property="Height" Value="30" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -1782,11 +1797,11 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerAssistantTab:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAssistantTab.active">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style Selector="Button.readerAiReasoningToggle">
@@ -1795,7 +1810,7 @@
             <Setter Property="MinHeight" Value="24" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="FontSize" Value="11" />
@@ -1804,7 +1819,7 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerAiReasoningToggle:pointerover">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAiSendButton">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
@@ -1814,7 +1829,7 @@
             <Setter Property="MinHeight" Value="34" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -1823,10 +1838,10 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerAiSendButton:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Button.readerAiSendButton:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
         <Style Selector="Button.readerAiSendButton:disabled">
             <Setter Property="Opacity" Value="0.35" />
@@ -1836,8 +1851,8 @@
             <Setter Property="MinHeight" Value="34" />
             <Setter Property="Padding" Value="6,5" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -1845,11 +1860,11 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerAiQuickOption:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAiQuickOption:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
         <Style Selector="Button.readerAiQuickOption:disabled">
             <Setter Property="Opacity" Value="0.35" />
@@ -1859,8 +1874,8 @@
             <Setter Property="MinHeight" Value="36" />
             <Setter Property="Padding" Value="6,5" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -1868,10 +1883,10 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerMinimalAction:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Button.readerMinimalAction:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
         <Style Selector="Button.readerMinimalAction:disabled">
             <Setter Property="Opacity" Value="0.35" />
@@ -1881,8 +1896,8 @@
             <Setter Property="MinHeight" Value="44" />
             <Setter Property="Padding" Value="2,7" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -1890,24 +1905,24 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerNoteItem:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Grid.readerShell TextBox.readerMinimalField">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="Padding" Value="2,7" />
         </Style>
         <Style Selector="Grid.readerShell TextBox.readerMinimalField:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Grid.readerShell ComboBox.readerMinimalField">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
         <Style Selector="Grid.readerShell ComboBox.readerMinimalField:focus">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
 
         <!-- Hollow tabs (WinUI SetReaderTocTab): transparent fill for both
@@ -1918,8 +1933,8 @@
             <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#242424" />
-            <Setter Property="BorderBrush" Value="#D5D5D1" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="12" />
@@ -1929,13 +1944,13 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerTab:pointerover">
-            <Setter Property="Background" Value="#ECECEA" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Button.readerTab:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
         <Style Selector="Button.readerTab.active">
-            <Setter Property="BorderBrush" Value="#000000" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
 
         <!-- Reader header chrome buttons: stable sizes keep the reader header
@@ -1948,8 +1963,8 @@
             <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="6,4" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#242424" />
-            <Setter Property="BorderBrush" Value="#D5D5D1" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="12" />
@@ -1959,10 +1974,10 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerHeader:pointerover">
-            <Setter Property="Background" Value="#ECECEA" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Button.readerHeader:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
         <!-- KReader header glyphs share one full button slot. The presenter
              fills the slot and the content alignment, rather than the glyph's
@@ -2000,9 +2015,9 @@
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="35" />
             <Setter Property="Padding" Value="10,7" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="13" />
@@ -2011,32 +2026,32 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerTtsAction.primary">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsAction.primary:disabled">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsAction:pointerover">
-            <Setter Property="Background" Value="#F0F0F0" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsAction.primary:pointerover">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsAction:pressed">
-            <Setter Property="Background" Value="#D9D9D9" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsAction.primary:pressed">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsAction:disabled">
             <Setter Property="Opacity" Value="0.35" />
@@ -2051,9 +2066,9 @@
             <Setter Property="Height" Value="48" />
             <Setter Property="MinHeight" Value="48" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInputBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="24" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -2061,14 +2076,14 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerTtsFloatingToggle:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInputBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsFloatingToggle:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsFloatingToggle:disabled">
             <Setter Property="Opacity" Value="0.45" />
@@ -2081,9 +2096,9 @@
             <Setter Property="Height" Value="38" />
             <Setter Property="MinHeight" Value="38" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="19" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -2091,14 +2106,14 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerTtsFloatingStop:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInputBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsFloatingStop:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerTtsFloatingStop:disabled">
             <Setter Property="Opacity" Value="0.45" />
@@ -2112,7 +2127,7 @@
             <Setter Property="MinHeight" Value="20" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -2132,12 +2147,12 @@
         </Style>
         <Style Selector="Button.readerTtsWheelButton:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="RenderTransform" Value="scale(1.18)" />
         </Style>
         <Style Selector="Button.readerTtsWheelButton:pressed">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="RenderTransform" Value="scale(0.92)" />
         </Style>
 
@@ -2148,9 +2163,9 @@
             <Setter Property="Height" Value="46" />
             <Setter Property="MinHeight" Value="46" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="#E5E5E5" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="#D0D0D0" />
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="23" />
             <Setter Property="FontSize" Value="14" />
@@ -2168,15 +2183,15 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerTtsWheelCenter:pointerover">
-            <Setter Property="Background" Value="#DCDCDC" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="RenderTransform" Value="scale(1.10)" />
         </Style>
         <Style Selector="Button.readerTtsWheelCenter:pressed">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="RenderTransform" Value="scale(0.94)" />
         </Style>
         <Style Selector="Button.readerTtsWheelCenter:disabled">
@@ -2190,8 +2205,8 @@
             <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#242424" />
-            <Setter Property="BorderBrush" Value="#D5D5D1" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="13" />
@@ -2201,10 +2216,10 @@
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerHeaderIcon:pointerover">
-            <Setter Property="Background" Value="#ECECEA" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
         </Style>
         <Style Selector="Button.readerHeaderIcon:pressed">
-            <Setter Property="Background" Value="#D9D9D5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
 
         <!-- TOC rows stay paper-white in every interaction state. The current
@@ -2216,7 +2231,7 @@
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Template">
@@ -2243,15 +2258,15 @@
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected:pressed">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <!-- The virtualizing panel needs the full viewport after a branch
              expands. Top-aligning its presenter leaves it sized to the old
@@ -2329,21 +2344,21 @@
 
         <Style Selector="ListBoxItem">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
         <Style Selector="ListBoxItem:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ListBoxItem:selected">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="ListBoxItem:selected:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
 
         <!-- The Douban picker draws the selected state on the candidate card
@@ -2351,7 +2366,7 @@
              margin cannot leak the Fluent accent colour as a stray bar. -->
         <Style Selector="ListBox.doubanCandidateList ListBoxItem">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -2369,10 +2384,10 @@
                          ListBox.doubanCandidateList ListBoxItem:pointerover,
                          ListBox.doubanCandidateList ListBoxItem:selected:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ListBox.doubanCandidateList ListBoxItem:selected Border.doubanCandidateRow">
-            <Setter Property="BoxShadow" Value="inset 0 0 0 1 #000000" />
+            <Setter Property="BoxShadow" Value="{DynamicResource CardHoverShadow}" />
         </Style>
 
         <!-- These TOC state overrides must follow the generic ListBoxItem
@@ -2382,21 +2397,21 @@
         <Style Selector="ListBox.readerTocList ListBoxItem">
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:pressed">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="ListBox.readerTocList ListBoxItem:selected,
                          ListBox.readerTocList ListBoxItem:selected:pointerover,
                          ListBox.readerTocList ListBoxItem:selected:pressed">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
 
         <!-- The WinUI shelf selects the 154-DIP card content, never the
@@ -2406,7 +2421,7 @@
              WrapPanel slot width below just decides how many fit per row. -->
         <Style Selector="ListBox.bookGrid ListBoxItem">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -2422,14 +2437,14 @@
         </Style>
         <Style Selector="ListBox.bookGrid ListBoxItem:selected">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ListBox.bookGrid ListBoxItem:pointerover">
             <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="ListBox.bookGrid ListBoxItem:selected:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ListBox.bookGrid /template/ ItemsPresenter">
             <Setter Property="VerticalAlignment" Value="Top" />
@@ -2439,7 +2454,7 @@
         </Style>
         <Style Selector="ListBox.bookList ListBoxItem">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -2455,19 +2470,19 @@
         </Style>
         <Style Selector="ListBox.bookList ListBoxItem:selected">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ListBox.bookList ListBoxItem:pointerover">
             <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="ListBox.bookList ListBoxItem:selected:pointerover">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <Style Selector="ContextMenu">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
@@ -2478,24 +2493,24 @@
              default border is grey, so the monochrome language must be applied
              here as well. -->
         <Style Selector="MenuFlyoutPresenter">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="MinHeight" Value="0" />
         </Style>
         <Style Selector="MenuFlyoutPresenter /template/ Border#LayoutRoot">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
         <Style Selector="MenuItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Padding" Value="{DynamicResource MenuFlyoutItemThemePaddingNarrow}" />
             <Setter Property="Transitions">
                 <Transitions />
@@ -2511,32 +2526,32 @@
         <!-- 选中某条：黑色矩形 + 白色反色文字。子菜单箭头等矢量图形同样
              只允许黑白两色，避免 Fluent 模板主题色渗入。 -->
         <Style Selector="MenuItem:pointerover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="MenuItem.readerSelectionStyle:pointerover">
-            <Setter Property="Background" Value="{StaticResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="MenuItem.readerSelectionStyle:pressed">
-            <Setter Property="Background" Value="{StaticResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="MenuItem:pressed">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="MenuItem:disabled">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="#999999" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource SubtleInkBrush}" />
         </Style>
         <Style Selector="MenuItem:open">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="MenuItem.instantMenuHover">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="MenuItem:separator">
             <Setter Property="Height" Value="0.5" />
@@ -2551,13 +2566,13 @@
             </Setter>
         </Style>
         <Style Selector="MenuItem:open /template/ Border#PART_LayoutRoot">
-            <Setter Property="Background" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="MenuItem:open /template/ ContentPresenter#PART_HeaderPresenter">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="MenuItem:open:not(:empty) /template/ Path#PART_ChevronPath">
-            <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource InkBrush}" />
             <Setter Property="IsVisible" Value="True" />
             <Setter Property="Opacity" Value="1" />
         </Style>
@@ -2566,24 +2581,24 @@
              colour instead of letting the selected-state theme hide it.
              Items without a submenu keep the theme's :empty chevron hidden. -->
         <Style Selector="MenuItem:selected:not(:empty) /template/ Path#PART_ChevronPath">
-            <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource InkBrush}" />
             <Setter Property="IsVisible" Value="True" />
             <Setter Property="Opacity" Value="1" />
         </Style>
         <Style Selector="MenuItem.instantMenuHover /template/ Border#PART_LayoutRoot">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="MenuItem.instantMenuHover /template/ ContentPresenter#PART_HeaderPresenter">
-            <Setter Property="Foreground" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="MenuItem.instantMenuHover /template/ Path#PART_ChevronPath">
-            <Setter Property="Fill" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource PaperBrush}" />
         </Style>
         <!-- Keep vector colours scoped to each MenuItem's own template.
              A broad descendant selector also reaches into an open submenu and
              can turn a nested chevron white while its row is still white. -->
         <Style Selector="MenuItem /template/ Path">
-            <Setter Property="Fill" Value="{StaticResource InkBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource InkBrush}" />
         </Style>
         <!-- 带子菜单的项：右箭头在任何交互状态下都保持可见（普通、悬停、
              按下、子菜单展开/选中），只按所在行的底色切换黑白，不隐藏。 -->
@@ -2592,17 +2607,17 @@
             <Setter Property="Opacity" Value="1" />
         </Style>
         <Style Selector="MenuItem:pointerover /template/ Path, MenuItem:pressed /template/ Path">
-            <Setter Property="Fill" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="MenuItem.instantMenuHover /template/ Path">
-            <Setter Property="Fill" Value="{StaticResource PaperBrush}" />
+            <Setter Property="Fill" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="MenuItem:disabled /template/ Path">
-            <Setter Property="Fill" Value="#999999" />
+            <Setter Property="Fill" Value="{DynamicResource SubtleInkBrush}" />
         </Style>
         <!-- Menu separators: solid black line instead of the Fluent grey. -->
         <Style Selector="Separator">
-            <Setter Property="Background" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
             <Setter Property="Height" Value="0.5" />
             <Setter Property="Margin" Value="0" />
         </Style>
@@ -2613,7 +2628,7 @@
              (BookCardViewModel.IsFrameVisible); the cover border itself never
              turns black. -->
         <Style Selector="Border.bookCover">
-            <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
             <Setter Property="ClipToBounds" Value="True" />
         </Style>
         <Style Selector="Border.bookCover Image">
@@ -2633,12 +2648,12 @@
              Do not use ListBoxItem:selected here: the ListBox can retain a
              current item independently of the app's real book selection. -->
         <Style Selector="ListBox.bookGrid ListBoxItem:pointerover Border.bookOutline">
-            <Setter Property="BoxShadow" Value="inset 0 0 0 1 #000000" />
+            <Setter Property="BoxShadow" Value="{DynamicResource CardHoverShadow}" />
         </Style>
         <!-- List-view rows follow the same rule: grey at rest, black thin
              border on hover (and black when selected via the overlay). -->
         <Style Selector="Border.bookRow">
-            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
             <Setter Property="Transitions">
                 <Transitions>
                     <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
@@ -2646,7 +2661,8 @@
             </Setter>
         </Style>
         <Style Selector="Border.bookRow:pointerover">
-            <Setter Property="BorderBrush" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
+        <StyleInclude Source="avares://Kkindle.App/ReaderAppearanceStyles.axaml" />
     </Application.Styles>
 </Application>

@@ -362,6 +362,9 @@ public partial class MainWindow
         await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken, _s3SyncStoredSettings.DeviceId);
         await _deviceModelStore.InitializeAsync(cancellationToken);
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
+        ApplyMainAppearance();
+        ApplyReaderAppearance();
+        SyncReaderAppearanceControls();
         if (Application.Current is App app)
             app.ApplyLanguage(_appSettings.UiLanguage);
         RefreshLocalizedZLibraryFilterItems();
@@ -3853,6 +3856,8 @@ public partial class MainWindow
         _suppressAppSettingsAutoSave = true;
         try
         {
+            MainThemeBox.SelectedIndex = (int)_appSettings.MainTheme;
+            ApplyMainAppearance();
             PreferredOpenFormatBox.SelectedIndex = _appSettings.PreferredOpenFormat switch
             {
                 "pdf" => 1,
@@ -4738,7 +4743,7 @@ public partial class MainWindow
             && (configuredFileName.Equals("ebook-convert", StringComparison.OrdinalIgnoreCase)
                 || configuredFileName.Equals("ebook-convert.exe", StringComparison.OrdinalIgnoreCase));
         var status = isDetected ? T("已检测到 Calibre") : T("未检测到 Calibre");
-        CalibreDetectionStatusDot.Fill = new SolidColorBrush(Color.Parse(isDetected ? "#2E8B57" : "#D6A100"));
+        CalibreDetectionStatusDot.Fill = AppAppearanceResources.GetBrush(isDetected ? "SuccessBrush" : "WarningBrush");
         ToolTip.SetTip(CalibreDetectionStatusDot, status);
         AutomationProperties.SetName(CalibreDetectionStatusDot, status);
 
@@ -5092,6 +5097,7 @@ public partial class MainWindow
     {
         return AppSettings.Normalize(_appSettings with
         {
+            MainTheme = ReadMainThemeFromControls(),
             UiLanguage = UiText.NormalizeLanguage(UiLanguageBox.SelectedItem is ComboBoxItem languageItem
                 ? languageItem.Tag?.ToString()
                 : _appSettings.UiLanguage),
@@ -6155,9 +6161,9 @@ public sealed class PlatformDiagnosticViewModel : ObservableObject, IDisposable
     };
     public IBrush StatusBrush => Item.Status switch
     {
-        PlatformDiagnosticStatus.Ready => Brushes.SeaGreen,
-        PlatformDiagnosticStatus.Warning => Brushes.DarkGoldenrod,
-        _ => Brushes.IndianRed
+        PlatformDiagnosticStatus.Ready => AppAppearanceResources.GetBrush("SuccessBrush"),
+        PlatformDiagnosticStatus.Warning => AppAppearanceResources.GetBrush("WarningBrush"),
+        _ => AppAppearanceResources.GetBrush("DangerBrush")
     };
 
     public void RefreshLocalizedProperties()

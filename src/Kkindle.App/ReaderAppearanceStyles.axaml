@@ -1,0 +1,146 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:Kkindle">
+    <!-- Reader-specific resources keep the library's monochrome UI intact. -->
+    <Style Selector="Grid.readerShell TextBlock, Grid.readerShell SelectableTextBlock, Grid.readerChrome TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell SelectableTextBlock">
+        <Setter Property="SelectionBrush" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="SelectionForegroundBrush" Value="{DynamicResource ReaderInputBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell TextBox">
+        <Setter Property="PlaceholderForeground" Value="{DynamicResource ReaderMutedBrush}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="SelectionForegroundBrush" Value="{DynamicResource ReaderInputBrush}" />
+    </Style>
+    <Style Selector="local|ReaderSearchHighlightTextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="HighlightBrush" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="HighlightForeground" Value="{DynamicResource ReaderInputBrush}" />
+    </Style>
+    <Style Selector="Grid.readerChrome Button.caption">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="Grid.readerChrome Button.caption:pointerover">
+        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="Grid.readerChrome Button.caption:pressed">
+        <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter,
+                     Grid.readerShell Button.quiet:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell Button.icon:pressed /template/ ContentPresenter#PART_ContentPresenter,
+                     Grid.readerShell Button.quiet:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell TextBox /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource ReaderInputBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell TextBox:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccentBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell ComboBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Background" Value="{DynamicResource ReaderInputBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell ComboBoxItem:pointerover, Grid.readerShell ComboBoxItem:selected">
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Background" Value="{DynamicResource ReaderSelectedBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell ComboBox /template/ Border#PopupBorder">
+        <Setter Property="Background" Value="{DynamicResource ReaderInputBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+    </Style>
+    <Style Selector="Grid.readerShell Separator">
+        <Setter Property="Background" Value="{DynamicResource ReaderBorderBrush}" />
+    </Style>
+    <Style Selector="Border.readerAiBubble">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.readerAiBubble.user">
+        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+    </Style>
+    <Style Selector="RadioButton.readerThemeOption">
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="Margin" Value="0,0,6,0" />
+        <Setter Property="Padding" Value="7" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="2" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Border Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                    <ContentPresenter Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
+                                      HorizontalContentAlignment="Stretch" />
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+    <Style Selector="RadioButton.readerThemeOption:pointerover, RadioButton.readerThemeOption:focus-visible">
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+    </Style>
+    <Style Selector="RadioButton.readerThemeOption:checked">
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource ReaderSelectedBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu">
+        <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu /template/ Border#LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem">
+        <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem /template/ Path">
+        <Setter Property="Fill" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem:open /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem:open /template/ ContentPresenter#PART_HeaderPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem:pointerover,
+                     MenuFlyoutPresenter.readerMenu MenuItem:pressed,
+                     MenuFlyoutPresenter.readerMenu MenuItem.instantMenuHover">
+        <Setter Property="Background" Value="{DynamicResource ReaderSelectedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem.instantMenuHover /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource ReaderSelectedBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem:selected /template/ Border#PART_LayoutRoot,
+                     MenuFlyoutPresenter.readerMenu MenuItem:pointerover /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource ReaderSelectedBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem:selected /template/ ContentPresenter#PART_HeaderPresenter,
+                     MenuFlyoutPresenter.readerMenu MenuItem:pointerover /template/ ContentPresenter#PART_HeaderPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem.instantMenuHover /template/ ContentPresenter#PART_HeaderPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.readerMenu MenuItem:pointerover /template/ Path,
+                     MenuFlyoutPresenter.readerMenu MenuItem.instantMenuHover /template/ Path">
+        <Setter Property="Fill" Value="{DynamicResource ReaderInkBrush}" />
+    </Style>
+</Styles>

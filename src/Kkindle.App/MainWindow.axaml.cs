@@ -229,6 +229,9 @@ public partial class MainWindow : Window
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
+        ApplyMainAppearance();
+        InitializeReaderAppearance();
+        InitializeReaderToolbarAutoHide();
         // Keep the reader's nested menu on the same hover branch and chevron
         // state as the book-library context menu.
         if (ReaderMoreButton.Flyout is MenuFlyout readerMoreMenu)
@@ -558,7 +561,6 @@ public partial class MainWindow : Window
             UpdateReaderToolbar();
             UpdateReaderZenTocToggle();
             UpdateReaderLayoutSliderLabels();
-            UpdateReaderStatsDisplay();
             UpdateReaderTtsUi();
         }
         if (_stage3Ready && ReadingMaterialsPage.IsVisible && !_readingMaterialsDirty)
@@ -852,15 +854,12 @@ public partial class MainWindow : Window
         public byte[] Unprotect(byte[] value) => value.ToArray();
     }
 
-    // Closing the window while Kreader is open returns to the library (the
-    // reader's X / 返回书架 default) instead of exiting the whole application.
-    // A second close request on the library then exits for real. Alt+F4 and
-    // platform close requests land here too (the window draws its own title
-    // bar, so this is the only path besides CloseWindowButton_Click).
+    // Native close requests (including Alt+F4) return from Kreader to the
+    // library. A subsequent native close on the library exits the application.
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
     {
         if (_allowWindowCloseForPendingUpdate || _allowWindowCloseForS3Sync) return;
-        if (ReaderRoot.IsVisible)
+        if (ReaderRoot.IsVisible || Volatile.Read(ref _readerCloseInProgress) != 0)
         {
             e.Cancel = true;
             _ = CloseReaderAsync();
@@ -892,6 +891,8 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _readerToolbarHideTimer?.Stop();
+        _readerToolbarLayoutTimer?.Stop();
         CancelWindowStateAnimation();
         _library.DataChanged -= LocalLibraryDataChanged;
         _readerData.DataChanged -= LocalReaderDataChanged;
@@ -1417,7 +1418,7 @@ public partial class MainWindow : Window
     {
         // Keep one minimal star silhouette; fill conveys the selected state
         // without changing the icon's optical footprint.
-        DetailFavoriteIcon.Fill = isFavorite ? Brushes.Black : Brushes.Transparent;
+        DetailFavoriteIcon.Fill = isFavorite ? AppAppearanceResources.GetBrush("InkBrush") : Brushes.Transparent;
         var favoriteLabel = isFavorite ? T("已收藏；点击取消收藏") : T("未收藏；点击加入收藏");
         ToolTip.SetTip(DetailFavoriteButton, favoriteLabel);
         AutomationProperties.SetName(DetailFavoriteButton, favoriteLabel);
@@ -1597,7 +1598,7 @@ public partial class MainWindow : Window
                 Children =
                 {
                     new TextBlock { Text = Path.GetFileName(file), FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis },
-                    new TextBlock { Text = Path.GetDirectoryName(file) ?? string.Empty, FontSize = 10, Foreground = Brushes.Gray, TextTrimming = TextTrimming.CharacterEllipsis }
+                    new TextBlock { Text = Path.GetDirectoryName(file) ?? string.Empty, FontSize = 10, Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"), TextTrimming = TextTrimming.CharacterEllipsis }
                 }
             });
             Grid.SetColumn(toggle, 1);
@@ -1605,7 +1606,7 @@ public partial class MainWindow : Window
             ImportFormatSelectionList.Children.Add(new Border
             {
                 Padding = new Thickness(10, 8),
-                BorderBrush = Brushes.LightGray,
+                BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
                 BorderThickness = new Thickness(1),
                 Child = row
             });
@@ -4195,10 +4196,19 @@ public partial class MainWindow : Window
     private void MaximizeWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => ToggleMaximized();
 
-    // The custom caption X parks the whole application in the system tray.
-    // The tray menu's 退出 command remains the explicit application exit path.
-    private void CloseWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    // The caption X saves and closes the current reading session. From the
+    // library it parks the application in the system tray; 退出 exits it.
+    private async void CloseWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        // Repeated clicks while the reading checkpoint is being saved must
+        // not hide the main window as soon as the reader view disappears.
+        if (Volatile.Read(ref _readerCloseInProgress) != 0) return;
+        if (ReaderRoot.IsVisible)
+        {
+            await CloseReaderAsync();
+            return;
+        }
+
         _windowStateAnimationVersion++;
         _windowMinimizeAnimationInProgress = false;
         CancelWindowStateAnimation();

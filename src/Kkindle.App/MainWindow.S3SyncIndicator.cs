@@ -71,8 +71,8 @@ public partial class MainWindow
         S3SyncSuccessGlyph.IsVisible = state == S3SyncIndicatorState.Succeeded;
         S3SyncFailureGlyph.IsVisible = needsAttention;
         S3SyncCloudIcon.Stroke = state == S3SyncIndicatorState.NotConfigured
-            ? Brushes.Gray
-            : Brushes.Black;
+            ? AppAppearanceResources.GetBrush("MutedInkBrush")
+            : AppAppearanceResources.GetBrush("InkBrush");
         S3SyncCloudIcon.StrokeThickness = needsAttention ? 1.9 : 1.6;
 
         var tooltip = BuildS3SyncIndicatorTooltip();

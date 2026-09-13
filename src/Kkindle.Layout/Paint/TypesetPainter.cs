@@ -56,10 +56,14 @@ public sealed class TypesetPainter
         IReadOnlyList<SKRect>? searchBands = null,
         IReadOnlyList<TypesetAnnotationOverlay>? annotationOverlays = null,
         bool showVerticalDebugBoxes = false,
-        IReadOnlyList<SKRect>? focusedSearchBands = null)
+        IReadOnlyList<SKRect>? focusedSearchBands = null,
+        bool paintBackground = true)
     {
-        using var background = new SKPaint { Color = _theme.Background, Style = SKPaintStyle.Fill };
-        canvas.DrawRect(0, 0, page.Width, page.Height, background);
+        if (paintBackground)
+        {
+            using var background = new SKPaint { Color = _theme.Background, Style = SKPaintStyle.Fill };
+            canvas.DrawRect(0, 0, page.Width, page.Height, background);
+        }
 
         if (highlightBands is not null)
         {

@@ -42,6 +42,7 @@ public sealed record AppSettings
     public const string DefaultPinyinEngineId = PinyinBookEngineCatalog.DotNetG2PId;
 
     public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
+    public AppTheme MainTheme { get; init; } = AppTheme.Classic;
     public bool OnboardingCompleted { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultDeviceModel { get; init; }
@@ -84,6 +85,7 @@ public sealed record AppSettings
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ReaderVerticalDebugBoxesEnabled { get; init; }
     public ReaderLayoutSettings DefaultReaderLayout { get; init; } = new();
+    public ReaderAppearanceSettings ReaderAppearance { get; init; } = new();
 
     public static AppSettings Normalize(AppSettings? settings)
     {
@@ -93,6 +95,7 @@ public sealed record AppSettings
         return settings with
         {
             UiLanguage = UiText.NormalizeLanguage(settings.UiLanguage),
+            MainTheme = Enum.IsDefined(settings.MainTheme) ? settings.MainTheme : AppTheme.Classic,
             DefaultDeviceModel = string.IsNullOrWhiteSpace(settings.DefaultDeviceModel)
                 ? null
                 : settings.DefaultDeviceModel.Trim(),
@@ -107,6 +110,7 @@ public sealed record AppSettings
             AutoGenerateAzw3OnImport = false,
             AutoBackupRetention = Math.Clamp(settings.AutoBackupRetention, 1, 30),
             DefaultReaderLayout = ReaderLayoutDefaults.Normalize(settings.DefaultReaderLayout ?? new ReaderLayoutSettings()),
+            ReaderAppearance = ReaderAppearanceSettings.Normalize(settings.ReaderAppearance),
             Translation = BookTranslationSettings.Normalize(settings.Translation)
         };
     }

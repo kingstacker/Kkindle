@@ -1034,6 +1034,7 @@ public partial class MainWindow
 
     private int _readerPageAnimation = ReaderAnimationFade;
     private readonly SemaphoreSlim _readerPageTurnGate = new(1, 1);
+    private readonly SemaphoreSlim _readerTransitionGate = new(1, 1);
     private readonly SemaphoreSlim _readerLayoutGate = new(1, 1);
     private readonly SemaphoreSlim _readerBundledFontGate = new(1, 1);
     private CancellationTokenSource? _readerRelayoutCancellation;
@@ -1111,8 +1112,6 @@ public partial class MainWindow
     private bool _readerTocExpandedBeforeZen = true;
     private bool _readerTocMinimalBeforeZen;
     private long _readerActiveSeconds;
-    private long _readerSessionSeconds;
-    private long _readerStatsBaseSeconds;
     private DispatcherTimer? _readerStatsTimer;
     private readonly SemaphoreSlim _readerStatsFlushGate = new(1, 1);
     private int _readerTransientStatusSequence;
@@ -1450,8 +1449,6 @@ public partial class MainWindow
         _readerTocExpandedBeforeZen = true;
         _readerTocMinimalBeforeZen = false;
         _readerActiveSeconds = 0;
-        _readerSessionSeconds = 0;
-        _readerStatsBaseSeconds = 0;
         ReaderBookInfoText.Text = _readerBookCard?.Title ?? UiText.Get("目录");
         BuildReaderTocRows();
         CollapseReaderTocToCurrentChapter(_readerChapterIndex);
@@ -1491,7 +1488,6 @@ public partial class MainWindow
         await InitializeReaderAiAsync(cancellationToken);
         await InitializeReaderTtsAsync(cancellationToken);
         UpdateReaderToolbar();
-        await LoadReaderStatsBaseAsync();
         StartReaderStatsTimer();
         StartReaderFootnoteHoverPoll();
     }
@@ -5728,11 +5724,6 @@ public partial class MainWindow
                     _readerLinuxTextFallbackPageIndex = linuxFallbackMovesToTargetEnd ? -1 : 0;
                 }
             }
-            var holdOverlay = await TryShowReaderChapterHoldOverlayAsync(navigationToken);
-            var loaded = await NavigateReaderHostAndWaitAsync(host, target, navigationToken);
-            if (!loaded) throw new InvalidOperationException(T("章节加载失败。"));
-
-            await ApplySavedAnnotationsAsync(host, navigationToken);
             var direction = transitionDirection
                 ?? (item.ChapterIndex < previousChapterIndex ? -1 : 1);
             await RunReaderContentTransitionAsync(
@@ -5741,6 +5732,10 @@ public partial class MainWindow
                 direction,
                 async () =>
                 {
+                    var loaded = await NavigateReaderHostAndWaitAsync(host, target, navigationToken);
+                    if (!loaded) throw new InvalidOperationException(T("章节加载失败。"));
+
+                    await ApplySavedAnnotationsAsync(host, navigationToken);
                     _readerChapterIndex = item.ChapterIndex;
                     _readerScrollPosition = 0;
                     _readerScrollRatio = 0;
@@ -5770,7 +5765,8 @@ public partial class MainWindow
                     return true;
                 },
                 navigationToken,
-                animate: !holdOverlay && intent != ReaderNavigationIntent.None);
+                animate: intent != ReaderNavigationIntent.None,
+                holdOutgoingPage: true);
             FocusCurrentReaderHost();
             PrimeReaderContinuousEdgeTracking();
             SetReaderTocSelection(item);
@@ -5810,77 +5806,9 @@ public partial class MainWindow
         finally
         {
             CompleteReaderTtsNavigationRequest(navigationRequestVersion);
-            await HideReaderChapterHoldOverlayAsync();
             if (ReferenceEquals(_readerNavigationCancellation, navigationCancellation))
                 _readerNavigationCancellation = null;
             navigationCancellation.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Freezes the outgoing page above the webview for the duration of a
-    /// chapter switch. Same-host chapter navigation clears the document as
-    /// soon as it starts, which shows a blank surface until the new chapter
-    /// is revealed; the hold overlay keeps the last visible frame on screen
-    /// so the reader only ever changes content once, at the fade-in. Returns
-    /// false when no snapshot is available and the caller should keep its
-    /// regular transition.
-    /// </summary>
-    private async Task<bool> TryShowReaderChapterHoldOverlayAsync(
-        CancellationToken cancellationToken)
-    {
-        if (_readerIsPdf) return false;
-        if (CurrentReaderHost is not IReaderPageSnapshotProvider provider) return false;
-        try
-        {
-            var png = await provider.CaptureVisiblePageAsync(cancellationToken);
-            if (png is not { Length: > 0 })
-            {
-                LogReaderChapterTiming("hold.captureEmpty", Stopwatch.StartNew());
-                return false;
-            }
-            ReaderChapterHoldImage.Source = new Bitmap(new MemoryStream(png));
-            ReaderChapterHoldLayer.Opacity = 1;
-            ReaderChapterHoldLayer.IsVisible = true;
-            LogReaderChapterTiming("hold.shown", Stopwatch.StartNew());
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private async Task HideReaderChapterHoldOverlayAsync()
-    {
-        try
-        {
-            if (!ReaderChapterHoldLayer.IsVisible)
-            {
-                LogReaderChapterTiming("hide.notVisible", Stopwatch.StartNew());
-                return;
-            }
-            ReaderChapterHoldLayer.Opacity = 0;
-            await Task.Delay(220).ConfigureAwait(true);
-            ReaderChapterHoldLayer.IsVisible = false;
-            ReaderChapterHoldImage.Source = null;
-            LogReaderChapterTiming("hold.hidden", Stopwatch.StartNew());
-        }
-        catch
-        {
-            // A stuck overlay would block the reader, so tolerate any
-            // failure here and force the layer down.
-            try
-            {
-                ReaderChapterHoldLayer.IsVisible = false;
-            }
-            catch
-            {
-            }
         }
     }
 
@@ -6610,30 +6538,12 @@ public partial class MainWindow
         _readerStatsTimer?.Stop();
     }
 
-    private async Task LoadReaderStatsBaseAsync()
-    {
-        if (_readerBookFile is null) return;
-        try
-        {
-            var stats = await _readerData.GetReadingStatsAsync(
-                _readerBookFile.Id,
-                _readerSessionCancellation?.Token ?? CancellationToken.None);
-            _readerStatsBaseSeconds = stats?.CumulativeSeconds ?? 0;
-            UpdateReaderStatsDisplay();
-        }
-        catch
-        {
-        }
-    }
-
     private void ReaderStatsTimer_Tick(object? sender, EventArgs e)
     {
         if (!IsActive || !ReaderRoot.IsVisible) return;
         _readerActiveSeconds++;
-        _readerSessionSeconds++;
         if (_readerActiveSeconds % 30 == 0)
             _ = FlushReaderActiveSecondsAsync();
-        UpdateReaderStatsDisplay();
     }
 
     private async Task FlushReaderActiveSecondsAsync()
@@ -6666,20 +6576,6 @@ public partial class MainWindow
         {
             _readerStatsFlushGate.Release();
         }
-    }
-
-    private void UpdateReaderStatsDisplay()
-    {
-        if (ReaderStatsText is null) return;
-        var cumulative = _readerStatsBaseSeconds + _readerSessionSeconds;
-        ReaderStatsText.Text = T("累计阅读 {0} · 本次 {1}", FormatReaderDuration(cumulative), FormatReaderDuration(_readerSessionSeconds));
-    }
-
-    private static string FormatReaderDuration(long seconds)
-    {
-        if (seconds < 60) return UiText.Get("{0} 秒", seconds);
-        if (seconds < 3600) return UiText.Get("{0} 分钟", seconds / 60);
-        return UiText.Get("{0:0.0} 小时", seconds / 3600.0);
     }
 
     private void UpdateReaderZoomLabel()
@@ -7133,7 +7029,6 @@ public partial class MainWindow
                         ? Math.Max(0, _readerScrollWidth - _readerClientWidth)
                         : Math.Max(0, _readerScrollHeight - _readerClientHeight);
                     _readerScrollRatio = max > 0 ? Math.Clamp(_readerScrollPosition / max, 0, 1) : 0;
-                    ReaderProgressPercentText.Text = $"{CalculateReaderProgressPercent():0}%";
                     _ = SaveReaderProgressAfterScrollAsync(++_readerProgressSaveSequence);
                     // The bridge already supplied the exact scroll position
                     // and fragment. Reusing that snapshot avoids issuing a
@@ -8128,11 +8023,10 @@ public partial class MainWindow
             var targetPage = _readerLinuxTextFallbackPageIndex + direction * spreadSize;
             if (targetPage >= 0 && targetPage <= maximum)
             {
-                await RunLinuxReaderFallbackContentTransitionAsync<int>(
-                    ReaderPaginationPolicy.GetVisualTurnDirection(
-                        direction,
-                        _readerLayout.VerticalWriting),
-                    _readerPageAnimation,
+                await RunReaderContentTransitionAsync(
+                    CurrentReaderHost!,
+                    CurrentReaderHost!,
+                    direction,
                     () =>
                     {
                         _readerLinuxTextFallbackPageIndex = targetPage;
@@ -8365,48 +8259,45 @@ public partial class MainWindow
         int direction,
         Func<Task<T>> changeContentAsync,
         CancellationToken cancellationToken,
-        bool animate = true)
+        bool animate = true,
+        bool holdOutgoingPage = false)
     {
-        if (Volatile.Read(ref _readerCloseInProgress) != 0)
-            return await changeContentAsync();
-
-        var animation = animate ? _readerPageAnimation : ReaderAnimationNone;
-        if (animation == ReaderAnimationNone)
+        // A newer TOC request cancels the old load. Let its snapshot cleanup
+        // finish before the next transition takes ownership of these overlays.
+        await _readerTransitionGate.WaitAsync(cancellationToken);
+        try
         {
-            return await changeContentAsync();
-        }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Volatile.Read(ref _readerCloseInProgress) != 0)
+                return await changeContentAsync();
 
-        var visualDirection = ReaderPaginationPolicy.GetVisualTurnDirection(
-            direction,
-            !_readerIsPdf && _readerLayout.VerticalWriting);
-
-        if (UseLinuxPlainTextRecoveryFallback && OperatingSystem.IsLinux()
-            && outgoingHost is not NativeReaderHost)
-        {
-            return await RunLinuxReaderFallbackContentTransitionAsync(
-                visualDirection,
-                animation,
-                changeContentAsync,
-                cancellationToken);
-        }
-
-        if (outgoingHost is NativeReaderHost nativeHost)
-        {
-            // The self-drawn surface renders the incoming page immediately, so
-            // the outgoing frame is photographed and animated away on a
-            // snapshot overlay while the new page waits underneath.
-            var surface = BuildReaderNativeTransitionSurface(nativeHost);
+            var animation = animate ? _readerPageAnimation : ReaderAnimationNone;
+            var visualDirection = ReaderPaginationPolicy.GetVisualTurnDirection(
+                direction,
+                !_readerIsPdf && _readerLayout.VerticalWriting);
+            var surface = IsLinuxReaderTextFallbackActive()
+                ? BuildLinuxReaderFallbackTransitionSurface()
+                : outgoingHost is NativeReaderHost nativeHost
+                    ? BuildReaderNativeTransitionSurface(nativeHost)
+                    : null;
             if (surface is null)
                 return await changeContentAsync();
+
+            // Capture before loading, including when both chapters share a
+            // host. The same snapshot holds the old page during loading and
+            // then plays exactly the selected in-chapter page-turn effect.
             return await ReaderTransitionPlayer.RunAsync(
                 surface,
                 animation,
                 visualDirection,
                 changeContentAsync,
-                cancellationToken);
+                cancellationToken,
+                holdOutgoingPage);
         }
-
-        return await changeContentAsync();
+        finally
+        {
+            _readerTransitionGate.Release();
+        }
     }
 
     private void StopReaderTransitionOverlays()
@@ -8443,9 +8334,6 @@ public partial class MainWindow
         ReaderLinuxTextFallbackTransitionEdge.Opacity = 1;
         ReaderLinuxTextFallbackTransitionEdge.RenderTransform = null;
 
-        ReaderChapterHoldLayer.IsVisible = false;
-        ReaderChapterHoldLayer.Opacity = 0;
-        ReaderChapterHoldImage.Source = null;
         ReaderTransitionCover.Opacity = 0;
     }
 
@@ -8478,33 +8366,6 @@ public partial class MainWindow
             ReaderLinuxTextFallbackTransitionFront,
             ReaderLinuxTextFallbackTransitionEdge,
             ReaderLinuxTextFallbackOverlay.Background);
-    }
-
-    /// <summary>
-    /// Linux counterpart of the WebView transition pipeline: plays the
-    /// selected animation over the native fallback surface while the content
-    /// change renders underneath. Falls back to an instant switch whenever
-    /// the fallback layer is inactive or a snapshot cannot be captured.
-    /// </summary>
-    private async Task<T> RunLinuxReaderFallbackContentTransitionAsync<T>(
-        int visualDirection,
-        int animation,
-        Func<Task<T>> changeContentAsync,
-        CancellationToken cancellationToken)
-    {
-        if (animation == ReaderAnimationNone)
-            return await changeContentAsync();
-
-        var surface = BuildLinuxReaderFallbackTransitionSurface();
-        if (surface is null)
-            return await changeContentAsync();
-
-        return await ReaderTransitionPlayer.RunAsync(
-            surface,
-            animation,
-            visualDirection,
-            changeContentAsync,
-            cancellationToken);
     }
 
     private void ReaderTocButton_Click(object? sender, RoutedEventArgs e)
@@ -9349,10 +9210,6 @@ public partial class MainWindow
         SyncReaderAnimationMenu();
         if (ReaderZoomText is not null)
             ReaderZoomText.Text = $"{_readerLayout.FontScale:P0}";
-        if (ReaderProgressPercentText is not null)
-            ReaderProgressPercentText.Text = $"{CalculateReaderProgressPercent():0}%";
-        if (ReaderReadingProgressText is not null)
-            ReaderReadingProgressText.Text = GetReaderReadingProgressLabel();
         if (ReaderProgressSlider is not null)
         {
             _readerProgressSliderUpdating = true;
@@ -9405,12 +9262,6 @@ public partial class MainWindow
                     && tocIndex + 1 < _readerTocItems.Count;
         UpdateReaderSearchCount();
         UpdateReaderTtsUi();
-    }
-
-    private string GetReaderReadingProgressLabel()
-    {
-        var (currentPage, totalPages) = GetReaderPagePosition();
-        return T("已读 {0} / {1} 页", currentPage, totalPages);
     }
 
     private (double Width, double Height) GetReaderPageCountMeasure()

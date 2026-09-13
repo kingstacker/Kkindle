@@ -18,12 +18,6 @@ namespace Kkindle;
 /// </summary>
 internal sealed class EpubTranslationProgressWindow : Window
 {
-    private const string White = "#FFFFFF";
-    private const string Ink = "#111111";
-    private const string MutedInk = "#737373";
-    private const string Hairline = "#E1E1E1";
-    private const string SoftGray = "#F5F5F5";
-    private const string GrayDot = "#B5B5B5";
 
     private readonly TextBlock _bookText = new();
     private readonly TextBlock _engineText = new();
@@ -71,16 +65,16 @@ internal sealed class EpubTranslationProgressWindow : Window
         MinHeight = 460;
         CanResize = true;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new SolidColorBrush(Color.Parse(White));
+        Background = AppAppearanceResources.GetBrush("PaperBrush");
 
         _bookText.Text = bookTitle;
         _bookText.FontSize = 20;
         _bookText.FontWeight = FontWeight.SemiBold;
-        _bookText.Foreground = new SolidColorBrush(Color.Parse(Ink));
+        _bookText.Foreground = AppAppearanceResources.GetBrush("InkBrush");
         _bookText.TextWrapping = TextWrapping.Wrap;
 
         _engineText.Text = $"{GetProviderDisplayName(provider)}  ·  {sourceLanguage} → {targetLanguage}";
-        _engineText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+        _engineText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
         _engineText.FontSize = 12;
         _engineText.TextWrapping = TextWrapping.Wrap;
 
@@ -97,7 +91,7 @@ internal sealed class EpubTranslationProgressWindow : Window
         _stageText.FontSize = 14;
         _stageText.FontWeight = FontWeight.SemiBold;
 
-        _currentText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+        _currentText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
         _currentText.FontSize = 12;
         _currentText.TextWrapping = TextWrapping.Wrap;
         _currentText.MaxLines = 2;
@@ -106,15 +100,15 @@ internal sealed class EpubTranslationProgressWindow : Window
         _progressBar.Maximum = 100;
         _progressBar.Height = 8;
         _progressBar.Margin = new Thickness(0, 8, 0, 0);
-        _progressBar.Foreground = new SolidColorBrush(Color.Parse(Ink));
-        _progressBar.Background = new SolidColorBrush(Color.Parse(Hairline));
+        _progressBar.Foreground = AppAppearanceResources.GetBrush("InkBrush");
+        _progressBar.Background = AppAppearanceResources.GetBrush("HairlineBrush");
 
         _percentageText.Text = "0%";
         _percentageText.HorizontalAlignment = HorizontalAlignment.Right;
         _percentageText.FontSize = 13;
         _percentageText.FontWeight = FontWeight.SemiBold;
 
-        _detailsText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+        _detailsText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
         _detailsText.FontSize = 11;
         _detailsText.TextWrapping = TextWrapping.Wrap;
 
@@ -125,13 +119,13 @@ internal sealed class EpubTranslationProgressWindow : Window
             FontWeight = FontWeight.SemiBold
         };
         _segmentSummaryText.Text = "等待扫描…";
-        _segmentSummaryText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+        _segmentSummaryText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
         _segmentSummaryText.FontSize = 11;
         _segmentSummaryText.HorizontalAlignment = HorizontalAlignment.Right;
         _segmentSummaryText.VerticalAlignment = VerticalAlignment.Center;
 
         _emptySegmentText.Text = "扫描到正文段落后，会在这里显示翻译瀑布流。";
-        _emptySegmentText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+        _emptySegmentText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
         _emptySegmentText.FontSize = 12;
         _emptySegmentText.TextWrapping = TextWrapping.Wrap;
         _emptySegmentText.Margin = new Thickness(4, 6, 4, 6);
@@ -144,7 +138,7 @@ internal sealed class EpubTranslationProgressWindow : Window
         _segmentScrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         _segmentScrollViewer.Padding = new Thickness(0, 2, 8, 2);
 
-        _resultText.Foreground = new SolidColorBrush(Color.Parse(Ink));
+        _resultText.Foreground = AppAppearanceResources.GetBrush("InkBrush");
         _resultText.FontSize = 11;
         _resultText.TextWrapping = TextWrapping.Wrap;
 
@@ -705,7 +699,7 @@ internal sealed class EpubTranslationProgressWindow : Window
             _statusDot.VerticalAlignment = VerticalAlignment.Center;
 
             _indexText.FontSize = 11;
-            _indexText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+            _indexText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
             _indexText.TextTrimming = TextTrimming.CharacterEllipsis;
 
             _statusText.FontSize = 11;
@@ -717,11 +711,11 @@ internal sealed class EpubTranslationProgressWindow : Window
             _translatedText.TextWrapping = TextWrapping.Wrap;
 
             _flowText.FontSize = 11;
-            _flowText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+            _flowText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
             _flowText.TextWrapping = TextWrapping.Wrap;
 
             _errorText.FontSize = 11;
-            _errorText.Foreground = new SolidColorBrush(Color.Parse(MutedInk));
+            _errorText.Foreground = AppAppearanceResources.GetBrush("MutedInkBrush");
             _errorText.TextWrapping = TextWrapping.Wrap;
 
             _originalBlock = new Border
@@ -814,16 +808,16 @@ internal sealed class EpubTranslationProgressWindow : Window
                 _ => "处理中"
             };
             var completed = segment.Status == BookTranslationSegmentStatus.Completed;
-            var statusBrush = new SolidColorBrush(Color.Parse(completed ? Ink : MutedInk));
-            _statusDot.Fill = new SolidColorBrush(Color.Parse(completed ? Ink : GrayDot));
+            var statusBrush = AppAppearanceResources.GetBrush(completed ? "InkBrush" : "MutedInkBrush");
+            _statusDot.Fill = AppAppearanceResources.GetBrush(completed ? "InkBrush" : "SidebarIndicatorBrush");
             _statusText.Text = label;
             _statusText.Foreground = statusBrush;
             _card.BorderBrush = segment.Status == BookTranslationSegmentStatus.Processing
                 ? statusBrush
-                : new SolidColorBrush(Color.Parse(Hairline));
-            _card.Background = new SolidColorBrush(Color.Parse(White));
-            _originalBlock.Background = new SolidColorBrush(Color.Parse(White));
-            _translatedBlock.Background = new SolidColorBrush(Color.Parse(SoftGray));
+                : AppAppearanceResources.GetBrush("HairlineBrush");
+            _card.Background = AppAppearanceResources.GetBrush("PaperBrush");
+            _originalBlock.Background = AppAppearanceResources.GetBrush("PaperBrush");
+            _translatedBlock.Background = AppAppearanceResources.GetBrush("SoftHoverBrush");
         }
 
         public void MarkCanceled()
@@ -834,14 +828,14 @@ internal sealed class EpubTranslationProgressWindow : Window
             _flowText.Text = "流程：任务取消";
             _errorText.Text = string.Empty;
             _errorText.IsVisible = false;
-            var statusBrush = new SolidColorBrush(Color.Parse(MutedInk));
-            _statusDot.Fill = new SolidColorBrush(Color.Parse(GrayDot));
+            var statusBrush = AppAppearanceResources.GetBrush("MutedInkBrush");
+            _statusDot.Fill = AppAppearanceResources.GetBrush("SidebarIndicatorBrush");
             _statusText.Text = "已取消";
             _statusText.Foreground = statusBrush;
-            _card.BorderBrush = new SolidColorBrush(Color.Parse(Hairline));
-            _card.Background = new SolidColorBrush(Color.Parse(White));
-            _originalBlock.Background = new SolidColorBrush(Color.Parse(White));
-            _translatedBlock.Background = new SolidColorBrush(Color.Parse(SoftGray));
+            _card.BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush");
+            _card.Background = AppAppearanceResources.GetBrush("PaperBrush");
+            _originalBlock.Background = AppAppearanceResources.GetBrush("PaperBrush");
+            _translatedBlock.Background = AppAppearanceResources.GetBrush("SoftHoverBrush");
         }
 
         public void MarkPaused()
@@ -852,14 +846,14 @@ internal sealed class EpubTranslationProgressWindow : Window
             _flowText.Text = "流程：任务暂停";
             _errorText.Text = string.Empty;
             _errorText.IsVisible = false;
-            var statusBrush = new SolidColorBrush(Color.Parse(MutedInk));
-            _statusDot.Fill = new SolidColorBrush(Color.Parse(GrayDot));
+            var statusBrush = AppAppearanceResources.GetBrush("MutedInkBrush");
+            _statusDot.Fill = AppAppearanceResources.GetBrush("SidebarIndicatorBrush");
             _statusText.Text = "已暂停";
             _statusText.Foreground = statusBrush;
-            _card.BorderBrush = new SolidColorBrush(Color.Parse(Hairline));
-            _card.Background = new SolidColorBrush(Color.Parse(White));
-            _originalBlock.Background = new SolidColorBrush(Color.Parse(White));
-            _translatedBlock.Background = new SolidColorBrush(Color.Parse(SoftGray));
+            _card.BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush");
+            _card.Background = AppAppearanceResources.GetBrush("PaperBrush");
+            _originalBlock.Background = AppAppearanceResources.GetBrush("PaperBrush");
+            _translatedBlock.Background = AppAppearanceResources.GetBrush("SoftHoverBrush");
         }
 
         private static TextBlock CreateLabel(string text) => new()
@@ -867,7 +861,7 @@ internal sealed class EpubTranslationProgressWindow : Window
             Text = text,
             FontSize = 10,
             FontWeight = FontWeight.SemiBold,
-            Foreground = new SolidColorBrush(Color.Parse(MutedInk))
+            Foreground = AppAppearanceResources.GetBrush("MutedInkBrush")
         };
     }
 }

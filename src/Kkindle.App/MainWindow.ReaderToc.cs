@@ -22,16 +22,10 @@ namespace Kkindle;
 /// </summary>
 public sealed record ReaderTocMarker(EpubReaderNavigationItem Item, bool IsCurrent)
 {
-    private static readonly IBrush CurrentBrush = new SolidColorBrush(
-        Color.FromArgb(255, 91, 98, 104));
-    private static readonly IBrush InactiveBrush = new SolidColorBrush(
-        Color.FromArgb(255, 211, 213, 209));
-    public static readonly IBrush HoverBrush = new SolidColorBrush(
-        Color.FromArgb(255, 96, 96, 96));
-
+    public ReaderPalette Palette { get; set; } = ReaderPalette.For(ReaderTheme.Classic);
     public string Title => Item.Title;
     public IBrush Fill => GetFill(IsCurrent);
-    public static IBrush GetFill(bool isCurrent) => isCurrent ? CurrentBrush : InactiveBrush;
+    public IBrush GetFill(bool isCurrent) => isCurrent ? Palette.AccentBrush : Palette.BorderBrush;
 }
 
 public partial class MainWindow
@@ -517,7 +511,7 @@ public partial class MainWindow
                     && markerData.Item.Target.Equals(
                         _readerCompactSelectedTarget,
                         StringComparison.OrdinalIgnoreCase);
-                marker.Background = ReaderTocMarker.GetFill(isCurrent);
+                marker.Background = markerData.GetFill(isCurrent);
             }
 
             try
@@ -555,7 +549,7 @@ public partial class MainWindow
         }
 
         if (hoveredMarker is not null)
-            hoveredMarker.Background = ReaderTocMarker.HoverBrush;
+            hoveredMarker.Background = ReaderPalette.For(_appSettings.ReaderAppearance.Theme).AccentBrush;
         if (!_readerSliderPreviewVisible)
         {
             if (_readerCompactPointerActive)
@@ -799,7 +793,8 @@ public partial class MainWindow
                 _readerCompactSelectedTarget is not null
                     && item.Target.Equals(
                         _readerCompactSelectedTarget,
-                        StringComparison.OrdinalIgnoreCase)))
+                        StringComparison.OrdinalIgnoreCase))
+            { Palette = ReaderPalette.For(_appSettings.ReaderAppearance.Theme) })
             .ToArray();
     }
 
@@ -843,6 +838,7 @@ public partial class MainWindow
             _readerTocExpanded ? 286d : _readerTocMinimal ? ReaderTocMinimalWidth : 0d);
         ReaderTocPanel.IsVisible = _readerTocExpanded;
         ReaderTocCompactPanel.IsVisible = _readerTocMinimal;
+        UpdateReaderToolbarAutoHide();
         // Opening the TOC changes the layout, not the availability of the
         // toolbar action. Keep its label at full opacity in both states.
         ReaderTocToggleButton.Opacity = 1;

@@ -393,7 +393,6 @@ public partial class MainWindow
         ReaderTocView.IsVisible = true;
         ReaderBookmarkPane.IsVisible = false;
         ReaderSearchPanel.IsVisible = false;
-        ReaderReadingInfoPanel.IsVisible = true;
         ReaderTocEmptyText.IsVisible = _readerTocItems.Count == 0;
     }
 
@@ -407,7 +406,6 @@ public partial class MainWindow
         ReaderTocView.IsVisible = false;
         ReaderBookmarkPane.IsVisible = true;
         ReaderSearchPanel.IsVisible = false;
-        ReaderReadingInfoPanel.IsVisible = true;
         ReaderBookmarkEmptyText.IsVisible = ReaderBookmarks.Count == 0;
         ApplyReaderPanelLayout();
     }
@@ -417,7 +415,6 @@ public partial class MainWindow
         ReaderTocView.IsVisible = false;
         ReaderBookmarkPane.IsVisible = false;
         ReaderSearchPanel.IsVisible = true;
-        ReaderReadingInfoPanel.IsVisible = false;
     }
 
     private void ShowReaderSearchStatus(string? message)
@@ -1450,6 +1447,7 @@ public partial class MainWindow
 
     private void ReaderLayoutSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
+        SyncReaderAppearanceControls();
         ReaderVerticalWritingCheck.Content = OperatingSystem.IsLinux()
             ? T("竖排排版（全局，自绘单页）")
             : T("竖排排版（全局，仅支持单页）");
@@ -1478,8 +1476,7 @@ public partial class MainWindow
         ReaderLayoutSettingsPopup.HorizontalOffset = 0;
         ReaderLayoutSettingsPopup.VerticalOffset = 0;
         ReaderLayoutSettingsOverlay.Margin = new Thickness(0);
-        ReaderLayoutSettingsOverlay.Width = Math.Max(0, ReaderRoot.Bounds.Width);
-        ReaderLayoutSettingsOverlay.Height = Math.Max(0, ReaderRoot.Bounds.Height);
+        UpdateReaderSettingsPopupSize();
         ReaderLayoutSettingsPopup.IsOpen = true;
     }
 

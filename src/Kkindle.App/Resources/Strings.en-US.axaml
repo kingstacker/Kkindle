@@ -1613,4 +1613,24 @@
     <x:String x:Key="Sync.WebDavHelp">Enter the URL of an existing WebDAV directory. Sync files will be stored in a subdirectory created automatically. Enter credentials if required; some services use an app password.</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">The sync subdirectory cannot contain control characters.</x:String>
     <x:String x:Key="Ui.Library.ImportBooks">Import books</x:String>
+    <x:String x:Key="Ui.Reader.Settings">Reading settings</x:String>
+    <x:String x:Key="Ui.Reader.Appearance">Theme and paper</x:String>
+    <x:String x:Key="Ui.Appearance.MainTheme">Main interface theme</x:String>
+    <x:String x:Key="Ui.Appearance.MainThemeHint">Colors for the library, sidebar and settings. Reader themes are set separately.</x:String>
+    <x:String x:Key="Ui.Appearance.Classic">Black &amp; white (default)</x:String>
+    <x:String x:Key="Ui.Appearance.Night">Night</x:String>
+    <x:String x:Key="Ui.Appearance.Green">Green</x:String>
+    <x:String x:Key="Ui.Appearance.WarmBrown">Warm brown</x:String>
+    <x:String x:Key="Ui.Appearance.Ivory">Ivory</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Classic">Classic</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Night">Night</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Green">Green</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Brown">Warm brown</x:String>
+    <x:String x:Key="Ui.Reader.Theme.Ivory">Ivory</x:String>
+    <x:String x:Key="Ui.Reader.Paper">Enable paper texture</x:String>
+    <x:String x:Key="Ui.Reader.PaperStrength">Paper strength</x:String>
+    <x:String x:Key="Ui.Reader.Fibers">Add paper fibers</x:String>
+    <x:String x:Key="Ui.Reader.PaperHint">Fine grain and soft tonal variation, with optional fibers. Saved automatically for all books.</x:String>
+    <x:String x:Key="Ui.Reader.NightPaperHint">Night uses a softer texture to keep reading clear in dim light.</x:String>
+    <x:String x:Key="Ui.Reader.Layout">Layout</x:String>
 </ResourceDictionary>
