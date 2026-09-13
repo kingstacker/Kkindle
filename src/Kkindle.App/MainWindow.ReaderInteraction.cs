@@ -5721,15 +5721,13 @@ public partial class MainWindow
         _readerNavigationCancellation = navigationCancellation;
         var navigationToken = navigationCancellation.Token;
         var hiddenHost = HiddenReaderHost;
-        var host = OperatingSystem.IsLinux()
-            ? CurrentReaderHost
-            : IsReaderHostReady(hiddenHost) ? hiddenHost! : CurrentReaderHost;
+        var host = IsReaderHostReady(hiddenHost) ? hiddenHost! : CurrentReaderHost;
         var previousChapterIndex = _readerChapterIndex;
         var previousFragment = _readerCurrentFragment;
         try
         {
             ReaderStatusText.Text = string.Empty;
-            if (OperatingSystem.IsLinux() && !_readerIsPdf)
+            if (linuxFallbackStartsAtTarget)
             {
                 _readerChapterIndex = item.ChapterIndex;
                 _readerCurrentFragment = GetReaderTargetFragment(target);

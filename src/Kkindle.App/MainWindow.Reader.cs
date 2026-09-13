@@ -36,9 +36,7 @@ public partial class MainWindow
             : _readerActiveHost;
 
     private IReaderHost? HiddenReaderHost =>
-        OperatingSystem.IsLinux()
-            ? null
-            : _readerShowingPreload ? _readerActiveHost : _readerPreloadHost;
+        _readerShowingPreload ? _readerActiveHost : _readerPreloadHost;
 
     private static bool IsReaderHostReady(IReaderHost? host)
         => host?.ReadyTask.IsCompletedSuccessfully == true;
@@ -251,7 +249,8 @@ public partial class MainWindow
             _readerActiveHost.WebMessageReceived += ReaderHost_WebMessageReceived;
             ReaderActiveHostSlot.Content = _readerActiveHost.View;
 
-            if (!OperatingSystem.IsLinux() && !_readerIsPdf)
+            // Native EPUB hosts support background layout on every platform.
+            if (!_readerIsPdf)
             {
                 _readerPreloadHost = CreateReaderHostForCurrentFormat();
                 if (ReferenceEquals(_readerActiveHost, _readerPreloadHost))
@@ -268,9 +267,6 @@ public partial class MainWindow
                 ReaderPreloadHostSlot.Content = null;
             }
         }
-
-        if (OperatingSystem.IsLinux())
-            _readerShowingPreload = false;
 
         ReaderActiveHostSlot.IsVisible = true;
         ReaderActiveHostSlot.Opacity = 1;
@@ -353,7 +349,7 @@ public partial class MainWindow
         await gate.WaitAsync(cancellationToken);
         try
         {
-            if (OperatingSystem.IsLinux() && !_readerIsPdf)
+            if (IsLinuxReaderTextFallbackActive())
             {
                 if (!ReaderLinuxTextFallbackOverlay.IsVisible)
                     SetReaderHostLayer(revealActiveHost: true);
@@ -479,8 +475,7 @@ public partial class MainWindow
 
     private async Task PreloadNextReaderChapterAsync(CancellationToken cancellationToken)
     {
-        if (OperatingSystem.IsLinux()
-            || _readerDocument is null
+        if (_readerDocument is null
             || HiddenReaderHost is not { } host
             || !IsReaderHostReady(host)
             || _readerChapterIndex >= _readerDocument.Chapters.Count - 1) return;
@@ -620,9 +615,7 @@ public partial class MainWindow
         var token = navigationCancellation.Token;
         var target = new Uri(_readerDocument.Chapters[targetIndex]);
         var hiddenHost = HiddenReaderHost;
-        var host = OperatingSystem.IsLinux()
-            ? CurrentReaderHost
-            : IsReaderHostReady(hiddenHost) ? hiddenHost! : CurrentReaderHost;
+        var host = IsReaderHostReady(hiddenHost) ? hiddenHost! : CurrentReaderHost;
         try
         {
             ReaderStatusText.Text = string.Empty;
