@@ -55,6 +55,8 @@ public sealed class BookFile
 
 public sealed class KindleDevice
 {
+    // The DTO name is retained for existing platform integrations and cached data.
+    public ReaderDeviceProfile Profile { get; init; } = ReaderDeviceProfiles.Kindle;
     public string RootPath { get; init; } = string.Empty;
     public string VolumeSerial { get; init; } = string.Empty;
     public string Name { get; init; } = "Kindle";
@@ -62,6 +64,8 @@ public sealed class KindleDevice
     public long FreeBytes { get; init; }
     public bool IsReady { get; init; }
     public KindleTransport Transport { get; init; } = KindleTransport.MassStorage;
+    public bool CanReadNotes => Profile.SupportsClippings
+        || (Profile.SupportsKoboNotes && Transport == KindleTransport.MassStorage);
 
     public string Identity => string.IsNullOrWhiteSpace(VolumeSerial)
         ? RootPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)

@@ -19,12 +19,12 @@ internal static class WpdSessionCloser
             clientInfo = CreateComObject<object>(PortableDeviceValuesClassId);
             var openResult = device.Open(devicePath, clientInfo);
             if (openResult < 0)
-                throw new COMException($"无法打开 Kindle 的原生 WPD 会话（HRESULT 0x{openResult:X8}）。", openResult);
+                throw new COMException($"无法打开设备的原生 WPD 会话（HRESULT 0x{openResult:X8}）。", openResult);
 
             cancellationToken.ThrowIfCancellationRequested();
             var closeResult = device.Close();
             if (closeResult < 0)
-                throw new COMException($"无法关闭 Kindle 的原生 WPD 会话（HRESULT 0x{closeResult:X8}）。", closeResult);
+                throw new COMException($"无法关闭设备的原生 WPD 会话（HRESULT 0x{closeResult:X8}）。", closeResult);
         }
         finally
         {
@@ -37,7 +37,7 @@ internal static class WpdSessionCloser
     {
         var start = shellPath.IndexOf(@"\\?\", StringComparison.OrdinalIgnoreCase);
         if (start < 0)
-            throw new IOException("无法从 Kindle 的 Shell 路径确定 WPD 设备路径。");
+            throw new IOException("无法从设备的 Shell 路径确定 WPD 设备路径。");
         return shellPath[start..];
     }
 

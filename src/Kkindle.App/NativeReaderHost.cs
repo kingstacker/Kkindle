@@ -83,6 +83,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private static readonly TimeSpan SelectionAutoPageTurnDelay = TimeSpan.FromSeconds(1);
 
     private readonly Dictionary<string, int> _fragmentPagesByRequest = new(StringComparer.Ordinal);
+    private string[] _navigationFragments = [];
     private int? _pendingRestoreOffset;
     private int? _pendingRestorePage;
     private double? _pendingScrollOffset;
@@ -630,6 +631,35 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
             ScrollToOffset(_searchHits[index].Start);
         }
+    }
+
+    internal void SetNavigationFragments(IEnumerable<string> fragments) =>
+        _navigationFragments = fragments.Select(NormalizeFragment)
+            .Where(fragment => fragment.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+
+    internal string? GetCurrentNavigationFragment()
+    {
+        if (_layout is null || _layout.Pages.Count == 0 || _content is null) return null;
+
+        // Follow the leading visible text, including a partially scrolled
+        // page. Later anchors on this page or the second page of a spread
+        // must not move the TOC ahead of the reader.
+        var position = CaptureViewportReadingAnchor();
+        string? current = null;
+        var currentPage = -1;
+        var currentOffset = -1;
+        foreach (var fragment in _navigationFragments)
+        {
+            var page = _layout.GetPageIndexOfFragment(fragment);
+            if (page < 0 || page > position.PageIndex) continue;
+            var offset = _content.FragmentTextOffsets.TryGetValue(fragment, out var textOffset) ? textOffset : -1;
+            if (page == position.PageIndex && position.TextOffset >= 0 && offset > position.TextOffset) continue;
+            if (page < currentPage || page == currentPage && offset < currentOffset) continue;
+            current = fragment;
+            currentPage = page;
+            currentOffset = offset;
+        }
+        return current;
     }
 
     public (double Position, double Ratio, double ScrollWidth, double ScrollHeight, double ClientWidth, double ClientHeight) GetScrollState()
@@ -1919,7 +1949,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             scrollHeight = state.ScrollHeight,
             clientWidth = state.ClientWidth,
             clientHeight = state.ClientHeight,
-            fragment = (string?)null,
+            fragment = GetCurrentNavigationFragment(),
         });
     }
 

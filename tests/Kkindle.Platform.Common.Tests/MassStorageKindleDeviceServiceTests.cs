@@ -105,6 +105,36 @@ public sealed class MassStorageKindleDeviceServiceTests
         }
     }
 
+    [Theory]
+    [InlineData("Kobo", ".kobo", ReaderDeviceFamily.Kobo)]
+    [InlineData("掌阅", "Books", ReaderDeviceFamily.IReader)]
+    [InlineData("Hanvon", "books", ReaderDeviceFamily.Hanvon)]
+    [InlineData("Reader", "Books", ReaderDeviceFamily.Generic)]
+    public async Task OtherReadersRoundTripNativeEpubWithoutKindleDirectories(string name, string marker, ReaderDeviceFamily family)
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mounts = Path.Combine(root, "mounts");
+            var readerRoot = Path.Combine(mounts, name);
+            Directory.CreateDirectory(Path.Combine(readerRoot, marker));
+            var service = new MassStorageKindleDeviceService(new AppPaths(Path.Combine(root, "app")), new FakeMetadataService(), [mounts]);
+            var device = Assert.Single(await service.DetectDevicesAsync(), candidate => Path.GetFullPath(candidate.RootPath) == Path.GetFullPath(readerRoot));
+            Assert.Equal(family, device.Profile.Family);
+            var source = Path.Combine(root, "sample.epub");
+            await File.WriteAllTextAsync(source, "native epub payload");
+            await service.SendBookAsync(device, new BookFile { Format = "epub", Sha256 = await Hashing.Sha256Async(source) }, source);
+            var book = Assert.Single(await service.ScanBooksAsync(device));
+            var exported = await service.ExportBookAsync(device, book, Path.Combine(root, "export"));
+            Assert.Equal(await File.ReadAllBytesAsync(source), await File.ReadAllBytesAsync(exported));
+            Assert.False(Directory.Exists(Path.Combine(readerRoot, "documents")));
+            Assert.False(Directory.Exists(Path.Combine(readerRoot, "system")));
+            await service.RemoveBookAsync(device, book);
+            Assert.Empty(await service.ScanBooksAsync(device));
+        }
+        finally { TryDelete(root); }
+    }
+
     private sealed class FakeMetadataService : IMetadataService
     {
         public Task<BookMetadata> ReadMetadataAsync(string path, CancellationToken cancellationToken = default) =>

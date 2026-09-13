@@ -5,6 +5,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Fixtures/PdfFixture.cs" Link="Fixtures/PdfFixture.cs" />
     <ProjectReference Include="../../src/Kkindle.App/Kkindle.App.csproj" />
     <PackageReference Include="Avalonia.Headless" Version="12.1.1" />
     <PackageReference Include="Avalonia.Skia" Version="12.1.1" />

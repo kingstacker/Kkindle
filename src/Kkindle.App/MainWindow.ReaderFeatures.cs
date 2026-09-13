@@ -206,12 +206,6 @@ public partial class MainWindow
 
     private void OpenReaderSearchShortcut()
     {
-        if (_readerIsPdf)
-        {
-            ShowReaderSearchPanel();
-            return;
-        }
-
         ReaderInPageSearchBar.IsVisible = true;
         ReaderInPageSearchBox.Focus();
         ReaderInPageSearchBox.SelectAll();
@@ -234,6 +228,11 @@ public partial class MainWindow
         try
         {
             SetTaskStatus(T("正在准备《{0}》的 PDF 阅读器…", card.Title));
+            var info = await Task.Run(() =>
+            {
+                using var pdf = new PdfDocumentService(path);
+                return pdf.ReadInfo(token);
+            }, token);
             var pages = await _pdfTextService.ExtractAsync(path, token);
             if (pages.Count == 0)
                 throw new InvalidDataException(T("PDF 没有可读取的页面文本。"));
@@ -254,25 +253,30 @@ public partial class MainWindow
             // swap below shows the right slot.
             _readerShowingPreload = false;
 
-            // The PDF surface is rendered by WebView2's built-in PDF viewer
-            // (file:// URL + #page=N fragment), exactly like the WinUI
-            // reference. The extracted page texts stay as the local search /
-            // progress / bookmark / AI context index underneath it.
             await InitializeReaderInteractionAsync(
                 new EpubReaderDocument(Path.GetDirectoryName(path) ?? string.Empty, [], [], []),
                 token);
+            // Initialization resets all per-book state. Install the PDF index
+            // afterwards, and keep the global EPUB layout preferences intact.
             _readerIsPdf = true;
-            _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with
-            {
-                FlowMode = 0,
-                TwoPageMode = false
-            });
+            _readerPdfPages = pages;
+            _readerPdfSourcePath = path;
             UpdateReaderBookmarkCornerSurface();
 
             var progress = await _readerData.GetProgressAsync(file.Id, token);
             if (progress is not null)
                 _readerPdfPage = Math.Clamp(progress.ChapterIndex + 1, 1, pages.Count);
             _readerChapterIndex = _readerPdfPage - 1;
+            var pdfUri = new Uri(Path.GetFullPath(path));
+            _readerTocItems = info.Outline.Count > 0
+                ? info.Outline.Select((item, index) => new EpubReaderNavigationItem(item.Title,
+                    pdfUri.AbsoluteUri + $"#page={item.PageNumber}&top={(item.Top ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture)}&outline={index}",
+                    item.PageNumber - 1, item.Level)).ToArray()
+                : pages.Select(page => new EpubReaderNavigationItem(T("第 {0} 页", page.PageNumber),
+                    pdfUri.AbsoluteUri + $"#page={page.PageNumber}", page.PageNumber - 1)).ToArray();
+            BuildReaderTocRows();
+            CollapseReaderTocToCurrentChapter(_readerChapterIndex);
+            SetReaderCompactNavigationItems(_readerTocItems);
 
             ReaderBookInfoText.Text = $"{card.Title} · PDF";
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
@@ -282,14 +286,9 @@ public partial class MainWindow
             ReaderRoot.IsVisible = true;
             LibraryRoot.IsVisible = false;
             WindowBrandText.IsVisible = true;
-            // The WinUI reference keeps the TOC panel open for PDF with an
-            // explanatory empty state; bookmarks still work per page.
             _readerTocExpanded = true;
             _readerTocMinimal = false;
-            ReaderTocEmptyText.Text = textPageCount == 0
-                ? T("PDF 主要是扫描图片；当前可翻页、保存进度、书签和页面笔记，搜索、AI 与朗读不可用。")
-                : T("PDF 使用内置查看器；已加载 {0}/{1} 页文本，可搜索、使用 AI、朗读并添加页面笔记。", textPageCount, pages.Count);
-            ReaderTocEmptyText.IsVisible = true;
+            ReaderTocEmptyText.IsVisible = false;
             ApplyReaderPanelLayout();
             ShowReaderTocTab();
             ReaderAiView.IsVisible = true;
@@ -300,9 +299,6 @@ public partial class MainWindow
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
 
             await EnsureReaderHostsAsync();
-            // PDF renders in the webview's own viewer, so the Linux plain-text
-            // surface never applies here. Drop any overlay left by a previous
-            // EPUB session before revealing the host.
             HideLinuxReaderTextFallback();
             SetReaderHostLayer();
             FocusCurrentReaderHost();
@@ -312,6 +308,10 @@ public partial class MainWindow
             {
                 throw new InvalidOperationException(T("PDF 阅读器页面加载失败。"));
             }
+            await ApplySavedReaderPdfAnnotationsAsync(token);
+            if (host is NativePdfReaderHost pdfHost)
+                await pdfHost.RestoreViewStateAsync(progress?.Fragment, progress?.ScrollPosition ?? 0);
+            SyncReaderPdfTocSelection();
 
             ReaderStatusText.Text = textPageCount == 0
                 ? T("PDF · {0} 页 · 扫描图片，无可搜索文本", pages.Count)
@@ -337,27 +337,58 @@ public partial class MainWindow
     {
         if (!_readerTtsAutoNavigation)
             await _readerTts.StopAsync();
-        if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not { } host) return;
+        if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not NativePdfReaderHost host) return;
         if (string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return;
-        _readerPdfPage = Math.Clamp(page, 1, _readerPdfPages.Count);
+        _selectedReaderAnnotation = null;
+        HideReaderAnnotationInputPopup();
+        HideReaderSelectionPopup();
+        HideReaderAnnotationHoverPopup();
+        var targetPage = Math.Clamp(page, 1, _readerPdfPages.Count);
+        var source = new Uri(_readerPdfSourcePath).AbsoluteUri + $"#page={targetPage}";
+        var loaded = await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber), async () =>
+        {
+            if (!await host.NavigateAsync(new Uri(source), cancellationToken)) return false;
+            await ApplySavedReaderPdfAnnotationsAsync(cancellationToken);
+            return true;
+        }, cancellationToken, animate: targetPage != host.PageNumber, holdOutgoingPage: true);
+        if (!loaded)
+        {
+            if (!string.IsNullOrWhiteSpace(host.LastError)) ReaderStatusText.Text = host.LastError;
+            return;
+        }
+        _readerPdfPage = host.PageNumber;
         _readerChapterIndex = _readerPdfPage - 1;
-        // Load the real PDF page through WebView2's built-in viewer (the
-        // WinUI reference navigates the same file:// + #page=N URL). Page
-        // turns are fire-and-forget like the reference: the viewer replaces
-        // the pending navigation and the host state is already final.
-        var source = new Uri(_readerPdfSourcePath).AbsoluteUri + $"#page={_readerPdfPage}";
-        host.Navigate(new Uri(source));
+        SyncReaderPdfTocSelection();
+        if (!string.IsNullOrWhiteSpace(ReaderInPageSearchBox.Text))
+            await ApplyReaderPdfSearchAsync(ReaderInPageSearchBox.Text.Trim(), ++_readerPdfSearchSequence);
         ReaderChapterText.Text = GetReaderChapterPositionLabel();
         UpdateReaderToolbar();
         await UpdateReaderBookmarkIndicatorAsync();
         if (saveProgress) await SaveReaderProgressAsync(cancellationToken);
     }
 
-    // PDF annotations cannot render inside WebView2's built-in PDF viewer
-    // (no DOM to inject into), exactly like the WinUI reference: they live in
-    // the notes list and jump to their page on click.
     private async Task ApplySavedReaderPdfAnnotationsAsync(CancellationToken cancellationToken)
-        => await Task.CompletedTask;
+    {
+        if (_readerBookFile is null || CurrentReaderHost is not NativePdfReaderHost host) return;
+        var page = host.PageNumber;
+        var annotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken, MaxReaderAnnotations);
+        if (!ReferenceEquals(host, CurrentReaderHost) || host.PageNumber != page) return;
+        host.SetAnnotations(annotations.Where(item => TryGetReaderPdfPage(item.ChapterPath, out var savedPage) && savedPage == page).ToArray());
+    }
+
+    private void SyncReaderPdfTocSelection()
+    {
+        if (!_readerIsPdf || _readerTocItems.Count == 0) return;
+        var top = (CurrentReaderHost as NativePdfReaderHost)?.VisibleTop ?? 0;
+        var current = _readerTocItems.Where(item => item.ChapterIndex < _readerChapterIndex
+            || item.ChapterIndex == _readerChapterIndex && NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)) <= top + 0.02)
+            .OrderByDescending(item => item.ChapterIndex)
+            .ThenByDescending(item => NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)))
+            .ThenByDescending(item => item.Level).FirstOrDefault()
+            ?? _readerTocItems.FirstOrDefault(item => item.ChapterIndex == _readerChapterIndex)
+            ?? _readerTocItems[0];
+        if (!ReferenceEquals((ReaderTocList.SelectedItem as ReaderTocRow)?.Item, current)) SetReaderTocSelection(current);
+    }
 
     private async Task RefreshReaderBookmarksAsync(CancellationToken cancellationToken)
     {
@@ -1027,7 +1058,8 @@ public partial class MainWindow
                         result.PageNumber - 1,
                         $"pdf:page:{result.PageNumber}",
                         pageNumber: result.PageNumber,
-                        query: query));
+                        query: query,
+                        startOffset: result.MatchIndex));
             }
             else if (_readerBookCard is not null && _readerBookFile is not null && _readerDocument is not null)
             {
@@ -1095,6 +1127,13 @@ public partial class MainWindow
         if (result.PageNumber is { } page)
         {
             await NavigatePdfPageAsync(page, ReaderToken);
+            if (CurrentReaderHost is NativePdfReaderHost pdf && pdf.PageNumber == page)
+            {
+                var match = pdf.Find(result.Query ?? string.Empty, result.StartOffset);
+                _readerSearchCount = match.Count;
+                _readerSearchIndex = match.Index;
+                UpdateReaderSearchCount();
+            }
             return;
         }
         if (result.Source is { } source)
@@ -1303,11 +1342,15 @@ public partial class MainWindow
         ReaderInPageSearchBox.Text = string.Empty;
     }
 
-    // PDF in-page search cannot run inside WebView2's built-in viewer (no DOM
-    // to mark); Ctrl+F routes PDF to the whole-book search tab instead, like
-    // the WinUI reference. Kept as a guarded no-op for the text-search entry.
-    private async Task ApplyReaderPdfSearchAsync(string query, int sequence)
-        => await Task.CompletedTask;
+    private Task ApplyReaderPdfSearchAsync(string query, int sequence)
+    {
+        if (sequence != _readerPdfSearchSequence || CurrentReaderHost is not NativePdfReaderHost pdf) return Task.CompletedTask;
+        var result = pdf.Find(query);
+        _readerSearchCount = result.Count;
+        _readerSearchIndex = result.Index;
+        UpdateReaderSearchCount();
+        return Task.CompletedTask;
+    }
 
     private void ReaderProgressSlider_ValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
     {

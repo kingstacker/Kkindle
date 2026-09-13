@@ -622,8 +622,9 @@ public partial class MainWindow
         if (_readerIsPdf)
         {
             var total = Math.Max(1, _readerPdfPages.Count);
-            var page = Math.Clamp(index + 1, 1, total);
-            ReaderChapterPreviewTitleText.Text = T("第 {0} 页", page);
+            var item = includeBodyPreview && index >= 0 && index < _readerTocItems.Count ? _readerTocItems[index] : null;
+            var page = Math.Clamp((item?.ChapterIndex ?? index) + 1, 1, total);
+            ReaderChapterPreviewTitleText.Text = item is null ? T("第 {0} 页", page) : $"{item.Title} · {T("第 {0} 页", page)}";
         }
         else
         {

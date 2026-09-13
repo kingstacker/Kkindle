@@ -43,8 +43,8 @@ public sealed class PlatformDiagnosticsService
             diagnostics.Add(CheckPdfParser());
             diagnostics.Add(CheckCalibre(calibrePath));
             diagnostics.Add(kindleAvailable
-                ? new PlatformDiagnostic("Kindle", PlatformDiagnosticStatus.Ready, "已加载当前平台 Kindle 设备服务。")
-                : new PlatformDiagnostic("Kindle", PlatformDiagnosticStatus.Warning, "当前平台没有可用的 Kindle 设备服务；书库和阅读功能仍可使用。"));
+                ? new PlatformDiagnostic("阅读设备", PlatformDiagnosticStatus.Ready, "已加载当前平台阅读设备服务。")
+                : new PlatformDiagnostic("阅读设备", PlatformDiagnosticStatus.Warning, "当前平台没有可用的阅读设备服务；书库和阅读功能仍可使用。"));
             return diagnostics;
         }, cancellationToken);
 
@@ -95,8 +95,15 @@ public sealed class PlatformDiagnosticsService
 
     private static PlatformDiagnostic CheckPdfParser()
     {
-        var version = typeof(UglyToad.PdfPig.PdfDocument).Assembly.GetName().Version?.ToString() ?? "未知版本";
-        return new PlatformDiagnostic("PDF 文本解析", PlatformDiagnosticStatus.Ready, $"PdfPig {version} 已包含在应用中。 ");
+        try
+        {
+            PdfDocumentService.VerifyRuntime();
+            return new PlatformDiagnostic("PDF 渲染与文本", PlatformDiagnosticStatus.Ready, "PDFium 已就绪，可显示页面、选择文字并标注。");
+        }
+        catch (Exception exception)
+        {
+            return new PlatformDiagnostic("PDF 渲染与文本", PlatformDiagnosticStatus.Unavailable, UiText.Get("PDFium 加载失败：{0}", exception.Message));
+        }
     }
 
     private static PlatformDiagnostic CheckCalibre(string? configuredPath)

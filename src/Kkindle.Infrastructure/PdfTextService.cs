@@ -1,6 +1,4 @@
 using Kkindle.Core;
-using UglyToad.PdfPig;
-using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 
 namespace Kkindle.Infrastructure;
 
@@ -14,14 +12,17 @@ public sealed class PdfTextService
         {
             var pages = new List<PdfPageText>();
             var characterCount = 0L;
-            using var document = PdfDocument.Open(path);
-            foreach (var page in document.GetPages())
+            using var document = new PdfDocumentService(path);
+            for (var pageNumber = 1; pageNumber <= document.PageCount; pageNumber++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (pages.Count >= MaxIndexedPages || characterCount >= MaxIndexedCharacters) break;
-                var text = ContentOrderTextExtractor.GetText(page).Trim();
+                // Keep the full page map even when the searchable index reaches
+                // its limit. Image-only and unindexed pages remain navigable.
+                var text = pageNumber <= MaxIndexedPages && characterCount < MaxIndexedCharacters
+                    ? document.ReadPage(pageNumber, cancellationToken).Text
+                    : string.Empty;
                 characterCount += text.Length;
-                pages.Add(new PdfPageText(page.Number, text));
+                pages.Add(new PdfPageText(pageNumber, text));
             }
             return pages;
         }, cancellationToken);

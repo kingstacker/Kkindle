@@ -16,10 +16,36 @@ public sealed class BookMetadataService : IMetadataService
     public async Task<BookMetadata> ReadMetadataAsync(string path, CancellationToken cancellationToken = default)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
+        if (extension == ".pdf") return await ReadPdfAsync(path, cancellationToken);
         return extension == ".epub"
             ? await ReadEpubAsync(path, cancellationToken)
             : await ReadFallbackAsync(path, extension, cancellationToken);
     }
+
+    private static Task<BookMetadata> ReadPdfAsync(string path, CancellationToken cancellationToken) =>
+        Task.Run(() =>
+        {
+            var title = CleanFileTitle(Path.GetFileNameWithoutExtension(path));
+            try
+            {
+                using var pdf = new PdfDocumentService(path);
+                var info = pdf.ReadInfo(cancellationToken);
+                var cover = pdf.RenderPage(1, 480, 720, cancellationToken);
+                return new BookMetadata
+                {
+                    Title = string.IsNullOrWhiteSpace(info.Title) ? title : info.Title,
+                    Authors = string.IsNullOrWhiteSpace(info.Author) ? "未知作者" : info.Author,
+                    CoverBytes = cover.Png,
+                    CoverExtension = ".png"
+                };
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                // Encrypted or damaged documents can still be kept in the
+                // library; opening them explains the actual read failure.
+                return new BookMetadata { Title = title, Authors = "未知作者" };
+            }
+        }, cancellationToken);
 
     private static async Task<BookMetadata> ReadFallbackAsync(
         string path,

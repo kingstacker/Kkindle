@@ -421,6 +421,7 @@ public partial class MainWindow : Window
         UpdateWindowShadowMargin();
         SetSidebarActive(AllBooksButton);
         SetLibraryViewMode(LibraryViewMode.Grid);
+        InitializeDeviceShelfControls();
         UpdateLibraryUi();
         ConfigureStage3Timer();
         SetEjectButtonsEnabled(false);
@@ -440,6 +441,7 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(UpdateBookGridLayout, DispatcherPriority.Loaded);
         AttachSettingsAutoHideScrollbar();
         AttachBookGridAutoHideScrollbar();
+        AttachReadingDashboardAutoHideScrollbars();
     }
 
     private void ApplyApplicationIcon()
@@ -507,6 +509,32 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AttachReadingDashboardAutoHideScrollbars()
+    {
+        foreach (var viewer in new[] { ReadingDashboardScrollViewer, DashboardRecentScrollViewer })
+        {
+            var idleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            idleTimer.Tick += (_, _) =>
+            {
+                idleTimer.Stop();
+                viewer.Classes.Remove("scrolling");
+            };
+            viewer.ScrollChanged += (_, e) =>
+            {
+                // Scrolling the nested recent list must not reveal the page's scrollbar.
+                if (!ReferenceEquals(e.Source, viewer) || e.OffsetDelta == default) return;
+                viewer.Classes.Add("scrolling");
+                idleTimer.Stop();
+                idleTimer.Start();
+            };
+            viewer.DetachedFromVisualTree += (_, _) =>
+            {
+                idleTimer.Stop();
+                viewer.Classes.Remove("scrolling");
+            };
+        }
+    }
+
     public LibraryViewModel ViewModel { get; }
 
     private static string T(string source, params object?[] args) => UiText.Get(source, args);
@@ -527,6 +555,7 @@ public partial class MainWindow : Window
         if (_filterControlsReady)
             RefreshLocalizedFilterItems();
         RefreshLocalizedZLibraryFilterItems();
+        RefreshDeviceShelfLanguage();
         RefreshLocalizedReadingMaterialsSourceFilter();
         ViewModel.RefreshView();
         UpdateLibraryUi();
@@ -616,7 +645,7 @@ public partial class MainWindow : Window
         var selectedIndex = ReadingMaterialsSourceBox.SelectedIndex;
         SetComboBoxItemContent(ReadingMaterialsSourceBox, 0, T("全部来源"));
         SetComboBoxItemContent(ReadingMaterialsSourceBox, 1, T("本地书库"));
-        SetComboBoxItemContent(ReadingMaterialsSourceBox, 2, "Kindle");
+        SetComboBoxItemContent(ReadingMaterialsSourceBox, 2, T("当前设备"));
         RestoreComboBoxSelection(ReadingMaterialsSourceBox, selectedIndex);
     }
 
@@ -650,11 +679,12 @@ public partial class MainWindow : Window
         try
         {
             await Task.Delay(1500);
+            if (CurrentDevice is not { } device) return;
             foreach (var card in ViewModel.Books)
             {
                 try
                 {
-                    using var prepared = await PrepareKindleTransferAsync(card.Book, null, CancellationToken.None);
+                    using var prepared = await PrepareKindleTransferAsync(device, card.Book, null, CancellationToken.None);
                     Console.WriteLine($"[senddiag] prepare ok 《{card.Title}》 ({prepared.File.Format})");
                 }
                 catch (Exception exception)
@@ -1071,13 +1101,13 @@ public partial class MainWindow : Window
     private void UpdateLibraryUi()
     {
         LibraryBusyProgress.IsVisible = ViewModel.IsBusy;
-        LibrarySummaryText.Text = ViewModel.StatusText;
-        LibraryViewModeText.Text = DescribeLibraryViewMode(_libraryViewMode);
+        var viewDescription = $"{T("切换视图")} · {DescribeLibraryViewMode(_libraryViewMode)}";
+        ToolTip.SetTip(LibraryViewToggleButton, viewDescription);
         LibraryGridViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.Grid;
         LibraryListViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.List;
         LibraryCollectionsViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.Collections;
         FilterButton.Classes.Set("active", FilterPanel.IsVisible || ViewModel.HasActiveFilters);
-        AutomationProperties.SetName(LibraryViewToggleButton, $"{T("切换视图")} · {DescribeLibraryViewMode(_libraryViewMode)}");
+        AutomationProperties.SetName(LibraryViewToggleButton, viewDescription);
         TaskStatusText.Text = ViewModel.StatusText;
         SidebarCountText.Text = ViewModel.BookCount.ToString();
         foreach (var card in ViewModel.Books)
@@ -1147,7 +1177,6 @@ public partial class MainWindow : Window
     private void SetTaskStatus(string message)
     {
         TaskStatusText.Text = UiText.Localize(message);
-        LibrarySummaryText.Text = ViewModel.StatusText;
     }
 
     private void SetLibraryViewMode(LibraryViewMode mode)
@@ -2089,8 +2118,10 @@ public partial class MainWindow : Window
         }
 
         menu.Items.Add(CreateBookVariantMenuItem(
-            T("发送到 Kindle 设备"),
-            KindleTransferPolicy.GetCandidates(card.Book.Files),
+            T("发送到设备"),
+            CurrentDevice is { } targetDevice
+                ? DeviceTransferPolicy.GetCandidates(targetDevice.Profile, card.Book.Files)
+                : card.Book.Files,
             sourceFile => SendSelectedBookToKindleCoreAsync(sourceFile)));
         menu.Items.Add(CreateBookVariantMenuItem(
             T("发送到 Kindle 邮箱"),

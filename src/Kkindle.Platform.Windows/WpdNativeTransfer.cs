@@ -38,7 +38,7 @@ internal static class WpdNativeTransfer
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(objectId))
-            throw new IOException("Kindle 源文件的 WPD 对象 ID 为空。");
+            throw new IOException("设备源文件的 WPD 对象 ID 为空。");
 
         var devicePath = GetPortableDevicePath(shellPath);
         var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.kkindle-part";
@@ -53,15 +53,15 @@ internal static class WpdNativeTransfer
             cancellationToken.ThrowIfCancellationRequested();
             device = CreateComObject<IPortableDevice>(PortableDeviceClassId);
             clientInfo = CreateComObject<IPortableDeviceValues>(PortableDeviceValuesClassId);
-            ThrowIfFailed(device.Open(devicePath, clientInfo), "打开 Kindle 的原生 WPD 会话");
+            ThrowIfFailed(device.Open(devicePath, clientInfo), "打开设备的原生 WPD 会话");
 
             cancellationToken.ThrowIfCancellationRequested();
-            ThrowIfFailed(device.Content(out content), "获取 Kindle 的 WPD 内容接口");
+            ThrowIfFailed(device.Content(out content), "获取设备的 WPD 内容接口");
             if (content is null)
-                throw new IOException("Kindle 未返回 WPD 内容接口。");
-            ThrowIfFailed(content.Transfer(out resources), "获取 Kindle 的 WPD 资源接口");
+                throw new IOException("设备未返回 WPD 内容接口。");
+            ThrowIfFailed(content.Transfer(out resources), "获取设备的 WPD 资源接口");
             if (resources is null)
-                throw new IOException("Kindle 未返回 WPD 资源接口。");
+                throw new IOException("设备未返回 WPD 资源接口。");
 
             uint optimalReadBufferSize = 0;
             var resourceKey = WpdResourceDefault;
@@ -72,9 +72,9 @@ internal static class WpdNativeTransfer
                     StgmRead,
                     ref optimalReadBufferSize,
                     out source),
-                "打开 Kindle 资源读取流");
+                "打开设备资源读取流");
             if (source is null)
-                throw new IOException("Kindle 未返回资源读取流。");
+                throw new IOException("设备未返回资源读取流。");
 
             CopyFromDevice(
                 source,
@@ -106,9 +106,9 @@ internal static class WpdNativeTransfer
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(parentObjectId))
-            throw new IOException("Kindle 目标目录的 WPD 对象 ID 为空。");
+            throw new IOException("设备目标目录的 WPD 对象 ID 为空。");
         if (string.IsNullOrWhiteSpace(fileName) || fileName.IndexOfAny(['\\', '/']) >= 0)
-            throw new InvalidOperationException("Kindle 目标文件名无效。");
+            throw new InvalidOperationException("设备目标文件名无效。");
 
         var sourceInfo = new FileInfo(sourcePath);
         var devicePath = GetPortableDevicePath(shellPath);
@@ -123,10 +123,10 @@ internal static class WpdNativeTransfer
             cancellationToken.ThrowIfCancellationRequested();
             device = CreateComObject<IPortableDevice>(PortableDeviceClassId);
             clientInfo = CreateComObject<IPortableDeviceValues>(PortableDeviceValuesClassId);
-            ThrowIfFailed(device.Open(devicePath, clientInfo), "打开 Kindle 的原生 WPD 会话");
+            ThrowIfFailed(device.Open(devicePath, clientInfo), "打开设备的原生 WPD 会话");
 
             cancellationToken.ThrowIfCancellationRequested();
-            ThrowIfFailed(device.Content(out content), "获取 Kindle 的 WPD 内容接口");
+            ThrowIfFailed(device.Content(out content), "获取设备的 WPD 内容接口");
 
             properties = CreateComObject<IPortableDeviceValues>(PortableDeviceValuesClassId);
             SetStringValue(properties, WpdObjectParentId, parentObjectId, "目标目录");
@@ -141,9 +141,9 @@ internal static class WpdNativeTransfer
                     out destination,
                     ref optimalWriteBufferSize,
                     IntPtr.Zero),
-                "创建 Kindle 目标文件");
+                "创建设备目标文件");
             if (destination is null)
-                throw new IOException("Kindle 未返回文件写入数据流。");
+                throw new IOException("设备未返回文件写入数据流。");
 
             CopyToDevice(
                 sourcePath,
@@ -202,7 +202,7 @@ internal static class WpdNativeTransfer
                 destination.Write(buffer, read, bytesWritten);
                 var written = Marshal.ReadInt32(bytesWritten);
                 if (written != read)
-                    throw new IOException($"Kindle 数据流写入不完整（请求 {read} 字节，实际 {written} 字节）。");
+                    throw new IOException($"设备数据流写入不完整（请求 {read} 字节，实际 {written} 字节）。");
 
                 copied += written;
                 progress?.Report(new TransferProgress(copied, totalBytes, $"正在发送 {displayName}"));
@@ -246,7 +246,7 @@ internal static class WpdNativeTransfer
                 source.Read(buffer, buffer.Length, bytesRead);
                 var read = Marshal.ReadInt32(bytesRead);
                 if (read < 0 || read > buffer.Length)
-                    throw new IOException($"Kindle 数据流读取长度无效（{read} 字节）。");
+                    throw new IOException($"设备数据流读取长度无效（{read} 字节）。");
                 if (read == 0) break;
 
                 destination.Write(buffer, 0, read);
@@ -256,7 +256,7 @@ internal static class WpdNativeTransfer
             cancellationToken.ThrowIfCancellationRequested();
             destination.Flush(true);
             if (expectedSize > 0 && copied != expectedSize)
-                throw new IOException($"Kindle 资源读取不完整（预计 {expectedSize} 字节，实际 {copied} 字节）。");
+                throw new IOException($"设备资源读取不完整（预计 {expectedSize} 字节，实际 {copied} 字节）。");
         }
         finally
         {
@@ -293,7 +293,7 @@ internal static class WpdNativeTransfer
             }
         }
 
-        throw lastSharingException ?? new IOException("无法打开 Kindle 传输源文件。");
+        throw lastSharingException ?? new IOException("无法打开设备传输源文件。");
     }
 
     private static bool IsSharingViolation(IOException exception)
@@ -326,7 +326,7 @@ internal static class WpdNativeTransfer
     {
         var start = shellPath.IndexOf(@"\\?\", StringComparison.OrdinalIgnoreCase);
         if (start < 0)
-            throw new IOException("无法从 Kindle 的 Shell 路径确定 WPD 设备路径。");
+            throw new IOException("无法从设备的 Shell 路径确定 WPD 设备路径。");
         return shellPath[start..];
     }
 

@@ -210,12 +210,13 @@ public partial class MainWindow
 
     private Task ApplyPdfReaderTtsHighlightAsync(int page, int start, int length)
     {
-        // The embedded PDF viewer owns its page DOM, so text ranges cannot be
-        // painted from Avalonia. Keep the page/status synchronized instead.
         return RunOnReaderUiAsync(() =>
         {
             if (_readerIsPdf && page == _readerPdfPage)
+            {
+                (CurrentReaderHost as NativePdfReaderHost)?.SetSpeechHighlight(start, length);
                 ReaderStatusText.Text = T("PDF 第 {0} 页 · 正在朗读", page);
+            }
         });
     }
 
@@ -227,6 +228,7 @@ public partial class MainWindow
             return;
         }
         if (!_readerIsPdf || !ReaderRoot.IsVisible) return;
+        (CurrentReaderHost as NativePdfReaderHost)?.ClearSpeechHighlight();
         var textPageCount = _readerPdfPages.Count(page => !string.IsNullOrWhiteSpace(page.Text));
         ReaderStatusText.Text = textPageCount == 0
             ? T("PDF · {0} 页 · 扫描图片，无可搜索文本", _readerPdfPages.Count)

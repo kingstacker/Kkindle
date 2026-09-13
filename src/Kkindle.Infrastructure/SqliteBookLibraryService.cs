@@ -25,6 +25,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     private readonly AppPaths _paths;
     private readonly IMetadataService _metadata;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
+    private readonly SemaphoreSlim _pdfCoverGate = new(1, 1);
 
     public event EventHandler<LocalDataChangedEventArgs>? DataChanged;
 
@@ -819,6 +820,40 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         {
             _databaseGate.Release();
         }
+    }
+
+    public async Task<string?> EnsurePdfCoverAsync(Guid bookId, CancellationToken cancellationToken = default)
+    {
+        await _pdfCoverGate.WaitAsync(cancellationToken);
+        try
+        {
+            var book = await GetBookAsync(bookId, cancellationToken);
+            if (book is null) return null;
+            if (!string.IsNullOrWhiteSpace(book.CoverPath) && File.Exists(ResolveDataPath(book.CoverPath))) return book.CoverPath;
+            var file = book.Files.FirstOrDefault(item => string.Equals(item.Format, "pdf", StringComparison.OrdinalIgnoreCase));
+            if (file is null || !File.Exists(GetAbsoluteFilePath(file))) return null;
+            var metadata = await _metadata.ReadMetadataAsync(GetAbsoluteFilePath(file), cancellationToken);
+            if (metadata.CoverBytes is not { Length: > 0 }) return null;
+            var path = Path.Combine(_paths.Covers, $"{book.Id:N}-pdf.png");
+            var temporary = path + $".{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllBytesAsync(temporary, metadata.CoverBytes, cancellationToken);
+                File.Move(temporary, path, overwrite: true);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            var relative = Path.GetRelativePath(_paths.Data, path);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            using var update = connection.CreateCommand();
+            // Do not overwrite a cover chosen while the first page rendered,
+            // or rewrite other metadata from an old UI snapshot.
+            update.CommandText = "UPDATE Books SET CoverPath=$cover WHERE Id=$id AND CoverPath IS $previous;";
+            update.Parameters.AddWithValue("$cover", relative);
+            update.Parameters.AddWithValue("$id", bookId.ToString());
+            update.Parameters.AddWithValue("$previous", (object?)book.CoverPath ?? DBNull.Value);
+            return await update.ExecuteNonQueryAsync(cancellationToken) > 0 ? relative : null;
+        }
+        finally { _pdfCoverGate.Release(); }
     }
 
     public async Task UpdateMetadataAsync(Book book, CancellationToken cancellationToken = default)

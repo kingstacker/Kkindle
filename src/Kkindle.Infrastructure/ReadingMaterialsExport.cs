@@ -19,10 +19,10 @@ public static class ReadingMaterialsExport
             leaveOpen: true);
         await WriteLineAsync(writer, "# Kkindle " + UiText.Get("阅读资料"), cancellationToken);
         await WriteLineAsync(writer, string.Empty, cancellationToken);
-        foreach (var sourceGroup in records.GroupBy(item => item.Source))
+        foreach (var sourceGroup in records.GroupBy(item => (item.Source, item.SourceDeviceId, item.SourceDeviceName)))
         foreach (var bookGroup in sourceGroup.GroupBy(item => item.BookTitle, StringComparer.CurrentCultureIgnoreCase))
         {
-            var source = sourceGroup.Key == ReadingMaterialSource.Local ? UiText.Get("本地书籍") : "Kindle";
+            var source = sourceGroup.First().SourceLabel;
             await WriteLineAsync(writer, $"## {source} · {bookGroup.Key}", cancellationToken);
             await WriteLineAsync(writer, string.Empty, cancellationToken);
             foreach (var item in bookGroup)
@@ -65,10 +65,10 @@ public static class ReadingMaterialsExport
         await WriteLineAsync(writer, "Kkindle " + UiText.Get("阅读资料"), cancellationToken);
         await WriteLineAsync(writer, "================", cancellationToken);
         await WriteLineAsync(writer, string.Empty, cancellationToken);
-        foreach (var sourceGroup in records.GroupBy(item => item.Source))
+        foreach (var sourceGroup in records.GroupBy(item => (item.Source, item.SourceDeviceId, item.SourceDeviceName)))
         foreach (var bookGroup in sourceGroup.GroupBy(item => item.BookTitle, StringComparer.CurrentCultureIgnoreCase))
         {
-            var source = sourceGroup.Key == ReadingMaterialSource.Local ? UiText.Get("本地书籍") : "Kindle";
+            var source = sourceGroup.First().SourceLabel;
             await WriteLineAsync(writer, $"[{source}] {bookGroup.Key}", cancellationToken);
             foreach (var item in bookGroup)
             {
@@ -140,8 +140,8 @@ public static class ReadingMaterialsExport
         IReadOnlyList<ReadingMaterialRecord> records,
         Action<string, string, IReadOnlyList<ReadingMaterialRecord>> append)
     {
-        foreach (var sourceGroup in records.GroupBy(item => item.Source))
+        foreach (var sourceGroup in records.GroupBy(item => (item.Source, item.SourceDeviceId, item.SourceDeviceName)))
         foreach (var bookGroup in sourceGroup.GroupBy(item => item.BookTitle, StringComparer.CurrentCultureIgnoreCase))
-            append(sourceGroup.Key == ReadingMaterialSource.Local ? UiText.Get("本地书籍") : "Kindle", bookGroup.Key, bookGroup.ToArray());
+            append(sourceGroup.First().SourceLabel, bookGroup.Key, bookGroup.ToArray());
     }
 }

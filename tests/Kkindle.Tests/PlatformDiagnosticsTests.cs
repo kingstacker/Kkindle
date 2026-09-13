@@ -17,8 +17,8 @@ public sealed class PlatformDiagnosticsTests
 
             Assert.Contains(diagnostics, item => item.Name == "数据目录" && item.Status == PlatformDiagnosticStatus.Ready);
             Assert.Contains(diagnostics, item => item.Name == "回收站目录" && item.Status == PlatformDiagnosticStatus.Ready);
-            Assert.Contains(diagnostics, item => item.Name == "PDF 文本解析" && item.Status == PlatformDiagnosticStatus.Ready);
-            Assert.Contains(diagnostics, item => item.Name == "Kindle" && item.Status == PlatformDiagnosticStatus.Warning);
+            Assert.Contains(diagnostics, item => item.Name == "PDF 渲染与文本" && item.Status == PlatformDiagnosticStatus.Ready);
+            Assert.Contains(diagnostics, item => item.Name == "阅读设备" && item.Status == PlatformDiagnosticStatus.Warning);
             var calibre = Assert.Single(diagnostics, item => item.Name == "Calibre");
             Assert.Equal(
                 calibre.Status == PlatformDiagnosticStatus.Ready

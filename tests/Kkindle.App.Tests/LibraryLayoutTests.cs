@@ -2,6 +2,7 @@ using System.IO.Compression;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 using Kkindle.Core;
 using SkiaSharp;
 using Xunit;
@@ -29,6 +30,29 @@ public sealed partial class SettingsTests
         var shelf = scope.Get<Grid>("LibraryContentHost");
         var originalWidth = shelf.Bounds.Width;
         Capture(scope.Window, $"{language}-{width}-library-toolbar");
+        scope.Get<Button>("DeviceManagementSectionButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        scope.Get<Button>("ReadingSectionButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Render();
+        var navigationNames = new[] { "AllBooksButton", "KindleBooksButton", "ZLibraryBooksButton",
+            "FontManagementButton", "DictionaryManagementButton", "ReaderNotesNavigationButton", "ReadingDashboardButton" };
+        double? iconCenter = null;
+        foreach (var navigationName in navigationNames)
+        {
+            var glyph = scope.Get<Button>(navigationName).GetVisualDescendants()
+                .OfType<Avalonia.Controls.Shapes.Path>().Single(p => p.Classes.Contains("sidebarGlyph"));
+            // Check the painted geometry, not just identical control boxes: a
+            // narrow Path can sit left of centre inside a centred square slot.
+            // Pixel hinting may move an edge by half a physical pixel, while
+            // the layout slots must still share exactly the same column.
+            var paintedCenter = glyph.RenderedGeometry!.Bounds.Center;
+            var tolerance = 0.5 / scope.Window.RenderScaling + 0.01;
+            Assert.InRange(Math.Abs(paintedCenter.X - glyph.Bounds.Width / 2), 0, tolerance);
+            Assert.InRange(Math.Abs(paintedCenter.Y - glyph.Bounds.Height / 2), 0, tolerance);
+            var center = glyph.TranslatePoint(new Point(glyph.Bounds.Width / 2, glyph.Bounds.Height / 2), scope.Window)!.Value.X;
+            iconCenter ??= center;
+            Assert.Equal(iconCenter.Value, center, 2);
+        }
+        Capture(scope.Window, $"{language}-{width}-sidebar-expanded");
 
         var grid = scope.Get<ListBox>("BookGrid");
         grid.SelectedItem = scope.Window.ViewModel.Books[0];
@@ -95,6 +119,9 @@ public sealed partial class SettingsTests
         viewModel.CollectionFilterName = collection.Name;
         await viewModel.RefreshViewAsync();
         Assert.Single(viewModel.Books);
+        await Render();
+        var gridToolbarBounds = GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window);
+        Capture(scope.Window, "view-switch-grid");
         var viewButton = scope.Get<Button>("LibraryViewToggleButton");
         viewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.True(viewButton.ContextMenu!.IsOpen);
@@ -107,6 +134,9 @@ public sealed partial class SettingsTests
         Assert.Equal(collection.Id, viewModel.CollectionFilterId);
         Assert.Equal(LibrarySortMode.TitleAscending, viewModel.SortMode);
         Assert.True(scope.Get<MenuItem>("LibraryListViewMenuItem").IsChecked);
+        await Render();
+        Assert.Equal(gridToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window));
+        Capture(scope.Window, "view-switch-list");
 
         scope.Get<MenuItem>("LibraryGridViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert.True(scope.Get<ListBox>("BookGrid").IsVisible);
@@ -118,7 +148,27 @@ public sealed partial class SettingsTests
         Assert.Null(viewModel.CollectionFilterId);
         Assert.True(scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").IsChecked);
         Assert.Equal(LibrarySortMode.TitleAscending, viewModel.SortMode);
+        await Render();
+        Assert.Equal(gridToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window));
+        Capture(scope.Window, "view-switch-collections");
+
+        // Hidden grid controls retain their old bounds. A resize in another view
+        // must still place the buttons where the grid will place them next.
+        scope.Window.Width = 1024;
+        await Render();
+        var resizedToolbarBounds = GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window);
+        Capture(scope.Window, "view-switch-resized-collections");
+        scope.Get<MenuItem>("LibraryGridViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        await Render();
+        Assert.Equal(resizedToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window));
+        Capture(scope.Window, "view-switch-resized-grid");
     });
+
+    private static Rect[] GetToolbarControlBounds(Control toolbar, Window window) => toolbar
+        .GetVisualDescendants().OfType<Control>()
+        .Where(control => control is Button or ComboBox)
+        .Select(control => new Rect(control.TranslatePoint(default, window)!.Value, control.Bounds.Size))
+        .ToArray();
 
     private static void AssertLibraryToolbar(TestWindow scope)
     {

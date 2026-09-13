@@ -28,8 +28,8 @@ public partial class MainWindow
         if (_readerBookCard is null || _readerBookFile is null) return;
         var selectedText = (_readerPendingSelection ?? string.Empty).Trim();
         var isPdfPageNote = _readerIsPdf
-            && selectedText.Length == 0
-            && _selectedReaderAnnotation is null;
+            && (_selectedReaderAnnotation is { StartOffset: 0, EndOffset: 0 }
+                || selectedText.Length == 0 && _selectedReaderAnnotation is null);
         if (selectedText.Length == 0 && _selectedReaderAnnotation is null && !isPdfPageNote)
         {
             ReaderStatusText.Text = T("请先在正文中选择一段文字。");
@@ -74,7 +74,7 @@ public partial class MainWindow
             }
         }
 
-        var normalizedStyle = NormalizeReaderAnnotationStyle(underlineStyle ?? _readerLastHighlightStyle);
+        var normalizedStyle = NormalizeReaderAnnotationStyle(underlineStyle ?? _selectedReaderAnnotation?.UnderlineStyle ?? _readerLastHighlightStyle);
         annotation.ChapterPath = chapterPath;
         annotation.Fragment = _readerIsPdf
             ? null
@@ -83,7 +83,7 @@ public partial class MainWindow
         annotation.Note = note.Trim();
         annotation.Color = normalizedStyle == "marker"
             ? "#000000"
-            : NormalizeReaderAnnotationColor(color ?? "#000000");
+            : NormalizeReaderAnnotationColor(color ?? _selectedReaderAnnotation?.Color ?? "#000000");
         annotation.UnderlineStyle = normalizedStyle;
         annotation.StartOffset = _readerPendingSelectionStartOffset;
         annotation.EndOffset = isPdfPageNote
@@ -106,13 +106,11 @@ public partial class MainWindow
                 ApplyLinuxReaderTextFallbackAnnotationRanges();
                 ClearLinuxReaderTextFallbackVisualSelection();
             }
-            if (!_readerIsPdf && CurrentReaderHost is { } host)
+            if (CurrentReaderHost is { } host)
             {
                 await ApplySavedAnnotationsAsync(host, ReaderToken);
                 await ClearCurrentReaderSelectionAsync(host);
             }
-            else if (_readerIsPdf)
-                await ApplySavedReaderPdfAnnotationsAsync(ReaderToken);
             HideReaderSelectionPopup();
             HideReaderAnnotationInputPopup();
             _readerPendingSelection = null;
@@ -132,7 +130,7 @@ public partial class MainWindow
     {
         if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
         ReaderAnnotationInputQuote.Text = _readerPendingSelection;
-        ReaderAnnotationInputBox.Text = string.Empty;
+        ReaderAnnotationInputBox.Text = _selectedReaderAnnotation?.Note ?? string.Empty;
         ShowReaderPopupNearSelection(
             ReaderAnnotationInputPopup,
             ReaderAnnotationInputPanel,
@@ -159,7 +157,7 @@ public partial class MainWindow
         _readerPendingSelectionEndOffset = 0;
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
-        if (!_readerIsPdf && CurrentReaderHost is { } host)
+        if (CurrentReaderHost is { } host)
             _ = ClearCurrentReaderSelectionAsync(host);
     }
 
@@ -199,7 +197,7 @@ public partial class MainWindow
         _readerPendingSelectionEndOffset = 0;
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
-        if (!_readerIsPdf && CurrentReaderHost is { } host)
+        if (CurrentReaderHost is { } host)
             _ = ClearCurrentReaderSelectionAsync(host);
     }
 
@@ -207,6 +205,7 @@ public partial class MainWindow
     {
         if (sender is not Button { Tag: ReaderAnnotation annotation }) return;
         await NavigateToReaderAnnotationAsync(annotation);
+        if (_readerIsPdf) EditReaderPdfAnnotation(annotation);
     }
 
     private async Task NavigateToReaderAnnotationAsync(ReaderAnnotation annotation)
@@ -214,7 +213,11 @@ public partial class MainWindow
         if (_readerIsPdf)
         {
             if (TryGetReaderPdfPage(annotation.ChapterPath, out var page))
+            {
                 await NavigatePdfPageAsync(page, ReaderToken);
+                if (CurrentReaderHost is NativePdfReaderHost pdf && pdf.PageNumber == page)
+                    pdf.ScrollToOffset(annotation.StartOffset);
+            }
             return;
         }
         if (_readerDocument is null) return;
@@ -262,7 +265,7 @@ public partial class MainWindow
             await RefreshReaderAnnotationsAsync(ReaderToken);
             if (IsLinuxReaderTextFallbackActive())
                 ApplyLinuxReaderTextFallbackAnnotationRanges();
-            if (!_readerIsPdf && CurrentReaderHost is { } host)
+            if (CurrentReaderHost is { } host)
                 await ApplySavedAnnotationsAsync(host, ReaderToken);
             ShowReaderTransientStatus(T("批注已删除"));
         }
@@ -283,17 +286,7 @@ public partial class MainWindow
         // Clear the live DOM selection so the highlighted text returns to the
         // normal body rendering after the copy action (WinUI reference); the
         // in-page selection bar hides itself once the selection is empty.
-        if (!_readerIsPdf && CurrentReaderHost is { } host)
-        {
-            try
-            {
-                await host.InvokeScriptAsync(
-                    "(() => { const s = window.getSelection(); if (s) s.removeAllRanges(); return true; })();");
-            }
-            catch
-            {
-            }
-        }
+        if (CurrentReaderHost is { } host) await ClearCurrentReaderSelectionAsync(host);
         HideReaderSelectionPopup();
         _readerPendingSelection = null;
         _readerPendingSelectionStartOffset = 0;
@@ -316,6 +309,11 @@ public partial class MainWindow
 
     private static async Task ClearCurrentReaderSelectionAsync(IReaderHost host)
     {
+        if (host is NativePdfReaderHost pdf)
+        {
+            pdf.ClearSelection();
+            return;
+        }
         if (host is NativeReaderHost nativeReader)
         {
             nativeReader.ClearSelection();
@@ -354,6 +352,32 @@ public partial class MainWindow
             ? T("没有找到释义。请先在“字典管理”中导入词典。")
             : string.Join("\n\n", entries.Select(entry => $"[{entry.DictionaryName}] {entry.Definition}")),
             T("返回阅读"));
+    }
+
+    private void EditReaderPdfAnnotation(ReaderAnnotation annotation)
+    {
+        if (!_readerIsPdf || !TryGetReaderPdfPage(annotation.ChapterPath, out var page) || page != _readerPdfPage) return;
+        _selectedReaderAnnotation = annotation;
+        _readerPendingSelection = annotation.SelectedText;
+        _readerPendingSelectionStartOffset = annotation.StartOffset;
+        _readerPendingSelectionEndOffset = annotation.EndOffset;
+        _readerPendingSelectionPrefix = annotation.Prefix;
+        _readerPendingSelectionSuffix = annotation.Suffix;
+        _readerLastHighlightStyle = annotation.UnderlineStyle;
+        _readerLastSelectionPopupAnchor = null;
+        _readerLastSelectionPopupBottom = null;
+        if (CurrentReaderHost is NativePdfReaderHost pdf)
+        {
+            var bounds = pdf.GetRangeBounds(annotation.StartOffset, annotation.EndOffset);
+            if (bounds.Count > 0 && pdf.TranslatePoint(bounds[0].TopLeft, ReaderWebViewHost) is { } anchor)
+            {
+                _readerLastSelectionPopupAnchor = anchor;
+                _readerLastSelectionPopupBottom = anchor.Y + bounds[0].Height;
+            }
+        }
+        HideReaderAnnotationHoverPopup();
+        HideReaderSelectionPopup();
+        ShowReaderAnnotationInputPopup();
     }
 
     private void ReaderFootnoteCloseButton_Click(object? sender, RoutedEventArgs e)

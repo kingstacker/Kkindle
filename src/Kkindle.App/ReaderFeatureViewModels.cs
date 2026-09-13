@@ -23,7 +23,8 @@ public sealed class ReaderSearchResultViewModel : ObservableObject
         string chapterPath,
         string? target = null,
         int? pageNumber = null,
-        string? query = null)
+        string? query = null,
+        int? startOffset = null)
     {
         Title = title;
         var presentation = string.IsNullOrWhiteSpace(query)
@@ -35,6 +36,7 @@ public sealed class ReaderSearchResultViewModel : ObservableObject
         Target = target;
         PageNumber = pageNumber;
         Query = query;
+        StartOffset = startOffset;
         ExcerptHighlightRanges = presentation.Item2;
     }
 
@@ -72,6 +74,7 @@ public sealed class ReaderSearchResultViewModel : ObservableObject
     public string ChapterPath { get; }
     public string? Target { get; }
     public int? PageNumber { get; }
+    public int? StartOffset { get; }
     public string? Query { get; }
     public BookContentChunk? Source { get; }
     public IReadOnlyList<ReaderSearchHighlightRange> ExcerptHighlightRanges { get; }

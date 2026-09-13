@@ -39,10 +39,14 @@ WebKitGTK 4.1 fallback.
 
 The Settings > Diagnostics page performs the same local checks at runtime and
 shows the detected WebView library, writable data paths, bundled PDF parser,
-Calibre, TTS and Kindle service. A PDF with a text layer supports local search,
-AI context and TTS; an image-only/scanned PDF still supports page navigation,
-bookmarks and page notes, but Kkindle does not currently run OCR or paint text
-highlights inside the embedded PDF viewer.
+Calibre, TTS and Kindle service. PDFium native assets ship for Windows, Linux
+and macOS. PDF pages and first-page covers use the same renderer; its text
+geometry drives selection, underlines, highlights and editable comments.
+Embedded outlines retain their hierarchy and page destinations. PDFs without
+outlines have a page list. Text PDFs also support local search, AI context and
+TTS. Scanned pages support viewing, page navigation, bookmarks and page notes;
+OCR is not included. PDF zoom and the position within a page are restored
+without changing EPUB typography preferences.
 
 The `Development Build` GitHub Actions workflow can be run manually or by
 pushing the `develop`/`dev/**` branches. It appends the Actions run number to a

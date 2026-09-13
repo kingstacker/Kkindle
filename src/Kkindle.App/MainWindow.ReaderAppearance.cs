@@ -37,6 +37,7 @@ public partial class MainWindow
             ? ThemeVariant.Dark : ThemeVariant.Light;
         (_readerActiveHost as NativeReaderHost)?.SetAppearance(appearance);
         (_readerPreloadHost as NativeReaderHost)?.SetAppearance(appearance);
+        (_readerActiveHost as NativePdfReaderHost)?.SetAppearance(appearance);
         UpdateReaderTitleAppearance();
         // Updating marker brushes leaves the rail's scroll offset and hover
         // wave intact; rebuilding its ItemsSource would move the chapter map.

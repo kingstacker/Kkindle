@@ -25,7 +25,7 @@ public static class LinuxKindleEjector
 
         var fallback = await RunAsync("umount", [device.RootPath], cancellationToken, allowFailure: true);
         if (fallback.ExitCode != 0)
-            throw new IOException($"无法安全卸载 Kindle：{fallback.Error}");
+            throw new IOException($"无法安全卸载设备：{fallback.Error}");
     }
 
     private static async Task<CommandResult> RunAsync(

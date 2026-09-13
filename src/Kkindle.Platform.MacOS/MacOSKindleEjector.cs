@@ -23,7 +23,7 @@ public static class MacOSKindleEjector
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         if (process.ExitCode != 0)
-            throw new IOException($"无法安全弹出 Kindle：{(await errorTask).Trim()}");
+            throw new IOException($"无法安全弹出设备：{(await errorTask).Trim()}");
         await outputTask;
     }
 }

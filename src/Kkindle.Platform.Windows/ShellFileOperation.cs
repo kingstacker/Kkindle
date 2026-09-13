@@ -19,8 +19,8 @@ internal static class ShellFileOperation
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         if (!thread.Join(TimeSpan.FromSeconds(30)))
-            throw new TimeoutException("等待 Windows 删除 Kindle 文件超时。");
-        if (failure is not null) throw new IOException("Windows 无法删除 Kindle 文件。", failure);
+            throw new TimeoutException("等待 Windows 删除设备文件超时。");
+        if (failure is not null) throw new IOException("Windows 无法删除设备文件。", failure);
     }
 
     private static void DeleteOnStaThread(object shellFolderItem)
@@ -52,7 +52,7 @@ internal static class ShellFileOperation
             Marshal.ThrowExceptionForHR(operation.DeleteItem(item, IntPtr.Zero));
             Marshal.ThrowExceptionForHR(operation.PerformOperations());
             Marshal.ThrowExceptionForHR(operation.GetAnyOperationsAborted(out var aborted));
-            if (aborted) throw new OperationCanceledException("Kindle 文件删除已取消。");
+            if (aborted) throw new OperationCanceledException("设备文件删除已取消。");
         }
         finally
         {

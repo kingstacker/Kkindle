@@ -173,8 +173,8 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 
     public string PresenceLabel => LibraryPresence switch
     {
-        BookLibraryPresence.Both => UiText.Get("电脑与 Kindle 书库都有"),
-        BookLibraryPresence.KindleOnly => UiText.Get("仅 Kindle 书库有"),
+        BookLibraryPresence.Both => UiText.Get("电脑与当前设备都有"),
+        BookLibraryPresence.KindleOnly => UiText.Get("仅当前设备有"),
         _ => UiText.Get("仅电脑书库有")
     };
 
@@ -724,6 +724,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
             OnPropertyChanged(nameof(HasActiveFilters));
             ViewChanged?.Invoke(this, EventArgs.Empty);
+            _ = RestoreMissingPdfCoversAsync(Books.ToArray(), requestId, requestToken);
         }
         finally
         {
@@ -744,6 +745,30 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         {
             StatusText = UiText.Get("刷新书库失败：{0}", UiText.Localize(exception.Message));
             ViewChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private async Task RestoreMissingPdfCoversAsync(BookCardViewModel[] cards, int requestId, CancellationToken cancellationToken)
+    {
+        foreach (var card in cards)
+        {
+            if (cancellationToken.IsCancellationRequested || requestId != _viewRequestId) return;
+            if (card.CoverImage is not null || !card.Book.Files.Any(file => string.Equals(file.Format, "pdf", StringComparison.OrdinalIgnoreCase))) continue;
+            try
+            {
+                var cover = await _library.EnsurePdfCoverAsync(card.Book.Id, cancellationToken);
+                if (cancellationToken.IsCancellationRequested || requestId != _viewRequestId) return;
+                if (string.IsNullOrWhiteSpace(cover)) continue;
+                card.Book.CoverPath = cover;
+                card.Refresh();
+                card.LoadCover();
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                // A missing/damaged PDF keeps its placeholder; the library is
+                // usable while other visible books receive their covers.
+            }
         }
     }
 

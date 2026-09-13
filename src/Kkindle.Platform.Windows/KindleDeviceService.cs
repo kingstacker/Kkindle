@@ -42,13 +42,14 @@ public sealed class KindleDeviceService : IKindleDeviceService
             try
             {
                 if (drive.DriveType != DriveType.Removable || !drive.IsReady) continue;
-                var documents = Path.Combine(drive.RootDirectory.FullName, "documents");
-                if (!Directory.Exists(documents)) continue;
+                var profile = ReaderDeviceProfiles.DetectMounted(drive.RootDirectory.FullName, drive.VolumeLabel);
+                if (profile is null) continue;
                 devices.Add(new KindleDevice
                 {
                     RootPath = drive.RootDirectory.FullName,
+                    Profile = profile,
                     VolumeSerial = GetVolumeSerial(drive.RootDirectory.FullName),
-                    Name = string.IsNullOrWhiteSpace(drive.VolumeLabel) ? "Kindle" : drive.VolumeLabel,
+                    Name = string.IsNullOrWhiteSpace(drive.VolumeLabel) ? profile.DisplayName : drive.VolumeLabel,
                     TotalBytes = drive.TotalSize,
                     FreeBytes = drive.AvailableFreeSpace,
                     IsReady = true
@@ -75,7 +76,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
     {
         var enumerated = device.Transport == KindleTransport.Wpd
             ? await Task.Run(
-                () => WpdKindleAccess.ScanBooks(device, SupportedExtensions, cancellationToken),
+                () => WpdKindleAccess.ScanBooks(device,
+                    device.Profile.BookFormats.Select(format => "." + format).ToHashSet(StringComparer.OrdinalIgnoreCase), cancellationToken),
                 cancellationToken)
             : await Task.Run(() => EnumerateMassStorageBooks(device, cancellationToken), cancellationToken);
         foreach (var book in enumerated) SetFallbackMetadata(book);
@@ -217,12 +219,12 @@ public sealed class KindleDeviceService : IKindleDeviceService
         var documents = GetDocumentsRoot(device);
         if (!Directory.Exists(documents)) return [];
         var books = new List<KindleBook>();
-        foreach (var path in Directory.EnumerateFiles(documents, "*.*", SearchOption.AllDirectories))
+        foreach (var path in Directory.EnumerateFiles(documents, "*", new EnumerationOptions
+                 { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var documentsRelativePath = Path.GetRelativePath(documents, path);
-            if (IsDictionaryPath(documentsRelativePath)) continue;
-            if (!SupportedExtensions.Contains(Path.GetExtension(path))) continue;
+            if (!device.Profile.IsBookPath(documentsRelativePath)) continue;
             try
             {
                 var info = new FileInfo(path);
@@ -316,7 +318,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
                 return false;
             }
             await EnrichBookAsync(device, book, localPath, cancellationToken);
-            if (string.IsNullOrWhiteSpace(book.CoverPath))
+            if (device.Profile.UsesKindleThumbnails && string.IsNullOrWhiteSpace(book.CoverPath))
             {
                 var thumbnailName = await KindleThumbnailService.ReadThumbnailFileNameAsync(localPath, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(thumbnailName))
@@ -410,7 +412,11 @@ public sealed class KindleDeviceService : IKindleDeviceService
     public async Task SendBookAsync(KindleDevice device, BookFile bookFile, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default, string? coverOverridePath = null)
     {
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("书籍源文件不存在。", sourcePath);
-        var thumbnail = await KindleThumbnailService.CreateAsync(sourcePath, _metadata, cancellationToken, coverOverridePath);
+        if (!device.Profile.SupportsBookFile(sourcePath))
+            throw new NotSupportedException(UiText.Get("当前设备不支持此书籍格式。"));
+        var thumbnail = device.Profile.UsesKindleThumbnails
+            ? await KindleThumbnailService.CreateAsync(sourcePath, _metadata, cancellationToken, coverOverridePath)
+            : null;
         if (device.Transport == KindleTransport.Wpd)
         {
             await Task.Run(
@@ -438,7 +444,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
             File.Move(temporary, destination, true);
             if (thumbnail is not null)
             {
-                progress?.Report(new TransferProgress(total, total, "正在同步 Kindle 书架封面"));
+                progress?.Report(new TransferProgress(total, total, "正在同步设备书架封面"));
                 await WriteMassStorageThumbnailAsync(device, thumbnail, cancellationToken);
             }
         }
@@ -478,13 +484,14 @@ public sealed class KindleDeviceService : IKindleDeviceService
         IProgress<TransferProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (!device.Profile.IsBookPath(book.RelativePath)) throw new InvalidOperationException(UiText.Get("设备书籍路径无效。"));
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         Directory.CreateDirectory(destinationRoot);
         cancellationToken.ThrowIfCancellationRequested();
 
         if (device.Transport == KindleTransport.Wpd)
         {
-            progress?.Report(new TransferProgress(0, book.Size, $"正在从 Kindle 读取 {book.FileName}"));
+            progress?.Report(new TransferProgress(0, book.Size, $"正在从设备读取 {book.FileName}"));
             var exportedPath = await Task.Run(
                 () => WpdKindleAccess.CopyBookToLocal(device, book, destinationRoot, cancellationToken),
                 cancellationToken);
@@ -495,7 +502,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         var documents = GetDocumentsRoot(device);
         var sourcePath = Path.GetFullPath(Path.Combine(device.RootPath, book.RelativePath));
         EnsureUnderRoot(sourcePath, documents);
-        if (!File.Exists(sourcePath)) throw new FileNotFoundException("Kindle 书籍不存在。", book.RelativePath);
+        if (!File.Exists(sourcePath)) throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
 
         var destinationPath = GetUniqueDestination(destinationRoot, GetSafeFileName(book.FileName));
         var temporaryPath = destinationPath + ".kkindle-part";
@@ -517,6 +524,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         KindleBook book,
         CancellationToken cancellationToken = default)
     {
+        if (!device.Profile.IsBookPath(book.RelativePath)) throw new InvalidOperationException(UiText.Get("设备书籍路径无效。"));
         cancellationToken.ThrowIfCancellationRequested();
         if (device.Transport == KindleTransport.Wpd)
         {
@@ -527,7 +535,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         var documents = GetDocumentsRoot(device);
         var path = Path.GetFullPath(Path.Combine(device.RootPath, book.RelativePath));
         EnsureUnderRoot(path, documents);
-        if (!File.Exists(path)) throw new FileNotFoundException("Kindle 书籍不存在。", book.RelativePath);
+        if (!File.Exists(path)) throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("不能删除链接形式的设备文件。");
 
@@ -539,6 +547,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         KindleResourceKind kind,
         CancellationToken cancellationToken = default)
     {
+        if (!device.Profile.SupportsResource(kind)) return [];
         if (device.Transport == KindleTransport.Wpd)
             return await Task.Run(() => WpdKindleAccess.ScanResources(device, kind, cancellationToken), cancellationToken);
 
@@ -554,7 +563,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         foreach (var path in Directory.EnumerateFiles(root, "*", enumeration))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!KindleResourcePolicy.IsSupportedFile(kind, path)) continue;
+            if (!device.Profile.SupportsResourceFile(kind, path)) continue;
             try
             {
                 var info = new FileInfo(path);
@@ -581,10 +590,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("待发送的设备资源不存在。", sourcePath);
-        if (!KindleResourcePolicy.IsSupportedFile(kind, sourcePath))
-            throw new InvalidDataException(kind == KindleResourceKind.Font
-                ? "Kindle 字体仅支持 TTF 和 OTF。"
-                : "Kindle 字典仅支持 AZW、AZW3、MOBI、PRC 和 KFX。");
+        if (!device.Profile.SupportsResourceFile(kind, sourcePath))
+            throw new InvalidDataException(UiText.Get("当前设备不支持此资源格式。"));
         if (device.Transport == KindleTransport.Wpd)
         {
             await Task.Run(() => WpdKindleAccess.SendResource(device, kind, sourcePath, progress, cancellationToken), cancellationToken);
@@ -607,7 +614,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
             var sourceHash = await CopyAndHashAsync(sourcePath, temporary, total, progress, cancellationToken);
             var targetHash = await HashFileAsync(temporary, cancellationToken);
             if (!sourceHash.Equals(targetHash, StringComparison.OrdinalIgnoreCase))
-                throw new IOException("传输校验失败，Kindle 资源未写入。");
+                throw new IOException("传输校验失败，设备资源未写入。");
             await MoveFileAsync(temporary, destination, overwrite: true, cancellationToken);
         }
         finally
@@ -622,7 +629,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         string destinationPath,
         CancellationToken cancellationToken = default)
     {
-        if (!KindleResourcePolicy.TryGetPathWithinRoot(resource.Kind, resource.RelativePath, out _))
+        if (!device.Profile.TryGetResourcePath(resource.Kind, resource.RelativePath, out _))
             throw new InvalidOperationException("设备资源路径无效。");
         var destination = Path.GetFullPath(destinationPath);
         Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? throw new InvalidOperationException("导出路径无效。"));
@@ -648,7 +655,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!KindleResourcePolicy.TryGetPathWithinRoot(resource.Kind, resource.RelativePath, out _))
+        if (!device.Profile.TryGetResourcePath(resource.Kind, resource.RelativePath, out _))
             throw new InvalidOperationException("设备资源路径无效。");
         if (device.Transport == KindleTransport.Wpd)
         {
@@ -668,6 +675,13 @@ public sealed class KindleDeviceService : IKindleDeviceService
         CancellationToken cancellationToken = default,
         int maxItems = int.MaxValue)
     {
+        if (!device.Profile.SupportsClippings)
+        {
+            if (!device.Profile.SupportsKoboNotes) return [];
+            if (device.Transport == KindleTransport.MassStorage)
+                return await KoboNotesReader.ReadAsync(Path.Combine(device.RootPath, ".kobo", "KoboReader.sqlite"), maxItems, cancellationToken);
+            return [];
+        }
         string text;
         if (device.Transport == KindleTransport.Wpd)
             text = await Task.Run(() => WpdKindleAccess.ReadClippingsText(device, cancellationToken), cancellationToken);
@@ -694,9 +708,11 @@ public sealed class KindleDeviceService : IKindleDeviceService
         IReadOnlyCollection<string> clippingIds,
         CancellationToken cancellationToken = default)
     {
+        if (!device.Profile.CanDeleteNotes)
+            throw new NotSupportedException(UiText.Get("当前设备的笔记仅支持读取和导出。"));
         ArgumentNullException.ThrowIfNull(clippingIds);
         if (clippingIds.Count == 0) return;
-        if (clippingIds.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("Kindle 笔记标识无效。", nameof(clippingIds));
+        if (clippingIds.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("设备笔记标识无效。", nameof(clippingIds));
         var ids = clippingIds.ToHashSet(StringComparer.Ordinal);
         cancellationToken.ThrowIfCancellationRequested();
         if (device.Transport == KindleTransport.Wpd)
@@ -741,7 +757,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
     private static void EnsureClippingsExist(IReadOnlyList<KindleClipping> clippings, HashSet<string> ids)
     {
         if (!ids.IsSubsetOf(clippings.Select(item => item.Id)))
-            throw new FileNotFoundException("一个或多个 Kindle 划线笔记不存在。");
+            throw new FileNotFoundException("一个或多个设备划线笔记不存在。");
     }
 
     public Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default)
@@ -754,19 +770,14 @@ public sealed class KindleDeviceService : IKindleDeviceService
 
     private static string GetDocumentsRoot(KindleDevice device)
     {
-        var root = Path.GetFullPath(device.RootPath);
-        var documents = Path.GetFullPath(Path.Combine(root, "documents"));
-        EnsureUnderRoot(documents, root);
-        return documents;
+        return ReaderDevicePaths.ResolveDirectory(device.RootPath, device.Profile.BooksDirectory);
     }
 
     private static string GetResourceRoot(KindleDevice device, KindleResourceKind kind)
     {
-        var deviceRoot = Path.GetFullPath(device.RootPath);
-        var resourceRoot = Path.GetFullPath(Path.Combine(deviceRoot, KindleResourcePolicy.RootRelativePath(kind)));
-        EnsureUnderRoot(resourceRoot, deviceRoot);
+        var resourceRoot = ReaderDevicePaths.ResolveDirectory(device.RootPath, device.Profile.ResourceDirectory(kind));
         if (Directory.Exists(resourceRoot) && (File.GetAttributes(resourceRoot) & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidOperationException("Kindle 资源目录不能是链接或联接点。");
+            throw new InvalidOperationException("设备资源目录不能是链接或联接点。");
         return resourceRoot;
     }
 
@@ -997,7 +1008,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
             0,
             IntPtr.Zero);
         if (handle == InvalidHandleValue)
-            throw CreateEjectIOException("无法打开 Kindle 卷", Marshal.GetLastWin32Error());
+            throw CreateEjectIOException("无法打开设备卷", Marshal.GetLastWin32Error());
 
         try
         {
@@ -1022,10 +1033,10 @@ public sealed class KindleDeviceService : IKindleDeviceService
                 Thread.Sleep(150);
             }
             if (!locked)
-                throw CreateEjectIOException("Kindle 正在被程序占用，无法锁定卷", lockError);
+                throw CreateEjectIOException("设备正在被程序占用，无法锁定卷", lockError);
 
             if (!DeviceIoControl(handle, FsctlDismountVolume, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
-                throw CreateEjectIOException("无法卸载 Kindle 卷", Marshal.GetLastWin32Error());
+                throw CreateEjectIOException("无法卸载设备卷", Marshal.GetLastWin32Error());
 
             // Clear any removable-media lock before asking the storage stack
             // to eject. Some USB mass-storage drivers require this explicitly.
@@ -1041,7 +1052,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
                 IntPtr.Zero);
 
             if (!DeviceIoControl(handle, IoctlStorageEjectMedia, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
-                throw CreateEjectIOException("Windows 存储驱动拒绝弹出 Kindle", Marshal.GetLastWin32Error());
+                throw CreateEjectIOException("Windows 存储驱动拒绝弹出设备", Marshal.GetLastWin32Error());
         }
         finally { CloseHandle(handle); }
     }

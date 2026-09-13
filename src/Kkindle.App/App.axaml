@@ -573,6 +573,12 @@
         <Style Selector="ScrollViewer.settingsScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
             <Setter Property="Opacity" Value="1" />
         </Style>
+        <Style Selector="ScrollViewer.dashboardScroll:not(.scrolling) /template/ ScrollBar /template/ Grid#Root Thumb">
+            <Setter Property="Opacity" Value="0" />
+        </Style>
+        <Style Selector="ScrollViewer.dashboardScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
         <!-- The reader TOC uses the same transient thumb behavior, but owns a
              separate class because its ListBox has its own template ScrollViewer. -->
         <Style Selector="ScrollViewer.readerTocScroll /template/ ScrollBar /template/ Grid#Root Thumb">
@@ -680,26 +686,26 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
 
-        <!-- Section headers: same size as items but semibold gray, so the
-             collapsible parents outweigh their children without ink. -->
+        <!-- Navigation uses a 15px label and a 24px icon canvas. Semibold
+             section labels preserve the hierarchy at the same readable size. -->
         <Style Selector="Button.sidebarSection">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Height" Value="36" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="12,2,0,2" />
+            <Setter Property="Margin" Value="0,2,0,2" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Padding="4,6"
+                    <Border Padding="12,6,0,6"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
@@ -739,22 +745,20 @@
             <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
         </Style>
 
-        <!-- Settings is a top-level destination, not another child row. Keep
-             its resting geometry aligned with the section headers, then use
-             a quiet gray active row to make the hierarchy clear without
-             creating a heavy filled block. -->
+        <!-- Settings shares the destination icon/label columns and keeps its
+             semibold top-level label and quiet gray active row. -->
         <Style Selector="Button.sidebarPrimaryItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Height" Value="36" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="12,2,0,2" />
+            <Setter Property="Margin" Value="0,2,0,2" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -764,16 +768,16 @@
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="{TemplateBinding CornerRadius}"
-                            Padding="4,6">
+                            Padding="12,6,0,6">
                         <Border.Transitions>
                             <Transitions>
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
                             </Transitions>
                         </Border.Transitions>
-                        <TextBlock Text="{TemplateBinding Content}"
-                                   Foreground="{TemplateBinding Foreground}"
-                                   HorizontalAlignment="Stretch"
-                                   VerticalAlignment="Center" />
+                        <ContentPresenter Content="{TemplateBinding Content}"
+                                          Foreground="{TemplateBinding Foreground}"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Center" />
                     </Border>
                 </ControlTemplate>
             </Setter>
@@ -808,9 +812,9 @@
              grouped child entries. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="34" />
+            <Setter Property="Height" Value="38" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="12,2,0,2" />
+            <Setter Property="Margin" Value="0,2,0,2" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -820,7 +824,7 @@
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontSize" Value="15" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Border Background="{TemplateBinding Background}"
@@ -830,9 +834,9 @@
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
                             </Transitions>
                         </Border.Transitions>
-                        <Grid ColumnDefinitions="3,9,*">
+                        <Grid ColumnDefinitions="3,21,*">
                             <Border Width="3"
-                                    Height="22"
+                                    Height="24"
                                     Background="{TemplateBinding BorderBrush}"
                                     HorizontalAlignment="Left"
                                     VerticalAlignment="Center" />
@@ -870,6 +874,12 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="CornerRadius" Value="0" />
+        </Style>
+
+        <Style Selector="TextBlock.sidebarLabel">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
 
         <!-- Settings use one row of categories and a bounded reading width. -->
@@ -1987,7 +1997,10 @@
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
-        <Style Selector="Grid.readerShell Button.readerHeader Path">
+        <!-- Limit glyph sizing to button content so flyout menu chevrons keep
+             the same compact dimensions as book context-menu chevrons. -->
+        <Style Selector="Grid.readerShell Button.readerHeader > Path,
+                         Grid.readerShell Button.readerHeader > Grid > Path">
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Width" Value="24" />
@@ -2292,9 +2305,8 @@
             <Setter Property="Fill" Value="Transparent" />
         </Style>
 
-        <!-- Library action glyphs share one optical box. Keeping the vector
-             artwork in a fixed square prevents uneven paths from looking
-             off-centre inside otherwise centred icon buttons. -->
+        <!-- Library actions and navigation share a stroke style. Toolbar
+             glyphs fill 18px; navigation has its own larger canvas below. -->
         <Style Selector="Path.libraryGlyph">
             <Setter Property="Width" Value="18" />
             <Setter Property="Height" Value="18" />
@@ -2313,6 +2325,14 @@
                     <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.14" />
                 </Transitions>
             </Setter>
+        </Style>
+        <!-- SidebarGlyph scales child artwork independently of the shared
+             toolbar stroke. Keep the 24px slot and 15px label columns. -->
+        <Style Selector="Path.libraryGlyph.sidebarGlyph">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Stretch" Value="None" />
+            <Setter Property="IsHitTestVisible" Value="False" />
         </Style>
         <Style Selector="Button Path.libraryGlyph">
             <Setter Property="Stroke" Value="{Binding $parent[Button].Foreground}" />

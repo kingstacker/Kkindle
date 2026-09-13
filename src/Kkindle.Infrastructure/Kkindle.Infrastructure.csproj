@@ -12,6 +12,11 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
+    <PackageReference Include="bblanchon.PDFium.Win32" Version="152.0.7961" />
+    <PackageReference Include="bblanchon.PDFium.Linux" Version="152.0.7961" />
+    <PackageReference Include="bblanchon.PDFium.macOS" Version="152.0.7961" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
     <PackageReference Include="DotNetG2P.Chinese" Version="1.10.0" />
     <PackageReference Include="SharpZipLib" Version="1.4.2" />
@@ -21,6 +26,7 @@
     <EmbeddedResource Include="ThirdParty/G2PW/bert-base-chinese_s2t_dict.txt" />
     <None Update="ThirdParty/G2PW/LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="ThirdParty/G2PW/NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="ThirdParty/PDFium/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <!-- Kindle scan caching and book classification stay internal: they are

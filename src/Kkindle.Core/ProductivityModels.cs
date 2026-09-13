@@ -155,7 +155,7 @@ public sealed record ReadingDashboard(
 public sealed record ReadingDashboardBook(Guid BookId, Guid BookFileId, double ProgressPercent, long CumulativeSeconds, DateTimeOffset UpdatedAt);
 public sealed record ReadingDashboardDay(DateOnly Date, long ActiveSeconds);
 
-public enum ReadingMaterialSource { Local, Kindle }
+public enum ReadingMaterialSource { Local, Device, Kindle = Device }
 
 public sealed record ReadingMaterialRecord(
     ReadingMaterialSource Source,
@@ -164,4 +164,10 @@ public sealed record ReadingMaterialRecord(
     string Location,
     string Quote,
     string Note,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    string? SourceDeviceId = null,
+    string? SourceDeviceName = null)
+{
+    public string SourceLabel => Source == ReadingMaterialSource.Local ? UiText.Get("本地书籍")
+        : string.IsNullOrWhiteSpace(SourceDeviceName) ? UiText.Get("设备") : SourceDeviceName;
+}

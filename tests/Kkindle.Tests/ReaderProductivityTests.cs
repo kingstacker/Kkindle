@@ -242,7 +242,7 @@ public sealed class ReaderProductivityTests
         ReadingMaterialRecord[] records =
         [
             new(ReadingMaterialSource.Local, "Local Book", "划线与笔记", "chapter.xhtml · 1-8", "local quote", "local note", new DateTimeOffset(2026, 8, 10, 1, 0, 0, TimeSpan.Zero)),
-            new(ReadingMaterialSource.Kindle, "Kindle Book", "划线", "Location 20", "kindle quote", "", null)
+            new(ReadingMaterialSource.Device, "Kindle Book", "划线", "Location 20", "kindle quote", "", null, "KINDLE-1", "Kindle")
         ];
 
         var markdown = ReadingMaterialsExport.BuildMarkdown(records);

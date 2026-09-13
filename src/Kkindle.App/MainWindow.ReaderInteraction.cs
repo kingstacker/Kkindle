@@ -1557,16 +1557,20 @@ public partial class MainWindow
             return;
         }
 
-        var restoreNative = ReferenceEquals(host, CurrentReaderHost)
-            && _readerRestoredProgress is { } pendingNative
-            && pendingNative.ChapterIndex == _readerChapterIndex;
+        var progress = ReferenceEquals(host, CurrentReaderHost)
+            && _readerRestoredProgress?.ChapterIndex == _readerChapterIndex
+                ? _readerRestoredProgress : null;
+        // The tracked fragment describes the current section, not a request
+        // to jump to its heading whenever the reader's layout is configured.
+        // A pending restore must use its saved values even if the initial
+        // native scroll event has already reported the document origin.
         await nativeReader.Configure(
             _readerLayout,
-            _readerScrollPosition,
-            _readerCurrentFragment,
-            restoreNative,
+            progress?.ScrollPosition ?? _readerScrollPosition,
+            progress?.Fragment,
+            progress is not null,
             showVerticalDebugBoxes: ShouldShowReaderVerticalDebugBoxes());
-        if (restoreNative)
+        if (progress is not null)
         {
             _readerRestoredProgress = null;
         }
@@ -5065,6 +5069,8 @@ public partial class MainWindow
                 nativeState.ScrollHeight,
                 nativeState.ClientWidth,
                 nativeState.ClientHeight));
+            _readerCurrentFragment = nativeReader.GetCurrentNavigationFragment();
+            SyncReaderTocSelectionWithReadingPosition();
             return;
         }
 
@@ -5576,6 +5582,16 @@ public partial class MainWindow
         ReaderNavigationIntent intent = ReaderNavigationIntent.None,
         int? transitionDirection = null)
     {
+        if (_readerIsPdf)
+        {
+            if (!Uri.TryCreate(item.Target, UriKind.Absolute, out var pdfTarget) || !pdfTarget.IsFile) return false;
+            await NavigatePdfPageAsync(item.ChapterIndex + 1, cancellationToken);
+            if (CurrentReaderHost is not NativePdfReaderHost pdf || pdf.PageNumber != item.ChapterIndex + 1) return false;
+            pdf.ScrollToTop(NativePdfReaderHost.ReadTargetTop(pdfTarget));
+            SetReaderTocSelection(item);
+            await SaveReaderProgressAsync(cancellationToken);
+            return true;
+        }
         var isReaderTtsNavigation = !_readerTtsAutoNavigation
             && intent is ReaderNavigationIntent.Toc or ReaderNavigationIntent.Progress;
         var shouldResumeReaderTts = isReaderTtsNavigation
@@ -5996,6 +6012,23 @@ public partial class MainWindow
         SetReaderTocSelection(selected);
     }
 
+    private void SyncReaderTocSelectionWithReadingPosition()
+    {
+        if (_readerIsPdf) { SyncReaderPdfTocSelection(); return; }
+        if (_readerDocument is { } document && CurrentReaderHost?.Source is { } source
+            && _readerChapterIndex >= 0 && _readerChapterIndex < document.Chapters.Count
+            && !ReaderNavigationLocationPolicy.TargetsSameDocument(source, new Uri(document.Chapters[_readerChapterIndex])))
+            return;
+
+        var index = GetCurrentReaderTocIndex();
+        var item = index >= 0 ? _readerTocItems[index] : null;
+        // Preserve the user's TOC scroll and the realized rows while reading
+        // within one section. Only a new section needs selection/scrolling.
+        if (ReferenceEquals((ReaderTocList.SelectedItem as ReaderTocRow)?.Item, item)) return;
+        SetReaderTocSelection(item);
+        ReaderChapterText.Text = GetReaderChapterPositionLabel();
+    }
+
     private EpubReaderNavigationItem? FindAdjacentReaderSubchapter(int direction)
     {
         direction = Math.Sign(direction);
@@ -6086,6 +6119,7 @@ public partial class MainWindow
         IReaderHost host,
         CancellationToken cancellationToken)
     {
+        if (host is NativePdfReaderHost) { await ApplySavedReaderPdfAnnotationsAsync(cancellationToken); return; }
         if (_readerBookFile is null || _readerDocument is null) return;
         var chapterPath = GetReaderChapterPath(host);
         if (chapterPath is null) return;
@@ -6436,6 +6470,12 @@ public partial class MainWindow
         }
         if (sequence is not null && sequence.Value != _readerSearchSequence) return;
         _readerSearchIndex = (index % _readerSearchCount + _readerSearchCount) % _readerSearchCount;
+        if (host is NativePdfReaderHost pdf)
+        {
+            pdf.ScrollToSearchHit(_readerSearchIndex);
+            UpdateReaderSearchCount();
+            return;
+        }
         if (host is NativeReaderHost nativeReader)
         {
             nativeReader.ScrollToSearchHit(_readerSearchIndex);
@@ -6456,6 +6496,7 @@ public partial class MainWindow
         {
             try
             {
+                if (host is NativePdfReaderHost pdf) pdf.ClearSearch();
                 await host.InvokeScriptAsync("""
                     (() => {
                       const unwrap = mark => {
@@ -6488,6 +6529,7 @@ public partial class MainWindow
     private async Task SaveCurrentReaderGlobalPreferencesAsync(
         CancellationToken cancellationToken)
     {
+        if (_readerIsPdf) return;
         var layout = NormalizeReaderLayoutForPlatform(_readerLayout);
         _readerLayout = layout;
         _appSettings = AppSettings.Normalize(_appSettings with
@@ -6581,7 +6623,7 @@ public partial class MainWindow
     private void UpdateReaderZoomLabel()
     {
         if (ReaderZoomText is not null)
-            ReaderZoomText.Text = $"{_readerLayout.FontScale:P0}";
+            ReaderZoomText.Text = $"{(_readerIsPdf ? (CurrentReaderHost as NativePdfReaderHost)?.Zoom ?? 1 : _readerLayout.FontScale):P0}";
     }
 
     // Transient reader-header status: auto-clears after a short moment instead
@@ -7004,7 +7046,7 @@ public partial class MainWindow
                 case "scroll":
                     if (IsLinuxReaderTextFallbackActive())
                         break;
-                    var horizontalScroll = IsReaderPaginated || _readerLayout.VerticalWriting;
+                    var horizontalScroll = !_readerIsPdf && (IsReaderPaginated || _readerLayout.VerticalWriting);
                     if (!_readerIsPdf)
                     {
                         var reportedFragment = ReadString(root, "fragment").TrimStart('#');
@@ -7029,6 +7071,7 @@ public partial class MainWindow
                         ? Math.Max(0, _readerScrollWidth - _readerClientWidth)
                         : Math.Max(0, _readerScrollHeight - _readerClientHeight);
                     _readerScrollRatio = max > 0 ? Math.Clamp(_readerScrollPosition / max, 0, 1) : 0;
+                    SyncReaderTocSelectionWithReadingPosition();
                     _ = SaveReaderProgressAfterScrollAsync(++_readerProgressSaveSequence);
                     // The bridge already supplied the exact scroll position
                     // and fragment. Reusing that snapshot avoids issuing a
@@ -7053,7 +7096,7 @@ public partial class MainWindow
                     if (!string.IsNullOrWhiteSpace(_readerPendingSelection))
                     {
                         _selectedReaderAnnotation = null;
-                        if (CurrentReaderHost is NativeReaderHost nativeReader)
+                        if (CurrentReaderHost is NativeReaderHost or NativePdfReaderHost)
                         {
                             Point? placementPoint = null;
                             double? selectionBottom = null;
@@ -7074,7 +7117,7 @@ public partial class MainWindow
                                 // selection geometry before placing the popup,
                                 // otherwise the bar is offset by the host slot's
                                 // margin on resized reader windows.
-                                if (nativeReader.View is Control nativeView
+                                if (CurrentReaderHost.View is Control nativeView
                                     && nativeView.TranslatePoint(new Point(0, 0), ReaderWebViewHost)
                                         is { } nativeOrigin)
                                 {
@@ -7106,6 +7149,14 @@ public partial class MainWindow
                     break;
                 case "selectionAction":
                     DispatchReaderSelectionAction(root);
+                    break;
+                case "pdfZoom":
+                    UpdateReaderZoomLabel();
+                    break;
+                case "annotationClick":
+                    if (_readerIsPdf && Guid.TryParse(ReadString(root, "id"), out var annotationId)
+                        && ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is { } clickedAnnotation)
+                        EditReaderPdfAnnotation(clickedAnnotation);
                     break;
                 case "link":
                     if (root.TryGetProperty("href", out var href))
@@ -8277,8 +8328,8 @@ public partial class MainWindow
                 !_readerIsPdf && _readerLayout.VerticalWriting);
             var surface = IsLinuxReaderTextFallbackActive()
                 ? BuildLinuxReaderFallbackTransitionSurface()
-                : outgoingHost is NativeReaderHost nativeHost
-                    ? BuildReaderNativeTransitionSurface(nativeHost)
+                : outgoingHost is NativeReaderHost or NativePdfReaderHost
+                    ? BuildReaderNativeTransitionSurface(outgoingHost)
                     : null;
             if (surface is null)
                 return await changeContentAsync();
@@ -8338,7 +8389,7 @@ public partial class MainWindow
     }
 
     private ReaderTransitionSurface? BuildReaderNativeTransitionSurface(
-        NativeReaderHost host)
+        IReaderHost host)
     {
         if (host.View is not Control nativeView) return null;
         var bounds = ReaderNativeTransitionLayer.Bounds;
@@ -8559,6 +8610,12 @@ public partial class MainWindow
 
     private async Task ChangeReaderFontAsync(double delta)
     {
+        if (_readerIsPdf && CurrentReaderHost is NativePdfReaderHost pdf)
+        {
+            await pdf.SetZoomAsync(pdf.Zoom + delta);
+            UpdateReaderZoomLabel();
+            return;
+        }
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with { FontScale = _readerLayout.FontScale + delta });
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
@@ -8573,6 +8630,7 @@ public partial class MainWindow
     private void ReaderPdfNoteButton_Click(object? sender, RoutedEventArgs e)
     {
         if (!_readerIsPdf || _readerBookFile is null) return;
+        (CurrentReaderHost as NativePdfReaderHost)?.ClearSelection();
         _selectedReaderAnnotation = null;
         _readerPendingSelection = null;
         _readerPendingSelectionStartOffset = 0;
@@ -9208,8 +9266,7 @@ public partial class MainWindow
         }
         SyncReaderFlowMenu();
         SyncReaderAnimationMenu();
-        if (ReaderZoomText is not null)
-            ReaderZoomText.Text = $"{_readerLayout.FontScale:P0}";
+        UpdateReaderZoomLabel();
         if (ReaderProgressSlider is not null)
         {
             _readerProgressSliderUpdating = true;
@@ -9234,13 +9291,18 @@ public partial class MainWindow
             }
             _readerProgressSliderUpdating = false;
         }
-        // PDF hides the zoom controls and shows the PDF badge, matching the
-        // WinUI reference toolbar states; chapter buttons disable at the edges.
+        // PDF uses these controls for page zoom, EPUB for font size.
         if (ReaderZoomOutButton is not null && ReaderZoomText is not null && ReaderZoomInButton is not null)
         {
-            ReaderZoomOutButton.IsVisible = !_readerIsPdf;
-            ReaderZoomText.IsVisible = !_readerIsPdf;
-            ReaderZoomInButton.IsVisible = !_readerIsPdf;
+            ReaderZoomOutButton.IsVisible = true;
+            ReaderZoomText.IsVisible = true;
+            ReaderZoomInButton.IsVisible = true;
+            var zoomOutLabel = _readerIsPdf ? T("缩小页面") : T("减小字号");
+            var zoomInLabel = _readerIsPdf ? T("放大页面") : T("增大字号");
+            ToolTip.SetTip(ReaderZoomOutButton, zoomOutLabel);
+            ToolTip.SetTip(ReaderZoomInButton, zoomInLabel);
+            AutomationProperties.SetName(ReaderZoomOutButton, zoomOutLabel);
+            AutomationProperties.SetName(ReaderZoomInButton, zoomInLabel);
         }
         if (ReaderPdfBadge is not null)
             ReaderPdfBadge.IsVisible = _readerIsPdf;

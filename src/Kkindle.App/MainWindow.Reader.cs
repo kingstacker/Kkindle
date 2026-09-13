@@ -203,7 +203,12 @@ public partial class MainWindow
 
     private IReaderHost CreateReaderHostForCurrentFormat()
     {
-        if (_readerIsPdf) return _readerHostFactory();
+        if (_readerIsPdf)
+        {
+            var pdf = new NativePdfReaderHost();
+            pdf.SetAppearance(_appSettings.ReaderAppearance);
+            return pdf;
+        }
         var host = new NativeReaderHost();
         host.SetAppearance(_appSettings.ReaderAppearance);
         return host;
@@ -211,7 +216,7 @@ public partial class MainWindow
 
     private bool IsReaderHostTypeCompatible(IReaderHost host) =>
         _readerIsPdf
-            ? host is not NativeReaderHost
+            ? host is NativePdfReaderHost
             : host is NativeReaderHost;
 
     private async Task EnsureReaderHostsAsync()
@@ -220,8 +225,7 @@ public partial class MainWindow
         {
             CancelReaderChapterPreload();
             _readerLoadedHostSources.Clear();
-            // The reader surface follows the opened format: self-drawn engine
-            // for EPUB, the platform webview only for PDF rendering.
+            // Each format owns its rendering and text geometry.
             ReaderActiveHostSlot.Content = null;
             _readerActiveHost.NavigationStarting -= ReaderHost_NavigationStarting;
             _readerActiveHost.NavigationCompleted -= ReaderHost_NavigationCompleted;
@@ -247,7 +251,7 @@ public partial class MainWindow
             _readerActiveHost.WebMessageReceived += ReaderHost_WebMessageReceived;
             ReaderActiveHostSlot.Content = _readerActiveHost.View;
 
-            if (!OperatingSystem.IsLinux())
+            if (!OperatingSystem.IsLinux() && !_readerIsPdf)
             {
                 _readerPreloadHost = CreateReaderHostForCurrentFormat();
                 if (ReferenceEquals(_readerActiveHost, _readerPreloadHost))
@@ -442,6 +446,12 @@ public partial class MainWindow
         cancellationToken.ThrowIfCancellationRequested();
         if (host is NativeReaderHost nativeReader)
         {
+            // Each host can hold a different spine document. Only its own
+            // TOC anchors participate in reading-position tracking.
+            nativeReader.SetNavigationFragments(_readerTocItems
+                .Select(item => Uri.TryCreate(item.Target, UriKind.Absolute, out var uri) ? uri : null)
+                .Where(uri => uri is not null && ReaderNavigationLocationPolicy.TargetsSameDocument(uri, target))
+                .Select(uri => uri!.Fragment));
             nativeReader.Navigate(target, _readerLayout, ShouldShowReaderVerticalDebugBoxes());
             return true;
         }
@@ -653,7 +663,7 @@ public partial class MainWindow
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
             UpdateReaderToolbar();
             ReaderStatusText.Text = string.Empty;
-            SetReaderTocSelectionForChapter(targetIndex);
+            SetReaderTocSelectionForLocation(targetIndex, _readerCurrentFragment);
             await UpdateReaderBookmarkIndicatorAsync();
             await SaveReaderProgressAsync(sessionToken);
             _ = PreloadNextReaderChapterAsync(sessionToken);
@@ -950,6 +960,15 @@ public partial class MainWindow
         _readerAiCancellation = null;
         _readerActiveHost?.Stop();
         _readerPreloadHost?.Stop();
+        if (_readerActiveHost is NativePdfReaderHost pdfHost)
+        {
+            ReaderActiveHostSlot.Content = null;
+            pdfHost.NavigationStarting -= ReaderHost_NavigationStarting;
+            pdfHost.NavigationCompleted -= ReaderHost_NavigationCompleted;
+            pdfHost.WebMessageReceived -= ReaderHost_WebMessageReceived;
+            pdfHost.Dispose();
+            _readerActiveHost = null;
+        }
         ReaderRoot.IsVisible = false;
         LibraryRoot.IsVisible = true;
         WindowBrandText.IsVisible = false;
@@ -1021,7 +1040,7 @@ public partial class MainWindow
                 _readerBookCard.Book.Id,
                 _readerBookFile.Id,
                 $"pdf:page:{_readerPdfPage}",
-                null,
+                (CurrentReaderHost as NativePdfReaderHost)?.CaptureViewState(),
                 _readerPdfPage - 1,
                 (int)Math.Round(_readerScrollPosition),
                 CalculateReaderProgressPercent(),
