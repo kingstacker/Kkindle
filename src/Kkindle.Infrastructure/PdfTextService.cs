@@ -19,7 +19,7 @@ public sealed class PdfTextService
                 // Keep the full page map even when the searchable index reaches
                 // its limit. Image-only and unindexed pages remain navigable.
                 var text = pageNumber <= MaxIndexedPages && characterCount < MaxIndexedCharacters
-                    ? document.ReadPage(pageNumber, cancellationToken).Text
+                    ? document.ReadPageText(pageNumber, cancellationToken)
                     : string.Empty;
                 characterCount += text.Length;
                 pages.Add(new PdfPageText(pageNumber, text));

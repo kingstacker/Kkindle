@@ -12,7 +12,7 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 
 - **Library** — Import EPUB, PDF, MOBI, and AZW3; manage metadata, covers, tags, collections, search, and reading status.
 - **Kreader** — Paginated or scrolling reading, table of contents, bookmarks, search, annotations, typography settings, reading progress, and Windows read-aloud.
-- **PDF reading** — First-page library covers, native page rendering, zoom, selectable text, six underline/highlight styles, editable comments, nested PDF outlines and page jumps. Search, bookmarks and reading position use the same local reading data as EPUB. Scanned pages support viewing and page notes; OCR is not included.
+- **PDF reading** — First-page library covers, continuous scrolling, single-page and two-page reading, fit-width/page controls, sharp zoom and 90° rotation. Paper and text colors follow the reading theme. Supports selectable text, six underline/highlight styles, editable comments, nested outlines and page jumps. Pages appear before full-book text indexing finishes; only visible regions are rendered at the screen's pixel density. Search, bookmarks and reading position use the same local reading data as EPUB. Scanned pages support viewing and page notes; OCR is not included.
 - **AI assistant** — Ask questions about the current book, summarize chapters, explain selections, and choose from discovered models through DeepSeek, OpenAI, or compatible endpoints. Requests use relevant local excerpts only.
 - **Kindle** — Detect USB/WPD/MTP devices, transfer books, manage fonts and dictionaries, and import `My Clippings.txt`.
 - **Tools and sync** — Calibre conversion, Z-Library downloads, local backups, encrypted credentials, and optional S3 / WebDAV synchronization.

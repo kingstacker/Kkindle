@@ -42,6 +42,15 @@ shows the detected WebView library, writable data paths, bundled PDF parser,
 Calibre, TTS and Kindle service. PDFium native assets ship for Windows, Linux
 and macOS. PDF pages and first-page covers use the same renderer; its text
 geometry drives selection, underlines, highlights and editable comments.
+Continuous scrolling, single-page and two-page modes share that page map.
+View rotation is saved with reading progress; selection, annotations and outline
+destinations rotate with the page. Paper and neutral ink follow the reader theme,
+while saturated colors in figures are preserved. Classic keeps the original colors.
+The reader renders clipped BGRA regions at the current display scale directly
+from PDFium, avoiding PNG round-trips and enlarged low-resolution page images.
+Its bounded page cache is independent of the full document's scroll extent.
+The current page becomes usable before outlines and the text-only search index
+finish loading in the background. Closing a book cancels that background work.
 Embedded outlines retain their hierarchy and page destinations. PDFs without
 outlines have a page list. Text PDFs also support local search, AI context and
 TTS. Scanned pages support viewing, page navigation, bookmarks and page notes;

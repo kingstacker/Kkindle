@@ -19,7 +19,7 @@ internal static class PdfFixture
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
             Stream("0.18 0.40 0.30 rg 0 0 400 600 re f 1 1 1 rg BT /F1 32 Tf 45 460 Td (PDF READER) Tj 0 -60 Td /F1 18 Tf (First page cover) Tj ET"),
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>",
-            Stream("0 0 0 rg BT /F1 22 Tf 40 530 Td (Chapter Two) Tj /F1 16 Tf 0 -65 Td (Select this text for a note.) Tj 0 -36 Td (Underline and highlight this line.) Tj 0 -36 Td (Search this text again.) Tj 0 -175 Td (Nested section) Tj 0 -40 Td (Notes stay on the correct page.) Tj ET"),
+            Stream("1 1 1 rg 0 0 400 600 re f 0 0 0 rg BT /F1 22 Tf 40 530 Td (Chapter Two) Tj /F1 16 Tf 0 -65 Td (Select this text for a note.) Tj 0 -36 Td (Underline and highlight this line.) Tj 0 -36 Td (Search this text again.) Tj 0 -175 Td (Nested section) Tj 0 -40 Td (Notes stay on the correct page.) Tj ET"),
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /XObject << /Scan 17 0 R >> >> /Contents 9 0 R >>",
             Stream("q 400 0 0 600 0 0 cm /Scan Do Q"),
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 500 700] /CropBox [50 80 450 680] /Rotate 90 /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R >>",
@@ -45,6 +45,43 @@ internal static class PdfFixture
         WriteAscii($"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n");
         foreach (var offset in offsets.Skip(1)) WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
         WriteAscii($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R /Info 18 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return path;
+    }
+
+    public static string WriteLong(string directory, int pageCount = 400)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "PDF continuous reading.pdf");
+        var kids = string.Join(" ", Enumerable.Range(0, pageCount).Select(page => $"{4 + page * 2} 0 R"));
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            $"<< /Type /Pages /Kids [{kids}] /Count {pageCount} >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+        };
+        for (var page = 1; page <= pageCount; page++)
+        {
+            var contents = 5 + (page - 1) * 2;
+            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 3 0 R >> >> /Contents {contents} 0 R >>");
+            var text = new StringBuilder($"0 0 0 rg BT /F1 21 Tf 36 550 Td (Reading a PDF) Tj /F1 10 Tf 0 -26 Td (Page {page}) Tj 0 -23 Td /F1 10 Tf ");
+            for (var line = 1; line <= 38; line++)
+                text.Append($"(Line {line}: Text stays sharp as the page is enlarged.) Tj 0 -12 Td ");
+            text.Append("ET");
+            objects.Add(Stream(text.ToString()));
+        }
+        using var file = File.Create(path);
+        void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));
+        WriteAscii("%PDF-1.7\n");
+        var offsets = new List<long> { 0 };
+        for (var index = 0; index < objects.Count; index++)
+        {
+            offsets.Add(file.Position);
+            WriteAscii($"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
+        }
+        var xref = file.Position;
+        WriteAscii($"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets.Skip(1)) WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
+        WriteAscii($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
         return path;
     }
 

@@ -6623,7 +6623,9 @@ public partial class MainWindow
     private void UpdateReaderZoomLabel()
     {
         if (ReaderZoomText is not null)
-            ReaderZoomText.Text = $"{(_readerIsPdf ? (CurrentReaderHost as NativePdfReaderHost)?.Zoom ?? 1 : _readerLayout.FontScale):P0}";
+            ReaderZoomText.Text = _readerIsPdf && CurrentReaderHost is NativePdfReaderHost pdf
+                ? Math.Abs(pdf.Zoom - 1) < 0.005 ? pdf.FitMode == PdfReaderFitMode.Width ? T("适宽") : T("整页") : $"{pdf.Zoom:P0}"
+                : $"{_readerLayout.FontScale:P0}";
     }
 
     // Transient reader-header status: auto-clears after a short moment instead
@@ -7037,8 +7039,16 @@ public partial class MainWindow
                     if (_readerIsPdf && root.TryGetProperty("page", out var pdfPage)
                         && pdfPage.TryGetInt32(out var page))
                     {
+                        var previousPdfPage = _readerPdfPage;
                         _readerPdfPage = Math.Clamp(page, 1, Math.Max(1, _readerPdfPages.Count));
                         _readerChapterIndex = _readerPdfPage - 1;
+                        RememberCurrentPdfPageText();
+                        if (_readerPdfPage != previousPdfPage)
+                        {
+                            _selectedReaderAnnotation = null;
+                            HideReaderSelectionPopup();
+                            HideReaderAnnotationInputPopup();
+                        }
                         ReaderChapterText.Text = GetReaderChapterPositionLabel();
                         UpdateReaderToolbar();
                     }
@@ -7152,6 +7162,12 @@ public partial class MainWindow
                     break;
                 case "pdfZoom":
                     UpdateReaderZoomLabel();
+                    break;
+                case "pdfLayout":
+                    UpdateReaderToolbar();
+                    break;
+                case "pdfError":
+                    ReaderStatusText.Text = UiText.Localize(ReadString(root, "message"));
                     break;
                 case "annotationClick":
                     if (_readerIsPdf && Guid.TryParse(ReadString(root, "id"), out var annotationId)
@@ -8252,7 +8268,8 @@ public partial class MainWindow
         }
         if (_readerIsPdf)
         {
-            await NavigatePdfPageAsync(_readerPdfPage + direction, ReaderToken);
+            var page = CurrentReaderHost is NativePdfReaderHost pdf ? pdf.GetAdjacentPage(direction) : _readerPdfPage + direction;
+            if (page != _readerPdfPage) await NavigatePdfPageAsync(page, ReaderToken);
             return;
         }
         if (CurrentReaderHost is not { } host) return;
@@ -8484,7 +8501,13 @@ public partial class MainWindow
         if (sender is not MenuItem { Tag: string tag }) return;
         if (_readerIsPdf)
         {
-            ReaderStatusText.Text = T("PDF 使用页面模式，可用底部进度条或左右按钮翻页。");
+            ReaderFlowButton.Flyout?.Hide();
+            await SetReaderPdfDisplayModeAsync(tag switch
+            {
+                "scroll" => PdfReaderDisplayMode.Continuous,
+                "double" => PdfReaderDisplayMode.TwoPage,
+                _ => PdfReaderDisplayMode.SinglePage
+            });
             return;
         }
 
@@ -8518,9 +8541,11 @@ public partial class MainWindow
     private void SyncReaderFlowMenu()
     {
         if (ReaderScrollModeItem is null || ReaderSinglePageModeItem is null || ReaderTwoPageModeItem is null) return;
-        var flowMode = _readerLayout.FlowMode;
-        var twoPage = _readerLayout.TwoPageMode;
-        var vertical = _readerLayout.VerticalWriting;
+        var pdf = _readerIsPdf ? CurrentReaderHost as NativePdfReaderHost : null;
+        var flowMode = pdf is null ? _readerLayout.FlowMode : pdf.DisplayMode == PdfReaderDisplayMode.Continuous ? 0 : 1;
+        var twoPage = pdf is null ? _readerLayout.TwoPageMode : pdf.DisplayMode == PdfReaderDisplayMode.TwoPage;
+        var vertical = !_readerIsPdf && _readerLayout.VerticalWriting;
+        ReaderTwoPageModeItem.Header = _readerIsPdf ? T("双页") : T("双栏");
         if (vertical)
         {
             // Vertical writing always presents as single pages.
@@ -8541,7 +8566,7 @@ public partial class MainWindow
         {
             // Icon-only button: keep the current mode in tooltip and
             // accessibility name, mirroring UpdateReaderToolbar.
-            var flowLabel = flowMode == 0 ? T("滚动") : twoPage ? T("双栏") : T("单页");
+            var flowLabel = flowMode == 0 ? T("滚动") : twoPage ? (_readerIsPdf ? T("双页") : T("双栏")) : T("单页");
             ToolTip.SetTip(ReaderFlowButton, flowLabel);
             AutomationProperties.SetName(ReaderFlowButton, flowLabel);
             if (ReaderFlowIcon is not null)
@@ -8627,28 +8652,6 @@ public partial class MainWindow
         ShowReaderBookmarkTab();
     }
 
-    private void ReaderPdfNoteButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (!_readerIsPdf || _readerBookFile is null) return;
-        (CurrentReaderHost as NativePdfReaderHost)?.ClearSelection();
-        _selectedReaderAnnotation = null;
-        _readerPendingSelection = null;
-        _readerPendingSelectionStartOffset = 0;
-        _readerPendingSelectionEndOffset = 0;
-        _readerPendingSelectionPrefix = string.Empty;
-        _readerPendingSelectionSuffix = string.Empty;
-        ReaderAnnotationInputQuote.Text = T("PDF 第 {0} 页（页面笔记）", _readerPdfPage);
-        ReaderAnnotationInputBox.Text = string.Empty;
-        ShowReaderPopupNearSelection(
-            ReaderAnnotationInputPopup,
-            ReaderAnnotationInputPanel,
-            fallbackWidth: 320,
-            fallbackHeight: 190,
-            placementPoint: null,
-            selectionBottom: null);
-        ReaderAnnotationInputBox.Focus();
-    }
-
     private async void ReaderBookmarkCornerButton_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
@@ -8662,11 +8665,12 @@ public partial class MainWindow
         // for every reader surface: the native EPUB engine has no injected
         // page to draw the ribbon, so the Avalonia corner stays active here.
         ReaderBookmarkCornerButton.IsVisible = true;
-        ReaderWebViewHost.Margin = new Thickness(
-            0,
-            _readerIsPdf ? 34 : 12,
-            2,
-            _readerZenMode ? 0 : 10);
+        // PDF paints its own page gutters. Outer padding and the old WebView
+        // edge cover would expose the EPUB paper color as horizontal bands.
+        ReaderWebViewHost.Margin = _readerIsPdf
+            ? new Thickness(0)
+            : new Thickness(0, 12, 2, _readerZenMode ? 0 : 10);
+        ReaderWebViewBottomCover.IsVisible = !_readerIsPdf;
     }
 
     private async void ToggleReaderZenMode()
@@ -9248,21 +9252,7 @@ public partial class MainWindow
     {
         if (ReaderFlowButton is not null)
         {
-            // The flow button is icon-only; the current mode lives in the
-            // tooltip and accessibility name instead of the button face.
-            var flowLabel = _readerIsPdf
-                ? T("PDF 页")
-                : _readerLayout.FlowMode == 0
-                ? T("滚动")
-                : _readerLayout.TwoPageMode ? T("双栏") : T("单页");
-            ToolTip.SetTip(ReaderFlowButton, flowLabel);
-            AutomationProperties.SetName(ReaderFlowButton, flowLabel);
-            if (ReaderFlowIcon is not null)
-                ReaderFlowIcon.Data = GetReaderFlowIcon(
-                    _readerIsPdf ? 1 : _readerLayout.FlowMode,
-                    _readerLayout.TwoPageMode);
-            // The WinUI reference hides the flow selector entirely for PDF.
-            ReaderFlowButton.IsVisible = !_readerIsPdf;
+            ReaderFlowButton.IsVisible = true;
         }
         SyncReaderFlowMenu();
         SyncReaderAnimationMenu();
@@ -9299,26 +9289,31 @@ public partial class MainWindow
             ReaderZoomInButton.IsVisible = true;
             var zoomOutLabel = _readerIsPdf ? T("缩小页面") : T("减小字号");
             var zoomInLabel = _readerIsPdf ? T("放大页面") : T("增大字号");
+            ReaderZoomOutButton.Content = _readerIsPdf ? "−" : "A−";
+            ReaderZoomInButton.Content = _readerIsPdf ? "+" : "A+";
             ToolTip.SetTip(ReaderZoomOutButton, zoomOutLabel);
             ToolTip.SetTip(ReaderZoomInButton, zoomInLabel);
             AutomationProperties.SetName(ReaderZoomOutButton, zoomOutLabel);
             AutomationProperties.SetName(ReaderZoomInButton, zoomInLabel);
         }
+        if (ReaderPdfFitButton is not null)
+        {
+            ReaderPdfFitButton.IsVisible = _readerIsPdf;
+            var pdf = CurrentReaderHost as NativePdfReaderHost;
+            ReaderPdfFitWidthItem.IsChecked = pdf?.FitMode == PdfReaderFitMode.Width && Math.Abs(pdf.Zoom - 1) < 0.005;
+            ReaderPdfFitPageItem.IsChecked = pdf?.FitMode == PdfReaderFitMode.Page && Math.Abs(pdf.Zoom - 1) < 0.005;
+        }
         if (ReaderPdfBadge is not null)
             ReaderPdfBadge.IsVisible = _readerIsPdf;
-        if (ReaderPdfNoteButton is not null)
-        {
-            ReaderPdfNoteButton.IsVisible = _readerIsPdf;
-            ToolTip.SetTip(ReaderPdfNoteButton, T("为当前 PDF 页面添加笔记"));
-            AutomationProperties.SetName(ReaderPdfNoteButton, T("页面笔记"));
-        }
+        if (ReaderPdfRotateButton is not null)
+            ReaderPdfRotateButton.IsVisible = _readerIsPdf;
         if (ReaderPreviousButton is not null)
             ReaderPreviousButton.IsEnabled = _readerIsPdf
-                ? _readerPdfPage > 1
+                ? (CurrentReaderHost as NativePdfReaderHost)?.CanGoPrevious == true
                 : GetCurrentReaderTocIndex() > 0;
         if (ReaderNextButton is not null)
             ReaderNextButton.IsEnabled = _readerIsPdf
-                ? _readerPdfPage < Math.Max(1, _readerPdfPages.Count)
+                ? (CurrentReaderHost as NativePdfReaderHost)?.CanGoNext == true
                 : GetCurrentReaderTocIndex() is var tocIndex
                     && tocIndex >= 0
                     && tocIndex + 1 < _readerTocItems.Count;

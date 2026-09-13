@@ -12,6 +12,8 @@ public sealed record PdfPageContent(double Width, double Height, string Text, IR
 public sealed record PdfOutlineItem(string Title, int PageNumber, int Level, double? Top = null);
 public sealed record PdfDocumentInfo(int PageCount, string Title, string Author, IReadOnlyList<PdfOutlineItem> Outline);
 public sealed record PdfRenderedPage(int PageNumber, PdfPageContent Content, byte[] Png);
+public sealed record PdfRasterRegion(int PageNumber, int PagePixelWidth, int PagePixelHeight,
+    int Left, int Top, int Width, int Height, byte[] Pixels, int Rotation = 0);
 
 /// <summary>
 /// Owns a PDFium document. All native calls share one gate: PDFium is not
@@ -83,6 +85,57 @@ public sealed class PdfDocumentService : IDisposable
         }
     }
 
+    public string ReadPageText(int pageNumber, CancellationToken cancellationToken = default)
+    {
+        lock (NativeGate)
+        {
+            CheckOpen(cancellationToken);
+            var page = LoadPage(pageNumber);
+            try { return ReadPageContent(page, cancellationToken, includeGeometry: false).Text; }
+            finally { Native.FPDF_ClosePage(page); }
+        }
+    }
+
+    // Render directly from the PDF display list at the requested device scale.
+    // Clipping keeps memory proportional to the viewport, even at high zoom.
+    // The reader consumes BGRA pixels directly, without a PNG encode/decode.
+    public PdfRasterRegion RenderRegion(int pageNumber, int pagePixelWidth, int pagePixelHeight,
+        int left, int top, int width, int height, CancellationToken cancellationToken = default, int rotation = 0)
+    {
+        if (rotation is not (0 or 90 or 180 or 270)) throw new ArgumentOutOfRangeException(nameof(rotation));
+        if (pagePixelWidth is < 1 or > 1_000_000 || pagePixelHeight is < 1 or > 1_000_000
+            || left < 0 || top < 0 || width < 1 || height < 1
+            || (long)left + width > pagePixelWidth || (long)top + height > pagePixelHeight
+            || (long)width * height > 16_000_000)
+            throw new ArgumentOutOfRangeException(nameof(width), "PDF render region is too large or outside the page.");
+        lock (NativeGate)
+        {
+            CheckOpen(cancellationToken);
+            var page = LoadPage(pageNumber);
+            try
+            {
+                var pixels = GC.AllocateUninitializedArray<byte>(checked(width * height * 4));
+                var handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+                try
+                {
+                    var bitmap = Native.FPDFBitmap_CreateEx(width, height, 4, handle.AddrOfPinnedObject(), width * 4);
+                    if (bitmap == IntPtr.Zero) throw new InvalidOperationException("无法创建 PDF 页面图像。");
+                    try
+                    {
+                        Native.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xffffffff);
+                        // Annotations + LCD text hinting on the opaque, pixel-aligned surface.
+                        Native.FPDF_RenderPageBitmap(bitmap, page, -left, -top, pagePixelWidth, pagePixelHeight, rotation / 90, 3);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        return new(pageNumber, pagePixelWidth, pagePixelHeight, left, top, width, height, pixels, rotation);
+                    }
+                    finally { Native.FPDFBitmap_Destroy(bitmap); }
+                }
+                finally { handle.Free(); }
+            }
+            finally { Native.FPDF_ClosePage(page); }
+        }
+    }
+
     public PdfRenderedPage RenderPage(
         int pageNumber,
         int maxWidth = 1600,
@@ -128,7 +181,7 @@ public sealed class PdfDocumentService : IDisposable
         return page != IntPtr.Zero ? page : throw new InvalidDataException($"无法读取 PDF 第 {pageNumber} 页。");
     }
 
-    private static PdfPageContent ReadPageContent(IntPtr page, CancellationToken cancellationToken)
+    private static PdfPageContent ReadPageContent(IntPtr page, CancellationToken cancellationToken, bool includeGeometry = true)
     {
         var width = Native.FPDF_GetPageWidth(page);
         var height = Native.FPDF_GetPageHeight(page);
@@ -151,7 +204,7 @@ public sealed class PdfDocumentService : IDisposable
                 var value = char.ConvertFromUtf32((int)codePoint);
                 var offset = text.Length;
                 text.Append(value);
-                if (string.IsNullOrWhiteSpace(value)) continue;
+                if (!includeGeometry || string.IsNullOrWhiteSpace(value)) continue;
                 if (Native.FPDFText_GetCharBox(textPage, index, out var left, out var right, out var bottom, out var top) == 0)
                     continue;
                 var bounds = TransformBounds(page, left, right, bottom, top);

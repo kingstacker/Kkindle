@@ -1485,6 +1485,9 @@ public partial class MainWindow
         var sources = new List<ReaderAiSourceViewModel>();
         if (_readerIsPdf)
         {
+            if (requestKind == ReaderAiRequestKind.BookSummary)
+                await EnsureReaderPdfTextIndexAsync(cancellationToken);
+            RememberCurrentPdfPageText();
             SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
             var pages = _readerPdfPages.Where(page => !string.IsNullOrWhiteSpace(page.Text))
                 .OrderBy(page => page.PageNumber).ToArray();

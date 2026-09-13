@@ -192,6 +192,7 @@ public partial class MainWindow
     {
         if (_readerBookFile is null || _readerPdfPages.Count == 0)
             return null;
+        RememberCurrentPdfPageText();
         var page = _readerPdfPages.FirstOrDefault(item => item.PageNumber == _readerPdfPage);
         if (page is null || string.IsNullOrWhiteSpace(page.Text))
             return null;

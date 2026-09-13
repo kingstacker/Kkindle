@@ -89,6 +89,65 @@ public sealed class PdfDocumentTests : IDisposable
     }
 
     [Fact]
+    public void TextOnlyIndexPreservesOffsetsWithoutRequiringGlyphGeometry()
+    {
+        using var pdf = new PdfDocumentService(PdfFixture.Write(_directory));
+        for (var page = 1; page <= pdf.PageCount; page++)
+            Assert.Equal(pdf.ReadPage(page).Text, pdf.ReadPageText(page));
+    }
+
+    [Fact]
+    public void HighResolutionRegionsAreRedrawnFromPdfAndUseOnlyTheClippedBuffer()
+    {
+        using var pdf = new PdfDocumentService(PdfFixture.Write(_directory));
+        var low = pdf.RenderRegion(2, 400, 600, 35, 45, 150, 32);
+        var high = pdf.RenderRegion(2, 1600, 2400, 140, 180, 600, 128);
+        Assert.Equal(600 * 128 * 4, high.Pixels.Length);
+        var differences = 0;
+        for (var y = 0; y < high.Height; y++)
+            for (var x = 0; x < high.Width; x++)
+            {
+                var actual = high.Pixels[(y * high.Width + x) * 4];
+                var enlarged = low.Pixels[((y / 4) * low.Width + x / 4) * 4];
+                if (Math.Abs(actual - enlarged) > 20) differences++;
+            }
+        Assert.True(differences > 500, "Zoom must redraw glyph edges, rather than enlarge the original raster.");
+        var extreme = pdf.RenderRegion(2, 16000, 24000, 1600, 2200, 640, 640);
+        Assert.Equal(640 * 640 * 4, extreme.Pixels.Length);
+        Assert.Contains(extreme.Pixels, pixel => pixel < 100);
+        Assert.Throws<ArgumentOutOfRangeException>(() => pdf.RenderRegion(2, 400, 600, 350, 0, 100, 100));
+    }
+
+    [Theory]
+    [InlineData(90)]
+    [InlineData(180)]
+    [InlineData(270)]
+    public void ViewRotationKeepsTheOriginalImageAndClippedRegionAligned(int rotation)
+    {
+        using var pdf = new PdfDocumentService(PdfFixture.Write(_directory));
+        var original = pdf.RenderRegion(3, 400, 600, 0, 0, 400, 600);
+        var width = rotation % 180 == 0 ? 400 : 600;
+        var height = rotation % 180 == 0 ? 600 : 400;
+        var rotated = pdf.RenderRegion(3, width, height, 0, 0, width, height, rotation: rotation);
+        Assert.Equal(rotation, rotated.Rotation);
+        foreach (var (x, y) in new[] { (20, 20), (350, 20), (20, 550), (350, 550) })
+        {
+            var (rx, ry) = rotation switch
+            {
+                90 => (599 - y, x),
+                180 => (399 - x, 599 - y),
+                _ => (y, 399 - x)
+            };
+            Assert.Equal(original.Pixels.AsSpan((y * 400 + x) * 4, 4).ToArray(),
+                rotated.Pixels.AsSpan((ry * width + rx) * 4, 4).ToArray());
+        }
+        var clipped = pdf.RenderRegion(3, width, height, 64, 80, 128, 96, rotation: rotation);
+        for (var row = 0; row < clipped.Height; row++)
+            Assert.Equal(rotated.Pixels.AsSpan(((row + 80) * width + 64) * 4, 128 * 4).ToArray(),
+                clipped.Pixels.AsSpan(row * 128 * 4, 128 * 4).ToArray());
+    }
+
+    [Fact]
     public async Task ExistingPdfBooksReceiveMissingCoversWithoutReplacingCustomCovers()
     {
         var paths = new AppPaths(Path.Combine(_directory, "library"));

@@ -39,6 +39,7 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         await scope.Call<Task>("CloseReaderAsync");
         await scope.Call<Task>("OpenPdfReaderAsync", card, card.Book.Files[0], new SqliteBookLibraryService(scope.Paths, new BookMetadataService()).GetAbsoluteFilePath(card.Book.Files[0]));
         Assert.Equal(3, scope.Field<NativePdfReaderHost>("_readerActiveHost").PageNumber);
+        await scope.Field<Task>("_readerPdfOutlineTask");
         AssertCurrent(scope, "Scanned page");
     });
 
@@ -142,6 +143,7 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         var card = new BookCardViewModel(book, scope.Paths.Data);
         await scope.Call<Task>("OpenPdfReaderAsync", card, book.Files[0], library.GetAbsoluteFilePath(book.Files[0]));
         Assert.True(scope.Get<Control>("ReaderRoot").IsVisible, scope.Get<TextBlock>("ReaderStatusText").Text);
+        await scope.Field<Task>("_readerPdfOutlineTask");
         await ReaderTests.Render();
         return card;
     }

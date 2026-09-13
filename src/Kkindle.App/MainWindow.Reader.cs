@@ -573,7 +573,8 @@ public partial class MainWindow
         _readerPendingAnnotation = null;
         if (_readerIsPdf)
         {
-            await NavigatePdfPageAsync(_readerPdfPage + offset, ReaderToken);
+            var page = CurrentReaderHost is NativePdfReaderHost pdf ? pdf.GetAdjacentPage(offset) : _readerPdfPage + offset;
+            if (page != _readerPdfPage) await NavigatePdfPageAsync(page, ReaderToken);
             return;
         }
         if (_readerDocument is null || CurrentReaderHost is null) return;
@@ -705,7 +706,7 @@ public partial class MainWindow
                 : $"{_readerChapterIndex + 1} / {_readerDocument.Chapters.Count} · {GetReaderChapterDisplayName(_readerChapterIndex)}";
 
     private string GetReaderChapterPositionLabel() => _readerIsPdf
-        ? T("{0} / {1}", _readerPdfPage, Math.Max(1, _readerPdfPages.Count))
+        ? GetPdfPagePositionLabel()
         : _readerDocument is null
             ? string.Empty
             : GetCurrentReaderTocIndex() is var tocIndex && tocIndex >= 0
@@ -718,7 +719,8 @@ public partial class MainWindow
         if (direction == 0) return;
         if (_readerIsPdf)
         {
-            await NavigatePdfPageAsync(_readerPdfPage + direction, ReaderToken);
+            var page = CurrentReaderHost is NativePdfReaderHost pdf ? pdf.GetAdjacentPage(direction) : _readerPdfPage + direction;
+            if (page != _readerPdfPage) await NavigatePdfPageAsync(page, ReaderToken);
             return;
         }
 

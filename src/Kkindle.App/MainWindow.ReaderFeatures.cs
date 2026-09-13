@@ -42,7 +42,8 @@ public partial class MainWindow
         !_readerIsPdf && CurrentReaderHost is NativeReaderHost { IsPaginated: true };
 
     private bool IsReaderPaginated =>
-        _readerIsPdf || _readerLayout.FlowMode == 1 || IsNativeReaderPaginated;
+        _readerIsPdf ? (CurrentReaderHost as NativePdfReaderHost)?.DisplayMode != PdfReaderDisplayMode.Continuous
+            : _readerLayout.FlowMode == 1 || IsNativeReaderPaginated;
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
@@ -72,6 +73,12 @@ public partial class MainWindow
             && TryHandleLinuxReaderTextFallbackKeyDown(e))
         {
             return;
+        }
+
+        if (_readerIsPdf && CurrentReaderHost is NativePdfReaderHost pdf && !IsReaderTextInputFocused())
+        {
+            pdf.HandleReaderKey(e);
+            if (e.Handled) { FocusCurrentReaderHost(); return; }
         }
 
         if (IsReaderPaginated
@@ -228,22 +235,12 @@ public partial class MainWindow
         try
         {
             SetTaskStatus(T("正在准备《{0}》的 PDF 阅读器…", card.Title));
-            var info = await Task.Run(() =>
-            {
-                using var pdf = new PdfDocumentService(path);
-                return pdf.ReadInfo(token);
-            }, token);
-            var pages = await _pdfTextService.ExtractAsync(path, token);
-            if (pages.Count == 0)
-                throw new InvalidDataException(T("PDF 没有可读取的页面文本。"));
-            var textPageCount = pages.Count(page => !string.IsNullOrWhiteSpace(page.Text));
-
             _readerBookCard = card;
             _readerBookFile = file;
             _readerDocument = null;
             _readerIsPdf = true;
             _readerPdfSourcePath = path;
-            _readerPdfPages = pages;
+            _readerPdfPages = [];
             _readerPdfPage = 1;
             _readerChapterIndex = 0;
             _readerScrollRatio = 0;
@@ -259,36 +256,34 @@ public partial class MainWindow
             // Initialization resets all per-book state. Install the PDF index
             // afterwards, and keep the global EPUB layout preferences intact.
             _readerIsPdf = true;
-            _readerPdfPages = pages;
             _readerPdfSourcePath = path;
+            await EnsureReaderHostsAsync();
+            var host = (NativePdfReaderHost)CurrentReaderHost!;
+            var pageCount = await host.PrepareDocumentAsync(path, token);
+            var pages = Enumerable.Range(1, pageCount).Select(page => new PdfPageText(page, string.Empty)).ToArray();
+            _readerPdfPages = pages;
+            _readerPdfIndexReady = false;
+            _readerPdfIndexError = null;
             UpdateReaderBookmarkCornerSurface();
 
             var progress = await _readerData.GetProgressAsync(file.Id, token);
             if (progress is not null)
-                _readerPdfPage = Math.Clamp(progress.ChapterIndex + 1, 1, pages.Count);
+                _readerPdfPage = Math.Clamp(progress.ChapterIndex + 1, 1, pageCount);
             _readerChapterIndex = _readerPdfPage - 1;
-            var pdfUri = new Uri(Path.GetFullPath(path));
-            _readerTocItems = info.Outline.Count > 0
-                ? info.Outline.Select((item, index) => new EpubReaderNavigationItem(item.Title,
-                    pdfUri.AbsoluteUri + $"#page={item.PageNumber}&top={(item.Top ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture)}&outline={index}",
-                    item.PageNumber - 1, item.Level)).ToArray()
-                : pages.Select(page => new EpubReaderNavigationItem(T("第 {0} 页", page.PageNumber),
-                    pdfUri.AbsoluteUri + $"#page={page.PageNumber}", page.PageNumber - 1)).ToArray();
+            _readerTocItems = [];
             BuildReaderTocRows();
-            CollapseReaderTocToCurrentChapter(_readerChapterIndex);
             SetReaderCompactNavigationItems(_readerTocItems);
 
             ReaderBookInfoText.Text = $"{card.Title} · PDF";
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
-            ReaderStatusText.Text = textPageCount == 0
-                ? T("PDF · {0} 页 · 主要是扫描图片", pages.Count)
-                : T("PDF · {0} 页 · 可搜索文本 {1}/{0} 页", pages.Count, textPageCount);
+            ReaderStatusText.Text = T("PDF · {0} 页", pageCount);
             ReaderRoot.IsVisible = true;
             LibraryRoot.IsVisible = false;
             WindowBrandText.IsVisible = true;
             _readerTocExpanded = true;
             _readerTocMinimal = false;
-            ReaderTocEmptyText.IsVisible = false;
+            ReaderTocEmptyText.Text = T("正在读取目录…");
+            ReaderTocEmptyText.IsVisible = true;
             ApplyReaderPanelLayout();
             ShowReaderTocTab();
             ReaderAiView.IsVisible = true;
@@ -298,24 +293,22 @@ public partial class MainWindow
             ReaderAssistantPanel.IsVisible = false;
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
 
-            await EnsureReaderHostsAsync();
             HideLinuxReaderTextFallback();
             SetReaderHostLayer();
             FocusCurrentReaderHost();
+            host.RestoreViewSettings(progress?.Fragment);
+            await Dispatcher.UIThread.InvokeAsync(() => ReaderRoot.UpdateLayout(), DispatcherPriority.Loaded);
             var pdfSource = new Uri(path).AbsoluteUri + $"#page={_readerPdfPage}";
-            if (CurrentReaderHost is not { } host
-                || !await NavigateReaderHostAndWaitAsync(host, new Uri(pdfSource), token))
+            if (!await NavigateReaderHostAndWaitAsync(host, new Uri(pdfSource), token))
             {
                 throw new InvalidOperationException(T("PDF 阅读器页面加载失败。"));
             }
             await ApplySavedReaderPdfAnnotationsAsync(token);
-            if (host is NativePdfReaderHost pdfHost)
-                await pdfHost.RestoreViewStateAsync(progress?.Fragment, progress?.ScrollPosition ?? 0);
+            if (progress is not null)
+                await host.RestoreViewStateAsync(progress.Fragment, progress.ScrollPosition);
+            RememberCurrentPdfPageText();
             SyncReaderPdfTocSelection();
-
-            ReaderStatusText.Text = textPageCount == 0
-                ? T("PDF · {0} 页 · 扫描图片，无可搜索文本", pages.Count)
-                : T("PDF · {0} 页 · 可搜索文本 {1}/{0} 页", pages.Count, textPageCount);
+            StartReaderPdfBackgroundWork(host, file.Id, token);
             UpdateReaderToolbar();
             await UpdateReaderBookmarkIndicatorAsync();
             await SaveReaderProgressAsync(token);
@@ -345,12 +338,11 @@ public partial class MainWindow
         HideReaderAnnotationHoverPopup();
         var targetPage = Math.Clamp(page, 1, _readerPdfPages.Count);
         var source = new Uri(_readerPdfSourcePath).AbsoluteUri + $"#page={targetPage}";
-        var loaded = await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber), async () =>
-        {
-            if (!await host.NavigateAsync(new Uri(source), cancellationToken)) return false;
-            await ApplySavedReaderPdfAnnotationsAsync(cancellationToken);
-            return true;
-        }, cancellationToken, animate: targetPage != host.PageNumber, holdOutgoingPage: true);
+        var loaded = host.DisplayMode == PdfReaderDisplayMode.Continuous
+            ? await host.NavigateAsync(new Uri(source), cancellationToken)
+            : await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber),
+                () => host.NavigateAsync(new Uri(source), cancellationToken), cancellationToken,
+                animate: targetPage != host.PageNumber, holdOutgoingPage: true);
         if (!loaded)
         {
             if (!string.IsNullOrWhiteSpace(host.LastError)) ReaderStatusText.Text = host.LastError;
@@ -367,13 +359,12 @@ public partial class MainWindow
         if (saveProgress) await SaveReaderProgressAsync(cancellationToken);
     }
 
-    private async Task ApplySavedReaderPdfAnnotationsAsync(CancellationToken cancellationToken)
+    private Task ApplySavedReaderPdfAnnotationsAsync(CancellationToken cancellationToken)
     {
-        if (_readerBookFile is null || CurrentReaderHost is not NativePdfReaderHost host) return;
-        var page = host.PageNumber;
-        var annotations = await _readerData.GetAnnotationsAsync(_readerBookFile.Id, cancellationToken, MaxReaderAnnotations);
-        if (!ReferenceEquals(host, CurrentReaderHost) || host.PageNumber != page) return;
-        host.SetAnnotations(annotations.Where(item => TryGetReaderPdfPage(item.ChapterPath, out var savedPage) && savedPage == page).ToArray());
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_readerBookFile is not null && CurrentReaderHost is NativePdfReaderHost host)
+            host.SetAnnotations(ReaderAnnotations.ToArray());
+        return Task.CompletedTask;
     }
 
     private void SyncReaderPdfTocSelection()
@@ -1050,6 +1041,9 @@ public partial class MainWindow
             var pendingResults = new List<ReaderSearchResultViewModel>();
             if (_readerIsPdf)
             {
+                var fileId = _readerBookFile?.Id;
+                await EnsureReaderPdfTextIndexAsync(ReaderToken);
+                if (!_readerIsPdf || _readerBookFile?.Id != fileId) return;
                 var results = PdfTextService.Search(_readerPdfPages, query, MaxWholeBookSearchResults);
                 foreach (var result in results)
                     pendingResults.Add(new ReaderSearchResultViewModel(

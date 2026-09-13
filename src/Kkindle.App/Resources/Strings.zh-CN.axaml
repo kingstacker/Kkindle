@@ -1669,4 +1669,12 @@
     <x:String x:Key="Ui.Auto.6E56F74D61AE9671">PDF 渲染与文本</x:String>
     <x:String x:Key="Ui.Auto.5387BBF87605624B">PDFium 已就绪，可显示页面、选择文字并标注。</x:String>
     <x:String x:Key="Ui.Auto.1B62D9336022D236">PDFium 加载失败：{0}</x:String>
+    <x:String x:Key="Ui.Auto.C95E9E685192110D">双页</x:String>
+    <x:String x:Key="Ui.Auto.C1F31E481AAA0B3B">适合宽度</x:String>
+    <x:String x:Key="Ui.Auto.45F54AAA27F02EB8">适合整页</x:String>
+    <x:String x:Key="Ui.Auto.6EA534CB62BCA05C">页面缩放</x:String>
+    <x:String x:Key="Ui.Auto.36517D179E0F88A8">正在读取目录…</x:String>
+    <x:String x:Key="Ui.Auto.B30C746140638433">适宽</x:String>
+    <x:String x:Key="Ui.Auto.581B3C5CBA2B75A9">整页</x:String>
+    <x:String x:Key="Ui.Auto.980EDB5BF6FDE833">顺时针旋转 90°</x:String>
 </ResourceDictionary>

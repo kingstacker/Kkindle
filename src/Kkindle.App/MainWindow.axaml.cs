@@ -78,7 +78,6 @@ public partial class MainWindow : Window
     private readonly IReaderRetriever _readerRetriever;
     private readonly ReaderAiContextBuilder _readerAiContextBuilder;
     private readonly EpubFootnoteResolver _footnotes;
-    private readonly PdfTextService _pdfTextService;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly AiChatClient _aiChatClient;
     private readonly TranslationService _translationService;
@@ -194,7 +193,6 @@ public partial class MainWindow : Window
             log: message => Debug.WriteLine($"[RAG] {message}"));
         _readerAiContextBuilder = new ReaderAiContextBuilder(_readerData);
         _footnotes = new EpubFootnoteResolver();
-        _pdfTextService = new PdfTextService();
         _aiSettingsStore = new AiSettingsStore(paths, _secretProtector);
         _aiChatClient = new AiChatClient();
         _translationService = new TranslationService(_aiChatClient);

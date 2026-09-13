@@ -1669,4 +1669,12 @@
     <x:String x:Key="Ui.Auto.6E56F74D61AE9671">PDF rendering and text</x:String>
     <x:String x:Key="Ui.Auto.5387BBF87605624B">PDFium is ready to display pages, select text and add annotations.</x:String>
     <x:String x:Key="Ui.Auto.1B62D9336022D236">Failed to load PDFium: {0}</x:String>
+    <x:String x:Key="Ui.Auto.C95E9E685192110D">Two pages</x:String>
+    <x:String x:Key="Ui.Auto.C1F31E481AAA0B3B">Fit width</x:String>
+    <x:String x:Key="Ui.Auto.45F54AAA27F02EB8">Fit page</x:String>
+    <x:String x:Key="Ui.Auto.6EA534CB62BCA05C">Page zoom</x:String>
+    <x:String x:Key="Ui.Auto.36517D179E0F88A8">Loading table of contents…</x:String>
+    <x:String x:Key="Ui.Auto.B30C746140638433">Width</x:String>
+    <x:String x:Key="Ui.Auto.581B3C5CBA2B75A9">Page</x:String>
+    <x:String x:Key="Ui.Auto.980EDB5BF6FDE833">Rotate clockwise 90°</x:String>
 </ResourceDictionary>

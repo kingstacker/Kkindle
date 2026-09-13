@@ -4262,6 +4262,43 @@
                                         ToolTip.Tip="{DynamicResource Ui.Auto.8B247B82F012C614}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.8B247B82F012C614}"
                                         Click="ReaderIncreaseFontButton_Click" />
+                                <Button x:Name="ReaderPdfFitButton"
+                                        Classes="readerHeader"
+                                        Width="38"
+                                        MinWidth="38"
+                                        IsVisible="False"
+                                        ToolTip.Tip="{DynamicResource Ui.Auto.6EA534CB62BCA05C}"
+                                        AutomationProperties.Name="{DynamicResource Ui.Auto.6EA534CB62BCA05C}">
+                                    <Path Width="24" Height="24"
+                                          Stroke="{Binding $parent[Button].Foreground}"
+                                          StrokeThickness="1.5"
+                                          StrokeLineCap="Round" StrokeJoin="Round"
+                                          Data="M4 5h16v14H4Z M7 12h10 M9 9.5L6.5 12L9 14.5 M15 9.5L17.5 12L15 14.5" />
+                                    <Button.Flyout>
+                                        <MenuFlyout FlyoutPresenterClasses="readerMenu">
+                                            <MenuItem x:Name="ReaderPdfFitWidthItem"
+                                                      Header="{DynamicResource Ui.Auto.C1F31E481AAA0B3B}"
+                                                      ToggleType="Radio" Tag="width" Click="ReaderPdfFitItem_Click" />
+                                            <MenuItem x:Name="ReaderPdfFitPageItem"
+                                                      Header="{DynamicResource Ui.Auto.45F54AAA27F02EB8}"
+                                                      ToggleType="Radio" Tag="page" Click="ReaderPdfFitItem_Click" />
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                                <Button x:Name="ReaderPdfRotateButton"
+                                        Classes="readerHeader"
+                                        Width="38"
+                                        MinWidth="38"
+                                        IsVisible="False"
+                                        ToolTip.Tip="{DynamicResource Ui.Auto.980EDB5BF6FDE833}"
+                                        AutomationProperties.Name="{DynamicResource Ui.Auto.980EDB5BF6FDE833}"
+                                        Click="ReaderPdfRotateButton_Click">
+                                    <Path Width="24" Height="24"
+                                          Stroke="{Binding $parent[Button].Foreground}"
+                                          StrokeThickness="1.5"
+                                          StrokeLineCap="Round" StrokeJoin="Round"
+                                          Data="M20 5v5h-5 M20 10a8 8 0 1 0-1 8" />
+                                </Button>
                                 <Button x:Name="ReaderFlowButton"
                                         Classes="readerHeader"
                                         Width="38"
@@ -4311,20 +4348,6 @@
                                           StrokeLineCap="Round"
                                           StrokeJoin="Round"
                                           Data="M7 4.5h10v15l-5-4.2-5 4.2Z" />
-                                </Button>
-                                <Button x:Name="ReaderPdfNoteButton"
-                                        Classes="readerHeader"
-                                        Width="38"
-                                        MinWidth="38"
-                                        IsVisible="False"
-                                        Click="ReaderPdfNoteButton_Click">
-                                    <Path Width="24"
-                                          Height="24"
-                                          Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.5"
-                                          StrokeLineCap="Round"
-                                          StrokeJoin="Round"
-                                          Data="M7 4h10v16H7Z M10 9h4 M10 12.5h4 M10 16h4" />
                                 </Button>
                                 <Button x:Name="ReaderAssistantToggleButton"
                                         Classes="readerHeader"
