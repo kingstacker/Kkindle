@@ -370,7 +370,7 @@ public partial class MainWindow
     private void SyncReaderPdfTocSelection()
     {
         if (!_readerIsPdf || _readerTocItems.Count == 0) return;
-        var top = (CurrentReaderHost as NativePdfReaderHost)?.VisibleTop ?? 0;
+        var top = (CurrentReaderHost as NativePdfReaderHost)?.NavigationTop ?? 0;
         var current = _readerTocItems.Where(item => item.ChapterIndex < _readerChapterIndex
             || item.ChapterIndex == _readerChapterIndex && NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)) <= top + 0.02)
             .OrderByDescending(item => item.ChapterIndex)

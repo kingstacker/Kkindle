@@ -43,6 +43,33 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         AssertCurrent(scope, "Scanned page");
     });
 
+    [Theory]
+    [InlineData(PdfReaderFitMode.Page, 0.9)]
+    [InlineData(PdfReaderFitMode.Width, 0.25)]
+    public Task ScaledPdfOutlineJumpsKeepTheClickedSectionAfterRendering(PdfReaderFitMode fit, double zoom) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetFitModeAsync(fit);
+        await pdf.SetZoomAsync(zoom);
+        var toc = scope.Field<IReadOnlyList<EpubReaderNavigationItem>>("_readerTocItems");
+
+        foreach (var index in new[] { 2, 1, 2, 3 })
+        {
+            var item = toc[index];
+            Assert.True(await scope.Call<Task<bool>>("NavigateToReaderItemAsync", item, CancellationToken.None, ReaderNavigationIntent.Toc, null));
+            await pdf.RefreshViewportAsync();
+            await ReaderTests.Render();
+            Assert.Equal(item.ChapterIndex + 1, pdf.PageNumber);
+            Assert.Contains(pdf.PageNumber, pdf.VisiblePageNumbers);
+            AssertCurrent(scope, item.Title);
+            var heading = pdf.PageContent!.Text.IndexOf(item.Title, StringComparison.Ordinal);
+            if (heading >= 0)
+                Assert.InRange(pdf.GetRangeBounds(heading, heading + item.Title.Length).First().Top, 0, 100);
+        }
+    });
+
     [Fact]
     public Task SelectionStylesCommentsSearchAndPersistenceUsePageLocalTextOffsets() => Run(async () =>
     {

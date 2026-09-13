@@ -98,8 +98,10 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     public int Rotation { get; private set; }
     public string? LastError { get; private set; }
     public PdfPageContent? PageContent => GetPageContent(PageNumber);
-    public double VisibleTop => Math.Clamp(PageBounds.Intersect(new Rect(Viewport))
-        .TransformToAABB(GetPageTransform(PageBounds).Invert()).Top / Math.Max(1, GetUnrotatedPageSize(PageBounds).Height), 0, 1);
+    public double VisibleTop => GetVisibleTop(new Rect(Viewport));
+    // ScrollToTop aligns destinations inside this margin. Sample the same
+    // edge when following the outline, including after zooming or rotating.
+    internal double NavigationTop => GetVisibleTop(new Rect(Viewport).Deflate(PdfReaderLayout.Margin));
     public Rect PageBounds => GetPageBounds(PageNumber);
     public bool CanGoPrevious => GetAdjacentPage(-1) != PageNumber;
     public bool CanGoNext => GetAdjacentPage(1) != PageNumber;
@@ -109,6 +111,9 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private double DeviceScaling => TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
     private Size Viewport => new(Math.Max(1, Bounds.Width), Math.Max(1, Bounds.Height));
     private Rect DocumentViewport => new(_pan.X, _pan.Y, Viewport.Width, Viewport.Height);
+
+    private double GetVisibleTop(Rect viewport) => Math.Clamp(PageBounds.Intersect(viewport)
+        .TransformToAABB(GetPageTransform(PageBounds).Invert()).Top / Math.Max(1, GetUnrotatedPageSize(PageBounds).Height), 0, 1);
 
     public event EventHandler<ReaderNavigationStartingEventArgs>? NavigationStarting;
     public event EventHandler<ReaderNavigationCompletedEventArgs>? NavigationCompleted;
