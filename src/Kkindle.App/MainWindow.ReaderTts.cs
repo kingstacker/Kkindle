@@ -230,10 +230,7 @@ public partial class MainWindow
         }
         if (!_readerIsPdf || !ReaderRoot.IsVisible) return;
         (CurrentReaderHost as NativePdfReaderHost)?.ClearSpeechHighlight();
-        var textPageCount = _readerPdfPages.Count(page => !string.IsNullOrWhiteSpace(page.Text));
-        ReaderStatusText.Text = textPageCount == 0
-            ? T("PDF · {0} 页 · 扫描图片，无可搜索文本", _readerPdfPages.Count)
-            : T("PDF · {0} 页 · 可搜索文本 {1}/{0} 页", _readerPdfPages.Count, textPageCount);
+        ResetReaderStatusText();
     }
 
     private async Task<ReaderTtsDocument?> GetNextReaderTtsDocumentAsync(

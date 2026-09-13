@@ -7017,9 +7017,7 @@ public partial class MainWindow
     // Baseline reader status: the bridge and host navigation both restore it.
     private void ResetReaderStatusText()
     {
-        ReaderStatusText.Text = _readerIsPdf
-            ? T("PDF · {0} 页", _readerPdfPages.Count)
-            : string.Empty;
+        ReaderStatusText.Text = string.Empty;
     }
 
     private void HandleReaderBridgeMessage(string? body)

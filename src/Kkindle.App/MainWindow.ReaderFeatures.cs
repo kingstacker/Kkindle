@@ -276,7 +276,7 @@ public partial class MainWindow
 
             ReaderBookInfoText.Text = $"{card.Title} · PDF";
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
-            ReaderStatusText.Text = T("PDF · {0} 页", pageCount);
+            ResetReaderStatusText();
             ReaderRoot.IsVisible = true;
             LibraryRoot.IsVisible = false;
             WindowBrandText.IsVisible = true;
