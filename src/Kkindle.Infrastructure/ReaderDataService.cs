@@ -173,6 +173,7 @@ public sealed partial class ReaderDataService
             await EnsureReaderBookmarkPositionColumnsAsync(connection, cancellationToken);
             await EnsureTextExtractionVersionColumnAsync(connection, cancellationToken);
             await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
+            await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
 
             await using (var syncTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
             {
@@ -763,30 +764,57 @@ public sealed partial class ReaderDataService
         CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
-        var summary = connection.CreateCommand();
-        summary.CommandText = """
-            SELECT
-                COUNT(*),
-                COALESCE(SUM(CASE WHEN ProgressPercent >= 99.5 THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CumulativeSeconds), 0),
-                COALESCE(AVG(ProgressPercent), 0)
-            FROM ReaderReadingStats;
+        using var librarySchema = connection.CreateCommand();
+        librarySchema.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Books');";
+        var hasLibrary = Convert.ToInt32(await librarySchema.ExecuteScalarAsync(cancellationToken)) != 0;
+        using var history = connection.CreateCommand();
+        history.CommandText = hasLibrary ? """
+            SELECT s.BookId, s.BookFileId, s.ProgressPercent, s.CumulativeSeconds, s.UpdatedAt,
+                   COALESCE(b.Title, h.Title, ''), b.Id IS NOT NULL
+            FROM ReaderReadingStats s
+            LEFT JOIN ReaderReadingHistory h ON h.BookFileId = s.BookFileId
+            LEFT JOIN Books b ON b.Id = s.BookId;
+            """ : """
+            SELECT s.BookId, s.BookFileId, s.ProgressPercent, s.CumulativeSeconds, s.UpdatedAt,
+                   COALESCE(h.Title, ''), 0
+            FROM ReaderReadingStats s
+            LEFT JOIN ReaderReadingHistory h ON h.BookFileId = s.BookFileId;
             """;
-        int started;
-        int finished;
-        long seconds;
-        double average;
-        await using (var reader = await summary.ExecuteReaderAsync(cancellationToken))
+        var fileHistory = new List<ReadingDashboardBook>();
+        await using (var reader = await history.ExecuteReaderAsync(cancellationToken))
         {
-            await reader.ReadAsync(cancellationToken);
-            started = reader.GetInt32(0);
-            finished = reader.GetInt32(1);
-            seconds = reader.GetInt64(2);
-            average = reader.GetDouble(3);
+            while (await reader.ReadAsync(cancellationToken))
+                fileHistory.Add(new ReadingDashboardBook(
+                    Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), reader.GetDouble(2),
+                    reader.GetInt64(3), DateTimeOffset.Parse(reader.GetString(4)))
+                {
+                    Title = reader.GetString(5), IsInLibrary = reader.GetInt32(6) != 0
+                });
         }
+        // A book can have several formats. Sum their time, but use the most
+        // recently read format for its progress and count the book only once.
+        var books = fileHistory.GroupBy(item => item.BookId)
+            .Select(group => group.OrderByDescending(item => item.UpdatedAt).ThenBy(item => item.BookFileId).First() with
+            {
+                CumulativeSeconds = group.Sum(item => item.CumulativeSeconds),
+                Title = group.Select(item => item.Title).FirstOrDefault(title => !string.IsNullOrWhiteSpace(title)) ?? string.Empty
+            })
+            .OrderByDescending(item => item.UpdatedAt).ThenBy(item => item.BookId).ToArray();
+        var started = books.Length;
+        var finished = books.Count(item => item.ProgressPercent >= 99.5);
+        var seconds = books.Sum(item => item.CumulativeSeconds);
+        var average = books.Length == 0 ? 0 : books.Average(item => item.ProgressPercent);
 
         var counts = connection.CreateCommand();
-        counts.CommandText = "SELECT (SELECT COUNT(*) FROM ReaderBookmarks), (SELECT COUNT(*) FROM ReaderAnnotations);";
+        counts.CommandText = hasLibrary ? """
+            SELECT
+                (SELECT COUNT(*) FROM ReaderBookmarks r
+                    JOIN BookFiles f ON f.Id = r.BookFileId AND f.BookId = r.BookId
+                    JOIN Books b ON b.Id = f.BookId),
+                (SELECT COUNT(*) FROM ReaderAnnotations r
+                    JOIN BookFiles f ON f.Id = r.BookFileId AND f.BookId = r.BookId
+                    JOIN Books b ON b.Id = f.BookId);
+            """ : "SELECT (SELECT COUNT(*) FROM ReaderBookmarks), (SELECT COUNT(*) FROM ReaderAnnotations);";
         int bookmarks;
         int annotations;
         await using (var reader = await counts.ExecuteReaderAsync(cancellationToken))
@@ -796,25 +824,7 @@ public sealed partial class ReaderDataService
             annotations = reader.GetInt32(1);
         }
 
-        var recent = connection.CreateCommand();
-        recent.CommandText = """
-            SELECT BookId, BookFileId, ProgressPercent, CumulativeSeconds, UpdatedAt
-            FROM ReaderReadingStats
-            ORDER BY UpdatedAt DESC
-            LIMIT $limit;
-            """;
-        recent.Parameters.AddWithValue("$limit", Math.Clamp(recentLimit, 1, 100));
-        var recentBooks = new List<ReadingDashboardBook>();
-        await using (var reader = await recent.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
-                recentBooks.Add(new ReadingDashboardBook(
-                    Guid.Parse(reader.GetString(0)),
-                    Guid.Parse(reader.GetString(1)),
-                    reader.GetDouble(2),
-                    reader.GetInt64(3),
-                    DateTimeOffset.Parse(reader.GetString(4))));
-        }
+        var recentBooks = books.Take(Math.Clamp(recentLimit, 1, 100)).ToArray();
 
         var firstDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-13));
         var dailyCommand = connection.CreateCommand();
@@ -840,7 +850,12 @@ public sealed partial class ReaderDataService
             .Select(day => new ReadingDashboardDay(day, dailyValues.GetValueOrDefault(day)))
             .ToArray();
 
-        return new ReadingDashboard(started, finished, seconds, average, bookmarks, annotations, recentBooks, dailyReading);
+        return new ReadingDashboard(started, finished, seconds, average, bookmarks, annotations, recentBooks, dailyReading)
+        {
+            Books = books,
+            MostReadBooks = books.OrderByDescending(item => item.CumulativeSeconds)
+                .ThenByDescending(item => item.UpdatedAt).Take(8).ToArray()
+        };
     }
 
     public async Task AddReadingTimeAsync(

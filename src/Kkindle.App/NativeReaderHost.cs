@@ -1819,14 +1819,14 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             {
                 Bands = bands,
                 Style = annotation.UnderlineStyle,
-                Color = ParseAnnotationColor(annotation.Color),
+                Color = ParseAnnotationColor(annotation.Color, annotation.UnderlineStyle == "marker"),
             });
         }
 
         return overlays.Count > 0 ? overlays : null;
     }
 
-    private SKColor ParseAnnotationColor(string? value)
+    private SKColor ParseAnnotationColor(string? value, bool isMarker)
     {
         if (value is { Length: 7 }
             && value[0] == '#'
@@ -1840,6 +1840,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 (byte)(rgb >> 16),
                 (byte)(rgb >> 8),
                 (byte)rgb);
+            // Marker colors are translucent fills. Preserve black as the
+            // legacy inversion sentinel, even when the theme uses light ink.
+            if (isMarker) return color;
             // Existing annotations use black ink. Keep that semantic ink
             // readable on every paper, including previously saved notes.
             if (color.Red <= 0x33 && color.Green <= 0x33 && color.Blue <= 0x33)
@@ -1854,7 +1857,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return color;
         }
 
-        return _paintTheme.Text;
+        return isMarker ? SKColors.Black : _paintTheme.Text;
     }
 
     private IReadOnlyList<SKRect>? SearchBandsFor(LayoutPage page)

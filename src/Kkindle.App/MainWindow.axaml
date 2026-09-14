@@ -2907,6 +2907,15 @@
                                         </StackPanel>
                                     </Border>
                                 </Expander>
+                                <Expander x:Name="SettingsReadingDataExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.440C143379A34160}" Tag="{DynamicResource Ui.Auto.2DFB956FAF03E30A}" AutomationProperties.Name="{DynamicResource Ui.Auto.440C143379A34160}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                    <Border>
+                                        <StackPanel Spacing="10">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.C9FD4D3CBC6F284A}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <Button x:Name="ResetReadingDataButton" Content="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" AutomationProperties.Name="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" Classes="quiet" HorizontalAlignment="Left" Click="ResetReadingDataButton_Click" />
+                                            <TextBlock x:Name="SettingsReadingDataStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
                                 <Expander x:Name="SettingsDataDirectoryExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.95AD5BF35F521BC6}" Tag="{DynamicResource Ui.Auto.42B74722A4C077FE}" AutomationProperties.Name="{DynamicResource Ui.Auto.95AD5BF35F521BC6}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border>
                                         <StackPanel Spacing="8">
@@ -3304,7 +3313,7 @@
                         <TextBlock x:Name="ConfirmationTitleText" FontSize="18" FontWeight="Bold" />
                         <TextBlock x:Name="ConfirmationMessageText" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="7" Margin="0,8,0,0">
-                            <Button Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Padding="13,7" Click="ConfirmationCancelButton_Click" />
+                            <Button x:Name="ConfirmationCancelButton" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Padding="13,7" Click="ConfirmationCancelButton_Click" />
                             <Button x:Name="ConfirmationOkButton" Content="{DynamicResource Ui.Auto.A3EA3C17B401BD2F}" Padding="13,7" Click="ConfirmationOkButton_Click" />
                         </StackPanel>
                     </StackPanel>
@@ -5811,6 +5820,8 @@
                                 <MenuFlyout FlyoutPresenterClasses="readerMenu" ShowMode="Transient"
                                             Placement="Bottom"
                                             VerticalOffset="4"
+                                            Opened="ReaderSelectionHighlightFlyout_Opened"
+                                            Closed="ReaderSelectionHighlightFlyout_Closed"
                                             OverlayDismissEventPassThrough="True">
                                     <MenuItem x:Name="ReaderSelectionHighlightSolidItem" Header="{DynamicResource Ui.Auto.91F5C1B272FBDAFD}" Classes="readerSelectionStyle" Tag="solid" Click="ReaderSelectionHighlightStyleItem_Click" />
                                     <MenuItem Header="{DynamicResource Ui.Auto.A6698E0626B4FA35}" Classes="readerSelectionStyle" Tag="double" Click="ReaderSelectionHighlightStyleItem_Click" />
@@ -5818,7 +5829,57 @@
                                     <MenuItem Header="{DynamicResource Ui.Auto.BDDE3C3FF3DD4E89}" Classes="readerSelectionStyle" Tag="dotted" Click="ReaderSelectionHighlightStyleItem_Click" />
                                     <MenuItem Header="{DynamicResource Ui.Auto.B601C29A9B51CF20}" Classes="readerSelectionStyle" Tag="wavy" Click="ReaderSelectionHighlightStyleItem_Click" />
                                     <Separator />
-                                    <MenuItem Header="{DynamicResource Ui.Auto.30A96F7A6D6F3C86}" Classes="readerSelectionStyle" Tag="marker" Click="ReaderSelectionHighlightStyleItem_Click" />
+                                    <MenuItem x:Name="ReaderSelectionMarkerItem" Classes="readerSelectionStyle" Tag="marker" Click="ReaderSelectionHighlightStyleItem_Click">
+                                        <MenuItem.Header>
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock x:Name="ReaderSelectionMarkerLabel" Text="{DynamicResource Ui.Auto.51CBFC596D18C946}" VerticalAlignment="Center" />
+                                                <Button x:Name="ReaderSelectionMarkerColorButton" Grid.Column="1" Classes="readerMarkerColorPicker" Margin="12,0,0,0"
+                                                        ToolTip.Tip="{DynamicResource Ui.Auto.AE3A39B9007FBC10}"
+                                                        AutomationProperties.Name="{DynamicResource Ui.Auto.AE3A39B9007FBC10}"
+                                                        Click="ReaderSelectionMarkerColorButton_Click">
+                                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                                        <Border x:Name="ReaderSelectionMarkerColorPreview" Width="14" Height="14" Background="#000000" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" VerticalAlignment="Center" />
+                                                        <TextBlock x:Name="ReaderSelectionMarkerColorText" Text="{DynamicResource Ui.Auto.078472BE6C94CB17}" FontSize="12" VerticalAlignment="Center" />
+                                                        <Path Width="8" Height="5" Data="M 0,0 L 4,4 L 8,0" Stroke="{DynamicResource ReaderInkBrush}" StrokeThickness="1" Fill="{x:Null}" VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                    <FlyoutBase.AttachedFlyout>
+                                                        <Flyout FlyoutPresenterClasses="readerMarkerPalette" Placement="Bottom" VerticalOffset="3" ShowMode="Standard">
+                                                            <StackPanel x:Name="ReaderSelectionMarkerPalette" Orientation="Horizontal" Spacing="3">
+                                                                <Button Classes="readerMarkerColorOption" Tag="#000000" Click="ReaderSelectionHighlightColorItem_Click"
+                                                                        ToolTip.Tip="{DynamicResource Ui.Auto.078472BE6C94CB17}" AutomationProperties.Name="{DynamicResource Ui.Auto.078472BE6C94CB17}">
+                                                                    <Border Width="16" Height="16" Background="#000000" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" />
+                                                                </Button>
+                                                                <Button Classes="readerMarkerColorOption" Tag="#FFD54F" Click="ReaderSelectionHighlightColorItem_Click"
+                                                                        ToolTip.Tip="{DynamicResource Ui.Auto.D451C07D739B3306}" AutomationProperties.Name="{DynamicResource Ui.Auto.D451C07D739B3306}">
+                                                                    <Border Width="16" Height="16" Background="#FFD54F" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" />
+                                                                </Button>
+                                                                <Button Classes="readerMarkerColorOption" Tag="#81C784" Click="ReaderSelectionHighlightColorItem_Click"
+                                                                        ToolTip.Tip="{DynamicResource Ui.Auto.30C83DC25B12C32C}" AutomationProperties.Name="{DynamicResource Ui.Auto.30C83DC25B12C32C}">
+                                                                    <Border Width="16" Height="16" Background="#81C784" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" />
+                                                                </Button>
+                                                                <Button Classes="readerMarkerColorOption" Tag="#64B5F6" Click="ReaderSelectionHighlightColorItem_Click"
+                                                                        ToolTip.Tip="{DynamicResource Ui.Auto.67035E6B7F82ACDB}" AutomationProperties.Name="{DynamicResource Ui.Auto.67035E6B7F82ACDB}">
+                                                                    <Border Width="16" Height="16" Background="#64B5F6" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" />
+                                                                </Button>
+                                                                <Button Classes="readerMarkerColorOption" Tag="#F48FB1" Click="ReaderSelectionHighlightColorItem_Click"
+                                                                        ToolTip.Tip="{DynamicResource Ui.Auto.DBD379B39F0D3537}" AutomationProperties.Name="{DynamicResource Ui.Auto.DBD379B39F0D3537}">
+                                                                    <Border Width="16" Height="16" Background="#F48FB1" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" />
+                                                                </Button>
+                                                                <Button Classes="readerMarkerColorOption" Tag="#B39DDB" Click="ReaderSelectionHighlightColorItem_Click"
+                                                                        ToolTip.Tip="{DynamicResource Ui.Auto.2ED9C6FABAC2013A}" AutomationProperties.Name="{DynamicResource Ui.Auto.2ED9C6FABAC2013A}">
+                                                                    <Border Width="16" Height="16" Background="#B39DDB" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" />
+                                                                </Button>
+                                                                <Button Classes="readerMarkerColorOption" Tag="#FFB74D" Click="ReaderSelectionHighlightColorItem_Click"
+                                                                        ToolTip.Tip="{DynamicResource Ui.Auto.AA1E899DD35771B0}" AutomationProperties.Name="{DynamicResource Ui.Auto.AA1E899DD35771B0}">
+                                                                    <Border Width="16" Height="16" Background="#FFB74D" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" />
+                                                                </Button>
+                                                            </StackPanel>
+                                                        </Flyout>
+                                                    </FlyoutBase.AttachedFlyout>
+                                                </Button>
+                                            </Grid>
+                                        </MenuItem.Header>
+                                    </MenuItem>
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>

@@ -17,11 +17,12 @@ public partial class MainWindow
     // pane only lists annotations. Style/color therefore come from the last
     // 划线 ▾ choice (or the defaults below) instead of panel combos.
     private string _readerLastHighlightStyle = "solid";
+    private string _readerLastMarkerColor = "#000000";
     private Point? _readerLastSelectionPopupAnchor;
     private double? _readerLastSelectionPopupBottom;
 
     private async Task SaveReaderAnnotationAsync(
-        string note,
+        string? note,
         string? underlineStyle = null,
         string? color = null)
     {
@@ -47,7 +48,8 @@ public partial class MainWindow
                 && item.StartOffset == _readerPendingSelectionStartOffset
                 && item.EndOffset == _readerPendingSelectionEndOffset)
             : null;
-        var annotation = _selectedReaderAnnotation ?? exact ?? new ReaderAnnotation
+        var existing = _selectedReaderAnnotation ?? exact;
+        var annotation = existing ?? new ReaderAnnotation
         {
             BookId = _readerBookCard.Book.Id,
             BookFileId = _readerBookFile.Id,
@@ -74,16 +76,17 @@ public partial class MainWindow
             }
         }
 
-        var normalizedStyle = NormalizeReaderAnnotationStyle(underlineStyle ?? _selectedReaderAnnotation?.UnderlineStyle ?? _readerLastHighlightStyle);
+        var normalizedStyle = NormalizeReaderAnnotationStyle(underlineStyle ?? existing?.UnderlineStyle ?? _readerLastHighlightStyle);
         annotation.ChapterPath = chapterPath;
         annotation.Fragment = _readerIsPdf
             ? null
             : _readerCurrentFragment;
         if (selectedText.Length > 0) annotation.SelectedText = selectedText;
-        annotation.Note = note.Trim();
-        annotation.Color = normalizedStyle == "marker"
-            ? "#000000"
-            : NormalizeReaderAnnotationColor(color ?? _selectedReaderAnnotation?.Color ?? "#000000");
+        // Quick style/color changes preserve notes; the editor can still
+        // explicitly clear a note by saving an empty string.
+        if (note is not null) annotation.Note = note.Trim();
+        annotation.Color = NormalizeReaderAnnotationColor(
+            color ?? existing?.Color ?? (normalizedStyle == "marker" ? _readerLastMarkerColor : "#000000"));
         annotation.UnderlineStyle = normalizedStyle;
         annotation.StartOffset = _readerPendingSelectionStartOffset;
         annotation.EndOffset = isPdfPageNote
@@ -299,12 +302,18 @@ public partial class MainWindow
     // The "划线 ▾" quick-style actions now arrive from the in-page selection
     // bar (the webview is a native HWND island Avalonia cannot paint over);
     // the chosen style is remembered as the default for later annotations.
-    private async Task ApplyReaderHighlightStyleAsync(string style)
+    private async Task ApplyReaderHighlightStyleAsync(string style, string? color = null)
     {
-        _readerLastHighlightStyle = style;
+        _readerLastHighlightStyle = NormalizeReaderAnnotationStyle(style);
+        if (_readerLastHighlightStyle == "marker")
+        {
+            _readerLastMarkerColor = NormalizeReaderAnnotationColor(color ?? _readerLastMarkerColor);
+            color = _readerLastMarkerColor;
+        }
         await SaveReaderAnnotationAsync(
-            string.Empty,
-            underlineStyle: style);
+            null,
+            underlineStyle: _readerLastHighlightStyle,
+            color: color);
     }
 
     private static async Task ClearCurrentReaderSelectionAsync(IReaderHost host)

@@ -1,11 +1,13 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Kkindle.Core;
 using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Infrastructure;
 
-// Grow-only counters per device make offline reading time and daily reading
-// history additive and idempotent. The shared legacy component imports
+// Grow-only counters per device and original file make offline reading time
+// additive even when the same device reimports a book. The shared legacy component imports
 // pre-counter totals once, using max rather than counting the same historical
 // time on every device.
 internal static class ReadingTimeSyncTracker
@@ -82,9 +84,7 @@ internal static class ReadingTimeSyncTracker
         var knownTotal = Total(counters);
         if (localTotal > knownTotal)
         {
-            using var device = Command(connection, transaction,
-                "SELECT Value FROM S3SyncLocalMetadata WHERE Key = 'reading-time-device';");
-            var deviceId = (string)(await device.ExecuteScalarAsync(cancellationToken))!;
+            var deviceId = await GetLocalCounterIdAsync(connection, transaction, fileId, cancellationToken);
             var value = checked(counters.GetValueOrDefault(deviceId) + localTotal - knownTotal);
             await SetMaximumAsync(connection, transaction, fileId, deviceId, value, cancellationToken);
             counters[deviceId] = value;
@@ -142,17 +142,16 @@ internal static class ReadingTimeSyncTracker
     {
         if (activeSeconds <= 0) return;
         var date = recordedAt.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var deviceId = await GetLocalCounterIdAsync(connection, transaction, fileId, cancellationToken);
         using var command = Command(connection, transaction, """
             INSERT INTO S3SyncReadingDayCounters (BookFileId, ReadingDate, DeviceId, Seconds)
-            VALUES (
-                $file, $date,
-                COALESCE((SELECT Value FROM S3SyncLocalMetadata WHERE Key = 'reading-time-device'), 'legacy'),
-                $seconds)
+            VALUES ($file, $date, $device, $seconds)
             ON CONFLICT(BookFileId, ReadingDate, DeviceId) DO UPDATE SET
                 Seconds = S3SyncReadingDayCounters.Seconds + excluded.Seconds;
             """,
             ("$file", fileId.ToString()),
             ("$date", date),
+            ("$device", deviceId),
             ("$seconds", activeSeconds));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -329,6 +328,18 @@ internal static class ReadingTimeSyncTracker
     {
         if (string.Equals(value, "legacy", StringComparison.Ordinal)) return "legacy";
         return Guid.TryParse(value, out var deviceId) ? deviceId.ToString("N") : null;
+    }
+
+    private static async Task<string> GetLocalCounterIdAsync(
+        SqliteConnection connection, SqliteTransaction transaction, Guid fileId, CancellationToken cancellationToken)
+    {
+        using var device = Command(connection, transaction,
+            "SELECT Value FROM S3SyncLocalMetadata WHERE Key = 'reading-time-device';");
+        var deviceId = NormalizeDeviceId(await device.ExecuteScalarAsync(cancellationToken) as string) ?? "legacy";
+        // The opaque GUID remains compatible with older snapshot readers. Do
+        // not rename existing counters: other devices may still hold them.
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"reading-time-v2:{deviceId}:{fileId:N}"));
+        return new Guid(hash.AsSpan(0, 16)).ToString("N");
     }
 
     private static SqliteCommand Command(

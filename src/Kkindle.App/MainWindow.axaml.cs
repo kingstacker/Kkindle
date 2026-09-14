@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
@@ -93,6 +94,11 @@ public partial class MainWindow : Window
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
     private readonly KindleEmailSender _kindleEmailSender;
     private readonly S3SyncService _s3SyncService;
+    // Refreshing the library rebuilds BookCardViewModel instances. Keep the
+    // last per-book result so a transient refresh failure cannot turn every
+    // existing card back into the default NotSynced state.
+    private readonly ConcurrentDictionary<Guid, BookSyncStatus> _bookSyncStatusCache = new();
+    private long _bookSyncStatusRefreshVersion;
     private readonly UpdateService? _updateService;
     private AppSettings _appSettings = new();
     private ZLibrarySettings _zLibrarySettings = new();
@@ -1124,6 +1130,8 @@ public partial class MainWindow : Window
         SidebarCountText.Text = ViewModel.BookCount.ToString();
         foreach (var card in ViewModel.Books)
         {
+            if (_bookSyncStatusCache.TryGetValue(card.Book.Id, out var cachedSyncStatus))
+                card.SetSyncStatus(cachedSyncStatus);
             card.SetGalleryTextVisible(!_appSettings.GridGalleryDisplay);
             card.SetSyncStatusVisible(_appSettings.ShowSyncStatusIcon);
             card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled && _appSettings.ShowLibraryPresenceIcon);
@@ -1504,14 +1512,27 @@ public partial class MainWindow : Window
         var cards = ViewModel.Books.ToArray();
         if (cards.Length == 0) return;
 
-        IReadOnlyDictionary<Guid, BookSyncStatus> statuses;
+        var refreshVersion = Interlocked.Increment(ref _bookSyncStatusRefreshVersion);
         try
         {
-            statuses = await _s3SyncService.GetBookSyncStatusesAsync(
+            var statuses = await _s3SyncService.GetBookSyncStatusesAsync(
                 _s3SyncStoredSettings.DeviceId,
                 _s3SyncStoredSettings.Settings,
                 cards.Select(card => card.Book).ToArray(),
                 cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (refreshVersion != Volatile.Read(ref _bookSyncStatusRefreshVersion)) return;
+
+            foreach (var (bookId, status) in statuses)
+                _bookSyncStatusCache[bookId] = status;
+
+            var visibleCards = ViewModel.Books.ToHashSet();
+            foreach (var card in cards)
+            {
+                if (visibleCards.Contains(card))
+                    card.SetSyncStatus(statuses.GetValueOrDefault(card.Book.Id, BookSyncStatus.NotSynced));
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1519,12 +1540,20 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            Debug.WriteLine($"Book sync status refresh failed: {exception.Message}");
-            statuses = cards.ToDictionary(card => card.Book.Id, _ => BookSyncStatus.NotSynced);
-        }
+            Debug.WriteLine($"Book sync status refresh failed: {exception}");
+            if (refreshVersion != Volatile.Read(ref _bookSyncStatusRefreshVersion)) return;
 
-        foreach (var card in cards)
-            card.SetSyncStatus(statuses.GetValueOrDefault(card.Book.Id, BookSyncStatus.NotSynced));
+            // Keep the last known state for existing books. A newly imported
+            // card has no cache entry and therefore keeps its own default
+            // NotSynced state until a later refresh succeeds.
+            var visibleCards = ViewModel.Books.ToHashSet();
+            foreach (var card in cards)
+            {
+                if (visibleCards.Contains(card)
+                    && _bookSyncStatusCache.TryGetValue(card.Book.Id, out var previousStatus))
+                    card.SetSyncStatus(previousStatus);
+            }
+        }
     }
 
     private async Task RefreshLibraryMatchRecordsAsync(CancellationToken cancellationToken)
@@ -1974,7 +2003,33 @@ public partial class MainWindow : Window
             SetTaskStatus(T("无法下载《{0}》：请检查云端同步配置和网络连接。", card.Title));
     }
 
+    private int _bookOpenInProgress;
+
     private async Task OpenBookAsync(
+        BookCardViewModel card,
+        BookFile? requestedFile = null,
+        bool restoreProgress = true)
+    {
+        // A remote reset can be applied by a sync that started before this
+        // click. Wait before loading any checkpoint into the reader session.
+        while (_s3SyncBusy)
+        {
+            if (_s3SyncCompletion is null) return;
+            SetTaskStatus(T("正在等待云端同步完成…"));
+            try { await WaitForS3SyncAsync(_lifetimeCancellation.Token); }
+            catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { return; }
+        }
+        if (_readingDataResetBusy)
+        {
+            SetTaskStatus(T("阅读数据正在重置，请稍后再打开书籍。"));
+            return;
+        }
+        _bookOpenInProgress++;
+        try { await OpenBookCoreAsync(card, requestedFile, restoreProgress); }
+        finally { _bookOpenInProgress--; }
+    }
+
+    private async Task OpenBookCoreAsync(
         BookCardViewModel card,
         BookFile? requestedFile = null,
         bool restoreProgress = true)
@@ -3419,10 +3474,11 @@ public partial class MainWindow : Window
         bool UpdateCover,
         bool UpdatePublication);
 
-    private async Task<bool> ConfirmAsync(string title, string message, string? primaryText = null, CancellationToken cancellationToken = default)
+    private async Task<bool> ConfirmAsync(string title, string message, string? primaryText = null,
+        CancellationToken cancellationToken = default, bool allowDiagnosticAutoConfirm = true)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
+        if (allowDiagnosticAutoConfirm && Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
         if (_confirmationCompletion is not null) return false;
         ConfirmationTitleText.Text = title;
         ConfirmationMessageText.Text = message;
@@ -3430,6 +3486,7 @@ public partial class MainWindow : Window
             ?? (title.Contains(T("删除"), StringComparison.Ordinal) ? T("确认删除") : T("应用"));
         ShowOverlay(ConfirmationOverlay);
         _confirmationCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!allowDiagnosticAutoConfirm) ConfirmationCancelButton.Focus();
         var completion = _confirmationCompletion;
         try
         {

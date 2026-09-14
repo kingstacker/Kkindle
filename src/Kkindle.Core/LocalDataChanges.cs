@@ -8,7 +8,8 @@ public enum LocalDataChangeKind
     ReadingProgress,
     ReadingLayout,
     ReadingStats,
-    Settings
+    Settings,
+    ReadingDataReset
 }
 
 public sealed class LocalDataChangedEventArgs(LocalDataChangeKind kind) : EventArgs

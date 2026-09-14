@@ -3405,21 +3405,20 @@ public partial class MainWindow
             DashboardStreakText.Text = T("{0} 天", ComputeReadingStreakDays(dashboard.DailyReading));
             DashboardStatusText.IsVisible = false;
 
-            var dashboardTitles = await _library.GetBookTitlesAsync(
-                dashboard.RecentBooks.Select(item => item.BookId).ToArray(),
-                _lifetimeCancellation.Token);
+            string BookTitle(ReadingDashboardBook item)
+            {
+                var title = string.IsNullOrWhiteSpace(item.Title) ? T("未知书名") : item.Title;
+                return item.IsInLibrary ? title : T("{0}（已移出书库）", title);
+            }
             _readingDashboardItems.Clear();
             foreach (var item in dashboard.RecentBooks)
             {
-                var title = dashboardTitles.GetValueOrDefault(item.BookId)
-                    ?? T("未导入的书籍");
                 var recent = new Stage3DashboardRecentViewModel(
-                    title,
+                    BookTitle(item),
                     item.ProgressPercent,
                     item.CumulativeSeconds,
                     item.UpdatedAt);
                 _readingDashboardItems.Add(recent);
-                DashboardRecentItems.Add(recent);
             }
             DashboardRecentEmptyText.IsVisible = _readingDashboardItems.Count == 0;
 
@@ -3435,15 +3434,13 @@ public partial class MainWindow
                     day.Date == today ? 1d : 0.3));
             }
 
-            PopulateDashboardBars(DashboardBookTimes, dashboard.RecentBooks
-                .OrderByDescending(item => item.CumulativeSeconds)
-                .Take(8)
+            PopulateDashboardBars(DashboardBookTimes, dashboard.MostReadBooks
                 .Select(item => (
-                    dashboardTitles.GetValueOrDefault(item.BookId) ?? T("未导入的书籍"),
+                    BookTitle(item),
                     (double)item.CumulativeSeconds,
                     FormatReadingTime(item.CumulativeSeconds))));
 
-            var progressValues = dashboard.RecentBooks.Select(item => item.ProgressPercent).ToArray();
+            var progressValues = dashboard.Books.Select(item => item.ProgressPercent).ToArray();
             PopulateDashboardBars(DashboardProgressBuckets,
             [
                 ("0–24%", (double)progressValues.Count(value => value < 25), T("{0} 本", progressValues.Count(value => value < 25))),
@@ -4369,7 +4366,7 @@ public partial class MainWindow
 
     private bool IsAutomaticS3SyncReady()
     {
-        if (!_stage3Ready || _backupBusy || _s3SyncExitInProgress || !_appSettings.NetworkEnabled
+        if (!_stage3Ready || _backupBusy || _readingDataResetBusy || _s3SyncExitInProgress || !_appSettings.NetworkEnabled
             || _s3DeletionConfirmationPending || _s3SyncCancelledByUser)
             return false;
 
@@ -4570,6 +4567,11 @@ public partial class MainWindow
             return false;
         }
         if (!silent && !await FlushAppSettingsAsync()) return false;
+        if (_readingDataResetBusy)
+        {
+            if (!silent) SetS3SyncStatus(T("阅读数据正在重置，请完成后再执行云端同步。"), silent: false);
+            return false;
+        }
         if (_backupBusy)
         {
             if (!silent) SetS3SyncStatus(T("备份任务正在进行，请完成后再执行 云端同步。"), silent: false);
@@ -4595,7 +4597,7 @@ public partial class MainWindow
             }
             return false;
         }
-        if (_readerDocument is not null || _readerIsPdf)
+        if (_readerDocument is not null || _readerIsPdf || _bookOpenInProgress > 0 || _readerCloseInProgress != 0)
         {
             if (!silent) S3SyncStatusText.Text = T("请先返回书库，再执行同步。");
             return false;
@@ -5353,7 +5355,7 @@ public partial class MainWindow
 
     private async void ExportBackupButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (_backupBusy) return;
+        if (_backupBusy || _readingDataResetBusy) return;
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel is null) return;
         var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -5364,6 +5366,7 @@ public partial class MainWindow
         });
         var path = file?.TryGetLocalPath();
         if (string.IsNullOrWhiteSpace(path)) return;
+        if (_backupBusy || _readingDataResetBusy) return;
         _backupBusy = true;
         ShowTaskProgressPopup();
         TaskProgressPopupBar.IsIndeterminate = true;
@@ -5389,7 +5392,7 @@ public partial class MainWindow
 
     private async Task RunAutoBackupIfNeededAsync(CancellationToken cancellationToken = default)
     {
-        if (!_appSettings.AutoBackupEnabled || _backupBusy) return;
+        if (!_appSettings.AutoBackupEnabled || _backupBusy || _readingDataResetBusy) return;
         try
         {
             Directory.CreateDirectory(_paths.Backups);
@@ -5428,7 +5431,7 @@ public partial class MainWindow
 
     private async void ImportBackupButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (_backupBusy) return;
+        if (_backupBusy || _readingDataResetBusy) return;
         if (_s3SyncBusy)
         {
             await ShowMessageAsync(T("请稍候"), T("云端同步正在进行，请完成后再导入备份。"));
@@ -5449,7 +5452,7 @@ public partial class MainWindow
         });
         var path = files.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrWhiteSpace(path) || !await ConfirmAsync(T("导入 Kkindle 备份"), T("导入会覆盖当前书库、封面和阅读记录，确定继续吗？"))) return;
-        if (_backupBusy) return;
+        if (_backupBusy || _readingDataResetBusy) return;
         if (_s3SyncBusy)
         {
             await ShowMessageAsync(T("请稍候"), T("云端同步正在进行，请完成后再导入备份。"));

@@ -47,6 +47,7 @@ public sealed partial class S3SyncService
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
+        await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         using (var control = CreateCommand(connection, transaction, """
             CREATE TABLE IF NOT EXISTS S3SyncDeletionControl (
@@ -167,14 +168,6 @@ public sealed partial class S3SyncService
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private async Task<Dictionary<string, DateTimeOffset>> ReadRecordedDeletionTimesAsync(
-        CancellationToken cancellationToken)
-    {
-        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
-        await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
-        return await ReadRecordedDeletionTimesInTransactionAsync(connection, null, cancellationToken);
-    }
-
     private static async Task<Dictionary<string, DateTimeOffset>> ReadRecordedDeletionTimesInTransactionAsync(
         SqliteConnection connection,
         SqliteTransaction? transaction,
@@ -241,8 +234,13 @@ public sealed partial class S3SyncService
         IReadOnlyCollection<S3SyncTombstone> tombstones,
         CancellationToken cancellationToken)
     {
+        var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
         var snapshot = new S3SyncSnapshot
         {
+            // Older clients must not merge counters across a reset. Keep the
+            // existing format until the first reset, then require version 3.
+            Version = readingReset is null ? 2 : SnapshotVersion,
+            ReadingDataReset = readingReset,
             DeviceId = deviceId,
             CreatedAt = DateTimeOffset.UtcNow,
             Tombstones = tombstones.ToList()
@@ -466,9 +464,11 @@ public sealed partial class S3SyncService
 
         using (var command = CreateCommand(connection, transaction, 
             """
-            SELECT BookId, BookFileId, CumulativeSeconds, ProgressPercent,
-                   CompletedChapters, TotalChapters, UpdatedAt
-            FROM ReaderReadingStats;
+            SELECT s.BookId, s.BookFileId, s.CumulativeSeconds, s.ProgressPercent,
+                   s.CompletedChapters, s.TotalChapters, s.UpdatedAt,
+                   COALESCE(h.Title, ''), COALESCE(h.Sha256, '')
+            FROM ReaderReadingStats s
+            LEFT JOIN ReaderReadingHistory h ON h.BookFileId = s.BookFileId;
             """
             ))
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
@@ -482,7 +482,9 @@ public sealed partial class S3SyncService
                     ProgressPercent = reader.GetDouble(3),
                     CompletedChapters = reader.GetInt32(4),
                     TotalChapters = reader.GetInt32(5),
-                    UpdatedAt = ParseTimestamp(reader.GetString(6))
+                    UpdatedAt = ParseTimestamp(reader.GetString(6)),
+                    BookTitle = reader.GetString(7),
+                    FileSha256 = reader.GetString(8)
                 });
         }
 
@@ -496,7 +498,9 @@ public sealed partial class S3SyncService
             await ReadingTimeSyncTracker.UpdateTotalAsync(connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
         }
         var recorded = await ReadRecordedDeletionTimesInTransactionAsync(connection, transaction, cancellationToken);
-        snapshot.Tombstones = MergeTombstones(tombstones, GetRecordedTombstones(recorded, snapshot));
+        snapshot.LocalDeletionTimes = recorded;
+        snapshot.Tombstones = MergeTombstones(
+            FilterReadingTombstones(tombstones, readingReset), GetRecordedTombstones(recorded, snapshot));
         return snapshot;
     }
 
@@ -633,13 +637,13 @@ public sealed partial class S3SyncService
             .Select(group => group.OrderByDescending(snapshot => snapshot.CreatedAt).First())
             .ToArray();
 
-        // Callers normally merge remote tombstones in SyncAsync. Keeping the
-        // merge here as well makes this database phase safe to invoke on its
-        // own (and avoids ever preparing a stale remote row before its
-        // tombstone has been considered).
+        var readingReset = ReaderReadingDataReset.Latest(
+            snapshots.Select(snapshot => snapshot.ReadingDataReset).Prepend(localSnapshot.ReadingDataReset));
+        // Scope reading deletions to the winning reset before merging them;
+        // old devices may still publish deletions with later wall-clock times.
         localSnapshot.Tombstones = MergeTombstones(
-            localSnapshot.Tombstones ?? [],
-            snapshots.SelectMany(snapshot => snapshot.Tombstones ?? []));
+            FilterReadingTombstones(localSnapshot.Tombstones ?? [], readingReset),
+            snapshots.SelectMany(snapshot => FilterReadingTombstones(snapshot.Tombstones ?? [], readingReset)));
 
         var warnings = new List<string>();
         var isPartial = false;
@@ -649,6 +653,7 @@ public sealed partial class S3SyncService
             cancellationToken);
         if (duplicateBooksMerged > 0)
             warnings.Add(UiText.Get("已自动合并 {0} 本重复书籍。", duplicateBooksMerged));
+        var readingHistoryMerged = await ConsolidateLocalReadingHistoryAsync(cancellationToken);
 
         if (snapshots.Length == 0)
         {
@@ -657,7 +662,7 @@ public sealed partial class S3SyncService
                 0,
                 0,
                 0,
-                duplicateBooksMerged > 0,
+                duplicateBooksMerged > 0 || readingHistoryMerged,
                 warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct()))
             {
                 RemoteBookIds = new HashSet<Guid>(),
@@ -760,6 +765,7 @@ public sealed partial class S3SyncService
                 && !IsTombstoned(tombstoneIndex, "file", annotation.BookFileId, annotation.UpdatedAt))
             .ToArray();
         var remoteProgress = snapshots
+            .Where(snapshot => snapshot.ReadingDataReset == readingReset)
             .SelectMany(snapshot => snapshot.Progress)
             .GroupBy(item => item.BookFileId)
             .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
@@ -787,14 +793,19 @@ public sealed partial class S3SyncService
                 && !IsTombstoned(tombstoneIndex, "file", item.BookFileId, item.UpdatedAt))
             .ToArray();
         var remoteStats = snapshots
+            .Where(snapshot => snapshot.ReadingDataReset == readingReset)
             .SelectMany(snapshot => snapshot.ReadingStats)
             .GroupBy(stats => stats.BookFileId)
             .Select(MergeRemoteReadingStats)
-            .Where(item => !tombstonedBooks.Contains(item.BookId)
-                && !IsTombstoned(tombstoneIndex, "book", item.BookId, item.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "stats", item.BookFileId, item.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "file", item.BookFileId, item.UpdatedAt))
+            .Where(item => !IsTombstoned(tombstoneIndex, "stats", item.BookFileId, item.UpdatedAt))
             .ToArray();
+        var remoteTitles = allRemoteBooks.ToDictionary(book => book.Id, book => book.Title);
+        var remoteHashes = allRemoteFiles.ToDictionary(file => file.Id, file => file.Sha256);
+        foreach (var stats in remoteStats)
+        {
+            if (string.IsNullOrWhiteSpace(stats.BookTitle)) stats.BookTitle = remoteTitles.GetValueOrDefault(stats.BookId) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(stats.FileSha256)) stats.FileSha256 = remoteHashes.GetValueOrDefault(stats.BookFileId) ?? string.Empty;
+        }
         void RefilterRemoteRows()
         {
             var view = FilterRemoteRows(new S3SyncSnapshot
@@ -956,11 +967,11 @@ public sealed partial class S3SyncService
             }
         }
 
-        var locallyKnownFileIds = new HashSet<Guid>(localIdentity.FilesById.Keys);
+        var locallyKnownFiles = localIdentity.FilesById.Values.ToDictionary(file => file.Id, file => file.BookId);
         foreach (var prepared in preparedFilesByLocalId.Values)
-            locallyKnownFileIds.Add(prepared.LocalFileId);
+            locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
 
-        var changed = duplicateBooksMerged > 0;
+        var changed = duplicateBooksMerged > 0 || readingHistoryMerged;
         var booksAdded = 0;
         var addedBookIds = new HashSet<Guid>();
         var annotationsApplied = 0;
@@ -972,10 +983,32 @@ public sealed partial class S3SyncService
             // that applies the merge, so a just-deleted row cannot be revived.
             var currentLocal = await CaptureDatabaseSnapshotAsync(
                 connection, transaction, localSnapshot.DeviceId, localSnapshot.Tombstones, cancellationToken);
+            var currentReset = ReaderReadingDataReset.Latest(
+                snapshots.Select(snapshot => snapshot.ReadingDataReset).Prepend(currentLocal.ReadingDataReset));
+            if (currentReset != readingReset)
+            {
+                // A local reset during the download supersedes every remote
+                // generation selected above. None of those counters or
+                // checkpoints can be imported into the new generation.
+                remoteProgress = [];
+                remoteStats = [];
+                readingReset = currentReset;
+            }
+            if (currentLocal.ReadingDataReset != readingReset)
+            {
+                await ReaderReadingDataReset.ApplyAsync(connection, transaction, readingReset!, cancellationToken);
+                currentLocal.ReadingDataReset = readingReset;
+                currentLocal.Progress.Clear();
+                currentLocal.ReadingStats.Clear();
+                changed = true;
+            }
             var currentBooks = currentLocal.Books.ToDictionary(book => book.Id);
             var currentFileIds = currentLocal.Files.Select(file => file.Id).ToHashSet();
-            localSnapshot.Tombstones = currentLocal.Tombstones;
-            tombstoneIndex = BuildTombstoneIndex(currentLocal.Tombstones);
+            localSnapshot.ReadingDataReset = readingReset;
+            localSnapshot.Tombstones = MergeTombstones(
+                FilterReadingTombstones(currentLocal.Tombstones, readingReset),
+                snapshots.SelectMany(snapshot => FilterReadingTombstones(snapshot.Tombstones ?? [], readingReset)));
+            tombstoneIndex = BuildTombstoneIndex(localSnapshot.Tombstones);
             RefilterRemoteRows();
             foreach (var (id, prepared) in preparedFilesByLocalId.ToArray())
             {
@@ -1000,9 +1033,11 @@ public sealed partial class S3SyncService
                     coverUpdates.Remove(id);
                 }
             }
-            locallyKnownFileIds.Clear();
-            locallyKnownFileIds.UnionWith(currentLocal.Files.Select(file => file.Id));
-            locallyKnownFileIds.UnionWith(preparedFilesByLocalId.Keys);
+            locallyKnownFiles.Clear();
+            foreach (var file in currentLocal.Files)
+                locallyKnownFiles[file.Id] = file.BookId;
+            foreach (var prepared in preparedFilesByLocalId.Values)
+                locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
             await SuppressDeletionTrackingAsync(connection, transaction, true, cancellationToken);
             using var commandCache = new SqliteCommandCache(connection, transaction);
             foreach (var book in remoteBooks)
@@ -1053,7 +1088,7 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$size", prepared.Source.Size);
                 AddParameter(command, "$sha256", prepared.Source.Sha256.ToLowerInvariant());
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
-                locallyKnownFileIds.Add(prepared.LocalFileId);
+                locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
             }
 
             foreach (var (bookId, cover) in coverUpdates)
@@ -1095,7 +1130,7 @@ public sealed partial class S3SyncService
 
             foreach (var annotation in remoteAnnotations)
             {
-                if (!TryMapReaderRow(annotation.BookId, annotation.BookFileId, bookMap, fileMap, locallyKnownFileIds, out var localBookId, out var localFileId))
+                if (!TryMapReaderRow(annotation.BookFileId, fileMap, locallyKnownFiles, out var localBookId, out var localFileId))
                     continue;
                 var command = commandCache.Get(
                     """
@@ -1138,7 +1173,7 @@ public sealed partial class S3SyncService
 
             foreach (var item in remoteProgress)
             {
-                if (!TryMapReaderRow(item.BookId, item.BookFileId, bookMap, fileMap, locallyKnownFileIds, out var localBookId, out var localFileId))
+                if (!TryMapReaderRow(item.BookFileId, fileMap, locallyKnownFiles, out var localBookId, out var localFileId))
                     continue;
                 var command = commandCache.Get(
                     """
@@ -1170,7 +1205,7 @@ public sealed partial class S3SyncService
 
             foreach (var bookmark in remoteBookmarks)
             {
-                if (!TryMapReaderRow(bookmark.BookId, bookmark.BookFileId, bookMap, fileMap, locallyKnownFileIds, out var localBookId, out var localFileId))
+                if (!TryMapReaderRow(bookmark.BookFileId, fileMap, locallyKnownFiles, out var localBookId, out var localFileId))
                     continue;
                 var command = commandCache.Get(
                     """
@@ -1205,7 +1240,7 @@ public sealed partial class S3SyncService
 
             foreach (var layout in remoteLayouts)
             {
-                if (!TryMapReaderRow(layout.BookId, layout.BookFileId, bookMap, fileMap, locallyKnownFileIds, out var localBookId, out var localFileId))
+                if (!TryMapReaderRow(layout.BookFileId, fileMap, locallyKnownFiles, out var localBookId, out var localFileId))
                     continue;
                 var normalized = ReaderLayoutDefaults.Normalize(new ReaderLayoutSettings(
                     layout.FontScale,
@@ -1254,8 +1289,16 @@ public sealed partial class S3SyncService
 
             foreach (var stats in remoteStats)
             {
-                if (!TryMapReaderRow(stats.BookId, stats.BookFileId, bookMap, fileMap, locallyKnownFileIds, out var localBookId, out var localFileId))
-                    continue;
+                if (!TryMapReaderRow(stats.BookFileId, fileMap, locallyKnownFiles, out var localBookId, out var localFileId))
+                {
+                    // Deleted books retain their reading history without
+                    // recreating a library entry or downloading their files.
+                    // Old snapshots without any identity metadata cannot be
+                    // safely matched to archived records on another device.
+                    if (string.IsNullOrWhiteSpace(stats.BookTitle) && !IsSha256(stats.FileSha256)) continue;
+                    localBookId = stats.BookId;
+                    localFileId = stats.BookFileId;
+                }
                 var mergedSeconds = await ReadingTimeSyncTracker.MergeAsync(
                     connection, transaction, localFileId, stats.SecondsByDevice, stats.CumulativeSeconds, cancellationToken);
                 var command = commandCache.Get(
@@ -1282,6 +1325,8 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$totalChapters", stats.TotalChapters);
                 AddParameter(command, "$updatedAt", stats.UpdatedAt.ToString("O"));
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+                changed |= await ReaderReadingHistory.RememberAsync(
+                    connection, transaction, localBookId, localFileId, stats.BookTitle, stats.FileSha256, cancellationToken);
                 changed |= await ReadingTimeSyncTracker.UpdateTotalAsync(
                     connection, transaction, localFileId, mergedSeconds, cancellationToken) > 0;
                 await ReadingTimeSyncTracker.MergeReadingDaysAsync(
@@ -1309,6 +1354,7 @@ public sealed partial class S3SyncService
                 commandCache,
                 cancellationToken);
 
+            changed |= await ConsolidateReadingHistoryRowsAsync(connection, transaction, commandCache, cancellationToken);
             await RemoveReferencedScheduledPathsAsync(
                 connection,
                 transaction,
@@ -1361,6 +1407,9 @@ public sealed partial class S3SyncService
         return new S3SyncReadingStats
         {
             BookId = latest.BookId, BookFileId = latest.BookFileId,
+            BookTitle = rows.OrderByDescending(row => row.UpdatedAt).Select(row => row.BookTitle)
+                .FirstOrDefault(title => !string.IsNullOrWhiteSpace(title)) ?? string.Empty,
+            FileSha256 = rows.Select(row => row.FileSha256).FirstOrDefault(IsSha256) ?? string.Empty,
             CumulativeSeconds = ReadingTimeSyncTracker.Total(counters), SecondsByDevice = counters,
             SecondsByDateByDevice = dailyCounters,
             ProgressPercent = latest.ProgressPercent, CompletedChapters = latest.CompletedChapters,
@@ -1403,8 +1452,8 @@ public sealed partial class S3SyncService
             && !IsTombstoned(tombstones, "bookmark", row.Id, row.CreatedAt)).ToList();
         view.Layouts = view.Layouts.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
             && !Deleted("layout", row.BookFileId, row.UpdatedAt, fileMap)).ToList();
-        view.ReadingStats = view.ReadingStats.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
-            && !Deleted("stats", row.BookFileId, row.UpdatedAt, fileMap)).ToList();
+        view.ReadingStats = view.ReadingStats.Where(row =>
+            !Deleted("stats", row.BookFileId, row.UpdatedAt, fileMap)).ToList();
         return view;
     }
 
@@ -1994,46 +2043,29 @@ public sealed partial class S3SyncService
         SqliteCommandCache commandCache,
         CancellationToken cancellationToken)
     {
+        await ReaderReadingHistory.MergeFilesAsync(connection, transaction, sourceFileId, targetFileId, canonicalBookId, cancellationToken);
         await ReadingTimeSyncTracker.MergeFilesAsync(connection, transaction, sourceFileId, targetFileId, cancellationToken);
-        var copyAnnotations = commandCache.Get(
+        var moveAnnotations = commandCache.Get(
             """
-            INSERT OR IGNORE INTO ReaderAnnotations (
-                Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
-                SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt)
-            SELECT Id, $canonical, $target, ChapterPath, Fragment, StartOffset, EndOffset,
-                   SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
-            FROM ReaderAnnotations
+            UPDATE ReaderAnnotations
+            SET BookId = $canonical, BookFileId = $target
             WHERE BookFileId = $source;
             """);
-        AddParameter(copyAnnotations, "$canonical", canonicalBookId.ToString());
-        AddParameter(copyAnnotations, "$target", targetFileId.ToString());
-        AddParameter(copyAnnotations, "$source", sourceFileId.ToString());
-        await copyAnnotations.ExecuteNonQueryAsync(cancellationToken);
+        AddParameter(moveAnnotations, "$canonical", canonicalBookId.ToString());
+        AddParameter(moveAnnotations, "$target", targetFileId.ToString());
+        AddParameter(moveAnnotations, "$source", sourceFileId.ToString());
+        await moveAnnotations.ExecuteNonQueryAsync(cancellationToken);
 
-        var deleteAnnotations = commandCache.Get(
-            "DELETE FROM ReaderAnnotations WHERE BookFileId = $source;");
-        AddParameter(deleteAnnotations, "$source", sourceFileId.ToString());
-        await deleteAnnotations.ExecuteNonQueryAsync(cancellationToken);
-
-        var copyBookmarks = commandCache.Get(
+        var moveBookmarks = commandCache.Get(
             """
-            INSERT OR IGNORE INTO ReaderBookmarks (
-                Id, BookId, BookFileId, ChapterPath, Fragment, ChapterIndex,
-                ScrollPosition, FlowMode, Title, Quote, CreatedAt)
-            SELECT Id, $canonical, $target, ChapterPath, Fragment, ChapterIndex,
-                   ScrollPosition, FlowMode, Title, Quote, CreatedAt
-            FROM ReaderBookmarks
+            UPDATE ReaderBookmarks
+            SET BookId = $canonical, BookFileId = $target
             WHERE BookFileId = $source;
             """);
-        AddParameter(copyBookmarks, "$canonical", canonicalBookId.ToString());
-        AddParameter(copyBookmarks, "$target", targetFileId.ToString());
-        AddParameter(copyBookmarks, "$source", sourceFileId.ToString());
-        await copyBookmarks.ExecuteNonQueryAsync(cancellationToken);
-
-        var deleteBookmarks = commandCache.Get(
-            "DELETE FROM ReaderBookmarks WHERE BookFileId = $source;");
-        AddParameter(deleteBookmarks, "$source", sourceFileId.ToString());
-        await deleteBookmarks.ExecuteNonQueryAsync(cancellationToken);
+        AddParameter(moveBookmarks, "$canonical", canonicalBookId.ToString());
+        AddParameter(moveBookmarks, "$target", targetFileId.ToString());
+        AddParameter(moveBookmarks, "$source", sourceFileId.ToString());
+        await moveBookmarks.ExecuteNonQueryAsync(cancellationToken);
 
         await MergeVersionedFileRowAsync(
             connection,
@@ -2469,19 +2501,18 @@ public sealed partial class S3SyncService
     }
 
     private static bool TryMapReaderRow(
-        Guid remoteBookId,
         Guid remoteFileId,
-        IReadOnlyDictionary<Guid, Guid> bookMap,
         IReadOnlyDictionary<Guid, Guid> fileMap,
-        IReadOnlySet<Guid> locallyKnownFileIds,
+        IReadOnlyDictionary<Guid, Guid> locallyKnownFiles,
         out Guid localBookId,
         out Guid localFileId)
     {
         localBookId = default;
         localFileId = default;
-        return bookMap.TryGetValue(remoteBookId, out localBookId)
-            && fileMap.TryGetValue(remoteFileId, out localFileId)
-            && locallyKnownFileIds.Contains(localFileId);
+        // The mapped file owns the reading data. An older snapshot may still
+        // name the book ID that existed before duplicate-book consolidation.
+        return fileMap.TryGetValue(remoteFileId, out localFileId)
+            && locallyKnownFiles.TryGetValue(localFileId, out localBookId);
     }
 
     private static bool TryMapTombstoneId(
@@ -2820,9 +2851,6 @@ public sealed partial class S3SyncService
             "DELETE FROM ReaderProgress WHERE BookId = $bookId;",
             "DELETE FROM ReaderBookmarks WHERE BookId = $bookId;",
             "DELETE FROM ReaderLayoutSettings WHERE BookId = $bookId;",
-            "DELETE FROM ReaderReadingStats WHERE BookId = $bookId;",
-            "DELETE FROM ReaderReadingSessions WHERE BookId = $bookId;",
-            "DELETE FROM S3SyncReadingDayCounters WHERE BookFileId IN (SELECT Id FROM BookFiles WHERE BookId = $bookId);",
             "DELETE FROM BookContentChunks WHERE BookId = $bookId;",
             "DELETE FROM BookCollectionItems WHERE BookId = $bookId;",
             "DELETE FROM BookFiles WHERE BookId = $bookId;",
@@ -2860,9 +2888,6 @@ public sealed partial class S3SyncService
             "DELETE FROM ReaderProgress WHERE BookFileId = $fileId;",
             "DELETE FROM ReaderBookmarks WHERE BookFileId = $fileId;",
             "DELETE FROM ReaderLayoutSettings WHERE BookFileId = $fileId;",
-            "DELETE FROM ReaderReadingStats WHERE BookFileId = $fileId;",
-            "DELETE FROM ReaderReadingSessions WHERE BookFileId = $fileId;",
-            "DELETE FROM S3SyncReadingDayCounters WHERE BookFileId = $fileId;",
             "DELETE FROM BookContentChunks WHERE BookFileId = $fileId;",
             "DELETE FROM BookFiles WHERE Id = $fileId;"
         })
@@ -3040,12 +3065,19 @@ public sealed partial class S3SyncService
         var result = new List<S3SyncTombstone>();
         foreach (var (key, deletedAt) in recorded)
         {
-            if (live.ContainsKey(key)
-                || (previousVersions?.TryGetValue(key, out var version) == true && version > deletedAt))
-                continue;
             var separator = key.IndexOf(':');
             if (separator <= 0) continue;
-            result.Add(new S3SyncTombstone { EntityType = key[..separator], Key = key[(separator + 1)..], DeletedAt = deletedAt });
+            var entityType = key[..separator];
+            var sameGeneration = !IsResetReadingEntity(entityType)
+                || previous?.ReadingDataReset == current.ReadingDataReset;
+            if (live.ContainsKey(key)
+                || (sameGeneration && previousVersions?.TryGetValue(key, out var version) == true && version > deletedAt))
+                continue;
+            result.Add(new S3SyncTombstone
+            {
+                EntityType = entityType, Key = key[(separator + 1)..], DeletedAt = deletedAt,
+                ReadingDataResetId = IsResetReadingEntity(entityType) ? current.ReadingDataReset?.Id : null
+            });
         }
         return result;
     }
@@ -3063,6 +3095,7 @@ public sealed partial class S3SyncService
     {
         if (previous is null) return [];
         var result = new List<S3SyncTombstone>();
+        var sameReadingGeneration = previous.ReadingDataReset == current.ReadingDataReset;
 
         AddMissing(
             "book",
@@ -3104,7 +3137,7 @@ public sealed partial class S3SyncService
             previous.CreatedAt,
             current.CreatedAt,
             recordedDeletionTimes);
-        AddMissing(
+        if (sameReadingGeneration) AddMissing(
             "progress",
             previous.Progress.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
             current.Progress.Select(item => item.BookFileId.ToString("N")),
@@ -3128,7 +3161,7 @@ public sealed partial class S3SyncService
             previous.CreatedAt,
             current.CreatedAt,
             recordedDeletionTimes);
-        AddMissing(
+        if (sameReadingGeneration) AddMissing(
             "stats",
             previous.ReadingStats.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
             current.ReadingStats.Select(item => item.BookFileId.ToString("N")),
@@ -3136,6 +3169,8 @@ public sealed partial class S3SyncService
             previous.CreatedAt,
             current.CreatedAt,
             recordedDeletionTimes);
+        foreach (var item in result.Where(item => IsResetReadingEntity(item.EntityType)))
+            item.ReadingDataResetId = current.ReadingDataReset?.Id;
         return result;
     }
 
@@ -3237,12 +3272,15 @@ public sealed partial class S3SyncService
             if (entityType.Length == 0 || normalizedKey.Length == 0)
                 continue;
             var key = VersionKey(entityType, normalizedKey);
+            var readingResetId = IsResetReadingEntity(entityType) ? tombstone.ReadingDataResetId : null;
+            if (readingResetId is { } resetId) key += ":" + resetId.ToString("N");
             if (!merged.TryGetValue(key, out var existing) || tombstone.DeletedAt > existing.DeletedAt)
                 merged[key] = new S3SyncTombstone
                 {
                     EntityType = entityType,
                     Key = normalizedKey,
-                    DeletedAt = tombstone.DeletedAt
+                    DeletedAt = tombstone.DeletedAt,
+                    ReadingDataResetId = readingResetId
                 };
         }
         return merged.Values.OrderBy(item => item.DeletedAt).ToList();

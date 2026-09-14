@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Kkindle.Tests;
 
-public sealed class S3SyncIntegrationTests
+public sealed partial class S3SyncIntegrationTests
 {
     [Fact]
     public async Task MissingEncryptionKey_IsRejectedBeforeAnyUpload()
@@ -334,6 +334,62 @@ public sealed class S3SyncIntegrationTests
         remoteBook = Assert.Single(await b.Library.SearchAsync());
         var downloaded = await b.Service.GetBookSyncStatusesAsync(b.Id, b.Settings, [remoteBook]);
         Assert.Equal(BookSyncStatus.Downloaded, downloaded[source.BookId]);
+    }
+
+    [Fact]
+    public async Task AddingOneBookDoesNotResetExistingSyncStatuses()
+    {
+        var bucket = new MemoryBucket();
+        await using var device = await Device.CreateAsync(bucket);
+        var first = await device.AddBookAsync();
+        var second = await device.AddBookAsync();
+        await device.SyncAsync();
+
+        var initialBooks = await device.Library.SearchAsync();
+        var initialStatuses = await device.Service.GetBookSyncStatusesAsync(
+            device.Id, device.Settings, initialBooks);
+        Assert.Equal(BookSyncStatus.Synced, initialStatuses[first.BookId]);
+        Assert.Equal(BookSyncStatus.Synced, initialStatuses[second.BookId]);
+
+        var added = await device.AddBookAsync();
+        var currentBooks = await device.Library.SearchAsync();
+        var currentStatuses = await device.Service.GetBookSyncStatusesAsync(
+            device.Id, device.Settings, currentBooks);
+
+        Assert.Equal(BookSyncStatus.Synced, currentStatuses[first.BookId]);
+        Assert.Equal(BookSyncStatus.Synced, currentStatuses[second.BookId]);
+        Assert.Equal(BookSyncStatus.NotSynced, currentStatuses[added.BookId]);
+    }
+
+    [Fact]
+    public async Task SyncStatusReadWaitsForConcurrentStateWrite()
+    {
+        var bucket = new MemoryBucket();
+        await using var device = await Device.CreateAsync(bucket);
+        await device.AddBookAsync();
+        await device.SyncAsync();
+        await device.AddBookAsync();
+        var books = await device.Library.SearchAsync();
+
+        var snapshotUploadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSnapshotUpload = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bucket.BeforePut = async (key, _) =>
+        {
+            if (key != device.SnapshotKey) return;
+            snapshotUploadStarted.TrySetResult(true);
+            await releaseSnapshotUpload.Task;
+        };
+
+        var syncTask = device.SyncAsync();
+        await snapshotUploadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var statusTask = device.Service.GetBookSyncStatusesAsync(device.Id, device.Settings, books);
+        await Task.Delay(100);
+        Assert.False(statusTask.IsCompleted);
+
+        releaseSnapshotUpload.TrySetResult(true);
+        await syncTask;
+        var statuses = await statusTask;
+        Assert.All(statuses.Values, status => Assert.Equal(BookSyncStatus.Synced, status));
     }
 
     [Fact]

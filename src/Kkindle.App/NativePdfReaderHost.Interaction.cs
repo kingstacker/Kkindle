@@ -206,7 +206,7 @@ public sealed partial class NativePdfReaderHost
     {
         if (style == "marker")
         {
-            context.FillRectangle(new SolidColorBrush(Color.FromArgb(55, color.R, color.G, color.B)), rect.Inflate(1));
+            context.FillRectangle(new SolidColorBrush(Color.FromArgb(80, color.R, color.G, color.B)), rect.Inflate(1));
             return;
         }
         var brush = new SolidColorBrush(color);

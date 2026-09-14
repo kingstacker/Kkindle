@@ -279,7 +279,7 @@ public sealed class ReaderLinuxTextFallbackTextBlock : SelectableTextBlock
                 if (annotation.Style == "marker")
                 {
                     context.FillRectangle(
-                        new SolidColorBrush(Color.FromArgb(72, color.R, color.G, color.B)),
+                        new SolidColorBrush(Color.FromArgb(80, color.R, color.G, color.B)),
                         lineRect);
                     continue;
                 }

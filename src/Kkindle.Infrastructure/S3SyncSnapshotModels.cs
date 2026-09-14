@@ -12,6 +12,8 @@ internal sealed class S3SyncSnapshot
     public string DeviceId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public S3SyncSettingsSnapshot? Settings { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ReadingDataReset? ReadingDataReset { get; set; }
     public List<S3SyncBook> Books { get; set; } = [];
     public List<S3SyncBookFile> Files { get; set; } = [];
     public List<S3SyncCollection> Collections { get; set; } = [];
@@ -31,6 +33,11 @@ internal sealed class S3SyncSnapshot
 
     [JsonIgnore]
     public Dictionary<Guid, string> LocalCoverPaths { get; } = [];
+
+    // Captured in the same SQLite transaction as the reset generation and
+    // reader rows, so a concurrent reset cannot re-label an old deletion.
+    [JsonIgnore]
+    public Dictionary<string, DateTimeOffset> LocalDeletionTimes { get; set; } = [];
 }
 
 internal sealed class S3SyncBook
@@ -155,6 +162,8 @@ internal sealed class S3SyncReadingStats
 {
     public Guid BookId { get; set; }
     public Guid BookFileId { get; set; }
+    public string BookTitle { get; set; } = string.Empty;
+    public string FileSha256 { get; set; } = string.Empty;
     public long CumulativeSeconds { get; set; }
     public Dictionary<string, long> SecondsByDevice { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<string, Dictionary<string, long>> SecondsByDateByDevice { get; set; } =
@@ -170,6 +179,8 @@ internal sealed class S3SyncTombstone
     public string EntityType { get; set; } = string.Empty;
     public string Key { get; set; } = string.Empty;
     public DateTimeOffset DeletedAt { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ReadingDataResetId { get; set; }
 }
 
 internal sealed class S3SyncSettingsSnapshot

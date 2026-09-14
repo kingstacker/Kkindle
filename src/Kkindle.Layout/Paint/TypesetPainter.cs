@@ -137,7 +137,7 @@ public sealed class TypesetPainter
             }
         }
 
-        // Selection, the focused search hit and annotation markers are
+        // Selection, the focused search hit and black annotation markers are
         // painted between the text background and the glyphs with inverted
         // glyph color, matching the WebKit reader's black-on-white inverted
         // selection.
@@ -301,12 +301,10 @@ public sealed class TypesetPainter
             return bands;
         }
 
-        // The 荧光标记（黑白反色） style is a black-white inversion: a solid
-        // ink band whose glyphs are repainted in the paper colour, exactly
-        // like the selection rendering below.
+        // Black retains the original ink/paper inversion. Colored markers
+        // use translucent backgrounds and leave the theme's text color intact.
         using var marker = new SKPaint
         {
-            Color = _theme.Selection,
             Style = SKPaintStyle.Fill,
             IsAntialias = true,
         };
@@ -317,12 +315,14 @@ public sealed class TypesetPainter
                 continue;
             }
 
+            var inverted = overlay.Color == SKColors.Black;
+            marker.Color = inverted ? _theme.Selection : overlay.Color.WithAlpha(80);
             foreach (var band in overlay.Bands)
             {
                 if (band.Width > 0 && band.Height > 0)
                 {
                     canvas.DrawRect(band, marker);
-                    bands.Add(band);
+                    if (inverted) bands.Add(band);
                 }
             }
         }

@@ -8,6 +8,7 @@ using Avalonia.Media.Imaging;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 using Kkindle.TestFixtures;
+using SkiaSharp;
 using Xunit;
 
 namespace Kkindle.Ui.Tests;
@@ -199,6 +200,67 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         Capture(scope.Window, "pdf-rotated");
         await scope.Call<Task>("ChangeReaderFontAsync", 0.1);
         Assert.Equal(1.1, pdf.Zoom, 2);
+    });
+
+    [Theory]
+    [InlineData(ReaderTheme.Classic)]
+    [InlineData(ReaderTheme.Night)]
+    public Task ColoredMarkersRenderAndKeepTheirNotesAndColorsWhenReopened(ReaderTheme theme) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { Theme = theme });
+        await scope.Field<Task>("_readerAppearanceSaveTask");
+        await pdf.RefreshViewportAsync();
+        var text = pdf.PageContent!.Text;
+        var words = new[] { "Select", "this text", "Underline", "highlight", "Nested section", "correct page" };
+        for (var index = 0; index < words.Length; index++)
+        {
+            var start = text.IndexOf(words[index], StringComparison.Ordinal);
+            pdf.ScrollToOffset(start);
+            await pdf.RefreshViewportAsync();
+            pdf.SelectRange(start, start + words[index].Length);
+            var color = ReaderHighlightColorTests.MarkerColors[index];
+            await scope.Call<Task>("SaveReaderAnnotationAsync", "Keep this PDF note", "marker", color);
+            using var pixels = SKBitmap.Decode(await pdf.CaptureVisiblePageAsync(CancellationToken.None));
+            var expected = ReaderHighlightColorTests.BlendMarker(color, ReaderPalette.For(theme).Page);
+            var bounds = pdf.GetRangeBounds(start, start + words[index].Length).Single();
+            var coloredPixels = 0;
+            for (var y = Math.Max(0, (int)bounds.Top); y < Math.Min(pixels.Height, bounds.Bottom); y++)
+                for (var x = Math.Max(0, (int)bounds.Left); x < Math.Min(pixels.Width, bounds.Right); x++)
+                    if (ReaderHighlightColorTests.ColorDistance(pixels.GetPixel(x, y), expected) <= 3) coloredPixels++;
+            Assert.True(coloredPixels > 10, $"Missing {color} PDF marker in {theme}.");
+        }
+        var first = scope.Window.ReaderAnnotations.Single(item => item.SelectedText == words[0]);
+        pdf.ScrollToOffset(first.StartOffset);
+        await pdf.RefreshViewportAsync();
+        pdf.SelectRange(first.StartOffset, first.EndOffset);
+        await ReaderTests.Render();
+        var stylesButton = scope.Get<Button>("ReaderSelectionHighlightMenuButton");
+        stylesButton.Flyout!.ShowAt(stylesButton);
+        await ReaderTests.Render();
+        Assert.Equal(UiText.Get("黄色"), scope.Get<TextBlock>("ReaderSelectionMarkerColorText").Text);
+        var picker = scope.Get<Button>("ReaderSelectionMarkerColorButton");
+        ReaderHighlightColorTests.Click(picker);
+        await ReaderTests.Render();
+        Assert.True(Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(picker)).IsOpen);
+        var pink = scope.Get<StackPanel>("ReaderSelectionMarkerPalette").Children.OfType<Button>().Single(item => item.Tag as string == "#F48FB1");
+        ReaderHighlightColorTests.Click(pink);
+        for (var attempt = 0; attempt < 500 && scope.Field<string?>("_readerPendingSelection") is not null; attempt++)
+            await Task.Delay(10);
+        Assert.Equal("#F48FB1", scope.Window.ReaderAnnotations.Single(item => item.Id == first.Id).Color);
+        Assert.Equal("Keep this PDF note", scope.Window.ReaderAnnotations.Single(item => item.Id == first.Id).Note);
+        var savedColors = scope.Window.ReaderAnnotations.ToDictionary(item => item.Id, item => item.Color);
+        await scope.Call<Task>("CloseReaderAsync");
+        await scope.Call<Task>("OpenPdfReaderAsync", card, card.Book.Files[0], new SqliteBookLibraryService(scope.Paths, new BookMetadataService()).GetAbsoluteFilePath(card.Book.Files[0]));
+        Assert.Equal(6, scope.Window.ReaderAnnotations.Count);
+        Assert.All(scope.Window.ReaderAnnotations, item =>
+        {
+            Assert.Equal(savedColors[item.Id], item.Color);
+            Assert.Equal("Keep this PDF note", item.Note);
+        });
     });
 
     private static async Task<BookCardViewModel> Open(ReaderTestWindow scope, bool outline = true)

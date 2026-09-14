@@ -394,13 +394,13 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
             var character = text[cell.Offset];
             var selected = cell.Offset < selectionEnd
                 && cell.Offset + cell.Length > selectionStart;
-            // 荧光标记（黑白反色）inverts its cells exactly like the live
-            // selection: solid ink backing with paper-coloured glyphs.
-            var inverted = selected
-                || markerRanges.Any(range =>
-                    cell.Offset < range.End && cell.Offset + cell.Length > range.Start);
-            if (inverted)
+            var marker = markerRanges.FirstOrDefault(range =>
+                cell.Offset < range.End && cell.Offset + cell.Length > range.Start);
+            var inverted = selected || marker.Inverted;
+            if (selected)
                 context.FillRectangle(backing, cell.Bounds);
+            else if (marker.Background is { } markerBackground)
+                context.FillRectangle(markerBackground, cell.Bounds);
             var brush = inverted ? invertedForeground : Foreground ?? Brushes.Black;
 
             if (character == MainWindow.ReaderLinuxTextFallbackFootnoteMarker)
@@ -552,9 +552,9 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
         FontSize,
         brush);
 
-    private List<(int Start, int End)> CollectMarkerRanges()
+    private List<(int Start, int End, IBrush Background, bool Inverted)> CollectMarkerRanges()
     {
-        var ranges = new List<(int Start, int End)>();
+        var ranges = new List<(int Start, int End, IBrush Background, bool Inverted)>();
         if (AnnotationRanges is not { Count: > 0 }) return ranges;
         var sourceLength = (Text ?? string.Empty).Length;
         foreach (var annotation in AnnotationRanges)
@@ -562,7 +562,13 @@ public sealed class ReaderLinuxTextFallbackVerticalPage : Control
             if (annotation.Style != "marker") continue;
             var start = Math.Clamp(annotation.Start, 0, sourceLength);
             var end = Math.Clamp(annotation.Start + annotation.Length, start, sourceLength);
-            if (end > start) ranges.Add((start, end));
+            if (end <= start) continue;
+            var color = ParseAnnotationColor(annotation.Color);
+            var inverted = color == Colors.Black;
+            IBrush background = inverted
+                ? InvertedSelectionBackground ?? Brushes.Black
+                : new SolidColorBrush(Color.FromArgb(80, color.R, color.G, color.B));
+            ranges.Add((start, end, background, inverted));
         }
 
         return ranges;

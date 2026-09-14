@@ -21,7 +21,7 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public sealed partial class S3SyncService
 {
-    private const int SnapshotVersion = 2;
+    private const int SnapshotVersion = 3;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
     private const int EncryptionNonceBytes = 12;
@@ -244,53 +244,64 @@ public sealed partial class S3SyncService
         var normalized = S3SyncSettings.Normalize(settings);
         if (!normalized.IsConfigured) return statuses;
 
-        var state = await LoadStateAsync(
-            NormalizeDeviceId(deviceId),
-            BuildStorageIdentity(normalized),
-            cancellationToken);
-        var baseline = state.LastUploadedSnapshot;
-        if (baseline is null) return statuses;
-
-        var remoteBookIds = (state.RemoteBookIds ?? [])
-            .Select(id => Guid.TryParse(id, out var parsed) ? parsed : (Guid?)null)
-            .Where(id => id is not null)
-            .Select(id => id!.Value)
-            .ToHashSet();
-        var remoteOnlyFileHashes = (state.RemoteOnlyFileHashes ?? [])
-            .Where(IsSha256)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var book in books)
+        // The local state file is replaced during SyncAsync. Serialize this
+        // read with the same gate, otherwise a badge refresh can observe the
+        // transient/empty state and incorrectly mark every book NotSynced.
+        await _syncGate.WaitAsync(cancellationToken);
+        try
         {
-            var baselineBook = baseline.Books.FirstOrDefault(item => item.Id == book.Id);
-            var baselineFiles = baseline.Files.Where(item => item.BookId == book.Id).ToArray();
-            if (baselineBook is null
-                || book.UpdatedAt != baselineBook.UpdatedAt
-                || !BookFilesMatchBaseline(book.Files, baselineFiles))
+            var state = await LoadStateAsync(
+                NormalizeDeviceId(deviceId),
+                BuildStorageIdentity(normalized),
+                cancellationToken);
+            var baseline = state.LastUploadedSnapshot;
+            if (baseline is null) return statuses;
+
+            var remoteBookIds = (state.RemoteBookIds ?? [])
+                .Select(id => Guid.TryParse(id, out var parsed) ? parsed : (Guid?)null)
+                .Where(id => id is not null)
+                .Select(id => id!.Value)
+                .ToHashSet();
+            var remoteOnlyFileHashes = (state.RemoteOnlyFileHashes ?? [])
+                .Where(IsSha256)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var book in books)
             {
-                statuses[book.Id] = BookSyncStatus.NotSynced;
-                continue;
+                var baselineBook = baseline.Books.FirstOrDefault(item => item.Id == book.Id);
+                var baselineFiles = baseline.Files.Where(item => item.BookId == book.Id).ToArray();
+                if (baselineBook is null
+                    || book.UpdatedAt != baselineBook.UpdatedAt
+                    || !BookFilesMatchBaseline(book.Files, baselineFiles))
+                {
+                    statuses[book.Id] = BookSyncStatus.NotSynced;
+                    continue;
+                }
+
+                var hasRemoteOnlyFile = book.Files.Any(file => remoteOnlyFileHashes.Contains(file.Sha256));
+                var hasLocalFile = book.Files.Any(file =>
+                {
+                    if (remoteOnlyFileHashes.Contains(file.Sha256)) return false;
+                    var path = ResolveDataPath(file.RelativePath);
+                    return path is not null && File.Exists(path);
+                });
+                if (!remoteBookIds.Contains(book.Id) && !hasRemoteOnlyFile && hasLocalFile)
+                {
+                    statuses[book.Id] = BookSyncStatus.Synced;
+                    continue;
+                }
+
+                statuses[book.Id] = hasLocalFile
+                    ? BookSyncStatus.Downloaded
+                    : BookSyncStatus.NotDownloaded;
             }
 
-            var hasRemoteOnlyFile = book.Files.Any(file => remoteOnlyFileHashes.Contains(file.Sha256));
-            var hasLocalFile = book.Files.Any(file =>
-            {
-                if (remoteOnlyFileHashes.Contains(file.Sha256)) return false;
-                var path = ResolveDataPath(file.RelativePath);
-                return path is not null && File.Exists(path);
-            });
-            if (!remoteBookIds.Contains(book.Id) && !hasRemoteOnlyFile && hasLocalFile)
-            {
-                statuses[book.Id] = BookSyncStatus.Synced;
-                continue;
-            }
-
-            statuses[book.Id] = hasLocalFile
-                ? BookSyncStatus.Downloaded
-                : BookSyncStatus.NotDownloaded;
+            return statuses;
         }
-
-        return statuses;
+        finally
+        {
+            _syncGate.Release();
+        }
     }
 
     private static bool BookFilesMatchBaseline(
@@ -329,15 +340,15 @@ public sealed partial class S3SyncService
             await InitializeDeletionTrackingAsync(cancellationToken, deviceId);
             var storageIdentity = BuildStorageIdentity(normalized);
             var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
-            var recordedDeletionTimes = await ReadRecordedDeletionTimesAsync(cancellationToken);
             var local = await CaptureSnapshotAsync(deviceId, state.Tombstones, cancellationToken);
+            var recordedDeletionTimes = local.LocalDeletionTimes;
             var detectedDeletions = DetectDeletedEntitiesWithRecordedTimes(
                 state.LastUploadedSnapshot,
                 local,
                 recordedDeletionTimes);
             EnsureDeletionVolumeIsSafe(state.LastUploadedSnapshot, detectedDeletions, options?.ConfirmedDeletionFingerprint);
             local.Tombstones = MergeTombstones(
-                state.Tombstones,
+                local.Tombstones,
                 detectedDeletions.Concat(GetRecordedTombstones(recordedDeletionTimes, local, state.LastUploadedSnapshot)));
 
             progress?.Report(UiText.Get("正在连接 {0}…", normalized.ProviderName));
@@ -354,9 +365,6 @@ public sealed partial class S3SyncService
                 state.LastUploadedSnapshot is not null,
                 progress,
                 cancellationToken);
-
-            var remoteTombstones = remoteSnapshots.SelectMany(snapshot => snapshot.Tombstones);
-            local.Tombstones = MergeTombstones(local.Tombstones, remoteTombstones);
 
             progress?.Report(UiText.Get("正在合并书籍和阅读数据…"));
             var databaseResult = await ApplyRemoteSnapshotsAsync(
@@ -392,11 +400,12 @@ public sealed partial class S3SyncService
             // a complete converged view, so a third device can catch up from it
             // without having to contact every previous device forever.
             var finalSnapshot = await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
-            var finalDeletions = await ReadRecordedDeletionTimesAsync(cancellationToken);
+            var finalDeletions = finalSnapshot.LocalDeletionTimes;
             var recordedTombstones = GetRecordedTombstones(finalDeletions, finalSnapshot, state.LastUploadedSnapshot);
             EnsureDeletionVolumeIsSafe(state.LastUploadedSnapshot,
-                MergeTombstones(detectedDeletions, recordedTombstones), options?.ConfirmedDeletionFingerprint);
-            finalSnapshot.Tombstones = MergeTombstones(local.Tombstones, recordedTombstones);
+                MergeTombstones(FilterReadingTombstones(detectedDeletions, finalSnapshot.ReadingDataReset), recordedTombstones),
+                options?.ConfirmedDeletionFingerprint);
+            finalSnapshot.Tombstones = MergeTombstones(finalSnapshot.Tombstones, recordedTombstones);
 
             // Publish exactly this captured view after all its objects exist.
             // Writes after capture remain outside the saved local baseline.
@@ -783,6 +792,7 @@ public sealed partial class S3SyncService
             var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, cancellationToken);
             if (snapshot.Version > SnapshotVersion)
                 throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
+            ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
             if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
                 throw new InvalidDataException("同步快照缺少有效的设备 ID。");
             snapshot.DeviceId = parsedDeviceId.ToString("N");

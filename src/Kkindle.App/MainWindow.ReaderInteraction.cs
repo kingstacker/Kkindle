@@ -6277,9 +6277,10 @@ public partial class MainWindow
                   ? annotation.Style
                   : 'solid';
                 const marker = style === 'marker';
-                mark.style.setProperty('background-color', marker ? '#000000' : 'transparent', 'important');
+                const invertedMarker = marker && color === '#000000';
+                mark.style.setProperty('background-color', marker ? (invertedMarker ? color : color + '50') : 'transparent', 'important');
                 if (marker) {
-                  mark.style.setProperty('color', '#FFFFFF', 'important');
+                  mark.style.setProperty('color', invertedMarker ? '#FFFFFF' : 'inherit', 'important');
                   mark.style.setProperty('text-decoration-line', 'none', 'important');
                 } else {
                   mark.style.setProperty('text-decoration-line', 'underline', 'important');
@@ -7606,6 +7607,7 @@ public partial class MainWindow
     private void HideReaderSelectionPopup()
     {
         HideReaderTranslationPopup(clearSelection: false);
+        ReaderMarkerPaletteFlyout?.Hide();
         StopReaderSelectionHighlightPointerTracking();
         if (ReaderSelectionHighlightMenuButton?.Flyout is PopupFlyoutBase { IsOpen: true } flyout)
             flyout.Hide();
@@ -7629,6 +7631,8 @@ public partial class MainWindow
                 || source.GetVisualAncestors().Contains(ReaderSelectionPopupBar)
                 || source is MenuFlyoutPresenter
                 || source.GetVisualAncestors().OfType<MenuFlyoutPresenter>().Any()
+                || ReferenceEquals(source, ReaderSelectionMarkerPalette)
+                || source.GetVisualAncestors().Contains(ReaderSelectionMarkerPalette)
                 || ReferenceEquals(source, ReaderTranslationPopup)
                 || source.GetVisualAncestors().Contains(ReaderTranslationPopup)
                 || source is ComboBoxItem))
@@ -7709,6 +7713,13 @@ public partial class MainWindow
             StopReaderSelectionHighlightPointerTracking();
             return;
         }
+        // The palette has its own popup root. Keep the style menu open while
+        // the pointer crosses into it; light dismiss closes the palette.
+        if (ReaderMarkerPaletteFlyout is { IsOpen: true })
+        {
+            _readerSelectionHighlightOutsideTicks = 0;
+            return;
+        }
         if (!TryGetReaderCursorScreenPoint(out var screenPoint))
             return;
 
@@ -7776,7 +7787,14 @@ public partial class MainWindow
     private async void ReaderSelectionHighlightStyleItem_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: string style }) return;
-        await ApplyReaderHighlightStyleAsync(style);
+        await ApplyReaderHighlightStyleAsync(style, style == "marker" ? ReaderMarkerColorForSelection() : null);
+    }
+
+    private async void ReaderSelectionHighlightColorItem_Click(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Button { Tag: string color }) return;
+        await ApplyReaderHighlightStyleAsync("marker", color);
     }
 
     private void ReaderSelectionAnnotateButton_Click(object? sender, RoutedEventArgs e)
@@ -7822,7 +7840,11 @@ public partial class MainWindow
                 if (root.TryGetProperty("style", out var styleElement)
                     && styleElement.GetString() is { } style)
                 {
-                    _ = ObserveReaderTaskAsync(ApplyReaderHighlightStyleAsync(style));
+                    var color = root.TryGetProperty("color", out var colorElement)
+                        && colorElement.ValueKind == JsonValueKind.String
+                        ? colorElement.GetString()
+                        : style == "marker" ? "#000000" : null;
+                    _ = ObserveReaderTaskAsync(ApplyReaderHighlightStyleAsync(style, color));
                 }
                 break;
             case "annotate":

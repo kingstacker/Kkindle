@@ -11,6 +11,27 @@ namespace Kkindle.Ui.Tests;
 
 public sealed partial class SettingsTests
 {
+    [Fact]
+    public Task SyncStatusesSurviveLibraryCardRebuild() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+
+        var cards = scope.Window.ViewModel.Books.ToArray();
+        var statusCache = scope.Field<System.Collections.Concurrent.ConcurrentDictionary<Guid, BookSyncStatus>>(
+            "_bookSyncStatusCache");
+        statusCache[cards[0].Book.Id] = BookSyncStatus.Synced;
+        statusCache[cards[1].Book.Id] = BookSyncStatus.NotDownloaded;
+        scope.Call("UpdateLibraryUi");
+
+        await scope.Window.ViewModel.RefreshAsync();
+        await Render();
+
+        var refreshed = scope.Window.ViewModel.Books.ToDictionary(card => card.Book.Id);
+        Assert.Equal(BookSyncStatus.Synced, refreshed[cards[0].Book.Id].SyncStatus);
+        Assert.Equal(BookSyncStatus.NotDownloaded, refreshed[cards[1].Book.Id].SyncStatus);
+    });
+
     [Theory]
     [InlineData(1024, 664, "zh-CN")]
     [InlineData(1294, 804, "zh-CN")]
