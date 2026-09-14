@@ -491,6 +491,8 @@ public sealed partial class S3SyncService
             stats.SecondsByDevice = await ReadingTimeSyncTracker.CaptureAsync(
                 connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
             stats.CumulativeSeconds = ReadingTimeSyncTracker.Total(stats.SecondsByDevice);
+            stats.SecondsByDateByDevice = await ReadingTimeSyncTracker.CaptureReadingDaysAsync(
+                connection, transaction, stats.BookFileId, cancellationToken);
             await ReadingTimeSyncTracker.UpdateTotalAsync(connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
         }
         var recorded = await ReadRecordedDeletionTimesInTransactionAsync(connection, transaction, cancellationToken);
@@ -572,6 +574,8 @@ public sealed partial class S3SyncService
                 AutoDoubanMatchOnImport = app.AutoDoubanMatchOnImport,
                 CompareKindleLibraryEnabled = app.CompareKindleLibraryEnabled,
                 GridGalleryDisplay = app.GridGalleryDisplay,
+                ShowSyncStatusIcon = app.ShowSyncStatusIcon,
+                ShowLibraryPresenceIcon = app.ShowLibraryPresenceIcon,
                 ReadingMaterialsCollapsedByDefault = app.ReadingMaterialsCollapsedByDefault,
                 PinyinContextMenuEnabled = app.PinyinContextMenuEnabled,
                 PinyinLocalOnly = app.PinyinLocalOnly,
@@ -654,7 +658,11 @@ public sealed partial class S3SyncService
                 0,
                 0,
                 duplicateBooksMerged > 0,
-                warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct()));
+                warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct()))
+            {
+                RemoteBookIds = new HashSet<Guid>(),
+                RemoteOnlyFileHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            };
         }
 
         var localIdentity = await ReadLocalDatabaseIdentityAsync(cancellationToken);
@@ -809,17 +817,27 @@ public sealed partial class S3SyncService
         RefilterRemoteRows();
         var preparedFilesByLocalId = new Dictionary<Guid, PreparedSyncFile>();
         var plannedRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var remoteOnlyFileHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var remoteBookIds = new HashSet<Guid>();
         var coverUpdates = new Dictionary<Guid, (string RelativePath, DateTimeOffset UpdatedAt)>();
         var filesDownloaded = 0;
         var coversDownloaded = false;
 
-        progress?.Report(UiText.Get("正在准备书籍文件…"));
+        progress?.Report(settings.DownloadBookFilesOnSync
+            ? UiText.Get("正在准备书籍文件…")
+            : UiText.Get("正在登记书籍文件元数据…"));
         foreach (var remoteFile in remoteFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!bookMap.TryGetValue(remoteFile.BookId, out var localBookId)
                 || !fileMap.TryGetValue(remoteFile.Id, out var localFileId))
                 continue;
+            if (!IsSha256(remoteFile.Sha256))
+            {
+                warnings.Add(UiText.Get("《{0}》的远端文件缺少有效的 SHA-256 校验值，已跳过。", remoteFile.FileName));
+                isPartial = true;
+                continue;
+            }
 
             var existing = localIdentity.FilesById.GetValueOrDefault(localFileId);
             if (preparedFilesByLocalId.TryGetValue(localFileId, out var preparedForSameFile))
@@ -845,35 +863,50 @@ public sealed partial class S3SyncService
                 continue;
             }
 
-            try
+            var prepared = new PreparedSyncFile(
+                remoteFile,
+                localBookId,
+                localFileId,
+                Path.GetRelativePath(_paths.Data, absolutePath));
+            preparedFilesByLocalId[localFileId] = prepared;
+            plannedRelativePaths.Add(prepared.RelativePath);
+
+            if (settings.DownloadBookFilesOnSync)
             {
-                var downloaded = await EnsureLocalBlobAsync(
-                    client,
-                    settings,
-                    remoteFile.Sha256,
-                    absolutePath,
-                    progress,
-                    cancellationToken);
-                if (downloaded) filesDownloaded++;
-                var prepared = new PreparedSyncFile(
-                    remoteFile,
-                    localBookId,
-                    localFileId,
-                    Path.GetRelativePath(_paths.Data, absolutePath));
-                preparedFilesByLocalId[localFileId] = prepared;
-                plannedRelativePaths.Add(prepared.RelativePath);
+                try
+                {
+                    if (await EnsureLocalBlobAsync(
+                            client,
+                            settings,
+                            remoteFile.Sha256,
+                            absolutePath,
+                            progress,
+                            cancellationToken))
+                        filesDownloaded++;
+                }
+                catch (SyncObjectNotFoundException)
+                {
+                    warnings.Add(UiText.Get("《{0}》的 S3 文件对象不存在，已跳过。", remoteFile.FileName));
+                    isPartial = true;
+                }
+                catch (InvalidDataException exception)
+                {
+                    warnings.Add(UiText.Get("《{0}》校验失败：{1}", remoteFile.FileName, UiText.Localize(exception.Message)));
+                    isPartial = true;
+                }
             }
-            catch (SyncObjectNotFoundException)
-            {
-                warnings.Add(UiText.Get("《{0}》的远端文件对象不存在，已跳过。", remoteFile.FileName));
-                isPartial = true;
-            }
-            catch (InvalidDataException exception)
-            {
-                warnings.Add(UiText.Get("《{0}》校验失败：{1}", remoteFile.FileName, UiText.Localize(exception.Message)));
-                isPartial = true;
-            }
+
+            if (!File.Exists(absolutePath))
+                remoteOnlyFileHashes.Add(remoteFile.Sha256);
         }
+
+        // A retry can see the database row created by an earlier merge, so it
+        // will not enter the "new book" branch below. If any of its files is
+        // still remote-only, retain the incoming-book provenance as well.
+        foreach (var localBookId in preparedFilesByLocalId.Values
+                     .Where(prepared => remoteOnlyFileHashes.Contains(prepared.Source.Sha256))
+                     .Select(prepared => prepared.LocalBookId))
+            remoteBookIds.Add(localBookId);
 
         foreach (var remoteBook in remoteBooks)
         {
@@ -977,7 +1010,10 @@ public sealed partial class S3SyncService
                 if (!bookMap.TryGetValue(book.Id, out var localBookId)) continue;
                 if (!currentBooks.ContainsKey(localBookId)
                     && addedBookIds.Add(localBookId))
+                {
                     booksAdded++;
+                    remoteBookIds.Add(localBookId);
+                }
                 var affected = await UpsertBookAsync(
                     commandCache.Get(UpsertBookSql),
                     book,
@@ -1248,6 +1284,8 @@ public sealed partial class S3SyncService
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
                 changed |= await ReadingTimeSyncTracker.UpdateTotalAsync(
                     connection, transaction, localFileId, mergedSeconds, cancellationToken) > 0;
+                await ReadingTimeSyncTracker.MergeReadingDaysAsync(
+                    connection, transaction, localFileId, stats.SecondsByDateByDevice, cancellationToken);
             }
 
             changed |= await ApplyTombstonesAsync(
@@ -1287,7 +1325,12 @@ public sealed partial class S3SyncService
             filesDownloaded,
             annotationsApplied,
             changed || filesDownloaded > 0 || coversDownloaded,
-            warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct())) { IsPartial = isPartial };
+            warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct()))
+        {
+            IsPartial = isPartial,
+            RemoteBookIds = remoteBookIds,
+            RemoteOnlyFileHashes = remoteOnlyFileHashes
+        };
     }
 
     private static S3SyncReadingStats MergeRemoteReadingStats(IEnumerable<S3SyncReadingStats> versions)
@@ -1295,17 +1338,31 @@ public sealed partial class S3SyncService
         var rows = versions.ToArray();
         var latest = rows.OrderByDescending(row => row.UpdatedAt).First();
         var counters = new Dictionary<string, long>(StringComparer.Ordinal);
+        var dailyCounters = new Dictionary<string, Dictionary<string, long>>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
             var values = row.SecondsByDevice is { Count: > 0 } ? row.SecondsByDevice
                 : new Dictionary<string, long> { ["legacy"] = Math.Max(0, row.CumulativeSeconds) };
             foreach (var (device, seconds) in values)
                 counters[device] = Math.Max(counters.GetValueOrDefault(device), seconds);
+
+            if (row.SecondsByDateByDevice is null) continue;
+            foreach (var (device, dates) in row.SecondsByDateByDevice)
+            {
+                if (!dailyCounters.TryGetValue(device, out var mergedDates))
+                {
+                    mergedDates = new Dictionary<string, long>(StringComparer.Ordinal);
+                    dailyCounters[device] = mergedDates;
+                }
+                foreach (var (date, seconds) in dates)
+                    mergedDates[date] = Math.Max(mergedDates.GetValueOrDefault(date), seconds);
+            }
         }
         return new S3SyncReadingStats
         {
             BookId = latest.BookId, BookFileId = latest.BookFileId,
             CumulativeSeconds = ReadingTimeSyncTracker.Total(counters), SecondsByDevice = counters,
+            SecondsByDateByDevice = dailyCounters,
             ProgressPercent = latest.ProgressPercent, CompletedChapters = latest.CompletedChapters,
             TotalChapters = latest.TotalChapters, UpdatedAt = latest.UpdatedAt
         };
@@ -2765,6 +2822,7 @@ public sealed partial class S3SyncService
             "DELETE FROM ReaderLayoutSettings WHERE BookId = $bookId;",
             "DELETE FROM ReaderReadingStats WHERE BookId = $bookId;",
             "DELETE FROM ReaderReadingSessions WHERE BookId = $bookId;",
+            "DELETE FROM S3SyncReadingDayCounters WHERE BookFileId IN (SELECT Id FROM BookFiles WHERE BookId = $bookId);",
             "DELETE FROM BookContentChunks WHERE BookId = $bookId;",
             "DELETE FROM BookCollectionItems WHERE BookId = $bookId;",
             "DELETE FROM BookFiles WHERE BookId = $bookId;",
@@ -2804,6 +2862,7 @@ public sealed partial class S3SyncService
             "DELETE FROM ReaderLayoutSettings WHERE BookFileId = $fileId;",
             "DELETE FROM ReaderReadingStats WHERE BookFileId = $fileId;",
             "DELETE FROM ReaderReadingSessions WHERE BookFileId = $fileId;",
+            "DELETE FROM S3SyncReadingDayCounters WHERE BookFileId = $fileId;",
             "DELETE FROM BookContentChunks WHERE BookFileId = $fileId;",
             "DELETE FROM BookFiles WHERE Id = $fileId;"
         })
@@ -2878,6 +2937,8 @@ public sealed partial class S3SyncService
                 AutoDoubanMatchOnImport = remoteApp.AutoDoubanMatchOnImport,
                 CompareKindleLibraryEnabled = remoteApp.CompareKindleLibraryEnabled,
                 GridGalleryDisplay = remoteApp.GridGalleryDisplay,
+                ShowSyncStatusIcon = remoteApp.ShowSyncStatusIcon,
+                ShowLibraryPresenceIcon = remoteApp.ShowLibraryPresenceIcon,
                 ReadingMaterialsCollapsedByDefault = remoteApp.ReadingMaterialsCollapsedByDefault,
                 PinyinContextMenuEnabled = remoteApp.PinyinContextMenuEnabled,
                 PinyinLocalOnly = remoteApp.PinyinLocalOnly,
@@ -3237,6 +3298,9 @@ public sealed partial class S3SyncService
         string? Warning)
     {
         public bool IsPartial { get; init; }
+        public IReadOnlySet<Guid> RemoteBookIds { get; init; } = new HashSet<Guid>();
+        public IReadOnlySet<string> RemoteOnlyFileHashes { get; init; } =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
     private static SqliteCommand CreateCommand(

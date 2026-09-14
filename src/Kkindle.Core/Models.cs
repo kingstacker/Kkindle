@@ -124,6 +124,14 @@ public enum BookLibraryPresence
     Both
 }
 
+public enum BookSyncStatus
+{
+    NotSynced,
+    Synced,
+    NotDownloaded,
+    Downloaded
+}
+
 public sealed record BookLibraryComparisonResult(
     IReadOnlySet<Guid> BooksOnKindle,
     IReadOnlySet<string> KindleBooksOnComputer);
@@ -415,6 +423,12 @@ public sealed class ImportBatchResult
     // its post-import work creates a second avoidable memory spike.
     public bool BookDetailsAvailable { get; set; } = true;
     public int SuccessCount => Items.Count(x => x.Succeeded);
+    // SuccessCount includes files that were intentionally skipped because the
+    // same content is already in the library. Keep that compatibility property
+    // for callers that only need to know whether processing succeeded, while
+    // exposing counts that describe what the import actually changed.
+    public int AddedCount => Items.Count(x => x.Succeeded && x.Added);
+    public int SkippedCount => Items.Count(x => x.Succeeded && !x.Added);
     public int FailureCount => Items.Count(x => !x.Succeeded);
 }
 

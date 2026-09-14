@@ -43,8 +43,25 @@ public partial class MainWindow
         var sourcePath = _library.GetAbsoluteFilePath(sourceFile);
         if (!File.Exists(sourcePath))
         {
-            SetTaskStatus(T("找不到书籍注音来源：{0}", sourceFile.RelativePath));
-            return;
+            try
+            {
+                sourcePath = await EnsureBookFileAvailableAsync(sourceFile, _lifetimeCancellation.Token) ?? sourcePath;
+            }
+            catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                SetTaskStatus(T("下载书籍失败：{0}", UiText.Localize(exception.Message)));
+                return;
+            }
+
+            if (!File.Exists(sourcePath))
+            {
+                SetTaskStatus(T("找不到书籍注音来源：{0}", sourceFile.RelativePath));
+                return;
+            }
         }
 
         var pinyinEngineKind = PinyinBookEngineCatalog.Parse(GetSelectedPinyinEngineId());

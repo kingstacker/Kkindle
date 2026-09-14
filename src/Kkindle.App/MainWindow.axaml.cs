@@ -537,6 +537,20 @@ public partial class MainWindow : Window
 
     private static string T(string source, params object?[] args) => UiText.Get(source, args);
 
+    private string BuildImportSummary(ImportBatchResult result, string suffix = "")
+    {
+        if (result.FailureCount == 0)
+        {
+            return result.SkippedCount == 0
+                ? T("导入完成：新增 {0} 个文件{1}。", result.AddedCount, suffix)
+                : T("导入完成：新增 {0} 个文件，跳过 {1} 个重复或已有文件{2}。", result.AddedCount, result.SkippedCount, suffix);
+        }
+
+        return result.SkippedCount == 0
+            ? T("导入完成：新增 {0} 个文件，{1} 个失败{2}。", result.AddedCount, result.FailureCount, suffix)
+            : T("导入完成：新增 {0} 个文件，跳过 {1} 个重复或已有文件，{2} 个失败{3}。", result.AddedCount, result.SkippedCount, result.FailureCount, suffix);
+    }
+
     private void MainWindowLanguageChanged(object? sender, EventArgs e)
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -1111,12 +1125,13 @@ public partial class MainWindow : Window
         foreach (var card in ViewModel.Books)
         {
             card.SetGalleryTextVisible(!_appSettings.GridGalleryDisplay);
-            card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
+            card.SetSyncStatusVisible(_appSettings.ShowSyncStatusIcon);
+            card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled && _appSettings.ShowLibraryPresenceIcon);
         }
         foreach (var card in DeviceBooks)
         {
             card.SetGalleryTextVisible(!_appSettings.GridGalleryDisplay);
-            card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
+            card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled && _appSettings.ShowLibraryPresenceIcon);
         }
         RefreshLibraryPresenceState();
         SyncCardSelectionVisuals();
@@ -1481,6 +1496,35 @@ public partial class MainWindow : Window
     {
         await ViewModel.RefreshAsync(cancellationToken);
         await RefreshLibraryMatchRecordsAsync(cancellationToken);
+        await RefreshBookSyncStatusesAsync(cancellationToken);
+    }
+
+    private async Task RefreshBookSyncStatusesAsync(CancellationToken cancellationToken)
+    {
+        var cards = ViewModel.Books.ToArray();
+        if (cards.Length == 0) return;
+
+        IReadOnlyDictionary<Guid, BookSyncStatus> statuses;
+        try
+        {
+            statuses = await _s3SyncService.GetBookSyncStatusesAsync(
+                _s3SyncStoredSettings.DeviceId,
+                _s3SyncStoredSettings.Settings,
+                cards.Select(card => card.Book).ToArray(),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Book sync status refresh failed: {exception.Message}");
+            statuses = cards.ToDictionary(card => card.Book.Id, _ => BookSyncStatus.NotSynced);
+        }
+
+        foreach (var card in cards)
+            card.SetSyncStatus(statuses.GetValueOrDefault(card.Book.Id, BookSyncStatus.NotSynced));
     }
 
     private async Task RefreshLibraryMatchRecordsAsync(CancellationToken cancellationToken)
@@ -1571,14 +1615,19 @@ public partial class MainWindow : Window
                 if (importedCards.Length > 0)
                     await RunDoubanBatchMatchAsync(importedCards);
             }
+
+            // ViewModel.ImportAsync rebuilds the cards before returning, so the
+            // library-change notification may have refreshed the old card
+            // instances. Recalculate against the cards now shown; otherwise a
+            // normal import leaves every newly-created badge at its default
+            // NotSynced value until the next full sync.
+            await RefreshBookSyncStatusesAsync(_lifetimeCancellation.Token);
             var automaticSuffix = automaticFormats.Failures.Count > 0
                 ? T("；格式补齐失败 {0} 项", automaticFormats.Failures.Count)
                 : automaticFormats.GeneratedCount > 0
                     ? T("；已补齐 {0} 个 EPUB/AZW3 文件", automaticFormats.GeneratedCount)
                     : string.Empty;
-            SetTaskStatus(result.FailureCount == 0
-                ? T("已导入 {0} 本书{1}。", result.SuccessCount, automaticSuffix)
-                : T("已导入 {0} 本书，{1} 项失败{2}。 ", result.SuccessCount, result.FailureCount, automaticSuffix));
+            SetTaskStatus(BuildImportSummary(result, automaticSuffix));
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -1682,9 +1731,9 @@ public partial class MainWindow : Window
         if (_importConflictCompletion is not null)
             return ImportConflictResolution.Skip;
 
-        ImportConflictTitleText.Text = T("发现同名版本");
+        ImportConflictTitleText.Text = T("发现同名书籍");
         ImportConflictSummaryText.Text = T(
-            "《{0}》与书库中的《{1}》标题和作者相同。请选择导入方式。",
+            "导入文件《{0}》与书库中的《{1}》标题和作者相同，但文件内容不同。请选择导入方式。",
             Path.GetFileName(conflict.SourcePath),
             conflict.ExistingBook.Title);
         var existingFormats = conflict.ExistingBook.Files
@@ -1850,6 +1899,81 @@ public partial class MainWindow : Window
             SetTaskStatus(T("无法读取拖入的文件或文件夹路径。"));
     }
 
+    private async Task<string?> EnsureBookFileAvailableAsync(
+        BookFile file,
+        CancellationToken cancellationToken)
+    {
+        var path = ViewModel.GetAbsoluteFilePath(file);
+        if (File.Exists(path)) return path;
+
+        var settings = _s3SyncStoredSettings.Settings;
+        if (!settings.IsConfigured || !_appSettings.NetworkEnabled)
+            return null;
+
+        var progress = new Progress<string>(message =>
+        {
+            void Apply() => SetTaskStatus(UiText.Localize(message));
+            if (Dispatcher.UIThread.CheckAccess())
+                Apply();
+            else
+                Dispatcher.UIThread.Post(Apply);
+        });
+        var downloadedPath = await _s3SyncService.EnsureBookFileDownloadedAsync(
+            _s3SyncStoredSettings.DeviceId,
+            settings,
+            file,
+            progress,
+            cancellationToken);
+        if (File.Exists(downloadedPath))
+            await RefreshBookSyncStatusesAsync(cancellationToken);
+        return downloadedPath;
+    }
+
+    private async void BookSyncStatusIcon_Tapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not Control { DataContext: BookCardViewModel card }) return;
+
+        e.Handled = true;
+        CancelPendingBookDetailClick();
+        try
+        {
+            switch (card.SyncStatus)
+            {
+                case BookSyncStatus.NotDownloaded:
+                    await DownloadBookFileOnDemandAsync(card);
+                    break;
+                case BookSyncStatus.NotSynced:
+                    SetTaskStatus(T("正在上传《{0}》…", card.Title));
+                    await RunS3SyncAsync(silent: false);
+                    break;
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("书籍同步失败：{0}", UiText.Localize(exception.Message)));
+        }
+    }
+
+    private async Task DownloadBookFileOnDemandAsync(BookCardViewModel card)
+    {
+        var file = ReaderBookSelectionPolicy.SelectPreferred(
+            card.Book.Files,
+            _appSettings.PreferredOpenFormat);
+        if (file is null)
+        {
+            SetTaskStatus(T("《{0}》没有可下载的书籍文件。", card.Title));
+            return;
+        }
+
+        SetTaskStatus(T("正在下载《{0}》…", card.Title));
+        var path = await EnsureBookFileAvailableAsync(file, _lifetimeCancellation.Token);
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            SetTaskStatus(T("无法下载《{0}》：请检查云端同步配置和网络连接。", card.Title));
+    }
+
     private async Task OpenBookAsync(
         BookCardViewModel card,
         BookFile? requestedFile = null,
@@ -1868,9 +1992,28 @@ public partial class MainWindow : Window
         var path = ViewModel.GetAbsoluteFilePath(file);
         if (!File.Exists(path))
         {
-            SetTaskStatus(T("找不到文件：{0}", file.RelativePath));
-            await ShowMessageAsync(T("无法打开书籍"), T("所选格式文件不存在或已被删除。"));
-            return;
+            try
+            {
+                path = await EnsureBookFileAvailableAsync(file, _lifetimeCancellation.Token) ?? path;
+            }
+            catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                var error = UiText.Localize(exception.Message);
+                SetTaskStatus(T("下载书籍失败：{0}", error));
+                await ShowMessageAsync(T("无法打开书籍"), error);
+                return;
+            }
+
+            if (!File.Exists(path))
+            {
+                SetTaskStatus(T("找不到文件：{0}", file.RelativePath));
+                await ShowMessageAsync(T("无法打开书籍"), T("所选格式文件不存在或已被删除。"));
+                return;
+            }
         }
 
         if (string.Equals(file.Format, "epub", StringComparison.OrdinalIgnoreCase))
@@ -2571,8 +2714,20 @@ public partial class MainWindow : Window
         var sourcePath = ViewModel.GetAbsoluteFilePath(sourceFile);
         if (!File.Exists(sourcePath))
         {
-            SetTaskStatus(T("找不到转换来源：{0}", sourceFile.RelativePath));
-            return;
+            try
+            {
+                sourcePath = await EnsureBookFileAvailableAsync(sourceFile, _lifetimeCancellation.Token) ?? sourcePath;
+            }
+            catch (Exception exception)
+            {
+                SetTaskStatus(T("下载书籍失败：{0}", UiText.Localize(exception.Message)));
+                return;
+            }
+            if (!File.Exists(sourcePath))
+            {
+                SetTaskStatus(T("找不到转换来源：{0}", sourceFile.RelativePath));
+                return;
+            }
         }
 
         _conversionInProgress = true;

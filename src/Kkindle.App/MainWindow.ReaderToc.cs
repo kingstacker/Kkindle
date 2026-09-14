@@ -813,6 +813,19 @@ public partial class MainWindow
 
     private void NavigateToReaderTocItem(EpubReaderNavigationItem item)
     {
+        if (_readerIsPdf)
+        {
+            // Keep the body stable while a PDF destination is being resolved;
+            // the PDF navigation commits the full TOC state after the page and
+            // its outline offset have both settled.
+            _ = ObserveReaderTaskAsync(
+                NavigateToReaderItemAsync(
+                    item,
+                    _readerSessionCancellation?.Token ?? CancellationToken.None,
+                    ReaderNavigationIntent.Toc));
+            return;
+        }
+
         // A TOC click is an explicit user target: it must start at the target
         // chapter's first line (or its own anchor), never inherit a leftover
         // "move to chapter end" intent from a superseded previous-chapter turn.

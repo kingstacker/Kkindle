@@ -35,10 +35,12 @@ public sealed class WebDavSyncIntegrationTests
         Assert.False((await a.SyncAsync()).IsPartial);
         var result = await b.SyncAsync();
         Assert.Equal(1, result.BooksAdded);
-        Assert.Equal(1, result.FilesDownloaded);
+        Assert.Equal(0, result.FilesDownloaded);
         Assert.False(result.IsPartial);
         var downloaded = Assert.Single(await b.Library.SearchAsync());
-        Assert.Equal(book.Bytes, await File.ReadAllBytesAsync(b.Library.GetAbsoluteFilePath(Assert.Single(downloaded.Files))));
+        var downloadedFile = Assert.Single(downloaded.Files);
+        var downloadedPath = await b.Service.EnsureBookFileDownloadedAsync(b.Id, b.Settings, downloadedFile);
+        Assert.Equal(book.Bytes, await File.ReadAllBytesAsync(downloadedPath));
         var remoteAnnotation = Assert.Single(await b.Reader.GetAllAnnotationsAsync());
         Assert.Equal(annotation.Note, remoteAnnotation.Note);
         Assert.Equal(45, (await b.Reader.GetProgressAsync(book.FileId))!.ProgressPercent);
@@ -114,7 +116,7 @@ public sealed class WebDavSyncIntegrationTests
     }
 
     [Fact]
-    public async Task MissingBookIsPartialAndCanBeRecoveredOnRetry()
+    public async Task MissingBookIsDeferredAndCanBeDownloadedAfterRetry()
     {
         var server = new WebDavTestServer();
         await using var a = await Device.CreateAsync(server);
@@ -123,15 +125,21 @@ public sealed class WebDavSyncIntegrationTests
         var file = Assert.Single(server.Files, pair => pair.Key.Contains("/objects/", StringComparison.Ordinal));
         server.Files.TryRemove(file.Key, out _);
         await using var b = await Device.CreateAsync(server);
-        Assert.True((await b.SyncAsync()).IsPartial);
+        var metadataOnly = await b.SyncAsync();
+        Assert.False(metadataOnly.IsPartial);
+        Assert.Equal(0, metadataOnly.FilesDownloaded);
         server.Files[file.Key] = file.Value;
         var retried = await b.SyncAsync();
         Assert.False(retried.IsPartial);
-        Assert.Equal(1, retried.FilesDownloaded);
+        Assert.Equal(0, retried.FilesDownloaded);
+        var book = Assert.Single(await b.Library.SearchAsync());
+        var downloadedPath = await b.Service.EnsureBookFileDownloadedAsync(
+            b.Id, b.Settings, Assert.Single(book.Files));
+        Assert.True(File.Exists(downloadedPath));
     }
 
     [Fact]
-    public async Task ForbiddenBookReadFailsWithoutPublishingAnIncompleteSnapshot()
+    public async Task ForbiddenBookReadFailsWhenTheBookIsOpened()
     {
         var server = new WebDavTestServer();
         await using var a = await Device.CreateAsync(server);
@@ -141,9 +149,13 @@ public sealed class WebDavSyncIntegrationTests
         server.BeforeRequest = (request, _) => Task.FromResult<HttpResponseMessage?>(
             request.Method == "GET" && request.Path.Contains("/objects/", StringComparison.Ordinal)
                 ? new(HttpStatusCode.Forbidden) : null);
-        var error = await Assert.ThrowsAsync<HttpRequestException>(() => b.SyncAsync());
+        var result = await b.SyncAsync();
+        Assert.False(result.IsPartial);
+        var book = Assert.Single(await b.Library.SearchAsync());
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => b.Service.EnsureBookFileDownloadedAsync(
+            b.Id, b.Settings, Assert.Single(book.Files)));
         Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
-        Assert.False(server.Files.ContainsKey(b.SnapshotPath));
+        Assert.True(server.Files.ContainsKey(b.SnapshotPath));
     }
 
     [Fact]

@@ -71,6 +71,46 @@ public sealed class PdfReaderTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task RapidPdfOutlineClicksCommitTheLatestBodyAndTocLocation() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.SinglePage);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var toc = scope.Field<IReadOnlyList<EpubReaderNavigationItem>>("_readerTocItems");
+
+        var first = scope.Call<Task<bool>>(
+            "NavigateToReaderItemAsync",
+            toc[2],
+            CancellationToken.None,
+            ReaderNavigationIntent.Toc,
+            null);
+        var second = scope.Call<Task<bool>>(
+            "NavigateToReaderItemAsync",
+            toc[1],
+            CancellationToken.None,
+            ReaderNavigationIntent.Toc,
+            null);
+        var latest = scope.Call<Task<bool>>(
+            "NavigateToReaderItemAsync",
+            toc[2],
+            CancellationToken.None,
+            ReaderNavigationIntent.Toc,
+            null);
+
+        var results = await Task.WhenAll(first, second, latest);
+        Assert.False(results[0]);
+        Assert.False(results[1]);
+        Assert.True(results[2]);
+        Assert.Equal(toc[2].ChapterIndex + 1, pdf.PageNumber);
+        AssertCurrent(scope, toc[2].Title);
+        // The nested outline is below the page origin. A stale parent reset
+        // would leave the viewport near zero even though the final row looked
+        // correct.
+        Assert.InRange(pdf.VisibleTop, 0.4, 0.75);
+    });
+
+    [Fact]
     public Task SelectionStylesCommentsSearchAndPersistenceUsePageLocalTextOffsets() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();

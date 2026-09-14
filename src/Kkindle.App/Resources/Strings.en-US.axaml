@@ -1425,6 +1425,7 @@
     <x:String x:Key="Ui.Auto.F788C6C61E7B5B2F">Uploading local book files…</x:String>
     <x:String x:Key="Ui.Auto.283F76F680FBFDF2">Saving sync snapshot…</x:String>
     <x:String x:Key="Ui.Auto.B5C80821E2C258C3">Preparing book files…</x:String>
+    <x:String x:Key="Ui.Auto.126D4D3D6EA353B8">Registering book file metadata…</x:String>
     <x:String x:Key="Ui.Auto.A46970C1501D9212">Merging books and reading data…</x:String>
     <x:String x:Key="Ui.Auto.A8D401CDC18433E0">Merging synced settings…</x:String>
     <x:String x:Key="Ui.Auto.319E82D8DA1D8FF6">Syncing with S3…</x:String>
@@ -1603,10 +1604,16 @@
     <x:String x:Key="Ui.Auto.F7CFED2DB31563A4">The sync object is encrypted. Enter the same encryption key used on your other devices.</x:String>
     <x:String x:Key="Ui.Auto.FF91E8BCEE1273B2">A backup task is in progress. Wait for it to finish before syncing with S3.</x:String>
     <x:String x:Key="Sync.ProviderLabel">Sync method</x:String>
+    <x:String x:Key="Sync.DownloadBookFilesOnSync">Download full books during sync</x:String>
+    <x:String x:Key="Sync.DownloadBookFilesOnSyncHelp">When off, sync only book metadata and covers; book files download when opened or when you click the download icon.</x:String>
     <x:String x:Key="Sync.WebDavEndpointLabel">Server URL</x:String>
     <x:String x:Key="Sync.WebDavUsernameLabel">Username</x:String>
     <x:String x:Key="Sync.WebDavPasswordLabel">Password / app password</x:String>
     <x:String x:Key="Sync.WebDavHelp">Enter the URL of an existing WebDAV directory. Sync files will be stored in a subdirectory created automatically. Enter credentials if required; some services use an app password.</x:String>
+    <x:String x:Key="Ui.Library.ShowSyncStatusIcon">Show book sync status icons</x:String>
+    <x:String x:Key="Ui.Library.ShowSyncStatusIconHelp">Show unsynced, synced, and not-downloaded icons on library cards.</x:String>
+    <x:String x:Key="Ui.Library.ShowPresenceIcon">Show library location icons</x:String>
+    <x:String x:Key="Ui.Library.ShowPresenceIconHelp">Show whether each book is in the computer library, the current device, or both.</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">The sync subdirectory cannot contain control characters.</x:String>
     <x:String x:Key="Ui.Library.ImportBooks">Import books</x:String>
     <x:String x:Key="Ui.Shelf.Eject">Eject device</x:String>

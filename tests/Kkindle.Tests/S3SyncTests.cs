@@ -65,6 +65,7 @@ public sealed class S3SyncTests
             {
                 Enabled = true,
                 AutomaticSyncEnabled = false,
+                DownloadBookFilesOnSync = true,
                 Endpoint = "https://s3.example.test",
                 AccessKey = "access-value",
                 SecretKey = "secret-value",

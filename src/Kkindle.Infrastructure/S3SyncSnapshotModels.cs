@@ -157,6 +157,8 @@ internal sealed class S3SyncReadingStats
     public Guid BookFileId { get; set; }
     public long CumulativeSeconds { get; set; }
     public Dictionary<string, long> SecondsByDevice { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, Dictionary<string, long>> SecondsByDateByDevice { get; set; } =
+        new(StringComparer.Ordinal);
     public double ProgressPercent { get; set; }
     public int CompletedChapters { get; set; }
     public int TotalChapters { get; set; }
@@ -197,6 +199,8 @@ internal sealed class S3SyncAppSettings
     public bool AutoDoubanMatchOnImport { get; set; }
     public bool CompareKindleLibraryEnabled { get; set; } = true;
     public bool GridGalleryDisplay { get; set; }
+    public bool ShowSyncStatusIcon { get; set; } = true;
+    public bool ShowLibraryPresenceIcon { get; set; } = true;
     public bool ReadingMaterialsCollapsedByDefault { get; set; } = true;
     public bool PinyinContextMenuEnabled { get; set; }
     public bool PinyinLocalOnly { get; set; }
@@ -234,4 +238,9 @@ internal sealed class S3SyncState
     public DateTimeOffset? LastSyncAt { get; set; }
     public S3SyncSnapshot? LastUploadedSnapshot { get; set; }
     public List<S3SyncTombstone> Tombstones { get; set; } = [];
+    // Local-only knowledge used by the lazy book-file download flow. These
+    // fields are intentionally kept out of S3SyncSnapshot: the wire format
+    // remains a portable metadata view and the download state is device-local.
+    public List<string> RemoteBookIds { get; set; } = [];
+    public List<string> RemoteOnlyFileHashes { get; set; } = [];
 }

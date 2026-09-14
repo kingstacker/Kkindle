@@ -1416,6 +1416,7 @@ public partial class MainWindow
         _readerBookPageCountCancellation = null;
         _readerBookPageCounts = [];
         _readerBookPageCountSequence++;
+        CancelReaderPdfNavigation();
         _readerSearchCount = 0;
         _readerSearchIndex = -1;
         _readerPendingChunkOffset = null;
@@ -5585,12 +5586,60 @@ public partial class MainWindow
         if (_readerIsPdf)
         {
             if (!Uri.TryCreate(item.Target, UriKind.Absolute, out var pdfTarget) || !pdfTarget.IsFile) return false;
-            await NavigatePdfPageAsync(item.ChapterIndex + 1, cancellationToken);
-            if (CurrentReaderHost is not NativePdfReaderHost pdf || pdf.PageNumber != item.ChapterIndex + 1) return false;
-            pdf.ScrollToTop(NativePdfReaderHost.ReadTargetTop(pdfTarget));
-            SetReaderTocSelection(item);
-            await SaveReaderProgressAsync(cancellationToken);
-            return true;
+            var pdfNavigationCancellation = BeginReaderPdfTocNavigation(
+                cancellationToken,
+                out var requestVersion);
+            var pdfNavigationToken = pdfNavigationCancellation.Token;
+            try
+            {
+                var targetPage = item.ChapterIndex + 1;
+                if (!await NavigatePdfPageCoreAsync(
+                    targetPage,
+                    pdfNavigationToken,
+                    saveProgress: false,
+                    syncTocSelection: false))
+                {
+                    return false;
+                }
+                if (!IsCurrentReaderPdfTocNavigation(requestVersion, pdfNavigationToken))
+                    return false;
+                if (CurrentReaderHost is not NativePdfReaderHost pdf
+                    || pdf.PageNumber != targetPage)
+                {
+                    return false;
+                }
+
+                // Finish the body navigation first. The PDF host emits a scroll
+                // message synchronously, so the pending request suppresses the
+                // automatic TOC follower until this exact destination is in
+                // place. The TOC is then updated once, at the end.
+                pdf.ScrollToTop(NativePdfReaderHost.ReadTargetTop(pdfTarget));
+                pdfNavigationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentReaderPdfTocNavigation(requestVersion, pdfNavigationToken))
+                    return false;
+
+                _readerPdfPage = pdf.PageNumber;
+                _readerChapterIndex = _readerPdfPage - 1;
+                SetReaderTocSelection(item);
+                ReaderChapterText.Text = GetReaderChapterPositionLabel();
+                UpdateReaderToolbar();
+                await UpdateReaderBookmarkIndicatorAsync();
+                await SaveReaderProgressAsync(pdfNavigationToken);
+                return true;
+            }
+            catch (OperationCanceledException) when (pdfNavigationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+            finally
+            {
+                if (ReferenceEquals(_readerPdfNavigationCancellation, pdfNavigationCancellation))
+                {
+                    _readerPdfTocNavigationVersion = 0;
+                    _readerPdfNavigationCancellation = null;
+                    pdfNavigationCancellation.Dispose();
+                }
+            }
         }
         var isReaderTtsNavigation = !_readerTtsAutoNavigation
             && intent is ReaderNavigationIntent.Toc or ReaderNavigationIntent.Progress;
@@ -8464,7 +8513,8 @@ public partial class MainWindow
         if (_suppressReaderTocSelectionNavigation) return;
         if (e.AddedItems.Count > 0 && e.AddedItems[0] is ReaderTocRow row)
         {
-            SetReaderTocCurrentRow(row);
+            if (!_readerIsPdf)
+                SetReaderTocCurrentRow(row);
             var item = row.Item;
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(

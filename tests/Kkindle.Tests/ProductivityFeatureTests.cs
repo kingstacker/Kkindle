@@ -450,6 +450,49 @@ public sealed class ProductivityFeatureTests
         finally { TestHelpers.TryDelete(root); }
     }
 
+    [Fact]
+    public async Task DashboardMigratesExistingSessionHistoryIntoDailySyncCounters()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var bookId = Guid.NewGuid();
+            var fileId = Guid.NewGuid();
+            var recordedAt = DateTimeOffset.UtcNow.AddDays(-1).ToString("O");
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE ReaderReadingSessions (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        BookId TEXT NOT NULL,
+                        BookFileId TEXT NOT NULL,
+                        ActiveSeconds INTEGER NOT NULL,
+                        ProgressPercent REAL NOT NULL DEFAULT 0,
+                        RecordedAt TEXT NOT NULL);
+                    INSERT INTO ReaderReadingSessions (
+                        BookId, BookFileId, ActiveSeconds, ProgressPercent, RecordedAt)
+                    VALUES ($bookId, $fileId, 73, 24, $recordedAt);
+                    """;
+                command.Parameters.AddWithValue("$bookId", bookId.ToString());
+                command.Parameters.AddWithValue("$fileId", fileId.ToString());
+                command.Parameters.AddWithValue("$recordedAt", recordedAt);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var service = new ReaderDataService(paths);
+            await service.InitializeAsync();
+            Assert.Equal(73, (await service.GetReadingDashboardAsync()).DailyReading.Sum(day => day.ActiveSeconds));
+
+            await service.InitializeAsync();
+            Assert.Equal(73, (await service.GetReadingDashboardAsync()).DailyReading.Sum(day => day.ActiveSeconds));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     private sealed class FakeKindleDictionaryConverter : IBookFormatConverter
     {
         public Task ConvertAsync(

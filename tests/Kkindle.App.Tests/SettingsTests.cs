@@ -86,6 +86,25 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task BookCardIconVisibilitySettingsPersist() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var syncIcon = scope.Get<ToggleSwitch>("ShowSyncStatusIconCheck");
+        var presenceIcon = scope.Get<ToggleSwitch>("ShowLibraryPresenceIconCheck");
+        Assert.True(syncIcon.IsChecked);
+        Assert.True(presenceIcon.IsChecked);
+
+        syncIcon.IsChecked = false;
+        presenceIcon.IsChecked = false;
+        scope.Window.Close();
+        await Until(() => !scope.Window.IsVisible);
+
+        var stored = await new AppSettingsStore(scope.Paths).LoadAsync();
+        Assert.False(stored.ShowSyncStatusIcon);
+        Assert.False(stored.ShowLibraryPresenceIcon);
+    });
+
+    [Fact]
     public Task PinyinEngineSelectionPersists() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -144,6 +163,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         scope.Call("SystemS3SyncNavigationButton_Click", null, new RoutedEventArgs());
         scope.Get<ToggleSwitch>("S3SyncEnabledCheck").IsChecked = true;
         scope.Get<ToggleSwitch>("S3AutomaticSyncCheck").IsChecked = false;
+        scope.Get<ToggleSwitch>("S3DownloadBookFilesCheck").IsChecked = true;
         scope.Get<TextBox>("S3AccessKeyBox").Text = "test-access";
         scope.Get<TextBox>("S3SecretKeyBox").Text = "test-secret";
         scope.Get<TextBox>("S3BucketBox").Text = "test-bucket";
@@ -160,6 +180,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.True(await scope.Call<Task<bool>>("SaveS3SyncSettingsFromControlsAsync", true, CancellationToken.None));
         var saved = await scope.Sync.LoadSettingsAsync();
         Assert.True(saved.Settings.Enabled);
+        Assert.True(saved.Settings.DownloadBookFilesOnSync);
         Assert.Equal("test-bucket", saved.Settings.Bucket);
         scope.Get<TextBox>("S3BucketBox").Text = "discard-me";
         scope.Call("S3DiscardSettingsButton_Click", null, new RoutedEventArgs());

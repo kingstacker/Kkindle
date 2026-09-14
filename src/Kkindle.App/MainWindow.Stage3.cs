@@ -707,7 +707,7 @@ public partial class MainWindow
                 comparison.BooksOnKindle.Contains(localCard.Book.Id)
                     ? BookLibraryPresence.Both
                     : BookLibraryPresence.ComputerOnly);
-            localCard.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
+            localCard.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled && _appSettings.ShowLibraryPresenceIcon);
         }
         foreach (var card in DeviceBooks)
         {
@@ -715,7 +715,7 @@ public partial class MainWindow
                 comparison.KindleBooksOnComputer.Contains(card.Book.RelativePath)
                     ? BookLibraryPresence.Both
                     : BookLibraryPresence.KindleOnly);
-            card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled);
+            card.SetLibraryPresenceVisible(_appSettings.CompareKindleLibraryEnabled && _appSettings.ShowLibraryPresenceIcon);
         }
 
         if (refreshDeviceView && _stage3Ready)
@@ -1558,6 +1558,9 @@ public partial class MainWindow
             throw new NotSupportedException(T("当前设备没有可发送的书籍格式，支持：{0}。", string.Join("、", device.Profile.BookFormats).ToUpperInvariant()));
         var sourcePath = _library.GetAbsoluteFilePath(sourceFile);
         if (!File.Exists(sourcePath))
+            sourcePath = await EnsureBookFileAvailableAsync(sourceFile, cancellationToken)
+                ?? sourcePath;
+        if (!File.Exists(sourcePath))
             throw new FileNotFoundException(T("找不到本地书籍文件，请先刷新书库。"), sourcePath);
         var coverOverridePath = ResolveBookCoverAbsolutePath(book);
 
@@ -1783,14 +1786,34 @@ public partial class MainWindow
             return;
         }
 
-        var candidates = cards
-            .Select(card => (Card: card, File: KindleEmailSelectionPolicy.SelectPreferred(card.Book.Files)))
-            .Where(entry => entry.File is not null)
-            .Select(entry => (entry.Card, File: entry.File!, Path: ViewModel.GetAbsoluteFilePath(entry.File!)))
-            .Where(entry => File.Exists(entry.Path))
-            .Select(entry => (entry.Card, entry.File, entry.Path, SizeBytes: new FileInfo(entry.Path).Length))
-            .ToArray();
-        if (candidates.Length == 0)
+        var candidates = new List<(BookCardViewModel Card, BookFile File, string Path, long SizeBytes)>();
+        foreach (var card in cards)
+        {
+            var file = KindleEmailSelectionPolicy.SelectPreferred(card.Book.Files);
+            if (file is null) continue;
+
+            var path = ViewModel.GetAbsoluteFilePath(file);
+            if (!File.Exists(path))
+            {
+                try
+                {
+                    path = await EnsureBookFileAvailableAsync(file, _lifetimeCancellation.Token) ?? path;
+                }
+                catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    SetTaskStatus(T("《{0}》下载失败：{1}", card.Title, UiText.Localize(exception.Message)));
+                    continue;
+                }
+            }
+
+            if (!File.Exists(path)) continue;
+            candidates.Add((card, file, path, new FileInfo(path).Length));
+        }
+        if (candidates.Count == 0)
         {
             SetTaskStatus(T("发送到 Kindle 邮箱只支持 EPUB 或 PDF；所选书籍没有可发送格式。"));
             return;
@@ -2006,8 +2029,20 @@ public partial class MainWindow
         var sourcePath = ViewModel.GetAbsoluteFilePath(file);
         if (!File.Exists(sourcePath))
         {
-            SetTaskStatus(T("找不到文件：{0}", file.RelativePath));
-            return;
+            try
+            {
+                sourcePath = await EnsureBookFileAvailableAsync(file, _lifetimeCancellation.Token) ?? sourcePath;
+            }
+            catch (Exception exception)
+            {
+                SetTaskStatus(T("下载书籍失败：{0}", UiText.Localize(exception.Message)));
+                return;
+            }
+            if (!File.Exists(sourcePath))
+            {
+                SetTaskStatus(T("找不到文件：{0}", file.RelativePath));
+                return;
+            }
         }
 
         try
@@ -2188,12 +2223,14 @@ public partial class MainWindow
             }
 
             var imported = 0;
+            var skipped = 0;
             if (importPaths.Count > 0)
             {
                 DevicePageStatusText.Text = T("正在导入电脑书库…");
                 var result = await ViewModel.ImportAsync(importPaths, cancellationToken: _lifetimeCancellation.Token);
                 var automaticFormats = await AutoGenerateReaderFormatsForImportsAsync(result, _lifetimeCancellation.Token);
-                imported = result.SuccessCount;
+                imported = result.AddedCount;
+                skipped = result.SkippedCount;
                 failed += result.FailureCount + automaticFormats.Failures.Count;
                 foreach (var item in result.Items.Where(item => !item.Succeeded))
                 {
@@ -2203,11 +2240,21 @@ public partial class MainWindow
                 failureDetails.AddRange(automaticFormats.Failures);
                 calibreMissing |= automaticFormats.Failures.Any(IsCalibreMissingMessage);
                 await RefreshCollectionsAsync();
+                // ViewModel.ImportAsync replaces the visible cards. The
+                // library-change event can therefore finish on the previous
+                // card set; refresh the badges after the import is complete.
+                await RefreshBookSyncStatusesAsync(_lifetimeCancellation.Token);
                 UpdateLibraryUi();
             }
             var completionMessage = failed == 0
-                ? T("已从 {0} 导出并导入电脑书库 {1} 本书。", device.Name, imported)
-                : T("导出完成：成功 {0} 本，失败 {1} 本。", imported, failed);
+                ? skipped == 0
+                    ? T("已从 {0} 导出并导入电脑书库 {1} 本书。", device.Name, imported)
+                    : imported == 0
+                        ? T("已从 {0} 导出；跳过 {1} 个重复或已有文件，未新增书籍。", device.Name, skipped)
+                        : T("已从 {0} 导出并导入电脑书库 {1} 本书，跳过 {2} 个重复或已有文件。", device.Name, imported, skipped)
+                : skipped == 0
+                    ? T("导出完成：成功 {0} 本，失败 {1} 本。", imported, failed)
+                    : T("导出完成：成功 {0} 本，跳过 {1} 个重复或已有文件，失败 {2} 本。", imported, skipped, failed);
             DevicePageStatusText.Text = completionMessage;
             ShowTransferToast(T("导出到电脑书库"), completionMessage, progress: 100);
             if (failed > 0)
@@ -3965,6 +4012,8 @@ public partial class MainWindow
             AutoConnectDeviceCheck.IsChecked = _appSettings.AutoConnectDevice;
             CompareKindleLibraryCheck.IsChecked = _appSettings.CompareKindleLibraryEnabled;
             GridGalleryDisplayCheck.IsChecked = _appSettings.GridGalleryDisplay;
+            ShowSyncStatusIconCheck.IsChecked = _appSettings.ShowSyncStatusIcon;
+            ShowLibraryPresenceIconCheck.IsChecked = _appSettings.ShowLibraryPresenceIcon;
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
             PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
             PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
@@ -4005,6 +4054,7 @@ public partial class MainWindow
             SyncProviderBox.SelectedIndex = (int)settings.Provider;
             S3SyncEnabledCheck.IsChecked = settings.Enabled;
             S3AutomaticSyncCheck.IsChecked = settings.AutomaticSyncEnabled;
+            S3DownloadBookFilesCheck.IsChecked = settings.DownloadBookFilesOnSync;
             S3SyncIntervalBox.Value = settings.IntervalMinutes;
             S3EndpointBox.Text = settings.Endpoint;
             S3AccessKeyBox.Text = settings.AccessKey;
@@ -4035,6 +4085,7 @@ public partial class MainWindow
         Provider = (SyncProvider)SyncProviderBox.SelectedIndex,
         Enabled = S3SyncEnabledCheck.IsChecked == true,
         AutomaticSyncEnabled = S3AutomaticSyncCheck.IsChecked == true,
+        DownloadBookFilesOnSync = S3DownloadBookFilesCheck.IsChecked == true,
         IntervalMinutes = S3SyncIntervalBox.Value is { } interval ? (int)interval : 30,
         Endpoint = S3EndpointBox.Text?.Trim() ?? string.Empty,
         AccessKey = S3AccessKeyBox.Text?.Trim() ?? string.Empty,
@@ -4258,7 +4309,7 @@ public partial class MainWindow
         Control[] controls =
         [
             SyncProviderBox, WebDavEndpointBox, WebDavUsernameBox, WebDavPasswordBox,
-            S3SyncEnabledCheck, S3AutomaticSyncCheck, S3SyncIntervalBox, S3EndpointBox,
+            S3SyncEnabledCheck, S3AutomaticSyncCheck, S3DownloadBookFilesCheck, S3SyncIntervalBox, S3EndpointBox,
             S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox,
             S3PathStyleCheck, S3SkipTlsVerifyCheck, S3EncryptionKeyBox, S3TimeoutBox,
             S3ConcurrencyBox, S3SaveSettingsButton, S3DiscardSettingsButton, S3TestConnectionButton, S3SyncNowButton,
@@ -4297,7 +4348,10 @@ public partial class MainWindow
         _s3DeletionConfirmationPending = false;
         _s3SyncCancelledByUser = false;
         if (kind == LocalDataChangeKind.Library)
+        {
             MarkReadingMaterialsDirty();
+            _ = RefreshBookSyncStatusesAsync(_lifetimeCancellation.Token);
+        }
         if (!_s3SyncBusy && _s3SyncStoredSettings.Settings is { Enabled: true, IsConfigured: true })
             UpdateS3SyncIndicator(S3SyncIndicatorState.Pending);
         if (!IsAutomaticS3SyncReady())
@@ -4641,11 +4695,17 @@ public partial class MainWindow
             {
                 await RefreshLibraryAfterS3SyncAsync(token);
             }
+            else
+            {
+                // A local book can become synced without changing any SQLite
+                // rows. Refresh just the badges in that case.
+                await RefreshBookSyncStatusesAsync(token);
+            }
             refreshAfterFailure = false;
             var status = result.IsPartial
-                ? T("同步未完成：新增 {0} 本书，下载 {1} 个文件；部分文件未能同步，请重试。", result.BooksAdded, result.FilesDownloaded)
+                ? T("同步未完成：新增 {0} 本书，下载 {1} 个文件；部分数据未能同步，请重试。", result.BooksAdded, result.FilesDownloaded)
                 : result.Changed
-                ? T("同步完成：新增 {0} 本书，下载 {1} 个文件，应用 {2} 条批注。", result.BooksAdded, result.FilesDownloaded, result.AnnotationsApplied)
+                ? T("同步完成：新增 {0} 本书，下载 {1} 个文件，应用 {2} 条批注；正文将在打开时按需下载。", result.BooksAdded, result.FilesDownloaded, result.AnnotationsApplied)
                 : T("同步完成，当前已是最新。 ");
             if (!string.IsNullOrWhiteSpace(result.Warning)) status += " " + UiText.Localize(result.Warning);
             SetS3SyncStatus(status, silent);
@@ -4762,6 +4822,8 @@ public partial class MainWindow
         AutoConnectDeviceCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         DefaultVerticalWritingCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        ShowSyncStatusIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        ShowLibraryPresenceIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
         TranslationAiRpmBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -5198,6 +5260,8 @@ public partial class MainWindow
             AutoConnectDevice = AutoConnectDeviceCheck.IsChecked != false,
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
             GridGalleryDisplay = GridGalleryDisplayCheck.IsChecked == true,
+            ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
+            ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
             PinyinContextMenuEnabled = PinyinContextMenuEnabledCheck.IsChecked == true,
             PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,

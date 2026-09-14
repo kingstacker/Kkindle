@@ -16,6 +16,9 @@ public sealed record S3SyncSettings
     public SyncProvider Provider { get; init; } = SyncProvider.S3;
     public bool Enabled { get; init; }
     public bool AutomaticSyncEnabled { get; init; } = true;
+    // Metadata-only remains the default so a first sync does not pull every
+    // book file onto a new device. Users can opt into a full content pull.
+    public bool DownloadBookFilesOnSync { get; init; }
     public int IntervalMinutes { get; init; } = 30;
     public string Endpoint { get; init; } = string.Empty;
     public string AccessKey { get; init; } = string.Empty;

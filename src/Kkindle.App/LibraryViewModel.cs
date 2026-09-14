@@ -149,6 +149,8 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     private BookLibraryPresence _libraryPresence = BookLibraryPresence.ComputerOnly;
     private bool _isLibraryPresenceVisible = true;
     private bool _isGalleryTextVisible = true;
+    private bool _isSyncStatusVisible = true;
+    private BookSyncStatus _syncStatus = BookSyncStatus.NotSynced;
 
     public BookLibraryPresence LibraryPresence
     {
@@ -182,6 +184,34 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     // hides the footer the badge must go with it so only the cover remains.
     public bool PresenceVisibility => _isLibraryPresenceVisible && _isGalleryTextVisible;
 
+    public BookSyncStatus SyncStatus
+    {
+        get => _syncStatus;
+        private set
+        {
+            if (!SetProperty(ref _syncStatus, value)) return;
+            OnPropertyChanged(nameof(SyncStatusLabel));
+            OnPropertyChanged(nameof(SyncNotSyncedVisibility));
+            OnPropertyChanged(nameof(SyncSyncedVisibility));
+            OnPropertyChanged(nameof(SyncNotDownloadedVisibility));
+        }
+    }
+
+    public bool SyncStatusVisibility => _isSyncStatusVisible;
+    public bool SyncNotSyncedVisibility => SyncStatus == BookSyncStatus.NotSynced;
+    // A local copy that is already part of the remote baseline is simply
+    // synced from the user's perspective; the separate enum value is kept
+    // internally for service/test compatibility.
+    public bool SyncSyncedVisibility => SyncStatus is BookSyncStatus.Synced or BookSyncStatus.Downloaded;
+    public bool SyncNotDownloadedVisibility => SyncStatus == BookSyncStatus.NotDownloaded;
+    public string SyncStatusLabel => SyncStatus switch
+    {
+        BookSyncStatus.Synced => UiText.Get("已同步"),
+        BookSyncStatus.NotDownloaded => UiText.Get("已同步到云端，尚未下载；点击图标下载"),
+        BookSyncStatus.Downloaded => UiText.Get("已同步"),
+        _ => UiText.Get("未同步；点击图标上传")
+    };
+
     public bool GalleryTextVisibility => _isGalleryTextVisible;
 
     // Gallery mode trims the card to the cover alone so no blank text block
@@ -189,6 +219,15 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     public double CardHeight => _isGalleryTextVisible ? 292 : 214;
 
     public void SetLibraryPresence(BookLibraryPresence presence) => LibraryPresence = presence;
+
+    public void SetSyncStatus(BookSyncStatus status) => SyncStatus = status;
+
+    public void SetSyncStatusVisible(bool visible)
+    {
+        if (_isSyncStatusVisible == visible) return;
+        _isSyncStatusVisible = visible;
+        OnPropertyChanged(nameof(SyncStatusVisibility));
+    }
 
     public void SetLibraryPresenceVisible(bool visible)
     {
@@ -307,6 +346,7 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(UpdatedLabel));
         OnPropertyChanged(nameof(DescriptionLabel));
         OnPropertyChanged(nameof(PresenceLabel));
+        OnPropertyChanged(nameof(SyncStatusLabel));
         OnPropertyChanged(nameof(ConversionProgressMessage));
     }
 
@@ -607,8 +647,12 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             var result = await _library.ImportAsync(paths, progress, cancellationToken, conflictResolver);
             await RefreshAsync(cancellationToken);
             StatusText = result.FailureCount == 0
-                ? UiText.Get("已导入 {0} 项", result.SuccessCount)
-                : UiText.Get("已导入 {0} 项，{1} 项失败", result.SuccessCount, result.FailureCount);
+                ? result.SkippedCount == 0
+                    ? UiText.Get("已新增 {0} 个文件", result.AddedCount)
+                    : UiText.Get("已新增 {0} 个文件，跳过 {1} 个重复或已有文件", result.AddedCount, result.SkippedCount)
+                : result.SkippedCount == 0
+                    ? UiText.Get("已新增 {0} 个文件，{1} 个失败", result.AddedCount, result.FailureCount)
+                    : UiText.Get("已新增 {0} 个文件，跳过 {1} 个重复或已有文件，{2} 个失败", result.AddedCount, result.SkippedCount, result.FailureCount);
             return result;
         }
         finally

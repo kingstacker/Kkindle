@@ -819,11 +819,11 @@ public sealed partial class ReaderDataService
         var firstDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-13));
         var dailyCommand = connection.CreateCommand();
         dailyCommand.CommandText = """
-            SELECT substr(RecordedAt, 1, 10), COALESCE(SUM(ActiveSeconds), 0)
-            FROM ReaderReadingSessions
-            WHERE RecordedAt >= $cutoff
-            GROUP BY substr(RecordedAt, 1, 10)
-            ORDER BY substr(RecordedAt, 1, 10);
+            SELECT ReadingDate, COALESCE(SUM(Seconds), 0)
+            FROM S3SyncReadingDayCounters
+            WHERE ReadingDate >= $cutoff
+            GROUP BY ReadingDate
+            ORDER BY ReadingDate;
             """;
         dailyCommand.Parameters.AddWithValue("$cutoff", firstDay.ToString("yyyy-MM-dd"));
         var dailyValues = new Dictionary<DateOnly, long>();
@@ -858,6 +858,7 @@ public sealed partial class ReaderDataService
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            var recordedAt = DateTimeOffset.UtcNow;
             var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
@@ -878,7 +879,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$progressPercent", progressPercent);
             command.Parameters.AddWithValue("$completedChapters", completedChapters);
             command.Parameters.AddWithValue("$totalChapters", totalChapters);
-            command.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
+            command.Parameters.AddWithValue("$updatedAt", recordedAt.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
 
             var session = connection.CreateCommand();
@@ -892,8 +893,10 @@ public sealed partial class ReaderDataService
             session.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
             session.Parameters.AddWithValue("$seconds", activeSeconds);
             session.Parameters.AddWithValue("$progressPercent", progressPercent);
-            session.Parameters.AddWithValue("$recordedAt", DateTimeOffset.UtcNow.ToString("O"));
+            session.Parameters.AddWithValue("$recordedAt", recordedAt.ToString("O"));
             await session.ExecuteNonQueryAsync(cancellationToken);
+            await ReadingTimeSyncTracker.RecordReadingDayAsync(
+                connection, transaction, bookFileId, recordedAt, activeSeconds, cancellationToken);
             await ReadingTimeSyncTracker.RecordCurrentTotalAsync(connection, transaction, bookFileId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             NotifyDataChanged(LocalDataChangeKind.ReadingStats);

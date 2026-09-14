@@ -1425,6 +1425,7 @@
     <x:String x:Key="Ui.Auto.F788C6C61E7B5B2F">正在上传本地书籍文件…</x:String>
     <x:String x:Key="Ui.Auto.283F76F680FBFDF2">正在保存同步快照…</x:String>
     <x:String x:Key="Ui.Auto.B5C80821E2C258C3">正在准备书籍文件…</x:String>
+    <x:String x:Key="Ui.Auto.126D4D3D6EA353B8">正在登记书籍文件元数据…</x:String>
     <x:String x:Key="Ui.Auto.A46970C1501D9212">正在合并书籍和阅读数据…</x:String>
     <x:String x:Key="Ui.Auto.A8D401CDC18433E0">正在合并同步设置…</x:String>
     <x:String x:Key="Ui.Auto.319E82D8DA1D8FF6">正在同步到 S3…</x:String>
@@ -1603,10 +1604,16 @@
     <x:String x:Key="Ui.Auto.F7CFED2DB31563A4">云端同步对象已加密，请配置相同的加密密钥。</x:String>
     <x:String x:Key="Ui.Auto.FF91E8BCEE1273B2">备份任务正在进行，请完成后再执行 云端同步。</x:String>
     <x:String x:Key="Sync.ProviderLabel">同步方式</x:String>
+    <x:String x:Key="Sync.DownloadBookFilesOnSync">同步时下载完整书籍</x:String>
+    <x:String x:Key="Sync.DownloadBookFilesOnSyncHelp">关闭时仅同步书籍元数据和封面；打开书籍或点击下载图标时再下载书籍文件。</x:String>
     <x:String x:Key="Sync.WebDavEndpointLabel">服务地址</x:String>
     <x:String x:Key="Sync.WebDavUsernameLabel">用户名</x:String>
     <x:String x:Key="Sync.WebDavPasswordLabel">密码 / 应用密码</x:String>
     <x:String x:Key="Sync.WebDavHelp">填写已存在的 WebDAV 目录地址；同步文件会自动保存到其下的同步子目录。需要认证时填写用户名和密码，部分服务使用应用密码。</x:String>
+    <x:String x:Key="Ui.Library.ShowSyncStatusIcon">显示书籍同步状态图标</x:String>
+    <x:String x:Key="Ui.Library.ShowSyncStatusIconHelp">在书库卡片上显示未同步、已同步和待下载图标。</x:String>
+    <x:String x:Key="Ui.Library.ShowPresenceIcon">显示书库位置图标</x:String>
+    <x:String x:Key="Ui.Library.ShowPresenceIconHelp">在书库卡片上显示电脑书库与当前设备的对应关系。</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">同步子目录不能包含控制字符。</x:String>
     <x:String x:Key="Ui.Library.ImportBooks">导入书籍</x:String>
     <x:String x:Key="Ui.Shelf.Eject">弹出设备</x:String>

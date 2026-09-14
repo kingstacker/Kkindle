@@ -126,8 +126,13 @@ public sealed class LibraryTests
 
             Assert.Equal(1, first.SuccessCount);
             Assert.Equal(1, second.SuccessCount);
+            Assert.Equal(1, first.AddedCount);
+            Assert.Equal(0, first.SkippedCount);
+            Assert.Equal(0, second.AddedCount);
+            Assert.Equal(1, second.SkippedCount);
             Assert.True(Assert.Single(first.Items).Added);
             Assert.False(Assert.Single(second.Items).Added);
+            Assert.Contains("已在书库中，已跳过重复文件", Assert.Single(second.Items).Message, StringComparison.Ordinal);
             Assert.Single(books);
             Assert.Equal("测试书", books[0].Title);
             Assert.Equal("测试作者", books[0].Authors);

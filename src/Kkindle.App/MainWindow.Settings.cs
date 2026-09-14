@@ -154,7 +154,7 @@ public partial class MainWindow
 
     private void ConfigureS3SettingsDraftTracking()
     {
-        ToggleSwitch[] switches = [S3SyncEnabledCheck, S3AutomaticSyncCheck, S3PathStyleCheck, S3SkipTlsVerifyCheck];
+        ToggleSwitch[] switches = [S3SyncEnabledCheck, S3AutomaticSyncCheck, S3DownloadBookFilesCheck, S3PathStyleCheck, S3SkipTlsVerifyCheck];
         foreach (var control in switches) control.IsCheckedChanged += (_, _) => S3SettingsFieldChanged();
         TextBox[] fields = [S3EndpointBox, S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox, S3EncryptionKeyBox,
             WebDavEndpointBox, WebDavUsernameBox, WebDavPasswordBox];

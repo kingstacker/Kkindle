@@ -23,6 +23,9 @@ public partial class MainWindow
     private bool _readerShowingPreload;
     private CancellationTokenSource? _readerSessionCancellation;
     private CancellationTokenSource? _readerNavigationCancellation;
+    private CancellationTokenSource? _readerPdfNavigationCancellation;
+    private int _readerPdfNavigationVersion;
+    private int _readerPdfTocNavigationVersion;
     private CancellationTokenSource? _readerChapterPreloadCancellation;
     private Uri? _readerChapterPreloadTarget;
     private readonly Dictionary<IReaderHost, Uri> _readerLoadedHostSources = new();
@@ -939,6 +942,7 @@ public partial class MainWindow
         _readerNavigationCancellation?.Cancel();
         _readerNavigationCancellation?.Dispose();
         _readerNavigationCancellation = null;
+        CancelReaderPdfNavigation();
         _readerSessionCancellation?.Cancel();
         _readerSessionCancellation?.Dispose();
         _readerSessionCancellation = null;

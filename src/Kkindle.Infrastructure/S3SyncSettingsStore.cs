@@ -58,6 +58,7 @@ public sealed class S3SyncSettingsStore
                 Provider = persisted.Provider,
                 Enabled = persisted.Enabled,
                 AutomaticSyncEnabled = persisted.AutomaticSyncEnabled,
+                DownloadBookFilesOnSync = persisted.DownloadBookFilesOnSync,
                 IntervalMinutes = persisted.IntervalMinutes,
                 Endpoint = persisted.Endpoint ?? string.Empty,
                 AccessKey = Unprotect(persisted.ProtectedAccessKey),
@@ -112,6 +113,7 @@ public sealed class S3SyncSettingsStore
             Provider = normalized.Provider,
             Enabled = normalized.Enabled,
             AutomaticSyncEnabled = normalized.AutomaticSyncEnabled,
+            DownloadBookFilesOnSync = normalized.DownloadBookFilesOnSync,
             IntervalMinutes = normalized.IntervalMinutes,
             Endpoint = normalized.Endpoint,
             ProtectedAccessKey = Protect(normalized.AccessKey),
@@ -174,6 +176,7 @@ public sealed class S3SyncSettingsStore
         public SyncProvider Provider { get; set; }
         public bool Enabled { get; set; }
         public bool AutomaticSyncEnabled { get; set; } = true;
+        public bool DownloadBookFilesOnSync { get; set; }
         public int IntervalMinutes { get; set; } = 30;
         public string? Endpoint { get; set; }
         public string? ProtectedAccessKey { get; set; }

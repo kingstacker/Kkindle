@@ -323,15 +323,36 @@ public partial class MainWindow
         }
     }
 
-    private async Task NavigatePdfPageAsync(
+    private Task NavigatePdfPageAsync(
         int page,
         CancellationToken cancellationToken,
-        bool saveProgress = true)
+        bool saveProgress = true) =>
+        IgnorePdfPageNavigationResultAsync(page, cancellationToken, saveProgress);
+
+    private async Task IgnorePdfPageNavigationResultAsync(
+        int page,
+        CancellationToken cancellationToken,
+        bool saveProgress)
     {
+        await NavigatePdfPageCoreAsync(
+            page,
+            cancellationToken,
+            saveProgress,
+            syncTocSelection: true);
+    }
+
+    private async Task<bool> NavigatePdfPageCoreAsync(
+        int page,
+        CancellationToken cancellationToken,
+        bool saveProgress,
+        bool syncTocSelection)
+    {
+        if (syncTocSelection)
+            CancelReaderPdfNavigation();
         if (!_readerTtsAutoNavigation)
             await _readerTts.StopAsync();
-        if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not NativePdfReaderHost host) return;
-        if (string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return;
+        if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not NativePdfReaderHost host) return false;
+        if (string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return false;
         _selectedReaderAnnotation = null;
         HideReaderAnnotationInputPopup();
         HideReaderSelectionPopup();
@@ -346,18 +367,54 @@ public partial class MainWindow
         if (!loaded)
         {
             if (!string.IsNullOrWhiteSpace(host.LastError)) ReaderStatusText.Text = host.LastError;
-            return;
+            return false;
         }
+        cancellationToken.ThrowIfCancellationRequested();
         _readerPdfPage = host.PageNumber;
         _readerChapterIndex = _readerPdfPage - 1;
-        SyncReaderPdfTocSelection();
+        if (syncTocSelection)
+            SyncReaderPdfTocSelection();
         if (!string.IsNullOrWhiteSpace(ReaderInPageSearchBox.Text))
             await ApplyReaderPdfSearchAsync(ReaderInPageSearchBox.Text.Trim(), ++_readerPdfSearchSequence);
         ReaderChapterText.Text = GetReaderChapterPositionLabel();
         UpdateReaderToolbar();
         await UpdateReaderBookmarkIndicatorAsync();
         if (saveProgress) await SaveReaderProgressAsync(cancellationToken);
+        return true;
     }
+
+    private void CancelReaderPdfNavigation()
+    {
+        ++_readerPdfNavigationVersion;
+        _readerPdfTocNavigationVersion = 0;
+        var cancellation = _readerPdfNavigationCancellation;
+        _readerPdfNavigationCancellation = null;
+        if (cancellation is null) return;
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+
+    private CancellationTokenSource BeginReaderPdfTocNavigation(
+        CancellationToken cancellationToken,
+        out int requestVersion)
+    {
+        CancelReaderPdfNavigation();
+        requestVersion = ++_readerPdfNavigationVersion;
+        var sessionToken = _readerSessionCancellation?.Token ?? CancellationToken.None;
+        var navigation = CancellationTokenSource.CreateLinkedTokenSource(
+            sessionToken,
+            cancellationToken);
+        _readerPdfNavigationCancellation = navigation;
+        _readerPdfTocNavigationVersion = requestVersion;
+        return navigation;
+    }
+
+    private bool IsCurrentReaderPdfTocNavigation(
+        int requestVersion,
+        CancellationToken cancellationToken) =>
+        requestVersion == _readerPdfNavigationVersion
+        && requestVersion == _readerPdfTocNavigationVersion
+        && !cancellationToken.IsCancellationRequested;
 
     private Task ApplySavedReaderPdfAnnotationsAsync(CancellationToken cancellationToken)
     {
@@ -369,7 +426,12 @@ public partial class MainWindow
 
     private void SyncReaderPdfTocSelection()
     {
-        if (!_readerIsPdf || _readerTocItems.Count == 0) return;
+        if (!_readerIsPdf
+            || _readerTocItems.Count == 0
+            || _readerPdfTocNavigationVersion != 0)
+        {
+            return;
+        }
         var top = (CurrentReaderHost as NativePdfReaderHost)?.NavigationTop ?? 0;
         var current = _readerTocItems.Where(item => item.ChapterIndex < _readerChapterIndex
             || item.ChapterIndex == _readerChapterIndex && NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)) <= top + 0.02)

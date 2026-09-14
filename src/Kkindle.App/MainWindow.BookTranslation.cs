@@ -226,6 +226,7 @@ public partial class MainWindow
 
         BookFile? epubFile = null;
         string? path = null;
+        Exception? downloadFailure = null;
         foreach (var candidate in card.Book.Files
                      .Where(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase))
                      .OrderBy(file => GetGeneratedTranslationKind(file.RelativePath) is null ? 0 : 1))
@@ -233,6 +234,8 @@ public partial class MainWindow
             try
             {
                 var candidatePath = _library.GetAbsoluteFilePath(candidate);
+                if (!File.Exists(candidatePath))
+                    candidatePath = await EnsureBookFileAvailableAsync(candidate, _lifetimeCancellation.Token) ?? candidatePath;
                 if (File.Exists(candidatePath))
                 {
                     epubFile = candidate;
@@ -242,13 +245,18 @@ public partial class MainWindow
             }
             catch (Exception exception)
             {
+                if (exception is OperationCanceledException && _lifetimeCancellation.IsCancellationRequested)
+                    return;
+                downloadFailure = exception;
                 Debug.WriteLine($"Unable to resolve EPUB path: {exception.Message}");
             }
         }
 
         if (epubFile is null || string.IsNullOrWhiteSpace(path))
         {
-            SetTaskStatus("未找到可翻译的 EPUB 文件。 ");
+            SetTaskStatus(downloadFailure is null
+                ? "未找到可翻译的 EPUB 文件。 "
+                : $"下载书籍失败：{UiText.Localize(downloadFailure.Message)}");
             return;
         }
 
@@ -459,9 +467,13 @@ public partial class MainWindow
             {
                 progressWindow.MarkLibraryImportResult(importResult);
                 var importedCount = importResult.Items.Count(item => item.Succeeded && item.Added);
+                var skippedCount = importResult.SkippedCount;
+                var skippedSuffix = skippedCount > 0
+                    ? $"，跳过 {skippedCount} 个重复或已有文件"
+                    : string.Empty;
                 SetTaskStatus(importResult.FailureCount == 0
-                    ? $"书籍翻译完成：{result.OutputPaths.Count} 个 EPUB 文件，已加入书库 {importedCount} 项。 "
-                    : $"书籍翻译完成，已加入书库 {importedCount} 项，{importResult.FailureCount} 项加入失败。 ");
+                    ? $"书籍翻译完成：{result.OutputPaths.Count} 个 EPUB 文件，已加入书库 {importedCount} 项{skippedSuffix}。 "
+                    : $"书籍翻译完成，已加入书库 {importedCount} 项{skippedSuffix}，{importResult.FailureCount} 项加入失败。 ");
             }
             else if (importError is not null)
             {
@@ -635,6 +647,9 @@ public partial class MainWindow
         var result = await BookTranslationLibraryImport.ImportAsync(_library, replacements, cancellationToken);
         await ViewModel.RefreshAsync(cancellationToken);
         await RefreshLibraryMatchRecordsAsync(cancellationToken);
+        // The translation import rebuilds the visible cards directly through
+        // the ViewModel, so refresh sync badges for the new card instances.
+        await RefreshBookSyncStatusesAsync(cancellationToken);
         await RefreshCollectionsAsync();
         UpdateLibraryUi();
         return result;

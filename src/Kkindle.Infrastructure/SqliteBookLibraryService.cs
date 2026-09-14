@@ -595,11 +595,11 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     result.Items.Add(new ImportItemResult(
                         sourcePath,
                         true,
-                        "已存在，跳过重复文件",
+                        UiText.Get("《{0}》已在书库中，已跳过重复文件。", duplicate.Title),
                         result.BookDetailsAvailable ? duplicate : null,
                         BookId: duplicate.Id));
                     completedBytes += file.Length;
-                    progress?.Report(new TransferProgress(completedBytes, totalBytes, $"已检查 {file.Name}"));
+                    progress?.Report(new TransferProgress(completedBytes, totalBytes, UiText.Get("已跳过重复文件：{0}", file.Name)));
                     continue;
                 }
 

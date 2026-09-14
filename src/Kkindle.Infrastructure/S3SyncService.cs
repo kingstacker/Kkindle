@@ -140,7 +140,9 @@ public sealed partial class S3SyncService
                 DeviceId = deviceId,
                 StorageIdentity = string.Empty,
                 LastUploadedSnapshot = null,
-                Tombstones = []
+                Tombstones = [],
+                RemoteBookIds = [],
+                RemoteOnlyFileHashes = []
             }, cancellationToken);
             await ClearRecordedDeletionTimesAsync(cancellationToken);
         }
@@ -163,6 +165,146 @@ public sealed partial class S3SyncService
         var keys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
         await DownloadRemoteSnapshotsAsync(client, normalized, keys, string.Empty, false, null, cancellationToken);
         await client.TestWriteAsync(normalized.Prefix, cancellationToken);
+    }
+
+    /// <summary>
+    /// Downloads one book file on demand. A normal sync only writes the file's
+    /// metadata to SQLite; opening the book is the explicit user action that
+    /// fetches the content-addressed object.
+    /// </summary>
+    public async Task<string> EnsureBookFileDownloadedAsync(
+        string deviceId,
+        S3SyncSettings settings,
+        BookFile file,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var normalized = S3SyncSettings.Normalize(settings);
+        ThrowIfInvalid(normalized);
+        if (!IsSha256(file.Sha256))
+            throw new InvalidDataException("同步文件缺少有效的 SHA-256 校验值。");
+
+        var targetPath = ResolveDataPath(file.RelativePath);
+        if (targetPath is null)
+            throw new InvalidDataException("同步文件目标路径无效。");
+
+        deviceId = NormalizeDeviceId(deviceId);
+        await _syncGate.WaitAsync(cancellationToken);
+        try
+        {
+            _derivedEncryptionKeys.Clear();
+            _encryptionSession = normalized.EncryptionKey.Length == 0
+                ? null
+                : CreateEncryptionSession(normalized.EncryptionKey);
+            _paths.EnsureDirectories();
+
+            var storageIdentity = BuildStorageIdentity(normalized);
+            var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
+            using var client = _clientFactory(normalized);
+            progress?.Report(UiText.Get("正在下载《{0}》…", Path.GetFileName(file.RelativePath)));
+            await EnsureLocalBlobAsync(
+                client,
+                normalized,
+                file.Sha256,
+                targetPath,
+                progress,
+                cancellationToken);
+
+            state.DeviceId = deviceId;
+            state.StorageIdentity = storageIdentity;
+            state.RemoteOnlyFileHashes = (state.RemoteOnlyFileHashes ?? [])
+                .Where(hash => !string.Equals(hash, file.Sha256, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            await SaveStateAsync(state, cancellationToken);
+            return targetPath;
+        }
+        finally
+        {
+            _encryptionSession = null;
+            _derivedEncryptionKeys.Clear();
+            _syncGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Returns the four-state badge value for the supplied local library view.
+    /// The comparison uses only the local metadata baseline and file existence;
+    /// it never contacts the remote object store.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, BookSyncStatus>> GetBookSyncStatusesAsync(
+        string deviceId,
+        S3SyncSettings settings,
+        IReadOnlyCollection<Book> books,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(books);
+        var statuses = books.ToDictionary(book => book.Id, _ => BookSyncStatus.NotSynced);
+        var normalized = S3SyncSettings.Normalize(settings);
+        if (!normalized.IsConfigured) return statuses;
+
+        var state = await LoadStateAsync(
+            NormalizeDeviceId(deviceId),
+            BuildStorageIdentity(normalized),
+            cancellationToken);
+        var baseline = state.LastUploadedSnapshot;
+        if (baseline is null) return statuses;
+
+        var remoteBookIds = (state.RemoteBookIds ?? [])
+            .Select(id => Guid.TryParse(id, out var parsed) ? parsed : (Guid?)null)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .ToHashSet();
+        var remoteOnlyFileHashes = (state.RemoteOnlyFileHashes ?? [])
+            .Where(IsSha256)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var book in books)
+        {
+            var baselineBook = baseline.Books.FirstOrDefault(item => item.Id == book.Id);
+            var baselineFiles = baseline.Files.Where(item => item.BookId == book.Id).ToArray();
+            if (baselineBook is null
+                || book.UpdatedAt != baselineBook.UpdatedAt
+                || !BookFilesMatchBaseline(book.Files, baselineFiles))
+            {
+                statuses[book.Id] = BookSyncStatus.NotSynced;
+                continue;
+            }
+
+            var hasRemoteOnlyFile = book.Files.Any(file => remoteOnlyFileHashes.Contains(file.Sha256));
+            var hasLocalFile = book.Files.Any(file =>
+            {
+                if (remoteOnlyFileHashes.Contains(file.Sha256)) return false;
+                var path = ResolveDataPath(file.RelativePath);
+                return path is not null && File.Exists(path);
+            });
+            if (!remoteBookIds.Contains(book.Id) && !hasRemoteOnlyFile && hasLocalFile)
+            {
+                statuses[book.Id] = BookSyncStatus.Synced;
+                continue;
+            }
+
+            statuses[book.Id] = hasLocalFile
+                ? BookSyncStatus.Downloaded
+                : BookSyncStatus.NotDownloaded;
+        }
+
+        return statuses;
+    }
+
+    private static bool BookFilesMatchBaseline(
+        IEnumerable<BookFile> currentFiles,
+        IEnumerable<S3SyncBookFile> baselineFiles)
+    {
+        var current = currentFiles.ToArray();
+        var baseline = baselineFiles.ToArray();
+        return current.Length == baseline.Length
+            && current.All(file => baseline.Any(remote =>
+                remote.Id == file.Id
+                && string.Equals(remote.Format, file.Format, StringComparison.OrdinalIgnoreCase)
+                && remote.Size == file.Size
+                && string.Equals(remote.Sha256, file.Sha256, StringComparison.OrdinalIgnoreCase)));
     }
 
     public async Task<S3SyncResult> SyncAsync(
@@ -225,6 +367,21 @@ public sealed partial class S3SyncService
                 progress,
                 cancellationToken);
 
+            // The database transaction commits before the remaining network
+            // work. Persist the remote provenance immediately so a later
+            // object/snapshot upload failure cannot make an incoming book look
+            // like a locally-created, already-synced book on the next retry.
+            var remoteOnlyFileHashes = (state.RemoteOnlyFileHashes ?? [])
+                .Where(IsSha256)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            remoteOnlyFileHashes.UnionWith(databaseResult.RemoteOnlyFileHashes);
+            state.RemoteBookIds = (state.RemoteBookIds ?? [])
+                .Concat(databaseResult.RemoteBookIds.Select(id => id.ToString("N")))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (databaseResult.RemoteBookIds.Count > 0 || databaseResult.RemoteOnlyFileHashes.Count > 0)
+                await SaveStateAsync(state, cancellationToken);
+
             progress?.Report(UiText.Get("正在合并同步设置…"));
             var settingsChanged = await ApplyRemoteSettingsAsync(
                 local.Settings,
@@ -245,7 +402,7 @@ public sealed partial class S3SyncService
             // Writes after capture remain outside the saved local baseline.
             progress?.Report(UiText.Get("正在上传本地书籍文件…"));
             var uploadWarning = await UploadLocalObjectsAsync(
-                client, normalized, finalSnapshot, progress, cancellationToken);
+                client, normalized, finalSnapshot, remoteOnlyFileHashes, progress, cancellationToken);
 
             progress?.Report(UiText.Get("正在保存同步快照…"));
             await UploadSnapshotAsync(client, normalized, finalSnapshot, cancellationToken);
@@ -255,6 +412,19 @@ public sealed partial class S3SyncService
             state.LastSyncAt = DateTimeOffset.UtcNow;
             state.LastUploadedSnapshot = finalSnapshot;
             state.Tombstones = finalSnapshot.Tombstones;
+            var finalBookIds = finalSnapshot.Books.Select(book => book.Id).ToHashSet();
+            state.RemoteBookIds = state.RemoteBookIds
+                .Where(id => Guid.TryParse(id, out var parsed) && finalBookIds.Contains(parsed))
+                .ToList();
+            state.RemoteOnlyFileHashes = remoteOnlyFileHashes
+                .Where(hash => finalSnapshot.Files.Any(file =>
+                        string.Equals(file.Sha256, hash, StringComparison.OrdinalIgnoreCase))
+                    && !finalSnapshot.Files.Any(file =>
+                        string.Equals(file.Sha256, hash, StringComparison.OrdinalIgnoreCase)
+                        && finalSnapshot.LocalFilePaths.TryGetValue(file.Id, out var relativePath)
+                        && ResolveDataPath(relativePath) is { } path
+                        && File.Exists(path)))
+                .ToList();
             await SaveStateAsync(state, cancellationToken);
 
             var warning = string.Join(
@@ -352,6 +522,8 @@ public sealed partial class S3SyncService
             }
 
             state.Tombstones ??= [];
+            state.RemoteBookIds ??= [];
+            state.RemoteOnlyFileHashes ??= [];
             return state;
         }
         catch (Exception exception) when (exception is IOException or JsonException)
@@ -411,6 +583,7 @@ public sealed partial class S3SyncService
         ISyncObjectStore client,
         S3SyncSettings settings,
         S3SyncSnapshot snapshot,
+        IReadOnlySet<string> remoteOnlyFileHashes,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
@@ -431,6 +604,10 @@ public sealed partial class S3SyncService
             var path = ResolveDataPath(relativePath);
             if (path is null || !File.Exists(path))
             {
+                // A remote-only file is deliberately represented in the local
+                // database before its bytes arrive. Do not turn that expected
+                // absence into a failed upload warning.
+                if (remoteOnlyFileHashes.Contains(file.Sha256)) continue;
                 missing.Add(path ?? relativePath);
                 continue;
             }

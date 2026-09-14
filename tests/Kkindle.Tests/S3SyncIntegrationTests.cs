@@ -233,6 +233,8 @@ public sealed class S3SyncIntegrationTests
 
         Assert.Equal(1000, (await a.Reader.GetReadingStatsAsync(book.FileId))!.CumulativeSeconds);
         Assert.Equal(1000, (await b.Reader.GetReadingStatsAsync(book.FileId))!.CumulativeSeconds);
+        Assert.Equal(1000, (await a.Reader.GetReadingDashboardAsync()).DailyReading.Sum(day => day.ActiveSeconds));
+        Assert.Equal(1000, (await b.Reader.GetReadingDashboardAsync()).DailyReading.Sum(day => day.ActiveSeconds));
     }
 
     [Fact]
@@ -271,7 +273,7 @@ public sealed class S3SyncIntegrationTests
     }
 
     [Fact]
-    public async Task MissingBlob_IsReportedAsPartialAndCanBeRetried()
+    public async Task MissingBlob_IsDeferredUntilTheBookIsOpened()
     {
         var bucket = new MemoryBucket();
         await using var a = await Device.CreateAsync(bucket);
@@ -280,14 +282,110 @@ public sealed class S3SyncIntegrationTests
         bucket.Objects.TryRemove($"{a.Settings.Prefix}/objects/plain/{book.Hash}", out _);
         await using var b = await Device.CreateAsync(bucket);
 
-        var partial = await b.SyncAsync();
-        Assert.True(partial.IsPartial);
-        Assert.NotNull(partial.Warning);
-        Assert.Equal(0, partial.FilesDownloaded);
+        var metadataOnly = await b.SyncAsync();
+        Assert.False(metadataOnly.IsPartial);
+        Assert.Null(metadataOnly.Warning);
+        Assert.Equal(0, metadataOnly.FilesDownloaded);
+        Assert.False(File.Exists(Path.Combine(b.Paths.Library, book.BookId.ToString("N"), "book.epub")));
+        Assert.Single(bucket.Snapshot(b.SnapshotKey).Files);
 
         await a.SyncAsync();
         Assert.False((await b.SyncAsync()).IsPartial);
         Assert.Single(bucket.Snapshot(b.SnapshotKey).Files);
+        var downloadedPath = await b.Service.EnsureBookFileDownloadedAsync(
+            b.Id,
+            b.Settings,
+            new BookFile
+            {
+                Id = book.FileId,
+                BookId = book.BookId,
+                Format = "epub",
+                RelativePath = Path.Combine("library", book.BookId.ToString("N"), "book.epub"),
+                Sha256 = book.Hash
+            });
+        Assert.True(File.Exists(downloadedPath));
+    }
+
+    [Fact]
+    public async Task SyncStatusDistinguishesUnsyncedSyncedAndLazyDownloadedBooks()
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket);
+        var source = await a.AddBookAsync();
+        var localBook = Assert.Single(await a.Library.SearchAsync());
+
+        var beforeSync = await a.Service.GetBookSyncStatusesAsync(a.Id, a.Settings, [localBook]);
+        Assert.Equal(BookSyncStatus.NotSynced, beforeSync[source.BookId]);
+
+        await a.SyncAsync();
+        localBook = Assert.Single(await a.Library.SearchAsync());
+        var afterSync = await a.Service.GetBookSyncStatusesAsync(a.Id, a.Settings, [localBook]);
+        Assert.Equal(BookSyncStatus.Synced, afterSync[source.BookId]);
+
+        await using var b = await Device.CreateAsync(bucket);
+        await b.SyncAsync();
+        var remoteBook = Assert.Single(await b.Library.SearchAsync());
+        var notDownloaded = await b.Service.GetBookSyncStatusesAsync(b.Id, b.Settings, [remoteBook]);
+        Assert.Equal(BookSyncStatus.NotDownloaded, notDownloaded[source.BookId]);
+
+        var downloadedPath = await b.Service.EnsureBookFileDownloadedAsync(
+            b.Id, b.Settings, Assert.Single(remoteBook.Files));
+        Assert.True(File.Exists(downloadedPath));
+        remoteBook = Assert.Single(await b.Library.SearchAsync());
+        var downloaded = await b.Service.GetBookSyncStatusesAsync(b.Id, b.Settings, [remoteBook]);
+        Assert.Equal(BookSyncStatus.Downloaded, downloaded[source.BookId]);
+    }
+
+    [Fact]
+    public async Task FullContentSyncDownloadsRemoteBookFiles()
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket);
+        var source = await a.AddBookAsync();
+        await a.SyncAsync();
+
+        await using var b = await Device.CreateAsync(bucket);
+        b.Settings = b.Settings with { DownloadBookFilesOnSync = true };
+
+        var result = await b.SyncAsync();
+
+        Assert.False(result.IsPartial);
+        Assert.Equal(1, result.FilesDownloaded);
+        Assert.True(File.Exists(Path.Combine(b.Paths.Library, source.BookId.ToString("N"), "book.epub")));
+        var remoteBook = Assert.Single(await b.Library.SearchAsync());
+        var status = await b.Service.GetBookSyncStatusesAsync(b.Id, b.Settings, [remoteBook]);
+        Assert.Equal(BookSyncStatus.Downloaded, status[source.BookId]);
+    }
+
+    [Fact]
+    public async Task InterruptedRemoteMerge_PersistsLazyDownloadProvenanceForRetry()
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket);
+        var source = await a.AddBookAsync();
+        await a.SyncAsync();
+        await using var b = await Device.CreateAsync(bucket);
+
+        var failSnapshotUpload = true;
+        bucket.BeforePut = (key, _) =>
+        {
+            if (key == b.SnapshotKey && failSnapshotUpload)
+            {
+                failSnapshotUpload = false;
+                throw new IOException("test snapshot upload failure");
+            }
+            return Task.CompletedTask;
+        };
+
+        await Assert.ThrowsAsync<IOException>(() => b.SyncAsync());
+        bucket.BeforePut = null;
+        Assert.Equal(1, await b.BookCountAsync());
+
+        await b.SyncAsync();
+        var remoteBook = Assert.Single(await b.Library.SearchAsync());
+        var status = await b.Service.GetBookSyncStatusesAsync(b.Id, b.Settings, [remoteBook]);
+
+        Assert.Equal(BookSyncStatus.NotDownloaded, status[source.BookId]);
     }
 
     [Fact]
@@ -356,7 +454,7 @@ public sealed class S3SyncIntegrationTests
     }
 
     [Fact]
-    public async Task CorruptRemoteFile_IsReportedAsPartial()
+    public async Task CorruptRemoteFile_IsRejectedWhenTheBookIsOpened()
     {
         var bucket = new MemoryBucket();
         await using var a = await Device.CreateAsync(bucket);
@@ -367,9 +465,20 @@ public sealed class S3SyncIntegrationTests
 
         var result = await b.SyncAsync();
 
-        Assert.True(result.IsPartial);
-        Assert.NotNull(result.Warning);
-        Assert.Empty(bucket.Snapshot(b.SnapshotKey).Files);
+        Assert.False(result.IsPartial);
+        Assert.Null(result.Warning);
+        Assert.Single(bucket.Snapshot(b.SnapshotKey).Files);
+        await Assert.ThrowsAsync<InvalidDataException>(() => b.Service.EnsureBookFileDownloadedAsync(
+            b.Id,
+            b.Settings,
+            new BookFile
+            {
+                Id = book.FileId,
+                BookId = book.BookId,
+                Format = "epub",
+                RelativePath = Path.Combine("library", book.BookId.ToString("N"), "book.epub"),
+                Sha256 = book.Hash
+            }));
     }
 
     [Fact]
@@ -455,6 +564,7 @@ public sealed class S3SyncIntegrationTests
     {
         public required string Root { get; init; }
         public required AppPaths Paths { get; init; }
+        public required SqliteBookLibraryService Library { get; init; }
         public required S3SyncService Service { get; init; }
         public required ReaderDataService Reader { get; init; }
         public string Id { get; } = Guid.NewGuid().ToString("N");
@@ -469,12 +579,14 @@ public sealed class S3SyncIntegrationTests
         {
             var root = TestHelpers.CreateTempDirectory();
             var paths = new AppPaths(root);
-            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
             var reader = new ReaderDataService(paths);
             await reader.InitializeAsync();
             var device = new Device
             {
                 Root = root, Paths = paths, Reader = reader,
+                Library = library,
                 Service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket))
             };
             device.Settings = device.Settings with { EncryptionKey = encryptionKey };
