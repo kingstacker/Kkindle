@@ -39,7 +39,7 @@ public partial class MainWindow
 
     private void KindleEmailSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
-        OpenSettingsExpander("Kindle", SettingsEmailExpander);
+        OpenSettingsExpander("Kindle", SettingsSendToKindleExpander);
         FocusSettingsControl(KindleEmailRecipientBox);
     }
 

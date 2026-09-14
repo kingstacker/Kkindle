@@ -54,7 +54,7 @@ VersionInfoDescription=Kkindle Windows installer
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "data\*;backups\*;app-root.json"
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "data\*;backups\*;browser-data\*;app-root.json"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -74,6 +74,7 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "/cleanup-uninstall"; Flags: runh
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\backups"
+Type: filesandordirs; Name: "{app}\browser-data"
 Type: files; Name: "{app}\.kkindle-migration.kkindle"
 Type: files; Name: "{app}\app-root.json"
 Type: files; Name: "{app}\app-root.json.tmp"

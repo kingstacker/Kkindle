@@ -4008,6 +4008,7 @@ public partial class MainWindow
             AutoDoubanMatchCheck.IsChecked = _appSettings.AutoDoubanMatchOnImport;
             AutoConnectDeviceCheck.IsChecked = _appSettings.AutoConnectDevice;
             CompareKindleLibraryCheck.IsChecked = _appSettings.CompareKindleLibraryEnabled;
+            SendToKindleWebEnabledCheck.IsChecked = _appSettings.SendToKindleWebEnabled;
             GridGalleryDisplayCheck.IsChecked = _appSettings.GridGalleryDisplay;
             ShowSyncStatusIconCheck.IsChecked = _appSettings.ShowSyncStatusIcon;
             ShowLibraryPresenceIconCheck.IsChecked = _appSettings.ShowLibraryPresenceIcon;
@@ -4818,6 +4819,11 @@ public partial class MainWindow
         ReadingMaterialsCollapsedByDefaultCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoGenerateReaderFormatsCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         CompareKindleLibraryCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        SendToKindleWebEnabledCheck.IsCheckedChanged += (_, _) =>
+        {
+            UpdateLibraryUi();
+            ScheduleAppSettingsAutoSave();
+        };
         GridGalleryDisplayCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PinyinContextMenuEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PinyinLocalOnlyCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -5261,6 +5267,7 @@ public partial class MainWindow
             AutoDoubanMatchOnImport = AutoDoubanMatchCheck.IsChecked == true,
             AutoConnectDevice = AutoConnectDeviceCheck.IsChecked != false,
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
+            SendToKindleWebEnabled = SendToKindleWebEnabledCheck.IsChecked != false,
             GridGalleryDisplay = GridGalleryDisplayCheck.IsChecked == true,
             ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
@@ -5854,7 +5861,7 @@ public partial class MainWindow
     private void KindleEmailSettingsCancelButton_Click(object? sender, RoutedEventArgs e)
     {
         PopulateKindleEmailControls();
-        SettingsEmailExpander.IsExpanded = false;
+        SettingsSendToKindleExpander.IsExpanded = false;
         KindleEmailSettingsStatusText.Text = string.Empty;
     }
 

@@ -16,6 +16,8 @@ public sealed class AppPaths
         Fonts = Path.Combine(Data, "fonts");
         Dictionaries = Path.Combine(Data, "dictionaries");
         Backups = Path.Combine(Root, "backups");
+        // Browser sessions belong to this installation, outside synced/backed-up library data.
+        BrowserData = Path.Combine(Root, "browser-data");
         Database = Path.Combine(Data, "kkindle.db");
         Settings = Path.Combine(Data, "app-settings.json");
     }
@@ -32,6 +34,7 @@ public sealed class AppPaths
     public string Fonts { get; }
     public string Dictionaries { get; }
     public string Backups { get; }
+    public string BrowserData { get; }
     public string Database { get; }
     public string Settings { get; }
 

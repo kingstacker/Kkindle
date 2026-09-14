@@ -1,0 +1,242 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:Kkindle"
+        x:Class="Kkindle.SendToKindleWindow"
+        Title="Send to Kindle"
+        Width="1020" Height="740" MinWidth="760" MinHeight="540"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource PaperBrush}">
+    <Grid RowDefinitions="Auto,3,*,Auto">
+        <Grid Margin="22,18,22,16" ColumnDefinitions="*,Auto" ColumnSpacing="18">
+            <StackPanel Spacing="5">
+                <TextBlock Text="Send to Kindle" FontSize="23" FontWeight="SemiBold" />
+                <TextBlock Text="{DynamicResource Ui.KindleWeb.SignInHint}" FontSize="12"
+                           Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button x:Name="ReturnToQueueButton" Content="{DynamicResource Ui.KindleWeb.ReturnToQueue}"
+                        Classes="quiet" IsVisible="False" Click="ReturnToQueueButton_Click" />
+                <Button x:Name="AccountButton" Content="{DynamicResource Ui.KindleWeb.Account}" Classes="quiet"
+                        VerticalContentAlignment="Center" Click="AccountButton_Click" />
+            </StackPanel>
+        </Grid>
+        <ProgressBar x:Name="LoadingProgress" Grid.Row="1" Height="3" IsIndeterminate="True"
+                     Foreground="{DynamicResource InkBrush}" />
+        <Grid Grid.Row="2">
+        <Grid x:Name="QueuePanel" Margin="22,18" RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="16"
+                  DragDrop.AllowDrop="True" Background="Transparent">
+                <Border x:Name="DropArea" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1"
+                        Padding="22,24,0,24">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
+                        <StackPanel Spacing="7" VerticalAlignment="Center">
+                            <TextBlock Text="{DynamicResource Ui.KindleWeb.DropHint}" FontSize="20" />
+                            <TextBlock Text="{DynamicResource Ui.KindleWeb.FileHint}" FontSize="12"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+                        </StackPanel>
+                        <Button x:Name="ChooseFilesButton" Grid.Column="1" Content="{DynamicResource Ui.KindleWeb.ChooseFiles}"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                VerticalContentAlignment="Center" Click="ChooseFilesButton_Click" />
+                    </Grid>
+                </Border>
+                <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+                    <TextBlock x:Name="QueueSummaryText" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button x:Name="ClearFilesButton" Grid.Column="1" Content="{DynamicResource Ui.KindleWeb.Clear}"
+                            Classes="quiet" HorizontalAlignment="Right" VerticalContentAlignment="Center"
+                            Click="ClearFilesButton_Click" />
+                </Grid>
+                <Border x:Name="RecentStatusPanel" Grid.Row="3" Padding="0" IsVisible="False">
+                    <StackPanel Spacing="12">
+                        <Button x:Name="RecentStatusHeaderButton" Background="Transparent"
+                                BorderThickness="0" CornerRadius="0" Padding="0" MinHeight="28"
+                                HorizontalAlignment="Left" HorizontalContentAlignment="Left"
+                                VerticalContentAlignment="Center" Click="RecentStatusHeaderButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock x:Name="RecentStatusTitleText"
+                                           Text="{DynamicResource Ui.KindleWeb.Recent.Title}"
+                                           FontSize="16" FontWeight="SemiBold" />
+                                <Grid Width="10" Height="10" Margin="2,0,0,0">
+                                    <Path x:Name="RecentStatusChevronDown" Data="M 1,2 L 5,6 L 9,2"
+                                          Stroke="{DynamicResource InkBrush}" StrokeThickness="1.3" />
+                                    <Path x:Name="RecentStatusChevronRight" Data="M 2,1 L 6,5 L 2,9"
+                                          Stroke="{DynamicResource InkBrush}" StrokeThickness="1.3"
+                                          IsVisible="False" />
+                                </Grid>
+                            </StackPanel>
+                        </Button>
+                        <StackPanel x:Name="RecentStatusBody" Spacing="10">
+                            <Grid x:Name="RecentStatusColumnHeader" ColumnDefinitions="104,*,Auto" ColumnSpacing="18">
+                                <TextBlock Text="{DynamicResource Ui.KindleWeb.Recent.Sent}" FontSize="12"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBlock Grid.Column="1" Text="{DynamicResource Ui.KindleWeb.Recent.FileTitle}" FontSize="12"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBlock Grid.Column="2" Text="{DynamicResource Ui.KindleWeb.Recent.Status}" FontSize="12"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource MutedInkBrush}" />
+                            </Grid>
+                            <TextBlock x:Name="RecentStatusEmptyText"
+                                       Text="{DynamicResource Ui.Auto.A39AE550259B5BDF}"
+                                       FontSize="12" Foreground="{DynamicResource MutedInkBrush}"
+                                       IsVisible="False" />
+                            <ScrollViewer x:Name="RecentStatusRows" MaxHeight="210"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          IsVisible="False" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl x:Name="RecentStatusList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="local:KindleWebRecentItem">
+                                            <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0"
+                                                    Padding="0,9">
+                                                <Grid ColumnDefinitions="104,*,Auto" ColumnSpacing="18">
+                                                    <TextBlock Text="{Binding SentText}" FontSize="12"
+                                                               Foreground="{DynamicResource MutedInkBrush}"
+                                                               VerticalAlignment="Center" />
+                                                    <Grid Grid.Column="1" ColumnDefinitions="18,*" ColumnSpacing="8">
+                                                        <Path Data="M 2,1 H 10 L 14,5 V 17 H 2 Z M 10,1 V 5 H 14 M 4,9 H 12 M 4,12 H 12"
+                                                              Width="16" Height="18" Stroke="{DynamicResource MutedInkBrush}"
+                                                              StrokeThickness="1.1" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding Title}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip.Tip="{Binding Title}" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6"
+                                                                VerticalAlignment="Center">
+                                                        <Grid Width="18" Height="18" HorizontalAlignment="Left"
+                                                              VerticalAlignment="Center">
+                                                            <Ellipse Width="16" Height="16"
+                                                                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                     Stroke="{DynamicResource MutedInkBrush}" StrokeThickness="1.2" />
+                                                            <TextBlock Text="{Binding StatusGlyph}" FontSize="11"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                       TextAlignment="Center" />
+                                                        </Grid>
+                                                        <TextBlock Text="{Binding StatusText}" TextWrapping="NoWrap"
+                                                                   FontSize="12" VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="FileList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:KindleWebQueueItem">
+                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="0,12">
+                                    <Grid ColumnDefinitions="*,80,128,Auto" ColumnSpacing="12">
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                                   ToolTip.Tip="{Binding FullPath}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" Text="{Binding SizeText}" FontSize="12"
+                                                   Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Text="{Binding StatusText}" FontSize="12"
+                                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                                        <Button Grid.Column="3" Content="{DynamicResource Ui.KindleWeb.Remove}"
+                                                Classes="quiet" HorizontalAlignment="Right"
+                                                VerticalContentAlignment="Center" IsEnabled="{Binding CanRemove}"
+                                                Click="RemoveFileButton_Click" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <StackPanel Grid.Row="4" Spacing="8">
+                    <TextBlock x:Name="QueueNoticeText" IsVisible="False" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="{DynamicResource Ui.KindleWeb.DestinationHint}" FontSize="12"
+                               Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Grid>
+            <Grid x:Name="AuthenticationPanel" IsVisible="False">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <Border MaxWidth="460" Margin="24" Padding="28,24" VerticalAlignment="Center"
+                            HorizontalAlignment="Stretch" BorderThickness="1" BorderBrush="{DynamicResource HairlineBrush}">
+                        <StackPanel Spacing="16">
+                            <StackPanel Spacing="7">
+                                <TextBlock Text="AMAZON" FontSize="11" LetterSpacing="2" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBlock x:Name="AuthenticationTitle" FontSize="23" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock x:Name="AuthenticationHint" FontSize="13" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource MutedInkBrush}" />
+                            </StackPanel>
+                            <StackPanel x:Name="AuthenticationAccountPanel" IsVisible="False" Spacing="7">
+                                <TextBlock Text="{DynamicResource Ui.KindleWeb.Auth.AccountLabel}" FontSize="13" />
+                                <TextBox x:Name="AuthenticationAccountBox" MinHeight="38" MaxLength="320"
+                                         IsUndoEnabled="False" KeyDown="AuthenticationInput_KeyDown"
+                                         AutomationProperties.Name="{DynamicResource Ui.KindleWeb.Auth.AccountLabel}" />
+                            </StackPanel>
+                            <StackPanel x:Name="AuthenticationPasswordPanel" IsVisible="False" Spacing="7">
+                                <TextBlock Text="{DynamicResource Ui.KindleWeb.Auth.PasswordLabel}" FontSize="13" />
+                                <TextBox x:Name="AuthenticationPasswordBox" MinHeight="38" MaxLength="1024" PasswordChar="●"
+                                         IsUndoEnabled="False" KeyDown="AuthenticationInput_KeyDown"
+                                         AutomationProperties.Name="{DynamicResource Ui.KindleWeb.Auth.PasswordLabel}" />
+                            </StackPanel>
+                            <StackPanel x:Name="AuthenticationCodePanel" IsVisible="False" Spacing="7">
+                                <TextBlock x:Name="AuthenticationCodeLabel" FontSize="13" />
+                                <TextBox x:Name="AuthenticationCodeBox" MinHeight="38" MaxLength="64"
+                                         IsUndoEnabled="False" KeyDown="AuthenticationInput_KeyDown"
+                                         AutomationProperties.Name="{DynamicResource Ui.KindleWeb.Auth.CodeLabel}" />
+                            </StackPanel>
+                            <TextBlock x:Name="AuthenticationErrorText" IsVisible="False" FontSize="12" TextWrapping="Wrap" />
+                            <Button x:Name="AuthenticationSubmitButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    MinHeight="38" Click="AuthenticationSubmitButton_Click" />
+                            <Grid x:Name="AuthenticationAuxiliaryActions" ColumnDefinitions="*,Auto">
+                                <Button x:Name="AuthenticationChangeAccountButton" HorizontalAlignment="Left" Classes="quiet"
+                                        Content="{DynamicResource Ui.KindleWeb.Auth.ChangeAccount}" IsVisible="False"
+                                        Click="AuthenticationChangeAccountButton_Click" />
+                                <Button x:Name="AuthenticationResendButton" Grid.Column="1" Classes="quiet" IsVisible="False"
+                                        Click="AuthenticationResendButton_Click" />
+                            </Grid>
+                            <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="0,14,0,0">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="{DynamicResource Ui.KindleWeb.Auth.SessionHint}" FontSize="11"
+                                               Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button x:Name="AuthenticationWebsiteButton" Content="{DynamicResource Ui.KindleWeb.Auth.Website}"
+                                                Classes="quiet" Click="AuthenticationWebsiteButton_Click" />
+                                        <Button x:Name="AuthenticationRetryButton" Content="{DynamicResource Ui.KindleWeb.Auth.Restart}"
+                                                Classes="quiet" Click="AuthenticationRetryButton_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
+            </Grid>
+            <Grid x:Name="BrowserPanel" RowDefinitions="Auto,*" IsVisible="False">
+                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,1" Padding="14,9">
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                        <StackPanel x:Name="BrowserNavigationButtons" Orientation="Horizontal" Spacing="6">
+                            <Button x:Name="BackButton" Content="{DynamicResource Ui.KindleWeb.Back}" Classes="quiet"
+                                    Padding="10,6" IsEnabled="False" Click="BackButton_Click" />
+                            <Button Content="{DynamicResource Ui.KindleWeb.Home}" Classes="quiet" Padding="10,6" Click="HomeButton_Click" />
+                            <Button Content="{DynamicResource Ui.KindleWeb.Refresh}" Classes="quiet" Padding="10,6" Click="RefreshButton_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="AddressText" Grid.Column="1" Text="https://www.amazon.com/sendtokindle"
+                                   FontSize="12" Foreground="{DynamicResource MutedInkBrush}"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <Button Grid.Column="2" Content="{DynamicResource Ui.KindleWeb.OpenInBrowser}" Classes="quiet"
+                                Padding="10,6" Click="OpenInBrowserButton_Click" ToolTip.Tip="{DynamicResource Ui.KindleWeb.BrowserSessionHint}" />
+                    </Grid>
+                </Border>
+                <Border x:Name="BrowserHost" Grid.Row="1" Background="White" />
+                <StackPanel x:Name="ErrorPanel" Grid.Row="1" IsVisible="False" Margin="32" MaxWidth="520"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14">
+                    <TextBlock Text="{DynamicResource Ui.KindleWeb.Unavailable}" FontSize="20" FontWeight="SemiBold" TextAlignment="Center" />
+                    <TextBlock x:Name="ErrorText" FontSize="13" TextWrapping="Wrap" TextAlignment="Center" />
+                    <Button Content="{DynamicResource Ui.KindleWeb.Retry}" HorizontalAlignment="Center" Click="RefreshButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+        <Border Grid.Row="3" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="22,14">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                <TextBlock x:Name="StatusText" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
+                <Button x:Name="StopWaitingButton" Grid.Column="1" IsVisible="False" Content="{DynamicResource Ui.KindleWeb.StopWaiting}"
+                        Classes="quiet" Click="StopWaitingButton_Click" />
+                <Button x:Name="SendFilesButton" Grid.Column="2" MinWidth="112" Content="{DynamicResource Ui.KindleWeb.Send}"
+                        HorizontalAlignment="Right" VerticalContentAlignment="Center"
+                        IsEnabled="False" Click="SendFilesButton_Click" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
