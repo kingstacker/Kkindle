@@ -71,6 +71,7 @@ public partial class MainWindow
                 epubPath,
                 contentHash,
                 sessionToken);
+            sessionToken.ThrowIfCancellationRequested();
 
             _readerDocument = document;
             _readerBookCard = card;
@@ -82,6 +83,7 @@ public partial class MainWindow
             var savedProgress = restoreProgress
                 ? await _readerData.GetProgressAsync(file.Id, sessionToken)
                 : null;
+            sessionToken.ThrowIfCancellationRequested();
             _readerRestoredProgress = ValidateReaderProgress(document, savedProgress);
             if (restoreProgress && _readerRestoredProgress is { } progress)
             {
@@ -121,7 +123,8 @@ public partial class MainWindow
             // that section. When a pixel breakpoint exists, navigating the
             // URL with its old chapter anchor can asynchronously pull the
             // WebView back to the chapter start after the breakpoint restore.
-            if ((_readerRestoredProgress?.ScrollPosition ?? 0) <= 0
+            if (_readerRestoredProgress?.ContentPosition is null
+                && (_readerRestoredProgress?.ScrollPosition ?? 0) <= 0
                 && !string.IsNullOrWhiteSpace(_readerCurrentFragment))
             {
                 target = new Uri(
@@ -156,6 +159,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
+            if (sessionToken.IsCancellationRequested) return;
             await CloseReaderAsync();
             SetTaskStatus(T("打开 EPUB 阅读器失败：{0}", UiText.Localize(exception.Message)));
             await ShowMessageAsync(T("无法打开书籍"), UiText.Localize(exception.Message));
@@ -190,7 +194,8 @@ public partial class MainWindow
             {
                 ChapterIndex = chapterIndex,
                 ScrollPosition = Math.Max(0, progress.ScrollPosition),
-                Fragment = DecodeReaderFragment(progress.Fragment)
+                Fragment = DecodeReaderFragment(progress.Fragment),
+                ContentPosition = ReaderContentPosition.Validate(progress.ContentPosition)
             };
         }
         catch (Exception exception) when (exception is ArgumentException
@@ -565,9 +570,7 @@ public partial class MainWindow
             await _readerTts.StopAsync();
         var chapterTiming = Stopwatch.StartNew();
         await ResetReaderInPageSearchForNavigationAsync();
-        _readerPendingBookmarkQuote = null;
-        _readerPendingBookmarkPosition = null;
-        _readerPendingBookmarkFlowMode = 0;
+        ClearReaderBookmarkPendingLocation();
         _readerPendingAnnotation = null;
         if (_readerIsPdf)
         {
@@ -1003,9 +1006,7 @@ public partial class MainWindow
         _readerPendingChunkOffset = null;
         _readerPendingSearchQuery = null;
         _readerPendingSearchContext = null;
-        _readerPendingBookmarkQuote = null;
-        _readerPendingBookmarkPosition = null;
-        _readerPendingBookmarkFlowMode = 0;
+        ClearReaderBookmarkPendingLocation();
         _readerPendingAnnotation = null;
         _readerCurrentFragment = null;
         _readerSearchSequence++;
@@ -1054,9 +1055,17 @@ public partial class MainWindow
         if (_readerDocument is null
             || _readerChapterIndex < 0
             || _readerChapterIndex >= _readerDocument.Chapters.Count) return;
+        if (_readerRestoredProgress is not null) return;
 
         TryApplyLinuxReaderTextFallbackState();
 
+        var nativeReader = CurrentReaderHost as NativeReaderHost;
+        var contentPosition = nativeReader?.CaptureContentPosition();
+        if (nativeReader is not null && (contentPosition is null
+            || nativeReader.Source is not { IsFile: true } source
+            || !string.Equals(source.LocalPath, _readerDocument.Chapters[_readerChapterIndex], StringComparison.OrdinalIgnoreCase)))
+            return;
+        var nativeState = nativeReader?.GetScrollState();
         var chapterPath = Path.GetRelativePath(
                 _readerDocument.RootPath,
                 _readerDocument.Chapters[_readerChapterIndex])
@@ -1067,10 +1076,15 @@ public partial class MainWindow
             chapterPath,
             _readerCurrentFragment,
             _readerChapterIndex,
-            (int)Math.Round(_readerScrollPosition),
-            CalculateReaderProgressPercent(),
-            _readerLayout.FlowMode,
-            DateTimeOffset.UtcNow);
+            (int)Math.Round(nativeState?.Position ?? _readerScrollPosition),
+            nativeState is { } state
+                ? Math.Clamp((_readerChapterIndex + state.Ratio) * 100d / _readerDocument.Chapters.Count, 0, 100)
+                : CalculateReaderProgressPercent(),
+            nativeReader is not null ? nativeReader.IsPaginated ? 1 : 0 : _readerLayout.FlowMode,
+            DateTimeOffset.UtcNow)
+        {
+            ContentPosition = contentPosition
+        };
 
         try
         {

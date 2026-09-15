@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
 using Avalonia.Styling;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
@@ -31,6 +32,7 @@ public partial class App : Application
 
     public override void Initialize()
     {
+        FontManager.Current.AddFontCollection(new BundledAppFontCollection());
         AvaloniaXamlLoader.Load(this);
         ApplyTheme(AppTheme.Classic);
         ReaderAppearanceResources.Populate(Resources, new ReaderAppearanceSettings());

@@ -42,7 +42,7 @@ public sealed class S3SyncSettingsStore
                 SettingsPath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.Read,
+                FileShare.Read | FileShare.Delete,
                 81920,
                 useAsync: true);
             var persisted = await JsonSerializer.DeserializeAsync<PersistedS3SyncSettings>(
@@ -105,6 +105,7 @@ public sealed class S3SyncSettingsStore
         S3SyncSettings settings,
         CancellationToken cancellationToken = default)
     {
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
         _paths.EnsureDirectories();
         var normalized = S3SyncSettings.Normalize(settings);
         var persisted = new PersistedS3SyncSettings
@@ -143,7 +144,7 @@ public sealed class S3SyncSettingsStore
             await JsonSerializer.SerializeAsync(stream, persisted, JsonOptions, cancellationToken);
         }
 
-        File.Move(temporaryPath, SettingsPath, overwrite: true);
+        SettingsFile.Publish(temporaryPath, SettingsPath);
     }
 
     private string Protect(string value)

@@ -18,7 +18,7 @@ public sealed class AppSettingsStore
         {
             _paths.EnsureDirectories();
             if (!File.Exists(_paths.Settings)) return new AppSettings();
-            using var stream = new FileStream(_paths.Settings, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var stream = new FileStream(_paths.Settings, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
             return AppSettings.Normalize(JsonSerializer.Deserialize<AppSettings>(stream, JsonOptions));
         }
         catch (JsonException)
@@ -41,7 +41,7 @@ public sealed class AppSettingsStore
         if (!File.Exists(_paths.Settings)) return new AppSettings();
         try
         {
-            await using var stream = new FileStream(_paths.Settings, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            await using var stream = new FileStream(_paths.Settings, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, true);
             return AppSettings.Normalize(await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions, cancellationToken));
         }
         catch (JsonException) { return new AppSettings(); }
@@ -60,6 +60,6 @@ public sealed class AppSettingsStore
         await using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, AppSettings.Normalize(settings), JsonOptions, cancellationToken);
         if (syncedAt is { } timestamp) File.SetLastWriteTimeUtc(temporary, timestamp.UtcDateTime);
-        File.Move(temporary, _paths.Settings, true);
+        SettingsFile.Publish(temporary, _paths.Settings);
     }
 }

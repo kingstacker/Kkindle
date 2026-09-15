@@ -1087,6 +1087,7 @@ public partial class MainWindow
     private string? _readerPendingBookmarkQuote;
     private int? _readerPendingBookmarkPosition;
     private int _readerPendingBookmarkFlowMode;
+    private ReaderContentPosition? _readerPendingBookmarkContentPosition;
     private string? _readerCurrentFragment;
     private ReaderAnnotation? _readerPendingAnnotation;
     private bool _suppressReaderTocSelectionNavigation;
@@ -1388,6 +1389,7 @@ public partial class MainWindow
         EpubReaderDocument document,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         // Every reader layout option comes from the global profile. Legacy
         // per-book rows remain in the database for compatibility, but opening
         // another book must never replace the current global layout.
@@ -1395,9 +1397,7 @@ public partial class MainWindow
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
-        _readerPendingBookmarkQuote = null;
-        _readerPendingBookmarkPosition = null;
-        _readerPendingBookmarkFlowMode = 0;
+        ClearReaderBookmarkPendingLocation();
         _readerCurrentFragment = null;
         _readerPendingAnnotation = null;
         _readerPendingSelection = null;
@@ -1485,9 +1485,15 @@ public partial class MainWindow
         ApplyReaderPanelLayout();
         UpdateReaderZoomLabel();
         await RefreshReaderBookmarksAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         await RefreshReaderAnnotationsAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         await InitializeReaderAiAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         await InitializeReaderTtsAsync(cancellationToken);
+        // Optional AI/TTS initialization handles its own cancellation. The
+        // reader session must still stop here before publishing ready state.
+        cancellationToken.ThrowIfCancellationRequested();
         UpdateReaderToolbar();
         StartReaderStatsTimer();
         StartReaderFootnoteHoverPoll();
@@ -1561,6 +1567,20 @@ public partial class MainWindow
         var progress = ReferenceEquals(host, CurrentReaderHost)
             && _readerRestoredProgress?.ChapterIndex == _readerChapterIndex
                 ? _readerRestoredProgress : null;
+        double? legacyChapterRatio = progress is not null && _readerDocument is { Chapters.Count: > 0 } document
+            && double.IsFinite(progress.ProgressPercent)
+                ? Math.Clamp(progress.ProgressPercent / 100d * document.Chapters.Count - progress.ChapterIndex, 0, 1)
+                : null;
+        if (progress is not null && progress.FlowMode == _readerLayout.FlowMode
+            && (!_readerLayout.VerticalWriting
+                || legacyChapterRatio is { } ratio && nativeReader.BodyText is { Length: > 0 } text
+                    && Math.Abs(ratio * text.Length - progress.ScrollPosition) <= 1))
+        {
+            // Keep usable legacy positions in the same presentation. In
+            // vertical mode the saved ratio also identifies an existing
+            // character offset; horizontal pixel records do not match it.
+            legacyChapterRatio = null;
+        }
         // The tracked fragment describes the current section, not a request
         // to jump to its heading whenever the reader's layout is configured.
         // A pending restore must use its saved values even if the initial
@@ -1570,7 +1590,9 @@ public partial class MainWindow
             progress?.ScrollPosition ?? _readerScrollPosition,
             progress?.Fragment,
             progress is not null,
-            showVerticalDebugBoxes: ShouldShowReaderVerticalDebugBoxes());
+            showVerticalDebugBoxes: ShouldShowReaderVerticalDebugBoxes(),
+            contentPosition: progress?.ContentPosition,
+            legacyChapterRatio: legacyChapterRatio);
         if (progress is not null)
         {
             _readerRestoredProgress = null;
@@ -5905,9 +5927,7 @@ public partial class MainWindow
         }
         if (!ReaderNavigationLocationPolicy.KeepsBookmarkQuote(intent))
         {
-            _readerPendingBookmarkQuote = null;
-            _readerPendingBookmarkPosition = null;
-            _readerPendingBookmarkFlowMode = 0;
+            ClearReaderBookmarkPendingLocation();
         }
         if (intent != ReaderNavigationIntent.Annotation)
             _readerPendingAnnotation = null;
@@ -5938,7 +5958,22 @@ public partial class MainWindow
         }
         else if (intent == ReaderNavigationIntent.Bookmark)
         {
-            if (_readerPendingBookmarkPosition is { } bookmarkPosition)
+            if (nativeReader.RestoreContentPosition(_readerPendingBookmarkContentPosition))
+            {
+                // The semantic destination survives changes to the global
+                // reading mode, font size and viewport since the bookmark.
+            }
+            else if (!string.IsNullOrWhiteSpace(_readerPendingBookmarkQuote)
+                && nativeReader.BodyText is { } body
+                && body.IndexOf(_readerPendingBookmarkQuote, StringComparison.Ordinal) is var quoteOffset
+                && quoteOffset >= 0
+                && body.IndexOf(_readerPendingBookmarkQuote, quoteOffset + 1, StringComparison.Ordinal) < 0)
+            {
+                // Older bookmarks sometimes have a unique visible quote even
+                // though they do not have a portable content anchor yet.
+                nativeReader.ScrollToOffset(quoteOffset);
+            }
+            else if (_readerPendingBookmarkPosition is { } bookmarkPosition)
             {
                 if (nativeReader.Vertical)
                 {
@@ -5949,8 +5984,11 @@ public partial class MainWindow
                     nativeReader.SeekToPixelScroll(bookmarkPosition);
                 }
             }
-            _readerPendingBookmarkPosition = null;
-            _readerPendingBookmarkQuote = null;
+            else if (!string.IsNullOrWhiteSpace(nativeFragment))
+            {
+                nativeReader.ScrollToFragment(nativeFragment);
+            }
+            ClearReaderBookmarkPendingLocation();
         }
         else if (ReaderNavigationLocationPolicy.ShouldNormalizeChapterStart(
                      intent,

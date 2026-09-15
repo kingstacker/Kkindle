@@ -388,7 +388,7 @@ public sealed partial class S3SyncService
         using (var command = CreateCommand(connection, transaction, 
             """
             SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
-                   ProgressPercent, FlowMode, UpdatedAt
+                   ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
             FROM ReaderProgress;
             """
             ))
@@ -405,14 +405,15 @@ public sealed partial class S3SyncService
                     ScrollPosition = reader.GetInt32(5),
                     ProgressPercent = reader.GetDouble(6),
                     FlowMode = reader.GetInt32(7),
-                    UpdatedAt = ParseTimestamp(reader.GetString(8))
+                    UpdatedAt = ParseTimestamp(reader.GetString(8)),
+                    ContentPositionJson = NullableString(reader, 9)
                 });
         }
 
         using (var command = CreateCommand(connection, transaction, 
             """
             SELECT Id, BookId, BookFileId, ChapterPath, Fragment, ChapterIndex,
-                   ScrollPosition, FlowMode, Title, Quote, CreatedAt
+                   ScrollPosition, FlowMode, Title, Quote, CreatedAt, ContentPositionJson
             FROM ReaderBookmarks;
             """
             ))
@@ -431,7 +432,8 @@ public sealed partial class S3SyncService
                     FlowMode = reader.GetInt32(7),
                     Title = reader.GetString(8),
                     Quote = reader.GetString(9),
-                    CreatedAt = ParseTimestamp(reader.GetString(10))
+                    CreatedAt = ParseTimestamp(reader.GetString(10)),
+                    ContentPositionJson = NullableString(reader, 11)
                 });
         }
 
@@ -1179,15 +1181,16 @@ public sealed partial class S3SyncService
                     """
                     INSERT INTO ReaderProgress (
                         BookFileId, BookId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
-                        ProgressPercent, FlowMode, UpdatedAt)
+                        ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson)
                     VALUES (
                         $bookFileId, $bookId, $chapterPath, $fragment, $chapterIndex, $scrollPosition,
-                        $progressPercent, $flowMode, $updatedAt)
+                        $progressPercent, $flowMode, $updatedAt, $contentPosition)
                     ON CONFLICT(BookFileId) DO UPDATE SET
                         BookId = excluded.BookId, ChapterPath = excluded.ChapterPath,
                         Fragment = excluded.Fragment, ChapterIndex = excluded.ChapterIndex,
                         ScrollPosition = excluded.ScrollPosition, ProgressPercent = excluded.ProgressPercent,
-                        FlowMode = excluded.FlowMode, UpdatedAt = excluded.UpdatedAt
+                        FlowMode = excluded.FlowMode, UpdatedAt = excluded.UpdatedAt,
+                        ContentPositionJson = excluded.ContentPositionJson
                     WHERE julianday(excluded.UpdatedAt) > julianday(ReaderProgress.UpdatedAt);
                     """
                     );
@@ -1200,6 +1203,7 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$progressPercent", item.ProgressPercent);
                 AddParameter(command, "$flowMode", item.FlowMode);
                 AddParameter(command, "$updatedAt", item.UpdatedAt.ToString("O"));
+                AddParameter(command, "$contentPosition", item.ContentPositionJson);
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
             }
 
@@ -1211,16 +1215,17 @@ public sealed partial class S3SyncService
                     """
                     INSERT INTO ReaderBookmarks (
                         Id, BookId, BookFileId, ChapterPath, Fragment, ChapterIndex,
-                        ScrollPosition, FlowMode, Title, Quote, CreatedAt)
+                        ScrollPosition, FlowMode, Title, Quote, CreatedAt, ContentPositionJson)
                     VALUES (
                         $id, $bookId, $bookFileId, $chapterPath, $fragment, $chapterIndex,
-                        $scrollPosition, $flowMode, $title, $quote, $createdAt)
+                        $scrollPosition, $flowMode, $title, $quote, $createdAt, $contentPosition)
                     ON CONFLICT(Id) DO UPDATE SET
                         BookId = excluded.BookId, BookFileId = excluded.BookFileId,
                         ChapterPath = excluded.ChapterPath, Fragment = excluded.Fragment,
                         ChapterIndex = excluded.ChapterIndex, ScrollPosition = excluded.ScrollPosition,
                         FlowMode = excluded.FlowMode, Title = excluded.Title,
-                        Quote = excluded.Quote, CreatedAt = excluded.CreatedAt
+                        Quote = excluded.Quote, CreatedAt = excluded.CreatedAt,
+                        ContentPositionJson = excluded.ContentPositionJson
                     WHERE julianday(excluded.CreatedAt) > julianday(ReaderBookmarks.CreatedAt);
                     """
                     );
@@ -1235,6 +1240,7 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$title", bookmark.Title);
                 AddParameter(command, "$quote", bookmark.Quote);
                 AddParameter(command, "$createdAt", bookmark.CreatedAt.ToString("O"));
+                AddParameter(command, "$contentPosition", bookmark.ContentPositionJson);
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
             }
 

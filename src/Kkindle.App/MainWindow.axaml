@@ -2983,26 +2983,43 @@
                                     </Border>
                                 </Expander>
                             </StackPanel>
-                            <StackPanel Spacing="16" x:Name="SettingsAboutSection" IsVisible="False">
-                                <Border>
-                                    <StackPanel Spacing="14">
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.38084D301E3F1A31}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                <TextBlock Text="kingstacker" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <StackPanel Spacing="12" x:Name="SettingsAboutSection" IsVisible="False">
+                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="6" Padding="16">
+                                    <StackPanel Spacing="12">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             </StackPanel>
+                                            <Border Grid.Column="1" Padding="10,7" Background="{DynamicResource SoftHoverBrush}" CornerRadius="4" VerticalAlignment="Center">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.38084D301E3F1A31}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    <TextBlock Text="kingstacker" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
                                         </Grid>
-                                        <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         <TextBlock Text="{DynamicResource Ui.About.UserGroup}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                        <ToggleSwitch x:Name="AutoUpdateCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.85D1563FE0079783}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.4A09393CF96D5F86}" AutomationProperties.Name="{DynamicResource Ui.Auto.4A09393CF96D5F86}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="6" Padding="16">
+                                    <StackPanel Spacing="12">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.4A09393CF96D5F86}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.85D1563FE0079783}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="AutoUpdateCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.85D1563FE0079783}" Classes="settingsToggle" AutomationProperties.Name="{DynamicResource Ui.Auto.4A09393CF96D5F86}" />
+                                        </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock x:Name="AboutUpdateStatusText" Text="{DynamicResource Ui.Auto.8642A3F7563F3F16}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
                                             <Button x:Name="CheckForUpdatesButton" Grid.Column="1" Content="{DynamicResource Ui.Auto.7F68EBAD19BA6BCD}" Classes="quiet" Click="CheckForUpdatesButton_Click" />
                                         </Grid>
-                                        <Rectangle Height="1" Fill="{DynamicResource HairlineBrush}" />
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
-                                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="6" Padding="14">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                                        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                            <Border Width="44" Height="44" Background="{DynamicResource SoftHoverBrush}" CornerRadius="22">
                                                 <Grid Width="32" Height="30">
                                                     <Polygon Points="4,11 6,2 13,8" Fill="{DynamicResource PaperBrush}" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
                                                     <Polygon Points="19,8 26,2 28,11" Fill="{DynamicResource PaperBrush}" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
@@ -3011,16 +3028,16 @@
                                                     <Ellipse Width="2.5" Height="3" Margin="0,14,9,0" Fill="{DynamicResource InkBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" />
                                                     <Polygon Points="14,20 18,20 16,22.5" Fill="{DynamicResource InkBrush}" />
                                                 </Grid>
-                                                <StackPanel Spacing="2" VerticalAlignment="Center">
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                            <Border Grid.Column="1" Width="88" Height="88" Background="{DynamicResource PaperBrush}" BorderBrush="{DynamicResource InkBrush}" BorderThickness="1">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.D84ED132DAB019E5}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             </Border>
-                                        </Grid>
-                                    </StackPanel>
+                                            <StackPanel Spacing="3" VerticalAlignment="Center">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Width="76" Height="76" Background="{DynamicResource SoftHoverBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="4">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.D84ED132DAB019E5}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                                        </Border>
+                                    </Grid>
                                 </Border>
                                 <Expander x:Name="SettingsDiagnosticsExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Tag="{DynamicResource Ui.Auto.B66D6EE56E8CAEDF}" AutomationProperties.Name="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsDiagnosticsSection" Padding="0">

@@ -5,6 +5,8 @@ namespace Kkindle.Infrastructure;
 
 // All settings writers for a data directory share this lock. Sync can compare
 // and update the four portable settings files without racing an ordinary save.
+// Readers share Delete as well as Read so replacing a complete settings file
+// on Windows does not fail while an older snapshot is still being read.
 internal static class SettingsWriteLock
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates =

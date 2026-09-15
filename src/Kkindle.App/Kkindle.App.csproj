@@ -8,6 +8,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Kkindle</RootNamespace>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- BundledAppFontCollection uses the pinned 12.1.1 font factory to avoid
+         its native stream lifetime crash. Recheck FontLifetimeTests before
+         updating Avalonia, then remove this opt-in when upstream fixes it. -->
+    <AvaloniaAccessUnstablePrivateApis>true</AvaloniaAccessUnstablePrivateApis>
   </PropertyGroup>
 
   <ItemGroup>

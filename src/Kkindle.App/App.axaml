@@ -32,7 +32,7 @@
 
         <!-- The font is bundled with the portable app. The suffix is the
              internal family name, not the filename. -->
-        <FontFamily x:Key="DefaultAppFontFamily">avares://Kkindle.App/Assets/Fonts/KingHwaOldSong-v3.0.ttf#KingHwaOldSong</FontFamily>
+        <FontFamily x:Key="DefaultAppFontFamily">fonts:Kkindle#KingHwaOldSong</FontFamily>
 
         <!-- The migrated reader buttons use the same deliberately plain
              template as the WinUI reference instead of Fluent's extra button

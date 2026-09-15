@@ -33,7 +33,7 @@ public sealed class TtsSettingsStore
                 SettingsPath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.Read,
+                FileShare.Read | FileShare.Delete,
                 81920,
                 useAsync: true);
             var persisted = await JsonSerializer.DeserializeAsync<PersistedTtsSettings>(
@@ -73,6 +73,7 @@ public sealed class TtsSettingsStore
         TtsSettings settings,
         CancellationToken cancellationToken = default)
     {
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken).ConfigureAwait(false);
         _paths.EnsureDirectories();
         var normalized = TtsSettings.Normalize(settings);
         var persisted = new PersistedTtsSettings
@@ -111,7 +112,7 @@ public sealed class TtsSettingsStore
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporaryPath, SettingsPath, overwrite: true);
+            SettingsFile.Publish(temporaryPath, SettingsPath);
         }
         catch
         {

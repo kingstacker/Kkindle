@@ -85,7 +85,7 @@ public sealed class KindleEmailSettingsStore
 
         try
         {
-            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, true);
             var persisted = await JsonSerializer.DeserializeAsync<PersistedKindleEmailSettings>(stream, _jsonOptions, cancellationToken);
             if (persisted is null) return new KindleEmailSettings();
 
@@ -139,7 +139,7 @@ public sealed class KindleEmailSettingsStore
         await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, persisted, _jsonOptions, cancellationToken);
         if (syncedAt is { } timestamp) File.SetLastWriteTimeUtc(temporaryPath, timestamp.UtcDateTime);
-        File.Move(temporaryPath, SettingsPath, overwrite: true);
+        SettingsFile.Publish(temporaryPath, SettingsPath);
     }
 
     private sealed class PersistedKindleEmailSettings

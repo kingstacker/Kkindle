@@ -10,14 +10,14 @@ namespace Kkindle.Ui.Tests;
 public sealed class BookTranslationProgressTests(SettingsUiSession session)
 {
     [Fact]
-    public Task QueuedTranslationProgressYieldsToUserInput() => session.Session.Dispatch(async () =>
+    public Task QueuedTranslationProgressYieldsToUserInput() => session.Session.Dispatch<bool>(async () =>
     {
         var windowType = typeof(MainWindow).Assembly.GetType("Kkindle.EpubTranslationProgressWindow")!;
         var window = (Window)Activator.CreateInstance(windowType,
             "Translation test", BookTranslationProvider.GoogleFree, "English", "中文", Path.GetTempPath())!;
-        window.Show();
         try
         {
+            window.Show();
             var reporterType = typeof(MainWindow).GetNestedType("BookTranslationProgressReporter", BindingFlags.NonPublic)!;
             var reporter = Activator.CreateInstance(reporterType, window)!;
             var progress = (IProgress<BookTranslationProgress>)reporter;
@@ -31,6 +31,9 @@ public sealed class BookTranslationProgressTests(SettingsUiSession session)
             await Task.WhenAll(input.Task, flushed).WaitAsync(TimeSpan.FromSeconds(8));
             Assert.True(await input.Task > 0, "Input must run before the translation progress queue drains.");
             Assert.Equal(0, (int)pending.GetValue(reporter)!);
+            // Select the async Dispatch overload so the session waits for the
+            // assertions and window cleanup before disposing application fonts.
+            return true;
         }
         finally { window.Close(); }
     }, CancellationToken.None);

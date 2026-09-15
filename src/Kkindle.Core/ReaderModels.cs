@@ -62,7 +62,10 @@ public sealed record ReaderProgressRow(
     int ScrollPosition,
     double ProgressPercent,
     int FlowMode,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    public ReaderContentPosition? ContentPosition { get; init; }
+}
 
 public sealed class ReaderBookmark
 {
@@ -74,6 +77,7 @@ public sealed class ReaderBookmark
     public int ChapterIndex { get; set; }
     public int? ScrollPosition { get; set; }
     public int FlowMode { get; set; }
+    public ReaderContentPosition? ContentPosition { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Quote { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

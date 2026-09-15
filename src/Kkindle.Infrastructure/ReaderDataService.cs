@@ -110,6 +110,7 @@ public sealed partial class ReaderDataService
                     ScrollPosition INTEGER NOT NULL DEFAULT 0,
                     ProgressPercent REAL NOT NULL DEFAULT 0,
                     FlowMode INTEGER NOT NULL DEFAULT 0,
+                    ContentPositionJson TEXT NULL,
                     UpdatedAt TEXT NOT NULL
                 );
 
@@ -122,6 +123,7 @@ public sealed partial class ReaderDataService
                     ChapterIndex INTEGER NOT NULL DEFAULT 0,
                     ScrollPosition INTEGER NULL,
                     FlowMode INTEGER NOT NULL DEFAULT 0,
+                    ContentPositionJson TEXT NULL,
                     Title TEXT NOT NULL DEFAULT '',
                     Quote TEXT NOT NULL DEFAULT '',
                     CreatedAt TEXT NOT NULL
@@ -171,6 +173,7 @@ public sealed partial class ReaderDataService
             await EnsureReaderLayoutParagraphIndentColumnAsync(connection, cancellationToken);
             await EnsureReaderAnnotationStyleColumnAsync(connection, cancellationToken);
             await EnsureReaderBookmarkPositionColumnsAsync(connection, cancellationToken);
+            await EnsureReaderContentPositionColumnsAsync(connection, cancellationToken);
             await EnsureTextExtractionVersionColumnAsync(connection, cancellationToken);
             await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
             await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
@@ -327,7 +330,7 @@ public sealed partial class ReaderDataService
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
-                   ProgressPercent, FlowMode, UpdatedAt
+                   ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
             FROM ReaderProgress
             WHERE BookFileId = $bookFileId;
             """;
@@ -343,7 +346,10 @@ public sealed partial class ReaderDataService
             reader.GetInt32(5),
             reader.GetDouble(6),
             reader.GetInt32(7),
-            DateTimeOffset.Parse(reader.GetString(8)));
+            DateTimeOffset.Parse(reader.GetString(8)))
+        {
+            ContentPosition = ReaderContentPositionJson.Deserialize(reader.IsDBNull(9) ? null : reader.GetString(9))
+        };
     }
 
     public async Task SaveProgressAsync(
@@ -358,14 +364,15 @@ public sealed partial class ReaderDataService
             command.CommandText = """
                 INSERT INTO ReaderProgress (
                     BookFileId, BookId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
-                    ProgressPercent, FlowMode, UpdatedAt)
+                    ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson)
                 VALUES (
                     $bookFileId, $bookId, $chapterPath, $fragment, $chapterIndex, $scrollPosition,
-                    $progressPercent, $flowMode, $updatedAt)
+                    $progressPercent, $flowMode, $updatedAt, $contentPosition)
                 ON CONFLICT(BookFileId) DO UPDATE SET
                     BookId=$bookId, ChapterPath=$chapterPath, Fragment=$fragment,
                     ChapterIndex=$chapterIndex, ScrollPosition=$scrollPosition,
-                    ProgressPercent=$progressPercent, FlowMode=$flowMode, UpdatedAt=$updatedAt;
+                    ProgressPercent=$progressPercent, FlowMode=$flowMode, UpdatedAt=$updatedAt,
+                    ContentPositionJson=$contentPosition;
                 """;
             command.Parameters.AddWithValue("$bookFileId", progress.BookFileId.ToString());
             command.Parameters.AddWithValue("$bookId", progress.BookId.ToString());
@@ -376,6 +383,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$progressPercent", progress.ProgressPercent);
             command.Parameters.AddWithValue("$flowMode", progress.FlowMode);
             command.Parameters.AddWithValue("$updatedAt", progress.UpdatedAt.ToString("O"));
+            command.Parameters.AddWithValue("$contentPosition", (object?)ReaderContentPositionJson.Serialize(progress.ContentPosition) ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
             NotifyDataChanged(LocalDataChangeKind.ReadingProgress);
         }
@@ -398,7 +406,7 @@ public sealed partial class ReaderDataService
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, BookId, BookFileId, ChapterPath, Fragment, ChapterIndex,
-                   ScrollPosition, FlowMode, Title, Quote, CreatedAt
+                   ScrollPosition, FlowMode, Title, Quote, CreatedAt, ContentPositionJson
             FROM ReaderBookmarks
             WHERE BookFileId = $bookFileId
             ORDER BY ChapterIndex, CreatedAt
@@ -422,7 +430,8 @@ public sealed partial class ReaderDataService
                 FlowMode = reader.GetInt32(7),
                 Title = reader.GetString(8),
                 Quote = reader.GetString(9),
-                CreatedAt = DateTimeOffset.Parse(reader.GetString(10))
+                CreatedAt = DateTimeOffset.Parse(reader.GetString(10)),
+                ContentPosition = ReaderContentPositionJson.Deserialize(reader.IsDBNull(11) ? null : reader.GetString(11))
             });
         }
         return result;
@@ -438,14 +447,14 @@ public sealed partial class ReaderDataService
             command.CommandText = """
                 INSERT INTO ReaderBookmarks (
                     Id, BookId, BookFileId, ChapterPath, Fragment, ChapterIndex,
-                    ScrollPosition, FlowMode, Title, Quote, CreatedAt)
+                    ScrollPosition, FlowMode, Title, Quote, CreatedAt, ContentPositionJson)
                 VALUES (
                     $id, $bookId, $bookFileId, $chapterPath, $fragment, $chapterIndex,
-                    $scrollPosition, $flowMode, $title, $quote, $createdAt)
+                    $scrollPosition, $flowMode, $title, $quote, $createdAt, $contentPosition)
                 ON CONFLICT(Id) DO UPDATE SET
                     BookId=$bookId, BookFileId=$bookFileId, ChapterPath=$chapterPath, Fragment=$fragment,
                     ChapterIndex=$chapterIndex, ScrollPosition=$scrollPosition, FlowMode=$flowMode,
-                    Title=$title, Quote=$quote, CreatedAt=$createdAt;
+                    Title=$title, Quote=$quote, CreatedAt=$createdAt, ContentPositionJson=$contentPosition;
                 """;
             command.Parameters.AddWithValue("$id", bookmark.Id.ToString());
             command.Parameters.AddWithValue("$bookId", bookmark.BookId.ToString());
@@ -458,6 +467,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$title", bookmark.Title);
             command.Parameters.AddWithValue("$quote", bookmark.Quote);
             command.Parameters.AddWithValue("$createdAt", bookmark.CreatedAt.ToString("O"));
+            command.Parameters.AddWithValue("$contentPosition", (object?)ReaderContentPositionJson.Serialize(bookmark.ContentPosition) ?? DBNull.Value);
             var changed = await command.ExecuteNonQueryAsync(cancellationToken);
             if (changed > 0)
                 NotifyDataChanged(LocalDataChangeKind.Bookmark);
@@ -617,6 +627,27 @@ public sealed partial class ReaderDataService
             using var addFlowMode = connection.CreateCommand();
             addFlowMode.CommandText = "ALTER TABLE ReaderBookmarks ADD COLUMN FlowMode INTEGER NOT NULL DEFAULT 0;";
             await addFlowMode.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async Task EnsureReaderContentPositionColumnsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        foreach (var table in new[] { "ReaderProgress", "ReaderBookmarks" })
+        {
+            using var inspect = connection.CreateCommand();
+            inspect.CommandText = $"PRAGMA table_info({table});";
+            var hasPosition = false;
+            await using (var reader = await inspect.ExecuteReaderAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken))
+                    hasPosition |= string.Equals(reader.GetString(1), "ContentPositionJson", StringComparison.OrdinalIgnoreCase);
+            }
+            if (hasPosition) continue;
+            using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN ContentPositionJson TEXT NULL;";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 

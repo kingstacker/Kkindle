@@ -89,7 +89,7 @@ public sealed class AiSettingsStore
         if (!File.Exists(SettingsPath)) return new AiConnectionSettings();
         try
         {
-            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, true);
             var persisted = await JsonSerializer.DeserializeAsync<PersistedAiSettings>(stream, _jsonOptions, cancellationToken);
             if (persisted is null) return new AiConnectionSettings();
             var provider = persisted.Provider?.Trim().ToLowerInvariant() ?? "deepseek";
@@ -102,9 +102,7 @@ public sealed class AiSettingsStore
                 Model = AiConnectionSettings.NormalizeModel(
                     provider,
                     string.IsNullOrWhiteSpace(persisted.Model) ? defaults.Model : persisted.Model),
-                ApiKey = string.IsNullOrWhiteSpace(persisted.ProtectedApiKey)
-                    ? string.Empty
-                    : Encoding.UTF8.GetString(_protector.Unprotect(Convert.FromBase64String(persisted.ProtectedApiKey)))
+                ApiKey = UnprotectApiKey(persisted.ProtectedApiKey)
             };
         }
         catch (Exception exception) when (exception is IOException or JsonException or FormatException or System.ComponentModel.Win32Exception)
@@ -117,6 +115,23 @@ public sealed class AiSettingsStore
     {
         using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
         await SaveUnderLockAsync(settings, cancellationToken);
+    }
+
+    private string UnprotectApiKey(string? protectedApiKey)
+    {
+        if (string.IsNullOrWhiteSpace(protectedApiKey)) return string.Empty;
+        try
+        {
+            return Encoding.UTF8.GetString(_protector.Unprotect(Convert.FromBase64String(protectedApiKey)));
+        }
+        catch (Exception exception) when (exception is FormatException
+            or System.Security.Cryptography.CryptographicException
+            or System.ComponentModel.Win32Exception)
+        {
+            // Keep the endpoint/model usable when the machine-bound key is
+            // unavailable, so the user only needs to re-enter the API key.
+            return string.Empty;
+        }
     }
 
     internal async Task SaveUnderLockAsync(AiConnectionSettings settings, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
@@ -135,7 +150,7 @@ public sealed class AiSettingsStore
         await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, persisted, _jsonOptions, cancellationToken);
         if (syncedAt is { } timestamp) File.SetLastWriteTimeUtc(temporaryPath, timestamp.UtcDateTime);
-        File.Move(temporaryPath, SettingsPath, overwrite: true);
+        SettingsFile.Publish(temporaryPath, SettingsPath);
     }
 
     private sealed class PersistedAiSettings

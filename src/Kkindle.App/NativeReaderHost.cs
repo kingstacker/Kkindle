@@ -44,6 +44,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private TypesetPaintTheme _paintTheme = ReaderPalette.For(ReaderTheme.Classic).PaintTheme;
     private CancellationTokenSource? _navigationCts;
     private long _navigationVersion;
+    private Task<bool> _navigationTask = Task.FromResult(true);
+    private long _configurationVersion;
     private bool _disposed;
 
     private int _pageIndex;
@@ -86,9 +88,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private string[] _navigationFragments = [];
     private int? _pendingRestoreOffset;
     private int? _pendingRestorePage;
+    private double? _pendingRestoreRatio;
     private double? _pendingScrollOffset;
     private string? _pendingFragment;
     private bool _pendingSeekToEnd;
+    private ViewportReadingAnchor? _pendingReadingAnchor;
 
     // Continuous-mode scrollbar overlay. A real ScrollBar visual child so
     // thumb drags and track clicks work; kept out of the layout otherwise.
@@ -198,6 +202,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public void Stop()
     {
+        ++_configurationVersion;
         _navigationCts?.Cancel();
     }
 
@@ -235,6 +240,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return;
         }
 
+        ++_configurationVersion;
         // Apply the book's settings before the background layout. Configuring
         // only after NavigationCompleted would compose the first chapter twice,
         // with the second (potentially large) pass blocking the UI thread.
@@ -255,7 +261,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 fragment = uri.Fragment.TrimStart('#');
             }
         }
-        NavigateCore(path, fragment);
+        _ = NavigateCore(path, fragment);
     }
 
     // ---- native surface API used by the MainWindow seams ------------------
@@ -292,50 +298,78 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     public bool Vertical => _settings.VerticalWriting;
 
     /// <summary>
-    /// Applies reader settings, restores a position and repaints. Positions
-    /// follow the persisted convention: pixel scroll for horizontal paged
-    /// mode, page-start character offset for vertical writing.
+    /// Applies reader settings and restores a content anchor. The numeric
+    /// scroll position remains a fallback for callers with legacy records.
     /// </summary>
-    public Task Configure(
+    public async Task Configure(
         ReaderLayoutSettings settings,
         double scrollPosition,
         string? fragment,
         bool restoreFromProgress,
-        bool showVerticalDebugBoxes)
+        bool showVerticalDebugBoxes,
+        ReaderContentPosition? contentPosition = null,
+        double? legacyChapterRatio = null)
     {
+        if (_disposed) return;
+        var configurationVersion = ++_configurationVersion;
+        // A reparse owns the pending position until it finishes. Applying a
+        // second settings change to the old content would erase that position
+        // and let the first load later install obsolete layout settings.
+        if (_composePending && !await _navigationTask) return;
+        if (_disposed || configurationVersion != _configurationVersion) return;
+
         var indentChanged = _content is not null
             && Source is not null
             && settings.ParagraphIndent != _loadedParagraphIndent;
         var settingsChanged = SettingsChanged(settings);
+        var readingAnchor = (settingsChanged || indentChanged) && _layout is { Pages.Count: > 0 }
+            ? ViewportReadingPositionMatches() ? _viewportReadingAnchor ?? CaptureViewportReadingAnchor()
+                : CaptureViewportReadingAnchor()
+            : null;
         _presentation = DerivePresentation(settings);
         _settings = settings;
         _showVerticalDebugBoxes = showVerticalDebugBoxes;
 
-        if (_content is not null && (settingsChanged || _layout is null || _composePending))
-        {
-            Recompose();
-        }
-
+        Task<bool>? reload = null;
         if (indentChanged)
         {
-            ReloadChapterForIndentChange();
+            reload = ReloadChapterForIndentChange(readingAnchor);
+        }
+        else if (_content is not null && (settingsChanged || _layout is null))
+        {
+            Recompose(readingAnchor);
         }
 
         // A saved progress position is authoritative when it exists. The
         // fragment is still useful for fresh link navigation, but letting it
         // win here would reopen a chapter at the link's page instead of the
         // user's last reading position.
-        var hasSavedPosition = restoreFromProgress && scrollPosition > 0.5;
+        contentPosition = ReaderContentPosition.Validate(contentPosition);
+        var hasSavedPosition = restoreFromProgress && (contentPosition is not null || scrollPosition > 0.5
+            || legacyChapterRatio is > 0 and <= 1);
         _pendingFragment = hasSavedPosition || string.IsNullOrWhiteSpace(fragment)
             ? null
             : NormalizeFragment(fragment);
         if (restoreFromProgress)
         {
+            _pendingReadingAnchor = null;
             _pendingRestoreOffset = null;
             _pendingRestorePage = null;
+            _pendingRestoreRatio = null;
             _pendingSeekToEnd = false;
             _pendingScrollOffset = null;
-            if (IsScroll)
+            if (contentPosition is not null)
+            {
+                _pendingReadingAnchor = ToViewportReadingAnchor(contentPosition);
+            }
+            else if (legacyChapterRatio is > 0 and <= 1 && double.IsFinite(legacyChapterRatio.Value))
+            {
+                // Old records did not identify whether their number was a
+                // pixel coordinate or a character offset. Their chapter ratio
+                // is a portable, approximate fallback across layout changes.
+                _pendingRestoreRatio = legacyChapterRatio;
+            }
+            else if (IsScroll)
             {
                 // Continuous mode saves an absolute content offset.
                 _pendingScrollOffset = Math.Max(0, scrollPosition);
@@ -351,8 +385,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
         else
         {
+            if (_pendingFragment is not null) _pendingReadingAnchor = null;
             _pendingRestoreOffset = null;
             _pendingRestorePage = null;
+            _pendingRestoreRatio = null;
             _pendingSeekToEnd = false;
             _pendingScrollOffset = null;
             if (!IsScroll)
@@ -361,11 +397,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             }
         }
 
+        if (reload is not null && !await reload) return;
+        if (_disposed || configurationVersion != _configurationVersion) return;
         ApplyPendingPosition();
         _bitmapDirty = true;
         InvalidateVisual();
         EmitScroll();
-        return Task.CompletedTask;
     }
 
     private static ReaderPresentation DerivePresentation(ReaderLayoutSettings settings) =>
@@ -662,6 +699,52 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         return current;
     }
 
+    public ReaderContentPosition? CaptureContentPosition()
+    {
+        if (_disposed || _composePending || _layout is not { Pages.Count: > 0 }
+            || !_navigationTask.IsCompletedSuccessfully || !_navigationTask.Result) return null;
+        var anchor = ViewportReadingPositionMatches()
+            ? _viewportReadingAnchor ?? CaptureViewportReadingAnchor()
+            : CaptureViewportReadingAnchor();
+        return new ReaderContentPosition
+        {
+            TextOffset = anchor.TextOffset,
+            ImageIndex = anchor.ImageIndex,
+            PageIndex = anchor.PageIndex,
+            RunY = anchor.RunY,
+            SliceFraction = anchor.SliceFraction
+        };
+    }
+
+    public bool RestoreContentPosition(ReaderContentPosition? position)
+    {
+        if (_disposed || ReaderContentPosition.Validate(position) is not { } valid) return false;
+        _pendingFragment = null;
+        _pendingSeekToEnd = false;
+        _pendingScrollOffset = null;
+        _pendingRestoreOffset = null;
+        _pendingRestorePage = null;
+        _pendingRestoreRatio = null;
+        _pendingReadingAnchor = ToViewportReadingAnchor(valid);
+        ApplyPendingPosition();
+        _bitmapDirty = true;
+        InvalidateVisual();
+        EmitScroll();
+        return true;
+    }
+
+    public bool IsContentPositionVisible(ReaderContentPosition? position)
+    {
+        if (_disposed || _composePending || _layout is not { Pages.Count: > 0 }
+            || ReaderContentPosition.Validate(position) is not { } valid) return false;
+        var (page, image) = ResolveViewportReadingAnchor(ToViewportReadingAnchor(valid));
+        if (!IsScroll) return page >= _pageIndex && page <= _pageIndex + (IsSpread ? 1 : 0);
+        var rect = image?.Rect ?? _layout.GetCharRect(page, valid.TextOffset);
+        var y = page * _layout.Pages[0].Height + (rect?.Top ?? valid.SliceFraction * _layout.Pages[0].Height);
+        var bottom = rect is { } bounds ? y + bounds.Height : y;
+        return bottom >= _scrollOffset && y < _scrollOffset + Bounds.Height;
+    }
+
     public (double Position, double Ratio, double ScrollWidth, double ScrollHeight, double ClientWidth, double ClientHeight) GetScrollState()
     {
         var viewportWidth = Math.Max(1, Bounds.Width);
@@ -681,9 +764,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 && _pageIndex < _layout.Pages.Count
                 && _layout.Pages[_pageIndex].TextStartOffset >= 0
                 ? _layout.Pages[_pageIndex].TextStartOffset
-                : 0;
+                : -1;
             var total = Math.Max(1, _layout?.BodyTextLength ?? 1);
-            return (start, Math.Clamp((double)start / total, 0, 1), total, viewportHeight, viewportWidth, viewportHeight);
+            var ratio = start >= 0 ? Math.Clamp((double)start / total, 0, 1)
+                : PageCount > 1 ? (double)_pageIndex / (PageCount - 1) : 0;
+            return (Math.Max(0, start), ratio, total, viewportHeight, viewportWidth, viewportHeight);
         }
 
         var stride = Math.Max(1, ComposePageWidth(viewportWidth));
@@ -1065,7 +1150,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         || settings.TwoPageMode != _settings.TwoPageMode
         || Math.Abs(settings.BodyPadding - _settings.BodyPadding) > 0.001;
 
-    private void NavigateCore(string chapterPath, string? fragment)
+    private Task<bool> NavigateCore(string chapterPath, string? fragment, ViewportReadingAnchor? readingAnchor = null)
     {
         _composePending = true;
         _relayoutTimer?.Stop();
@@ -1083,15 +1168,20 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _pendingFragment = string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment);
         _pendingRestoreOffset = null;
         _pendingRestorePage = null;
+        _pendingRestoreRatio = null;
         _pendingSeekToEnd = false;
+        _pendingReadingAnchor = readingAnchor;
         StopSelectionAutoPageTurn();
         _selectionActiveOffset = _selectionStart = _selectionEnd = _selectionAnchor = -1;
         _hasLastPointerPosition = false;
         _searchHits = null;
         _speechHighlight = null;
         InvalidateSpeechTextSnapshot();
-        _pageIndex = 0;
-        _scrollOffset = 0;
+        if (readingAnchor is null)
+        {
+            _pageIndex = 0;
+            _scrollOffset = 0;
+        }
         _pendingScrollOffset = null;
 
         // Compose off the UI thread; layout and shaping are pure CPU work on
@@ -1106,9 +1196,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             navigationCts.Cancel();
             _composePending = false;
             NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, false));
-            return;
+            return _navigationTask = Task.FromResult(false);
         }
 
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationTask = completion.Task;
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
         {
             try
@@ -1137,10 +1229,14 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 _composePending = false;
                 _bitmapDirty = true;
                 _pageIndex = 0;
+                if (Math.Abs(width - ComposePageWidth(Bounds.Width)) > 0.01
+                    || Math.Abs(height - Math.Max(1, Bounds.Height)) > 0.01)
+                    Recompose();
                 ApplyPendingPosition();
                 InvalidateVisual();
                 EmitScroll();
                 NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, true));
+                completion.TrySetResult(true);
             }
             catch (OperationCanceledException) when (navigationToken.IsCancellationRequested)
             {
@@ -1157,7 +1253,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                     NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, false));
                 }
             }
+            finally
+            {
+                completion.TrySetResult(false);
+            }
         });
+        return completion.Task;
     }
 
     private TypesetEngine Engine
@@ -1315,53 +1416,47 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private void ApplyPendingPosition()
     {
-        if (_layout is null || _layout.Pages.Count == 0)
+        if (_composePending || _layout is null || _layout.Pages.Count == 0)
         {
             return;
         }
 
-        if (_pendingSeekToEnd)
+        var page = _pendingSeekToEnd ? _layout.Pages.Count - 1
+            : _pendingFragment is { } fragment ? _layout.GetPageIndexOfFragment(NormalizeFragment(fragment)) : -1;
+        if (page < 0)
         {
-            _pageIndex = _layout.Pages.Count - 1;
-            _pendingSeekToEnd = false;
-            return;
-        }
-
-        if (_pendingFragment is { } fragment)
-        {
-            var fragmentPage = _layout.GetPageIndexOfFragment(NormalizeFragment(fragment));
-            if (fragmentPage >= 0)
+            if (_pendingScrollOffset is { } scroll) _scrollOffset = ClampScrollOffset(scroll);
+            else if (_pendingRestoreOffset is { } offset)
+                page = _layout.GetPageIndexOfOffset(Math.Clamp(offset, 0, Math.Max(0, _layout.BodyTextLength - 1)));
+            else if (_pendingRestorePage is { } restorePage)
+                page = Math.Clamp(restorePage, 0, _layout.Pages.Count - 1);
+            else if (_pendingRestoreRatio is { } ratio)
             {
-                _pageIndex = fragmentPage;
-                _pendingFragment = null;
-                return;
+                if (IsScroll) _scrollOffset = ClampScrollOffset(ratio * MaxScrollOffset);
+                else page = (int)Math.Round(ratio * (_layout.Pages.Count - 1));
+            }
+            else if (_pendingReadingAnchor is { } anchor)
+            {
+                RestoreViewportReadingAnchor(anchor);
+                _viewportReadingAnchor = anchor;
+                RememberViewportReadingPosition();
             }
         }
-
-        if (_pendingScrollOffset is { } pendingScroll)
+        if (page >= 0)
         {
-            _scrollOffset = ClampScrollOffset(pendingScroll);
-            _pendingScrollOffset = null;
-            return;
+            if (IsScroll) _scrollOffset = ClampScrollOffset(page * Math.Max(1, Bounds.Height));
+            else _pageIndex = IsSpread ? page - page % 2 : page;
         }
 
-        if (_pendingRestoreOffset is { } offset)
-        {
-            var offsetPage = _layout.GetPageIndexOfOffset(Math.Clamp(offset, 0, Math.Max(0, _layout.BodyTextLength - 1)));
-            if (offsetPage >= 0)
-            {
-                _pageIndex = offsetPage;
-            }
-
-            _pendingRestoreOffset = null;
-            return;
-        }
-
-        if (_pendingRestorePage is { } restorePage)
-        {
-            _pageIndex = Math.Clamp(restorePage, 0, _layout.Pages.Count - 1);
-            _pendingRestorePage = null;
-        }
+        // These are alternative destinations for one request. Once a fragment
+        // wins, its fallback offset must not fire on the next resize/reflow.
+        _pendingSeekToEnd = false;
+        _pendingFragment = null;
+        _pendingScrollOffset = null;
+        _pendingRestoreOffset = null;
+        _pendingRestorePage = null;
+        _pendingRestoreRatio = null;
+        _pendingReadingAnchor = null;
     }
 
     private static string NormalizeFragment(string fragment)
@@ -1380,76 +1475,27 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// <summary>
     /// Re-runs the chapter load for a paragraph-indent toggle. The indent is
     /// applied by the loader when blocks are built, so Recompose alone never
-    /// changes it. The reading position is re-armed as a pending restore;
-    /// those fields are written after NavigateCore because it clears them.
+    /// changes it. Keep the semantic position until the new content is ready.
     /// </summary>
-    private void ReloadChapterForIndentChange()
+    private Task<bool> ReloadChapterForIndentChange(ViewportReadingAnchor? readingAnchor)
     {
         if (Source is null || _disposed)
         {
-            return;
-        }
-
-        // Capture the reading position first: NavigateCore resets the page
-        // index while the old layout stays valid until the reload applies.
-        double scrollOffset = 0;
-        int? restoreOffset = null;
-        var restorePage = 0;
-        if (IsScroll)
-        {
-            scrollOffset = _scrollOffset;
-        }
-        else if (Vertical)
-        {
-            if (_layout is not null
-                && _pageIndex >= 0
-                && _pageIndex < _layout.Pages.Count
-                && _layout.Pages[_pageIndex].TextStartOffset >= 0)
-            {
-                restoreOffset = _layout.Pages[_pageIndex].TextStartOffset;
-            }
-        }
-        else
-        {
-            restorePage = _pageIndex;
+            return Task.FromResult(false);
         }
 
         var uri = Source;
         var path = uri.IsFile ? uri.LocalPath : uri.AbsolutePath;
-        string? fragment = null;
-        if (!string.IsNullOrWhiteSpace(uri.Fragment))
-        {
-            try
-            {
-                fragment = Uri.UnescapeDataString(uri.Fragment.TrimStart('#'));
-            }
-            catch (UriFormatException)
-            {
-                fragment = uri.Fragment.TrimStart('#');
-            }
-        }
-
-        NavigateCore(path, fragment);
-
-        if (IsScroll)
-        {
-            _pendingScrollOffset = scrollOffset;
-        }
-        else if (Vertical)
-        {
-            _pendingRestoreOffset = restoreOffset;
-        }
-        else
-        {
-            _pendingRestorePage = restorePage;
-        }
-
-        _loadedParagraphIndent = _settings.ParagraphIndent;
+        return NavigateCore(path, fragment: null, readingAnchor);
     }
 
     // ---- rendering --------------------------------------------------------
 
-    private sealed record ViewportReadingAnchor(int TextOffset, int PageIndex, double RunY, double SliceFraction);
+    private sealed record ViewportReadingAnchor(int TextOffset, int PageIndex, double RunY, double SliceFraction,
+        int? ImageIndex = null);
+
+    private static ViewportReadingAnchor ToViewportReadingAnchor(ReaderContentPosition position) =>
+        new(position.TextOffset, position.PageIndex, position.RunY, position.SliceFraction, position.ImageIndex);
     private sealed record ViewportReadingState(
         ChapterContent Content, ChapterLayout Layout, ReaderLayoutSettings Settings, int PageIndex, double ScrollOffset);
 
@@ -1481,7 +1527,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var first = IsScroll ? (int)(_scrollOffset / height) : _pageIndex;
         first = Math.Clamp(first, 0, _layout.Pages.Count - 1);
         var page = _layout.Pages[first];
-        if (!IsScroll) return new(page.TextStartOffset, first, 0, 0);
+        if (!IsScroll)
+        {
+            if (page.TextStartOffset < 0 && page.Images.FirstOrDefault() is { } image)
+                return CaptureImageReadingAnchor(first, image, image.Rect.Top, 0);
+            return new(page.TextStartOffset, first,
+                page.Runs.FirstOrDefault(run => run.TextStart >= 0 && run.TextLength > 0)?.OriginY ?? page.InsetVertical, 0);
+        }
 
         var slice = _scrollOffset - first * height;
         for (var index = first; index <= Math.Min(first + 1, _layout.Pages.Count - 1); index++)
@@ -1490,6 +1542,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             var run = _layout.Pages[index].Runs
                 .Where(run => run.TextStart >= 0 && run.TextLength > 0 && run.OriginY >= localTop)
                 .OrderBy(run => run.OriginY).ThenBy(run => run.TextStart).FirstOrDefault();
+            var image = _layout.Pages[index].Images.Where(image => image.Rect.Bottom > localTop)
+                .OrderBy(image => image.Rect.Top).FirstOrDefault();
+            if (image is not null && (run is null || image.Rect.Top < run.OriginY - run.FontSize))
+                return CaptureImageReadingAnchor(index, image, image.Rect.Top - localTop, slice / height);
             if (run is not null)
                 return new(run.TextStart, index, run.OriginY - localTop, slice / height);
         }
@@ -1498,17 +1554,38 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             (fallback?.OriginY ?? page.InsetVertical) - slice, slice / height);
     }
 
+    private ViewportReadingAnchor CaptureImageReadingAnchor(int page, PlacedImage image, double y, double sliceFraction)
+    {
+        var ordinal = _layout!.Pages.Take(page).Sum(item => item.Images.Count)
+            + _layout.Pages[page].Images.IndexOf(image);
+        return new(-1, page, y, sliceFraction, ordinal);
+    }
+
+    private (int PageIndex, PlacedImage? Image) ResolveViewportReadingAnchor(ViewportReadingAnchor anchor)
+    {
+        if (anchor.ImageIndex is { } ordinal)
+        {
+            foreach (var item in _layout!.Pages)
+            {
+                if (ordinal < item.Images.Count) return (item.Index, item.Images[ordinal]);
+                ordinal -= item.Images.Count;
+            }
+        }
+        var page = anchor.TextOffset >= 0 ? _layout!.GetPageIndexOfOffset(anchor.TextOffset) : -1;
+        return (page >= 0 ? page : Math.Clamp(anchor.PageIndex, 0, _layout!.Pages.Count - 1), null);
+    }
+
     private void RestoreViewportReadingAnchor(ViewportReadingAnchor anchor)
     {
         if (_layout is null || _layout.Pages.Count == 0) return;
-        var page = anchor.TextOffset >= 0 ? _layout.GetPageIndexOfOffset(anchor.TextOffset) : -1;
-        if (page < 0) page = Math.Clamp(anchor.PageIndex, 0, _layout.Pages.Count - 1);
+        var (page, image) = ResolveViewportReadingAnchor(anchor);
         if (IsScroll)
         {
             var height = Math.Max(1, _layout.Pages[0].Height);
             var run = _layout.Pages[page].Runs.FirstOrDefault(run => run.TextStart >= 0
                 && run.TextStart <= anchor.TextOffset && run.TextStart + run.TextLength > anchor.TextOffset);
-            var slice = run is not null ? run.OriginY - anchor.RunY : anchor.SliceFraction * height;
+            var slice = image is not null ? image.Rect.Top - anchor.RunY
+                : run is not null ? run.OriginY - anchor.RunY : anchor.SliceFraction * height;
             _scrollOffset = ClampScrollOffset(page * height + slice);
         }
         else
@@ -1519,15 +1596,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private void ScheduleRelayout()
     {
-        if (_disposed || _content is null)
+        if (_disposed || _content is null || _composePending)
         {
             return;
         }
 
+        PreservePositionForViewportChange();
         _relayoutTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(70), DispatcherPriority.Background, (_, _) =>
         {
             _relayoutTimer!.Stop();
-            if (!_disposed && _content is not null)
+            if (!_disposed && _content is not null && !_composePending)
             {
                 Recompose();
                 ApplyPendingPosition();
@@ -1541,15 +1619,15 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _relayoutTimer.Start();
     }
 
-    private void Recompose()
+    private void Recompose(ViewportReadingAnchor? readingAnchor = null)
     {
         if (_disposed || _content is null)
         {
             return;
         }
 
-        var viewportAnchor = _preserveViewportPosition && ViewportReadingPositionMatches()
-            ? _viewportReadingAnchor : null;
+        var viewportAnchor = readingAnchor ?? (_preserveViewportPosition && ViewportReadingPositionMatches()
+            ? _viewportReadingAnchor : null);
         _preserveViewportPosition = false;
         var width = Math.Max(1, ComposePageWidth(Bounds.Width));
         var height = Math.Max(1, Bounds.Height);
@@ -1589,6 +1667,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         if (viewportAnchor is not null)
         {
             RestoreViewportReadingAnchor(viewportAnchor);
+            _viewportReadingAnchor = viewportAnchor;
             RememberViewportReadingPosition();
         }
         else

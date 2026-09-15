@@ -175,9 +175,11 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     private static async Task<Guid?> GetCollectionIdByNameAsync(
         SqliteConnection connection,
         string name,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT Id FROM BookCollections WHERE Name = $name COLLATE NOCASE LIMIT 1;";
         command.Parameters.AddWithValue("$name", name);
         var result = await command.ExecuteScalarAsync(cancellationToken);
@@ -582,6 +584,9 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             foreach (var sourcePath in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                string? createdFilePath = null;
+                string? createdCoverPath = null;
+                var committed = false;
                 try
                 {
                     var file = new FileInfo(sourcePath);
@@ -653,24 +658,28 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 Directory.CreateDirectory(bookDirectory);
                 var targetName = GetUniqueFileName(bookDirectory, Path.GetFileName(sourcePath));
                 var targetPath = Path.Combine(bookDirectory, targetName);
-                var temporaryPath = targetPath + ".part";
+                var temporaryPath = targetPath + $".{Guid.NewGuid():N}.part";
                 try
                 {
                     await CopyFileAsync(sourcePath, temporaryPath, file.Length, completedBytes, totalBytes, progress, cancellationToken);
-                    File.Move(temporaryPath, targetPath, true);
+                    File.Move(temporaryPath, targetPath, overwrite: false);
+                    createdFilePath = targetPath;
                 }
                 finally
                 {
                     if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
                 }
 
+                // Publish the file, book row and collection membership together.
+                // A failed insert must not leave an empty book in the library.
+                using var transaction = connection.BeginTransaction();
                 if (newBook)
                 {
-                    await InsertBookAsync(connection, book, cancellationToken);
+                    await InsertBookAsync(connection, book, cancellationToken, transaction);
                 }
                 else
                 {
-                    await UpdateBookRowAsync(connection, book, cancellationToken);
+                    await UpdateBookRowAsync(connection, book, cancellationToken, transaction);
                 }
 
                 if (newBook)
@@ -678,10 +687,12 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     var defaultCollectionId = await GetCollectionIdByNameAsync(
                         connection,
                         BookLibraryDefaults.UncollectedCollectionName,
-                        cancellationToken);
+                        cancellationToken,
+                        transaction);
                     if (defaultCollectionId is not null)
                     {
                         var membership = connection.CreateCommand();
+                        membership.Transaction = transaction;
                         membership.CommandText = """
                             INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
                             VALUES ($collectionId, $bookId, $addedAt);
@@ -704,18 +715,22 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     Size = file.Length,
                     Sha256 = hash
                 };
-                await InsertFileAsync(connection, bookFile, cancellationToken);
+                await InsertFileAsync(connection, bookFile, cancellationToken, transaction);
                 book.Files.Add(bookFile);
 
                 if (metadata.CoverBytes is { Length: > 0 } && string.IsNullOrWhiteSpace(book.CoverPath))
                 {
                     var coverName = $"{book.Id:N}{NormalizeCoverExtension(metadata.CoverExtension)}";
                     var coverPath = Path.Combine(_paths.Covers, coverName);
+                    if (!File.Exists(coverPath)) createdCoverPath = coverPath;
                     await File.WriteAllBytesAsync(coverPath, metadata.CoverBytes, cancellationToken);
                     book.CoverPath = Path.GetRelativePath(_paths.Data, coverPath);
-                    await UpdateBookRowAsync(connection, book, cancellationToken);
+                    await UpdateBookRowAsync(connection, book, cancellationToken, transaction);
                 }
 
+                transaction.Commit();
+                committed = true;
+                changed = true;
                 result.Items.Add(new ImportItemResult(
                     sourcePath,
                     true,
@@ -723,7 +738,6 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     result.BookDetailsAvailable ? book : null,
                     Added: true,
                     BookId: book.Id));
-                changed = true;
                 completedBytes += file.Length;
                 progress?.Report(new TransferProgress(completedBytes, totalBytes, $"已导入 {file.Name}"));
                 }
@@ -731,6 +745,14 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 catch (Exception ex)
                 {
                     result.Items.Add(new ImportItemResult(sourcePath, false, ex.Message, null));
+                }
+                finally
+                {
+                    if (!committed)
+                    {
+                        if (createdFilePath is not null) TryDeleteFile(createdFilePath);
+                        if (createdCoverPath is not null) TryDeleteFile(createdCoverPath);
+                    }
                 }
             }
 

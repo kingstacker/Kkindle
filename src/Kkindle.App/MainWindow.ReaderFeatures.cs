@@ -33,7 +33,10 @@ public partial class MainWindow
         string ChapterPath,
         int ScrollPosition,
         int FlowMode,
-        string? Fragment);
+        string? Fragment)
+    {
+        public ReaderContentPosition? ContentPosition { get; init; }
+    }
 
     private CancellationToken ReaderToken =>
         _readerSessionCancellation?.Token ?? _lifetimeCancellation.Token;
@@ -267,6 +270,7 @@ public partial class MainWindow
             UpdateReaderBookmarkCornerSurface();
 
             var progress = await _readerData.GetProgressAsync(file.Id, token);
+            token.ThrowIfCancellationRequested();
             if (progress is not null)
                 _readerPdfPage = Math.Clamp(progress.ChapterIndex + 1, 1, pageCount);
             _readerChapterIndex = _readerPdfPage - 1;
@@ -318,6 +322,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
+            if (token.IsCancellationRequested) return;
             await CloseReaderAsync();
             SetTaskStatus(T("打开 PDF 阅读器失败：{0}", UiText.Localize(exception.Message)));
         }
@@ -614,6 +619,7 @@ public partial class MainWindow
     {
         if (_readerBookCard is null || _readerBookFile is null) return;
         var location = await CaptureCurrentReaderBookmarkLocationAsync();
+        if (CurrentReaderHost is NativeReaderHost && location is null) return;
         var currentPath = location?.ChapterPath ?? (_readerIsPdf
             ? $"pdf:{_readerPdfPage}"
             : GetReaderChapterPath());
@@ -629,13 +635,16 @@ public partial class MainWindow
         var currentFlowMode = location?.FlowMode ?? _readerLayout.FlowMode;
         var existing = ReaderBookmarks.FirstOrDefault(bookmark =>
             AreReaderBookmarkChapterPathsEqual(bookmark.ChapterPath, currentPath)
-            && string.Equals(bookmark.Fragment, fragment, StringComparison.OrdinalIgnoreCase)
-            && (bookmark.ScrollPosition is int savedPosition
+            && (ReaderContentPosition.Validate(bookmark.ContentPosition) is { } savedContent
+                && CurrentReaderHost is NativeReaderHost native
+                ? native.IsContentPositionVisible(savedContent)
+                : string.Equals(bookmark.Fragment, fragment, StringComparison.OrdinalIgnoreCase)
+                && (bookmark.ScrollPosition is int savedPosition
                 && currentPosition is int position
                 ? Math.Abs(savedPosition - position) <= 4
                 : string.IsNullOrWhiteSpace(bookmark.Quote)
                   || string.IsNullOrWhiteSpace(quote)
-                  || string.Equals(bookmark.Quote, quote, StringComparison.OrdinalIgnoreCase)));
+                  || string.Equals(bookmark.Quote, quote, StringComparison.OrdinalIgnoreCase))));
 
         try
         {
@@ -656,6 +665,7 @@ public partial class MainWindow
                     ChapterIndex = _readerChapterIndex,
                     ScrollPosition = currentPosition,
                     FlowMode = currentFlowMode,
+                    ContentPosition = location?.ContentPosition,
                     Title = GetReaderChapterLabel(),
                     Quote = quote ?? string.Empty,
                     CreatedAt = DateTimeOffset.UtcNow
@@ -839,13 +849,18 @@ public partial class MainWindow
         if (CurrentReaderHost is not { } host) return null;
         if (host is NativeReaderHost nativeReader)
         {
+            var contentPosition = nativeReader.CaptureContentPosition();
+            if (contentPosition is null) return null;
             var nativeState = nativeReader.GetScrollState();
             var nativePosition = Math.Max(0, (int)Math.Round(nativeState.Position));
             return new ReaderBookmarkLocation(
                 chapterPath,
                 nativePosition,
-                Math.Max(1, flowMode),
-                _readerCurrentFragment);
+                nativeReader.IsPaginated ? 1 : 0,
+                _readerCurrentFragment)
+            {
+                ContentPosition = contentPosition
+            };
         }
 
         try
@@ -943,6 +958,7 @@ public partial class MainWindow
         _readerPendingBookmarkQuote = null;
         _readerPendingBookmarkPosition = null;
         _readerPendingBookmarkFlowMode = 0;
+        _readerPendingBookmarkContentPosition = null;
     }
 
     private async Task UpdateReaderBookmarkIndicatorAsync()
@@ -966,7 +982,10 @@ public partial class MainWindow
                 chapterPath,
                 Math.Max(0, (int)Math.Round(_readerScrollPosition)),
                 _readerIsPdf ? 0 : _readerLayout.FlowMode,
-                _readerIsPdf ? null : _readerCurrentFragment);
+                _readerIsPdf ? null : _readerCurrentFragment)
+            {
+                ContentPosition = (CurrentReaderHost as NativeReaderHost)?.CaptureContentPosition()
+            };
         ApplyReaderBookmarkIndicator(location);
     }
 
@@ -983,7 +1002,11 @@ public partial class MainWindow
 
         var tolerance = location.FlowMode == 1 ? 8 : 4;
         var isBookmarked = ReaderBookmarks.Any(bookmark =>
-            ReaderBookmarkPolicy.MatchesVisiblePosition(
+            ReaderContentPosition.Validate(bookmark.ContentPosition) is { } savedContent
+                && CurrentReaderHost is NativeReaderHost native
+            ? AreReaderBookmarkChapterPathsEqual(bookmark.ChapterPath, location.ChapterPath)
+                && native.IsContentPositionVisible(savedContent)
+            : ReaderBookmarkPolicy.MatchesVisiblePosition(
                 bookmark.ChapterPath,
                 bookmark.FlowMode,
                 bookmark.ScrollPosition,
@@ -1046,6 +1069,7 @@ public partial class MainWindow
         _readerPendingBookmarkQuote = bookmark.Quote;
         _readerPendingBookmarkPosition = bookmark.ScrollPosition;
         _readerPendingBookmarkFlowMode = bookmark.FlowMode;
+        _readerPendingBookmarkContentPosition = bookmark.ContentPosition;
         var target = new Uri(path);
         var fragment = DecodeReaderFragment(bookmark.Fragment);
         if (!string.IsNullOrWhiteSpace(fragment))

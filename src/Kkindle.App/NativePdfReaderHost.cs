@@ -34,6 +34,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private readonly Dictionary<int, CachedPage> _pages = [];
     private PdfDocumentService? _document;
     private string? _documentPath;
+    private bool _documentReady;
     private CancellationTokenSource? _documentCancellation;
     private CancellationTokenSource? _navigation;
     private CancellationTokenSource? _viewportCancellation;
@@ -125,8 +126,10 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     public async Task<int> PrepareDocumentAsync(string path, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
         path = Path.GetFullPath(path);
-        if (_document is not null && string.Equals(_documentPath, path, StringComparison.Ordinal)) return PageCount;
+        if (_documentReady && _documentCancellation is { IsCancellationRequested: false }
+            && string.Equals(_documentPath, path, StringComparison.Ordinal)) return PageCount;
         Stop();
         _documentCancellation?.Dispose();
         _documentCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -155,6 +158,9 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         _layout = null;
         _pan = default;
         _annotations = [];
+        // Publish readiness only after the page count and caches belong to
+        // this load. Stop/cancellation must not leave a reusable half-session.
+        _documentReady = true;
         return count;
     }
 
@@ -642,6 +648,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
 
     public void Stop()
     {
+        _documentReady = false;
         _navigation?.Cancel();
         _viewportCancellation?.Cancel();
         _documentCancellation?.Cancel();

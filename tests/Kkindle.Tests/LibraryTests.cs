@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
+using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Tests;
 
@@ -558,6 +559,55 @@ public sealed class LibraryTests
 
             Assert.Equal("纸上作品", metadata.Title);
             Assert.Equal("未知作者", metadata.Authors);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedFileInsertRollsBackBookMetadataAndCopiedFiles(bool existingBook)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            Book? original = null;
+            if (existingBook)
+            {
+                var previous = Path.Combine(root, "previous.epub");
+                CreateEpub(previous, uniqueMarker: "previous");
+                await library.ImportAsync([previous]);
+                original = Assert.Single(await library.SearchAsync());
+            }
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = paths.Database }.ToString());
+            await connection.OpenAsync();
+            using var trigger = connection.CreateCommand();
+            trigger.CommandText = """
+                CREATE TRIGGER FailImportFile BEFORE INSERT ON BookFiles
+                BEGIN SELECT RAISE(ABORT, 'Simulated file insert failure'); END;
+                """;
+            await trigger.ExecuteNonQueryAsync();
+            var source = Path.Combine(root, "new.epub");
+            CreateEpub(source, uniqueMarker: "incoming");
+
+            var result = await library.ImportAsync([source]);
+
+            Assert.False(Assert.Single(result.Items).Succeeded);
+            var books = await library.SearchAsync();
+            if (original is null)
+                Assert.Empty(books);
+            else
+            {
+                var restored = Assert.Single(books);
+                Assert.Equal(original.Id, restored.Id);
+                Assert.Equal(original.UpdatedAt, restored.UpdatedAt);
+                Assert.Equal(original.Files[0].Id, Assert.Single(restored.Files).Id);
+                Assert.True(File.Exists(library.GetAbsoluteFilePath(restored.Files[0])));
+            }
+            Assert.Equal(existingBook ? 1 : 0, Directory.GetFiles(paths.Library, "*", SearchOption.AllDirectories).Length);
         }
         finally { TestHelpers.TryDelete(root); }
     }

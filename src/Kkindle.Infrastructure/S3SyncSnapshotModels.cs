@@ -124,6 +124,8 @@ internal sealed class S3SyncProgress
     public int ScrollPosition { get; set; }
     public double ProgressPercent { get; set; }
     public int FlowMode { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContentPositionJson { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
@@ -137,6 +139,8 @@ internal sealed class S3SyncBookmark
     public int ChapterIndex { get; set; }
     public int? ScrollPosition { get; set; }
     public int FlowMode { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContentPositionJson { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Quote { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }

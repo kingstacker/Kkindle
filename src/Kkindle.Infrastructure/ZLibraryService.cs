@@ -84,7 +84,7 @@ public sealed class ZLibrarySettingsStore
 
         try
         {
-            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, true);
             var persisted = await JsonSerializer.DeserializeAsync<PersistedZLibrarySettings>(stream, _jsonOptions, cancellationToken);
             if (persisted is null) return new ZLibrarySettings();
 
@@ -132,7 +132,7 @@ public sealed class ZLibrarySettingsStore
         await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, persisted, _jsonOptions, cancellationToken);
         if (syncedAt is { } timestamp) File.SetLastWriteTimeUtc(temporaryPath, timestamp.UtcDateTime);
-        File.Move(temporaryPath, SettingsPath, overwrite: true);
+        SettingsFile.Publish(temporaryPath, SettingsPath);
     }
 
     private sealed class PersistedZLibrarySettings

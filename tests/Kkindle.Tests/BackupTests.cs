@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using Kkindle.Infrastructure;
 using Kkindle.Core;
+using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Tests;
 
@@ -170,6 +171,225 @@ public sealed class BackupTests
         {
             TestHelpers.TryDelete(root);
         }
+    }
+
+    [Fact]
+    public async Task ExportCreatesStandaloneSnapshotWithOnlyCommittedWalChanges()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = paths.Database, Pooling = false
+            }.ToString());
+            await connection.OpenAsync();
+            using var setup = connection.CreateCommand();
+            setup.CommandText = "CREATE TABLE BackupProbe (Value INTEGER); INSERT INTO BackupProbe VALUES (1);";
+            await setup.ExecuteNonQueryAsync();
+            using var transaction = connection.BeginTransaction();
+            using var pending = connection.CreateCommand();
+            pending.Transaction = transaction;
+            pending.CommandText = "INSERT INTO BackupProbe VALUES (2);";
+            await pending.ExecuteNonQueryAsync();
+
+            var backupPath = Path.Combine(root, "snapshot.kkindle");
+            await new AppBackupService(paths, new TestHelpers.PlaintextSecretProtector()).ExportAsync(backupPath);
+            using var archive = ZipFile.OpenRead(backupPath);
+            Assert.DoesNotContain(archive.Entries, entry => entry.FullName.EndsWith("-wal") || entry.FullName.EndsWith("-shm"));
+            var snapshotPath = Path.Combine(root, "snapshot.db");
+            archive.GetEntry("database/kkindle.db")!.ExtractToFile(snapshotPath);
+            using var snapshot = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = snapshotPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false
+            }.ToString());
+            await snapshot.OpenAsync();
+            using var query = snapshot.CreateCommand();
+            query.CommandText = "SELECT COUNT(*) FROM BackupProbe WHERE Value = 1;";
+            Assert.Equal(1L, await query.ExecuteScalarAsync());
+            query.CommandText = "SELECT COUNT(*) FROM BackupProbe WHERE Value = 2;";
+            Assert.Equal(0L, await query.ExecuteScalarAsync());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task FailedExportPreservesThePreviousBackup()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "book.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            await library.ImportAsync([source]);
+            var book = Assert.Single(await library.SearchAsync());
+            var backup = new AppBackupService(paths, new TestHelpers.PlaintextSecretProtector());
+            var backupPath = Path.Combine(root, "backup.kkindle");
+            await backup.ExportAsync(backupPath);
+            var originalBytes = await File.ReadAllBytesAsync(backupPath);
+            using var locked = new FileStream(library.GetAbsoluteFilePath(book.Files[0]), FileMode.Open, FileAccess.Read, FileShare.None);
+
+            await Assert.ThrowsAnyAsync<IOException>(() => backup.ExportAsync(backupPath));
+
+            Assert.Equal(originalBytes, await File.ReadAllBytesAsync(backupPath));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task CancelledImportRestoresPreviousDatabaseFilesAndSettings()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var (paths, library, previousBook, backupPath, _) = await PrepareImportFailureAsync(root);
+            using var cancellation = new CancellationTokenSource();
+            var protector = new CallbackSecretProtector(() => cancellation.Cancel());
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new AppBackupService(paths, protector).ImportAsync(backupPath, cancellation.Token));
+
+            var restored = Assert.Single(await library.SearchAsync());
+            Assert.Equal(previousBook.Id, restored.Id);
+            Assert.True(File.Exists(library.GetAbsoluteFilePath(restored.Files[0])));
+            Assert.Equal("previous-key", (await new AiSettingsStore(paths, new TestHelpers.PlaintextSecretProtector()).LoadAsync()).ApiKey);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task FailedRollbackRetainsRecoveryDataAndReportsItsLocation()
+    {
+        // Windows sharing violations give us a deterministic failure while
+        // rolling back directory replacement, without modifying permissions.
+        if (!OperatingSystem.IsWindows()) return;
+        var root = TestHelpers.CreateTempDirectory();
+        FileStream? locked = null;
+        try
+        {
+            var (paths, _, previousBook, backupPath, incomingFile) = await PrepareImportFailureAsync(root);
+            var protector = new CallbackSecretProtector(() =>
+            {
+                locked = new FileStream(Path.Combine(paths.Data, incomingFile.RelativePath), FileMode.Open, FileAccess.Read, FileShare.Read);
+                throw new InvalidOperationException("Simulated settings write failure.");
+            });
+
+            var error = await Assert.ThrowsAnyAsync<Exception>(() => new AppBackupService(paths, protector).ImportAsync(backupPath));
+
+            var recovery = Assert.Single(Directory.GetDirectories(paths.Data, ".kkindle-rollback-*"));
+            Assert.Contains(recovery, error.Message, StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(recovery, "kkindle.db")));
+            Assert.True(File.Exists(Path.Combine(recovery, previousBook.Files[0].RelativePath)));
+        }
+        finally
+        {
+            locked?.Dispose();
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task RestoresLegacyWindowsPathsForBooksCoversAndTrash()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "book.epub");
+            CreateEpub(source);
+            var protector = new TestHelpers.PlaintextSecretProtector();
+            var paths = new AppPaths(Path.Combine(root, "source"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            await library.ImportAsync([source]);
+            var book = Assert.Single(await library.SearchAsync());
+            await File.WriteAllTextAsync(Path.Combine(paths.Covers, "cover.jpg"), "cover-content");
+            book.CoverPath = "covers/cover.jpg";
+            await library.UpdateMetadataAsync(book);
+            var converted = Path.Combine(root, "book.pdf");
+            await File.WriteAllBytesAsync(converted, [1, 2, 3]);
+            var removed = await library.AddFileToBookAsync(book.Id, converted);
+            await library.DeleteFileAsync(book.Id, removed.Id);
+            var backupPath = Path.Combine(root, "legacy.kkindle");
+            await new AppBackupService(paths, protector).ExportAsync(backupPath);
+
+            // Recreate a v1 package written on Windows, even when this test
+            // itself runs on Linux/macOS or the exporter has been fixed.
+            var legacyDatabase = Path.Combine(root, "legacy.db");
+            using (var archive = ZipFile.Open(backupPath, ZipArchiveMode.Update))
+            {
+                archive.GetEntry("database/kkindle.db")!.ExtractToFile(legacyDatabase);
+                using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+                {
+                    DataSource = legacyDatabase, Pooling = false
+                }.ToString()))
+                {
+                    await connection.OpenAsync();
+                    using var command = connection.CreateCommand();
+                    command.CommandText = """
+                        UPDATE Books SET CoverPath = replace(CoverPath, '/', '\');
+                        UPDATE BookFiles SET RelativePath = replace(RelativePath, '/', '\');
+                        UPDATE LibraryTrash SET TrashPath = replace(TrashPath, '/', '\'),
+                            OriginalPath = replace(OriginalPath, '/', '\'),
+                            FileJson = json_set(FileJson, '$.RelativePath',
+                                replace(json_extract(FileJson, '$.RelativePath'), '/', '\'));
+                        """;
+                    await command.ExecuteNonQueryAsync();
+                }
+                archive.GetEntry("database/kkindle.db")!.Delete();
+                archive.CreateEntryFromFile(legacyDatabase, "database/kkindle.db");
+            }
+
+            var targetPaths = new AppPaths(Path.Combine(root, "target"));
+            var target = new SqliteBookLibraryService(targetPaths, new BookMetadataService());
+            await target.InitializeAsync();
+            await new AppBackupService(targetPaths, protector).ImportAsync(backupPath);
+            var restored = Assert.Single(await target.SearchAsync());
+            Assert.DoesNotContain('\\', restored.Files[0].RelativePath);
+            Assert.Equal("covers/cover.jpg", restored.CoverPath);
+            Assert.True(File.Exists(target.GetAbsoluteFilePath(restored.Files[0])));
+            Assert.Equal("cover-content", await File.ReadAllTextAsync(Path.Combine(targetPaths.Data, restored.CoverPath!)));
+            await target.RestoreTrashItemAsync(Assert.Single(await target.GetTrashItemsAsync()).Id);
+            var files = Assert.Single(await target.SearchAsync()).Files;
+            Assert.Equal(2, files.Count);
+            Assert.All(files, file =>
+            {
+                Assert.DoesNotContain('\\', file.RelativePath);
+                Assert.True(File.Exists(target.GetAbsoluteFilePath(file)));
+            });
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    private static async Task<(AppPaths Paths, SqliteBookLibraryService Library, Book PreviousBook, string BackupPath, BookFile IncomingFile)>
+        PrepareImportFailureAsync(string root)
+    {
+        var source = Path.Combine(root, "book.epub");
+        CreateEpub(source);
+        var protector = new TestHelpers.PlaintextSecretProtector();
+        var sourcePaths = new AppPaths(Path.Combine(root, "source"));
+        var sourceLibrary = new SqliteBookLibraryService(sourcePaths, new BookMetadataService());
+        await sourceLibrary.InitializeAsync();
+        await sourceLibrary.ImportAsync([source]);
+        var incoming = Assert.Single(await sourceLibrary.SearchAsync());
+        var backupPath = Path.Combine(root, "backup.kkindle");
+        await new AppBackupService(sourcePaths, protector).ExportAsync(backupPath);
+        var paths = new AppPaths(Path.Combine(root, "target"));
+        var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+        await library.InitializeAsync();
+        await library.ImportAsync([source]);
+        await new AiSettingsStore(paths, protector).SaveAsync(new AiConnectionSettings { ApiKey = "previous-key" });
+        return (paths, library, Assert.Single(await library.SearchAsync()), backupPath, incoming.Files[0]);
+    }
+
+    private sealed class CallbackSecretProtector(Action onProtect) : ISecretProtector
+    {
+        public byte[] Protect(byte[] value) { onProtect(); return value.ToArray(); }
+        public byte[] Unprotect(byte[] value) => value.ToArray();
     }
 
     private static void CreateEpub(string path)

@@ -10,6 +10,86 @@ namespace Kkindle.Tests;
 public sealed class S3SyncTests
 {
     [Fact]
+    public async Task ContentPositionsSurviveSnapshotExportImportAndOlderSnapshots()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            var data = new ReaderDataService(paths);
+            await data.InitializeAsync();
+            var bookId = Guid.NewGuid();
+            var fileId = Guid.NewGuid();
+            var time = DateTimeOffset.UtcNow.AddMinutes(-5);
+            var relativePath = Path.Combine("library", bookId.ToString("N"), "book.epub");
+            var path = Path.Combine(paths.Data, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, [1, 2, 3]);
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO Books (Id, Title, Authors, Tags, Category, IsFavorite, ReadingStatus, CreatedAt, UpdatedAt)
+                    VALUES ($book, 'Position sync', '', '', '', 0, 0, $time, $time);
+                    INSERT INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256)
+                    VALUES ($file, $book, 'epub', $path, 3, '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81');
+                    """;
+                command.Parameters.AddWithValue("$book", bookId.ToString());
+                command.Parameters.AddWithValue("$file", fileId.ToString());
+                command.Parameters.AddWithValue("$time", time.ToString("O"));
+                command.Parameters.AddWithValue("$path", relativePath);
+                await command.ExecuteNonQueryAsync();
+            }
+            var position = new ReaderContentPosition { TextOffset = 9134, PageIndex = 36, RunY = 24 };
+            var image = new ReaderContentPosition { ImageIndex = 2, PageIndex = 2, RunY = 90 };
+            await data.SaveProgressAsync(new ReaderProgressRow(bookId, fileId, "chapter.xhtml", null, 0, 25920, 50, 1, time)
+            { ContentPosition = position });
+            var bookmark = new ReaderBookmark { BookId = bookId, BookFileId = fileId, ChapterPath = "images.xhtml", ContentPosition = image, CreatedAt = time };
+            await data.SaveBookmarkAsync(bookmark);
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var capture = typeof(S3SyncService).GetMethod("CaptureSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var apply = typeof(S3SyncService).GetMethod("ApplyRemoteSnapshotsAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Task<S3SyncSnapshot> Capture() => (Task<S3SyncSnapshot>)capture.Invoke(service, ["position-device", Array.Empty<S3SyncTombstone>(), CancellationToken.None])!;
+            Task Apply(S3SyncSnapshot local, S3SyncSnapshot remote) => (Task)apply.Invoke(service,
+                [null!, new S3SyncSettings(), local, new[] { remote }, null, CancellationToken.None])!;
+            var local = await Capture();
+            var wire = JsonSerializer.Serialize(local);
+            Assert.Equal(position, ReaderContentPositionJson.Deserialize(Assert.Single(local.Progress).ContentPositionJson));
+            Assert.Equal(image, ReaderContentPositionJson.Deserialize(Assert.Single(local.Bookmarks).ContentPositionJson));
+            var remote = JsonSerializer.Deserialize<S3SyncSnapshot>(wire)!;
+            remote.DeviceId = "another-device";
+            remote.Progress[0].UpdatedAt = time.AddMinutes(1);
+            remote.Progress[0].ScrollPosition = 0;
+            remote.Progress[0].ContentPositionJson = ReaderContentPositionJson.Serialize(image);
+            remote.Bookmarks[0].CreatedAt = time.AddMinutes(1);
+            remote.Bookmarks[0].ContentPositionJson = ReaderContentPositionJson.Serialize(position);
+            await Apply(local, remote);
+            Assert.Equal(image, (await data.GetProgressAsync(fileId))!.ContentPosition);
+            Assert.Equal(position, Assert.Single(await data.GetBookmarksAsync(fileId)).ContentPosition);
+
+            local = await Capture();
+            remote.Progress[0].UpdatedAt = time.AddMinutes(2);
+            remote.Progress[0].ScrollPosition = 1234;
+            remote.Progress[0].ContentPositionJson = null;
+            remote.Bookmarks[0].CreatedAt = time.AddMinutes(2);
+            remote.Bookmarks[0].ScrollPosition = 1234;
+            remote.Bookmarks[0].ContentPositionJson = null;
+            wire = JsonSerializer.Serialize(remote);
+            Assert.DoesNotContain("ContentPositionJson", wire, StringComparison.Ordinal);
+            await Apply(local, JsonSerializer.Deserialize<S3SyncSnapshot>(wire)!);
+            var legacyProgress = (await data.GetProgressAsync(fileId))!;
+            Assert.Equal(1234, legacyProgress.ScrollPosition);
+            Assert.Null(legacyProgress.ContentPosition);
+            var legacyBookmark = Assert.Single(await data.GetBookmarksAsync(fileId));
+            Assert.Equal(1234, legacyBookmark.ScrollPosition);
+            Assert.Null(legacyBookmark.ContentPosition);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public void DefaultsToVirtualHostedStyleAddressing()
     {
         Assert.False(new S3SyncSettings().PathStyle);

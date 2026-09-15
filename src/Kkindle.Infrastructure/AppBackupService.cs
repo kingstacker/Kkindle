@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Kkindle.Core;
 using Microsoft.Data.Sqlite;
 
@@ -61,10 +62,12 @@ public sealed class AppBackupService
 
         var stagingRoot = CreateWorkingDirectory(".kkindle-export-");
         var databaseSnapshotPath = Path.Combine(stagingRoot, "kkindle.db");
+        var pendingPath = destinationPath + $".{Guid.NewGuid():N}.tmp";
         try
         {
-            var summary = await ReadLibrarySummaryAsync(_paths.Database, cancellationToken);
             await CreateDatabaseSnapshotAsync(databaseSnapshotPath, cancellationToken);
+            await NormalizeSnapshotPathsAsync(databaseSnapshotPath, cancellationToken);
+            var summary = await ReadLibrarySummaryAsync(databaseSnapshotPath, cancellationToken);
             var settings = await BuildExportSettingsAsync(cancellationToken);
             var manifest = new BackupManifest
             {
@@ -80,8 +83,8 @@ public sealed class AppBackupService
                 Directory.CreateDirectory(destinationDirectory);
 
             await using (var output = new FileStream(
-                destinationPath,
-                FileMode.Create,
+                pendingPath,
+                FileMode.CreateNew,
                 FileAccess.Write,
                 FileShare.None,
                 81920,
@@ -90,14 +93,14 @@ public sealed class AppBackupService
             {
                 await AddJsonEntryAsync(archive, ManifestEntryName, manifest, cancellationToken);
                 await AddFileEntryAsync(archive, databaseSnapshotPath, DatabaseEntryName, cancellationToken);
-                await AddOptionalFileEntryAsync(archive, databaseSnapshotPath + "-wal", DatabaseWalEntryName, cancellationToken);
-                await AddOptionalFileEntryAsync(archive, databaseSnapshotPath + "-shm", DatabaseShmEntryName, cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Library, "library", cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Covers, "covers", cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Trash, "trash", cancellationToken);
                 await AddJsonEntryAsync(archive, SettingsEntryName, settings, cancellationToken);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(pendingPath, destinationPath, overwrite: true);
             return new AppBackupExportResult(
                 manifest.BookCount,
                 manifest.FileCount,
@@ -105,6 +108,7 @@ public sealed class AppBackupService
         }
         finally
         {
+            TryDeleteFile(pendingPath);
             TryDeleteDirectory(stagingRoot);
         }
     }
@@ -129,15 +133,16 @@ public sealed class AppBackupService
             using (var archive = ZipFile.OpenRead(sourcePath))
             {
                 manifest = await ReadManifestAsync(archive, cancellationToken);
+                ValidateManifest(manifest);
                 await ExtractSupportedEntriesAsync(archive, stagingRoot, cancellationToken);
             }
 
-            ValidateManifest(manifest);
             var stagedDatabasePath = Path.Combine(stagingRoot, DatabaseEntryName.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(stagedDatabasePath))
                 throw new InvalidDataException("备份包缺少书库数据库。 ");
 
             var summary = await ValidateDatabaseAsync(stagedDatabasePath, cancellationToken);
+            await NormalizeSnapshotPathsAsync(stagedDatabasePath, cancellationToken);
             backupSettings = await ReadBackupSettingsAsync(
                 Path.Combine(stagingRoot, SettingsEntryName.Replace('/', Path.DirectorySeparatorChar)),
                 cancellationToken);
@@ -159,14 +164,17 @@ public sealed class AppBackupService
             Directory.CreateDirectory(stagedTrashPath);
 
             var rollbackRoot = CreateWorkingDirectory(".kkindle-rollback-");
-            var currentDataMoved = false;
+            var movedPaths = new List<(string Source, string Backup)>();
+            var replacementStarted = false;
+            var retainRollback = false;
             try
             {
                 await CreateDatabaseSnapshotAsync(
                     Path.Combine(rollbackRoot, "kkindle.db"),
                     cancellationToken);
-                MoveCurrentDataToRollback(rollbackRoot);
-                currentDataMoved = true;
+                cancellationToken.ThrowIfCancellationRequested();
+                MoveCurrentDataToRollback(rollbackRoot, movedPaths);
+                replacementStarted = true;
                 Directory.Move(stagedLibraryPath, _paths.Library);
                 Directory.Move(stagedCoversPath, _paths.Covers);
                 Directory.Move(stagedTrashPath, _paths.Trash);
@@ -179,7 +187,6 @@ public sealed class AppBackupService
                     importedS3Settings,
                     cancellationToken);
 
-                TryDeleteDirectory(rollbackRoot);
                 return new AppBackupImportResult(
                     summary.BookCount,
                     summary.FileCount,
@@ -189,26 +196,31 @@ public sealed class AppBackupService
                     S3Settings = importedS3Settings
                 };
             }
-            catch
+            catch (Exception importException)
             {
-                if (currentDataMoved)
+                if (movedPaths.Count > 0)
                 {
                     try
                     {
-                        await RestoreCurrentDataFromRollbackAsync(rollbackRoot, cancellationToken);
+                        // Cancellation of the import must never cancel recovery.
+                        if (replacementStarted)
+                            await RestoreCurrentDataFromRollbackAsync(rollbackRoot, movedPaths);
+                        else
+                            RestoreMovedFilesFromRollback(movedPaths);
                     }
-                    catch
+                    catch (Exception rollbackException)
                     {
-                        // Preserve the original import exception. The rollback
-                        // is best effort because an external SQLite handle may
-                        // still be releasing at this point.
+                        retainRollback = true;
+                        throw new IOException(
+                            $"备份导入失败，自动恢复未完成。恢复副本已保留在：{rollbackRoot}",
+                            new AggregateException(importException, rollbackException));
                     }
                 }
                 throw;
             }
             finally
             {
-                TryDeleteDirectory(rollbackRoot);
+                if (!retainRollback) TryDeleteDirectory(rollbackRoot);
             }
         }
         finally
@@ -267,43 +279,129 @@ public sealed class AppBackupService
         if (!File.Exists(_paths.Database))
             throw new InvalidDataException("书库数据库不存在，无法导出。 ");
 
-        var sourceConnectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = _paths.Database,
-            Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Private
-        }.ToString();
-
-        using var source = new SqliteConnection(sourceConnectionString);
-        await source.OpenAsync(cancellationToken);
-        source.Close();
-        File.Copy(_paths.Database, destinationPath, overwrite: true);
-        CopyOptionalFile(_paths.Database + "-wal", destinationPath + "-wal");
-        CopyOptionalFile(_paths.Database + "-shm", destinationPath + "-shm");
+        await CopyDatabaseAsync(_paths.Database, destinationPath, cancellationToken);
     }
 
-    private async Task ReplaceDatabaseFromSnapshotAsync(
+    private Task ReplaceDatabaseFromSnapshotAsync(
         string snapshotPath,
+        CancellationToken cancellationToken) =>
+        CopyDatabaseAsync(snapshotPath, _paths.Database, cancellationToken);
+
+    private static async Task CopyDatabaseAsync(
+        string sourcePath,
+        string destinationPath,
         CancellationToken cancellationToken)
     {
         var sourceConnectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = snapshotPath,
+            DataSource = sourcePath,
             Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Private
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
         }.ToString();
         var destinationConnectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = _paths.Database,
+            DataSource = destinationPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Private
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
         }.ToString();
 
         using var source = new SqliteConnection(sourceConnectionString);
         using var destination = new SqliteConnection(destinationConnectionString);
         await source.OpenAsync(cancellationToken);
         await destination.OpenAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        // SQLite's backup API reads a consistent committed view, including WAL
+        // contents, without copying live journal/shared-memory files.
         source.BackupDatabase(destination);
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private static async Task NormalizeSnapshotPathsAsync(string databasePath, CancellationToken cancellationToken)
+    {
+        // The package can move between Windows, Linux and macOS. Normalize
+        // only the staged database, including paths embedded in trash records.
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString());
+        await connection.OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        foreach (var (table, pathColumns, jsonColumns) in new[]
+        {
+            ("Books", new[] { "CoverPath" }, Array.Empty<string>()),
+            ("BookFiles", new[] { "RelativePath" }, Array.Empty<string>()),
+            ("LibraryTrash", new[] { "TrashPath", "OriginalPath", "TrashCoverPath", "OriginalCoverPath" }, new[] { "BookJson", "FileJson" })
+        })
+        {
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var schema = connection.CreateCommand())
+            {
+                schema.Transaction = transaction;
+                schema.CommandText = $"PRAGMA table_info(\"{table}\");";
+                using var reader = await schema.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken)) columns.Add(reader.GetString(1));
+            }
+            foreach (var column in pathColumns.Where(columns.Contains))
+            {
+                using var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = $"UPDATE \"{table}\" SET \"{column}\" = replace(\"{column}\", '\\', '/') WHERE instr(\"{column}\", '\\') > 0;";
+                await update.ExecuteNonQueryAsync(cancellationToken);
+            }
+            foreach (var column in jsonColumns.Where(columns.Contains))
+            {
+                var records = new List<(string Id, string Json)>();
+                using (var read = connection.CreateCommand())
+                {
+                    read.Transaction = transaction;
+                    read.CommandText = $"SELECT Id, \"{column}\" FROM \"{table}\" WHERE \"{column}\" IS NOT NULL;";
+                    using var reader = await read.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken)) records.Add((reader.GetString(0), reader.GetString(1)));
+                }
+                foreach (var (id, json) in records)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    JsonNode? node;
+                    try { node = JsonNode.Parse(json); }
+                    catch (JsonException exception) { throw new InvalidDataException("备份包中的回收站记录无法读取。", exception); }
+                    if (!NormalizeJsonPaths(node)) continue;
+                    using var update = connection.CreateCommand();
+                    update.Transaction = transaction;
+                    update.CommandText = $"UPDATE \"{table}\" SET \"{column}\" = $json WHERE Id = $id;";
+                    update.Parameters.AddWithValue("$json", node!.ToJsonString());
+                    update.Parameters.AddWithValue("$id", id);
+                    await update.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+        }
+        transaction.Commit();
+    }
+
+    private static bool NormalizeJsonPaths(JsonNode? node)
+    {
+        var changed = false;
+        if (node is JsonObject record)
+        {
+            foreach (var (name, value) in record.ToArray())
+            {
+                if ((name.Equals("RelativePath", StringComparison.OrdinalIgnoreCase)
+                        || name.Equals("CoverPath", StringComparison.OrdinalIgnoreCase))
+                    && value is JsonValue scalar && scalar.TryGetValue<string>(out var path) && path.Contains('\\'))
+                {
+                    record[name] = path.Replace('\\', '/');
+                    changed = true;
+                }
+                else changed |= NormalizeJsonPaths(value);
+            }
+        }
+        else if (node is JsonArray items)
+            foreach (var item in items) changed |= NormalizeJsonPaths(item);
+        return changed;
     }
 
     private static async Task<(int BookCount, int FileCount)> ReadLibrarySummaryAsync(
@@ -316,7 +414,8 @@ public sealed class AppBackupService
         {
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Private
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
         }.ToString();
 
         using var connection = new SqliteConnection(connectionString);
@@ -336,7 +435,8 @@ public sealed class AppBackupService
         {
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Private
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
         }.ToString();
 
         try
@@ -465,37 +565,29 @@ public sealed class AppBackupService
         });
     }
 
-    private void MoveCurrentDataToRollback(string rollbackRoot)
+    private void MoveCurrentDataToRollback(
+        string rollbackRoot,
+        List<(string Source, string Backup)> movedPaths)
     {
-        try
+        foreach (var name in new[] { "library", "covers", "trash", AiSettingsPath, KindleEmailSettingsPath, S3SyncSettingsPath })
         {
-            MoveIfExists(_paths.Library, Path.Combine(rollbackRoot, "library"));
-            MoveIfExists(_paths.Covers, Path.Combine(rollbackRoot, "covers"));
-            MoveIfExists(_paths.Trash, Path.Combine(rollbackRoot, "trash"));
-            MoveIfExists(Path.Combine(_paths.Data, AiSettingsPath), Path.Combine(rollbackRoot, AiSettingsPath));
-            MoveIfExists(Path.Combine(_paths.Data, KindleEmailSettingsPath), Path.Combine(rollbackRoot, KindleEmailSettingsPath));
-            MoveIfExists(Path.Combine(_paths.Data, S3SyncSettingsPath), Path.Combine(rollbackRoot, S3SyncSettingsPath));
-        }
-        catch
-        {
-            RestoreMovedFilesFromRollback(rollbackRoot);
-            throw;
+            var source = Path.Combine(_paths.Data, name);
+            if (!File.Exists(source) && !Directory.Exists(source)) continue;
+            var backup = Path.Combine(rollbackRoot, name);
+            MoveIfExists(source, backup);
+            movedPaths.Add((source, backup));
         }
     }
 
-    private void RestoreMovedFilesFromRollback(string rollbackRoot)
+    private static void RestoreMovedFilesFromRollback(IReadOnlyList<(string Source, string Backup)> movedPaths)
     {
-        MoveIfExists(Path.Combine(rollbackRoot, "library"), _paths.Library);
-        MoveIfExists(Path.Combine(rollbackRoot, "covers"), _paths.Covers);
-        MoveIfExists(Path.Combine(rollbackRoot, "trash"), _paths.Trash);
-        MoveIfExists(Path.Combine(rollbackRoot, AiSettingsPath), Path.Combine(_paths.Data, AiSettingsPath));
-        MoveIfExists(Path.Combine(rollbackRoot, KindleEmailSettingsPath), Path.Combine(_paths.Data, KindleEmailSettingsPath));
-        MoveIfExists(Path.Combine(rollbackRoot, S3SyncSettingsPath), Path.Combine(_paths.Data, S3SyncSettingsPath));
+        foreach (var (source, backup) in movedPaths.Reverse())
+            MoveIfExists(backup, source);
     }
 
     private async Task RestoreCurrentDataFromRollbackAsync(
         string rollbackRoot,
-        CancellationToken cancellationToken)
+        IReadOnlyList<(string Source, string Backup)> movedPaths)
     {
         DeletePath(_paths.Library);
         DeletePath(_paths.Covers);
@@ -504,15 +596,10 @@ public sealed class AppBackupService
         DeletePath(Path.Combine(_paths.Data, KindleEmailSettingsPath));
         DeletePath(Path.Combine(_paths.Data, S3SyncSettingsPath));
 
-        MoveIfExists(Path.Combine(rollbackRoot, "library"), _paths.Library);
-        MoveIfExists(Path.Combine(rollbackRoot, "covers"), _paths.Covers);
-        MoveIfExists(Path.Combine(rollbackRoot, "trash"), _paths.Trash);
-        MoveIfExists(Path.Combine(rollbackRoot, AiSettingsPath), Path.Combine(_paths.Data, AiSettingsPath));
-        MoveIfExists(Path.Combine(rollbackRoot, KindleEmailSettingsPath), Path.Combine(_paths.Data, KindleEmailSettingsPath));
-        MoveIfExists(Path.Combine(rollbackRoot, S3SyncSettingsPath), Path.Combine(_paths.Data, S3SyncSettingsPath));
+        RestoreMovedFilesFromRollback(movedPaths);
         await ReplaceDatabaseFromSnapshotAsync(
             Path.Combine(rollbackRoot, "kkindle.db"),
-            cancellationToken);
+            CancellationToken.None);
     }
 
     private static async Task AddDirectoryEntriesAsync(
@@ -554,15 +641,6 @@ public sealed class AppBackupService
         await using var destination = entry.Open();
         await source.CopyToAsync(destination, 81920, cancellationToken);
     }
-
-    private static Task AddOptionalFileEntryAsync(
-        ZipArchive archive,
-        string sourcePath,
-        string entryName,
-        CancellationToken cancellationToken) =>
-        File.Exists(sourcePath)
-            ? AddFileEntryAsync(archive, sourcePath, entryName, cancellationToken)
-            : Task.CompletedTask;
 
     private static async Task AddJsonEntryAsync<T>(
         ZipArchive archive,
@@ -636,9 +714,11 @@ public sealed class AppBackupService
             throw new InvalidDataException("备份包清单中的数量无效。 ");
     }
 
-    private static string CreateWorkingDirectory(string prefix)
+    private string CreateWorkingDirectory(string prefix)
     {
-        var path = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
+        // Directory.Move cannot cross volumes. Keep staging and rollback next
+        // to the managed directories, even when data lives on another drive.
+        var path = Path.Combine(_paths.Data, prefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
     }
@@ -675,10 +755,11 @@ public sealed class AppBackupService
         }
     }
 
-    private static void CopyOptionalFile(string source, string destination)
+    private static void TryDeleteFile(string path)
     {
-        if (File.Exists(source))
-            File.Copy(source, destination, overwrite: true);
+        try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private static void DeletePath(string path)

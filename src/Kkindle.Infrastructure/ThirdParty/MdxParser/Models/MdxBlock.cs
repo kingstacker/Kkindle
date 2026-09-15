@@ -103,7 +103,7 @@ namespace MdxParser.Models
                 Size = 4 * 4 + num_info + m_BlockSize;
 
             var keyBlockInfoBuff = new byte[num_info];
-            stream.Read(keyBlockInfoBuff);
+            readBytes(stream, keyBlockInfoBuff);
 
             // read key block info, which indicates key block's compressed and decompressed size
             List<(int,int)> keyBlockInfoList = decodeKeyBlockInfo(keyBlockInfoBuff).ToList();
