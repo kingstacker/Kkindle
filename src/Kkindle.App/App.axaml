@@ -567,6 +567,11 @@
         <Style Selector="ScrollViewer.bookScroll /template/ ScrollBar[IsExpanded=true] /template/ Grid#Root Thumb">
             <Setter Property="Opacity" Value="1" />
         </Style>
+        <Style Selector="ScrollViewer.bookScroll /template/ ScrollBar:horizontal">
+            <Setter Property="IsVisible" Value="False" />
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+        </Style>
         <Style Selector="ScrollViewer.settingsScroll:not(.scrolling) /template/ ScrollBar /template/ Grid#Root Thumb">
             <Setter Property="Opacity" Value="0" />
         </Style>
