@@ -56,6 +56,7 @@ public sealed record AppSettings
     public int AutoBackupRetention { get; init; } = 5;
     public bool AiEnabled { get; init; } = true;
     public bool NetworkEnabled { get; init; } = true;
+    public bool SendToKindleWebEnabled { get; init; } = true;
     public string EmbeddingModelId { get; init; } = DefaultEmbeddingModelId;
     public string PinyinEngineId { get; init; } = DefaultPinyinEngineId;
     public bool AutoUpdateCheckEnabled { get; init; } = true;

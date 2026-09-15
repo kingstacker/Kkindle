@@ -220,6 +220,7 @@ public partial class MainWindow : Window
         _readerTts.EnvironmentChanged += ReaderTts_EnvironmentChanged;
         _epubReader = new EpubReaderPreparationService(paths);
         _readerHostFactory = services?.ReaderHostFactory ?? (() => new NativeWebViewReaderHost());
+        _kindleWebFileInput = services?.KindleWebFileInput;
         _zLibraryService = new ZLibraryService();
         _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, _secretProtector);
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, _secretProtector);
@@ -939,6 +940,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _sendToKindleWindow?.CloseForShutdown();
         _readerToolbarHideTimer?.Stop();
         _readerToolbarLayoutTimer?.Stop();
         CancelWindowStateAnimation();
@@ -1119,6 +1121,7 @@ public partial class MainWindow : Window
     private void UpdateLibraryUi()
     {
         LibraryBusyProgress.IsVisible = ViewModel.IsBusy;
+        SendToKindleWebButton.IsVisible = IsSendToKindleWebEnabled();
         var viewDescription = $"{T("切换视图")} · {DescribeLibraryViewMode(_libraryViewMode)}";
         ToolTip.SetTip(LibraryViewToggleButton, viewDescription);
         LibraryGridViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.Grid;
@@ -2323,6 +2326,16 @@ public partial class MainWindow : Window
             T("发送到 Kindle 邮箱"),
             KindleEmailSelectionPolicy.GetCandidates(card.Book.Files),
             sourceFile => SendSelectedBookByEmailCoreAsync(sourceFile)));
+        if (IsSendToKindleWebEnabled())
+        {
+            var webFiles = KindleWebFilePolicy.GetCandidates(card.Book.Files);
+            var webMenu = CreateBookVariantMenuItem(
+                T("发送到 Kindle Web"),
+                webFiles,
+                sourceFile => sourceFile is null ? Task.CompletedTask : AddLibraryFilesToKindleWebAsync([sourceFile]));
+            webMenu.IsEnabled = webFiles.Count > 0;
+            menu.Items.Add(webMenu);
+        }
 
         var collectionMenu = new MenuItem { Header = T("收藏夹") };
         ApplyLegacyMenuItemSize(collectionMenu);

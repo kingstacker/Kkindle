@@ -104,4 +104,5 @@ public sealed record AppServices(
     IAppUpdateInstaller? UpdateInstaller = null,
     ITtsEngine? TtsEngine = null,
     ITtsAudioPlayer? TtsAudioPlayer = null,
-    ITtsEnvironmentSetup? TtsEnvironmentSetup = null);
+    ITtsEnvironmentSetup? TtsEnvironmentSetup = null,
+    IKindleWebFileInput? KindleWebFileInput = null);

@@ -22,6 +22,10 @@ public sealed class BackupTests
             await sourceReaderData.InitializeAsync();
             await sourceLibrary.ImportAsync([sourceBook]);
 
+            var browserProfile = Path.Combine(sourcePaths.BrowserData, "send-to-kindle");
+            Directory.CreateDirectory(browserProfile);
+            await File.WriteAllTextAsync(Path.Combine(browserProfile, "session"), "test-browser-session");
+
             await new AiSettingsStore(sourcePaths, protector).SaveAsync(new AiConnectionSettings
             {
                 Provider = "openai",
@@ -63,6 +67,9 @@ public sealed class BackupTests
             Assert.True(export.ArchiveSize > 0);
             using (var archive = ZipFile.OpenRead(backupPath))
             {
+                Assert.DoesNotContain(archive.Entries, entry =>
+                    entry.FullName.Contains("browser-data", StringComparison.OrdinalIgnoreCase)
+                    || entry.FullName.EndsWith("/session", StringComparison.OrdinalIgnoreCase));
                 var settingsEntry = archive.GetEntry("settings/settings.json");
                 Assert.NotNull(settingsEntry);
                 using var reader = new StreamReader(settingsEntry!.Open());

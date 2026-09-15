@@ -134,6 +134,7 @@ internal static class Program
             CreateDeviceChangeNotifier: handle => new WindowsDeviceChangeNotifier(handle),
             KindleDeviceService: new KindleDeviceService(paths, new BookMetadataService()),
             ReaderHostFactory: () => new NativeWebViewReaderHost(ConfigureWebView2),
+            KindleWebFileInput: new WindowsKindleWebFileInput(),
             UpdateInstaller: new WindowsAppUpdateInstaller(),
             TtsEngine: ttsEngine,
             TtsAudioPlayer: ttsPlayer,

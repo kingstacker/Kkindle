@@ -293,6 +293,8 @@ public sealed class ProductivityFeatureTests
             var temporary = Path.Combine(root, "temp");
             Directory.CreateDirectory(Path.Combine(relocated, "data"));
             Directory.CreateDirectory(Path.Combine(relocated, "backups"));
+            Directory.CreateDirectory(Path.Combine(relocated, "browser-data", "send-to-kindle"));
+            await File.WriteAllTextAsync(Path.Combine(relocated, "browser-data", "send-to-kindle", "session"), "test-session");
             Directory.CreateDirectory(Path.Combine(temporary, "Kkindle", "updates"));
             Directory.CreateDirectory(Path.Combine(temporary, "Kkindle", "resource-transfer"));
             await File.WriteAllTextAsync(Path.Combine(relocated, "keep.txt"), "unrelated");
@@ -314,6 +316,7 @@ public sealed class ProductivityFeatureTests
 
             Assert.False(Directory.Exists(Path.Combine(relocated, "data")));
             Assert.False(Directory.Exists(Path.Combine(relocated, "backups")));
+            Assert.False(Directory.Exists(Path.Combine(relocated, "browser-data")));
             Assert.False(File.Exists(Path.Combine(relocated, ".kkindle-migration.kkindle")));
             Assert.True(File.Exists(Path.Combine(relocated, "keep.txt")));
             Assert.True(Directory.Exists(relocated));

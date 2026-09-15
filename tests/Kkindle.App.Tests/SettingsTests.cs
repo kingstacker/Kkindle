@@ -86,6 +86,27 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task SendToKindleToggleControlsLibraryToolbarAndPersists() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var toggle = scope.Get<ToggleSwitch>("SendToKindleWebEnabledCheck");
+        var toolbarButton = scope.Get<Button>("SendToKindleWebButton");
+        var expander = scope.Get<Expander>("SettingsSendToKindleExpander");
+        Assert.False(expander.IsExpanded);
+        Assert.Contains("邮箱", expander.Tag?.ToString());
+        Assert.True(toggle.IsChecked);
+        Assert.True(toolbarButton.IsVisible);
+
+        toggle.IsChecked = false;
+        await Render();
+        Assert.False(toolbarButton.IsVisible);
+
+        scope.Window.Close();
+        await Until(() => !scope.Window.IsVisible);
+        Assert.False((await new AppSettingsStore(scope.Paths).LoadAsync()).SendToKindleWebEnabled);
+    });
+
+    [Fact]
     public Task BookCardIconVisibilitySettingsPersist() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -366,6 +387,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         scope.Call("KindleEmailSettingsButton_Click", null, new RoutedEventArgs());
         await Render();
         Assert.True(scope.Get<Control>("SettingsKindleSection").IsEffectivelyVisible);
+        Assert.True(scope.Get<Expander>("SettingsSendToKindleExpander").IsExpanded);
         Assert.Same(scope.Get<Control>("KindleEmailRecipientBox"), scope.Window.FocusManager!.GetFocusedElement());
         scope.Get<TextBox>("KindleEmailRecipientBox").Text = "draft@kindle.com";
         Capture(scope.Window, "zh-CN-1024-email");

@@ -2,6 +2,7 @@ bin/
 obj/
 .vs/
 data/
+browser-data/
 TestResults/
 artifacts/
 .dotnet/

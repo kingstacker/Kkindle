@@ -783,6 +783,14 @@
                                   Classes="libraryGlyph"
                                   Data="M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z" />
                         </Button>
+                        <Button x:Name="SendToKindleWebButton"
+                                Classes="quiet libraryToolbar"
+                                ToolTip.Tip="{DynamicResource Ui.KindleWeb.Title}"
+                                AutomationProperties.Name="{DynamicResource Ui.KindleWeb.Title}"
+                                Click="OpenSendToKindleWebButton_Click">
+                            <Path Classes="libraryGlyph" Width="17" Height="17"
+                                  Data="M 22,2 L 15,22 L 11,13 L 2,9 Z M 22,2 L 11,13" />
+                        </Button>
                         <Button x:Name="ImportButton"
                                 Classes="quiet libraryToolbar"
                                 Height="38"
@@ -2714,9 +2722,21 @@
                                 <TextBlock Text="{DynamicResource Ui.Auto.A43615418478EEAC}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
                                 <ToggleSwitch x:Name="AutoConnectDeviceCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.7F0A0AA4F361B01F}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.CA89D89196E9F0EB}" AutomationProperties.Name="{DynamicResource Ui.Auto.CA89D89196E9F0EB}" />
                                 <ToggleSwitch x:Name="CompareKindleLibraryCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.67415CFB0566F7E7}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.833CD46CD762E74D}" AutomationProperties.Name="{DynamicResource Ui.Auto.833CD46CD762E74D}" />
-                                <Expander x:Name="SettingsEmailExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.541BC76EBCBC0228}" Tag="{DynamicResource Ui.Auto.4E68CFCEBD398D44}" AutomationProperties.Name="{DynamicResource Ui.Auto.541BC76EBCBC0228}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
-                                    <Border x:Name="KindleEmailSettingsPane" Padding="0">
+                                <Expander x:Name="SettingsSendToKindleExpander"
+                                          Classes="settingsExpander"
+                                          Header="{DynamicResource Ui.KindleWeb.Title}"
+                                          Tag="{DynamicResource Ui.KindleWeb.SettingsHint}"
+                                          AutomationProperties.Name="{DynamicResource Ui.KindleWeb.Title}"
+                                          Expanded="SettingsExpander_Expanded"
+                                          Collapsed="SettingsExpander_Collapsed">
+                                    <Border x:Name="SendToKindleWebSettingsPane" Padding="0">
                                         <StackPanel Spacing="14">
+                                            <ToggleSwitch x:Name="SendToKindleWebEnabledCheck"
+                                                          Classes="settingsToggle"
+                                                          Content="{DynamicResource Ui.KindleWeb.SettingsToggle}"
+                                                          AutomationProperties.Name="{DynamicResource Ui.KindleWeb.SettingsToggle}"
+                                                          IsChecked="True" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.541BC76EBCBC0228}" FontWeight="SemiBold" FontSize="15" />
                                             <TextBlock Text="{DynamicResource Ui.Auto.8609EBA830E79233}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <Button Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalAlignment="Left" Focusable="True" Click="KindleEmailGuideLink_Click">
                                                 <TextBlock FontSize="12" Foreground="{DynamicResource InkBrush}" TextDecorations="Underline" Text="{DynamicResource Ui.Auto.F5C62A45859955BB}" TextWrapping="Wrap" />
@@ -2754,8 +2774,8 @@
                                                 <TextBlock x:Name="KindleEmailSettingsStatusText" Grid.Column="2" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             </Grid>
                                         </StackPanel>
-                                    </Border>
-                                </Expander>
+                                </Border>
+                            </Expander>
                                 <Expander x:Name="SettingsAccountExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.5D978320212BD623}" Tag="{DynamicResource Ui.Auto.C87F02F2D8220D30}" AutomationProperties.Name="{DynamicResource Ui.Auto.5D978320212BD623}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="ZLibraryAccountPane" Padding="0">
                                         <StackPanel Spacing="14">
@@ -2969,6 +2989,7 @@
                                             </StackPanel>
                                         </Grid>
                                         <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{DynamicResource Ui.About.UserGroup}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         <ToggleSwitch x:Name="AutoUpdateCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.85D1563FE0079783}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.4A09393CF96D5F86}" AutomationProperties.Name="{DynamicResource Ui.Auto.4A09393CF96D5F86}" />
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock x:Name="AboutUpdateStatusText" Text="{DynamicResource Ui.Auto.8642A3F7563F3F16}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />

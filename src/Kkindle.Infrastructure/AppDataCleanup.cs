@@ -32,6 +32,7 @@ public static class AppDataCleanup
         {
             TryDeleteDirectory(Path.Combine(dataRoot, "data"));
             TryDeleteDirectory(Path.Combine(dataRoot, "backups"));
+            TryDeleteDirectory(Path.Combine(dataRoot, "browser-data"));
             TryDeleteFile(AppRootConfiguration.MigrationBackupPath(dataRoot));
             TryDeleteEmptyDirectory(dataRoot);
         }
