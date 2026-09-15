@@ -259,7 +259,7 @@
     <x:String x:Key="Ui.Auto.0A379C1E7398FBA1">Any status</x:String>
     <x:String x:Key="Ui.Auto.B25B2E4E11693509">Any language</x:String>
     <x:String x:Key="Ui.Auto.52D25A9E30BA94F1">About</x:String>
-    <x:String x:Key="Ui.About.UserGroup">User group: 1109898894</x:String>
+    <x:String x:Key="Ui.About.UserGroup">QQ group: 1109898894</x:String>
     <x:String x:Key="Ui.Auto.3FD47EDCE45B3603">Close</x:String>
     <x:String x:Key="Ui.Auto.D7B60ECE792129FF">Close book details</x:String>
     <x:String x:Key="Ui.Auto.D7842A57D154C697">Douban matching, Z-Library, email delivery, and tool downloads become unavailable when disabled</x:String>

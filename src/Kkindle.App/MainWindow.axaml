@@ -3034,15 +3034,17 @@
                                             <ItemsControl x:Name="PlatformDiagnosticsList" ItemsSource="{Binding PlatformDiagnostics}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate x:DataType="local:PlatformDiagnosticViewModel">
-                                                        <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="0,8">
-                                                            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="9">
+                                                        <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="0,8,8,8">
+                                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="9" MinWidth="0">
                                                                 <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Top" Margin="0,4,0,0" />
-                                                                <StackPanel Grid.Column="1" Spacing="2">
-                                                                    <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                                    <TextBlock Text="{Binding Detail}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                                </StackPanel>
-                                                                <TextBlock Grid.Column="2" Text="{Binding StatusLabel}" FontSize="12" VerticalAlignment="Top" TextWrapping="Wrap" />
-                                                                <Button Grid.Column="3" Content="{Binding RepairLabel}" IsVisible="{Binding CanRepair}" Classes="quiet" Padding="8,3" VerticalAlignment="Top" Click="RepairDiagnosticButton_Click" />
+                                                                <Grid Grid.Column="1" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="9" RowSpacing="2" MinWidth="0">
+                                                                    <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" MinWidth="0" />
+                                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                                                        <TextBlock Text="{Binding StatusLabel}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                                        <Button Content="{Binding RepairLabel}" IsVisible="{Binding CanRepair}" Classes="quiet" Padding="8,3" VerticalAlignment="Center" Click="RepairDiagnosticButton_Click" />
+                                                                    </StackPanel>
+                                                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Detail}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" MinWidth="0" />
+                                                                </Grid>
                                                             </Grid>
                                                         </Border>
                                                     </DataTemplate>

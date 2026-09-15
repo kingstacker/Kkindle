@@ -259,7 +259,7 @@
     <x:String x:Key="Ui.Auto.0A379C1E7398FBA1">全部状态</x:String>
     <x:String x:Key="Ui.Auto.B25B2E4E11693509">全部语言</x:String>
     <x:String x:Key="Ui.Auto.52D25A9E30BA94F1">关于</x:String>
-    <x:String x:Key="Ui.About.UserGroup">用户交流群：1109898894</x:String>
+    <x:String x:Key="Ui.About.UserGroup">QQ交流群：1109898894</x:String>
     <x:String x:Key="Ui.Auto.3FD47EDCE45B3603">关闭</x:String>
     <x:String x:Key="Ui.Auto.D7B60ECE792129FF">关闭书籍详情</x:String>
     <x:String x:Key="Ui.Auto.D7842A57D154C697">关闭后豆瓣匹配、Z-Library、邮件发送与工具下载安装等联网功能不可用</x:String>
