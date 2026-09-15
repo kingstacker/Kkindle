@@ -2352,14 +2352,15 @@
         <Style Selector="Grid.libraryPresenceGlyph">
             <Setter Property="RenderTransformOrigin" Value="50%,50%" />
             <Setter Property="RenderTransform" Value="scale(1)" />
+            <Setter Property="IsHitTestVisible" Value="False" />
             <Setter Property="Transitions">
                 <Transitions>
                     <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.14" />
                 </Transitions>
             </Setter>
         </Style>
-        <Style Selector="Grid.libraryPresenceGlyph:pointerover">
-            <Setter Property="RenderTransform" Value="scale(1.22)" />
+        <Style Selector="Border.libraryPresenceHitTarget:pointerover Grid.libraryPresenceGlyph">
+            <Setter Property="RenderTransform" Value="scale(1.1)" />
         </Style>
 
         <Style Selector="ListBoxItem">
@@ -2549,8 +2550,18 @@
             <Setter Property="Background" Value="{DynamicResource InkBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
+        <!-- The Fluent template's header presenter keeps its own foreground,
+             so a dark hover row can otherwise hide the item text. -->
+        <Style Selector="MenuItem:pointerover /template/ ContentPresenter#PART_HeaderPresenter,
+                         MenuItem:pressed /template/ ContentPresenter#PART_HeaderPresenter">
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+        </Style>
         <Style Selector="MenuItem.readerSelectionStyle:pointerover">
             <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        </Style>
+        <Style Selector="MenuItem.readerSelectionStyle:pointerover /template/ ContentPresenter#PART_HeaderPresenter,
+                         MenuItem.readerSelectionStyle:pressed /template/ ContentPresenter#PART_HeaderPresenter">
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="MenuItem.readerSelectionStyle:pressed">
@@ -2564,6 +2575,23 @@
         <Style Selector="MenuItem:disabled">
             <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource SubtleInkBrush}" />
+        </Style>
+        <!-- A flyout can select its first row as it opens, before a hover
+             event reaches the item. Keep this state legible too. -->
+        <Style Selector="MenuItem:selected:not(:open)">
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+        </Style>
+        <Style Selector="MenuItem:selected:not(:open) /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="MenuItem:selected:not(:open) /template/ ContentPresenter#PART_HeaderPresenter">
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+        </Style>
+        <Style Selector="MenuItem:selected:not(:open):not(:empty) /template/ Path#PART_ChevronPath">
+            <Setter Property="Fill" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="IsVisible" Value="True" />
+            <Setter Property="Opacity" Value="1" />
         </Style>
         <Style Selector="MenuItem:open">
             <Setter Property="Background" Value="{DynamicResource PaperBrush}" />

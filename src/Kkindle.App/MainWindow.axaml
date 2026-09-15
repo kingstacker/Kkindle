@@ -66,47 +66,51 @@
         <!-- Minimal library-presence glyph shared by the PC grid/list and the
              Kindle cards. Every state uses the same centred optical box. -->
         <DataTemplate x:Key="LibraryPresenceGlyph" x:CompileBindings="False">
-            <Grid Classes="libraryPresenceGlyph" Width="20" Height="20">
-                <Path Classes="libraryGlyph"
-                      Data="{StaticResource ComputerGlyphGeometry}"
-                      Stroke="{DynamicResource InkBrush}"
-                      IsVisible="{Binding ComputerOnlyPresenceVisibility}" />
-                <Path Classes="libraryGlyph"
-                      Data="{StaticResource DeviceGlyphGeometry}"
-                      Stroke="{DynamicResource InkBrush}"
-                      IsVisible="{Binding KindleOnlyPresenceVisibility}" />
-                <Path Classes="libraryGlyph"
-                      Data="M 3,5 H 17 V 15 H 3 Z M 2,18 H 17 M 15,9 H 21 V 21 H 15 Z"
-                      Stroke="{DynamicResource InkBrush}"
-                      IsVisible="{Binding BothLibrariesPresenceVisibility}" />
-            </Grid>
+            <Border Classes="libraryPresenceHitTarget" Width="22" Height="22" Background="Transparent">
+                <Grid Classes="libraryPresenceGlyph" Width="20" Height="20">
+                    <Path Classes="libraryGlyph"
+                          Data="{StaticResource ComputerGlyphGeometry}"
+                          Stroke="{DynamicResource InkBrush}"
+                          IsVisible="{Binding ComputerOnlyPresenceVisibility}" />
+                    <Path Classes="libraryGlyph"
+                          Data="{StaticResource DeviceGlyphGeometry}"
+                          Stroke="{DynamicResource InkBrush}"
+                          IsVisible="{Binding KindleOnlyPresenceVisibility}" />
+                    <Path Classes="libraryGlyph"
+                          Data="M 3,5 H 17 V 15 H 3 Z M 2,18 H 17 M 15,9 H 21 V 21 H 15 Z"
+                          Stroke="{DynamicResource InkBrush}"
+                          IsVisible="{Binding BothLibrariesPresenceVisibility}" />
+                </Grid>
+            </Border>
         </DataTemplate>
         <StreamGeometry x:Key="BookSyncNotSyncedGlyphGeometry">M 12,17 V 5 M 7,10 L 12,5 L 17,10 M 4,19 H 20</StreamGeometry>
         <StreamGeometry x:Key="BookSyncSyncedGlyphGeometry">M 4,12 L 9,17 L 20,6</StreamGeometry>
         <StreamGeometry x:Key="BookSyncNotDownloadedGlyphGeometry">M 12,5 V 17 M 7,12 L 12,17 L 17,12 M 4,19 H 20</StreamGeometry>
         <DataTemplate x:Key="BookSyncStatusGlyph" x:CompileBindings="False">
-            <Grid Classes="libraryPresenceGlyph" Width="20" Height="20">
-                <Path Classes="libraryGlyph"
-                      Data="{StaticResource BookSyncNotSyncedGlyphGeometry}"
-                      Stroke="{DynamicResource InkBrush}"
-                      IsVisible="{Binding SyncNotSyncedVisibility}">
-                    <Path.RenderTransform>
-                        <TranslateTransform Y="-2" />
-                    </Path.RenderTransform>
-                </Path>
-                <Path Classes="libraryGlyph"
-                      Data="{StaticResource BookSyncSyncedGlyphGeometry}"
-                      Stroke="{DynamicResource InkBrush}"
-                      IsVisible="{Binding SyncSyncedVisibility}" />
-                <Path Classes="libraryGlyph"
-                      Data="{StaticResource BookSyncNotDownloadedGlyphGeometry}"
-                      Stroke="{DynamicResource InkBrush}"
-                      IsVisible="{Binding SyncNotDownloadedVisibility}">
-                    <Path.RenderTransform>
-                        <TranslateTransform Y="-2" />
-                    </Path.RenderTransform>
-                </Path>
-            </Grid>
+            <Border Classes="libraryPresenceHitTarget" Width="22" Height="22" Background="Transparent">
+                <Grid Classes="libraryPresenceGlyph" Width="20" Height="20">
+                    <Path Classes="libraryGlyph"
+                          Data="{StaticResource BookSyncNotSyncedGlyphGeometry}"
+                          Stroke="{DynamicResource InkBrush}"
+                          IsVisible="{Binding SyncNotSyncedVisibility}">
+                        <Path.RenderTransform>
+                            <TranslateTransform Y="-2" />
+                        </Path.RenderTransform>
+                    </Path>
+                    <Path Classes="libraryGlyph"
+                          Data="{StaticResource BookSyncSyncedGlyphGeometry}"
+                          Stroke="{DynamicResource InkBrush}"
+                          IsVisible="{Binding SyncSyncedVisibility}" />
+                    <Path Classes="libraryGlyph"
+                          Data="{StaticResource BookSyncNotDownloadedGlyphGeometry}"
+                          Stroke="{DynamicResource InkBrush}"
+                          IsVisible="{Binding SyncNotDownloadedVisibility}">
+                        <Path.RenderTransform>
+                            <TranslateTransform Y="-2" />
+                        </Path.RenderTransform>
+                    </Path>
+                </Grid>
+            </Border>
         </DataTemplate>
         <DataTemplate x:Key="LibraryImportActionContent" x:CompileBindings="False">
             <Path Classes="libraryGlyph" Width="16" Height="16" Data="M 12,4 V 20 M 4,12 H 20" />
@@ -2363,6 +2367,7 @@
                             <StackPanel Grid.Row="2" Margin="16,12,16,16" Spacing="7">
                                 <Button Content="{DynamicResource Ui.Auto.93E94127FD6DDD49}" HorizontalAlignment="Stretch" IsEnabled="{Binding CanOpenOfficialDetail}" Click="ZLibraryOfficialDetailButton_Click" />
                                 <Button Content="{DynamicResource Ui.Auto.E47D06BF2E51D2C4}" Classes="quiet" HorizontalAlignment="Stretch" IsEnabled="{Binding CanReadOnline}" Click="ZLibraryReadOnlineButton_Click" />
+                                <Button Content="{DynamicResource Ui.Auto.8FDEEC855B094363}" HorizontalAlignment="Stretch" IsEnabled="{Binding CanSendToKindleWeb}" Click="ZLibrarySendKindleWebButton_Click" />
                                 <Button Content="{DynamicResource Ui.Auto.8F043961C898554D}" Classes="quiet" HorizontalAlignment="Stretch" IsEnabled="{Binding CanSendToEmail}" Click="ZLibrarySendEmailButton_Click" />
                             </StackPanel>
                         </Grid>

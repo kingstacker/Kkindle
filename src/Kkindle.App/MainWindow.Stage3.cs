@@ -92,6 +92,7 @@ public partial class MainWindow
     private Point _deviceRubberBandCurrent;
     private ZLibraryBookCardViewModel? _selectedZLibraryBook;
     private bool _zLibraryEmailSending;
+    private bool _zLibraryWebSending;
 
     // Device-operation coordination (WinUI reference): every Kindle session
     // operation is tracked so eject can drain active work before requesting
@@ -5672,6 +5673,119 @@ public partial class MainWindow
     private async void ZLibraryReadOnlineButton_Click(object? sender, RoutedEventArgs e) =>
         await OpenZLibraryUrlAsync(_selectedZLibraryBook?.Book.ReadOnlineUrl, T("在线阅读"));
 
+    private async void ZLibrarySendKindleWebButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var item = _selectedZLibraryBook;
+        if (item is null || item.IsDownloading || _zLibraryWebSending || _zLibraryEmailSending) return;
+        _zLibraryWebSending = true;
+        try
+        {
+            await SendZLibraryBookToKindleWebAsync(item);
+        }
+        finally
+        {
+            _zLibraryWebSending = false;
+        }
+    }
+
+    private async Task SendZLibraryBookToKindleWebAsync(ZLibraryBookCardViewModel item)
+    {
+        if (!item.CanSendToKindleWeb)
+        {
+            item.SetStatus(T("该书格式不受 Kindle Web 支持。"));
+            SetTaskStatus(T("该书格式不受 Kindle Web 支持。"));
+            return;
+        }
+        if (item.Book.Size > KindleWebFilePolicy.MaximumFileBytes)
+        {
+            item.SetStatus(T("文件超过 200 MB，无法发送到 Kindle Web。"));
+            SetTaskStatus(T("文件超过 200 MB，无法发送到 Kindle Web。"));
+            await ShowMessageAsync(T("无法发送"), T("文件超过 200 MB，无法发送到 Kindle Web。"));
+            return;
+        }
+        if (!_appSettings.NetworkEnabled)
+        {
+            item.SetStatus(T("网络功能已关闭。"));
+            await ShowMessageAsync(T("网络功能已关闭"), T("请在应用设置中允许网络功能后再发送到 Kindle Web。"));
+            return;
+        }
+        if (!_zLibrarySettings.IsConfigured)
+        {
+            item.SetStatus(T("发送前请先配置 Z-Library 账号。"));
+            SetTaskStatus(T("发送前请先配置 Z-Library 账号。"));
+            await ShowZLibraryAccountAsync(T("发送前请先配置 Z-Library 账号。"));
+            return;
+        }
+
+        if (_sendToKindleWindow is { CanAcceptOneClickSend: false } existingWindow)
+        {
+            existingWindow.Activate();
+            existingWindow.ShowNotice(T("请先完成或清空当前 Send to Kindle Web 文件列表。"));
+            return;
+        }
+        var sendWindow = await OpenSendToKindleWebAsync(requireEnabled: false);
+        if (sendWindow is null) return;
+        if (!sendWindow.CanAcceptOneClickSend)
+        {
+            sendWindow.Activate();
+            sendWindow.ShowNotice(T("请先完成或清空当前 Send to Kindle Web 文件列表。"));
+            return;
+        }
+
+        item.IsDownloading = true;
+        item.SetStatus(T("正在下载，可能会消耗一次 Z-Library 下载额度…"));
+        ShowTaskProgressPopup();
+        TaskProgressPopupBar.IsIndeterminate = true;
+        TaskProgressPopupText.Text = T("正在下载《{0}》并发送到 Kindle Web…", item.Title);
+        try
+        {
+            if (!_zLibraryService.IsLoggedIn)
+                await _zLibraryService.LoginAsync(
+                    _zLibrarySettings.Email,
+                    _zLibrarySettings.Password,
+                    _zLibrarySettings.BaseUrl,
+                    _lifetimeCancellation.Token);
+
+            var downloadsDirectory = Path.Combine(_paths.Data, "downloads");
+            var downloadedPath = await _zLibraryService.DownloadAsync(
+                item.Book,
+                downloadsDirectory,
+                new Progress<TransferProgress>(item.SetDownloadProgress),
+                _lifetimeCancellation.Token);
+            _ = KindleWebFilePolicy.Inspect(downloadedPath);
+
+            item.SetStatus(T("正在发送到 Kindle Web…"));
+            TaskProgressPopupText.Text = T("正在发送《{0}》到 Kindle Web…", item.Title);
+            var submitted = await sendWindow.SendOneFileImmediatelyAsync(downloadedPath, _lifetimeCancellation.Token);
+            if (submitted)
+            {
+                item.SetStatus(T("已提交到 Kindle Web。"));
+                SetTaskStatus(T("《{0}》已提交到 Kindle Web。", item.Title));
+            }
+            else
+            {
+                item.SetStatus(T("Kindle Web 发送未确认，请查看发送窗口。"));
+                SetTaskStatus(T("Kindle Web 发送未确认，请查看发送窗口。"));
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            item.SetStatus(T("Kindle Web 发送已取消。"));
+        }
+        catch (Exception exception)
+        {
+            item.SetStatus(T("Kindle Web 发送失败：{0}", UiText.Localize(exception.Message)));
+            SetTaskStatus(T("Kindle Web 发送失败。"));
+            await ShowMessageAsync(T("发送失败"), UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            item.IsDownloading = false;
+            TaskProgressPopupBar.IsIndeterminate = false;
+            HideTaskProgressPopup();
+        }
+    }
+
     private async Task OpenZLibraryUrlAsync(string? value, string actionName)
     {
         if (!_appSettings.NetworkEnabled)
@@ -5703,7 +5817,7 @@ public partial class MainWindow
     private async void ZLibrarySendEmailButton_Click(object? sender, RoutedEventArgs e)
     {
         var item = _selectedZLibraryBook;
-        if (item is null || item.IsDownloading || _zLibraryEmailSending) return;
+        if (item is null || item.IsDownloading || _zLibraryEmailSending || _zLibraryWebSending) return;
         if (!item.CanSendToEmail)
         {
             SetTaskStatus(T("该书当前不支持邮件发送，或文件不是 EPUB/PDF 格式。"));
@@ -6435,6 +6549,7 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject, IDisposable
     public bool CanSendToEmail => Book.SendToEmailAvailable
         && (Book.Extension.Equals("epub", StringComparison.OrdinalIgnoreCase)
             || Book.Extension.Equals("pdf", StringComparison.OrdinalIgnoreCase));
+    public bool CanSendToKindleWeb => !IsDownloading && KindleWebFilePolicy.IsSupportedFormat(Book.Extension);
     public Bitmap? CoverImage => _coverImage;
     public bool IsDownloading
     {
@@ -6450,6 +6565,7 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject, IDisposable
             if (!SetProperty(ref _isDownloading, value)) return;
             OnPropertyChanged(nameof(IsNotDownloading));
             OnPropertyChanged(nameof(IsDownloadIdle));
+            OnPropertyChanged(nameof(CanSendToKindleWeb));
         }
     }
     public bool IsNotDownloading => !IsDownloading;

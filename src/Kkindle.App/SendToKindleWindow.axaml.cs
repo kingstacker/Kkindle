@@ -20,6 +20,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
     private readonly ObservableCollection<KindleWebQueueItem> _files = [];
     private readonly ObservableCollection<KindleWebRecentItem> _recentStatusItems = [];
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly TaskCompletionSource<bool> _openedCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly DispatcherTimer _probeTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private CancellationTokenSource? _sendCancellation;
     private bool _closed;
@@ -36,6 +37,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
     private KindleWebPageSnapshot? _lastSnapshot;
     private string? _accountDisplay;
     private bool _recentStatusExpanded = true;
+    private bool _lastBatchWasOneClick;
 
     public SendToKindleWindow() : this(new AppPaths()) { }
 
@@ -62,6 +64,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         {
             if (_useNativeBrowser) CreateBrowser();
             _probeTimer.Start();
+            _openedCompletion.TrySetResult(true);
         };
         Closing += (_, e) =>
         {
@@ -104,6 +107,40 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         }
         if (errors.Count > 0) ShowNotice(string.Join(Environment.NewLine, errors.Take(5)));
         UpdateText();
+    }
+
+    public bool CanAcceptOneClickSend => !_closed && !_busy
+        && ((_files.Count == 0 && !_batchFinished)
+            || (_batchFinished && _lastBatchWasOneClick
+                && _files.All(item => item.State is "submitted" or "failed")));
+
+    public async Task<bool> SendOneFileImmediatelyAsync(string path, CancellationToken cancellationToken)
+    {
+        if (!CanAcceptOneClickSend)
+        {
+            ShowNotice(UiText.Get("请先完成或清空当前 Send to Kindle Web 文件列表，再一键发送。"));
+            return false;
+        }
+
+        await _openedCompletion.Task.WaitAsync(cancellationToken);
+        if (!CanAcceptOneClickSend) return false;
+        if (_batchFinished)
+        {
+            _files.Clear();
+            _batchFinished = false;
+            _lastBatchWasOneClick = false;
+            _lastSnapshot = null;
+            ShowNotice("");
+            SetStatus(_sessionReady ? "登录状态有效，检查文件列表后点击发送。" : "正在检查亚马逊登录状态…");
+            UpdateText();
+        }
+
+        AddFiles([path]);
+        if (_files.Count != 1) return false;
+        return await SendQueuedFilesAsync(
+            requireSessionReady: false,
+            oneClick: true,
+            cancellationToken: cancellationToken);
     }
 
     public void ShowNotice(string message)
@@ -170,22 +207,28 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         if (_busy) return;
         _files.Clear();
         _batchFinished = false;
+        _lastBatchWasOneClick = false;
         _lastSnapshot = null;
         ShowNotice("");
         SetStatus(_sessionReady ? "登录状态有效，检查文件列表后点击发送。" : "正在检查亚马逊登录状态…");
     }
 
-    private async void SendFilesButton_Click(object? sender, RoutedEventArgs e)
+    private async void SendFilesButton_Click(object? sender, RoutedEventArgs e) =>
+        await SendQueuedFilesAsync(requireSessionReady: true, oneClick: false, cancellationToken: _lifetime.Token);
+
+    private async Task<bool> SendQueuedFilesAsync(bool requireSessionReady, bool oneClick, CancellationToken cancellationToken)
     {
-        if (_busy || _batchFinished || !_sessionReady || _files.Count == 0) return;
+        if (_busy || _batchFinished || (requireSessionReady && !_sessionReady) || _files.Count == 0) return false;
         var workflow = new KindleWebSendWorkflow(_page);
+        _lastBatchWasOneClick = oneClick;
         _busy = true;
         _manualWeb = false;
         ShowBrowser(false);
         ShowNotice("");
-        _sendCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _sendCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellationToken);
         foreach (var item in _files) item.State = "sending";
         UpdateText();
+        var fullySubmitted = false;
         try
         {
             EnsureNetworkAllowed();
@@ -193,6 +236,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
             var results = await workflow.SendAsync(batch, ReportProgress, _sendCancellation.Token);
             ApplyResults(results);
             var submitted = results.Count(file => file.Status == "submitted");
+            fullySubmitted = submitted == results.Length;
             if (submitted == results.Length)
                 SetStatus("已提交 {0} 个文件。亚马逊完成处理后，Kindle 联网即可同步。", submitted);
             else
@@ -235,6 +279,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
                 UpdateText();
             }
         }
+        return fullySubmitted;
     }
 
     private void ReportProgress(string phase, KindleWebPageSnapshot? snapshot)
@@ -456,6 +501,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
     private void Window_Closed(object? sender, EventArgs e)
     {
         _closed = true;
+        _openedCompletion.TrySetCanceled();
         ClearNativeAuthenticationSecrets(clearAccount: true);
         _lifetime.Cancel();
         _probeTimer.Stop();

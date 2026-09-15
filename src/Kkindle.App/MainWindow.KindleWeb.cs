@@ -38,9 +38,9 @@ public partial class MainWindow
         }
     }
 
-    private async Task<SendToKindleWindow?> OpenSendToKindleWebAsync()
+    private async Task<SendToKindleWindow?> OpenSendToKindleWebAsync(bool requireEnabled = true)
     {
-        if (!IsSendToKindleWebEnabled()) return null;
+        if (requireEnabled && !IsSendToKindleWebEnabled()) return null;
         if (!_appSettings.NetworkEnabled)
         {
             await ShowMessageAsync(T("网络功能已关闭"), T("请在应用设置中允许网络功能后再使用 Send to Kindle。"));
