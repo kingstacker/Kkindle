@@ -53,6 +53,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         RecentStatusList.ItemsSource = _recentStatusItems;
         QueuePanel.AddHandler(DragDrop.DragEnterEvent, Queue_DragOver, RoutingStrategies.Bubble, true);
         QueuePanel.AddHandler(DragDrop.DragOverEvent, Queue_DragOver, RoutingStrategies.Bubble, true);
+        QueuePanel.AddHandler(DragDrop.DragLeaveEvent, Queue_DragLeave, RoutingStrategies.Bubble, true);
         QueuePanel.AddHandler(DragDrop.DropEvent, Queue_Drop, RoutingStrategies.Bubble, true);
         _probeTimer.Tick += ProbeTimer_Tick;
         _loadingTimer.Tick += LoadingTimer_Tick;
@@ -142,11 +143,15 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
     {
         e.DragEffects = !_busy && !_batchFinished && LibraryDropImportPolicy.CanAccept(e.DataTransfer)
             ? DragDropEffects.Copy : DragDropEffects.None;
+        DropArea.Classes.Set("dragOver", e.DragEffects == DragDropEffects.Copy);
         e.Handled = true;
     }
 
+    private void Queue_DragLeave(object? sender, DragEventArgs e) => DropArea.Classes.Remove("dragOver");
+
     private void Queue_Drop(object? sender, DragEventArgs e)
     {
+        DropArea.Classes.Remove("dragOver");
         e.Handled = true;
         if (_busy || _batchFinished) return;
         try { AddFiles(LibraryDropImportPolicy.GetLocalPaths(e.DataTransfer)); }
@@ -419,6 +424,8 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
     {
         StatusText.Text = UiText.Get(_status, _statusArguments);
         QueueSummaryText.Text = UiText.Get("文件列表 · {0} 个", _files.Count);
+        EmptyQueuePanel.IsVisible = _files.Count == 0;
+        QueueFilesPanel.IsVisible = _files.Count > 0;
         ChooseFilesButton.IsEnabled = !_busy && !_batchFinished;
         ClearFilesButton.IsEnabled = !_busy && _files.Count > 0;
         SendFilesButton.IsEnabled = !_busy && !_batchFinished && _sessionReady && _files.Count > 0
@@ -428,7 +435,9 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         AccountButton.Content = _sessionReady
             ? string.IsNullOrWhiteSpace(_accountDisplay) ? UiText.Get("已登录") : _accountDisplay
             : UiText.Get("未登录");
+        ToolTip.SetTip(AccountButton, AccountButton.Content);
         AccountButton.IsEnabled = !_authenticationBusy;
+        UpdateWindowChrome();
         UpdateRecentStatusVisibility();
         UpdateAuthenticationText();
         foreach (var item in _files)

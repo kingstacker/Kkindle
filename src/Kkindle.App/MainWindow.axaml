@@ -2989,6 +2989,7 @@
                                             </StackPanel>
                                         </Grid>
                                         <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{DynamicResource Ui.About.UserGroup}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         <ToggleSwitch x:Name="AutoUpdateCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.85D1563FE0079783}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.4A09393CF96D5F86}" AutomationProperties.Name="{DynamicResource Ui.Auto.4A09393CF96D5F86}" />
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock x:Name="AboutUpdateStatusText" Text="{DynamicResource Ui.Auto.8642A3F7563F3F16}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />

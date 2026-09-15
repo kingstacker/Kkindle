@@ -80,6 +80,10 @@
     <x:String x:Key="Ui.Auto.0A01EEE1CD371A58">Signed in</x:String>
     <x:String x:Key="Ui.KindleWeb.DropHint">Drop books here</x:String>
     <x:String x:Key="Ui.KindleWeb.ChooseFiles">Choose files</x:String>
+    <x:String x:Key="Ui.KindleWeb.Queue.EmptyTitle">No files added yet</x:String>
+    <x:String x:Key="Ui.KindleWeb.Queue.EmptyHint">Choose files or drop books into the area above.</x:String>
+    <x:String x:Key="Ui.KindleWeb.Queue.FileName">File name</x:String>
+    <x:String x:Key="Ui.KindleWeb.Queue.Size">Size</x:String>
     <x:String x:Key="Ui.KindleWeb.Clear">Clear list</x:String>
     <x:String x:Key="Ui.KindleWeb.Remove">Remove</x:String>
     <x:String x:Key="Ui.KindleWeb.DestinationHint">Files are added to the current Amazon account&apos;s Kindle library and sync when your device is online.</x:String>
@@ -255,6 +259,7 @@
     <x:String x:Key="Ui.Auto.0A379C1E7398FBA1">Any status</x:String>
     <x:String x:Key="Ui.Auto.B25B2E4E11693509">Any language</x:String>
     <x:String x:Key="Ui.Auto.52D25A9E30BA94F1">About</x:String>
+    <x:String x:Key="Ui.About.UserGroup">User group: 1109898894</x:String>
     <x:String x:Key="Ui.Auto.3FD47EDCE45B3603">Close</x:String>
     <x:String x:Key="Ui.Auto.D7B60ECE792129FF">Close book details</x:String>
     <x:String x:Key="Ui.Auto.D7842A57D154C697">Douban matching, Z-Library, email delivery, and tool downloads become unavailable when disabled</x:String>
