@@ -193,6 +193,16 @@
     <x:String x:Key="Ui.Auto.F15EE48ED5493552">字体管理</x:String>
     <x:String x:Key="Ui.Auto.4B4D02F3724BBD50">Kindle 收件邮箱</x:String>
     <x:String x:Key="Ui.Auto.5F52884AFBDA326B">Kindle 邮箱设置</x:String>
+    <x:String x:Key="KindleEmail.ProviderLabel">邮箱服务商</x:String>
+    <x:String x:Key="KindleEmail.ProviderHint">选择邮箱服务商后，服务器连接配置会自动完成；163/QQ 请先开启 SMTP 并使用客户端授权码，Gmail/Outlook 按服务商要求使用应用专用密码。</x:String>
+    <x:String x:Key="KindleEmail.Provider.Gmail">Gmail</x:String>
+    <x:String x:Key="KindleEmail.Provider.QQ">QQ 邮箱</x:String>
+    <x:String x:Key="KindleEmail.Provider.163">163 邮箱</x:String>
+    <x:String x:Key="KindleEmail.Provider.Outlook">Outlook</x:String>
+    <x:String x:Key="KindleEmail.Provider.Custom">其他邮箱（自定义 SMTP）</x:String>
+    <x:String x:Key="KindleEmail.CustomSmtpTitle">自定义 SMTP 设置</x:String>
+    <x:String x:Key="KindleEmail.TestSend">测试发信</x:String>
+    <x:String x:Key="KindleEmail.TestSendHint">发送一封无附件测试邮件到 Kindle 收件邮箱；不会保存当前设置。</x:String>
     <x:String x:Key="Ui.Auto.EC63017A628AB5D9">设备书库</x:String>
     <x:String x:Key="Ui.Auto.F117607AC0E397F4">MOBI（转换为 EPUB）</x:String>
     <x:String x:Key="Ui.Auto.0F02DA7B32BA56DE">Markdown 适合保留标题层级；纯文本适合在任意设备上阅读。</x:String>
@@ -253,6 +263,10 @@
     <x:String x:Key="Ui.Auto.B25B2E4E11693509">全部语言</x:String>
     <x:String x:Key="Ui.Auto.52D25A9E30BA94F1">关于</x:String>
     <x:String x:Key="Ui.About.UserGroup">QQ交流群：1109898894</x:String>
+    <x:String x:Key="Ui.About.LogExportTitle">软件日志</x:String>
+    <x:String x:Key="Ui.About.LogExportDescription">导出运行日志和环境诊断信息，方便反馈问题；不会打包邮箱密码、API Key 或书籍文件。</x:String>
+    <x:String x:Key="Ui.About.ExportLogs">导出软件日志</x:String>
+    <x:String x:Key="Ui.About.ExportLogsHint">将运行日志和诊断信息打包为 ZIP 文件</x:String>
     <x:String x:Key="Ui.Auto.3FD47EDCE45B3603">关闭</x:String>
     <x:String x:Key="Ui.Auto.D7B60ECE792129FF">关闭书籍详情</x:String>
     <x:String x:Key="Ui.Auto.D7842A57D154C697">关闭后豆瓣匹配、邮件发送与工具下载安装等联网功能不可用</x:String>
@@ -563,10 +577,15 @@
     <x:String x:Key="Ui.Auto.12856C8BCE9C08EF">选择滚动、单页或双栏阅读模式</x:String>
     <x:String x:Key="Ui.Auto.70CB42E21940694F">选择豆瓣条目</x:String>
     <x:String x:Key="Ui.Auto.0498D4E5A749540F">选择阅读分页模式</x:String>
-    <x:String x:Key="Ui.Auto.8609EBA830E79233">通过 SMTP 将 EPUB 或 PDF 发送到你的 Kindle 个人文档邮箱。请把 Kindle 收件地址加入发件邮箱的信任列表；密码建议使用应用专用密码。</x:String>
+    <x:String x:Key="Ui.Auto.8609EBA830E79233">通过邮箱服务商将 EPUB 或 PDF 发送到你的 Kindle 个人文档邮箱。选择邮箱服务商后，服务器设置会自动配置；请把 Kindle 收件地址加入发件邮箱的信任列表，密码建议使用应用专用密码。</x:String>
     <x:String x:Key="Ui.Auto.1579F7B476E86BFF">邮件发送</x:String>
     <x:String x:Key="Ui.Auto.D45E65951D169D87">配置 SMTP 发送到 Kindle 个人文档邮箱</x:String>
     <x:String x:Key="Ui.Auto.F5C62A45859955BB">配置说明参考：书伴《Kindle 邮箱推送设置》</x:String>
+    <x:String x:Key="KindleEmail.CalibreGuide">Calibre 教程：通过邮箱一键推送 Kindle 电子书</x:String>
+    <x:String x:Key="Ui.Auto.850BB520AA94EB1D">正在发送测试邮件…</x:String>
+    <x:String x:Key="Ui.Auto.E51B4B1B47325A56">网络功能已关闭，请在设置中启用后再测试发信。</x:String>
+    <x:String x:Key="Ui.Auto.649AC0C45107601E">测试发信成功，邮件已提交到邮箱服务器，请检查 Kindle 收件邮箱。</x:String>
+    <x:String x:Key="Ui.Auto.B1355D8039897496">测试发信失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.59D7AD70A4016DE6">配置阅读 AI 助手的服务与 API Key</x:String>
     <x:String x:Key="Ui.Auto.CE9B12499C471759">阅读</x:String>
     <x:String x:Key="Ui.Auto.77AC05AA34080C2C">阅读排版设置</x:String>
@@ -1840,4 +1859,9 @@
     <x:String x:Key="Ui.Auto.40D4505D81F59701">重命名收藏夹失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.AF61BEF1B390A059">已重命名收藏夹为“{0}”。</x:String>
     <x:String x:Key="Ui.Auto.5523BE9A6469CB0D">拖到另一个收藏夹上合并</x:String>
+    <x:String x:Key="Ui.Auto.0F3018B8A6DBFEE2">导出软件日志</x:String>
+    <x:String x:Key="Ui.Auto.23DAC4A5F4975478">Kkindle-软件日志-{0}.zip</x:String>
+    <x:String x:Key="Ui.Auto.00A6D0C1FD663C03">正在整理软件日志…</x:String>
+    <x:String x:Key="Ui.Auto.684061BE9A3D32DE">软件日志已导出到 {0}</x:String>
+    <x:String x:Key="Ui.Auto.742B40618BD41E1C">软件日志导出失败：{0}</x:String>
 </ResourceDictionary>

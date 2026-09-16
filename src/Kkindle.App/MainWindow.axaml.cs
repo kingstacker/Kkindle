@@ -238,6 +238,7 @@ public partial class MainWindow : Window
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
+        InitializeKindleEmailClipboardSupport();
         ApplyMainAppearance();
         InitializeReaderAppearance();
         InitializeReaderToolbarAutoHide();

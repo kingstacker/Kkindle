@@ -193,6 +193,16 @@
     <x:String x:Key="Ui.Auto.F15EE48ED5493552">Font management</x:String>
     <x:String x:Key="Ui.Auto.4B4D02F3724BBD50">Kindle recipient email</x:String>
     <x:String x:Key="Ui.Auto.5F52884AFBDA326B">Kindle email settings</x:String>
+    <x:String x:Key="KindleEmail.ProviderLabel">Email provider</x:String>
+    <x:String x:Key="KindleEmail.ProviderHint">Choose a provider to configure the connection automatically; enable SMTP and use an authorization code for 163/QQ, or an app password as required by Gmail/Outlook.</x:String>
+    <x:String x:Key="KindleEmail.Provider.Gmail">Gmail</x:String>
+    <x:String x:Key="KindleEmail.Provider.QQ">QQ Mail</x:String>
+    <x:String x:Key="KindleEmail.Provider.163">163 Mail</x:String>
+    <x:String x:Key="KindleEmail.Provider.Outlook">Outlook</x:String>
+    <x:String x:Key="KindleEmail.Provider.Custom">Other (custom SMTP)</x:String>
+    <x:String x:Key="KindleEmail.CustomSmtpTitle">Custom SMTP settings</x:String>
+    <x:String x:Key="KindleEmail.TestSend">Test send</x:String>
+    <x:String x:Key="KindleEmail.TestSendHint">Send a no-attachment test email to the Kindle recipient; current settings are not saved.</x:String>
     <x:String x:Key="Ui.Auto.EC63017A628AB5D9">Device library</x:String>
     <x:String x:Key="Ui.Auto.F117607AC0E397F4">MOBI (convert to EPUB)</x:String>
     <x:String x:Key="Ui.Auto.0F02DA7B32BA56DE">Markdown preserves heading levels; plain text works on any device.</x:String>
@@ -253,6 +263,10 @@
     <x:String x:Key="Ui.Auto.B25B2E4E11693509">Any language</x:String>
     <x:String x:Key="Ui.Auto.52D25A9E30BA94F1">About</x:String>
     <x:String x:Key="Ui.About.UserGroup">QQ group: 1109898894</x:String>
+    <x:String x:Key="Ui.About.LogExportTitle">Software logs</x:String>
+    <x:String x:Key="Ui.About.LogExportDescription">Export runtime logs and environment diagnostics for troubleshooting. Email passwords, API keys, and book files are not packaged.</x:String>
+    <x:String x:Key="Ui.About.ExportLogs">Export software logs</x:String>
+    <x:String x:Key="Ui.About.ExportLogsHint">Package runtime logs and diagnostics into a ZIP file</x:String>
     <x:String x:Key="Ui.Auto.3FD47EDCE45B3603">Close</x:String>
     <x:String x:Key="Ui.Auto.D7B60ECE792129FF">Close book details</x:String>
     <x:String x:Key="Ui.Auto.D7842A57D154C697">Douban matching, email delivery, and tool downloads become unavailable when disabled</x:String>
@@ -563,10 +577,15 @@
     <x:String x:Key="Ui.Auto.12856C8BCE9C08EF">Choose scroll, single-page, or two-column reading mode</x:String>
     <x:String x:Key="Ui.Auto.70CB42E21940694F">Select Douban entry</x:String>
     <x:String x:Key="Ui.Auto.0498D4E5A749540F">Choose reading pagination mode</x:String>
-    <x:String x:Key="Ui.Auto.8609EBA830E79233">Send EPUB or PDF to your Kindle personal documents email through SMTP. Add the Kindle recipient address to the sender's allowlist; an app password is recommended.</x:String>
+    <x:String x:Key="Ui.Auto.8609EBA830E79233">Send EPUB or PDF to your Kindle personal documents email through your email provider. Choose a provider to configure the server automatically; add the Kindle recipient address to the sender&apos;s allowlist, and use an app password when required.</x:String>
     <x:String x:Key="Ui.Auto.1579F7B476E86BFF">Email delivery</x:String>
     <x:String x:Key="Ui.Auto.D45E65951D169D87">Configure SMTP delivery to your Kindle personal documents email</x:String>
     <x:String x:Key="Ui.Auto.F5C62A45859955BB">Setup guide: Jianshu Companion's Kindle email delivery settings</x:String>
+    <x:String x:Key="KindleEmail.CalibreGuide">Calibre guide: Send Kindle books by email</x:String>
+    <x:String x:Key="Ui.Auto.850BB520AA94EB1D">Sending test email…</x:String>
+    <x:String x:Key="Ui.Auto.E51B4B1B47325A56">Network features are disabled. Enable them in Settings before testing email.</x:String>
+    <x:String x:Key="Ui.Auto.649AC0C45107601E">Test email sent successfully. The message was accepted by the mail server; check your Kindle inbox.</x:String>
+    <x:String x:Key="Ui.Auto.B1355D8039897496">Test email failed: {0}</x:String>
     <x:String x:Key="Ui.Auto.59D7AD70A4016DE6">Configure the reading assistant service and API key</x:String>
     <x:String x:Key="Ui.Auto.CE9B12499C471759">Reading</x:String>
     <x:String x:Key="Ui.Auto.77AC05AA34080C2C">Reading layout settings</x:String>
@@ -1840,4 +1859,9 @@
     <x:String x:Key="Ui.Auto.40D4505D81F59701">Could not rename the collection: {0}</x:String>
     <x:String x:Key="Ui.Auto.AF61BEF1B390A059">Renamed collection to “{0}”.</x:String>
     <x:String x:Key="Ui.Auto.5523BE9A6469CB0D">Drag onto another collection to merge</x:String>
+    <x:String x:Key="Ui.Auto.0F3018B8A6DBFEE2">Export software logs</x:String>
+    <x:String x:Key="Ui.Auto.23DAC4A5F4975478">Kkindle-software-logs-{0}.zip</x:String>
+    <x:String x:Key="Ui.Auto.00A6D0C1FD663C03">Preparing software logs…</x:String>
+    <x:String x:Key="Ui.Auto.684061BE9A3D32DE">Software logs exported to {0}</x:String>
+    <x:String x:Key="Ui.Auto.742B40618BD41E1C">Software log export failed: {0}</x:String>
 </ResourceDictionary>

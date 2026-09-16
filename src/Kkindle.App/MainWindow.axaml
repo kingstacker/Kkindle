@@ -2593,6 +2593,20 @@
                                             <Button Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalAlignment="Left" Focusable="True" Click="KindleEmailGuideLink_Click">
                                                 <TextBlock FontSize="12" Foreground="{DynamicResource InkBrush}" TextDecorations="Underline" Text="{DynamicResource Ui.Auto.F5C62A45859955BB}" TextWrapping="Wrap" />
                                             </Button>
+                                            <Button Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalAlignment="Left" Focusable="True" Click="KindleEmailCalibreGuideLink_Click">
+                                                <TextBlock FontSize="12" Foreground="{DynamicResource InkBrush}" TextDecorations="Underline" Text="{DynamicResource KindleEmail.CalibreGuide}" TextWrapping="Wrap" />
+                                            </Button>
+                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                <TextBlock Text="{DynamicResource KindleEmail.ProviderLabel}" FontSize="14" VerticalAlignment="Center" />
+                                                <ComboBox x:Name="KindleEmailProviderBox" Grid.Column="1" SelectedIndex="0" MinWidth="190" HorizontalAlignment="Left" AutomationProperties.Name="{DynamicResource KindleEmail.ProviderLabel}">
+                                                    <ComboBoxItem Content="{DynamicResource KindleEmail.Provider.Gmail}" Tag="gmail" />
+                                                    <ComboBoxItem Content="{DynamicResource KindleEmail.Provider.QQ}" Tag="qq" />
+                                                    <ComboBoxItem Content="{DynamicResource KindleEmail.Provider.163}" Tag="163" />
+                                                    <ComboBoxItem Content="{DynamicResource KindleEmail.Provider.Outlook}" Tag="outlook" />
+                                                    <ComboBoxItem Content="{DynamicResource KindleEmail.Provider.Custom}" Tag="custom" />
+                                                </ComboBox>
+                                            </Grid>
+                                            <TextBlock Text="{DynamicResource KindleEmail.ProviderHint}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <StackPanel Spacing="5">
                                                 <TextBlock Text="{DynamicResource Ui.Auto.4B4D02F3724BBD50}" FontSize="12" TextWrapping="Wrap" />
                                                 <TextBox x:Name="KindleEmailRecipientBox" PlaceholderText="{DynamicResource Ui.Auto.88D320044CFC5366}" AutomationProperties.Name="{DynamicResource Ui.Auto.4B4D02F3724BBD50}" FontSize="14" />
@@ -2601,16 +2615,6 @@
                                                 <TextBlock Text="{DynamicResource Ui.Auto.F4D19C9EF4B8D010}" FontSize="12" TextWrapping="Wrap" />
                                                 <TextBox x:Name="KindleEmailSenderBox" PlaceholderText="{DynamicResource Ui.Auto.B24BB0C6CC545A3A}" AutomationProperties.Name="{DynamicResource Ui.Auto.F4D19C9EF4B8D010}" FontSize="14" />
                                             </StackPanel>
-                                            <Grid ColumnDefinitions="*,110" ColumnSpacing="8">
-                                                <StackPanel Spacing="5">
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.6A85554C141A6383}" FontSize="12" TextWrapping="Wrap" />
-                                                    <TextBox x:Name="KindleEmailSmtpHostBox" PlaceholderText="smtp.example.com" AutomationProperties.Name="{DynamicResource Ui.Auto.6A85554C141A6383}" FontSize="14" />
-                                                </StackPanel>
-                                                <StackPanel Grid.Column="1" Spacing="5">
-                                                    <TextBlock Text="{DynamicResource Ui.Auto.E71AC32B544B0EBF}" FontSize="12" TextWrapping="Wrap" />
-                                                    <TextBox x:Name="KindleEmailSmtpPortBox" Text="587" PlaceholderText="587" AutomationProperties.Name="{DynamicResource Ui.Auto.E71AC32B544B0EBF}" FontSize="14" />
-                                                </StackPanel>
-                                            </Grid>
                                             <StackPanel Spacing="5">
                                                 <TextBlock Text="{DynamicResource Ui.Auto.CB6DE497BBC98EBB}" FontSize="12" TextWrapping="Wrap" />
                                                 <TextBox x:Name="KindleEmailUsernameBox" AutomationProperties.Name="{DynamicResource Ui.Auto.CB6DE497BBC98EBB}" FontSize="14" />
@@ -2619,11 +2623,25 @@
                                                 <TextBlock Text="{DynamicResource Ui.Auto.8F6290CB91E90FFB}" FontSize="12" TextWrapping="Wrap" />
                                                 <TextBox x:Name="KindleEmailPasswordBox" PasswordChar="●" PlaceholderText="{DynamicResource Ui.Auto.8CB9B8C5CF47397A}" AutomationProperties.Name="{DynamicResource Ui.Auto.8F6290CB91E90FFB}" FontSize="14" />
                                             </StackPanel>
-                                            <CheckBox x:Name="KindleEmailSslCheck" Content="{DynamicResource Ui.Auto.98BFA63342D1FDA2}" IsChecked="True" />
-                                            <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+                                            <StackPanel x:Name="KindleEmailSmtpAdvancedPanel" Spacing="14" IsVisible="False">
+                                                <TextBlock Text="{DynamicResource KindleEmail.CustomSmtpTitle}" FontSize="13" FontWeight="SemiBold" />
+                                                <Grid ColumnDefinitions="*,110" ColumnSpacing="8">
+                                                    <StackPanel Spacing="5">
+                                                        <TextBlock Text="{DynamicResource Ui.Auto.6A85554C141A6383}" FontSize="12" TextWrapping="Wrap" />
+                                                        <TextBox x:Name="KindleEmailSmtpHostBox" PlaceholderText="smtp.example.com" AutomationProperties.Name="{DynamicResource Ui.Auto.6A85554C141A6383}" FontSize="14" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Spacing="5">
+                                                        <TextBlock Text="{DynamicResource Ui.Auto.E71AC32B544B0EBF}" FontSize="12" TextWrapping="Wrap" />
+                                                        <TextBox x:Name="KindleEmailSmtpPortBox" Text="587" PlaceholderText="587" AutomationProperties.Name="{DynamicResource Ui.Auto.E71AC32B544B0EBF}" FontSize="14" />
+                                                    </StackPanel>
+                                                </Grid>
+                                                <CheckBox x:Name="KindleEmailSslCheck" Content="{DynamicResource Ui.Auto.98BFA63342D1FDA2}" IsChecked="True" />
+                                            </StackPanel>
+                                            <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
                                                 <Button Grid.Column="0" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="settingsActionCancel" Click="KindleEmailSettingsCancelButton_Click" />
-                                                <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="KindleEmailSettingsSaveButton_Click" />
-                                                <TextBlock x:Name="KindleEmailSettingsStatusText" Grid.Column="2" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <Button x:Name="KindleEmailSettingsTestButton" Grid.Column="1" Content="{DynamicResource KindleEmail.TestSend}" Classes="quiet" ToolTip.Tip="{DynamicResource KindleEmail.TestSendHint}" AutomationProperties.Name="{DynamicResource KindleEmail.TestSend}" Click="KindleEmailSettingsTestButton_Click" />
+                                                <Button Grid.Column="2" Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="settingsActionSave" Click="KindleEmailSettingsSaveButton_Click" />
+                                                <TextBlock x:Name="KindleEmailSettingsStatusText" Grid.Column="3" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
                                             </Grid>
                                         </StackPanel>
                                 </Border>
@@ -2865,6 +2883,16 @@
                                             <Image Source="avares://Kkindle.App/Assets/Images/SupportWechatQr.png" Stretch="Uniform" />
                                         </Border>
                                     </Grid>
+                                </Border>
+                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="6" Padding="16">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="{DynamicResource Ui.About.LogExportTitle}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="AboutLogsDescriptionText" Text="{DynamicResource Ui.About.LogExportDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <TextBlock x:Name="AboutLogsStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                            <Button x:Name="ExportSoftwareLogsButton" Grid.Column="1" Content="{DynamicResource Ui.About.ExportLogs}" ToolTip.Tip="{DynamicResource Ui.About.ExportLogsHint}" AutomationProperties.Name="{DynamicResource Ui.About.ExportLogs}" Classes="quiet" Click="ExportSoftwareLogsButton_Click" />
+                                        </Grid>
+                                    </StackPanel>
                                 </Border>
                                 <Expander x:Name="SettingsDiagnosticsExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Tag="{DynamicResource Ui.Auto.B66D6EE56E8CAEDF}" AutomationProperties.Name="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsDiagnosticsSection" Padding="0">

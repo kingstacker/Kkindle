@@ -75,6 +75,28 @@ public sealed class KindleEmailTests
     }
 
     [Fact]
+    public async Task TestSenderRejectsInvalidSettingsBeforeConnecting()
+    {
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new KindleEmailSender().SendTestAsync(new KindleEmailSettings()));
+
+        Assert.Contains("请输入有效的 Kindle 收件邮箱地址", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribesWrappedSmtpFailureWithItsRootCause()
+    {
+        var exception = new System.Net.Mail.SmtpException(
+            "Failure sending mail.",
+            new IOException("The connection was closed."));
+
+        var description = KindleEmailSender.DescribeFailure(exception);
+
+        Assert.Contains("Failure sending mail.", description, StringComparison.Ordinal);
+        Assert.Contains("The connection was closed.", description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ValidatesSmtpSettingsAndNormalizesWhitespace()
     {
         var settings = new KindleEmailSettings
@@ -118,6 +140,40 @@ public sealed class KindleEmailTests
 
             Assert.DoesNotContain(secret, json, StringComparison.Ordinal);
             Assert.Equal(secret, loaded.SmtpPassword);
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task LoadsLegacy163PortWithCorrectedStartTlsPort()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            paths.EnsureDirectories();
+            var protector = new TestHelpers.PlaintextSecretProtector();
+            var store = new KindleEmailSettingsStore(paths, protector);
+            var settingsPath = Path.Combine(paths.Data, "kindle-email-settings.json");
+            await File.WriteAllTextAsync(settingsPath, """
+                {
+                  "KindleEmailAddress": "kindle@example.com",
+                  "SenderEmailAddress": "sender@163.com",
+                  "SmtpHost": "smtp.163.com",
+                  "SmtpPort": 587,
+                  "SmtpUsername": "sender@163.com",
+                  "ProtectedPassword": "",
+                  "EnableSsl": true
+                }
+                """);
+
+            var loaded = await store.LoadAsync();
+
+            Assert.Equal(25, loaded.SmtpPort);
+            Assert.True(loaded.EnableSsl);
         }
         finally
         {

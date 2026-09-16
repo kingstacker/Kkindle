@@ -450,6 +450,128 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task KindleEmailProviderPresetsHideAdvancedSmtpSettings() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Call("KindleEmailSettingsButton_Click", null, new RoutedEventArgs());
+        await Render();
+
+        var provider = scope.Get<ComboBox>("KindleEmailProviderBox");
+        var host = scope.Get<TextBox>("KindleEmailSmtpHostBox");
+        var port = scope.Get<TextBox>("KindleEmailSmtpPortBox");
+        var ssl = scope.Get<CheckBox>("KindleEmailSslCheck");
+        var advanced = scope.Get<Control>("KindleEmailSmtpAdvancedPanel");
+
+        foreach (var (index, expectedHost, expectedPort) in new[]
+        {
+            (0, "smtp.gmail.com", 587),
+            (1, "smtp.qq.com", 587),
+            (2, "smtp.163.com", 25),
+            (3, "smtp-mail.outlook.com", 587)
+        })
+        {
+            provider.SelectedIndex = index;
+            await Render();
+            Assert.Equal(expectedHost, host.Text);
+            Assert.Equal(expectedPort.ToString(), port.Text);
+            Assert.True(ssl.IsChecked);
+            Assert.False(advanced.IsEffectivelyVisible);
+        }
+
+        provider.SelectedIndex = 4;
+        await Render();
+        Assert.True(advanced.IsEffectivelyVisible);
+    });
+
+    [Fact]
+    public Task Legacy163PortUsesCorrectedPreset() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Set("_kindleEmailSettings", new KindleEmailSettings
+        {
+            SmtpHost = "smtp.163.com",
+            SmtpPort = 587,
+            EnableSsl = true
+        });
+        scope.Call("PopulateKindleEmailControls");
+        await Render();
+
+        Assert.Equal(2, scope.Get<ComboBox>("KindleEmailProviderBox").SelectedIndex);
+        Assert.Equal("25", scope.Get<TextBox>("KindleEmailSmtpPortBox").Text);
+        Assert.False(scope.Get<Control>("KindleEmailSmtpAdvancedPanel").IsEffectivelyVisible);
+    });
+
+    [Fact]
+    public Task ExistingCustomKindleEmailProviderKeepsAdvancedSettingsVisible() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Set("_kindleEmailSettings", new KindleEmailSettings
+        {
+            SmtpHost = "smtp.custom.example",
+            SmtpPort = 2525,
+            EnableSsl = false
+        });
+        scope.Call("PopulateKindleEmailControls");
+        await Render();
+
+        Assert.Equal(4, scope.Get<ComboBox>("KindleEmailProviderBox").SelectedIndex);
+        Assert.Equal("smtp.custom.example", scope.Get<TextBox>("KindleEmailSmtpHostBox").Text);
+        Assert.Equal("2525", scope.Get<TextBox>("KindleEmailSmtpPortBox").Text);
+        Assert.False(scope.Get<CheckBox>("KindleEmailSslCheck").IsChecked);
+        Assert.True(scope.Get<Control>("KindleEmailSmtpAdvancedPanel").IsEffectivelyVisible);
+    });
+
+    [Fact]
+    public Task KindleEmailSettingsExposeTestSendButton() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Call("KindleEmailSettingsButton_Click", null, new RoutedEventArgs());
+        await Render();
+
+        var testButton = scope.Get<Button>("KindleEmailSettingsTestButton");
+        Assert.True(testButton.IsEffectivelyVisible);
+        Assert.Equal("测试发信", testButton.Content?.ToString());
+
+        scope.Call("KindleEmailSettingsTestButton_Click", null, new RoutedEventArgs());
+        await Render();
+        Assert.Contains("请输入有效的 Kindle 收件邮箱地址", scope.Get<TextBlock>("KindleEmailSettingsStatusText").Text);
+    });
+
+    [Fact]
+    public Task KindleEmailTransferUsesBottomRightProgressToast() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+
+        scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "正在发送…", null, true, false);
+        await Render();
+
+        Assert.True(scope.Get<Control>("TransferToast").IsEffectivelyVisible);
+        Assert.True(scope.Get<ProgressBar>("TransferToastProgress").IsEffectivelyVisible);
+        Assert.False(scope.Get<Control>("TaskProgressPopup").IsEffectivelyVisible);
+        Assert.False(scope.Get<Control>("ConfirmationOverlay").IsEffectivelyVisible);
+    });
+
+    [Fact]
+    public Task AboutExposesSoftwareLogExport() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create(new AppSettings { UiLanguage = "zh-CN" });
+        scope.Call("SettingsButton_Click", null, new RoutedEventArgs());
+        scope.Call("ShowSettingsSection", "About");
+        await Render();
+
+        var button = scope.Get<Button>("ExportSoftwareLogsButton");
+        Assert.True(button.IsEffectivelyVisible);
+        Assert.Equal("导出软件日志", button.Content?.ToString());
+        Assert.Contains("不会打包邮箱密码", scope.Get<TextBlock>("AboutLogsDescriptionText").Text);
+        Assert.True(string.IsNullOrEmpty(scope.Get<TextBlock>("AboutLogsStatusText").Text));
+
+        ((Kkindle.App)Application.Current!).ApplyLanguage("en-US");
+        await Render();
+        Assert.Equal("Export software logs", button.Content?.ToString());
+        Assert.Contains("Email passwords", scope.Get<TextBlock>("AboutLogsDescriptionText").Text);
+    });
+
+    [Fact]
     public Task SwitchLabelIsClickableAndInputsHaveAccessibleNames() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();

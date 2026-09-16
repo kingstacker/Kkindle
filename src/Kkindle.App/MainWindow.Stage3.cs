@@ -1851,11 +1851,17 @@ public partial class MainWindow
 
         var sent = 0;
         var skipped = cards.Count - pending.Length;
-        foreach (var (card, _, sourcePath, _) in pending)
+        var transferTitle = T("发送到 Kindle 邮箱");
+        ShowTransferToast(transferTitle, T("正在发送邮件…"), progress: 0);
+        for (var index = 0; index < pending.Length; index++)
         {
+            var (card, _, sourcePath, _) = pending[index];
+            var progress = index * 100d / pending.Length;
             try
             {
-                SetTaskStatus(T("正在通过邮件发送《{0}》…", card.Title));
+                var progressMessage = T("正在发送《{0}》（{1}/{2}）…", card.Title, index + 1, pending.Length);
+                SetTaskStatus(progressMessage);
+                ShowTransferToast(transferTitle, progressMessage, progress: progress);
                 await _kindleEmailSender.SendAsync(
                     _kindleEmailSettings,
                     sourcePath,
@@ -1865,12 +1871,17 @@ public partial class MainWindow
             }
             catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
             {
+                SetTaskStatus(T("邮件发送已取消"));
+                ShowTransferToast(transferTitle, T("邮件发送已取消"), autoHide: true);
                 return;
             }
             catch (Exception exception)
             {
                 skipped++;
-                SetTaskStatus(T("《{0}》邮件发送失败：{1}", card.Title, UiText.Localize(exception.Message)));
+                var failure = UiText.Localize(KindleEmailSender.DescribeFailure(exception));
+                var failureMessage = T("《{0}》邮件发送失败：{1}", card.Title, failure);
+                SetTaskStatus(failureMessage);
+                ShowTransferToast(transferTitle, failureMessage, progress: (index + 1) * 100d / pending.Length);
             }
         }
 
@@ -1878,8 +1889,7 @@ public partial class MainWindow
             ? T("已通过邮件发送 {0} 本书，跳过或失败 {1} 本。", sent, skipped)
             : T("已通过邮件发送 {0} 本书。", sent);
         SetTaskStatus(emailCompletionMessage);
-        if (sent > 0)
-            await ShowMessageAsync(T("发送成功"), T("邮件已发送。Amazon 完成转换后，书籍会出现在 Kindle 或 Kindle 应用中。"));
+        ShowTransferToast(transferTitle, emailCompletionMessage, progress: 100, autoHide: true);
     }
 
     private async void SendSelectedBookToKindleButton_Click(object? sender, RoutedEventArgs e) =>
@@ -2051,23 +2061,30 @@ public partial class MainWindow
                 return;
             if (!await ConfirmAsync(T("发送到 Kindle 邮箱"), T("确定将《{0}》发送到 {1}？", card.Title, _kindleEmailSettings.KindleEmailAddress)))
                 return;
-            SetTaskStatus(T("正在通过邮件发送《{0}》…", card.Title));
+            var transferTitle = T("发送到 Kindle 邮箱");
+            var progressMessage = T("正在通过邮件发送《{0}》…", card.Title);
+            SetTaskStatus(progressMessage);
+            ShowTransferToast(transferTitle, progressMessage, isIndeterminate: true);
             await _kindleEmailSender.SendAsync(
                 _kindleEmailSettings,
                 sourcePath,
                 $"Kkindle：{card.Title}",
                 _lifetimeCancellation.Token);
-            SetTaskStatus(T("已通过邮件发送《{0}》。", card.Title));
-            await ShowMessageAsync(T("发送成功"), T("邮件已发送。Amazon 完成转换后，书籍会出现在 Kindle 或 Kindle 应用中。"));
+            var completionMessage = T("已通过邮件发送《{0}》。", card.Title);
+            SetTaskStatus(completionMessage);
+            ShowTransferToast(transferTitle, T("邮件已发送。Amazon 完成转换后，书籍会出现在 Kindle 或 Kindle 应用中。"), progress: 100, autoHide: true);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
+            SetTaskStatus(T("邮件发送已取消"));
+            ShowTransferToast(T("发送到 Kindle 邮箱"), T("邮件发送已取消"), autoHide: true);
         }
         catch (Exception exception)
         {
             LogSendDiagnostic("SendSelectedBookByEmailCoreAsync", exception);
-            SetTaskStatus(T("邮件发送失败：{0}", UiText.Localize(exception.Message)));
-            await ShowMessageAsync(T("发送失败"), UiText.Localize(exception.Message));
+            var failure = UiText.Localize(KindleEmailSender.DescribeFailure(exception));
+            SetTaskStatus(T("邮件发送失败：{0}", failure));
+            ShowTransferToast(T("发送到 Kindle 邮箱"), T("邮件发送失败：{0}", failure), autoHide: true);
         }
     }
 
@@ -4017,6 +4034,7 @@ public partial class MainWindow
             AboutUpdateStatusText.Text = _updateService is null
                 ? T("当前平台暂不支持应用内更新")
                 : T("尚未检查更新");
+            AboutLogsStatusText.Text = string.Empty;
             SettingsDataPathText.Text = _paths.Data;
             UpdateDiagnosticsTexts();
             if (!preserveEmailDraft)
@@ -5233,6 +5251,18 @@ public partial class MainWindow
         }
     }
 
+    private void KindleEmailCalibreGuideLink_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://bookfere.com/post/11.html") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            ShowSettingsCapsule(T("无法打开链接：{0}", UiText.Localize(exception.Message)), 4000);
+        }
+    }
+
     private AppSettings ReadAppSettingsFromControls()
     {
         return AppSettings.Normalize(_appSettings with
@@ -5504,6 +5534,47 @@ public partial class MainWindow
         PopulateKindleEmailControls();
         SettingsSendToKindleExpander.IsExpanded = false;
         KindleEmailSettingsStatusText.Text = string.Empty;
+    }
+
+    private async void KindleEmailSettingsTestButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_kindleEmailTestBusy) return;
+
+        var settings = ReadKindleEmailDraft();
+        var validation = settings.Validate();
+        if (validation is not null)
+        {
+            KindleEmailSettingsStatusText.Text = UiText.Localize(validation);
+            return;
+        }
+
+        if (!_appSettings.NetworkEnabled)
+        {
+            KindleEmailSettingsStatusText.Text = T("网络功能已关闭，请在设置中启用后再测试发信。");
+            return;
+        }
+
+        _kindleEmailTestBusy = true;
+        KindleEmailSettingsTestButton.IsEnabled = false;
+        try
+        {
+            KindleEmailSettingsStatusText.Text = T("正在发送测试邮件…");
+            await _kindleEmailSender.SendTestAsync(settings, _lifetimeCancellation.Token);
+            KindleEmailSettingsStatusText.Text = T("测试发信成功，邮件已提交到邮箱服务器，请检查 Kindle 收件邮箱。");
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            LogSendDiagnostic("KindleEmailSettingsTestButton_Click", exception);
+            KindleEmailSettingsStatusText.Text = T("测试发信失败：{0}", UiText.Localize(KindleEmailSender.DescribeFailure(exception)));
+        }
+        finally
+        {
+            _kindleEmailTestBusy = false;
+            KindleEmailSettingsTestButton.IsEnabled = true;
+        }
     }
 
     private async void MainReaderAiSettingsCancelButton_Click(object? sender, RoutedEventArgs e)

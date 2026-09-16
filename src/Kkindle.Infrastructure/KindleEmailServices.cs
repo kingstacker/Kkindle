@@ -89,7 +89,7 @@ public sealed class KindleEmailSettingsStore
             var persisted = await JsonSerializer.DeserializeAsync<PersistedKindleEmailSettings>(stream, _jsonOptions, cancellationToken);
             if (persisted is null) return new KindleEmailSettings();
 
-            return KindleEmailSettings.Normalize(new KindleEmailSettings
+            return NormalizeLoadedSettings(new KindleEmailSettings
             {
                 KindleEmailAddress = persisted.KindleEmailAddress ?? string.Empty,
                 SenderEmailAddress = persisted.SenderEmailAddress ?? string.Empty,
@@ -110,6 +110,22 @@ public sealed class KindleEmailSettingsStore
         {
             return new KindleEmailSettings();
         }
+    }
+
+    private static KindleEmailSettings NormalizeLoadedSettings(KindleEmailSettings settings)
+    {
+        var normalized = KindleEmailSettings.Normalize(settings);
+        if (string.Equals(normalized.SmtpHost, "smtp.163.com", StringComparison.OrdinalIgnoreCase)
+            && normalized.SmtpPort == 587
+            && normalized.EnableSsl)
+        {
+            // Older Kkindle builds used 587 for the 163 preset. The endpoint
+            // can close the connection before its SMTP greeting, while port
+            // 25 advertises STARTTLS and works with SmtpClient.
+            normalized.SmtpPort = 25;
+        }
+
+        return normalized;
     }
 
     public async Task SaveAsync(KindleEmailSettings settings, CancellationToken cancellationToken = default)
@@ -156,39 +172,84 @@ public sealed class KindleEmailSettingsStore
 
 public sealed class KindleEmailSender
 {
+    public static string DescribeFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        var root = exception.GetBaseException();
+        if (ReferenceEquals(root, exception)
+            || string.Equals(root.Message, exception.Message, StringComparison.Ordinal))
+            return exception.Message;
+
+        // SmtpClient often wraps the useful socket/TLS reason in the generic
+        // "Failure sending mail." exception. Keep both pieces visible in the
+        // settings page while the complete exception remains in the log.
+        return $"{exception.Message} ({root.Message})";
+    }
+
+    public async Task SendTestAsync(
+        KindleEmailSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateSettings(settings);
+
+        using var message = CreateMessage(
+            settings,
+            "Kkindle 测试邮件",
+            "这是一封来自 Kkindle 的测试邮件，用于验证 Kindle 邮箱发信配置。");
+        using var client = CreateClient(settings);
+        await client.SendMailAsync(message, cancellationToken);
+    }
+
     public async Task SendAsync(
         KindleEmailSettings settings,
         string filePath,
         string subject,
         CancellationToken cancellationToken = default)
     {
-        var validationError = settings.Validate();
-        if (validationError is not null) throw new InvalidOperationException(validationError);
+        ValidateSettings(settings);
         if (!File.Exists(filePath)) throw new FileNotFoundException("找不到要发送的书籍文件。", filePath);
         var fileSizeBytes = new FileInfo(filePath).Length;
         if (!KindleEmailSelectionPolicy.IsWithinAttachmentLimit(fileSizeBytes))
             throw new InvalidOperationException(
                 $"书籍文件大小为 {fileSizeBytes / (1024d * 1024d):0.#} MB，超过 Send to Kindle 邮箱单本 50 MB 的限制。");
 
-        using var message = new MailMessage
+        using var message = CreateMessage(
+            settings,
+            string.IsNullOrWhiteSpace(subject) ? "Send to Kindle" : subject.Trim(),
+            "Sent from Kkindle.");
+        message.Attachments.Add(new Attachment(filePath));
+
+        using var client = CreateClient(settings);
+        await client.SendMailAsync(message, cancellationToken);
+    }
+
+    private static void ValidateSettings(KindleEmailSettings settings)
+    {
+        var validationError = settings.Validate();
+        if (validationError is not null) throw new InvalidOperationException(validationError);
+    }
+
+    private static MailMessage CreateMessage(KindleEmailSettings settings, string subject, string body)
+    {
+        var message = new MailMessage
         {
             From = new MailAddress(settings.SenderEmailAddress),
-            Subject = string.IsNullOrWhiteSpace(subject) ? "Send to Kindle" : subject.Trim(),
-            Body = "Sent from Kkindle.",
+            Subject = subject,
+            Body = body,
             IsBodyHtml = false,
             SubjectEncoding = Encoding.UTF8,
             BodyEncoding = Encoding.UTF8
         };
         message.To.Add(new MailAddress(settings.KindleEmailAddress));
-        message.Attachments.Add(new Attachment(filePath));
-
-        using var client = new SmtpClient(settings.SmtpHost, settings.SmtpPort)
-        {
-            EnableSsl = settings.EnableSsl,
-            UseDefaultCredentials = false,
-            Credentials = new NetworkCredential(settings.SmtpUsername, settings.SmtpPassword),
-            DeliveryMethod = SmtpDeliveryMethod.Network
-        };
-        await client.SendMailAsync(message, cancellationToken);
+        return message;
     }
+
+    private static SmtpClient CreateClient(KindleEmailSettings settings) => new(settings.SmtpHost, settings.SmtpPort)
+    {
+        EnableSsl = settings.EnableSsl,
+        UseDefaultCredentials = false,
+        Credentials = new NetworkCredential(settings.SmtpUsername, settings.SmtpPassword),
+        DeliveryMethod = SmtpDeliveryMethod.Network
+    };
 }
