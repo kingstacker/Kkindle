@@ -498,7 +498,7 @@ a {
   gap: 14px;
   padding: 10px 14px 10px 10px;
   border: 1px solid var(--line);
-  background: var(--surface);
+  background: transparent;
   text-align: left;
   transition: border-color var(--ease), background var(--ease), transform var(--ease);
 }
