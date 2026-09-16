@@ -1360,6 +1360,14 @@ public sealed partial class S3SyncService
                 commandCache,
                 cancellationToken);
 
+            // Older snapshots can contain both the system "未收藏" row and
+            // user-created collection rows. Keep the derived system view
+            // consistent before this merge becomes the next sync baseline.
+            changed |= await NormalizeUncollectedCollectionAsync(
+                connection,
+                transaction,
+                cancellationToken);
+
             changed |= await ConsolidateReadingHistoryRowsAsync(connection, transaction, commandCache, cancellationToken);
             await RemoveReferencedScheduledPathsAsync(
                 connection,
@@ -1383,6 +1391,49 @@ public sealed partial class S3SyncService
             RemoteBookIds = remoteBookIds,
             RemoteOnlyFileHashes = remoteOnlyFileHashes
         };
+    }
+
+    private static async Task<bool> NormalizeUncollectedCollectionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        using var findDefault = CreateCommand(
+            connection,
+            transaction,
+            "SELECT Id FROM BookCollections WHERE Name = $name COLLATE NOCASE LIMIT 1;");
+        AddParameter(findDefault, "$name", BookLibraryDefaults.UncollectedCollectionName);
+        if (await findDefault.ExecuteScalarAsync(cancellationToken) is not string defaultCollectionId)
+            return false;
+
+        using var removeStaleDefault = CreateCommand(connection, transaction, """
+            DELETE FROM BookCollectionItems
+            WHERE CollectionId = $defaultCollectionId
+              AND EXISTS (
+                  SELECT 1
+                  FROM BookCollectionItems other
+                  WHERE other.BookId = BookCollectionItems.BookId
+                    AND other.CollectionId <> $defaultCollectionId
+              );
+            """);
+        AddParameter(removeStaleDefault, "$defaultCollectionId", defaultCollectionId);
+        var changed = await removeStaleDefault.ExecuteNonQueryAsync(cancellationToken) > 0;
+
+        using var addMissingDefault = CreateCommand(connection, transaction, """
+            INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+            SELECT $defaultCollectionId, b.Id, $addedAt
+            FROM Books b
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM BookCollectionItems custom
+                WHERE custom.BookId = b.Id
+                  AND custom.CollectionId <> $defaultCollectionId
+            );
+            """);
+        AddParameter(addMissingDefault, "$defaultCollectionId", defaultCollectionId);
+        AddParameter(addMissingDefault, "$addedAt", DateTimeOffset.UtcNow.ToString("O"));
+        changed |= await addMissingDefault.ExecuteNonQueryAsync(cancellationToken) > 0;
+        return changed;
     }
 
     private static S3SyncReadingStats MergeRemoteReadingStats(IEnumerable<S3SyncReadingStats> versions)

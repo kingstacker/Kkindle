@@ -132,9 +132,10 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
     }
 
-    // The "未收藏" collection is created automatically so every imported book
-    // has a default home. On first creation the currently uncollected books are
-    // backfilled into it; later removals are respected (no re-backfill).
+    // The "未收藏" collection is a system view: a book belongs to it exactly
+    // when it has no membership in any user-created collection. Normalize the
+    // rows here both for new imports and for databases created by the previous
+    // implementation, where a book could appear in both places.
     private async Task EnsureDefaultCollectionAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
@@ -155,21 +156,32 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             insert.Parameters.AddWithValue("$name", BookLibraryDefaults.UncollectedCollectionName);
             insert.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("O"));
             await insert.ExecuteNonQueryAsync(cancellationToken);
-
-            var backfill = connection.CreateCommand();
-            backfill.CommandText = """
-                INSERT INTO BookCollectionItems (CollectionId, BookId, AddedAt)
-                SELECT $collectionId, Id, $addedAt
-                FROM Books
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM BookCollectionItems
-                    WHERE BookCollectionItems.BookId = Books.Id
-                );
-                """;
-            backfill.Parameters.AddWithValue("$collectionId", collectionId.Value.ToString());
-            backfill.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
-            await backfill.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        var normalize = connection.CreateCommand();
+        normalize.CommandText = """
+            DELETE FROM BookCollectionItems
+            WHERE CollectionId = $defaultCollectionId
+              AND EXISTS (
+                  SELECT 1
+                  FROM BookCollectionItems other
+                  WHERE other.BookId = BookCollectionItems.BookId
+                    AND other.CollectionId <> $defaultCollectionId
+              );
+
+            INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+            SELECT $defaultCollectionId, b.Id, $addedAt
+            FROM Books b
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM BookCollectionItems custom
+                WHERE custom.BookId = b.Id
+                  AND custom.CollectionId <> $defaultCollectionId
+            );
+            """;
+        normalize.Parameters.AddWithValue("$defaultCollectionId", collectionId.Value.ToString());
+        normalize.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
+        await normalize.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<Guid?> GetCollectionIdByNameAsync(
@@ -1184,6 +1196,19 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     await InsertFileAsync(connection, file, cancellationToken, transaction);
                 foreach (var collectionId in book.CollectionIds)
                     await RestoreCollectionMembershipAsync(connection, transaction, collectionId, book.Id, cancellationToken);
+                if (await GetCollectionIdByNameAsync(
+                        connection,
+                        BookLibraryDefaults.UncollectedCollectionName,
+                        cancellationToken,
+                        transaction) is { } uncollectedId)
+                {
+                    await NormalizeBookCollectionMembershipAsync(
+                        connection,
+                        transaction,
+                        uncollectedId,
+                        book.Id,
+                        cancellationToken);
+                }
                 await DeleteTrashEntryAsync(connection, transaction, entry.Id, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
             }
@@ -1267,6 +1292,51 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task<int> NormalizeBookCollectionMembershipAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid uncollectedCollectionId,
+        Guid bookId,
+        CancellationToken cancellationToken)
+    {
+        var changed = 0;
+        var removeStaleUncollected = connection.CreateCommand();
+        removeStaleUncollected.Transaction = transaction;
+        removeStaleUncollected.CommandText = """
+            DELETE FROM BookCollectionItems
+            WHERE CollectionId = $uncollectedCollectionId
+              AND BookId = $bookId
+              AND EXISTS (
+                  SELECT 1
+                  FROM BookCollectionItems custom
+                  WHERE custom.BookId = $bookId
+                    AND custom.CollectionId <> $uncollectedCollectionId
+              );
+            """;
+        removeStaleUncollected.Parameters.AddWithValue("$uncollectedCollectionId", uncollectedCollectionId.ToString());
+        removeStaleUncollected.Parameters.AddWithValue("$bookId", bookId.ToString());
+        changed += await removeStaleUncollected.ExecuteNonQueryAsync(cancellationToken);
+
+        var addUncollected = connection.CreateCommand();
+        addUncollected.Transaction = transaction;
+        addUncollected.CommandText = """
+            INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+            SELECT $uncollectedCollectionId, $bookId, $addedAt
+            WHERE EXISTS(SELECT 1 FROM Books WHERE Id = $bookId)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM BookCollectionItems custom
+                  WHERE custom.BookId = $bookId
+                    AND custom.CollectionId <> $uncollectedCollectionId
+              );
+            """;
+        addUncollected.Parameters.AddWithValue("$uncollectedCollectionId", uncollectedCollectionId.ToString());
+        addUncollected.Parameters.AddWithValue("$bookId", bookId.ToString());
+        addUncollected.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
+        changed += await addUncollected.ExecuteNonQueryAsync(cancellationToken);
+        return changed;
+    }
+
     public async Task<IReadOnlyList<BookCollection>> GetCollectionsAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -1333,19 +1403,54 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             try
             {
+                var defaultCollectionId = await GetCollectionIdByNameAsync(
+                    connection,
+                    BookLibraryDefaults.UncollectedCollectionName,
+                    cancellationToken,
+                    transaction);
+                if (defaultCollectionId == collectionId)
+                    throw new InvalidOperationException("未收藏收藏夹不能删除。");
+
+                var affectedBookIds = new List<Guid>();
+                var affectedBooks = connection.CreateCommand();
+                affectedBooks.Transaction = transaction;
+                affectedBooks.CommandText = "SELECT BookId FROM BookCollectionItems WHERE CollectionId = $id;";
+                affectedBooks.Parameters.AddWithValue("$id", collectionId.ToString());
+                await using (var reader = await affectedBooks.ExecuteReaderAsync(cancellationToken))
+                {
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        if (Guid.TryParse(reader.GetString(0), out var bookId))
+                            affectedBookIds.Add(bookId);
+                    }
+                }
+
                 var deleteItems = connection.CreateCommand();
                 deleteItems.Transaction = transaction;
                 deleteItems.CommandText = "DELETE FROM BookCollectionItems WHERE CollectionId = $id;";
                 deleteItems.Parameters.AddWithValue("$id", collectionId.ToString());
-                await deleteItems.ExecuteNonQueryAsync(cancellationToken);
+                var deletedItems = await deleteItems.ExecuteNonQueryAsync(cancellationToken);
 
                 var deleteCollection = connection.CreateCommand();
                 deleteCollection.Transaction = transaction;
                 deleteCollection.CommandText = "DELETE FROM BookCollections WHERE Id = $id;";
                 deleteCollection.Parameters.AddWithValue("$id", collectionId.ToString());
-                await deleteCollection.ExecuteNonQueryAsync(cancellationToken);
+                var deletedCollections = await deleteCollection.ExecuteNonQueryAsync(cancellationToken);
+
+                if (deletedCollections > 0 && defaultCollectionId is { } uncollectedId)
+                {
+                    foreach (var bookId in affectedBookIds.Distinct())
+                        await NormalizeBookCollectionMembershipAsync(
+                            connection,
+                            transaction,
+                            uncollectedId,
+                            bookId,
+                            cancellationToken);
+                }
+
                 await transaction.CommitAsync(cancellationToken);
-                NotifyDataChanged();
+                if (deletedItems > 0 || deletedCollections > 0)
+                    NotifyDataChanged();
             }
             catch
             {
@@ -1378,29 +1483,77 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
-            var command = connection.CreateCommand();
-            command.CommandText = add
-                ? """
-                  INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
-                  SELECT $collectionId, $bookId, $addedAt
-                  WHERE EXISTS(SELECT 1 FROM BookCollections WHERE Id = $collectionId)
-                    AND EXISTS(SELECT 1 FROM Books WHERE Id = $bookId);
-                  """
-                : "DELETE FROM BookCollectionItems WHERE CollectionId = $collectionId AND BookId = $bookId;";
-            command.Parameters.AddWithValue("$collectionId", collectionId.ToString());
-            command.Parameters.AddWithValue("$bookId", bookId.ToString());
-            if (add) command.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
-            var changed = await command.ExecuteNonQueryAsync(cancellationToken);
-            if (changed > 0)
-                NotifyDataChanged();
-            if (add && changed == 0)
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
             {
-                var verify = connection.CreateCommand();
-                verify.CommandText = "SELECT EXISTS(SELECT 1 FROM BookCollectionItems WHERE CollectionId = $collectionId AND BookId = $bookId);";
-                verify.Parameters.AddWithValue("$collectionId", collectionId.ToString());
-                verify.Parameters.AddWithValue("$bookId", bookId.ToString());
-                if (Convert.ToInt64(await verify.ExecuteScalarAsync(cancellationToken)) == 0)
+                var defaultCollectionId = await GetCollectionIdByNameAsync(
+                    connection,
+                    BookLibraryDefaults.UncollectedCollectionName,
+                    cancellationToken,
+                    transaction)
+                    ?? throw new InvalidOperationException("未收藏收藏夹不存在。");
+
+                var exists = connection.CreateCommand();
+                exists.Transaction = transaction;
+                exists.CommandText = """
+                    SELECT EXISTS(SELECT 1 FROM BookCollections WHERE Id = $collectionId)
+                       AND EXISTS(SELECT 1 FROM Books WHERE Id = $bookId);
+                    """;
+                exists.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                exists.Parameters.AddWithValue("$bookId", bookId.ToString());
+                if (add && Convert.ToInt64(await exists.ExecuteScalarAsync(cancellationToken)) == 0)
                     throw new InvalidOperationException("书籍或收藏夹已不存在。");
+
+                var changed = 0;
+                if (add && collectionId == defaultCollectionId)
+                {
+                    var clearCustom = connection.CreateCommand();
+                    clearCustom.Transaction = transaction;
+                    clearCustom.CommandText = """
+                        DELETE FROM BookCollectionItems
+                        WHERE BookId = $bookId AND CollectionId <> $defaultCollectionId;
+                        """;
+                    clearCustom.Parameters.AddWithValue("$bookId", bookId.ToString());
+                    clearCustom.Parameters.AddWithValue("$defaultCollectionId", defaultCollectionId.ToString());
+                    changed += await clearCustom.ExecuteNonQueryAsync(cancellationToken);
+                }
+                else if (add)
+                {
+                    var addMembership = connection.CreateCommand();
+                    addMembership.Transaction = transaction;
+                    addMembership.CommandText = """
+                        INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+                        VALUES ($collectionId, $bookId, $addedAt);
+                        """;
+                    addMembership.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                    addMembership.Parameters.AddWithValue("$bookId", bookId.ToString());
+                    addMembership.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
+                    changed += await addMembership.ExecuteNonQueryAsync(cancellationToken);
+                }
+                else if (collectionId != defaultCollectionId)
+                {
+                    var removeMembership = connection.CreateCommand();
+                    removeMembership.Transaction = transaction;
+                    removeMembership.CommandText = "DELETE FROM BookCollectionItems WHERE CollectionId = $collectionId AND BookId = $bookId;";
+                    removeMembership.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                    removeMembership.Parameters.AddWithValue("$bookId", bookId.ToString());
+                    changed += await removeMembership.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                changed += await NormalizeBookCollectionMembershipAsync(
+                    connection,
+                    transaction,
+                    defaultCollectionId,
+                    bookId,
+                    cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                if (changed > 0)
+                    NotifyDataChanged();
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
             }
         }
         finally { _databaseGate.Release(); }

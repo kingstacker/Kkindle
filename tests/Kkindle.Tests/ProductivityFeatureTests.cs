@@ -29,6 +29,7 @@ public sealed class ProductivityFeatureTests
                 AutoBackupEnabled = true,
                 AutoGenerateEpubAndAzw3OnImport = true,
                 AutoBackupRetention = 99,
+                LibraryViewMode = "collections",
                 AiEnabled = false,
                 NetworkEnabled = false,
                 AutoUpdateCheckEnabled = false,
@@ -62,6 +63,7 @@ public sealed class ProductivityFeatureTests
             Assert.Equal("mobi", restored.PreferredOpenFormat);
             Assert.Equal("C:\\Calibre", restored.CalibrePath);
             Assert.Equal(30, restored.AutoBackupRetention);
+            Assert.Equal("Collections", restored.LibraryViewMode);
             Assert.True(restored.AutoGenerateEpubAndAzw3OnImport);
             Assert.False(restored.AiEnabled);
             Assert.False(restored.NetworkEnabled);
@@ -111,6 +113,7 @@ public sealed class ProductivityFeatureTests
             await File.WriteAllTextAsync(paths.Settings, "{ invalid json");
             var defaults = await store.LoadAsync();
             Assert.Equal("epub", defaults.PreferredOpenFormat);
+            Assert.Equal("Grid", defaults.LibraryViewMode);
             Assert.False(defaults.AutoGenerateEpubAndAzw3OnImport);
             Assert.True(defaults.CollectionsMutuallyExclusive);
             Assert.True(defaults.AutoConnectDevice);

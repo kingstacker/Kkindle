@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Kkindle.Core;
+using Kkindle.Infrastructure;
 using SkiaSharp;
 using Xunit;
 
@@ -183,6 +184,31 @@ public sealed partial class SettingsTests
         await Render();
         Assert.Equal(resizedToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window));
         Capture(scope.Window, "view-switch-resized-grid");
+    });
+
+    [Fact]
+    public Task LibraryViewModeRestoresAndPersists() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create(new AppSettings
+        {
+            UiLanguage = "zh-CN",
+            OnboardingCompleted = true,
+            NetworkEnabled = false,
+            AutoUpdateCheckEnabled = false,
+            AutoConnectDevice = false,
+            LibraryViewMode = "Collections"
+        });
+
+        Assert.True(scope.Get<ScrollViewer>("CollectionScroll").IsVisible);
+        Assert.True(scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").IsChecked);
+
+        scope.Get<MenuItem>("LibraryListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
+        Assert.Equal("List", (await new AppSettingsStore(scope.Paths).LoadAsync()).LibraryViewMode);
+
+        scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
+        Assert.Equal("Collections", (await new AppSettingsStore(scope.Paths).LoadAsync()).LibraryViewMode);
     });
 
     private static Rect[] GetToolbarControlBounds(Control toolbar, Window window) => toolbar

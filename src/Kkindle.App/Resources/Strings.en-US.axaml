@@ -272,6 +272,7 @@
     <x:String x:Key="Ui.Auto.D6D0F10A7D96A8D2">Publication year</x:String>
     <x:String x:Key="Ui.Auto.1107B9A98AD38DB6">Publisher</x:String>
     <x:String x:Key="Ui.Auto.515559957FD3ACBD">Category</x:String>
+    <x:String x:Key="Ui.Auto.649F19CE8EB1CEE9">Collections</x:String>
     <x:String x:Key="Ui.Auto.41299D9BE86670E7">Pagination</x:String>
     <x:String x:Key="Ui.Auto.8882BD88D4E7E80F">Switch to list view</x:String>
     <x:String x:Key="Ui.Auto.0474752B788B123E">Toggle compact table of contents</x:String>

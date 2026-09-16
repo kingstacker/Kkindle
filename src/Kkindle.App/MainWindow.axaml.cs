@@ -425,7 +425,7 @@ public partial class MainWindow : Window
         UpdateMaximizeGlyph();
         UpdateWindowShadowMargin();
         SetSidebarActive(AllBooksButton);
-        SetLibraryViewMode(LibraryViewMode.Grid);
+        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode));
         InitializeDeviceShelfControls();
         UpdateLibraryUi();
         ConfigureStage3Timer();
@@ -579,7 +579,10 @@ public partial class MainWindow : Window
         ViewModel.RefreshView();
         UpdateLibraryUi();
         if (_selectedCard is not null)
+        {
+            DetailCollectionsText.Text = DescribeBookCollections(_selectedCard);
             UpdateDetailActionIcons(_selectedCard.Book.IsFavorite, _selectedCard.Book.ReadingStatus);
+        }
         UpdateDeviceBookSelectionUi();
         UpdateDeviceBookPaginationUi();
         UpdateDeviceBookEmptyState();
@@ -1222,6 +1225,16 @@ public partial class MainWindow : Window
             _ => LibraryGridGlyphData
         });
         UpdateLibraryUi();
+        ScheduleAppSettingsAutoSave();
+    }
+
+    private static LibraryViewMode ParseLibraryViewMode(string? value)
+    {
+        if (string.Equals(value, nameof(LibraryViewMode.List), StringComparison.OrdinalIgnoreCase))
+            return LibraryViewMode.List;
+        if (string.Equals(value, nameof(LibraryViewMode.Collections), StringComparison.OrdinalIgnoreCase))
+            return LibraryViewMode.Collections;
+        return LibraryViewMode.Grid;
     }
 
     private static string DescribeLibraryViewMode(LibraryViewMode mode) => mode switch
@@ -1250,6 +1263,7 @@ public partial class MainWindow : Window
         DetailDescriptionText.Text = card.DescriptionLabel;
         DetailTagsBox.Text = card.Book.Tags;
         DetailCategoryBox.Text = card.Book.Category;
+        DetailCollectionsText.Text = DescribeBookCollections(card);
         DetailDescriptionBox.Text = card.Book.Description ?? string.Empty;
         DetailSeriesBox.Text = card.Book.Series ?? string.Empty;
         DetailPublisherBox.Text = card.Book.Publisher ?? string.Empty;
@@ -1274,6 +1288,21 @@ public partial class MainWindow : Window
         }
 
         ShowLibraryDetailPane();
+    }
+
+    private string DescribeBookCollections(BookCardViewModel card)
+    {
+        var customCollectionNames = CollectionFolders
+            .Where(folder => !string.Equals(
+                folder.Collection.Name,
+                BookLibraryDefaults.UncollectedCollectionName,
+                StringComparison.Ordinal)
+                && card.Book.CollectionIds.Contains(folder.Collection.Id))
+            .Select(folder => folder.Name)
+            .ToArray();
+        return customCollectionNames.Length > 0
+            ? string.Join("、", customCollectionNames)
+            : T("未收藏");
     }
 
     // The pane uses one render-only translation. Its content is populated
@@ -1453,6 +1482,7 @@ public partial class MainWindow : Window
         DetailIdentifierText.Text = string.Empty;
         DetailTagsBox.Text = string.Empty;
         DetailCategoryBox.Text = string.Empty;
+        DetailCollectionsText.Text = string.Empty;
         DetailDescriptionBox.Text = string.Empty;
         DetailSeriesBox.Text = string.Empty;
         DetailPublisherBox.Text = string.Empty;
@@ -2341,7 +2371,13 @@ public partial class MainWindow : Window
         var collectionMenu = new MenuItem { Header = T("收藏夹") };
         ApplyLegacyMenuItemSize(collectionMenu);
         collectionMenu.Resources["FlyoutThemeMinWidth"] = 0d;
-        foreach (var folder in CollectionFolders)
+        var customCollections = CollectionFolders
+            .Where(folder => !string.Equals(
+                folder.Collection.Name,
+                BookLibraryDefaults.UncollectedCollectionName,
+                StringComparison.Ordinal))
+            .ToArray();
+        foreach (var folder in customCollections)
         {
             var item = new MenuItem
             {
@@ -2354,7 +2390,7 @@ public partial class MainWindow : Window
             item.Click += async (_, _) => await ToggleBookCollectionAsync(card, folder);
             collectionMenu.Items.Add(item);
         }
-        if (CollectionFolders.Count > 0)
+        if (customCollections.Length > 0)
             collectionMenu.Items.Add(new Separator());
         collectionMenu.Items.Add(CreateMenuItem(T("新建收藏夹…"), async () =>
         {
@@ -2372,11 +2408,11 @@ public partial class MainWindow : Window
                 SetTaskStatus(T("创建收藏夹失败：{0}", UiText.Localize(exception.Message)));
             }
         }));
-        if (CollectionFolders.Count > 0)
+        if (customCollections.Length > 0)
         {
             var deleteCollectionMenu = new MenuItem { Header = T("删除收藏夹") };
             ApplyLegacyMenuItemSize(deleteCollectionMenu);
-            foreach (var folder in CollectionFolders)
+            foreach (var folder in customCollections)
                 deleteCollectionMenu.Items.Add(CreateMenuItem(folder.Name, () => DeleteCollectionAsync(folder)));
             collectionMenu.Items.Add(deleteCollectionMenu);
         }
@@ -4145,6 +4181,14 @@ public partial class MainWindow : Window
     private void CollectionFolder_ContextRequested(object? sender, ContextRequestedEventArgs e)
     {
         if (sender is not Control { DataContext: BookCollectionFolderViewModel folder } control) return;
+        if (string.Equals(
+                folder.Collection.Name,
+                BookLibraryDefaults.UncollectedCollectionName,
+                StringComparison.Ordinal))
+        {
+            e.Handled = true;
+            return;
+        }
         var menu = new ContextMenu();
         menu.Items.Add(CreateMenuItem(T("删除收藏夹"), () => DeleteCollectionAsync(folder)));
         menu.Open(control);

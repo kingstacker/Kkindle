@@ -145,7 +145,7 @@ public interface IZLibraryService
 
 public static class BookLibraryDefaults
 {
-    // Every imported book starts in this collection until the user organizes it
-    // into other collections. Created automatically on library initialization.
+    // System view for books that have no user-created collection membership.
+    // Created automatically and maintained by the library service.
     public const string UncollectedCollectionName = "未收藏";
 }

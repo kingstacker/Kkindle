@@ -51,6 +51,9 @@ public sealed record AppSettings
     public bool AutoBackupEnabled { get; init; }
     public bool AutoGenerateEpubAndAzw3OnImport { get; init; }
     public bool CollectionsMutuallyExclusive { get; init; } = true;
+    // The library surface is restored before the first window is shown so a
+    // restart does not unexpectedly fall back to the grid view.
+    public string LibraryViewMode { get; init; } = "Grid";
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool AutoGenerateAzw3OnImport { get; init; }
     public int AutoBackupRetention { get; init; } = 5;
@@ -97,6 +100,14 @@ public sealed record AppSettings
         settings ??= new AppSettings();
         var preferred = (settings.PreferredOpenFormat ?? string.Empty).Trim().TrimStart('.').ToLowerInvariant();
         if (preferred is not ("epub" or "pdf" or "azw3" or "mobi")) preferred = "epub";
+        var libraryViewMode = (settings.LibraryViewMode ?? string.Empty).Trim();
+        if (!libraryViewMode.Equals("List", StringComparison.OrdinalIgnoreCase)
+            && !libraryViewMode.Equals("Collections", StringComparison.OrdinalIgnoreCase))
+            libraryViewMode = "Grid";
+        else
+            libraryViewMode = libraryViewMode.Equals("List", StringComparison.OrdinalIgnoreCase)
+                ? "List"
+                : "Collections";
         return settings with
         {
             UiLanguage = UiText.NormalizeLanguage(settings.UiLanguage),
@@ -105,6 +116,7 @@ public sealed record AppSettings
                 ? null
                 : settings.DefaultDeviceModel.Trim(),
             PreferredOpenFormat = preferred,
+            LibraryViewMode = libraryViewMode,
             CalibrePath = (settings.CalibrePath ?? string.Empty).Trim(),
             EmbeddingModelId = string.IsNullOrWhiteSpace(settings.EmbeddingModelId)
                 ? DefaultEmbeddingModelId

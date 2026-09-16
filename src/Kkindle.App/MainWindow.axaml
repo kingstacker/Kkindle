@@ -865,21 +865,30 @@
             <Grid x:Name="LibraryContentHost"
                   RowDefinitions="Auto,*,Auto"
                   Background="Transparent">
+                    <!-- Collection breadcrumb header: the active collection
+                         title on the left and a single back action on the right. -->
                     <Border x:Name="CollectionHeader"
-                            Padding="0,0,0,10"
+                            Margin="0,0,0,4"
+                            Padding="0,2,0,12"
                             BorderBrush="{DynamicResource InkBrush}"
                             BorderThickness="0,0,0,1"
                             IsVisible="False">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <Button x:Name="BackToCollectionsButton"
-                                    Content="{DynamicResource Ui.Auto.5A24236E1754E954}"
-                                    Padding="10,5"
-                                    ToolTip.Tip="{DynamicResource Ui.Auto.94DC4D657CA6C6C6}"
-                                    Click="BackToCollectionsButton_Click" />
-                            <Button Content="{DynamicResource Ui.Auto.D35813D68B11A471}" Padding="10,5" Click="ShowAllBooksButton_Click" />
-                            <TextBlock x:Name="ActiveCollectionTitleText" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" />
-                            <Button x:Name="CreateCollectionButton" Content="{DynamicResource Ui.Auto.FDF0B569D820ADE8}" Padding="10,5" Click="CreateCollectionButton_Click" />
-                        </StackPanel>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                            <TextBlock x:Name="ActiveCollectionTitleText" FontSize="28" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button x:Name="BackToCollectionsButton"
+                                        Classes="quiet"
+                                        Padding="12,6"
+                                        ToolTip.Tip="{DynamicResource Ui.Auto.94DC4D657CA6C6C6}"
+                                        Click="BackToCollectionsButton_Click">
+                                    <StackPanel Orientation="Horizontal" Spacing="7">
+                                        <Path Classes="libraryGlyph" Width="13" Height="13" Data="M 15,4 L 7,12 L 15,20" />
+                                        <TextBlock Text="{DynamicResource Ui.Auto.5A24236E1754E954}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="CreateCollectionButton" Content="{DynamicResource Ui.Auto.FDF0B569D820ADE8}" Padding="12,6" Click="CreateCollectionButton_Click" />
+                            </StackPanel>
+                        </Grid>
                     </Border>
 
                     <Grid Grid.Row="1">
@@ -1318,6 +1327,10 @@
                             <StackPanel Spacing="5">
                                 <TextBlock Text="{DynamicResource Ui.Auto.515559957FD3ACBD}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                 <TextBox x:Name="DetailCategoryBox" PlaceholderText="{DynamicResource Ui.Auto.0C9D7F0CA37B2C93}" />
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.649F19CE8EB1CEE9}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailCollectionsText" IsReadOnly="True" TextWrapping="Wrap" />
                             </StackPanel>
                             <StackPanel Spacing="5">
                                 <TextBlock Text="{DynamicResource Ui.Auto.8131EAFD02396E6A}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />

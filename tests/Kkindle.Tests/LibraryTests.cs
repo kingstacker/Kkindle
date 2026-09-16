@@ -29,17 +29,22 @@ public sealed class LibraryTests
             await service.AddBookToCollectionAsync(book.Id, favorites.Id);
 
             var restored = Assert.Single(await service.SearchAsync());
-            Assert.Equal(3, restored.CollectionIds.Count);
-            Assert.Contains(uncollected.Id, restored.CollectionIds);
+            Assert.Equal(2, restored.CollectionIds.Count);
+            Assert.DoesNotContain(uncollected.Id, restored.CollectionIds);
             Assert.Contains(reading.Id, restored.CollectionIds);
             Assert.Contains(favorites.Id, restored.CollectionIds);
+            Assert.Empty((await service.SearchPageAsync(collectionId: uncollected.Id, pageSize: 20)).Books);
             Assert.Equal(3, (await service.GetCollectionsAsync()).Count);
 
             await service.RemoveBookFromCollectionAsync(book.Id, reading.Id);
+            restored = Assert.Single(await service.SearchAsync());
+            Assert.DoesNotContain(uncollected.Id, restored.CollectionIds);
+            Assert.Contains(favorites.Id, restored.CollectionIds);
             await service.DeleteCollectionAsync(favorites.Id);
 
             restored = Assert.Single(await service.SearchAsync());
             Assert.Equal(uncollected.Id, Assert.Single(restored.CollectionIds));
+            Assert.Single((await service.SearchPageAsync(collectionId: uncollected.Id, pageSize: 20)).Books);
             Assert.Equal(2, (await service.GetCollectionsAsync()).Count);
             Assert.Contains(uncollected.Id, (await service.GetCollectionsAsync()).Select(collection => collection.Id));
         }
@@ -67,6 +72,49 @@ public sealed class LibraryTests
             var books = await service.SearchAsync();
             Assert.Equal(2, books.Count);
             Assert.All(books, book => Assert.Contains(uncollected.Id, book.CollectionIds));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task ExistingDefaultMembershipsAreNormalizedWhenLibraryReopens()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "legacy-collection.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([source]);
+            var book = Assert.Single(await service.SearchAsync());
+            var uncollected = (await service.GetCollectionsAsync())
+                .Single(collection => collection.Name == BookLibraryDefaults.UncollectedCollectionName);
+            var custom = await service.CreateCollectionAsync("旧收藏夹");
+            await service.AddBookToCollectionAsync(book.Id, custom.Id);
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = paths.Database
+            }.ToString()))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+                    VALUES ($collectionId, $bookId, $addedAt);
+                    """;
+                command.Parameters.AddWithValue("$collectionId", uncollected.Id.ToString());
+                command.Parameters.AddWithValue("$bookId", book.Id.ToString());
+                command.Parameters.AddWithValue("$addedAt", DateTimeOffset.UtcNow.ToString("O"));
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var reopened = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await reopened.InitializeAsync();
+            var normalized = Assert.Single(await reopened.SearchAsync());
+            Assert.Equal([custom.Id], normalized.CollectionIds);
         }
         finally { TestHelpers.TryDelete(root); }
     }

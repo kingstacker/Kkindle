@@ -363,6 +363,7 @@ public partial class MainWindow
         await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken, _s3SyncStoredSettings.DeviceId);
         await _deviceModelStore.InitializeAsync(cancellationToken);
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
+        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode));
         ApplyMainAppearance();
         ApplyReaderAppearance();
         SyncReaderAppearanceControls();
@@ -5270,6 +5271,7 @@ public partial class MainWindow
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
             SendToKindleWebEnabled = SendToKindleWebEnabledCheck.IsChecked != false,
             GridGalleryDisplay = GridGalleryDisplayCheck.IsChecked == true,
+            LibraryViewMode = _libraryViewMode.ToString(),
             ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,

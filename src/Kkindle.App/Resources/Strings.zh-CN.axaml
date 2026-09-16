@@ -272,6 +272,7 @@
     <x:String x:Key="Ui.Auto.D6D0F10A7D96A8D2">出版年</x:String>
     <x:String x:Key="Ui.Auto.1107B9A98AD38DB6">出版社</x:String>
     <x:String x:Key="Ui.Auto.515559957FD3ACBD">分类</x:String>
+    <x:String x:Key="Ui.Auto.649F19CE8EB1CEE9">所在收藏夹</x:String>
     <x:String x:Key="Ui.Auto.41299D9BE86670E7">分页</x:String>
     <x:String x:Key="Ui.Auto.8882BD88D4E7E80F">切换到列表视图</x:String>
     <x:String x:Key="Ui.Auto.0474752B788B123E">切换极简目录</x:String>
