@@ -60,7 +60,11 @@ const translations = {
     aboutSource: "查看 GitHub 项目",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "选一个平台，开始建立你的书库。",
-    downloadLead: "官网只负责展示与指路，安装包来自 GitHub Releases。下载区会自动选择最新稳定版本。",
+    downloadLead: "下载区会自动选择 GitHub Releases 的最新稳定版本，国内用户也可通过百度网盘下载。",
+    baiduKicker: "国内用户备用下载",
+    baiduNote: "GitHub 下载不便时，可从百度网盘获取安装包。",
+    baiduLink: "百度网盘下载",
+    baiduCodeLabel: "提取码",
     stableLabel: "最新稳定版本",
     checking: "正在获取…",
     releasePage: "查看完整 Release ↗",
@@ -185,7 +189,11 @@ const translations = {
     aboutSource: "View the project on GitHub",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "Choose a platform. Start your library.",
-    downloadLead: "The site points the way; GitHub Releases hosts the packages. The download area selects the latest stable release automatically.",
+    downloadLead: "The download area selects the latest stable GitHub release automatically. Users in China can also download via Baidu Netdisk.",
+    baiduKicker: "Alternative download for China",
+    baiduNote: "If GitHub downloads are inconvenient, get the installer from Baidu Netdisk.",
+    baiduLink: "Download from Baidu Netdisk",
+    baiduCodeLabel: "Extraction code",
     stableLabel: "Latest stable release",
     checking: "Loading…",
     releasePage: "View full Release ↗",
@@ -441,8 +449,7 @@ function renderRelease(release) {
   });
 
   const primary = document.querySelector("[data-primary-download]");
-  const installer = assets.find((item) => assetMatchers["windows-installer"].test(item.name || ""));
-  if (primary) primary.href = installer?.browser_download_url || "#downloads";
+  if (primary) primary.href = "#platform-downloads";
   setStatus("releaseLoaded");
   resyncHashTarget();
 }

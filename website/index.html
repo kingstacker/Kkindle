@@ -17,7 +17,7 @@
     <meta property="og:url" content="https://kingstacker.github.io/Kkindle/" />
     <meta property="og:image" content="https://raw.githubusercontent.com/kingstacker/Kkindle/master/website/assets/library.png" />
     <link rel="icon" type="image/png" href="assets/kkindle.png" />
-    <link rel="stylesheet" href="styles.css?v=minimal-4" />
+    <link rel="stylesheet" href="styles.css?v=minimal-7" />
     <title>Kkindle — 个人电子书与 Kindle 工作台</title>
   </head>
   <body id="top">
@@ -77,7 +77,7 @@
             <div class="hero-actions">
               <a
                 class="button button-primary"
-                href="#downloads"
+                href="#platform-downloads"
                 data-primary-download
                 data-i18n="heroDownload"
               >
@@ -307,7 +307,7 @@
             </a>
           </div>
 
-          <div class="platforms">
+          <div class="platforms" id="platform-downloads">
             <article class="platform" data-platform="windows">
               <div class="platform-head">
                 <h3 data-i18n="windowsTitle">Windows</h3>
@@ -409,6 +409,28 @@
                 </li>
               </ul>
             </article>
+          </div>
+
+          <div class="baidu-download">
+            <div class="baidu-download-copy">
+              <p class="label" data-i18n="baiduKicker">国内用户备用下载</p>
+              <p class="baidu-download-note" data-i18n="baiduNote">GitHub 下载不便时，可通过百度网盘下载。</p>
+            </div>
+            <div class="baidu-download-action">
+              <a
+                class="button button-primary"
+                href="https://pan.baidu.com/s/1A5Sx-2bkFIgGwc35zyioWA?pwd=kxas"
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span data-i18n="baiduLink">百度网盘下载</span>
+                <span aria-hidden="true">↗</span>
+              </a>
+              <p class="baidu-code">
+                <span data-i18n="baiduCodeLabel">提取码</span>
+                <code>kxas</code>
+              </p>
+            </div>
           </div>
 
           <div class="downloads-foot">
@@ -593,6 +615,6 @@
     <noscript>
       <div class="noscript-note">请启用 JavaScript 以加载最新版本下载信息；也可以直接前往 GitHub Releases。</div>
     </noscript>
-    <script src="app.js?v=minimal-4" defer></script>
+    <script src="app.js?v=minimal-7" defer></script>
   </body>
 </html>
