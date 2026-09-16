@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the website's recent changelog entries from CHANGELOG.md."""
+"""Build the website's recent bilingual changelog from the source files."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEBSITE_SOURCE = ROOT / "website"
 CHANGELOG_SOURCE = ROOT / "CHANGELOG.md"
+CHANGELOG_EN_SOURCE = ROOT / "CHANGELOG.en.md"
 DEFAULT_OUTPUT = ROOT / "artifacts" / "website"
 START_MARKER = "<!-- changelog-generated:start -->"
 END_MARKER = "<!-- changelog-generated:end -->"
@@ -124,7 +125,40 @@ def render_inline_markdown(value: str) -> str:
     return ITALIC.sub(r"<em>\1</em>", escaped)
 
 
-def render_release(release: Release, is_latest: bool) -> str:
+def category_translation_key(category: ChangelogCategory) -> str | None:
+    return CATEGORY_TRANSLATIONS.get(category.name)
+
+
+def find_english_category(
+    category: ChangelogCategory,
+    english_categories: list[ChangelogCategory],
+    used_indices: set[int],
+) -> ChangelogCategory | None:
+    category_key = category_translation_key(category)
+    for index, candidate in enumerate(english_categories):
+        if index in used_indices:
+            continue
+        if category_key and category_translation_key(candidate) == category_key:
+            used_indices.add(index)
+            return candidate
+
+    return None
+
+
+def render_changelog_copy(value: str, language: str) -> str:
+    lang = "zh-CN" if language == "zh" else "en"
+    hidden = " hidden" if language == "en" else ""
+    return (
+        f'<span class="changelog-copy" data-changelog-lang="{language}" '
+        f'lang="{lang}"{hidden}>{render_inline_markdown(value)}</span>'
+    )
+
+
+def render_release(
+    release: Release,
+    english_release: Release | None,
+    is_latest: bool,
+) -> str:
     version = html.escape(release.version)
     release_date = release.date
     date_markup = ""
@@ -156,8 +190,10 @@ def render_release(release: Release, is_latest: bool) -> str:
         '  <ul class="changelog-points">',
     ]
 
+    english_categories = english_release.categories if english_release else []
+    used_english_categories: set[int] = set()
     for category in release.categories:
-        category_key = CATEGORY_TRANSLATIONS.get(category.name)
+        category_key = category_translation_key(category)
         if category_key:
             category_markup = (
                 f'<span class="changelog-type" data-i18n="{category_key}">'
@@ -169,12 +205,25 @@ def render_release(release: Release, is_latest: bool) -> str:
                 f"{html.escape(category.name)}</span>"
             )
 
-        for point in category.points:
+        english_category = find_english_category(
+            category,
+            english_categories,
+            used_english_categories,
+        )
+        for point_index, point in enumerate(category.points):
+            english_point = (
+                english_category.points[point_index]
+                if english_category and point_index < len(english_category.points)
+                else None
+            )
+            copies = [render_changelog_copy(str(point), "zh")]
+            if english_point:
+                copies.append(render_changelog_copy(str(english_point), "en"))
             lines.extend(
                 [
-                    "    <li>",
+                    '    <li data-changelog-item>',
                     f"      {category_markup}",
-                    f'      <span lang="zh-CN">{render_inline_markdown(str(point))}</span>',
+                    f"      {''.join(copies)}",
                     "    </li>",
                 ]
             )
@@ -183,9 +232,17 @@ def render_release(release: Release, is_latest: bool) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def render_changelog(releases: list[Release]) -> str:
+def render_changelog(
+    releases: list[Release],
+    english_releases: list[Release],
+) -> str:
+    english_by_version = {release.version: release for release in english_releases}
     return "\n\n".join(
-        render_release(release, is_latest=(index == 0))
+        render_release(
+            release,
+            english_by_version.get(release.version),
+            is_latest=(index == 0),
+        )
         for index, release in enumerate(releases)
     )
 
@@ -199,7 +256,12 @@ def generate_site(output_dir: Path) -> None:
     start, remainder = source_index.split(START_MARKER, maxsplit=1)
     _, end = remainder.split(END_MARKER, maxsplit=1)
     releases = parse_changelog(CHANGELOG_SOURCE.read_text(encoding="utf-8"))
-    generated = render_changelog(releases)
+    english_releases = (
+        parse_changelog(CHANGELOG_EN_SOURCE.read_text(encoding="utf-8"))
+        if CHANGELOG_EN_SOURCE.exists()
+        else []
+    )
+    generated = render_changelog(releases, english_releases)
     output_index = "\n".join(
         [start.rstrip(), START_MARKER, generated, END_MARKER, end.lstrip()]
     )

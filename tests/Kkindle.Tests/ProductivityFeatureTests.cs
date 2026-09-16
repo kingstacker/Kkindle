@@ -40,6 +40,7 @@ public sealed class ProductivityFeatureTests
                 LastAutoUpdateCheckAt = new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)),
                 PendingUpdateVersion = "1.2.3",
                 PendingUpdateReleaseNotes = "修复阅读器翻页问题",
+                PendingUpdateReleaseNotesEnglish = "Fixed reader page-turning issue",
                 PendingUpdatePackagePath = Path.Combine(root, "update.exe"),
                 PendingUpdateDownloadedAt = new DateTimeOffset(2026, 8, 23, 9, 35, 0, TimeSpan.FromHours(8)),
                 Translation = new BookTranslationSettings
@@ -73,6 +74,7 @@ public sealed class ProductivityFeatureTests
             Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 30, 0, TimeSpan.FromHours(8)), restored.LastAutoUpdateCheckAt);
             Assert.Equal("1.2.3", restored.PendingUpdateVersion);
             Assert.Equal("修复阅读器翻页问题", restored.PendingUpdateReleaseNotes);
+            Assert.Equal("Fixed reader page-turning issue", restored.PendingUpdateReleaseNotesEnglish);
             Assert.Equal(Path.Combine(root, "update.exe"), restored.PendingUpdatePackagePath);
             Assert.Equal(new DateTimeOffset(2026, 8, 23, 9, 35, 0, TimeSpan.FromHours(8)), restored.PendingUpdateDownloadedAt);
             Assert.Equal(BookTranslationProvider.Ai, restored.Translation.Provider);

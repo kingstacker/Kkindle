@@ -268,19 +268,27 @@ jobs:
           set -euo pipefail
           tag="${RELEASE_TAG#v}"
           changelog="$RUNNER_TEMP/kkindle-release-notes.md"
+          changelog_en="$RUNNER_TEMP/kkindle-release-notes.en.md"
 
-          # 1) A matching "## 0.7.0", "## v0.7.0" or "## [0.7.0]" section in
-          #    CHANGELOG.md wins: it is the curated release catalogue. Only a
-          #    level-2 heading ends the section so "###" subsections survive.
-          if [[ -f CHANGELOG.md ]]; then
-            awk -v ver="$tag" '
-              BEGIN { pattern = "^## +\\[?v?" ver "\\]?([) .:-]|$)" }
-              $0 ~ pattern { found = 1; next }
-              found && /^## / { exit }
-              found { print }
-            ' CHANGELOG.md > "$changelog" || true
-            sed -i '/./,$!d' "$changelog"
-          fi
+          extract_release_section() {
+            local source="$1"
+            local output="$2"
+            : > "$output"
+            if [[ -f "$source" ]]; then
+              # Only a level-2 heading ends the section so "###" subsections survive.
+              awk -v ver="$tag" '
+                BEGIN { pattern = "^## +\\[?v?" ver "\\]?([) .:-]|$)" }
+                $0 ~ pattern { found = 1; next }
+                found && /^## / { exit }
+                found { print }
+              ' "$source" > "$output" || true
+              sed -i '/./,$!d' "$output"
+            fi
+          }
+
+          # A matching section in either language is the curated release catalogue.
+          extract_release_section CHANGELOG.md "$changelog"
+          extract_release_section CHANGELOG.en.md "$changelog_en"
 
           # 2) Fall back to a detailed commit log since the previous tag.
           if [[ ! -s "$changelog" ]]; then
@@ -302,6 +310,19 @@ jobs:
             } > "$changelog"
           fi
 
+          {
+            echo '<!-- kkindle-release-notes:zh-CN -->'
+            echo '## 中文'
+            cat "$changelog"
+            if [[ -s "$changelog_en" ]]; then
+              echo
+              echo '<!-- kkindle-release-notes:en-US -->'
+              echo '## English'
+              cat "$changelog_en"
+            fi
+          } > "$RUNNER_TEMP/kkindle-release-notes.combined.md"
+          mv "$RUNNER_TEMP/kkindle-release-notes.combined.md" "$changelog"
+
           test -s "$changelog"
           echo "----- release notes -----"
           cat "$changelog"
@@ -321,6 +342,7 @@ jobs:
             --arg tag_name "$RELEASE_TAG" \
             --arg html_url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}" \
             --rawfile body "$RUNNER_TEMP/kkindle-release-notes.md" \
+            --rawfile body_en "$RUNNER_TEMP/kkindle-release-notes.en.md" \
             --arg setup_name "$setup_name" \
             --arg setup_url "${download_base}/${setup_name}" \
             --argjson setup_size "$(stat -c%s "artifacts/${setup_name}")" \
@@ -332,6 +354,7 @@ jobs:
               tag_name: $tag_name,
               html_url: $html_url,
               body: $body,
+              body_en: $body_en,
               draft: false,
               prerelease: $prerelease,
               assets: [

@@ -97,9 +97,9 @@ const translations = {
     unavailable: "当前版本未提供",
     changelogKicker: "CHANGELOG",
     changelogTitle: "每一次更新，都让阅读更顺手。",
-    changelogLead: "网页更新日志自动从 CHANGELOG.md 生成，展示最近 3 个版本；完整内容见仓库。",
+    changelogLead: "网页更新日志自动从 CHANGELOG.md 与 CHANGELOG.en.md 生成，展示最近 3 个版本；完整内容见仓库。",
     changelogFull: "查看完整更新日志",
-    changelogPlaceholder: "发布网页时，会自动从 CHANGELOG.md 生成更新日志。",
+    changelogPlaceholder: "发布网页时，会自动从 CHANGELOG.md 与 CHANGELOG.en.md 生成更新日志。",
     changelogLatest: "最新",
     changelogImproved: "优化",
     changelogFixed: "修复",
@@ -226,9 +226,9 @@ const translations = {
     unavailable: "Not provided in this release",
     changelogKicker: "CHANGELOG",
     changelogTitle: "Every update makes reading feel easier.",
-    changelogLead: "The latest 3 releases are generated from CHANGELOG.md and shown in their original Chinese; the repository has the full history.",
+    changelogLead: "The latest 3 releases are generated from CHANGELOG.md and CHANGELOG.en.md; see the repository for the full history.",
     changelogFull: "View the full changelog",
-    changelogPlaceholder: "Release notes are generated from CHANGELOG.md when the site is deployed.",
+    changelogPlaceholder: "Release notes are generated from CHANGELOG.md and CHANGELOG.en.md when the site is deployed.",
     changelogLatest: "Latest",
     changelogImproved: "Improved",
     changelogFixed: "Fixed",
@@ -290,6 +290,25 @@ function getStoredLanguage() {
   return navigator.language && navigator.language.toLowerCase().startsWith("en") ? "en" : "zh";
 }
 
+function applyChangelogLanguage() {
+  const preferredLanguage = currentLanguage === "en" ? "en" : "zh";
+  document.querySelectorAll("[data-changelog-item]").forEach((item) => {
+    const variants = Array.from(item.querySelectorAll("[data-changelog-lang]"));
+    if (variants.length === 0) return;
+    const preferred = variants.find((variant) => variant.dataset.changelogLang === preferredLanguage);
+    const fallback = variants.find((variant) => variant.dataset.changelogLang === "zh") || variants[0];
+    variants.forEach((variant) => {
+      variant.hidden = variant !== (preferred || fallback);
+    });
+  });
+
+  document.querySelectorAll("[data-changelog-link]").forEach((link) => {
+    link.href = currentLanguage === "en"
+      ? "https://github.com/kingstacker/Kkindle/blob/master/CHANGELOG.en.md"
+      : "https://github.com/kingstacker/Kkindle/blob/master/CHANGELOG.md";
+  });
+}
+
 function applyLanguage(language) {
   currentLanguage = language === "en" ? "en" : "zh";
   const copy = translations[currentLanguage];
@@ -311,6 +330,7 @@ function applyLanguage(language) {
     const key = element.dataset.i18nLabel;
     if (copy[key]) element.setAttribute("aria-label", copy[key]);
   });
+  applyChangelogLanguage();
 
   const languageToggle = document.querySelector("#language-toggle");
   if (languageToggle) {
@@ -453,6 +473,7 @@ function renderRelease(release) {
       }
     });
   });
+  applyChangelogLanguage();
 
   const primary = document.querySelector("[data-primary-download]");
   if (primary) primary.href = "#platform-downloads";

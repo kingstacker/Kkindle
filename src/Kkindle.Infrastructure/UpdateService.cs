@@ -78,7 +78,8 @@ public sealed class UpdateService : IDisposable
             release.Body?.Trim() ?? string.Empty,
             ParseHttpsUri(release.HtmlUrl, "GitHub Release 页面"),
             package,
-            checksums);
+            checksums,
+            release.BodyEnglish?.Trim());
     }
 
     public async Task<string> DownloadAsync(
@@ -328,6 +329,9 @@ public sealed class UpdateService : IDisposable
 
         [JsonPropertyName("body")]
         public string? Body { get; init; }
+
+        [JsonPropertyName("body_en")]
+        public string? BodyEnglish { get; init; }
 
         [JsonPropertyName("draft")]
         public bool Draft { get; init; }

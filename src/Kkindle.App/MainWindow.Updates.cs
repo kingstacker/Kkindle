@@ -64,6 +64,7 @@ public partial class MainWindow
             ShowUpdateBadge(
                 storedVersion,
                 _appSettings.PendingUpdateReleaseNotes,
+                _appSettings.PendingUpdateReleaseNotesEnglish,
                 packageReady: true);
             AboutUpdateStatusText.Text = T("更新包已下载，退出应用后安装 {0}", storedVersion);
             return;
@@ -73,7 +74,10 @@ public partial class MainWindow
             return;
 
         _pendingUpdateVersion = storedVersion;
-        ShowUpdateBadge(storedVersion, _appSettings.PendingUpdateReleaseNotes);
+        ShowUpdateBadge(
+            storedVersion,
+            _appSettings.PendingUpdateReleaseNotes,
+            _appSettings.PendingUpdateReleaseNotesEnglish);
         AboutUpdateStatusText.Text = T("发现新版本 {0}", storedVersion);
     }
 
@@ -246,7 +250,11 @@ public partial class MainWindow
                 update.Version,
                 StringComparison.OrdinalIgnoreCase)
                 && TryGetPendingUpdatePackage(out _, out _);
-            ShowUpdateBadge(update.Version, update.ReleaseNotes, packageReady);
+            ShowUpdateBadge(
+                update.Version,
+                update.ReleaseNotes,
+                update.ReleaseNotesEnglish,
+                packageReady);
         }
 
         try
@@ -262,6 +270,10 @@ public partial class MainWindow
                 PendingUpdateVersion = update?.Version,
                 PendingUpdateReleaseNotes =
                     update is null ? null : TruncateNotes(update.ReleaseNotes, 2000),
+                PendingUpdateReleaseNotesEnglish =
+                    update is null || string.IsNullOrWhiteSpace(update.ReleaseNotesEnglish)
+                        ? null
+                        : TruncateNotes(update.ReleaseNotesEnglish, 2000),
                 PendingUpdatePackagePath = samePendingPackage
                     ? _appSettings.PendingUpdatePackagePath
                     : null,
@@ -287,6 +299,7 @@ public partial class MainWindow
             {
                 PendingUpdateVersion = null,
                 PendingUpdateReleaseNotes = null,
+                PendingUpdateReleaseNotesEnglish = null,
                 PendingUpdatePackagePath = null,
                 PendingUpdateDownloadedAt = null
             });
@@ -308,10 +321,17 @@ public partial class MainWindow
         {
             PendingUpdateVersion = update.Version,
             PendingUpdateReleaseNotes = TruncateNotes(update.ReleaseNotes, 2000),
+            PendingUpdateReleaseNotesEnglish = string.IsNullOrWhiteSpace(update.ReleaseNotesEnglish)
+                ? null
+                : TruncateNotes(update.ReleaseNotesEnglish, 2000),
             PendingUpdatePackagePath = fullPackagePath,
             PendingUpdateDownloadedAt = DateTimeOffset.Now
         });
-        ShowUpdateBadge(update.Version, update.ReleaseNotes, packageReady: true);
+        ShowUpdateBadge(
+            update.Version,
+            update.ReleaseNotes,
+            update.ReleaseNotesEnglish,
+            packageReady: true);
         AboutUpdateStatusText.Text = T("更新包已下载，退出应用后安装 {0}", update.Version);
         try
         {
@@ -379,7 +399,11 @@ public partial class MainWindow
         }
     }
 
-    private void ShowUpdateBadge(string version, string? releaseNotes, bool packageReady = false)
+    private void ShowUpdateBadge(
+        string version,
+        string? releaseNotes,
+        string? releaseNotesEnglish,
+        bool packageReady = false)
     {
         UpdateBadgeButton.IsVisible = true;
         var tip = new StackPanel { Spacing = 6, MaxWidth = 380 };
@@ -390,7 +414,9 @@ public partial class MainWindow
         });
         tip.Children.Add(new TextBlock
         {
-            Text = TruncateNotes(releaseNotes, 600) is { Length: > 0 } notes
+            Text = TruncateNotes(
+                GetLocalizedReleaseNotes(releaseNotes, releaseNotesEnglish),
+                600) is { Length: > 0 } notes
                 ? notes
                 : T("本次更新未提供说明。"),
             TextWrapping = TextWrapping.Wrap
@@ -420,9 +446,52 @@ public partial class MainWindow
         return normalized[..maxLength].TrimEnd() + "…";
     }
 
-    private static string BuildUpdatePrompt(string currentVersion, AppUpdateInfo update)
+    private static string GetLocalizedReleaseNotes(string? releaseNotes, string? releaseNotesEnglish)
     {
-        var notes = TruncateNotes(update.ReleaseNotes, 900);
+        if (UiText.IsEnglish)
+        {
+            var english = ExtractReleaseNotesLanguage(releaseNotesEnglish, "en-US")
+                ?? ExtractReleaseNotesLanguage(releaseNotes, "en-US");
+            if (!string.IsNullOrWhiteSpace(english)) return english;
+        }
+
+        var chinese = ExtractReleaseNotesLanguage(releaseNotes, "zh-CN");
+        if (!string.IsNullOrWhiteSpace(chinese)) return chinese;
+        return ExtractReleaseNotesLanguage(releaseNotesEnglish, "en-US") ?? string.Empty;
+    }
+
+    private static string? ExtractReleaseNotesLanguage(string? notes, string language)
+    {
+        var normalized = (notes ?? string.Empty).Replace("\r", string.Empty, StringComparison.Ordinal).Trim();
+        if (normalized.Length == 0) return null;
+
+        var marker = $"<!-- kkindle-release-notes:{language} -->";
+        if (!normalized.Contains("<!-- kkindle-release-notes:", StringComparison.Ordinal))
+            return normalized;
+
+        var markerIndex = normalized.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0) return null;
+        var contentStart = markerIndex + marker.Length;
+        var nextMarker = normalized.IndexOf("<!-- kkindle-release-notes:", contentStart, StringComparison.Ordinal);
+        var content = (nextMarker >= 0
+                ? normalized[contentStart..nextMarker]
+                : normalized[contentStart..])
+            .Trim();
+
+        if (content.StartsWith("## 中文", StringComparison.Ordinal)
+            || content.StartsWith("## English", StringComparison.Ordinal))
+        {
+            content = content[(content.IndexOf('\n') + 1)..].Trim();
+        }
+
+        return content.Length == 0 ? null : content;
+    }
+
+    private string BuildUpdatePrompt(string currentVersion, AppUpdateInfo update)
+    {
+        var notes = TruncateNotes(
+            GetLocalizedReleaseNotes(update.ReleaseNotes, update.ReleaseNotesEnglish),
+            900);
         if (notes.Length == 0) notes = T("本次 Release 未提供更新说明。");
         return T("当前版本：{0}\n最新版本：{1}\n\n{2}", currentVersion, update.Version, notes);
     }

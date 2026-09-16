@@ -6,6 +6,7 @@ on:
       - master
     paths:
       - "CHANGELOG.md"
+      - "CHANGELOG.en.md"
       - "scripts/generate_website_changelog.py"
       - "website/**"
       - ".github/workflows/pages.yml"
