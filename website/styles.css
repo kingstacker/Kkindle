@@ -472,21 +472,32 @@ a {
 }
 
 .about-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-top: 32px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 760px;
+  margin-top: clamp(32px, 4vw, 48px);
+}
+
+.about-actions > .button,
+.qq-group {
+  width: 100%;
+  min-height: 78px;
+  border-radius: 12px;
+}
+
+.about-actions > .button {
+  justify-content: space-between;
+  padding: 14px 18px;
 }
 
 .qq-group {
-  display: inline-flex;
-  min-height: 58px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px 8px 9px;
+  gap: 14px;
+  padding: 10px 14px 10px 10px;
   border: 1px solid var(--line);
-  border-radius: 4px;
   background: var(--surface);
   text-align: left;
   transition: border-color var(--ease), background var(--ease), transform var(--ease);
@@ -499,14 +510,18 @@ a {
 }
 
 .qq-group-icon {
-  width: 40px;
-  height: 40px;
+  width: 56px;
+  height: 56px;
   flex: none;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--surface);
 }
 
 .qq-group-copy {
   display: grid;
-  gap: 1px;
+  min-width: 0;
+  gap: 2px;
   line-height: 1.35;
 }
 
@@ -517,13 +532,15 @@ a {
 }
 
 .qq-group-number {
-  font-size: 14px;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.03em;
 }
 
 .qq-group-hint {
-  margin-left: 8px;
+  margin-left: 0;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
   white-space: nowrap;
 }
 
@@ -1025,6 +1042,11 @@ a {
   .about-points {
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;
+  }
+
+  .about-actions {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
   }
 
   .qq-group {
