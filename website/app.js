@@ -58,6 +58,11 @@ const translations = {
     aboutPoint2: "EPUB / PDF / MOBI / AZW3",
     aboutPoint3: "MIT 开源许可",
     aboutSource: "查看 GitHub 项目",
+    qqGroupLabel: "QQ 用户群",
+    qqGroupCopyHint: "点击复制群号",
+    qqGroupCopied: "已复制群号 1109898894",
+    qqGroupCopyFailed: "复制失败，请手动记录群号 1109898894。",
+    qqGroupButtonLabel: "复制 QQ 用户群号 1109898894",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "选一个平台，开始建立你的书库。",
     downloadLead: "下载区会自动选择 GitHub Releases 的最新稳定版本，国内用户也可通过百度网盘下载。",
@@ -182,6 +187,11 @@ const translations = {
     aboutPoint2: "EPUB / PDF / MOBI / AZW3",
     aboutPoint3: "MIT License",
     aboutSource: "View the project on GitHub",
+    qqGroupLabel: "QQ Group",
+    qqGroupCopyHint: "Click to copy group number",
+    qqGroupCopied: "Copied QQ group number 1109898894",
+    qqGroupCopyFailed: "Copy failed. Please note group number 1109898894 manually.",
+    qqGroupButtonLabel: "Copy QQ user group number 1109898894",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "Choose a platform. Start your library.",
     downloadLead: "The download area selects the latest stable GitHub release automatically. Users in China can also download via Baidu Netdisk.",
@@ -482,10 +492,27 @@ function setupNavigation() {
   });
 }
 
+function setupQQGroupCopy() {
+  const button = document.querySelector("#qq-group-copy");
+  const status = document.querySelector("#qq-group-copy-status");
+  if (!button || !status) return;
+
+  button.addEventListener("click", async () => {
+    const copy = translations[currentLanguage];
+    try {
+      await navigator.clipboard.writeText("1109898894");
+      status.textContent = copy.qqGroupCopied;
+    } catch {
+      status.textContent = copy.qqGroupCopyFailed;
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   applyLanguage(getStoredLanguage());
   markRecommendedPlatform();
   setupNavigation();
+  setupQQGroupCopy();
 
   document.querySelector("#language-toggle")?.addEventListener("click", () => {
     applyLanguage(currentLanguage === "en" ? "zh" : "en");
