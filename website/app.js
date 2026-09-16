@@ -512,13 +512,24 @@ function setupQQGroupCopy() {
   const status = document.querySelector("#qq-group-copy-status");
   if (!button || !status) return;
 
+  let statusTimer;
+  const showStatus = (message, isError = false) => {
+    status.textContent = message;
+    status.classList.toggle("is-error", isError);
+    status.classList.add("is-visible");
+    window.clearTimeout(statusTimer);
+    statusTimer = window.setTimeout(() => {
+      status.classList.remove("is-visible");
+    }, 2400);
+  };
+
   button.addEventListener("click", async () => {
     const copy = translations[currentLanguage];
     try {
       await navigator.clipboard.writeText("1109898894");
-      status.textContent = copy.qqGroupCopied;
+      showStatus(copy.qqGroupCopied);
     } catch {
-      status.textContent = copy.qqGroupCopyFailed;
+      showStatus(copy.qqGroupCopyFailed, true);
     }
   });
 }

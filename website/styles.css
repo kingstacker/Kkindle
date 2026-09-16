@@ -536,6 +536,39 @@ a {
   letter-spacing: 0.03em;
 }
 
+.copy-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 20;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgb(19 19 19 / 12%);
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 10px);
+  transition: opacity var(--ease), transform var(--ease), visibility 0s linear var(--ease);
+}
+
+.copy-toast.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition-delay: 0s;
+}
+
+.copy-toast.is-error {
+  color: var(--ink-2);
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
