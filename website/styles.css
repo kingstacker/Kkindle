@@ -746,7 +746,7 @@ a {
 
 .changelog-points li {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 16px;
   padding-block: 10px;
   border-bottom: 1px solid var(--line);

@@ -92,25 +92,20 @@ const translations = {
     unavailable: "当前版本未提供",
     changelogKicker: "CHANGELOG",
     changelogTitle: "每一次更新，都让阅读更顺手。",
-    changelogLead: "这里记录 Kkindle 的重要变化。网页展示重点，完整内容保留在项目仓库。",
+    changelogLead: "网页更新日志自动从 CHANGELOG.md 生成，展示最近 3 个版本；完整内容见仓库。",
     changelogFull: "查看完整更新日志",
+    changelogPlaceholder: "发布网页时，会自动从 CHANGELOG.md 生成更新日志。",
     changelogLatest: "最新",
     changelogImproved: "优化",
     changelogFixed: "修复",
     changelogAdded: "新增",
-    changelog077Date: "2026 年 9 月 2 日",
-    changelog077Title: "阅读器动画与目录体验",
-    changelog077Point1: "优化阅读器翻页动画与章节切换的衔接，减少过渡过程中的跳动与闪烁。",
-    changelog077Point2: "改进目录滚动策略与当前章节定位，长目录浏览更稳定。",
-    changelog076Date: "2026 年 9 月 1 日",
-    changelog076Title: "更可靠的 EPUB 目录与章节导航",
-    changelog076Point1: "目录支持按 EPUB 原始层级缩进、展开和折叠，并自动展开当前章节所在分支。",
-    changelog076Point2: "修复复杂 EPUB 的目录优先级、重复条目、层级丢失和章节定位问题。",
-    changelog076Point3: "优化 EPUB 内容清洗与阅读内容缓存，规则变化后会自动重建。",
-    changelog075Date: "2026 年 9 月 1 日",
-    changelog075Title: "更稳定的 Kindle 设备工作流",
-    changelog075Point1: "修复 Kindle 资源缓存、Windows WPD 传输和词典弹窗相关问题。",
-    changelog075Point2: "优化设备传输与阅读资料导出的进度、重试和状态反馈。",
+    changelogChanged: "变更",
+    changelogSecurity: "安全",
+    changelogDeprecated: "弃用",
+    changelogRemoved: "移除",
+    changelogDocumentation: "文档",
+    changelogMaintenance: "维护",
+    changelogPerformance: "性能",
     faqKicker: "BEFORE YOU START",
     faqTitle: "下载前，先知道这几件事。",
     faq1Question: "Kkindle 支持哪些文件格式？",
@@ -221,25 +216,20 @@ const translations = {
     unavailable: "Not provided in this release",
     changelogKicker: "CHANGELOG",
     changelogTitle: "Every update makes reading feel easier.",
-    changelogLead: "A concise record of important Kkindle changes. The full history remains in the repository.",
+    changelogLead: "The latest 3 releases are generated from CHANGELOG.md and shown in their original Chinese; the repository has the full history.",
     changelogFull: "View the full changelog",
+    changelogPlaceholder: "Release notes are generated from CHANGELOG.md when the site is deployed.",
     changelogLatest: "Latest",
     changelogImproved: "Improved",
     changelogFixed: "Fixed",
     changelogAdded: "Added",
-    changelog077Date: "September 2, 2026",
-    changelog077Title: "Reader motion and table of contents",
-    changelog077Point1: "Refined reader page-turn animations and chapter transitions to reduce jumps and flashes.",
-    changelog077Point2: "Improved table-of-contents scrolling and current-chapter positioning for long books.",
-    changelog076Date: "September 1, 2026",
-    changelog076Title: "More reliable EPUB navigation",
-    changelog076Point1: "The table of contents now keeps EPUB hierarchy, indentation, expansion, and the current chapter branch.",
-    changelog076Point2: "Fixed priority, duplicate-entry, hierarchy, and chapter-targeting issues in complex EPUBs.",
-    changelog076Point3: "Refined EPUB content cleanup and reading caches so rule changes rebuild old data automatically.",
-    changelog075Date: "September 1, 2026",
-    changelog075Title: "A steadier Kindle device workflow",
-    changelog075Point1: "Fixed Kindle resource caches, Windows WPD transfers, and long dictionary dialogs.",
-    changelog075Point2: "Improved progress, retry, and device-state feedback for transfers and reading-material exports.",
+    changelogChanged: "Changed",
+    changelogSecurity: "Security",
+    changelogDeprecated: "Deprecated",
+    changelogRemoved: "Removed",
+    changelogDocumentation: "Docs",
+    changelogMaintenance: "Maint.",
+    changelogPerformance: "Perf.",
     faqKicker: "BEFORE YOU START",
     faqTitle: "A few things to know before downloading.",
     faq1Question: "Which file formats does Kkindle support?",
@@ -298,6 +288,10 @@ function applyLanguage(language) {
   document.querySelectorAll("[data-i18n]").forEach((element) => {
     const key = element.dataset.i18n;
     if (copy[key]) element.textContent = copy[key];
+  });
+  document.querySelectorAll("[data-changelog-date]").forEach((element) => {
+    const date = formatReleaseDate(element.dataset.changelogDate);
+    if (date) element.textContent = date;
   });
   document.querySelectorAll("[data-i18n-alt]").forEach((element) => {
     const key = element.dataset.i18nAlt;
@@ -360,7 +354,9 @@ function formatBytes(bytes) {
 
 function formatReleaseDate(value) {
   if (!value) return "";
-  const date = new Date(value);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString(currentLanguage === "en" ? "en-US" : "zh-CN", {
     year: "numeric",

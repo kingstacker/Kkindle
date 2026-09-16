@@ -5,6 +5,8 @@ on:
     branches:
       - master
     paths:
+      - "CHANGELOG.md"
+      - "scripts/generate_website_changelog.py"
       - "website/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -29,13 +31,16 @@ jobs:
       - name: Check out sources
         uses: actions/checkout@v7
 
+      - name: Generate website from changelog
+        run: python3 scripts/generate_website_changelog.py
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Upload website artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: website
+          path: artifacts/website
 
       - name: Deploy to GitHub Pages
         id: deployment
