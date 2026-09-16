@@ -3034,12 +3034,12 @@
                                         <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                                             <Border Width="44" Height="44" Background="{DynamicResource SoftHoverBrush}" CornerRadius="22">
                                                 <Grid Width="32" Height="30">
-                                                    <Polygon Points="4,11 6,2 13,8" Fill="{DynamicResource PaperBrush}" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
-                                                    <Polygon Points="19,8 26,2 28,11" Fill="{DynamicResource PaperBrush}" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
-                                                    <Ellipse Margin="3,6,3,1" Fill="{DynamicResource PaperBrush}" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
-                                                    <Ellipse Width="2.5" Height="3" Margin="9,14,0,0" Fill="{DynamicResource InkBrush}" HorizontalAlignment="Left" VerticalAlignment="Top" />
-                                                    <Ellipse Width="2.5" Height="3" Margin="0,14,9,0" Fill="{DynamicResource InkBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" />
-                                                    <Polygon Points="14,20 18,20 16,22.5" Fill="{DynamicResource InkBrush}" />
+                                                    <Path Data="M 11,8 C 9,6 11,4 10,2" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                                                    <Path Data="M 18,8 C 16,6 18,4 17,2" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                                                    <Path Data="M 23,14 H 25 C 28,14 29,16 29,19 C 29,22 27,24 23,24" Fill="Transparent" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
+                                                    <Path Data="M 7,12 H 23 V 19 C 23,24 20,26 15,26 C 10,26 7,24 7,19 Z" Fill="{DynamicResource PaperBrush}" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
+                                                    <Path Data="M 8,14 C 12,15.5 18,15.5 22,14" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
+                                                    <Path Data="M 5,28 H 25" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
                                                 </Grid>
                                             </Border>
                                             <StackPanel Spacing="3" VerticalAlignment="Center">
