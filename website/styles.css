@@ -493,7 +493,7 @@ a {
 
 .qq-group {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   padding: 10px 14px 10px 10px;
@@ -507,15 +507,6 @@ a {
   border-color: var(--line-2);
   background: var(--bg-sunken);
   transform: translateY(-1px);
-}
-
-.qq-group-icon {
-  width: 56px;
-  height: 56px;
-  flex: none;
-  object-fit: cover;
-  border-radius: 10px;
-  background: var(--surface);
 }
 
 .qq-group-copy {
