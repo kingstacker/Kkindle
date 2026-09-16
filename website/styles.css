@@ -493,7 +493,7 @@ a {
 
 .qq-group {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   padding: 10px 14px 10px 10px;
@@ -525,8 +525,7 @@ a {
   line-height: 1.35;
 }
 
-.qq-group-label,
-.qq-group-hint {
+.qq-group-label {
   color: var(--muted);
   font-size: var(--fs-meta);
 }
@@ -535,13 +534,6 @@ a {
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.03em;
-}
-
-.qq-group-hint {
-  margin-left: 0;
-  padding-left: 14px;
-  border-left: 1px solid var(--line);
-  white-space: nowrap;
 }
 
 .visually-hidden {
@@ -611,7 +603,7 @@ a {
   padding: 24px clamp(20px, 3vw, 32px);
   border: 1px solid var(--line-2);
   border-top: 2px solid var(--ink);
-  background: var(--surface);
+  background: transparent;
 }
 
 .baidu-download-copy {
@@ -1051,10 +1043,6 @@ a {
 
   .qq-group {
     max-width: 100%;
-  }
-
-  .qq-group-hint {
-    display: none;
   }
 
   .footer-inner {
