@@ -226,6 +226,12 @@ public partial class MainWindow
         BookFile file,
         string path)
     {
+        // A reader can also be opened from a restored/deep-linked card that
+        // was never attached to the library visual tree. The explicit open
+        // action is allowed to populate the detail cover on that path; normal
+        // library cards remain viewport-lazy.
+        card.LoadCover();
+
         // Invalidate any debounced progress save from the previous reader
         // session before installing the new session cancellation source.
         Interlocked.Increment(ref _readerProgressSaveSequence);

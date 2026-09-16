@@ -67,6 +67,7 @@ public partial class MainWindow
         NormalizeLibrarySortChrome(LibrarySortBox);
         AlignShelfToolbar(LibraryToolbar, LibraryWorkspace, LibraryContentHost);
         AlignCollectionHeader(LibraryToolbar, CollectionHeader);
+        AlignLibraryListRightEdge(LibraryToolbar, BookList);
     }
 
     private static void NormalizeLibrarySortChrome(ComboBox sortBox)
@@ -116,6 +117,21 @@ public partial class MainWindow
             headerMargin.Bottom);
         if (headerMargin != margin)
             header.Margin = margin;
+    }
+
+    private static void AlignLibraryListRightEdge(Grid toolbar, ListBox list)
+    {
+        // List rows are full-width controls, while the toolbar is inset to the
+        // last complete gallery slot. Reuse that live right inset so list rows
+        // never extend beyond the horizontal boundary established above them.
+        var listMargin = list.Margin;
+        var margin = new Thickness(
+            listMargin.Left,
+            listMargin.Top,
+            toolbar.Margin.Right,
+            listMargin.Bottom);
+        if (listMargin != margin)
+            list.Margin = margin;
     }
 
     private void LibraryToolbar_SizeChanged(object? sender, SizeChangedEventArgs e)

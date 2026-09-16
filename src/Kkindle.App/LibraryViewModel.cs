@@ -19,7 +19,6 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         Book = book;
         DataRoot = dataRoot;
         Refresh();
-        LoadCover();
     }
 
     public Book Book { get; }
@@ -301,9 +300,7 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 
     public void Refresh()
     {
-        CoverImage?.Dispose();
-        CoverImage = null;
-        _coverLoadAttempted = false;
+        UnloadCover();
 
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Authors));
@@ -330,6 +327,20 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CoverImage));
     }
 
+    /// <summary>
+    /// Releases the decoded bitmap while keeping the book metadata alive.
+    /// Virtualized card roots call this when they leave the visual tree so a
+    /// long scroll does not retain every cover visited by the user.
+    /// </summary>
+    public void UnloadCover()
+    {
+        if (CoverImage is null && !_coverLoadAttempted) return;
+        CoverImage?.Dispose();
+        CoverImage = null;
+        _coverLoadAttempted = false;
+        OnPropertyChanged(nameof(CoverImage));
+    }
+
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         OnPropertyChanged(nameof(Title));
@@ -353,8 +364,7 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         UiText.LanguageChanged -= OnLanguageChanged;
-        CoverImage?.Dispose();
-        CoverImage = null;
+        UnloadCover();
     }
 
     private static Bitmap? LoadCoverImage(string dataRoot, string? relativePath, int decodeWidth)
@@ -768,7 +778,6 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
             OnPropertyChanged(nameof(HasActiveFilters));
             ViewChanged?.Invoke(this, EventArgs.Empty);
-            _ = RestoreMissingPdfCoversAsync(Books.ToArray(), requestId, requestToken);
         }
         finally
         {
@@ -789,30 +798,6 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         {
             StatusText = UiText.Get("刷新书库失败：{0}", UiText.Localize(exception.Message));
             ViewChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    private async Task RestoreMissingPdfCoversAsync(BookCardViewModel[] cards, int requestId, CancellationToken cancellationToken)
-    {
-        foreach (var card in cards)
-        {
-            if (cancellationToken.IsCancellationRequested || requestId != _viewRequestId) return;
-            if (card.CoverImage is not null || !card.Book.Files.Any(file => string.Equals(file.Format, "pdf", StringComparison.OrdinalIgnoreCase))) continue;
-            try
-            {
-                var cover = await _library.EnsurePdfCoverAsync(card.Book.Id, cancellationToken);
-                if (cancellationToken.IsCancellationRequested || requestId != _viewRequestId) return;
-                if (string.IsNullOrWhiteSpace(cover)) continue;
-                card.Book.CoverPath = cover;
-                card.Refresh();
-                card.LoadCover();
-            }
-            catch (OperationCanceledException) { return; }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
-            {
-                // A missing/damaged PDF keeps its placeholder; the library is
-                // usable while other visible books receive their covers.
-            }
         }
     }
 

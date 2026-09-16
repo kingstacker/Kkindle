@@ -128,10 +128,12 @@ public partial class MainWindow : Window
     private bool _updatingFilterControls;
     private bool _updatingDetails;
     private LibraryViewMode _libraryViewMode = LibraryViewMode.Grid;
-    private AnimatedWrapPanel? _bookGridPanel;
+    private VirtualizingWrapPanel? _bookGridPanel;
     private BookCardViewModel? _selectedCard;
     private BookCardViewModel? _multiSelectAnchor;
     private readonly HashSet<Guid> _selectedBookIds = [];
+    private readonly HashSet<BookCardViewModel> _visibleBookCards = [];
+    private readonly HashSet<BookCardViewModel> _pdfCoverRequests = [];
     private TaskCompletionSource<bool>? _confirmationCompletion;
     private TaskCompletionSource<string?>? _collectionNameCompletion;
     private TaskCompletionSource<bool>? _messageCompletion;
@@ -368,11 +370,12 @@ public partial class MainWindow : Window
             HideReaderFootnotePopup();
         BookGrid.ItemsPanel = new FuncTemplate<Panel?>(() =>
         {
-            _bookGridPanel = new AnimatedWrapPanel
+            _bookGridPanel = new VirtualizingWrapPanel
             {
                 Orientation = Avalonia.Layout.Orientation.Horizontal,
                 ItemWidth = BookGridSlotWidth,
-                ItemHeight = BookGridSlotHeight
+                ItemHeight = BookGridSlotHeight,
+                CacheLength = 0.5
             };
             return _bookGridPanel;
         });
@@ -448,9 +451,12 @@ public partial class MainWindow : Window
             if (e.NameScope.Find("PART_Popup") is Popup popup)
                 popup.Width = _authorPopupWidth;
         };
+        BookGrid.TemplateApplied += (_, _) => AttachBookGridAutoHideScrollbar();
+        BookList.TemplateApplied += (_, _) => AttachBookListAutoHideScrollbar();
         Dispatcher.UIThread.Post(UpdateBookGridLayout, DispatcherPriority.Loaded);
         AttachSettingsAutoHideScrollbar();
         AttachBookGridAutoHideScrollbar();
+        AttachBookListAutoHideScrollbar();
         AttachReadingDashboardAutoHideScrollbars();
     }
 
@@ -468,16 +474,18 @@ public partial class MainWindow : Window
         }
     }
 
-    // Marks the book grid's ScrollViewer with the bookScroll/.scrolling classes
-    // the App.axaml auto-hide styles key on. Re-runs on TemplateApplied because
-    // the ListBox rebuilds its template ScrollViewer.
-    private void AttachBookGridAutoHideScrollbar()
+    // Marks a library ListBox's ScrollViewer with the bookScroll/.scrolling
+    // classes the App.axaml auto-hide styles key on. The ListBox can rebuild
+    // its template ScrollViewer when its visual tree changes, so the caller
+    // also retries from TemplateApplied.
+    private void AttachBookGridAutoHideScrollbar() => AttachBookAutoHideScrollbar(BookGrid);
+
+    private void AttachBookListAutoHideScrollbar() => AttachBookAutoHideScrollbar(BookList);
+
+    private void AttachBookAutoHideScrollbar(ListBox bookList)
     {
-        if (BookGrid.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } viewer)
-        {
-            BookGrid.TemplateApplied += (_, _) => AttachBookGridAutoHideScrollbar();
+        if (bookList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } viewer)
             return;
-        }
         if (viewer.Classes.Contains("bookScroll")) return;
         viewer.Classes.Add("bookScroll");
         viewer.Classes.Add("scrolling");
@@ -493,6 +501,12 @@ public partial class MainWindow : Window
             idleTimer.Stop();
             idleTimer.Start();
         };
+        viewer.DetachedFromVisualTree += (_, _) =>
+        {
+            idleTimer.Stop();
+            viewer.Classes.Remove("scrolling");
+        };
+        Dispatcher.UIThread.Post(idleTimer.Start, DispatcherPriority.Loaded);
     }
 
     // The settings page owns its ScrollViewer directly, so it can use the same
@@ -1242,6 +1256,68 @@ public partial class MainWindow : Window
         LibraryViewMode.List => T("列表视图"),
         _ => T("收藏夹视图")
     };
+
+    private void BookCard_AttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (sender is not Control control || control.DataContext is not BookCardViewModel card)
+            return;
+
+        _visibleBookCards.Add(card);
+        card.LoadCover();
+        if (card.CoverImage is null
+            && card.Book.Files.Any(file => string.Equals(file.Format, "pdf", StringComparison.OrdinalIgnoreCase)))
+        {
+            _ = RestoreVisiblePdfCoverAsync(card);
+        }
+    }
+
+    private void BookCard_DetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (sender is not Control control || control.DataContext is not BookCardViewModel card)
+            return;
+
+        _visibleBookCards.Remove(card);
+        // The detail pane may still be displaying this card after its grid
+        // container was virtualized away. Keep that one bitmap alive until
+        // the selection changes; every other off-screen card can release it.
+        if (!ReferenceEquals(card, _selectedCard))
+            card.UnloadCover();
+    }
+
+    private async Task RestoreVisiblePdfCoverAsync(BookCardViewModel card)
+    {
+        if (!_pdfCoverRequests.Add(card)) return;
+
+        try
+        {
+            var cover = await _library.EnsurePdfCoverAsync(
+                card.Book.Id,
+                _lifetimeCancellation.Token);
+            if (string.IsNullOrWhiteSpace(cover)
+                || !ViewModel.Books.Any(current => ReferenceEquals(current, card)))
+            {
+                return;
+            }
+
+            card.Book.CoverPath = cover;
+            card.Refresh();
+            if (_visibleBookCards.Contains(card) || ReferenceEquals(card, _selectedCard))
+                card.LoadCover();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // A missing/damaged PDF keeps its placeholder; the visible shelf
+            // remains usable while a later attach can retry the generation.
+        }
+        finally
+        {
+            _pdfCoverRequests.Remove(card);
+        }
+    }
 
     private void SelectBook(BookCardViewModel card)
     {
@@ -4811,9 +4887,9 @@ public partial class MainWindow : Window
         SetGridColumnWidth(LibraryRoot.ColumnDefinitions[2], new GridLength(0));
     }
 
-    // Cards keep their fixed 166x304 wrap slot. The panel's minimum width
-    // follows the viewport so Avalonia measures row breaks from the visible
-    // shelf width instead of holding onto an old six-card desired width.
+    // Cards keep their fixed slot. The virtualizing panel's width follows the
+    // viewport so row breaks stay aligned with the visible shelf instead of
+    // holding onto an old six-card desired width.
     private void UpdateBookGridLayout()
     {
         if (_bookGridPanel is null) return;

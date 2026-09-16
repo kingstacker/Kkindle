@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Kkindle.Core;
@@ -185,6 +186,60 @@ public sealed partial class SettingsTests
         await Render();
         Assert.Equal(resizedToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window));
         Capture(scope.Window, "view-switch-resized-grid");
+    });
+
+    [Fact]
+    public Task LibraryListRowsStayWithinToolbarBoundaryAndHideScrollbarWhenIdle() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+
+        for (var index = 0; index < 12; index++)
+        {
+            var id = Guid.NewGuid();
+            scope.Window.ViewModel.Books.Add(new BookCardViewModel(new Book
+            {
+                Id = id,
+                Title = $"Synthetic {index}",
+                Authors = "Layout test",
+                Files = [new BookFile { Id = Guid.NewGuid(), BookId = id, Format = "epub", RelativePath = $"synthetic-{index}.epub" }]
+            }, scope.Paths.Data));
+        }
+
+        scope.Get<MenuItem>("LibraryListViewMenuItem")
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        await Render();
+
+        var list = scope.Get<ListBox>("BookList");
+        var toolbar = scope.Get<Grid>("LibraryToolbar");
+        var listOrigin = list.TranslatePoint(default, scope.Window)!.Value;
+        var toolbarOrigin = toolbar.TranslatePoint(default, scope.Window)!.Value;
+        var listRight = listOrigin.X + list.Bounds.Width;
+        var toolbarRight = toolbarOrigin.X + toolbar.Bounds.Width;
+        Assert.InRange(Math.Abs(listRight - toolbarRight), 0, 1);
+        var rows = list.GetVisualDescendants().OfType<Border>()
+            .Where(border => border.Classes.Contains("bookRow"))
+            .ToArray();
+        Assert.NotEmpty(rows);
+        foreach (var row in rows)
+        {
+            var rowOrigin = row.TranslatePoint(default, scope.Window)!.Value;
+            Assert.InRange(Math.Abs(rowOrigin.X + row.Bounds.Width - toolbarRight), 0, 1);
+        }
+
+        var viewer = Assert.Single(list.GetVisualDescendants().OfType<ScrollViewer>());
+        var thumb = Assert.Single(viewer.GetVisualDescendants().OfType<Thumb>());
+        Assert.Contains("bookScroll", viewer.Classes);
+        Assert.True(viewer.Extent.Height > viewer.Viewport.Height);
+
+        viewer.Offset = new Vector(0, 50);
+        await Render();
+        Assert.Contains("scrolling", viewer.Classes);
+        Assert.Equal(1, thumb.Opacity);
+        await Task.Delay(800);
+        await Render();
+        Assert.DoesNotContain("scrolling", viewer.Classes);
+        Assert.Equal(0, thumb.Opacity);
     });
 
     [Fact]
