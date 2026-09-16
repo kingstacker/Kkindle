@@ -75,6 +75,49 @@ jobs:
             -Version '${{ steps.version.outputs.version }}' `
             -OutputRoot $env:RELEASE_DIR
 
+      - name: Generate bilingual release notes
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $notesPath = Join-Path $env:RUNNER_TEMP 'kkindle-release-notes.md'
+          $notesEnglishPath = Join-Path $env:RUNNER_TEMP 'kkindle-release-notes.en.md'
+
+          function Get-ReleaseSection([string] $path, [string] $releaseVersion) {
+            if (-not (Test-Path -LiteralPath $path)) { return '' }
+            $lines = @(Get-Content -LiteralPath $path)
+            $headingPattern = '^##\s+\[?v?' + [regex]::Escape($releaseVersion) + '\]?(?:\s|$)'
+            $start = -1
+            for ($index = 0; $index -lt $lines.Count; $index++) {
+              if ($lines[$index] -match $headingPattern) {
+                $start = $index + 1
+                break
+              }
+            }
+            if ($start -lt 0) { return '' }
+            $end = $lines.Count
+            for ($index = $start; $index -lt $lines.Count; $index++) {
+              if ($lines[$index] -match '^##\s+') {
+                $end = $index
+                break
+              }
+            }
+            if ($end -le $start) { return '' }
+            return (($lines[$start..($end - 1)] -join [Environment]::NewLine).Trim())
+          }
+
+          $changelogZh = Get-ReleaseSection 'CHANGELOG.md' $version
+          $changelogEn = Get-ReleaseSection 'CHANGELOG.en.md' $version
+          if ([string]::IsNullOrWhiteSpace($changelogZh)) {
+            $changelogZh = "## 更新内容`n`nKkindle $version。"
+          }
+
+          $body = "<!-- kkindle-release-notes:zh-CN -->`n## 中文`n$changelogZh"
+          if (-not [string]::IsNullOrWhiteSpace($changelogEn)) {
+            $body += "`n`n<!-- kkindle-release-notes:en-US -->`n## English`n$changelogEn"
+          }
+          Set-Content -LiteralPath $notesPath -Value $body -Encoding utf8NoBOM
+          Set-Content -LiteralPath $notesEnglishPath -Value $changelogEn -Encoding utf8NoBOM
+
       - name: Create release tag
         if: steps.version.outputs.tag_exists == 'false'
         shell: pwsh
@@ -96,7 +139,8 @@ jobs:
           $manifest = [ordered]@{
             tag_name = $env:RELEASE_TAG
             html_url = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
-            body = ""
+            body = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'kkindle-release-notes.md') -Raw
+            body_en = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'kkindle-release-notes.en.md') -Raw
             draft = $false
             prerelease = $version -match '-'
             assets = @(
@@ -129,8 +173,9 @@ jobs:
           $releaseExists = $null -ne ($releases | Where-Object { $_.tagName -eq $env:RELEASE_TAG })
           if ($releaseExists) {
             gh release upload $env:RELEASE_TAG $assets --clobber --repo $env:GITHUB_REPOSITORY
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file (Join-Path $env:RUNNER_TEMP 'kkindle-release-notes.md')
           } else {
-            gh release create @releaseArgs $assets --generate-notes
+            gh release create @releaseArgs $assets --notes-file (Join-Path $env:RUNNER_TEMP 'kkindle-release-notes.md')
           }
 
       - name: Upload workflow artifacts

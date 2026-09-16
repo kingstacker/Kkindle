@@ -28,6 +28,7 @@ public sealed class UpdateServiceTests
               "tag_name": "v1.2.0",
               "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0",
               "body": "Release notes",
+              "body_en": "English release notes",
               "draft": false,
               "prerelease": false,
               "assets": [
@@ -56,6 +57,7 @@ public sealed class UpdateServiceTests
         Assert.Equal("1.2.0", update.Version);
         Assert.Equal("Kkindle-1.2.0-win-x64-setup.exe", update.Package.Name);
         Assert.Equal("Release notes", update.ReleaseNotes);
+        Assert.Equal("English release notes", update.ReleaseNotesEnglish);
     }
 
     [Fact]

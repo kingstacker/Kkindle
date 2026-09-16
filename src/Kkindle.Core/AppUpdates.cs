@@ -8,7 +8,8 @@ public sealed record AppUpdateInfo(
     string ReleaseNotes,
     Uri ReleasePage,
     AppUpdateAsset Package,
-    AppUpdateAsset Checksums);
+    AppUpdateAsset Checksums,
+    string? ReleaseNotesEnglish = null);
 
 public sealed record AppUpdateDownloadProgress(long BytesReceived, long? TotalBytes)
 {

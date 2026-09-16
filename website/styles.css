@@ -472,7 +472,105 @@ a {
 }
 
 .about-actions {
-  margin-top: 32px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 760px;
+  margin-top: clamp(32px, 4vw, 48px);
+}
+
+.about-actions > .button,
+.qq-group {
+  width: 100%;
+  min-height: 78px;
+  border-radius: 12px;
+}
+
+.about-actions > .button {
+  justify-content: space-between;
+  padding: 14px 18px;
+}
+
+.qq-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  transition: border-color var(--ease), background var(--ease), transform var(--ease);
+}
+
+.qq-group:hover {
+  border-color: var(--line-2);
+  background: var(--bg-sunken);
+  transform: translateY(-1px);
+}
+
+.qq-group-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.qq-group-label {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+}
+
+.qq-group-number {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.copy-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 20;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgb(19 19 19 / 12%);
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 10px);
+  transition: opacity var(--ease), transform var(--ease), visibility 0s linear var(--ease);
+}
+
+.copy-toast.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition-delay: 0s;
+}
+
+.copy-toast.is-error {
+  color: var(--ink-2);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* 8 · Downloads ========================================================== */
@@ -518,6 +616,64 @@ a {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: clamp(28px, 4vw, 56px);
   margin-top: clamp(36px, 4vw, 52px);
+}
+
+.baidu-download {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  margin-top: 32px;
+  padding: 24px clamp(20px, 3vw, 32px);
+  border: 1px solid var(--line-2);
+  border-top: 2px solid var(--ink);
+  background: transparent;
+}
+
+.baidu-download-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.baidu-download .label {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.baidu-download-note {
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.baidu-download-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px 22px;
+}
+
+.baidu-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+
+.baidu-code code {
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--bg-sunken);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .platform-head {
@@ -688,7 +844,7 @@ a {
 
 .changelog-points li {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 16px;
   padding-block: 10px;
   border-bottom: 1px solid var(--line);
@@ -849,6 +1005,15 @@ a {
   .platform-note {
     min-height: 0;
   }
+
+  .baidu-download {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .baidu-download-action {
+    justify-content: space-between;
+  }
 }
 
 @media (max-width: 760px) {
@@ -893,6 +1058,15 @@ a {
   .about-points {
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;
+  }
+
+  .about-actions {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
+  }
+
+  .qq-group {
+    max-width: 100%;
   }
 
   .footer-inner {

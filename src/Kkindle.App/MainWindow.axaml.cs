@@ -599,6 +599,7 @@ public partial class MainWindow : Window
             ShowUpdateBadge(
                 _pendingUpdateVersion,
                 _appSettings.PendingUpdateReleaseNotes,
+                _appSettings.PendingUpdateReleaseNotesEnglish,
                 packageReady);
             AboutUpdateStatusText.Text = packageReady
                 ? T("更新包已下载，退出应用后安装 {0}", _pendingUpdateVersion)

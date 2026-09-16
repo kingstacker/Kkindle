@@ -58,9 +58,17 @@ const translations = {
     aboutPoint2: "EPUB / PDF / MOBI / AZW3",
     aboutPoint3: "MIT 开源许可",
     aboutSource: "查看 GitHub 项目",
+    qqGroupLabel: "QQ 用户群",
+    qqGroupCopied: "已复制群号 1109898894",
+    qqGroupCopyFailed: "复制失败，请手动记录群号 1109898894。",
+    qqGroupButtonLabel: "复制 QQ 用户群号 1109898894",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "选一个平台，开始建立你的书库。",
-    downloadLead: "官网只负责展示与指路，安装包来自 GitHub Releases。下载区会自动选择最新稳定版本。",
+    downloadLead: "下载区会自动选择 GitHub Releases 的最新稳定版本，国内用户也可通过百度网盘下载。",
+    baiduKicker: "国内用户备用下载",
+    baiduNote: "GitHub 下载不便时，可从百度网盘获取安装包。",
+    baiduLink: "百度网盘下载",
+    baiduCodeLabel: "提取码",
     stableLabel: "最新稳定版本",
     checking: "正在获取…",
     releasePage: "查看完整 Release ↗",
@@ -88,25 +96,18 @@ const translations = {
     unavailable: "当前版本未提供",
     changelogKicker: "CHANGELOG",
     changelogTitle: "每一次更新，都让阅读更顺手。",
-    changelogLead: "这里记录 Kkindle 的重要变化。网页展示重点，完整内容保留在项目仓库。",
     changelogFull: "查看完整更新日志",
     changelogLatest: "最新",
     changelogImproved: "优化",
     changelogFixed: "修复",
     changelogAdded: "新增",
-    changelog077Date: "2026 年 9 月 2 日",
-    changelog077Title: "阅读器动画与目录体验",
-    changelog077Point1: "优化阅读器翻页动画与章节切换的衔接，减少过渡过程中的跳动与闪烁。",
-    changelog077Point2: "改进目录滚动策略与当前章节定位，长目录浏览更稳定。",
-    changelog076Date: "2026 年 9 月 1 日",
-    changelog076Title: "更可靠的 EPUB 目录与章节导航",
-    changelog076Point1: "目录支持按 EPUB 原始层级缩进、展开和折叠，并自动展开当前章节所在分支。",
-    changelog076Point2: "修复复杂 EPUB 的目录优先级、重复条目、层级丢失和章节定位问题。",
-    changelog076Point3: "优化 EPUB 内容清洗与阅读内容缓存，规则变化后会自动重建。",
-    changelog075Date: "2026 年 9 月 1 日",
-    changelog075Title: "更稳定的 Kindle 设备工作流",
-    changelog075Point1: "修复 Kindle 资源缓存、Windows WPD 传输和词典弹窗相关问题。",
-    changelog075Point2: "优化设备传输与阅读资料导出的进度、重试和状态反馈。",
+    changelogChanged: "变更",
+    changelogSecurity: "安全",
+    changelogDeprecated: "弃用",
+    changelogRemoved: "移除",
+    changelogDocumentation: "文档",
+    changelogMaintenance: "维护",
+    changelogPerformance: "性能",
     faqKicker: "BEFORE YOU START",
     faqTitle: "下载前，先知道这几件事。",
     faq1Question: "Kkindle 支持哪些文件格式？",
@@ -183,9 +184,17 @@ const translations = {
     aboutPoint2: "EPUB / PDF / MOBI / AZW3",
     aboutPoint3: "MIT License",
     aboutSource: "View the project on GitHub",
+    qqGroupLabel: "QQ Group",
+    qqGroupCopied: "Copied QQ group number 1109898894",
+    qqGroupCopyFailed: "Copy failed. Please note group number 1109898894 manually.",
+    qqGroupButtonLabel: "Copy QQ user group number 1109898894",
     downloadKicker: "DOWNLOAD Kkindle",
     downloadTitle: "Choose a platform. Start your library.",
-    downloadLead: "The site points the way; GitHub Releases hosts the packages. The download area selects the latest stable release automatically.",
+    downloadLead: "The download area selects the latest stable GitHub release automatically. Users in China can also download via Baidu Netdisk.",
+    baiduKicker: "Alternative download for China",
+    baiduNote: "If GitHub downloads are inconvenient, get the installer from Baidu Netdisk.",
+    baiduLink: "Download from Baidu Netdisk",
+    baiduCodeLabel: "Extraction code",
     stableLabel: "Latest stable release",
     checking: "Loading…",
     releasePage: "View full Release ↗",
@@ -213,25 +222,18 @@ const translations = {
     unavailable: "Not provided in this release",
     changelogKicker: "CHANGELOG",
     changelogTitle: "Every update makes reading feel easier.",
-    changelogLead: "A concise record of important Kkindle changes. The full history remains in the repository.",
     changelogFull: "View the full changelog",
     changelogLatest: "Latest",
     changelogImproved: "Improved",
     changelogFixed: "Fixed",
     changelogAdded: "Added",
-    changelog077Date: "September 2, 2026",
-    changelog077Title: "Reader motion and table of contents",
-    changelog077Point1: "Refined reader page-turn animations and chapter transitions to reduce jumps and flashes.",
-    changelog077Point2: "Improved table-of-contents scrolling and current-chapter positioning for long books.",
-    changelog076Date: "September 1, 2026",
-    changelog076Title: "More reliable EPUB navigation",
-    changelog076Point1: "The table of contents now keeps EPUB hierarchy, indentation, expansion, and the current chapter branch.",
-    changelog076Point2: "Fixed priority, duplicate-entry, hierarchy, and chapter-targeting issues in complex EPUBs.",
-    changelog076Point3: "Refined EPUB content cleanup and reading caches so rule changes rebuild old data automatically.",
-    changelog075Date: "September 1, 2026",
-    changelog075Title: "A steadier Kindle device workflow",
-    changelog075Point1: "Fixed Kindle resource caches, Windows WPD transfers, and long dictionary dialogs.",
-    changelog075Point2: "Improved progress, retry, and device-state feedback for transfers and reading-material exports.",
+    changelogChanged: "Changed",
+    changelogSecurity: "Security",
+    changelogDeprecated: "Deprecated",
+    changelogRemoved: "Removed",
+    changelogDocumentation: "Docs",
+    changelogMaintenance: "Maint.",
+    changelogPerformance: "Perf.",
     faqKicker: "BEFORE YOU START",
     faqTitle: "A few things to know before downloading.",
     faq1Question: "Which file formats does Kkindle support?",
@@ -282,6 +284,25 @@ function getStoredLanguage() {
   return navigator.language && navigator.language.toLowerCase().startsWith("en") ? "en" : "zh";
 }
 
+function applyChangelogLanguage() {
+  const preferredLanguage = currentLanguage === "en" ? "en" : "zh";
+  document.querySelectorAll("[data-changelog-item]").forEach((item) => {
+    const variants = Array.from(item.querySelectorAll("[data-changelog-lang]"));
+    if (variants.length === 0) return;
+    const preferred = variants.find((variant) => variant.dataset.changelogLang === preferredLanguage);
+    const fallback = variants.find((variant) => variant.dataset.changelogLang === "zh") || variants[0];
+    variants.forEach((variant) => {
+      variant.hidden = variant !== (preferred || fallback);
+    });
+  });
+
+  document.querySelectorAll("[data-changelog-link]").forEach((link) => {
+    link.href = currentLanguage === "en"
+      ? "https://github.com/kingstacker/Kkindle/blob/master/CHANGELOG.en.md"
+      : "https://github.com/kingstacker/Kkindle/blob/master/CHANGELOG.md";
+  });
+}
+
 function applyLanguage(language) {
   currentLanguage = language === "en" ? "en" : "zh";
   const copy = translations[currentLanguage];
@@ -291,6 +312,10 @@ function applyLanguage(language) {
     const key = element.dataset.i18n;
     if (copy[key]) element.textContent = copy[key];
   });
+  document.querySelectorAll("[data-changelog-date]").forEach((element) => {
+    const date = formatReleaseDate(element.dataset.changelogDate);
+    if (date) element.textContent = date;
+  });
   document.querySelectorAll("[data-i18n-alt]").forEach((element) => {
     const key = element.dataset.i18nAlt;
     if (copy[key]) element.alt = copy[key];
@@ -299,6 +324,7 @@ function applyLanguage(language) {
     const key = element.dataset.i18nLabel;
     if (copy[key]) element.setAttribute("aria-label", copy[key]);
   });
+  applyChangelogLanguage();
 
   const languageToggle = document.querySelector("#language-toggle");
   if (languageToggle) {
@@ -352,7 +378,9 @@ function formatBytes(bytes) {
 
 function formatReleaseDate(value) {
   if (!value) return "";
-  const date = new Date(value);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString(currentLanguage === "en" ? "en-US" : "zh-CN", {
     year: "numeric",
@@ -439,10 +467,10 @@ function renderRelease(release) {
       }
     });
   });
+  applyChangelogLanguage();
 
   const primary = document.querySelector("[data-primary-download]");
-  const installer = assets.find((item) => assetMatchers["windows-installer"].test(item.name || ""));
-  if (primary) primary.href = installer?.browser_download_url || "#downloads";
+  if (primary) primary.href = "#platform-downloads";
   setStatus("releaseLoaded");
   resyncHashTarget();
 }
@@ -479,10 +507,38 @@ function setupNavigation() {
   });
 }
 
+function setupQQGroupCopy() {
+  const button = document.querySelector("#qq-group-copy");
+  const status = document.querySelector("#qq-group-copy-status");
+  if (!button || !status) return;
+
+  let statusTimer;
+  const showStatus = (message, isError = false) => {
+    status.textContent = message;
+    status.classList.toggle("is-error", isError);
+    status.classList.add("is-visible");
+    window.clearTimeout(statusTimer);
+    statusTimer = window.setTimeout(() => {
+      status.classList.remove("is-visible");
+    }, 2400);
+  };
+
+  button.addEventListener("click", async () => {
+    const copy = translations[currentLanguage];
+    try {
+      await navigator.clipboard.writeText("1109898894");
+      showStatus(copy.qqGroupCopied);
+    } catch {
+      showStatus(copy.qqGroupCopyFailed, true);
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   applyLanguage(getStoredLanguage());
   markRecommendedPlatform();
   setupNavigation();
+  setupQQGroupCopy();
 
   document.querySelector("#language-toggle")?.addEventListener("click", () => {
     applyLanguage(currentLanguage === "en" ? "zh" : "en");
