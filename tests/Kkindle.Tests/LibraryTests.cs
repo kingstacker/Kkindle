@@ -77,6 +77,87 @@ public sealed class LibraryTests
     }
 
     [Fact]
+    public async Task MergesCollectionsIntoTargetAndPreservesOtherMemberships()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var first = Path.Combine(root, "first.epub");
+            var second = Path.Combine(root, "second.epub");
+            CreateEpub(first, "first", "第一本");
+            CreateEpub(second, "second", "第二本");
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([first, second]);
+
+            var books = (await service.SearchAsync()).OrderBy(book => book.Title).ToArray();
+            var source = await service.CreateCollectionAsync("待读");
+            var target = await service.CreateCollectionAsync("喜欢的书");
+            var other = await service.CreateCollectionAsync("稍后阅读");
+            await service.AddBookToCollectionAsync(books[0].Id, source.Id);
+            await service.AddBookToCollectionAsync(books[1].Id, source.Id);
+            await service.AddBookToCollectionAsync(books[0].Id, target.Id);
+            await service.AddBookToCollectionAsync(books[1].Id, other.Id);
+
+            await service.MergeCollectionsAsync(source.Id, target.Id);
+
+            var collections = await service.GetCollectionsAsync();
+            Assert.DoesNotContain(source.Id, collections.Select(collection => collection.Id));
+            Assert.Contains(target.Id, collections.Select(collection => collection.Id));
+            var restored = (await service.SearchAsync()).OrderBy(book => book.Title).ToArray();
+            Assert.Contains(target.Id, restored[0].CollectionIds);
+            Assert.Contains(target.Id, restored[1].CollectionIds);
+            Assert.Contains(other.Id, restored[1].CollectionIds);
+            var uncollected = collections.Single(collection =>
+                collection.Name == BookLibraryDefaults.UncollectedCollectionName);
+            Assert.DoesNotContain(uncollected.Id, restored.SelectMany(book => book.CollectionIds));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task RenamesAndClearsCollectionWithoutBreakingOtherMemberships()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var first = Path.Combine(root, "first.epub");
+            var second = Path.Combine(root, "second.epub");
+            CreateEpub(first, "first", "第一本");
+            CreateEpub(second, "second", "第二本");
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([first, second]);
+
+            var books = (await service.SearchAsync()).OrderBy(book => book.Title).ToArray();
+            var source = await service.CreateCollectionAsync("待读");
+            var other = await service.CreateCollectionAsync("稍后阅读");
+            await service.AddBookToCollectionAsync(books[0].Id, source.Id);
+            await service.AddBookToCollectionAsync(books[1].Id, source.Id);
+            await service.AddBookToCollectionAsync(books[1].Id, other.Id);
+
+            await service.RenameCollectionAsync(source.Id, "正在阅读");
+            Assert.Contains((await service.GetCollectionsAsync()), collection =>
+                collection.Id == source.Id && collection.Name == "正在阅读");
+
+            await service.ClearCollectionAsync(source.Id);
+
+            var collections = await service.GetCollectionsAsync();
+            Assert.Contains(source.Id, collections.Select(collection => collection.Id));
+            var uncollected = collections.Single(collection =>
+                collection.Name == BookLibraryDefaults.UncollectedCollectionName);
+            var restored = (await service.SearchAsync()).OrderBy(book => book.Title).ToArray();
+            Assert.Equal([uncollected.Id], restored[0].CollectionIds);
+            Assert.Contains(other.Id, restored[1].CollectionIds);
+            Assert.DoesNotContain(uncollected.Id, restored[1].CollectionIds);
+            Assert.DoesNotContain(source.Id, restored.SelectMany(book => book.CollectionIds));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task ExistingDefaultMembershipsAreNormalizedWhenLibraryReopens()
     {
         var root = TestHelpers.CreateTempDirectory();
@@ -595,12 +676,12 @@ public sealed class LibraryTests
     }
 
     [Fact]
-    public async Task FallbackMetadataCleansHashBeforeDownloadSourceMarker()
+    public async Task FallbackMetadataCleansTrailingHash()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
         {
-            var source = Path.Combine(root, "纸上作品_0123456789ABCDEF0123456789ABCDEF (Z-Library).pdf");
+            var source = Path.Combine(root, "纸上作品_0123456789ABCDEF0123456789ABCDEF.pdf");
             await File.WriteAllTextAsync(source, "not a parsed PDF");
 
             var metadata = await new BookMetadataService().ReadMetadataAsync(source);

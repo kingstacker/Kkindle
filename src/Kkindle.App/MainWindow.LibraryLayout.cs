@@ -66,6 +66,7 @@ public partial class MainWindow
 
         NormalizeLibrarySortChrome(LibrarySortBox);
         AlignShelfToolbar(LibraryToolbar, LibraryWorkspace, LibraryContentHost);
+        AlignCollectionHeader(LibraryToolbar, CollectionHeader);
     }
 
     private static void NormalizeLibrarySortChrome(ComboBox sortBox)
@@ -99,6 +100,22 @@ public partial class MainWindow
         var margin = new Thickness(left, 22, right, 18);
         if (toolbar.Margin != margin)
             toolbar.Margin = margin;
+    }
+
+    private static void AlignCollectionHeader(Grid toolbar, Border header)
+    {
+        // The toolbar margin is calculated from the live book area so its
+        // content lines up with the book columns. Keep the collection title
+        // row and its divider on the same horizontal bounds as that toolbar.
+        var toolbarMargin = toolbar.Margin;
+        var headerMargin = header.Margin;
+        var margin = new Thickness(
+            toolbarMargin.Left,
+            headerMargin.Top,
+            toolbarMargin.Right,
+            headerMargin.Bottom);
+        if (headerMargin != margin)
+            header.Margin = margin;
     }
 
     private void LibraryToolbar_SizeChanged(object? sender, SizeChangedEventArgs e)

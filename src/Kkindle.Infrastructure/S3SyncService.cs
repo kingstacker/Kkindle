@@ -45,7 +45,6 @@ public sealed partial class S3SyncService
     private readonly AppSettingsStore _appSettingsStore;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
-    private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
     private readonly SemaphoreSlim _syncGate = new(1, 1);
     private readonly ConcurrentDictionary<string, CachedFileHash> _fileHashCache =
         new(StringComparer.OrdinalIgnoreCase);
@@ -87,7 +86,6 @@ public sealed partial class S3SyncService
         _appSettingsStore = new AppSettingsStore(paths);
         _aiSettingsStore = new AiSettingsStore(paths, protector);
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, protector);
-        _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, protector);
     }
 
     public Task<S3SyncStoredSettings> LoadSettingsAsync(CancellationToken cancellationToken = default) =>

@@ -55,7 +55,7 @@ public sealed partial class SettingsTests
         scope.Get<Button>("DeviceManagementSectionButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         scope.Get<Button>("ReadingSectionButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Render();
-        var navigationNames = new[] { "AllBooksButton", "KindleBooksButton", "ZLibraryBooksButton",
+        var navigationNames = new[] { "AllBooksButton", "KindleBooksButton",
             "FontManagementButton", "DictionaryManagementButton", "ReaderNotesNavigationButton", "ReadingDashboardButton" };
         double? iconCenter = null;
         foreach (var navigationName in navigationNames)
@@ -142,6 +142,7 @@ public sealed partial class SettingsTests
         await viewModel.RefreshViewAsync();
         Assert.Single(viewModel.Books);
         await Render();
+        AssertCollectionHeaderMatchesToolbar(scope);
         var gridToolbarBounds = GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window);
         Capture(scope.Window, "view-switch-grid");
         var viewButton = scope.Get<Button>("LibraryViewToggleButton");
@@ -205,10 +206,35 @@ public sealed partial class SettingsTests
         scope.Get<MenuItem>("LibraryListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
         Assert.Equal("List", (await new AppSettingsStore(scope.Paths).LoadAsync()).LibraryViewMode);
+        Assert.False(scope.Get<Border>("SettingsSavedCapsule").IsVisible);
 
         scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
         Assert.Equal("Collections", (await new AppSettingsStore(scope.Paths).LoadAsync()).LibraryViewMode);
+        Assert.False(scope.Get<Border>("SettingsSavedCapsule").IsVisible);
+    });
+
+    [Fact]
+    public Task CollectionModeSearchFiltersFoldersByMatchingBooks() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        var library = scope.Field<IBookLibraryService>("_library");
+        var collection = await library.CreateCollectionAsync("Alpha collection");
+        var alpha = scope.Window.ViewModel.Books.Single(card => card.Title == "Alpha");
+        await library.AddBookToCollectionAsync(alpha.Book.Id, collection.Id);
+        await scope.Call<Task>("RefreshLibraryAsync");
+
+        scope.Get<MenuItem>("LibraryCollectionsViewMenuItem")
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        await Until(() => !scope.Window.ViewModel.IsBusy);
+        await Render();
+        Assert.Equal(2, scope.Window.FilteredCollectionFolders.Count);
+
+        scope.Get<TextBox>("SearchBox").Text = "Alpha";
+        await Until(() => !scope.Window.ViewModel.IsBusy
+            && scope.Window.FilteredCollectionFolders.Count == 1);
+        Assert.Equal(collection.Id, Assert.Single(scope.Window.FilteredCollectionFolders).Collection.Id);
     });
 
     private static Rect[] GetToolbarControlBounds(Control toolbar, Window window) => toolbar
@@ -216,6 +242,20 @@ public sealed partial class SettingsTests
         .Where(control => control is Button or ComboBox)
         .Select(control => new Rect(control.TranslatePoint(default, window)!.Value, control.Bounds.Size))
         .ToArray();
+
+    private static void AssertCollectionHeaderMatchesToolbar(TestWindow scope)
+    {
+        var toolbar = scope.Get<Grid>("LibraryToolbar");
+        var header = scope.Get<Border>("CollectionHeader");
+        var toolbarOrigin = toolbar.TranslatePoint(default, scope.Window)!.Value;
+        var headerOrigin = header.TranslatePoint(default, scope.Window)!.Value;
+        var toolbarRight = toolbarOrigin.X + toolbar.Bounds.Width;
+        var headerRight = headerOrigin.X + header.Bounds.Width;
+        Assert.InRange(Math.Abs(header.Margin.Left - toolbar.Margin.Left), 0, 1);
+        Assert.InRange(Math.Abs(header.Margin.Right - toolbar.Margin.Right), 0, 1);
+        Assert.InRange(Math.Abs(headerOrigin.X - toolbarOrigin.X), 0, 1);
+        Assert.InRange(Math.Abs(headerRight - toolbarRight), 0, 1);
+    }
 
     private static void AssertLibraryToolbar(TestWindow scope)
     {

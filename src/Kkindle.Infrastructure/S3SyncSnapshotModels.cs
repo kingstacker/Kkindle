@@ -193,11 +193,9 @@ internal sealed class S3SyncSettingsSnapshot
     public DateTimeOffset? AppUpdatedAt { get; set; }
     public DateTimeOffset? AiUpdatedAt { get; set; }
     public DateTimeOffset? KindleEmailUpdatedAt { get; set; }
-    public DateTimeOffset? ZLibraryUpdatedAt { get; set; }
     public S3SyncAppSettings App { get; set; } = new();
     public S3SyncAiSettings Ai { get; set; } = new();
     public S3SyncKindleEmailSettings KindleEmail { get; set; } = new();
-    public S3SyncZLibrarySettings ZLibrary { get; set; } = new();
 }
 
 internal sealed class S3SyncAppSettings
@@ -238,12 +236,6 @@ internal sealed class S3SyncKindleEmailSettings
     public int SmtpPort { get; set; } = 587;
     public string SmtpUsername { get; set; } = string.Empty;
     public bool EnableSsl { get; set; } = true;
-}
-
-internal sealed class S3SyncZLibrarySettings
-{
-    public string Email { get; set; } = string.Empty;
-    public string BaseUrl { get; set; } = string.Empty;
 }
 
 internal sealed class S3SyncState

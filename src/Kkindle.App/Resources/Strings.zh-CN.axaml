@@ -178,8 +178,6 @@
     <x:String x:Key="Ui.Auto.708176E42D8C114F">AI 翻译需要先配置 AI 服务、模型和 API Key。</x:String>
     <x:String x:Key="Ui.Auto.377C481D3C31ACE2">AI 助手设置</x:String>
     <x:String x:Key="Ui.Auto.1EF0F672AC552C01">Kindle 邮箱</x:String>
-    <x:String x:Key="Ui.Auto.C75E6F50F3BD2F17">Z-library</x:String>
-    <x:String x:Key="Ui.Auto.DEC3634BEDD23D3D">Z-Library 账号</x:String>
     <x:String x:Key="Ui.Auto.A654447A8C906AB1">字体管理</x:String>
     <x:String x:Key="Ui.Auto.8B62411F753D8465">字典管理</x:String>
     <x:String x:Key="Ui.Auto.8A7525B1492FB848">笔记管理</x:String>
@@ -202,10 +200,6 @@
     <x:String x:Key="Ui.Auto.6A85554C141A6383">SMTP 服务器</x:String>
     <x:String x:Key="Ui.Auto.CB6DE497BBC98EBB">SMTP 用户名</x:String>
     <x:String x:Key="Ui.Auto.05F75734785394FA">USB 磁盘</x:String>
-    <x:String x:Key="Ui.Auto.6C1BAA83960E7BC6">Z-Library</x:String>
-    <x:String x:Key="Ui.Auto.C8EA76F5CCA7AE85">Z-Library 在线书库：搜索并下载电子书</x:String>
-    <x:String x:Key="Ui.Auto.04C7E918A97AA2D2">Z-Library 账号设置</x:String>
-    <x:String x:Key="Ui.Auto.780A8542C562FD78">Z-Library 账号邮箱</x:String>
     <x:String x:Key="Ui.Auto.68DBD3556A19C150">ebook-convert 用于导入时的格式转换与 Kindle 词典导入；路径留空时自动查找系统中已安装的 Calibre。</x:String>
     <x:String x:Key="Ui.Auto.6160F42DABA0438E">ebook-convert 路径</x:String>
     <x:String x:Key="Ui.Auto.9DD9F8A0E4DE0220">一键打包书籍文件、封面、书库信息和阅读记录，生成 .kkindle 备份文件。导入备份会覆盖当前书库；导入前会自动校验备份内容。</x:String>
@@ -236,7 +230,6 @@
     <x:String x:Key="Ui.Auto.B341B84A73883BDA">任务进度</x:String>
     <x:String x:Key="Ui.Auto.7D4146CA082798F0">作者</x:String>
     <x:String x:Key="Ui.Auto.98BFA63342D1FDA2">使用 SSL/TLS</x:String>
-    <x:String x:Key="Ui.Auto.643DE2DA68E1AE9F">使用 Z-Library 账号登录后即可搜索和下载书籍。下载受账号每日额度限制；密码仅加密保存在本机，不会写入备份包。</x:String>
     <x:String x:Key="Ui.Device.ModelExample">例如 Kindle Paperwhite、Kobo Libra</x:String>
     <x:String x:Key="Ui.Auto.CDB45C04FD8D14BE">例如 name@example.com</x:String>
     <x:String x:Key="Ui.Auto.88D320044CFC5366">例如 name@kindle.com</x:String>
@@ -262,7 +255,7 @@
     <x:String x:Key="Ui.About.UserGroup">QQ交流群：1109898894</x:String>
     <x:String x:Key="Ui.Auto.3FD47EDCE45B3603">关闭</x:String>
     <x:String x:Key="Ui.Auto.D7B60ECE792129FF">关闭书籍详情</x:String>
-    <x:String x:Key="Ui.Auto.D7842A57D154C697">关闭后豆瓣匹配、Z-Library、邮件发送与工具下载安装等联网功能不可用</x:String>
+    <x:String x:Key="Ui.Auto.D7842A57D154C697">关闭后豆瓣匹配、邮件发送与工具下载安装等联网功能不可用</x:String>
     <x:String x:Key="Ui.Auto.A8B1F579ACBCC5D5">关闭阅读器</x:String>
     <x:String x:Key="Ui.Auto.39700B6351624E48">写下批注（可留空，仅划线）</x:String>
     <x:String x:Key="Ui.Auto.1BD1893C09003D8A">准备就绪</x:String>
@@ -350,6 +343,7 @@
     <x:String x:Key="Ui.Auto.CFE6A637EB2B50A8">导出到电脑书库</x:String>
     <x:String x:Key="Ui.Auto.E9D3DD690A4E2593">导出备份</x:String>
     <x:String x:Key="Ui.Auto.F67D55C3531FBD5C">导出当前筛选结果</x:String>
+    <x:String x:Key="Ui.Notes.ExportLabel">导出</x:String>
     <x:String x:Key="Ui.Auto.DAB0F7CAA4DEA42D">导出所选</x:String>
     <x:String x:Key="Ui.Auto.8E1B126E634DCA98">导出文本</x:String>
     <x:String x:Key="Ui.Auto.B4FBE589C50EE54E">导出记录</x:String>
@@ -427,7 +421,6 @@
     <x:String x:Key="Ui.Auto.9514487168A00698">未检测到设备</x:String>
     <x:String x:Key="Ui.Auto.73238927F76F6BD2">未连接设备</x:String>
     <x:String x:Key="Ui.Auto.646F56BD61A92E84">未选择书籍</x:String>
-    <x:String x:Key="Ui.Auto.7831C76AF1C21CE6">未配置账号，可搜索书籍；下载前需要登录 Z-Library。</x:String>
     <x:String x:Key="Ui.Auto.E801393E50EE0F3D">本书还没有划线或批注。在正文中选中文字后即可创建。</x:String>
     <x:String x:Key="Ui.Auto.BF4AD761840FCD0A">本地</x:String>
     <x:String x:Key="Ui.Auto.023CAEED6A29333F">本地 0 条 · 设备 0 条 · 当前显示 0 条</x:String>
@@ -543,7 +536,7 @@
     <x:String x:Key="Ui.Auto.0213F653036C18BA">豆瓣评分（只读）</x:String>
     <x:String x:Key="Ui.Auto.CBA1EC75F4CA2162">资料</x:String>
     <x:String x:Key="Ui.Auto.CA478C91D3839A44">输入 API Key</x:String>
-    <x:String x:Key="Ui.Auto.5A2773913717DBD3">输入 Z-Library 账号密码</x:String>
+    <x:String x:Key="Ui.Auto.5A2773913717DBD3">输入服务密码</x:String>
     <x:String x:Key="Ui.Auto.CAF22EACE474E406">输入书名或作者开始搜索。</x:String>
     <x:String x:Key="Ui.Auto.2B1CF18C033FE28A">输入关键词，实时搜索整本书。</x:String>
     <x:String x:Key="Ui.Auto.8CB9B8C5CF47397A">输入密码或应用专用密码</x:String>
@@ -573,7 +566,6 @@
     <x:String x:Key="Ui.Auto.8609EBA830E79233">通过 SMTP 将 EPUB 或 PDF 发送到你的 Kindle 个人文档邮箱。请把 Kindle 收件地址加入发件邮箱的信任列表；密码建议使用应用专用密码。</x:String>
     <x:String x:Key="Ui.Auto.1579F7B476E86BFF">邮件发送</x:String>
     <x:String x:Key="Ui.Auto.D45E65951D169D87">配置 SMTP 发送到 Kindle 个人文档邮箱</x:String>
-    <x:String x:Key="Ui.Auto.937B60677348A858">配置 Z-Library 账号用于下载书籍</x:String>
     <x:String x:Key="Ui.Auto.F5C62A45859955BB">配置说明参考：书伴《Kindle 邮箱推送设置》</x:String>
     <x:String x:Key="Ui.Auto.59D7AD70A4016DE6">配置阅读 AI 助手的服务与 API Key</x:String>
     <x:String x:Key="Ui.Auto.CE9B12499C471759">阅读</x:String>
@@ -603,7 +595,6 @@
     <x:String x:Key="Ui.Auto.9ADB531F355AD086">韩文</x:String>
     <x:String x:Key="Ui.Auto.560630BA0C84322E">页数</x:String>
     <x:String x:Key="Ui.Auto.FE154AC80068C997">黑体 SimHei</x:String>
-    <x:String x:Key="Ui.Auto.464EB73BC23E797A">默认使用官方 API；域名变更或访问受限时可在此修改为可用的镜像地址。</x:String>
     <x:String x:Key="Ui.Auto.6FA2075CA9C20775">默认打开格式</x:String>
     <x:String x:Key="Ui.Auto.ACA5C620116BC0F2">&#xA;&#xA;{0}（{1}）：&#xA;{2}{3}</x:String>
     <x:String x:Key="Ui.Auto.C8A2DB7A32415857">&#xA;&#xA;本次因触发豆瓣访问验证提前停止，其余书籍未处理。</x:String>
@@ -711,7 +702,6 @@
     <x:String x:Key="Ui.Auto.F26D663D2ADB4909">一键豆瓣匹配完成</x:String>
     <x:String x:Key="Ui.Auto.8A03E35AD323E387">下载失败</x:String>
     <x:String x:Key="Ui.Auto.042958600E0E71C8">下载失败：{0}</x:String>
-    <x:String x:Key="Ui.Auto.8F700ED449F1EC84">下载并发送前请先配置 Z-Library 账号。</x:String>
     <x:String x:Key="Ui.Auto.AC69F68B7010EC79">下载并安装</x:String>
     <x:String x:Key="Ui.Auto.0ADFADA556E07779">书名：{0}</x:String>
     <x:String x:Key="Ui.Auto.630B3F8332D08B55">书库是空的，先导入书籍再使用一键豆瓣匹配。</x:String>
@@ -775,6 +765,14 @@
     <x:String x:Key="Ui.Auto.2B77822FDBF2ACF1">删除批注失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.920FE6EF0593C099">删除收藏夹</x:String>
     <x:String x:Key="Ui.Auto.E0B0EE25AE94B18A">删除收藏夹失败：{0}</x:String>
+    <x:String x:Key="Ui.Auto.7668887FC46A6D80">解散收藏夹</x:String>
+    <x:String x:Key="Ui.Auto.BEE6146F3B81D89C">确定解散收藏夹“{0}”吗？书籍将自动回到未收藏夹。</x:String>
+    <x:String x:Key="Ui.Auto.D66C21903463FF3F">解散收藏夹失败：{0}</x:String>
+    <x:String x:Key="Ui.Auto.25009614B500B69F">已解散收藏夹“{0}”。</x:String>
+    <x:String x:Key="Ui.Auto.FBE64992D5138F02">合并收藏夹</x:String>
+    <x:String x:Key="Ui.Auto.8E5784D887989679">确定将“{0}”合并到“{1}”吗？源收藏夹将被解散。</x:String>
+    <x:String x:Key="Ui.Auto.BCE64FC8738983C3">合并收藏夹失败：{0}</x:String>
+    <x:String x:Key="Ui.Auto.00AE5024FFFD3760">已将“{0}”合并到“{1}”。</x:String>
     <x:String x:Key="Ui.Auto.88F47860E77D1B7A">删除文件</x:String>
     <x:String x:Key="Ui.Auto.334D84D63AA942F9">删除文件失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.A0D02F115BF6C632">删除格式</x:String>
@@ -851,7 +849,7 @@
     <x:String x:Key="Ui.Auto.CACC0073DF7F0828">导出预览已准备 · 设备 {0} 条</x:String>
     <x:String x:Key="Ui.Auto.CCBB5EE62B1A5992">封面</x:String>
     <x:String x:Key="Ui.Auto.EA9490D50C94E4A9">将《{0}》发送到 {1}？EPUB/MOBI 会先转换为 AZW3。</x:String>
-    <x:String x:Key="Ui.Auto.6DD431E92E4EFF5B">将下载《{0}》并发送到 {1}。此操作会消耗一次 Z-Library 下载额度，是否继续？</x:String>
+    <x:String x:Key="Ui.Auto.6DD431E92E4EFF5B">将下载《{0}》并发送到 {1}。是否继续？</x:String>
     <x:String x:Key="Ui.Auto.DCC1CDB3C1D0FA55">将从 {0} 导出以下书籍并导入电脑书库：{1}{1}{2}</x:String>
     <x:String x:Key="Ui.Auto.2AB5620B164DEFB7">将以下书籍发送到 {0}：{1}{1}{2}{1}{1}EPUB/MOBI 会先转换为 Kindle 兼容的 AZW3。</x:String>
     <x:String x:Key="Ui.Auto.67A9EE5311F97107">将按书名和作者自动匹配并写入 {0} 本书的豆瓣信息。此功能不推荐频繁使用，可能触发豆瓣访问限制；是否继续？</x:String>
@@ -1237,11 +1235,9 @@
     <x:String x:Key="Ui.Auto.0D5C68DA687203B4">请先选择一个收藏夹。</x:String>
     <x:String x:Key="Ui.Auto.860A31F58432C3F8">请先选择一本书。</x:String>
     <x:String x:Key="Ui.Auto.7773744CA21BDEFF">请先选择至少一本书。</x:String>
-    <x:String x:Key="Ui.Auto.EF51B15B19E57437">请先配置 Z-Library 账号。</x:String>
     <x:String x:Key="Ui.Auto.0EACAE272ABBACE3">请先配置账号</x:String>
     <x:String x:Key="Ui.Auto.A412BF87FF21CF50">请在应用设置中允许网络功能后下载书籍。</x:String>
     <x:String x:Key="Ui.Auto.560EC59E489E2C94">请在应用设置中允许网络功能后使用{0}。</x:String>
-    <x:String x:Key="Ui.Auto.D437F0BAE5AED583">请在应用设置中允许网络功能后使用在线书库。</x:String>
     <x:String x:Key="Ui.Auto.0BC9551CBF9A1084">请在应用设置中允许网络功能后再发送 Kindle 邮件。</x:String>
     <x:String x:Key="Ui.Auto.2FEDF14F890E017A">请填写有效的 HTTP Base URL 和模型名称。</x:String>
     <x:String x:Key="Ui.Auto.1695A9071D272771">请检查数据目录后重启 Kkindle。</x:String>
@@ -1383,9 +1379,7 @@
     <x:String x:Key="Ui.Auto.5D0AE622F61F8EBF">关</x:String>
     <x:String x:Key="Ui.Auto.C96ED7EC0B0B2DFD">未知作者</x:String>
     <x:String x:Key="Ui.Auto.9F4A9B9E966DEAEB">新收藏夹</x:String>
-    <x:String x:Key="Ui.Auto.3B43F6AE25F4CEF2">请输入有效的 Z-Library 账号邮箱地址。</x:String>
-    <x:String x:Key="Ui.Auto.7289B1C16891CE06">请输入 Z-Library 账号密码。</x:String>
-    <x:String x:Key="Ui.Auto.6A804497104AC6A4">请输入有效的 Z-Library API 服务地址。</x:String>
+    <x:String x:Key="Ui.Auto.7289B1C16891CE06">请输入服务密码。</x:String>
     <x:String x:Key="Ui.Auto.AF1A3E3623672181">请输入有效的 Kindle 收件邮箱地址。</x:String>
     <x:String x:Key="Ui.Auto.D3406B5610E0E4F2">请输入有效的发件邮箱地址。</x:String>
     <x:String x:Key="Ui.Auto.37D36B871412A9B6">请输入 SMTP 服务器地址。</x:String>
@@ -1432,9 +1426,14 @@
     <x:String x:Key="Ui.Auto.67D5ABE35997BAC4">读取听书设置失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.F57EA3A19933EE1A">朗读失败：{0}</x:String>
      <x:String x:Key="Ui.Auto.10C73518838115E1">按句朗读当前 EPUB；微软语音来自 Windows 已安装的语音包。</x:String>
-     <x:String x:Key="Ui.Onboarding.WelcomeTitle">欢迎使用 Kkindle</x:String>
+    <x:String x:Key="Ui.Onboarding.WelcomeTitle">欢迎使用 Kkindle</x:String>
     <x:String x:Key="Ui.Onboarding.WelcomeSubtitle">把书库、阅读器和设备管理放在一起。</x:String>
-    <x:String x:Key="Ui.Onboarding.WelcomeDescription">先选择你偏好的界面语言，再设置常用的电子书设备型号。之后可以随时在设置或设备卡片中修改这些选项。</x:String>
+    <x:String x:Key="Ui.Onboarding.WelcomeDescription">先选择你偏好的界面语言，然后阅读使用说明并设置常用的电子书设备型号。之后可以随时在设置或设备卡片中修改这些选项。</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerTitle">免责声明</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerSubtitle">使用 Kkindle 前，请阅读并理解以下说明。</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerBody">Kkindle 是用于整理、阅读和传输用户自行取得或有权使用的电子书文件的工具。你应自行确认导入、转换、阅读和传输的内容符合适用法律、许可协议以及设备或服务规则。软件不会替你判断内容是否获得授权；对于你导入的内容、设备操作以及第三方服务的使用，你应自行承担相应责任。Kkindle 不提供或分发未经授权的电子书资源，也不对第三方内容、服务的可用性、准确性或合法性作保证。</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerAcknowledgement">我已阅读并理解上述说明，继续使用 Kkindle</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerRequired">请先阅读并勾选确认后再继续。</x:String>
     <x:String x:Key="Ui.Onboarding.LanguageLabel">界面语言</x:String>
     <x:String x:Key="Ui.Onboarding.LanguageHint">已根据系统语言预选，你也可以立即切换。</x:String>
     <x:String x:Key="Ui.Onboarding.DeviceTitle">选择设备型号</x:String>
@@ -1645,8 +1644,7 @@
     <x:String x:Key="Ui.Auto.C2DB62BA340B2D27">服务商、模型、API Key 与本地语义检索</x:String>
     <x:String x:Key="Ui.Auto.541BC76EBCBC0228">Kindle 邮箱推送</x:String>
     <x:String x:Key="Ui.Auto.4E68CFCEBD398D44">收件邮箱与发件服务器</x:String>
-    <x:String x:Key="Ui.Auto.5D978320212BD623">Z-Library 账户</x:String>
-    <x:String x:Key="Ui.Auto.C87F02F2D8220D30">登录凭据与服务地址</x:String>
+    <x:String x:Key="Ui.Auto.C87F02F2D8220D30">服务地址</x:String>
     <x:String x:Key="Ui.Auto.BB82E64487A01E21">S3 云端同步</x:String>
     <x:String x:Key="Ui.Auto.947ACFD929442781">连接配置、自动同步与手动同步</x:String>
     <x:String x:Key="Ui.Auto.C93D480F9C6D096F">此处的修改需要点击“保存设置”；测试连接不会保存，立即同步使用已保存的配置。</x:String>
@@ -1831,4 +1829,15 @@
     <x:String x:Key="Ui.Auto.B30C746140638433">适宽</x:String>
     <x:String x:Key="Ui.Auto.581B3C5CBA2B75A9">整页</x:String>
     <x:String x:Key="Ui.Auto.980EDB5BF6FDE833">顺时针旋转 90°</x:String>
+    <x:String x:Key="Ui.Auto.7F1F0A79D44606EC">打开收藏夹</x:String>
+    <x:String x:Key="Ui.Auto.A8D2648EE922D923">重命名收藏夹</x:String>
+    <x:String x:Key="Ui.Auto.6CC4882425CDDFC6">清空书籍</x:String>
+    <x:String x:Key="Ui.Auto.3AD7E3B86A2B01F4">合并到…</x:String>
+    <x:String x:Key="Ui.Auto.D0748B6FFA9FA9A8">清空收藏夹</x:String>
+    <x:String x:Key="Ui.Auto.61E66B0C7A2B79DB">确定清空收藏夹“{0}”吗？收藏夹本身会保留。</x:String>
+    <x:String x:Key="Ui.Auto.1A753EB4770A92CA">清空收藏夹失败：{0}</x:String>
+    <x:String x:Key="Ui.Auto.C1F78A30B55A253C">已清空收藏夹“{0}”。</x:String>
+    <x:String x:Key="Ui.Auto.40D4505D81F59701">重命名收藏夹失败：{0}</x:String>
+    <x:String x:Key="Ui.Auto.AF61BEF1B390A059">已重命名收藏夹为“{0}”。</x:String>
+    <x:String x:Key="Ui.Auto.5523BE9A6469CB0D">拖到另一个收藏夹上合并</x:String>
 </ResourceDictionary>

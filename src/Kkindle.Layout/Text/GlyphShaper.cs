@@ -32,7 +32,7 @@ public sealed class TypesetFontLibrary : IDisposable
     private readonly List<string> _order = new();
     private bool _disposed;
 
-    public string MainFontPath { get; }
+    public string MainFontPath { get; private set; }
 
     public TypesetFontLibrary(string mainFontPath, IEnumerable<string>? fallbackFontPaths = null)
     {
@@ -79,6 +79,23 @@ public sealed class TypesetFontLibrary : IDisposable
     public SKTypeface GetTypeface(string fontPath) => Entry(fontPath).Typeface;
 
     public int GetUpem(string fontPath) => Entry(fontPath).Upem;
+
+    /// <summary>
+    /// Selects the primary face used by the layout engine. All registered
+    /// faces remain available as glyph fallbacks, so changing the reader font
+    /// only changes the preferred face and does not discard coverage.
+    /// </summary>
+    public bool TrySetMainFont(string fontPath)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(fontPath)
+            || !_faces.ContainsKey(fontPath))
+        {
+            return false;
+        }
+
+        MainFontPath = fontPath;
+        return true;
+    }
 
     internal Font GetHarfBuzzFont(string fontPath) => Entry(fontPath).Font;
 

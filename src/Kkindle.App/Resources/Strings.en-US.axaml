@@ -178,8 +178,6 @@
     <x:String x:Key="Ui.Auto.708176E42D8C114F">Configure an AI service, model, and API key before using AI translation.</x:String>
     <x:String x:Key="Ui.Auto.377C481D3C31ACE2">AI settings</x:String>
     <x:String x:Key="Ui.Auto.1EF0F672AC552C01">Kindle email</x:String>
-    <x:String x:Key="Ui.Auto.C75E6F50F3BD2F17">Z-library</x:String>
-    <x:String x:Key="Ui.Auto.DEC3634BEDD23D3D">Z-Library account</x:String>
     <x:String x:Key="Ui.Auto.A654447A8C906AB1">Fonts</x:String>
     <x:String x:Key="Ui.Auto.8B62411F753D8465">Dictionaries</x:String>
     <x:String x:Key="Ui.Auto.8A7525B1492FB848">Note management</x:String>
@@ -202,10 +200,6 @@
     <x:String x:Key="Ui.Auto.6A85554C141A6383">SMTP server</x:String>
     <x:String x:Key="Ui.Auto.CB6DE497BBC98EBB">SMTP username</x:String>
     <x:String x:Key="Ui.Auto.05F75734785394FA">USB drive</x:String>
-    <x:String x:Key="Ui.Auto.6C1BAA83960E7BC6">Z-Library</x:String>
-    <x:String x:Key="Ui.Auto.C8EA76F5CCA7AE85">Z-Library online library: search and download ebooks</x:String>
-    <x:String x:Key="Ui.Auto.04C7E918A97AA2D2">Z-Library account settings</x:String>
-    <x:String x:Key="Ui.Auto.780A8542C562FD78">Z-Library account email</x:String>
     <x:String x:Key="Ui.Auto.68DBD3556A19C150">ebook-convert is used for format conversion during import and Kindle dictionary imports; leave the path empty to find an installed Calibre automatically.</x:String>
     <x:String x:Key="Ui.Auto.6160F42DABA0438E">ebook-convert path</x:String>
     <x:String x:Key="Ui.Auto.9DD9F8A0E4DE0220">Package book files, covers, library data, and reading records into a .kkindle backup with one click. Importing a backup replaces the current library; its contents are verified first.</x:String>
@@ -236,7 +230,6 @@
     <x:String x:Key="Ui.Auto.B341B84A73883BDA">Task progress</x:String>
     <x:String x:Key="Ui.Auto.7D4146CA082798F0">Author</x:String>
     <x:String x:Key="Ui.Auto.98BFA63342D1FDA2">Use SSL/TLS</x:String>
-    <x:String x:Key="Ui.Auto.643DE2DA68E1AE9F">Sign in with a Z-Library account to search and download books. Downloads are limited by the account's daily quota; the password is encrypted on this device and is not included in backups.</x:String>
     <x:String x:Key="Ui.Device.ModelExample">For example, Kindle Paperwhite or Kobo Libra</x:String>
     <x:String x:Key="Ui.Auto.CDB45C04FD8D14BE">For example, name@example.com</x:String>
     <x:String x:Key="Ui.Auto.88D320044CFC5366">For example, name@kindle.com</x:String>
@@ -262,7 +255,7 @@
     <x:String x:Key="Ui.About.UserGroup">QQ group: 1109898894</x:String>
     <x:String x:Key="Ui.Auto.3FD47EDCE45B3603">Close</x:String>
     <x:String x:Key="Ui.Auto.D7B60ECE792129FF">Close book details</x:String>
-    <x:String x:Key="Ui.Auto.D7842A57D154C697">Douban matching, Z-Library, email delivery, and tool downloads become unavailable when disabled</x:String>
+    <x:String x:Key="Ui.Auto.D7842A57D154C697">Douban matching, email delivery, and tool downloads become unavailable when disabled</x:String>
     <x:String x:Key="Ui.Auto.A8B1F579ACBCC5D5">Close reader</x:String>
     <x:String x:Key="Ui.Auto.39700B6351624E48">Write an annotation (optional; leave empty for a highlight only)</x:String>
     <x:String x:Key="Ui.Auto.1BD1893C09003D8A">Ready</x:String>
@@ -350,6 +343,7 @@
     <x:String x:Key="Ui.Auto.CFE6A637EB2B50A8">Export to computer library</x:String>
     <x:String x:Key="Ui.Auto.E9D3DD690A4E2593">Export backup</x:String>
     <x:String x:Key="Ui.Auto.F67D55C3531FBD5C">Export current filtered results</x:String>
+    <x:String x:Key="Ui.Notes.ExportLabel">Export</x:String>
     <x:String x:Key="Ui.Auto.DAB0F7CAA4DEA42D">Export selected</x:String>
     <x:String x:Key="Ui.Auto.8E1B126E634DCA98">Export text</x:String>
     <x:String x:Key="Ui.Auto.B4FBE589C50EE54E">Export records</x:String>
@@ -427,7 +421,6 @@
     <x:String x:Key="Ui.Auto.9514487168A00698">No device detected</x:String>
     <x:String x:Key="Ui.Auto.73238927F76F6BD2">No device connected</x:String>
     <x:String x:Key="Ui.Auto.646F56BD61A92E84">No book selected</x:String>
-    <x:String x:Key="Ui.Auto.7831C76AF1C21CE6">No account configured. You can search for books; sign in to Z-Library before downloading.</x:String>
     <x:String x:Key="Ui.Auto.E801393E50EE0F3D">This book has no highlights or annotations. Select text in the book to create one.</x:String>
     <x:String x:Key="Ui.Auto.BF4AD761840FCD0A">Local</x:String>
     <x:String x:Key="Ui.Auto.023CAEED6A29333F">0 local · 0 device · 0 currently shown</x:String>
@@ -543,7 +536,7 @@
     <x:String x:Key="Ui.Auto.0213F653036C18BA">Douban rating (read-only)</x:String>
     <x:String x:Key="Ui.Auto.CBA1EC75F4CA2162">Materials</x:String>
     <x:String x:Key="Ui.Auto.CA478C91D3839A44">Enter API key</x:String>
-    <x:String x:Key="Ui.Auto.5A2773913717DBD3">Enter Z-Library account password</x:String>
+    <x:String x:Key="Ui.Auto.5A2773913717DBD3">Enter service password</x:String>
     <x:String x:Key="Ui.Auto.CAF22EACE474E406">Enter a title or author to start searching.</x:String>
     <x:String x:Key="Ui.Auto.2B1CF18C033FE28A">Enter keywords to search the entire book in real time.</x:String>
     <x:String x:Key="Ui.Auto.8CB9B8C5CF47397A">Enter a password or app password</x:String>
@@ -573,7 +566,6 @@
     <x:String x:Key="Ui.Auto.8609EBA830E79233">Send EPUB or PDF to your Kindle personal documents email through SMTP. Add the Kindle recipient address to the sender's allowlist; an app password is recommended.</x:String>
     <x:String x:Key="Ui.Auto.1579F7B476E86BFF">Email delivery</x:String>
     <x:String x:Key="Ui.Auto.D45E65951D169D87">Configure SMTP delivery to your Kindle personal documents email</x:String>
-    <x:String x:Key="Ui.Auto.937B60677348A858">Configure a Z-Library account for downloading books</x:String>
     <x:String x:Key="Ui.Auto.F5C62A45859955BB">Setup guide: Jianshu Companion's Kindle email delivery settings</x:String>
     <x:String x:Key="Ui.Auto.59D7AD70A4016DE6">Configure the reading assistant service and API key</x:String>
     <x:String x:Key="Ui.Auto.CE9B12499C471759">Reading</x:String>
@@ -603,7 +595,6 @@
     <x:String x:Key="Ui.Auto.9ADB531F355AD086">Korean</x:String>
     <x:String x:Key="Ui.Auto.560630BA0C84322E">Pages</x:String>
     <x:String x:Key="Ui.Auto.FE154AC80068C997">SimHei</x:String>
-    <x:String x:Key="Ui.Auto.464EB73BC23E797A">The official API is used by default; change it here to an available mirror if the domain changes or access is restricted.</x:String>
     <x:String x:Key="Ui.Auto.6FA2075CA9C20775">Default opening format</x:String>
     <x:String x:Key="Ui.Auto.ACA5C620116BC0F2">&#xA;&#xA;{0} ({1}):&#xA;{2}{3}</x:String>
     <x:String x:Key="Ui.Auto.C8A2DB7A32415857">&#xA;&#xA;This run stopped early because Douban requested access verification; the remaining books were not processed.</x:String>
@@ -711,7 +702,6 @@
     <x:String x:Key="Ui.Auto.F26D663D2ADB4909">One-click Douban matching complete</x:String>
     <x:String x:Key="Ui.Auto.8A03E35AD323E387">Download failed</x:String>
     <x:String x:Key="Ui.Auto.042958600E0E71C8">Download failed: {0}</x:String>
-    <x:String x:Key="Ui.Auto.8F700ED449F1EC84">Configure a Z-Library account before downloading and sending.</x:String>
     <x:String x:Key="Ui.Auto.AC69F68B7010EC79">Download and install</x:String>
     <x:String x:Key="Ui.Auto.0ADFADA556E07779">Title: {0}</x:String>
     <x:String x:Key="Ui.Auto.630B3F8332D08B55">The library is empty. Import books before using one-click Douban matching.</x:String>
@@ -775,6 +765,14 @@
     <x:String x:Key="Ui.Auto.2B77822FDBF2ACF1">Failed to delete annotation: {0}</x:String>
     <x:String x:Key="Ui.Auto.920FE6EF0593C099">Delete collection</x:String>
     <x:String x:Key="Ui.Auto.E0B0EE25AE94B18A">Failed to delete collection: {0}</x:String>
+    <x:String x:Key="Ui.Auto.7668887FC46A6D80">Dissolve collection</x:String>
+    <x:String x:Key="Ui.Auto.BEE6146F3B81D89C">Dissolve collection &quot;{0}&quot;? Books will return to Uncollected.</x:String>
+    <x:String x:Key="Ui.Auto.D66C21903463FF3F">Failed to dissolve collection: {0}</x:String>
+    <x:String x:Key="Ui.Auto.25009614B500B69F">Dissolved collection &quot;{0}&quot;.</x:String>
+    <x:String x:Key="Ui.Auto.FBE64992D5138F02">Merge collections</x:String>
+    <x:String x:Key="Ui.Auto.8E5784D887989679">Merge &quot;{0}&quot; into &quot;{1}&quot;? The source collection will be dissolved.</x:String>
+    <x:String x:Key="Ui.Auto.BCE64FC8738983C3">Failed to merge collections: {0}</x:String>
+    <x:String x:Key="Ui.Auto.00AE5024FFFD3760">Merged &quot;{0}&quot; into &quot;{1}&quot;.</x:String>
     <x:String x:Key="Ui.Auto.88F47860E77D1B7A">Delete file</x:String>
     <x:String x:Key="Ui.Auto.334D84D63AA942F9">Failed to delete file: {0}</x:String>
     <x:String x:Key="Ui.Auto.A0D02F115BF6C632">Delete format</x:String>
@@ -851,7 +849,7 @@
     <x:String x:Key="Ui.Auto.CACC0073DF7F0828">Export preview ready · device {0}</x:String>
     <x:String x:Key="Ui.Auto.CCBB5EE62B1A5992">Cover</x:String>
     <x:String x:Key="Ui.Auto.EA9490D50C94E4A9">Send &quot;{0}&quot; to {1}? EPUB/MOBI will be converted to AZW3 first.</x:String>
-    <x:String x:Key="Ui.Auto.6DD431E92E4EFF5B">Download &quot;{0}&quot; and send it to {1}. This uses one Z-Library download quota. Continue?</x:String>
+    <x:String x:Key="Ui.Auto.6DD431E92E4EFF5B">Download &quot;{0}&quot; and send it to {1}. Continue?</x:String>
     <x:String x:Key="Ui.Auto.DCC1CDB3C1D0FA55">Export the following books from {0} and import them into the computer library: {1}{1}{2}</x:String>
     <x:String x:Key="Ui.Auto.2AB5620B164DEFB7">Send the following books to {0}: {1}{1}{2}{1}{1} EPUB/MOBI will first be converted to Kindle-compatible AZW3.</x:String>
     <x:String x:Key="Ui.Auto.67A9EE5311F97107">Automatically match Douban information by title and author and write it to {0} books. Frequent use is not recommended because it may trigger Douban access limits. Continue?</x:String>
@@ -1237,11 +1235,9 @@
     <x:String x:Key="Ui.Auto.0D5C68DA687203B4">Select a collection first.</x:String>
     <x:String x:Key="Ui.Auto.860A31F58432C3F8">Select a book first.</x:String>
     <x:String x:Key="Ui.Auto.7773744CA21BDEFF">Select at least one book first.</x:String>
-    <x:String x:Key="Ui.Auto.EF51B15B19E57437">Configure a Z-Library account first.</x:String>
     <x:String x:Key="Ui.Auto.0EACAE272ABBACE3">Configure an account first</x:String>
     <x:String x:Key="Ui.Auto.A412BF87FF21CF50">Allow network features in app settings before downloading books.</x:String>
     <x:String x:Key="Ui.Auto.560EC59E489E2C94">Allow network features in app settings before using {0}.</x:String>
-    <x:String x:Key="Ui.Auto.D437F0BAE5AED583">Allow network features in app settings before using the online library.</x:String>
     <x:String x:Key="Ui.Auto.0BC9551CBF9A1084">Allow network features in app settings before sending Kindle email.</x:String>
     <x:String x:Key="Ui.Auto.2FEDF14F890E017A">Enter a valid HTTP Base URL and model name.</x:String>
     <x:String x:Key="Ui.Auto.1695A9071D272771">Check the data directory and restart Kkindle.</x:String>
@@ -1383,9 +1379,7 @@
     <x:String x:Key="Ui.Auto.5D0AE622F61F8EBF">Off</x:String>
     <x:String x:Key="Ui.Auto.C96ED7EC0B0B2DFD">Unknown author</x:String>
     <x:String x:Key="Ui.Auto.9F4A9B9E966DEAEB">New collection</x:String>
-    <x:String x:Key="Ui.Auto.3B43F6AE25F4CEF2">Enter a valid Z-Library account email address.</x:String>
-    <x:String x:Key="Ui.Auto.7289B1C16891CE06">Enter the Z-Library account password.</x:String>
-    <x:String x:Key="Ui.Auto.6A804497104AC6A4">Enter a valid Z-Library API service address.</x:String>
+    <x:String x:Key="Ui.Auto.7289B1C16891CE06">Enter the service password.</x:String>
     <x:String x:Key="Ui.Auto.AF1A3E3623672181">Enter a valid Kindle recipient email address.</x:String>
     <x:String x:Key="Ui.Auto.D3406B5610E0E4F2">Enter a valid sender email address.</x:String>
     <x:String x:Key="Ui.Auto.37D36B871412A9B6">Enter the SMTP server address.</x:String>
@@ -1432,9 +1426,14 @@
     <x:String x:Key="Ui.Auto.67D5ABE35997BAC4">Could not read read-aloud settings: {0}</x:String>
     <x:String x:Key="Ui.Auto.F57EA3A19933EE1A">Read-aloud failed: {0}</x:String>
       <x:String x:Key="Ui.Auto.10C73518838115E1">Reads the current EPUB sentence by sentence. Microsoft voices come from installed Windows speech packs.</x:String>
-     <x:String x:Key="Ui.Onboarding.WelcomeTitle">Welcome to Kkindle</x:String>
+    <x:String x:Key="Ui.Onboarding.WelcomeTitle">Welcome to Kkindle</x:String>
     <x:String x:Key="Ui.Onboarding.WelcomeSubtitle">Your library, reader, and device tools in one place.</x:String>
-    <x:String x:Key="Ui.Onboarding.WelcomeDescription">Choose your preferred interface language, then set your primary e-reader model. You can change either option later in Settings or from the device card.</x:String>
+    <x:String x:Key="Ui.Onboarding.WelcomeDescription">Choose your preferred interface language, read the usage statement, and then set your primary e-reader model. You can change these options later in Settings or from the device card.</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerTitle">Disclaimer</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerSubtitle">Please read and understand the following before using Kkindle.</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerBody">Kkindle is a tool for organizing, reading, and transferring ebook files that you have lawfully obtained or are authorized to use. You are responsible for confirming that any content you import, convert, read, or transfer complies with applicable laws, licenses, and device or service rules. The software does not determine whether content is authorized; you are responsible for the content you import, device operations, and use of third-party services. Kkindle does not provide or distribute unauthorized ebook resources and makes no warranty about the availability, accuracy, or legality of third-party content or services.</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerAcknowledgement">I have read and understood the statement above and want to continue using Kkindle</x:String>
+    <x:String x:Key="Ui.Onboarding.DisclaimerRequired">Please read the statement and check the confirmation box before continuing.</x:String>
     <x:String x:Key="Ui.Onboarding.LanguageLabel">Interface language</x:String>
     <x:String x:Key="Ui.Onboarding.LanguageHint">Your system language was selected automatically. You can switch it now.</x:String>
     <x:String x:Key="Ui.Onboarding.DeviceTitle">Choose your device model</x:String>
@@ -1645,8 +1644,7 @@
     <x:String x:Key="Ui.Auto.C2DB62BA340B2D27">Provider, model, API key and local semantic search</x:String>
     <x:String x:Key="Ui.Auto.541BC76EBCBC0228">Send to Kindle by email</x:String>
     <x:String x:Key="Ui.Auto.4E68CFCEBD398D44">Recipient address and outgoing mail server</x:String>
-    <x:String x:Key="Ui.Auto.5D978320212BD623">Z-Library account</x:String>
-    <x:String x:Key="Ui.Auto.C87F02F2D8220D30">Sign-in credentials and service address</x:String>
+    <x:String x:Key="Ui.Auto.C87F02F2D8220D30">Service address</x:String>
     <x:String x:Key="Ui.Auto.BB82E64487A01E21">S3 cloud sync</x:String>
     <x:String x:Key="Ui.Auto.947ACFD929442781">Connection, automatic sync and manual sync</x:String>
     <x:String x:Key="Ui.Auto.C93D480F9C6D096F">Choose Save settings to apply changes. Test connection uses this draft; Sync now uses the saved configuration.</x:String>
@@ -1831,4 +1829,15 @@
     <x:String x:Key="Ui.Auto.B30C746140638433">Width</x:String>
     <x:String x:Key="Ui.Auto.581B3C5CBA2B75A9">Page</x:String>
     <x:String x:Key="Ui.Auto.980EDB5BF6FDE833">Rotate clockwise 90°</x:String>
+    <x:String x:Key="Ui.Auto.7F1F0A79D44606EC">Open collection</x:String>
+    <x:String x:Key="Ui.Auto.A8D2648EE922D923">Rename collection</x:String>
+    <x:String x:Key="Ui.Auto.6CC4882425CDDFC6">Clear books</x:String>
+    <x:String x:Key="Ui.Auto.3AD7E3B86A2B01F4">Merge into…</x:String>
+    <x:String x:Key="Ui.Auto.D0748B6FFA9FA9A8">Clear collection</x:String>
+    <x:String x:Key="Ui.Auto.61E66B0C7A2B79DB">Clear all books from “{0}”? The collection itself will be kept.</x:String>
+    <x:String x:Key="Ui.Auto.1A753EB4770A92CA">Could not clear the collection: {0}</x:String>
+    <x:String x:Key="Ui.Auto.C1F78A30B55A253C">Cleared collection “{0}”.</x:String>
+    <x:String x:Key="Ui.Auto.40D4505D81F59701">Could not rename the collection: {0}</x:String>
+    <x:String x:Key="Ui.Auto.AF61BEF1B390A059">Renamed collection to “{0}”.</x:String>
+    <x:String x:Key="Ui.Auto.5523BE9A6469CB0D">Drag onto another collection to merge</x:String>
 </ResourceDictionary>

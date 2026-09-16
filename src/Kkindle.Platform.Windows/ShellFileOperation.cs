@@ -23,6 +23,49 @@ internal static class ShellFileOperation
         if (failure is not null) throw new IOException("Windows 无法删除设备文件。", failure);
     }
 
+    public static void CopyToLocal(
+        object shellFolderItem,
+        string destinationPath,
+        long expectedSize,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var destination = Path.GetFullPath(destinationPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)
+            ?? throw new InvalidOperationException("设备文件导出目录无效。"));
+        var temporary = $"{destination}.{Guid.NewGuid():N}.kkindle-part";
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { CopyOnStaThread(shellFolderItem, temporary, cancellationToken); }
+            catch (Exception exception) { failure = exception; }
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        if (!thread.Join(TimeSpan.FromSeconds(120)))
+            throw new TimeoutException("等待 Windows 读取设备文件超时。");
+        if (failure is OperationCanceledException)
+            throw failure;
+        if (failure is not null)
+            throw new IOException("Windows 无法从 MTP 设备读取文件。", failure);
+
+        try
+        {
+            if (!File.Exists(temporary))
+                throw new IOException("Windows 未生成设备文件副本。");
+            if (expectedSize > 0 && new FileInfo(temporary).Length != expectedSize)
+                throw new IOException("Windows 读取的设备文件大小不完整。");
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static void DeleteOnStaThread(object shellFolderItem)
     {
         var itemGuid = typeof(IShellItem).GUID;
@@ -61,12 +104,75 @@ internal static class ShellFileOperation
         }
     }
 
+    private static void CopyOnStaThread(
+        object shellFolderItem,
+        string temporaryPath,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var itemGuid = typeof(IShellItem).GUID;
+        var unknown = Marshal.GetIUnknownForObject(shellFolderItem);
+        IntPtr itemIdList = IntPtr.Zero;
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHGetIDListFromObject(unknown, out itemIdList));
+        }
+        finally
+        {
+            Marshal.Release(unknown);
+        }
+
+        IShellItem? source = null;
+        IShellItem? destination = null;
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(itemIdList, ref itemGuid, out source));
+            Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(
+                Path.GetDirectoryName(temporaryPath)
+                    ?? throw new InvalidOperationException("设备文件导出目录无效。"),
+                IntPtr.Zero,
+                ref itemGuid,
+                out destination));
+
+            var operation = (IFileOperation)new FileOperation();
+            try
+            {
+                Marshal.ThrowExceptionForHR(operation.SetOperationFlags(FofSilent | FofNoConfirmation | FofNoErrorUi));
+                Marshal.ThrowExceptionForHR(operation.CopyItem(
+                    source,
+                    destination,
+                    Path.GetFileName(temporaryPath),
+                    IntPtr.Zero));
+                Marshal.ThrowExceptionForHR(operation.PerformOperations());
+                Marshal.ThrowExceptionForHR(operation.GetAnyOperationsAborted(out var aborted));
+                if (aborted) throw new OperationCanceledException("设备文件读取已取消。", cancellationToken);
+            }
+            finally
+            {
+                if (Marshal.IsComObject(operation)) Marshal.FinalReleaseComObject(operation);
+            }
+        }
+        finally
+        {
+            if (itemIdList != IntPtr.Zero) Marshal.FreeCoTaskMem(itemIdList);
+            if (destination is not null && Marshal.IsComObject(destination)) Marshal.FinalReleaseComObject(destination);
+            if (source is not null && Marshal.IsComObject(source)) Marshal.FinalReleaseComObject(source);
+        }
+    }
+
     [DllImport("shell32.dll", PreserveSig = true)]
     private static extern int SHGetIDListFromObject(IntPtr unknown, out IntPtr itemIdList);
 
     [DllImport("shell32.dll", PreserveSig = true)]
     private static extern int SHCreateItemFromIDList(
         IntPtr itemIdList,
+        ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItem shellItem);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SHCreateItemFromParsingName(
+        [MarshalAs(UnmanagedType.LPWStr)] string path,
+        IntPtr bindContext,
         ref Guid riid,
         [MarshalAs(UnmanagedType.Interface)] out IShellItem shellItem);
 

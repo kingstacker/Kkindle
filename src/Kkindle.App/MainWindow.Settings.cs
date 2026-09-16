@@ -283,19 +283,9 @@ public partial class MainWindow
         EnableSsl = KindleEmailSslCheck.IsChecked != false
     });
 
-    private ZLibrarySettings ReadZLibraryDraft() => ZLibrarySettings.Normalize(new ZLibrarySettings
-    {
-        Email = ZLibraryEmailBox.Text ?? string.Empty,
-        Password = ZLibraryPasswordBox.Text ?? string.Empty,
-        BaseUrl = ZLibraryBaseUrlBox.Text ?? string.Empty
-    });
-
     private static bool KindleEmailSettingsEqual(KindleEmailSettings left, KindleEmailSettings right) =>
         (left.KindleEmailAddress, left.SenderEmailAddress, left.SmtpHost, left.SmtpPort, left.SmtpUsername, left.SmtpPassword, left.EnableSsl)
         == (right.KindleEmailAddress, right.SenderEmailAddress, right.SmtpHost, right.SmtpPort, right.SmtpUsername, right.SmtpPassword, right.EnableSsl);
-
-    private static bool ZLibrarySettingsEqual(ZLibrarySettings left, ZLibrarySettings right) =>
-        (left.Email, left.Password, left.BaseUrl) == (right.Email, right.Password, right.BaseUrl);
 
     private void PopulateKindleEmailControls()
     {
@@ -308,10 +298,4 @@ public partial class MainWindow
         KindleEmailSslCheck.IsChecked = _kindleEmailSettings.EnableSsl;
     }
 
-    private void PopulateZLibraryControls()
-    {
-        ZLibraryEmailBox.Text = _zLibrarySettings.Email;
-        ZLibraryPasswordBox.Text = _zLibrarySettings.Password;
-        ZLibraryBaseUrlBox.Text = _zLibrarySettings.BaseUrl;
-    }
 }

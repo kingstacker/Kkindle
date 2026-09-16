@@ -15,7 +15,7 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 - **PDF reading** — First-page library covers, continuous scrolling, single-page and two-page reading, fit-width/page controls, sharp zoom and 90° rotation. Paper and text colors follow the reading theme. Supports selectable text, six underline/highlight styles, editable comments, nested outlines and page jumps. Pages appear before full-book text indexing finishes; only visible regions are rendered at the screen's pixel density. Search, bookmarks and reading position use the same local reading data as EPUB. Scanned pages support viewing and page notes; OCR is not included.
 - **AI assistant** — Ask questions about the current book, summarize chapters, explain selections, and choose from discovered models through DeepSeek, OpenAI, or compatible endpoints. Requests use relevant local excerpts only.
 - **Kindle** — Detect USB/WPD/MTP devices, transfer books, manage fonts and dictionaries, and import `My Clippings.txt`.
-- **Tools and sync** — Calibre conversion, Z-Library downloads, local backups, encrypted credentials, and optional S3 / WebDAV synchronization.
+- **Tools and sync** — Calibre conversion, local backups, encrypted credentials, and optional S3 / WebDAV synchronization.
 
 ## Download
 
@@ -46,7 +46,7 @@ Linux also requires WebKitGTK and Secret Service. See [cross-platform notes](doc
 
 ## Referenced technologies
 
-- **Feature references and tools** — [zlibrary.koplugin](https://github.com/ZlibraryKO/zlibrary.koplugin), [Calibre](https://github.com/kovidgoyal/calibre), and [KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290).
+- **Feature references and tools** — [Calibre](https://github.com/kovidgoyal/calibre) and [KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290).
 - **Runtime** — [Avalonia](https://github.com/AvaloniaUI/Avalonia), [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet), [EF Core](https://github.com/dotnet/efcore), and [PdfPig](https://github.com/UglyToad/PdfPig).
 - **Testing** — [xUnit](https://github.com/xunit/xunit) and [VSTest](https://github.com/microsoft/vstest).
 

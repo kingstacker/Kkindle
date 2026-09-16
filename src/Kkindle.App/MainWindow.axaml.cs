@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private const double BookGridSlotWidth = 166;
     private const int PerFileImportFormatSelectionLimit = 1_000;
     private const double RubberBandDragThreshold = 8;
+    private const double CollectionDragThreshold = 8;
     // Gallery mode trims the card to its cover, so the wrap-panel slot shrinks
     // with it (cover 214 + card margin 12) instead of leaving a blank strip.
     private double BookGridSlotHeight => _appSettings.GridGalleryDisplay ? 226 : 304;
@@ -50,6 +51,14 @@ public partial class MainWindow : Window
     private DispatcherTimer? _dropOverlayHideTimer;
     private DispatcherTimer? _bookDetailClickTimer;
     private BookCardViewModel? _pendingBookDetailCard;
+    private BookCollectionFolderViewModel? _pendingCollectionDragFolder;
+    private Control? _pendingCollectionDragControl;
+    private IPointer? _pendingCollectionDragPointer;
+    private Point _pendingCollectionDragStartPoint;
+    private bool _collectionDragActive;
+    private bool _suppressCollectionTap;
+    private BookCollectionFolderViewModel? _collectionDragTargetFolder;
+    private Control? _collectionDragTargetControl;
     private CancellationTokenSource? _detailPaneAnimationCancellation;
     private CancellationTokenSource? _windowStateAnimationCancellation;
     private bool _windowMinimizeAnimationInProgress;
@@ -89,8 +98,6 @@ public partial class MainWindow : Window
     private readonly TtsService _readerTts;
     private readonly EpubReaderPreparationService _epubReader;
     private readonly Func<IReaderHost> _readerHostFactory;
-    private readonly ZLibraryService _zLibraryService;
-    private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
     private readonly KindleEmailSender _kindleEmailSender;
     private readonly S3SyncService _s3SyncService;
@@ -101,7 +108,6 @@ public partial class MainWindow : Window
     private long _bookSyncStatusRefreshVersion;
     private readonly UpdateService? _updateService;
     private AppSettings _appSettings = new();
-    private ZLibrarySettings _zLibrarySettings = new();
     private KindleEmailSettings _kindleEmailSettings = new();
     private S3SyncStoredSettings _s3SyncStoredSettings = new(
         Guid.NewGuid().ToString("N"),
@@ -221,8 +227,6 @@ public partial class MainWindow : Window
         _epubReader = new EpubReaderPreparationService(paths);
         _readerHostFactory = services?.ReaderHostFactory ?? (() => new NativeWebViewReaderHost());
         _kindleWebFileInput = services?.KindleWebFileInput;
-        _zLibraryService = new ZLibraryService();
-        _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, _secretProtector);
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, _secretProtector);
         _kindleEmailSender = new KindleEmailSender();
         _s3SyncService = new S3SyncService(paths, _secretProtector);
@@ -573,7 +577,6 @@ public partial class MainWindow : Window
         RefreshOnboardingLocalizedChoices();
         if (_filterControlsReady)
             RefreshLocalizedFilterItems();
-        RefreshLocalizedZLibraryFilterItems();
         RefreshDeviceShelfLanguage();
         RefreshLocalizedReadingMaterialsSourceFilter();
         ViewModel.RefreshView();
@@ -592,7 +595,6 @@ public partial class MainWindow : Window
         _ = ObserveReaderTaskAsync(
             RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         UpdateCalibreDetectionStatus();
-        UpdateZLibraryAccountStatus();
         UpdateDiagnosticsTexts();
         foreach (var diagnostic in PlatformDiagnostics)
             diagnostic.RefreshLocalizedProperties();
@@ -637,32 +639,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RefreshLocalizedZLibraryFilterItems()
-    {
-        var extensionIndex = ZLibraryExtensionBox.SelectedIndex;
-        var languageIndex = ZLibraryLanguageBox.SelectedIndex;
-        SetComboBoxItemContent(ZLibraryExtensionBox, 0, T("全部格式"));
-
-        var languageLabels = new[]
-        {
-            "全部语言",
-            "中文",
-            "英文",
-            "日文",
-            "韩文",
-            "俄文",
-            "德文",
-            "法文",
-            "西班牙文"
-        };
-
-        for (var index = 0; index < languageLabels.Length; index++)
-            SetComboBoxItemContent(ZLibraryLanguageBox, index, T(languageLabels[index]));
-
-        RestoreComboBoxSelection(ZLibraryExtensionBox, extensionIndex);
-        RestoreComboBoxSelection(ZLibraryLanguageBox, languageIndex);
-    }
-
     private void RefreshLocalizedReadingMaterialsSourceFilter()
     {
         var selectedIndex = ReadingMaterialsSourceBox.SelectedIndex;
@@ -688,6 +664,7 @@ public partial class MainWindow : Window
     }
 
     public ObservableCollection<BookCollectionFolderViewModel> CollectionFolders { get; } = [];
+    public ObservableCollection<BookCollectionFolderViewModel> FilteredCollectionFolders { get; } = [];
     public ObservableCollection<DoubanCandidateViewModel> DoubanCandidates { get; } = [];
 
     private enum LibraryViewMode
@@ -997,9 +974,6 @@ public partial class MainWindow : Window
             await CloseReaderAsync();
         _readerNavigationCancellation?.Cancel();
         _readerSessionCancellation?.Cancel();
-        _zLibrarySearchCancellation?.Cancel();
-        _zLibrarySearchCancellation?.Dispose();
-        _zLibrarySearchCancellation = null;
         _embeddingModelDownloadCancellation?.Cancel();
         _g2pwModelDownloadCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
@@ -1029,7 +1003,6 @@ public partial class MainWindow : Window
         _lifetimeCancellation.Dispose();
         _douban.Dispose();
         _doubanBatchService?.Dispose();
-        _zLibraryService.Dispose();
         _epubTranslationService.Dispose();
         _translationService.Dispose();
         _aiChatClient.Dispose();
@@ -1046,7 +1019,6 @@ public partial class MainWindow : Window
         _readerPreloadHost?.Dispose();
         foreach (var folder in CollectionFolders) folder.Dispose();
         foreach (var item in DoubanCandidates) item.Dispose();
-        foreach (var item in ZLibraryBooks) item.Dispose();
         foreach (var item in _allStage3ReadingMaterials) item.Dispose();
         ViewModel.Dispose();
     }
@@ -1116,10 +1088,36 @@ public partial class MainWindow : Window
     {
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            Dispatcher.UIThread.Post(UpdateLibraryUi);
+            Dispatcher.UIThread.Post(() =>
+            {
+                ApplyCollectionSearchFilter();
+                UpdateLibraryUi();
+            });
             return;
         }
+        ApplyCollectionSearchFilter();
         UpdateLibraryUi();
+    }
+
+    private void ApplyCollectionSearchFilter()
+    {
+        var query = ViewModel.SearchText.Trim();
+        var hasSearchScope = query.Length > 0 || ViewModel.HasActiveFilters;
+        var matchingBookCollectionIds = hasSearchScope
+            ? ViewModel.Books
+                .SelectMany(card => card.Book.CollectionIds)
+                .ToHashSet()
+            : null;
+
+        FilteredCollectionFolders.Clear();
+        foreach (var folder in CollectionFolders)
+        {
+            var nameMatches = query.Length > 0
+                && folder.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+            var booksMatch = matchingBookCollectionIds?.Contains(folder.Collection.Id) == true;
+            if (!hasSearchScope || nameMatches || booksMatch)
+                FilteredCollectionFolders.Add(folder);
+        }
     }
 
     private void UpdateLibraryUi()
@@ -1154,7 +1152,7 @@ public partial class MainWindow : Window
         var showingBooks = _libraryViewMode is LibraryViewMode.Grid or LibraryViewMode.List;
         var hasBooks = ViewModel.Books.Count > 0;
         var showingCollections = _libraryViewMode == LibraryViewMode.Collections;
-        var collectionsEmpty = CollectionFolders.Count == 0;
+        var collectionsEmpty = FilteredCollectionFolders.Count == 0;
         LibraryPreviousPageButton.Content = T("上一页");
         LibraryNextPageButton.Content = T("下一页");
         LibraryPaginationBar.IsVisible = showingBooks && ViewModel.PageCount > 1;
@@ -1225,7 +1223,7 @@ public partial class MainWindow : Window
             _ => LibraryGridGlyphData
         });
         UpdateLibraryUi();
-        ScheduleAppSettingsAutoSave();
+        ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private static LibraryViewMode ParseLibraryViewMode(string? value)
@@ -1602,6 +1600,7 @@ public partial class MainWindow : Window
 
         foreach (var folder in CollectionFolders) folder.Dispose();
         CollectionFolders.Clear();
+        FilteredCollectionFolders.Clear();
 
         foreach (var summary in collections)
         {
@@ -1611,6 +1610,7 @@ public partial class MainWindow : Window
                 _paths.Data,
                 summary.CoverPaths));
         }
+        ApplyCollectionSearchFilter();
 
     }
 
@@ -2410,10 +2410,10 @@ public partial class MainWindow : Window
         }));
         if (customCollections.Length > 0)
         {
-            var deleteCollectionMenu = new MenuItem { Header = T("删除收藏夹") };
+            var deleteCollectionMenu = new MenuItem { Header = T("解散收藏夹") };
             ApplyLegacyMenuItemSize(deleteCollectionMenu);
             foreach (var folder in customCollections)
-                deleteCollectionMenu.Items.Add(CreateMenuItem(folder.Name, () => DeleteCollectionAsync(folder)));
+                deleteCollectionMenu.Items.Add(CreateMenuItem(folder.Name, () => DissolveCollectionAsync(folder)));
             collectionMenu.Items.Add(deleteCollectionMenu);
         }
         menu.Items.Add(collectionMenu);
@@ -3601,10 +3601,10 @@ public partial class MainWindow : Window
         completion?.TrySetResult(true);
     }
 
-    private Task<string?> PromptCollectionNameAsync()
+    private Task<string?> PromptCollectionNameAsync(string? initialName = null)
     {
         if (_collectionNameCompletion is not null) return Task.FromResult<string?>(null);
-        CollectionNameBox.Text = string.Empty;
+        CollectionNameBox.Text = initialName ?? string.Empty;
         ShowOverlay(CollectionNameOverlay);
         CollectionNameBox.Focus();
         _collectionNameCompletion = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -3644,13 +3644,71 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task DeleteCollectionAsync(BookCollectionFolderViewModel folder)
+    private Task OpenCollectionAsync(BookCollectionFolderViewModel folder)
     {
-        if (!await ConfirmAsync(T("删除收藏夹"), T("确定删除收藏夹“{0}”吗？书籍文件不会被删除。", folder.Name))) return;
+        ViewModel.CollectionFilterId = folder.Collection.Id;
+        ViewModel.CollectionFilterName = folder.Collection.Name;
+        ViewModel.RefreshView();
+        SetLibraryViewMode(LibraryViewMode.Grid);
+        return Task.CompletedTask;
+    }
+
+    private async Task RenameCollectionAsync(BookCollectionFolderViewModel folder)
+    {
+        var name = await PromptCollectionNameAsync(folder.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
 
         try
         {
-            await _library.DeleteCollectionAsync(folder.Collection.Id, _lifetimeCancellation.Token);
+            await _library.RenameCollectionAsync(
+                folder.Collection.Id,
+                name,
+                _lifetimeCancellation.Token);
+            await RefreshCollectionsAsync();
+            if (ViewModel.CollectionFilterId == folder.Collection.Id)
+            {
+                ViewModel.CollectionFilterName = name.Trim();
+                ViewModel.RefreshView();
+            }
+            UpdateLibraryUi();
+            SetTaskStatus(T("已重命名收藏夹为“{0}”。", name.Trim()));
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("重命名收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("重命名收藏夹"), UiText.Localize(exception.Message));
+        }
+    }
+
+    private async Task ClearCollectionAsync(BookCollectionFolderViewModel folder)
+    {
+        if (!await ConfirmAsync(
+                T("清空收藏夹"),
+                T("确定清空收藏夹“{0}”吗？收藏夹本身会保留。", folder.Name))) return;
+
+        try
+        {
+            await _library.ClearCollectionAsync(folder.Collection.Id, _lifetimeCancellation.Token);
+            await RefreshLibraryAsync();
+            SetLibraryViewMode(LibraryViewMode.Collections);
+            SetTaskStatus(T("已清空收藏夹“{0}”。", folder.Name));
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("清空收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("清空收藏夹"), UiText.Localize(exception.Message));
+        }
+    }
+
+    private async Task DissolveCollectionAsync(BookCollectionFolderViewModel folder)
+    {
+        if (!await ConfirmAsync(
+                T("解散收藏夹"),
+                T("确定解散收藏夹“{0}”吗？书籍将自动回到未收藏夹。", folder.Name))) return;
+
+        try
+        {
+            await _library.DissolveCollectionAsync(folder.Collection.Id, _lifetimeCancellation.Token);
             if (ViewModel.CollectionFilterId == folder.Collection.Id)
             {
                 ViewModel.CollectionFilterId = null;
@@ -3658,12 +3716,44 @@ public partial class MainWindow : Window
             }
             await RefreshLibraryAsync();
             SetLibraryViewMode(LibraryViewMode.Collections);
-            SetTaskStatus(T("已删除收藏夹“{0}”。", folder.Name));
+            SetTaskStatus(T("已解散收藏夹“{0}”。", folder.Name));
         }
         catch (Exception exception)
         {
-            SetTaskStatus(T("删除收藏夹失败：{0}", UiText.Localize(exception.Message)));
-            await ShowMessageAsync(T("无法删除收藏夹"), UiText.Localize(exception.Message));
+            SetTaskStatus(T("解散收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("解散收藏夹"), UiText.Localize(exception.Message));
+        }
+    }
+
+    private async Task MergeCollectionAsync(
+        BookCollectionFolderViewModel source,
+        BookCollectionFolderViewModel target)
+    {
+        var sourceName = source.Name;
+        var targetName = target.Name;
+        if (!await ConfirmAsync(
+                T("合并收藏夹"),
+                T("确定将“{0}”合并到“{1}”吗？源收藏夹将被解散。", sourceName, targetName))) return;
+
+        try
+        {
+            await _library.MergeCollectionsAsync(
+                source.Collection.Id,
+                target.Collection.Id,
+                _lifetimeCancellation.Token);
+            if (ViewModel.CollectionFilterId == source.Collection.Id)
+            {
+                ViewModel.CollectionFilterId = target.Collection.Id;
+                ViewModel.CollectionFilterName = target.Collection.Name;
+            }
+            await RefreshLibraryAsync();
+            SetLibraryViewMode(LibraryViewMode.Collections);
+            SetTaskStatus(T("已将“{0}”合并到“{1}”。", sourceName, targetName));
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("合并收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("合并收藏夹"), UiText.Localize(exception.Message));
         }
     }
 
@@ -4167,30 +4257,216 @@ public partial class MainWindow : Window
 
     private void CollectionFolder_Tapped(object? sender, TappedEventArgs e)
     {
+        if (_suppressCollectionTap)
+        {
+            _suppressCollectionTap = false;
+            e.Handled = true;
+            return;
+        }
         if (sender is not Control { DataContext: BookCollectionFolderViewModel folder }) return;
-        ViewModel.CollectionFilterId = folder.Collection.Id;
-        ViewModel.CollectionFilterName = folder.Collection.Name;
-        ViewModel.RefreshView();
-        SetLibraryViewMode(LibraryViewMode.Grid);
+        _ = OpenCollectionAsync(folder);
         e.Handled = true;
     }
 
-    // Right-clicking a collection card opens the delete action (WinUI
-    // reference); right-clicking empty space in the collections view offers
-    // the create action.
+    private void CollectionFolder_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Control control
+            || control.DataContext is not BookCollectionFolderViewModel folder
+            || IsUncollectedCollection(folder)
+            || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed)
+            return;
+
+        // Keep a normal press available for CollectionFolder_Tapped. The
+        // native drag operation starts only after the pointer crosses the
+        // threshold, so opening a collection is still a simple click.
+        _pendingCollectionDragFolder = folder;
+        _pendingCollectionDragControl = control;
+        _pendingCollectionDragPointer = e.Pointer;
+        _pendingCollectionDragStartPoint = e.GetPosition(control);
+        e.Pointer.Capture(control);
+    }
+
+    private void CollectionFolder_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (sender is not Control control
+            || !ReferenceEquals(control, _pendingCollectionDragControl)
+            || !ReferenceEquals(e.Pointer, _pendingCollectionDragPointer)
+            || _pendingCollectionDragFolder is not { } folder)
+            return;
+
+        if (_collectionDragActive)
+        {
+            UpdateCollectionDragVisual(e.GetPosition(CollectionDragOverlay));
+            e.Handled = true;
+            return;
+        }
+
+        var delta = e.GetPosition(control) - _pendingCollectionDragStartPoint;
+        if (Math.Max(Math.Abs(delta.X), Math.Abs(delta.Y)) < CollectionDragThreshold)
+            return;
+
+        _collectionDragActive = true;
+        control.Classes.Set("dragging", true);
+        CollectionDragPreviewTitle.Text = folder.Name;
+        CollectionDragPreviewCount.Text = folder.BookCountLabel;
+        CollectionDragPreviewCover1.Source = folder.Cover1;
+        CollectionDragPreviewCover2.Source = folder.Cover2;
+        CollectionDragPreviewCover3.Source = folder.Cover3;
+        CollectionDragOverlay.IsVisible = true;
+        UpdateCollectionDragVisual(e.GetPosition(CollectionDragOverlay));
+        e.Handled = true;
+    }
+
+    private async void CollectionFolder_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Pointer, _pendingCollectionDragPointer))
+            return;
+
+        if (!_collectionDragActive)
+        {
+            ResetPendingCollectionDrag();
+            return;
+        }
+
+        var source = _pendingCollectionDragFolder;
+        var target = _collectionDragTargetFolder;
+        _suppressCollectionTap = true;
+        Dispatcher.UIThread.Post(() => _suppressCollectionTap = false);
+        ResetPendingCollectionDrag();
+        e.Handled = true;
+
+        if (source is not null
+            && target is not null
+            && source.Collection.Id != target.Collection.Id
+            && !IsUncollectedCollection(target))
+            await MergeCollectionAsync(source, target);
+    }
+
+    private void CollectionFolder_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (sender is Control control && ReferenceEquals(control, _pendingCollectionDragControl))
+            ResetPendingCollectionDrag();
+    }
+
+    private void ResetPendingCollectionDrag()
+    {
+        var pointer = _pendingCollectionDragPointer;
+        _pendingCollectionDragControl?.Classes.Set("dragging", false);
+        _collectionDragTargetControl?.Classes.Set("dropTarget", false);
+        _pendingCollectionDragFolder = null;
+        _pendingCollectionDragControl = null;
+        _pendingCollectionDragPointer = null;
+        _pendingCollectionDragStartPoint = default;
+        _collectionDragActive = false;
+        _collectionDragTargetFolder = null;
+        _collectionDragTargetControl = null;
+        CollectionDragPreviewCover1.Source = null;
+        CollectionDragPreviewCover2.Source = null;
+        CollectionDragPreviewCover3.Source = null;
+        CollectionDragOverlay.IsVisible = false;
+        pointer?.Capture(null);
+    }
+
+    private void UpdateCollectionDragVisual(Point pointer)
+    {
+        if (!_collectionDragActive)
+            return;
+
+        var previewWidth = CollectionDragPreview.Bounds.Width > 0
+            ? CollectionDragPreview.Bounds.Width
+            : 210;
+        var previewHeight = CollectionDragPreview.Bounds.Height > 0
+            ? CollectionDragPreview.Bounds.Height
+            : 142;
+        var left = pointer.X - 18;
+        var top = pointer.Y - 18;
+        if (CollectionDragOverlay.Bounds.Width > 0)
+            left = Math.Clamp(left, 0, Math.Max(0, CollectionDragOverlay.Bounds.Width - previewWidth));
+        if (CollectionDragOverlay.Bounds.Height > 0)
+            top = Math.Clamp(top, 0, Math.Max(0, CollectionDragOverlay.Bounds.Height - previewHeight));
+        Canvas.SetLeft(CollectionDragPreview, left);
+        Canvas.SetTop(CollectionDragPreview, top);
+
+        var targetControl = FindCollectionFolderControlAt(pointer, out var targetFolder);
+        if (targetFolder is null
+            || _pendingCollectionDragFolder is null
+            || targetFolder.Collection.Id == _pendingCollectionDragFolder.Collection.Id
+            || IsUncollectedCollection(targetFolder))
+        {
+            targetFolder = null;
+            targetControl = null;
+        }
+
+        if (!ReferenceEquals(_collectionDragTargetControl, targetControl))
+        {
+            _collectionDragTargetControl?.Classes.Set("dropTarget", false);
+            targetControl?.Classes.Set("dropTarget", true);
+        }
+        _collectionDragTargetFolder = targetFolder;
+        _collectionDragTargetControl = targetControl;
+    }
+
+    private Control? FindCollectionFolderControlAt(
+        Point pointer,
+        out BookCollectionFolderViewModel? folder)
+    {
+        folder = null;
+        foreach (var control in CollectionList.GetVisualDescendants().OfType<Control>())
+        {
+            if (control is not Grid
+                || !control.Classes.Contains("collectionFolder")
+                || control.DataContext is not BookCollectionFolderViewModel candidate)
+                continue;
+            if (control.TranslatePoint(default, CollectionDragOverlay) is not { } origin)
+                continue;
+            if (!new Rect(origin, control.Bounds.Size).Contains(pointer))
+                continue;
+
+            folder = candidate;
+            return control;
+        }
+
+        return null;
+    }
+
+    private static bool IsUncollectedCollection(BookCollectionFolderViewModel folder) =>
+        string.Equals(
+            folder.Collection.Name,
+            BookLibraryDefaults.UncollectedCollectionName,
+            StringComparison.Ordinal);
+
+    // Right-clicking a custom collection card keeps the protected “未收藏”
+    // card out of collection-management actions.
     private void CollectionFolder_ContextRequested(object? sender, ContextRequestedEventArgs e)
     {
         if (sender is not Control { DataContext: BookCollectionFolderViewModel folder } control) return;
-        if (string.Equals(
-                folder.Collection.Name,
-                BookLibraryDefaults.UncollectedCollectionName,
-                StringComparison.Ordinal))
+        if (IsUncollectedCollection(folder))
         {
             e.Handled = true;
             return;
         }
         var menu = new ContextMenu();
-        menu.Items.Add(CreateMenuItem(T("删除收藏夹"), () => DeleteCollectionAsync(folder)));
+        menu.Items.Add(CreateMenuItem(T("打开收藏夹"), () => OpenCollectionAsync(folder)));
+        menu.Items.Add(CreateMenuItem(T("重命名收藏夹"), () => RenameCollectionAsync(folder)));
+        menu.Items.Add(CreateMenuItem(T("清空书籍"), () => ClearCollectionAsync(folder)));
+
+        var mergeTargets = CollectionFolders
+            .Where(candidate => candidate.Collection.Id != folder.Collection.Id
+                && !IsUncollectedCollection(candidate))
+            .ToArray();
+        if (mergeTargets.Length > 0)
+        {
+            menu.Items.Add(new Separator());
+            var mergeMenu = new MenuItem { Header = T("合并到…") };
+            ApplyLegacyMenuItemSize(mergeMenu);
+            mergeMenu.Resources["FlyoutThemeMinWidth"] = 0d;
+            foreach (var target in mergeTargets)
+                mergeMenu.Items.Add(CreateMenuItem(target.Name, () => MergeCollectionAsync(folder, target)));
+            menu.Items.Add(mergeMenu);
+        }
+
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem(T("解散收藏夹"), () => DissolveCollectionAsync(folder)));
         menu.Open(control);
         e.Handled = true;
     }

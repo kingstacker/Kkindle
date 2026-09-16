@@ -35,6 +35,46 @@ public sealed class SettingsUiCollection : ICollectionFixture<SettingsUiSession>
 public sealed partial class SettingsTests(SettingsUiSession session)
 {
     [Fact]
+    public Task FirstRunShowsWelcomeThenDisclaimerBeforeDeviceSetup() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create(new AppSettings
+        {
+            UiLanguage = "zh-CN",
+            OnboardingCompleted = false,
+            NetworkEnabled = false,
+            AutoUpdateCheckEnabled = false,
+            AutoConnectDevice = false
+        });
+
+        var overlay = scope.Get<Grid>("OnboardingOverlay");
+        await Until(() => overlay.IsVisible);
+
+        Assert.True(scope.Get<Grid>("OnboardingWelcomePage").IsVisible);
+        Assert.False(scope.Get<Grid>("OnboardingDisclaimerPage").IsVisible);
+        Assert.False(scope.Get<Grid>("OnboardingDevicePage").IsVisible);
+        Assert.Equal("1 / 3", scope.Get<TextBlock>("OnboardingStepText").Text);
+
+        scope.Get<Button>("OnboardingNextButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Render();
+        Assert.False(scope.Get<Grid>("OnboardingWelcomePage").IsVisible);
+        Assert.True(scope.Get<Grid>("OnboardingDisclaimerPage").IsVisible);
+        Assert.False(scope.Get<Grid>("OnboardingDevicePage").IsVisible);
+        Assert.Equal("2 / 3", scope.Get<TextBlock>("OnboardingStepText").Text);
+
+        scope.Get<Button>("OnboardingNextButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.True(scope.Get<TextBlock>("OnboardingDisclaimerStatusText").IsVisible);
+        Assert.True(scope.Get<Grid>("OnboardingDisclaimerPage").IsVisible);
+
+        scope.Get<CheckBox>("OnboardingDisclaimerCheckBox").IsChecked = true;
+        scope.Get<Button>("OnboardingNextButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Render();
+
+        Assert.False(scope.Get<Grid>("OnboardingDisclaimerPage").IsVisible);
+        Assert.True(scope.Get<Grid>("OnboardingDevicePage").IsVisible);
+        Assert.Equal("3 / 3", scope.Get<TextBlock>("OnboardingStepText").Text);
+    });
+
+    [Fact]
     public Task ClosingImmediatelyFlushesPreferencesAndLanguage() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -391,10 +431,6 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.Same(scope.Get<Control>("KindleEmailRecipientBox"), scope.Window.FocusManager!.GetFocusedElement());
         scope.Get<TextBox>("KindleEmailRecipientBox").Text = "draft@kindle.com";
         Capture(scope.Window, "zh-CN-1024-email");
-        await scope.Call<Task>("ShowZLibraryAccountAsync", (object?)null);
-        await Render();
-        Assert.Same(scope.Get<Control>("ZLibraryEmailBox"), scope.Window.FocusManager!.GetFocusedElement());
-        Capture(scope.Window, "zh-CN-1024-account");
         scope.Call("ReaderAiSettingsButton_Click", null, new RoutedEventArgs());
         await Until(() => scope.Field<bool>("_mainReaderAiSettingsLoaded"));
         await Render();

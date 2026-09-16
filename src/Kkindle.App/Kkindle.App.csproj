@@ -32,6 +32,7 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\Fonts\*" />
     <AvaloniaResource Include="Assets\Icons\*" />
+    <AvaloniaResource Include="Assets\Images\*" />
     <!-- The reader CSS injects @font-face with a file:// URL so WebView2 can
          use the bundled font, mirroring the WinUI reference's
          ApplyReaderAppearanceAsync; copy it to the output for that reason. -->

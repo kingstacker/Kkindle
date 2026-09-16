@@ -11,6 +11,7 @@ public partial class MainWindow
     private bool _onboardingUpdatingLanguage;
     private bool _onboardingUpdatingChoices;
     private bool _onboardingSaving;
+    private bool _onboardingDisclaimerAccepted;
     private int _onboardingStep;
     private string? _onboardingSelectedDeviceModel;
 
@@ -19,6 +20,7 @@ public partial class MainWindow
         if (_appSettings.OnboardingCompleted) return;
 
         _onboardingStep = 1;
+        _onboardingDisclaimerAccepted = false;
         _onboardingSelectedDeviceModel = _appSettings.DefaultDeviceModel;
         _onboardingUpdatingLanguage = true;
         try
@@ -30,6 +32,8 @@ public partial class MainWindow
             _onboardingUpdatingLanguage = false;
         }
 
+        OnboardingDisclaimerCheckBox.IsChecked = false;
+        OnboardingDisclaimerStatusText.IsVisible = false;
         UpdateOnboardingLanguageLabels();
         RefreshOnboardingDeviceChoices();
         UpdateOnboardingPage();
@@ -41,16 +45,29 @@ public partial class MainWindow
     private void UpdateOnboardingPage()
     {
         var isWelcome = _onboardingStep == 1;
+        var isDisclaimer = _onboardingStep == 2;
+        var isDevice = _onboardingStep == 3;
         OnboardingWelcomePage.IsVisible = isWelcome;
-        OnboardingDevicePage.IsVisible = !isWelcome;
-        OnboardingStepText.Text = $"{_onboardingStep} / 2";
+        OnboardingDisclaimerPage.IsVisible = isDisclaimer;
+        OnboardingDevicePage.IsVisible = isDevice;
+        OnboardingStepText.Text = $"{_onboardingStep} / 3";
         OnboardingBackButton.IsVisible = !isWelcome;
-        OnboardingSkipButton.IsVisible = !isWelcome;
-        OnboardingNextButton.IsVisible = isWelcome;
-        OnboardingFinishButton.IsVisible = !isWelcome;
+        OnboardingSkipButton.IsVisible = isDevice;
+        OnboardingNextButton.IsVisible = isWelcome || isDisclaimer;
+        OnboardingNextButton.IsEnabled = !_onboardingSaving;
+        OnboardingFinishButton.IsVisible = isDevice;
+        OnboardingDisclaimerStatusText.IsVisible = false;
         OnboardingDeviceStatusText.IsVisible = false;
 
-        if (!isWelcome)
+        if (isWelcome)
+        {
+            OnboardingLanguageBox.Focus();
+        }
+        else if (isDisclaimer)
+        {
+            OnboardingDisclaimerCheckBox.Focus();
+        }
+        else
         {
             RefreshOnboardingDeviceChoices();
             OnboardingVendorBox.Focus();
@@ -233,17 +250,44 @@ public partial class MainWindow
         UpdateOnboardingSelectedDeviceText();
     }
 
+    private void OnboardingDisclaimerCheckBox_IsCheckedChanged(object? sender, RoutedEventArgs e)
+    {
+        _onboardingDisclaimerAccepted = sender is CheckBox { IsChecked: true };
+        if (OnboardingDisclaimerStatusText is not null)
+            OnboardingDisclaimerStatusText.IsVisible = false;
+    }
+
     private void OnboardingNextButton_Click(object? sender, RoutedEventArgs e)
     {
-        _onboardingStep = 2;
+        if (_onboardingStep == 1)
+        {
+            _onboardingStep = 2;
+            UpdateOnboardingPage();
+            return;
+        }
+
+        if (_onboardingStep != 2)
+            return;
+
+        if (!_onboardingDisclaimerAccepted)
+        {
+            OnboardingDisclaimerStatusText.IsVisible = true;
+            OnboardingDisclaimerCheckBox.Focus();
+            return;
+        }
+
+        _onboardingStep = 3;
         UpdateOnboardingPage();
     }
 
     private void OnboardingBackButton_Click(object? sender, RoutedEventArgs e)
     {
-        _onboardingStep = 1;
+        _onboardingStep = Math.Max(1, _onboardingStep - 1);
         UpdateOnboardingPage();
-        OnboardingLanguageBox.Focus();
+        if (_onboardingStep == 1)
+            OnboardingLanguageBox.Focus();
+        else
+            OnboardingDisclaimerCheckBox.Focus();
     }
 
     private async void OnboardingSkipButton_Click(object? sender, RoutedEventArgs e)
@@ -323,18 +367,21 @@ public partial class MainWindow
             OnboardingBackButton.IsEnabled = true;
             OnboardingSkipButton.IsEnabled = true;
             OnboardingFinishButton.IsEnabled = true;
-            OnboardingNextButton.IsEnabled = true;
+            OnboardingNextButton.IsEnabled = !_onboardingSaving;
         }
     }
 
     private void OnboardingOverlay_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && _onboardingStep == 2)
+        if (e.Key == Key.Escape && _onboardingStep > 1)
         {
             e.Handled = true;
-            _onboardingStep = 1;
+            _onboardingStep--;
             UpdateOnboardingPage();
-            OnboardingLanguageBox.Focus();
+            if (_onboardingStep == 1)
+                OnboardingLanguageBox.Focus();
+            else
+                OnboardingDisclaimerCheckBox.Focus();
         }
     }
 }

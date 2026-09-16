@@ -10,7 +10,6 @@ public sealed class SettingsConcurrencyTests
     [InlineData("app")]
     [InlineData("ai")]
     [InlineData("email")]
-    [InlineData("zlibrary")]
     [InlineData("tts")]
     [InlineData("sync")]
     public async Task SavingSettingsPreservesAnOpenSnapshot(string kind)
@@ -29,8 +28,6 @@ public sealed class SettingsConcurrencyTests
                     value => new AiSettingsStore(paths, protector).SaveAsync(new AiConnectionSettings { Model = value })),
                 "email" => (Path.Combine(paths.Data, "kindle-email-settings.json"),
                     value => new KindleEmailSettingsStore(paths, protector).SaveAsync(new KindleEmailSettings { SmtpHost = value })),
-                "zlibrary" => (Path.Combine(paths.Data, "zlibrary-settings.json"),
-                    value => new ZLibrarySettingsStore(paths, protector).SaveAsync(new ZLibrarySettings { Email = value })),
                 "tts" => (Path.Combine(paths.Data, "tts-settings.json"),
                     value => new TtsSettingsStore(paths).SaveAsync(new TtsSettings { Model = value })),
                 "sync" => (Path.Combine(paths.Data, "s3-sync-settings.json"),

@@ -30,9 +30,14 @@
         <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource SidebarIndicatorColor}" />
         <SolidColorBrush x:Key="SoftHoverBrush" Color="{DynamicResource SoftHoverColor}" />
 
-        <!-- The font is bundled with the portable app. The suffix is the
-             internal family name, not the filename. -->
+        <!-- The original bundled font remains the default for all application
+             chrome. Reader body text has its own setting and can override it. -->
         <FontFamily x:Key="DefaultAppFontFamily">fonts:Kkindle#KingHwaOldSong</FontFamily>
+
+        <!-- The legacy Avalonia reader fallback is separate from application
+             chrome. The native reader applies the selected body font directly;
+             this resource is only the fallback surface's reader-font default. -->
+        <FontFamily x:Key="ReaderFallbackFontFamily">fonts:Kkindle#KingHwaOldSong</FontFamily>
 
         <!-- The migrated reader buttons use the same deliberately plain
              template as the WinUI reference instead of Fluent's extra button
@@ -2471,6 +2476,12 @@
         <Style Selector="ListBox.bookGrid ListBoxItem:selected:pointerover">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Grid.collectionFolder.dropTarget">
+            <Setter Property="Opacity" Value="0.62" />
+        </Style>
+        <Style Selector="Grid.collectionFolder.dragging">
+            <Setter Property="Opacity" Value="0.34" />
         </Style>
         <Style Selector="ListBox.bookGrid /template/ ItemsPresenter">
             <Setter Property="VerticalAlignment" Value="Top" />

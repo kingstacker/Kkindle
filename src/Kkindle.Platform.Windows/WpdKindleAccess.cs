@@ -539,12 +539,22 @@ internal static class WpdKindleAccess
             item = FindItemByRelativePath(storage, Path.Combine(device.Profile.BooksDirectory, book.RelativePath))
                 ?? throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
             var destinationPath = Path.Combine(destinationDirectory, book.FileName);
-            WpdNativeTransfer.CopyFileToLocal(
-                device.RootPath,
-                GetWpdObjectId(item),
-                destinationPath,
-                book.Size,
-                cancellationToken);
+            try
+            {
+                WpdNativeTransfer.CopyFileToLocal(
+                    device.RootPath,
+                    GetWpdObjectId(item),
+                    destinationPath,
+                    book.Size,
+                    cancellationToken);
+            }
+            catch (COMException)
+            {
+                // Some Kindle firmware exposes the object through Shell but
+                // rejects WPD_RESOURCE_DEFAULT. IFileOperation uses the same
+                // Shell object and remains compatible with that firmware.
+                ShellFileOperation.CopyToLocal((object)item, destinationPath, book.Size, cancellationToken);
+            }
             return destinationPath;
         }
         catch (COMException exception)
@@ -588,12 +598,20 @@ internal static class WpdKindleAccess
             if ((bool)item.IsFolder) throw new InvalidOperationException("设备目标不能是文件夹。");
             var fileName = Path.GetFileName(relativePath);
             var destinationPath = Path.Combine(destinationDirectory, fileName);
-            WpdNativeTransfer.CopyFileToLocal(
-                device.RootPath,
-                GetWpdObjectId(item),
-                destinationPath,
-                ReadInt64Property(item, "System.Size"),
-                cancellationToken);
+            var expectedSize = ReadInt64Property(item, "System.Size");
+            try
+            {
+                WpdNativeTransfer.CopyFileToLocal(
+                    device.RootPath,
+                    GetWpdObjectId(item),
+                    destinationPath,
+                    expectedSize,
+                    cancellationToken);
+            }
+            catch (COMException)
+            {
+                ShellFileOperation.CopyToLocal((object)item, destinationPath, expectedSize, cancellationToken);
+            }
             return destinationPath;
         }
         catch (COMException exception)

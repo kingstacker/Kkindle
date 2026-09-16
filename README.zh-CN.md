@@ -15,7 +15,7 @@ Kkindle 是一款基于 Avalonia 的跨平台电子书与 Kindle 管理器。它
 - **PDF 阅读**：书库自动使用第一页作为封面，支持连续滚动、单页和双页阅读，以及适合宽度/整页、清晰缩放和 90° 旋转；纸张与文字颜色跟随阅读主题。支持选择文字、六种划线/标记样式、批注编辑、分级目录识别与跳转。打开时先显示当前页，全文搜索在后台准备；可见区域按屏幕像素密度重绘。搜索、书签和阅读进度沿用 EPUB 的本地保存逻辑。扫描版可显示原页并添加页面笔记，暂不提供 OCR。
 - **AI 阅读助手**：围绕当前书籍提问、章节总结、选文解释和全书概览；支持自动获取模型、模型选择、连通性检测以及 DeepSeek、OpenAI 兼容接口。只发送相关本地片段。
 - **Kindle 管理**：识别 USB/WPD/MTP 设备，传输书籍，管理字体和词典，导入 `My Clippings.txt`。
-- **工具与同步**：Calibre 格式转换、Z-Library 下载、本地备份、凭据加密和可选 S3 / WebDAV 同步。
+- **工具与同步**：Calibre 格式转换、本地备份、凭据加密和可选 S3 / WebDAV 同步。
 
 ## 下载
 
@@ -48,7 +48,7 @@ Linux 还需要 WebKitGTK 和 Secret Service。Linux/macOS 的运行命令见[�
 
 ## 技术参考
 
-- **功能参考与工具**：[zlibrary.koplugin](https://github.com/ZlibraryKO/zlibrary.koplugin)、[Calibre](https://github.com/kovidgoyal/calibre)、[KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290)。
+- **功能参考与工具**：[Calibre](https://github.com/kovidgoyal/calibre)、[KFX Input](https://www.mobileread.com/forums/showthread.php?t=291290)。
 - **运行依赖**：[Avalonia](https://github.com/AvaloniaUI/Avalonia)、[CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet)、[EF Core](https://github.com/dotnet/efcore)、[PdfPig](https://github.com/UglyToad/PdfPig)。
 - **测试工具**：[xUnit](https://github.com/xunit/xunit)、[VSTest](https://github.com/microsoft/vstest)。
 

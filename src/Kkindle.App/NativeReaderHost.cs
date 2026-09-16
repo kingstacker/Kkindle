@@ -1146,6 +1146,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         || Math.Abs(settings.MaxWidth - _settings.MaxWidth) > 0.001
         || settings.VerticalWriting != _settings.VerticalWriting
         || settings.ParagraphIndent != _settings.ParagraphIndent
+        || !string.Equals(settings.FontFamily, _settings.FontFamily, StringComparison.OrdinalIgnoreCase)
         || settings.FlowMode != _settings.FlowMode
         || settings.TwoPageMode != _settings.TwoPageMode
         || Math.Abs(settings.BodyPadding - _settings.BodyPadding) > 0.001;
@@ -1211,6 +1212,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                     var loader = new XhtmlChapterLoader(settings.ParagraphIndent);
                     var content = loader.Load(chapterPath, navigationToken);
                     var options = BuildOptions(settings, width, height);
+                    SelectReaderMainFont(settings.FontFamily);
                     var layout = Compose(content, options, navigationToken);
                     return (content, options, layout);
                 }, navigationToken);
@@ -1293,6 +1295,118 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     internal static string GetBundledFontPath() =>
         Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", BundledFontFileName);
 
+    private static IEnumerable<string> GetReaderFontCandidatesForFamily(string family)
+    {
+        var normalized = family.Trim();
+        if (string.Equals(normalized, ReaderFontDefaults.DefaultFamily, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, ReaderFontDefaults.BundledFamily, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return GetBundledFontPath();
+            yield break;
+        }
+
+        var windowsFontDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+        var windowsFileNames = normalized switch
+        {
+            "Microsoft YaHei UI" => new[] { "msyh.ttc", "msyhl.ttc", "msyh.ttf" },
+            "SimSun" => new[] { "simsun.ttc", "simsun.ttf" },
+            "SimHei" => new[] { "simhei.ttf", "simhei.ttc" },
+            "KaiTi" => new[] { "simkai.ttf", "simkai.ttc" },
+            "DengXian" => new[] { "Deng.ttf", "Dengl.ttf", "Dengb.ttf" },
+            _ => Array.Empty<string>(),
+        };
+        if (!string.IsNullOrWhiteSpace(windowsFontDirectory))
+        {
+            foreach (var fileName in windowsFileNames)
+                yield return Path.Combine(windowsFontDirectory, fileName);
+        }
+
+        var platformPaths = normalized switch
+        {
+            "Source Han Serif SC" => new[]
+            {
+                "/usr/share/fonts/opentype/source-han-serif/SourceHanSerifSC-Regular.otf",
+                "/usr/share/fonts/opentype/source-han-serif/SourceHanSerifCN-Regular.otf",
+                "/usr/share/fonts/truetype/adobe-source-han-serif/SourceHanSerifSC-Regular.otf",
+                "/System/Library/Fonts/SourceHanSerifSC-Regular.otf",
+            },
+            "Noto Serif CJK SC" => new[]
+            {
+                "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.otf",
+            },
+            _ => Array.Empty<string>(),
+        };
+        foreach (var path in platformPaths)
+            yield return path;
+    }
+
+    private static string? ResolveReaderFontPath(string? family)
+    {
+        if (string.IsNullOrWhiteSpace(family))
+            return GetBundledFontPath();
+
+        foreach (var part in family.Split(
+                     ',',
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            foreach (var candidate in GetReaderFontCandidatesForFamily(part))
+            {
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> GetReaderFontCandidates()
+    {
+        var paths = new List<string>();
+        var windowsFontDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+        if (!string.IsNullOrWhiteSpace(windowsFontDirectory))
+        {
+            paths.AddRange(new[]
+            {
+                "segoeui.ttf",
+                "msyh.ttc",
+                "msyhl.ttc",
+                "msyh.ttf",
+                "simsun.ttc",
+                "simsun.ttf",
+                "simhei.ttf",
+                "simhei.ttc",
+                "simkai.ttf",
+                "simkai.ttc",
+                "Deng.ttf",
+                "Dengl.ttf",
+                "Dengb.ttf",
+            }.Select(fileName => Path.Combine(windowsFontDirectory, fileName)));
+        }
+
+        paths.AddRange(new[]
+        {
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.otf",
+            "/usr/share/fonts/opentype/source-han-serif/SourceHanSerifSC-Regular.otf",
+            "/usr/share/fonts/opentype/source-han-serif/SourceHanSerifCN-Regular.otf",
+            "/usr/share/fonts/truetype/adobe-source-han-serif/SourceHanSerifSC-Regular.otf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/SourceHanSerifSC-Regular.otf",
+        });
+
+        return paths
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private static TypesetFontLibrary CreateFontLibrary()
     {
         var main = GetBundledFontPath();
@@ -1302,23 +1416,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var fonts = new List<string>();
-        var systemFontDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
-        var candidates = new[]
+        foreach (var candidate in GetReaderFontCandidates())
         {
-            Path.Combine(systemFontDirectory, "segoeui.ttf"),
-            Path.Combine(systemFontDirectory, "msyh.ttc"),
-            Path.Combine(systemFontDirectory, "simsun.ttc"),
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/Hiragino Sans GB.ttc",
-        };
-        foreach (var candidate in candidates)
-        {
-            if (File.Exists(candidate)
-                && !string.Equals(candidate, main, StringComparison.OrdinalIgnoreCase)
+            if (!string.Equals(candidate, main, StringComparison.OrdinalIgnoreCase)
                 && !fonts.Contains(candidate, StringComparer.OrdinalIgnoreCase))
             {
                 fonts.Add(candidate);
@@ -1326,6 +1426,20 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         return new TypesetFontLibrary(main, fonts);
+    }
+
+    private void SelectReaderMainFont(string? family)
+    {
+        lock (_engineGate)
+        {
+            SelectReaderMainFont(Engine, family);
+        }
+    }
+
+    private static void SelectReaderMainFont(TypesetEngine engine, string? family)
+    {
+        var selected = ResolveReaderFontPath(family) ?? GetBundledFontPath();
+        engine.Fonts.TrySetMainFont(selected);
     }
 
     private static TypesetLayoutOptions BuildOptions(ReaderLayoutSettings settings, double width, double height)
@@ -1378,6 +1492,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         CancellationToken cancellationToken)
     {
         using var engine = new TypesetEngine(CreateFontLibrary());
+        SelectReaderMainFont(engine, settings.FontFamily);
         var options = BuildOptions(settings, width, height);
         var counts = new int[chapterPaths.Count];
         for (var index = 0; index < chapterPaths.Count; index++)
@@ -1636,6 +1751,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             ? _layout.Pages[_pageIndex].TextStartOffset
             : -1;
 
+        SelectReaderMainFont(_settings.FontFamily);
         var options = BuildOptions(_settings, width, height);
         _options = options;
         _layout = Compose(_content, options);

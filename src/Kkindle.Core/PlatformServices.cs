@@ -1,7 +1,7 @@
 namespace Kkindle.Core;
 
 /// <summary>
-/// Encrypts small secrets (API keys, SMTP and Z-Library passwords) with a
+/// Encrypts small secrets (API keys and SMTP passwords) with a
 /// key that belongs to the current OS user, so a copied settings file is
 /// useless on another machine or account.
 ///

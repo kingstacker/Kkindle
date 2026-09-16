@@ -1394,7 +1394,73 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         finally { _databaseGate.Release(); }
     }
 
-    public async Task DeleteCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default)
+    public Task DeleteCollectionAsync(
+        Guid collectionId,
+        CancellationToken cancellationToken = default) =>
+        DissolveCollectionAsync(collectionId, cancellationToken);
+
+    public async Task RenameCollectionAsync(
+        Guid collectionId,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = (name ?? string.Empty).Trim();
+        if (normalizedName.Length == 0)
+            throw new ArgumentException("收藏夹名称不能为空。", nameof(name));
+        if (normalizedName.Length > 60)
+            throw new ArgumentException("收藏夹名称不能超过 60 个字符。", nameof(name));
+
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var defaultCollectionId = await GetCollectionIdByNameAsync(
+                    connection,
+                    BookLibraryDefaults.UncollectedCollectionName,
+                    cancellationToken,
+                    transaction);
+                if (defaultCollectionId == collectionId)
+                    throw new InvalidOperationException("未收藏收藏夹不能重命名。");
+
+                var duplicate = connection.CreateCommand();
+                duplicate.Transaction = transaction;
+                duplicate.CommandText = """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM BookCollections
+                        WHERE Name = $name COLLATE NOCASE
+                          AND Id <> $collectionId
+                    );
+                    """;
+                duplicate.Parameters.AddWithValue("$name", normalizedName);
+                duplicate.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                if (Convert.ToInt64(await duplicate.ExecuteScalarAsync(cancellationToken)) != 0)
+                    throw new InvalidOperationException("同名收藏夹已经存在。");
+
+                var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = "UPDATE BookCollections SET Name = $name WHERE Id = $collectionId;";
+                update.Parameters.AddWithValue("$name", normalizedName);
+                update.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                if (await update.ExecuteNonQueryAsync(cancellationToken) == 0)
+                    throw new InvalidOperationException("收藏夹已不存在。");
+
+                await transaction.CommitAsync(cancellationToken);
+                NotifyDataChanged();
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+        finally { _databaseGate.Release(); }
+    }
+
+    public async Task ClearCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default)
     {
         await _databaseGate.WaitAsync(cancellationToken);
         try
@@ -1409,7 +1475,75 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     cancellationToken,
                     transaction);
                 if (defaultCollectionId == collectionId)
-                    throw new InvalidOperationException("未收藏收藏夹不能删除。");
+                    throw new InvalidOperationException("未收藏收藏夹不能清空。");
+
+                var collectionExists = connection.CreateCommand();
+                collectionExists.Transaction = transaction;
+                collectionExists.CommandText = "SELECT EXISTS(SELECT 1 FROM BookCollections WHERE Id = $collectionId);";
+                collectionExists.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                if (Convert.ToInt64(await collectionExists.ExecuteScalarAsync(cancellationToken)) == 0)
+                    throw new InvalidOperationException("收藏夹已不存在。");
+
+                var affectedBookIds = new List<Guid>();
+                var affectedBooks = connection.CreateCommand();
+                affectedBooks.Transaction = transaction;
+                affectedBooks.CommandText = "SELECT BookId FROM BookCollectionItems WHERE CollectionId = $collectionId;";
+                affectedBooks.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                await using (var reader = await affectedBooks.ExecuteReaderAsync(cancellationToken))
+                {
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        if (Guid.TryParse(reader.GetString(0), out var bookId))
+                            affectedBookIds.Add(bookId);
+                    }
+                }
+
+                var deleteItems = connection.CreateCommand();
+                deleteItems.Transaction = transaction;
+                deleteItems.CommandText = "DELETE FROM BookCollectionItems WHERE CollectionId = $collectionId;";
+                deleteItems.Parameters.AddWithValue("$collectionId", collectionId.ToString());
+                var deletedItems = await deleteItems.ExecuteNonQueryAsync(cancellationToken);
+
+                if (defaultCollectionId is { } uncollectedId)
+                {
+                    foreach (var bookId in affectedBookIds.Distinct())
+                        await NormalizeBookCollectionMembershipAsync(
+                            connection,
+                            transaction,
+                            uncollectedId,
+                            bookId,
+                            cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+                if (deletedItems > 0)
+                    NotifyDataChanged();
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+        finally { _databaseGate.Release(); }
+    }
+
+    public async Task DissolveCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default)
+    {
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var defaultCollectionId = await GetCollectionIdByNameAsync(
+                    connection,
+                    BookLibraryDefaults.UncollectedCollectionName,
+                    cancellationToken,
+                    transaction);
+                if (defaultCollectionId == collectionId)
+                    throw new InvalidOperationException("未收藏收藏夹不能解散。");
 
                 var affectedBookIds = new List<Guid>();
                 var affectedBooks = connection.CreateCommand();
@@ -1450,6 +1584,102 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
                 await transaction.CommitAsync(cancellationToken);
                 if (deletedItems > 0 || deletedCollections > 0)
+                    NotifyDataChanged();
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+        finally { _databaseGate.Release(); }
+    }
+
+    public async Task MergeCollectionsAsync(
+        Guid sourceCollectionId,
+        Guid targetCollectionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceCollectionId == targetCollectionId)
+            throw new InvalidOperationException("收藏夹不能合并到自身。");
+
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var defaultCollectionId = await GetCollectionIdByNameAsync(
+                    connection,
+                    BookLibraryDefaults.UncollectedCollectionName,
+                    cancellationToken,
+                    transaction);
+                if (defaultCollectionId is null
+                    || sourceCollectionId == defaultCollectionId
+                    || targetCollectionId == defaultCollectionId)
+                    throw new InvalidOperationException("未收藏收藏夹不能参与合并。");
+
+                var existingCollections = connection.CreateCommand();
+                existingCollections.Transaction = transaction;
+                existingCollections.CommandText = """
+                    SELECT COUNT(*)
+                    FROM BookCollections
+                    WHERE Id IN ($sourceCollectionId, $targetCollectionId);
+                    """;
+                existingCollections.Parameters.AddWithValue("$sourceCollectionId", sourceCollectionId.ToString());
+                existingCollections.Parameters.AddWithValue("$targetCollectionId", targetCollectionId.ToString());
+                if (Convert.ToInt64(await existingCollections.ExecuteScalarAsync(cancellationToken)) != 2)
+                    throw new InvalidOperationException("要合并的收藏夹已不存在。");
+
+                var sourceBookIds = new List<Guid>();
+                var affectedBooks = connection.CreateCommand();
+                affectedBooks.Transaction = transaction;
+                affectedBooks.CommandText = "SELECT BookId FROM BookCollectionItems WHERE CollectionId = $sourceCollectionId;";
+                affectedBooks.Parameters.AddWithValue("$sourceCollectionId", sourceCollectionId.ToString());
+                await using (var reader = await affectedBooks.ExecuteReaderAsync(cancellationToken))
+                {
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        if (Guid.TryParse(reader.GetString(0), out var bookId))
+                            sourceBookIds.Add(bookId);
+                    }
+                }
+
+                var copyItems = connection.CreateCommand();
+                copyItems.Transaction = transaction;
+                copyItems.CommandText = """
+                    INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+                    SELECT $targetCollectionId, BookId, AddedAt
+                    FROM BookCollectionItems
+                    WHERE CollectionId = $sourceCollectionId;
+                    """;
+                copyItems.Parameters.AddWithValue("$targetCollectionId", targetCollectionId.ToString());
+                copyItems.Parameters.AddWithValue("$sourceCollectionId", sourceCollectionId.ToString());
+                var copiedItems = await copyItems.ExecuteNonQueryAsync(cancellationToken);
+
+                var deleteItems = connection.CreateCommand();
+                deleteItems.Transaction = transaction;
+                deleteItems.CommandText = "DELETE FROM BookCollectionItems WHERE CollectionId = $sourceCollectionId;";
+                deleteItems.Parameters.AddWithValue("$sourceCollectionId", sourceCollectionId.ToString());
+                var deletedItems = await deleteItems.ExecuteNonQueryAsync(cancellationToken);
+
+                var deleteCollection = connection.CreateCommand();
+                deleteCollection.Transaction = transaction;
+                deleteCollection.CommandText = "DELETE FROM BookCollections WHERE Id = $sourceCollectionId;";
+                deleteCollection.Parameters.AddWithValue("$sourceCollectionId", sourceCollectionId.ToString());
+                var deletedCollections = await deleteCollection.ExecuteNonQueryAsync(cancellationToken);
+
+                foreach (var bookId in sourceBookIds.Distinct())
+                    await NormalizeBookCollectionMembershipAsync(
+                        connection,
+                        transaction,
+                        defaultCollectionId.Value,
+                        bookId,
+                        cancellationToken);
+
+                await transaction.CommitAsync(cancellationToken);
+                if (copiedItems > 0 || deletedItems > 0 || deletedCollections > 0)
                     NotifyDataChanged();
             }
             catch

@@ -10,7 +10,7 @@ namespace Kkindle.Platform.Windows;
 ///
 /// The blob format is whatever CryptProtectData produces. It must stay
 /// byte-compatible with what earlier Kkindle versions wrote, otherwise users
-/// silently lose their stored API key, SMTP password and Z-Library login on
+/// silently lose their stored API key and SMTP password on
 /// upgrade — this class was extracted verbatim from AiServices.cs for that
 /// reason, including the now-generic description string.
 /// </summary>
@@ -18,10 +18,8 @@ public sealed class WindowsSecretProtector : ISecretProtector
 {
     private const int CryptProtectUiForbidden = 0x1;
 
-    // Kept as-is even though SMTP and Z-Library passwords also flow through
-    // here. DPAPI treats the description as metadata that plays no part in
-    // decryption, so renaming it would be cosmetic; leaving it untouched keeps
-    // this extraction provably behaviour-preserving.
+    // DPAPI treats the description as metadata that plays no part in
+    // decryption; keep the stable value for existing protected settings.
     private const string BlobDescription = "Kkindle AI API Key";
 
     public byte[] Protect(byte[] value) => Transform(value, protect: true);

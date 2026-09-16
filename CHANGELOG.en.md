@@ -10,7 +10,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- The Z-Library book detail page can now send a book to Kindle Web with one click, downloading and submitting it automatically.
 
 ### Fixed
 
@@ -145,12 +144,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Fixed computer-library filters being truncated in English and unified the widths and spacing of filter and sort controls.
-- Fixed Z-Library and reading-material source filters still showing English in the Chinese interface.
 - Fixed the selected sidebar dot not appearing round enough.
 
 ### Improved
 
-- Improved the Z-Library title and filter layout and removed the redundant English subtitle.
 
 ## 0.7.0 (2026-08-30)
 

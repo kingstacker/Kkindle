@@ -14,10 +14,12 @@ public sealed class FontLifetimeTests(SettingsUiSession session)
     [InlineData(FontStyle.Normal, FontWeight.Bold, FontSimulations.Bold)]
     [InlineData(FontStyle.Italic, FontWeight.Bold, FontSimulations.Bold | FontSimulations.Oblique)]
     [InlineData(FontStyle.Italic, FontWeight.Black, FontSimulations.Bold | FontSimulations.Oblique)]
-    public Task ApplicationFontKeepsTheRequestedStyle(FontStyle style, FontWeight weight, FontSimulations expected) =>
+    public Task BundledReaderFontKeepsTheRequestedStyle(FontStyle style, FontWeight weight, FontSimulations expected) =>
         session.Session.Dispatch(() =>
         {
-            var family = Assert.IsType<FontFamily>(Application.Current!.Resources["DefaultAppFontFamily"]);
+            // The bundled face is the default for both the application chrome
+            // and the reader fallback.
+            var family = new FontFamily("fonts:Kkindle#KingHwaOldSong");
             Assert.Equal("fonts:Kkindle", family.Key?.Source.ToString());
             Assert.True(FontManager.Current.TryGetGlyphTypeface(new Typeface(family, style, weight), out var glyphs));
             Assert.NotNull(glyphs);
@@ -27,6 +29,15 @@ public sealed class FontLifetimeTests(SettingsUiSession session)
             Assert.True(glyphs.GlyphCount > 0);
             return true;
         }, CancellationToken.None);
+
+    [Fact]
+    public Task ApplicationChromeUsesFixedUiFont() => session.Session.Dispatch(() =>
+    {
+        var family = Assert.IsType<FontFamily>(Application.Current!.Resources["DefaultAppFontFamily"]);
+        Assert.Contains("KingHwaOldSong", family.Name, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Microsoft YaHei UI", family.Name, StringComparison.OrdinalIgnoreCase);
+        return true;
+    }, CancellationToken.None);
 
     [Fact]
     public Task BundledFontCanCreateSyntheticFacesDuringGarbageCollection() => session.Session.Dispatch(async () =>

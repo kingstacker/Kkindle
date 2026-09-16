@@ -21,7 +21,7 @@ public sealed class BookFormatConversionService : IBookFormatConverter
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // Calibre's bundled Python cannot open paths longer than MAX_PATH (260).
-    // Books with very long filenames (e.g. Z-Library exports) stored in the
+    // Books with very long filenames obtained from external services and stored in the
     // nested data\library tree routinely exceed that, so those sources are
     // converted from a short temporary copy. 240 leaves headroom for the
     // temp-copy path itself.

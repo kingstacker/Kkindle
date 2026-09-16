@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
@@ -141,6 +142,60 @@ public sealed partial class SettingsTests
         service.Devices = [];
         await scope.Call<Task>("RefreshDevicesAsync", false, CancellationToken.None);
         Assert.Empty(scope.Window.ReadingMaterials);
+    });
+
+    [Fact]
+    public Task ReadingMaterialExportSelectsWholeBooksByDefault() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var reader = Reader(scope, "KOBO-EXPORT", ReaderDeviceProfiles.Kobo);
+        var service = new ReaderService
+        {
+            Devices = [reader],
+            Notes = [
+                new KindleClipping { Id = "kobo:one", BookTitle = "同一本书", Content = "第一条", Type = KindleClippingType.Highlight },
+                new KindleClipping { Id = "kobo:two", BookTitle = "同一本书", Content = "第二条", Type = KindleClippingType.Highlight }
+            ]
+        };
+        await UseReaderServiceAsync(scope, service);
+        await scope.Call<Task>("RefreshDevicesAsync", false, CancellationToken.None);
+        scope.Call("ShowStage3Page", scope.Get<Grid>("ReadingMaterialsPage"), null);
+        await scope.Call<Task>("RefreshReadingMaterialsAsync");
+
+        Assert.Equal(2, scope.Window.ReadingMaterials.Count);
+        Assert.Single(scope.Window.ReadingMaterialGroups);
+        Assert.All(scope.Window.ReadingMaterials, item => Assert.False(item.IsSelected));
+        var summary = scope.Get<TextBlock>("ReadingMaterialsSummaryText").Text;
+        var status = scope.Get<TextBlock>("ReadingMaterialsStatusText").Text;
+
+        var exportToggle = scope.Get<Button>("ExportReadingMaterialsToggleButton");
+        exportToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Render();
+
+        Assert.True(scope.Get<Border>("ReadingMaterialsExportPanel").IsVisible);
+        Assert.True(scope.Get<Border>("ReadingMaterialsSummaryBorder").IsVisible);
+        Assert.False(scope.Get<Border>("ReadingMaterialsExportSummaryBorder").IsVisible);
+        Assert.False(scope.Get<Button>("SelectAllReadingMaterialsButton").IsVisible);
+        Assert.Equal(summary, scope.Get<TextBlock>("ReadingMaterialsSummaryText").Text);
+        Assert.Equal(status, scope.Get<TextBlock>("ReadingMaterialsStatusText").Text);
+        Assert.DoesNotContain("active", exportToggle.Classes);
+
+        Assert.All(scope.Window.ReadingMaterials, item => Assert.True(item.IsSelected));
+        var group = Assert.Single(scope.Window.ReadingMaterialGroups);
+        Assert.True(group.IsExportMode);
+        Assert.True(group.IsSelected);
+        Assert.Contains("当前将导出 2 条", scope.Get<TextBlock>("ReadingMaterialsExportSummaryText").Text);
+
+        group.IsSelected = false;
+        Assert.All(scope.Window.ReadingMaterials, item => Assert.False(item.IsSelected));
+        scope.Call("UpdateReadingMaterialsActionState");
+        Assert.Contains("当前将导出 0 条", scope.Get<TextBlock>("ReadingMaterialsExportSummaryText").Text);
+        group.IsSelected = true;
+        Assert.All(scope.Window.ReadingMaterials, item => Assert.True(item.IsSelected));
+
+        scope.Get<Button>("ExportReadingMaterialsToggleButton")
+            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.All(scope.Window.ReadingMaterials, item => Assert.False(item.IsSelected));
     });
 
     private static KindleDevice Reader(TestWindow scope, string identity, ReaderDeviceProfile profile) => new()

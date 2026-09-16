@@ -554,18 +554,15 @@ public sealed partial class S3SyncService
         var app = AppSettings.Normalize(await _appSettingsStore.LoadAsync(cancellationToken));
         var ai = await _aiSettingsStore.LoadAsync(cancellationToken);
         var kindleEmail = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
-        var zLibrary = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
         var appUpdatedAt = GetSettingsUpdatedAt(_paths.Settings);
         var aiUpdatedAt = GetSettingsUpdatedAt(Path.Combine(_paths.Data, "ai-settings.json"));
         var emailUpdatedAt = GetSettingsUpdatedAt(Path.Combine(_paths.Data, "kindle-email-settings.json"));
-        var zLibraryUpdatedAt = GetSettingsUpdatedAt(Path.Combine(_paths.Data, "zlibrary-settings.json"));
         return new S3SyncSettingsSnapshot
         {
-            UpdatedAt = new[] { appUpdatedAt, aiUpdatedAt, emailUpdatedAt, zLibraryUpdatedAt }.Max(),
+            UpdatedAt = new[] { appUpdatedAt, aiUpdatedAt, emailUpdatedAt }.Max(),
             AppUpdatedAt = appUpdatedAt,
             AiUpdatedAt = aiUpdatedAt,
             KindleEmailUpdatedAt = emailUpdatedAt,
-            ZLibraryUpdatedAt = zLibraryUpdatedAt,
             App = new S3SyncAppSettings
             {
                 UiLanguage = app.UiLanguage,
@@ -602,11 +599,6 @@ public sealed partial class S3SyncService
                 SmtpPort = kindleEmail.SmtpPort,
                 SmtpUsername = kindleEmail.SmtpUsername,
                 EnableSsl = kindleEmail.EnableSsl
-            },
-            ZLibrary = new S3SyncZLibrarySettings
-            {
-                Email = zLibrary.Email,
-                BaseUrl = zLibrary.BaseUrl
             }
         };
     }
@@ -3071,23 +3063,6 @@ public sealed partial class S3SyncService
             applied = true;
         }
 
-        remoteSettings = Latest(settings => settings.ZLibraryUpdatedAt);
-        remoteUpdatedAt = remoteSettings.ZLibraryUpdatedAt ?? remoteSettings.UpdatedAt;
-        if (remoteUpdatedAt > (localSettings.ZLibraryUpdatedAt ?? localSettings.UpdatedAt))
-        {
-            var currentZLibrary = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
-            var remoteZLibrary = remoteSettings.ZLibrary ?? new S3SyncZLibrarySettings();
-            await _zLibrarySettingsStore.SaveUnderLockAsync(new ZLibrarySettings
-            {
-                Email = remoteZLibrary.Email,
-                BaseUrl = string.IsNullOrWhiteSpace(remoteZLibrary.BaseUrl)
-                    ? currentZLibrary.BaseUrl
-                    : remoteZLibrary.BaseUrl,
-                Password = currentZLibrary.Password
-            }, cancellationToken, remoteUpdatedAt);
-            RemoteSettingsApplied?.Invoke(this, EventArgs.Empty);
-            applied = true;
-        }
         return applied;
     }
 

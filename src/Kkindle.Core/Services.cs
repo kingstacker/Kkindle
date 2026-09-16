@@ -44,7 +44,14 @@ public interface IBookLibraryService
     Task PurgeTrashItemAsync(Guid trashItemId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BookCollection>> GetCollectionsAsync(CancellationToken cancellationToken = default);
     Task<BookCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default);
+    Task RenameCollectionAsync(Guid collectionId, string name, CancellationToken cancellationToken = default);
+    Task ClearCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default);
     Task DeleteCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default);
+    Task DissolveCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default);
+    Task MergeCollectionsAsync(
+        Guid sourceCollectionId,
+        Guid targetCollectionId,
+        CancellationToken cancellationToken = default);
     Task AddBookToCollectionAsync(Guid bookId, Guid collectionId, CancellationToken cancellationToken = default);
     Task RemoveBookFromCollectionAsync(Guid bookId, Guid collectionId, CancellationToken cancellationToken = default);
     string GetAbsoluteFilePath(BookFile file);
@@ -121,26 +128,6 @@ public interface IKindleDeviceService
     Task DeleteClippingAsync(KindleDevice device, string clippingId, CancellationToken cancellationToken = default);
     Task DeleteClippingsAsync(KindleDevice device, IReadOnlyCollection<string> clippingIds, CancellationToken cancellationToken = default);
     Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default);
-}
-
-public interface IZLibraryService
-{
-    bool IsLoggedIn { get; }
-    string ActiveBaseUrl { get; }
-    Task LoginAsync(string email, string password, string baseUrl, CancellationToken cancellationToken = default);
-    Task<ZLibrarySearchResult> SearchAsync(
-        string query,
-        int page = 1,
-        int limit = 20,
-        IReadOnlyList<string>? extensions = null,
-        IReadOnlyList<string>? languages = null,
-        CancellationToken cancellationToken = default);
-    Task<string?> GetDownloadUrlAsync(ZLibraryBook book, string preferredExtension, CancellationToken cancellationToken = default);
-    Task<string> DownloadAsync(
-        ZLibraryBook book,
-        string destinationDirectory,
-        IProgress<TransferProgress>? progress = null,
-        CancellationToken cancellationToken = default);
 }
 
 public static class BookLibraryDefaults
