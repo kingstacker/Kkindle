@@ -42,6 +42,13 @@ public partial class MainWindow
         var storedVersion = _appSettings.PendingUpdateVersion;
         if (string.IsNullOrWhiteSpace(storedVersion))
             return;
+        if (!_appSettings.DevelopmentUpdateCheckEnabled
+            && UpdateService.IsDevelopmentVersion(storedVersion))
+        {
+            _pendingUpdateVersion = null;
+            _ = ClearPendingUpdateStateAsync();
+            return;
+        }
         try
         {
             var currentVersion = ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly);
@@ -143,8 +150,12 @@ public partial class MainWindow
         try
         {
             var currentVersion = ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly);
+            var channel = DevelopmentUpdateCheck.IsChecked == true
+                ? AppUpdateChannel.Development
+                : AppUpdateChannel.Stable;
             var update = await _updateService.CheckForUpdateAsync(
                 currentVersion,
+                channel,
                 _lifetimeCancellation.Token);
 
             // Successful lookups stamp today's date and refresh the persisted

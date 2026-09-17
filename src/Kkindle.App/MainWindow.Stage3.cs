@@ -4016,6 +4016,7 @@ public partial class MainWindow
             CollectionsMutuallyExclusiveCheck.IsChecked = _appSettings.CollectionsMutuallyExclusive;
             NetworkEnabledCheck.IsChecked = _appSettings.NetworkEnabled;
             AutoUpdateCheck.IsChecked = _appSettings.AutoUpdateCheckEnabled;
+            DevelopmentUpdateCheck.IsChecked = _appSettings.DevelopmentUpdateCheckEnabled;
             AutoDoubanMatchCheck.IsChecked = _appSettings.AutoDoubanMatchOnImport;
             AutoConnectDeviceCheck.IsChecked = _appSettings.AutoConnectDevice;
             CompareKindleLibraryCheck.IsChecked = _appSettings.CompareKindleLibraryEnabled;
@@ -4832,6 +4833,7 @@ public partial class MainWindow
             ScheduleAppSettingsAutoSave();
         };
         AutoUpdateCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        DevelopmentUpdateCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoDoubanMatchCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         CollectionsMutuallyExclusiveCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ReadingMaterialsCollapsedByDefaultCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -5295,6 +5297,7 @@ public partial class MainWindow
             AiEnabled = AiEnabledCheck.IsChecked != false,
             NetworkEnabled = NetworkEnabledCheck.IsChecked != false,
             AutoUpdateCheckEnabled = AutoUpdateCheck.IsChecked != false,
+            DevelopmentUpdateCheckEnabled = DevelopmentUpdateCheck.IsChecked == true,
             AutoDoubanMatchOnImport = AutoDoubanMatchCheck.IsChecked == true,
             AutoConnectDevice = AutoConnectDeviceCheck.IsChecked != false,
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
@@ -5322,6 +5325,26 @@ public partial class MainWindow
             if (_appSettingsSavedVersion == _appSettingsEditVersion) return true;
             var version = _appSettingsEditVersion;
             var settings = ReadAppSettingsFromControls();
+            var updateChannelChanged = _appSettings.DevelopmentUpdateCheckEnabled
+                != settings.DevelopmentUpdateCheckEnabled;
+            if (updateChannelChanged)
+            {
+                // A pending result belongs to the channel that was selected
+                // when it was found. Drop it when switching channels so a
+                // disabled development channel cannot keep showing or
+                // installing an old development package.
+                settings = AppSettings.Normalize(settings with
+                {
+                    LastAutoUpdateCheckAt = null,
+                    PendingUpdateVersion = null,
+                    PendingUpdateReleaseNotes = null,
+                    PendingUpdateReleaseNotesEnglish = null,
+                    PendingUpdatePackagePath = null,
+                    PendingUpdateDownloadedAt = null
+                });
+                _pendingUpdateVersion = null;
+                HideUpdateBadge();
+            }
             var autoConnectChanged = _appSettings.AutoConnectDevice != settings.AutoConnectDevice;
             _appSettings = settings;
             await _appSettingsStore.SaveAsync(settings, _lifetimeCancellation.Token);

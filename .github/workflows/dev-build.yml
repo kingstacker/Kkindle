@@ -12,11 +12,12 @@ on:
         type: string
   push:
     branches:
+      - dev
       - develop
       - "dev/**"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: development-build-${{ github.ref }}
@@ -79,7 +80,7 @@ jobs:
           exit 1
 
   windows:
-    name: Build Windows portable package
+    name: Build Windows installer package
     needs: [prepare, validate]
     runs-on: windows-2022
     timeout-minutes: 45
@@ -91,19 +92,23 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.400
-      - name: Build portable package
+      - name: Install release toolchain
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Chocolatey 安装 Inno Setup 失败：$LASTEXITCODE" }
+      - name: Build installer and portable package
         shell: pwsh
         run: |
           .\scripts\Build-Release.ps1 `
             -Version $env:DEV_VERSION `
-            -OutputRoot $env:OUTPUT_DIR `
-            -SkipInstaller
+            -OutputRoot $env:OUTPUT_DIR
       - uses: actions/upload-artifact@v7
         with:
           name: Kkindle-${{ needs.prepare.outputs.version }}-windows
           path: |
+            ${{ env.OUTPUT_DIR }}/*.exe
             ${{ env.OUTPUT_DIR }}/*.zip
-            ${{ env.OUTPUT_DIR }}/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -196,3 +201,82 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+
+  publish:
+    name: Publish development GitHub Release
+    needs: [prepare, windows, linux, macos]
+    if: ${{ github.ref_name == 'dev' || github.ref_name == 'develop' || startsWith(github.ref_name, 'dev/') }}
+    runs-on: ubuntu-24.04
+    env:
+      DEV_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_TAG: v${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Kkindle-${{ needs.prepare.outputs.version }}-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create development release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/kkindle-development-release-notes.md" <<EOF
+          ## Kkindle development build
+
+          Automated development build **${RELEASE_TAG}** from commit [${GITHUB_SHA}](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}).
+
+          This is a development version and may contain unfinished or unstable changes.
+          EOF
+
+      - name: Create update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          setup_name="Kkindle-${DEV_VERSION}-win-x64-setup.exe"
+          checksum_name="SHA256SUMS.txt"
+          test -f "artifacts/${setup_name}"
+          test -f "artifacts/${checksum_name}"
+          download_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          jq -n \
+            --arg tag_name "$RELEASE_TAG" \
+            --arg html_url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}" \
+            --rawfile body "$RUNNER_TEMP/kkindle-development-release-notes.md" \
+            --rawfile body_en "$RUNNER_TEMP/kkindle-development-release-notes.md" \
+            --arg setup_name "$setup_name" \
+            --arg setup_url "${download_base}/${setup_name}" \
+            --argjson setup_size "$(stat -c%s "artifacts/${setup_name}")" \
+            --arg checksum_name "$checksum_name" \
+            --arg checksum_url "${download_base}/${checksum_name}" \
+            --argjson checksum_size "$(stat -c%s "artifacts/${checksum_name}")" \
+            '{
+              tag_name: $tag_name,
+              html_url: $html_url,
+              body: $body,
+              body_en: $body_en,
+              draft: false,
+              prerelease: true,
+              assets: [
+                { name: $setup_name, browser_download_url: $setup_url, size: $setup_size },
+                { name: $checksum_name, browser_download_url: $checksum_url, size: $checksum_size }
+              ]
+            }' > artifacts/update-manifest.json
+
+      - name: Create GitHub pre-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Kkindle $RELEASE_TAG (Development)" \
+            --notes-file "$RUNNER_TEMP/kkindle-development-release-notes.md" \
+            --prerelease

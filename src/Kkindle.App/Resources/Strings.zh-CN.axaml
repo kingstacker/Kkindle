@@ -317,6 +317,8 @@
     <x:String x:Key="Ui.Auto.F3FB0EC333960844">向左滚动</x:String>
     <x:String x:Key="Ui.Auto.36CDC1A35EC4D971">向左翻页</x:String>
     <x:String x:Key="Ui.Auto.85D1563FE0079783">启动后自动检查 GitHub Releases 中的稳定版本</x:String>
+    <x:String x:Key="Ui.Auto.BE45A14236A76C88">检查开发版更新</x:String>
+    <x:String x:Key="Ui.Auto.A888CF89840E3DDB">启动后自动检查 GitHub Releases 中的开发版更新；关闭后仅检查稳定版</x:String>
     <x:String x:Key="Ui.Auto.E4AD8CC2EC98305C">启动时自动备份（每日）</x:String>
     <x:String x:Key="Ui.Auto.D4B94B23423B837F">启动时若距上次备份超过 20 小时则自动生成备份</x:String>
     <x:String x:Key="Ui.Auto.538FD705CD18A10F">启用 AI 阅读助手</x:String>

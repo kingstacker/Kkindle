@@ -2848,6 +2848,13 @@
                                             </StackPanel>
                                             <ToggleSwitch x:Name="AutoUpdateCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.85D1563FE0079783}" Classes="settingsToggle" AutomationProperties.Name="{DynamicResource Ui.Auto.4A09393CF96D5F86}" />
                                         </Grid>
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.BE45A14236A76C88}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.A888CF89840E3DDB}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="DevelopmentUpdateCheck" Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.A888CF89840E3DDB}" Classes="settingsToggle" AutomationProperties.Name="{DynamicResource Ui.Auto.BE45A14236A76C88}" />
+                                        </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock x:Name="AboutUpdateStatusText" Text="{DynamicResource Ui.Auto.8642A3F7563F3F16}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
                                             <Button x:Name="CheckForUpdatesButton"

@@ -209,6 +209,7 @@ internal sealed class S3SyncAppSettings
     public bool AiEnabled { get; set; } = true;
     public bool NetworkEnabled { get; set; } = true;
     public bool AutoUpdateCheckEnabled { get; set; } = true;
+    public bool DevelopmentUpdateCheckEnabled { get; set; }
     public bool AutoDoubanMatchOnImport { get; set; }
     public bool CompareKindleLibraryEnabled { get; set; } = true;
     public bool GridGalleryDisplay { get; set; }

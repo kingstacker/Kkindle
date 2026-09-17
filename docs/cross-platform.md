@@ -58,10 +58,11 @@ OCR is not included. PDF zoom and the position within a page are restored
 without changing EPUB typography preferences.
 
 The `Development Build` GitHub Actions workflow can be run manually or by
-pushing the `develop`/`dev/**` branches. It appends the Actions run number to a
-base version such as `0.6.0-dev`, uploads three-platform packages as seven-day
-workflow artifacts, and never creates a Git tag or GitHub Release. Development
-macOS packages always use ad-hoc signing.
+pushing the `dev`, `develop`, or `dev/**` branches. It appends the Actions run
+number to a base version such as `0.6.0-dev`, builds Windows installer and
+three-platform packages, and publishes a GitHub pre-release tagged with the
+development version. The workflow also keeps the per-platform artifacts for
+seven days. Development macOS packages always use ad-hoc signing.
 
 Calibre is not bundled in any Windows, Linux or macOS archive. It is optional and is
 discovered from the application directory, standard install locations or

@@ -317,6 +317,8 @@
     <x:String x:Key="Ui.Auto.F3FB0EC333960844">Scroll left</x:String>
     <x:String x:Key="Ui.Auto.36CDC1A35EC4D971">Page left</x:String>
     <x:String x:Key="Ui.Auto.85D1563FE0079783">Check stable versions in GitHub Releases after startup</x:String>
+    <x:String x:Key="Ui.Auto.BE45A14236A76C88">Check development updates</x:String>
+    <x:String x:Key="Ui.Auto.A888CF89840E3DDB">Check development versions in GitHub Releases after startup; when disabled, only stable versions are checked</x:String>
     <x:String x:Key="Ui.Auto.E4AD8CC2EC98305C">Back up automatically at startup (daily)</x:String>
     <x:String x:Key="Ui.Auto.D4B94B23423B837F">Create a backup at startup if more than 20 hours have passed since the last one</x:String>
     <x:String x:Key="Ui.Auto.538FD705CD18A10F">Enable AI reading assistant</x:String>
