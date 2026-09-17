@@ -164,7 +164,12 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         var palette = ReaderPalette.For(ReaderTheme.Night);
         var pageBrush = scope.Window.Resources["ReaderPageBrush"];
         var sidebarBrush = scope.Window.Resources["ReaderSidebarBrush"];
+        var chromeBrush = scope.Window.Resources["ReaderChromeBrush"];
+        Assert.Same(pageBrush, sidebarBrush);
+        Assert.Same(pageBrush, chromeBrush);
         Assert.True(scope.Get<Border>("ReaderAssistantPanel").Bounds.Width > 200);
+        Assert.Same(sidebarBrush, scope.Get<Border>("ReaderTocHeaderBar").Background);
+        Assert.Same(sidebarBrush, scope.Get<Border>("ReaderAssistantHeaderBar").Background);
         Assert.Same(pageBrush, scope.Get<Border>("ReaderHeaderBar").Background);
         Assert.Same(pageBrush, scope.Get<Grid>("ReaderWindowTitleBar").Background);
         var footer = scope.Get<Border>("ReaderFooterBar");

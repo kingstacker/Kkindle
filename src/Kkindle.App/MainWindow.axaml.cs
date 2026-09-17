@@ -28,7 +28,7 @@ public partial class MainWindow : Window
     private const string MaximizeGlyphData = "M 0.5,0.5 H 9.5 V 9.5 H 0.5 Z";
     private const string RestoreGlyphData = "M 2.5,0.5 H 9.5 V 7.5 M 0.5,2.5 H 7.5 V 9.5 H 0.5 Z";
     private const string SidebarChevronDownData = "M 1,2 L 5,6 L 9,2";
-    private const string SidebarChevronRightData = "M 2,1 L 6,5 L 2,9";
+    private const string SidebarChevronRightData = "M 3,1 L 7,5 L 3,9";
     private const string LibraryGridGlyphData = "M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z";
     private const string LibraryListGlyphData = "M 4,6 H 6 M 10,6 H 20 M 4,12 H 6 M 10,12 H 20 M 4,18 H 6 M 10,18 H 20";
     private const string LibraryCollectionsGlyphData = "M 3,7 H 9 L 11,9 H 21 V 20 H 3 Z";
@@ -600,6 +600,8 @@ public partial class MainWindow : Window
         {
             DetailCollectionsText.Text = DescribeBookCollections(_selectedCard);
             UpdateDetailActionIcons(_selectedCard.Book.IsFavorite, _selectedCard.Book.ReadingStatus);
+            if (LibraryDetailPane.IsVisible)
+                UpdateBookReflectionPreview(_selectedBookReflection);
         }
         UpdateDeviceBookSelectionUi();
         UpdateDeviceBookPaginationUi();
@@ -1362,6 +1364,7 @@ public partial class MainWindow : Window
         }
 
         ShowLibraryDetailPane();
+        _ = RefreshBookReflectionDetailsAsync(card.Book.Id);
     }
 
     private string DescribeBookCollections(BookCardViewModel card)

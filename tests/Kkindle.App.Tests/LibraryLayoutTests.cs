@@ -91,6 +91,20 @@ public sealed partial class SettingsTests
         Assert.True(shelfRight <= detailLeft, "The detail pane must not cover books.");
         Assert.True(grid.Bounds.Width <= shelf.Bounds.Width + 1);
         Assert.Contains("EPUB", scope.Get<TextBlock>("DetailFormatText").Text);
+        var detailButtons = new[]
+        {
+            scope.Get<Button>("LibraryDetailCloseButton"),
+            scope.Get<Button>("EditBookReflectionButton"),
+            scope.Get<Button>("DetailDoubanButton"),
+            scope.Get<Button>("DetailFavoriteButton"),
+            scope.Get<Button>("DetailReadingStatusButton")
+        };
+        var buttonCenters = detailButtons
+            .Select(button => button.TranslatePoint(
+                new Point(button.Bounds.Width / 2, button.Bounds.Height / 2),
+                scope.Window)!.Value.X)
+            .ToArray();
+        Assert.All(buttonCenters, center => Assert.Equal(buttonCenters[0], center, 1));
         Capture(scope.Window, $"{language}-{width}-library-details");
 
         // Opening and closing filters must leave the independent sort control available.
@@ -117,6 +131,44 @@ public sealed partial class SettingsTests
         Assert.True(scope.Get<Border>("MultiSelectionBar").IsVisible);
         AssertWithinWindow(scope.Get<Border>("MultiSelectionBar"), scope.Window);
         Assert.InRange(Math.Abs(shelf.Bounds.Width - originalWidth), 0, 1);
+    });
+
+    [Fact]
+    public Task BookReflectionPreviewIsLoadedIntoBookDetails() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        var card = scope.Window.ViewModel.Books[0];
+        var reader = scope.Field<ReaderDataService>("_readerData");
+        await reader.SaveBookReflectionAsync(new ReaderBookReflection
+        {
+            BookId = card.Book.Id,
+            Content = "A reflection long enough to verify that the book details expose a dedicated preview.",
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        scope.Get<ListBox>("BookGrid").SelectedItem = card;
+        await Until(() => scope.Get<Border>("LibraryDetailPane").IsVisible
+            && scope.Get<KreaderMarkdownTextBlock>("DetailReflectionPreviewText").Markdown?.Contains("A reflection", StringComparison.Ordinal) == true);
+        await Render();
+
+        var reflectionPanel = scope.Get<Border>("DetailReflectionPanel");
+        Assert.True(reflectionPanel.Bounds.Width >= 240);
+        var editReflectionButton = scope.Get<Button>("EditBookReflectionButton");
+        Assert.True(editReflectionButton.IsEffectivelyVisible);
+        Assert.IsType<Avalonia.Controls.Shapes.Path>(editReflectionButton.Content);
+        var detailActionButton = scope.Get<Button>("DetailDoubanButton");
+        Assert.Equal(detailActionButton.Bounds.Width, editReflectionButton.Bounds.Width, 1);
+        Assert.Equal(detailActionButton.Bounds.Height, editReflectionButton.Bounds.Height, 1);
+        Assert.Contains("A reflection", scope.Get<KreaderMarkdownTextBlock>("DetailReflectionPreviewText").Markdown ?? string.Empty);
+
+        var detailStack = scope.Get<StackPanel>("DetailContentStack");
+        var separator = scope.Get<Avalonia.Controls.Shapes.Rectangle>("DetailReflectionSeparator");
+        var cover = scope.Get<Grid>("DetailCoverAndActions");
+        var format = scope.Get<TextBlock>("DetailFormatText");
+        Assert.True(detailStack.Children.IndexOf(separator) < detailStack.Children.IndexOf(cover));
+        Assert.True(detailStack.Children.IndexOf(cover) < detailStack.Children.IndexOf(format));
     });
 
     [Fact]

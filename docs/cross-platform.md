@@ -52,9 +52,13 @@ Its bounded page cache is independent of the full document's scroll extent.
 The current page becomes usable before outlines and the text-only search index
 finish loading in the background. Closing a book cancels that background work.
 Embedded outlines retain their hierarchy and page destinations. PDFs without
-outlines have a page list. Text PDFs also support local search, AI context and
-TTS. Scanned pages support viewing, page navigation, bookmarks and page notes;
-OCR is not included. PDF zoom and the position within a page are restored
+outlines have a page list; text papers additionally receive a lightweight
+section/figure/table/reference navigator and a same-page two-column focus mode.
+Text PDFs also support local search, AI context and TTS. Scanned pages support
+viewing, page navigation, bookmarks and page notes; OCR is not included. PDF
+page notes can be anchored to arbitrary normalized page positions, and a
+selected region can be captured for a compatible vision model without writing
+back to the source PDF. PDF zoom and the position within a page are restored
 without changing EPUB typography preferences.
 
 The `Development Build` GitHub Actions workflow can be run manually or by

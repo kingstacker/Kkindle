@@ -18,6 +18,20 @@ public sealed class ReaderAiConversationTests
     }
 
     [Fact]
+    public void MarkdownPreviewRendersTaskListsAndStrikethrough()
+    {
+        var block = new KreaderMarkdownTextBlock
+        {
+            Markdown = "- [ ] Todo\n- [x] Done\n~~Old idea~~"
+        };
+
+        var runs = block.Inlines!.OfType<Avalonia.Controls.Documents.Run>().ToArray();
+        Assert.Contains(runs, run => run.Text?.Contains("☐ Todo", StringComparison.Ordinal) == true);
+        Assert.Contains(runs, run => run.Text?.Contains("☑ Done", StringComparison.Ordinal) == true);
+        Assert.Contains(runs, run => run.Text == "Old idea" && run.TextDecorations is not null);
+    }
+
+    [Fact]
     public void ReusedCitationNumbersResolveWithinEachAnswer()
     {
         ReaderAiSourceViewModel? navigated = null;

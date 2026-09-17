@@ -1,8 +1,9 @@
 using Avalonia;
+using Kkindle.Infrastructure;
 
 namespace Kkindle;
 
-public enum PdfReaderDisplayMode { Continuous, SinglePage, TwoPage }
+public enum PdfReaderDisplayMode { Continuous, SinglePage, TwoPage, PaperColumns }
 public enum PdfReaderFitMode { Width, Page }
 
 /// <summary>Page geometry is independent of the bounded cache of rendered regions.</summary>
@@ -17,7 +18,8 @@ internal sealed class PdfReaderLayout
     public int LastPage { get; }
 
     public PdfReaderLayout(IReadOnlyList<Size> sizes, Size viewport, int pageNumber,
-        PdfReaderDisplayMode mode, PdfReaderFitMode fit, double zoom, double dpi, int rotation = 0)
+        PdfReaderDisplayMode mode, PdfReaderFitMode fit, double zoom, double dpi, int rotation = 0,
+        PdfPageCrop? paperColumn = null)
     {
         Mode = mode;
         Pages = new Rect[sizes.Count];
@@ -30,7 +32,16 @@ internal sealed class PdfReaderLayout
         var availableWidth = Math.Max(1, viewport.Width - Margin * 2);
         var availableHeight = Math.Max(1, viewport.Height - Margin * 2);
         double Snap(double value) => Math.Round(value * dpi) / dpi;
-        Size PageSize(int index) => rotation % 180 == 0 ? sizes[index] : new(sizes[index].Height, sizes[index].Width);
+        Size PageSize(int index)
+        {
+            var size = sizes[index];
+            if (mode == PdfReaderDisplayMode.PaperColumns && index == pageNumber - 1)
+            {
+                var crop = (paperColumn ?? PdfPageCrop.Full).Normalize();
+                size = new(size.Width * crop.Width, size.Height * crop.Height);
+            }
+            return rotation % 180 == 0 ? size : new(size.Height, size.Width);
+        }
         var extentWidth = viewport.Width;
         var extentHeight = viewport.Height;
         if (mode == PdfReaderDisplayMode.TwoPage)

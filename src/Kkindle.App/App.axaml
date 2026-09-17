@@ -434,6 +434,19 @@
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
+        <!-- The reflection editor owns a full writing-surface frame. Do not
+             replace its frame with Fluent's focused underline. -->
+        <Style Selector="TextBox.bookReflectionEditor">
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.bookReflectionEditor /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.bookReflectionEditor:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
         <Style Selector="TextBox.readerAiQuestionInput /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -510,6 +523,35 @@
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.quiet:pressed">
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+        </Style>
+
+        <!-- Markdown editing uses the same quiet, paper-first language as
+             the library toolbar: transparent controls without button
+             underlines or filled pills. The class is intentionally independent
+             of the reader palette so the editor also matches the main library
+             window. -->
+        <Style Selector="Button.bookReflectionMarkdownTool">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="7,3" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.bookReflectionMarkdownTool:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.bookReflectionMarkdownTool:pressed">
             <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />

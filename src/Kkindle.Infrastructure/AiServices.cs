@@ -272,6 +272,51 @@ public sealed class AiChatClient : IDisposable
                 question,
                 history,
                 reasoningDepth,
+                image: null,
+                cancellationToken: cancellationToken))
+            {
+                yield return chunk;
+            }
+            yield break;
+        }
+
+        await foreach (var chunk in StreamChatCompletionsAsync(
+            settings,
+            instructions,
+            question,
+            history,
+            reasoningDepth,
+            image: null,
+            cancellationToken: cancellationToken))
+        {
+            yield return chunk;
+        }
+    }
+
+    /// <summary>
+    /// Streams a multimodal answer for an image selected in the reader. The
+    /// normal text-only path remains unchanged so compatible endpoints that do
+    /// not support image content continue to work.
+    /// </summary>
+    public async IAsyncEnumerable<AiStreamChunk> StreamVisionAsync(
+        AiConnectionSettings settings,
+        string instructions,
+        string question,
+        IReadOnlyList<AiConversationTurn> history,
+        AiImageAttachment image,
+        string reasoningDepth = "auto",
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (settings.Provider.Equals("openai", StringComparison.OrdinalIgnoreCase))
+        {
+            await foreach (var chunk in StreamOpenAiResponsesAsync(
+                settings,
+                instructions,
+                question,
+                history,
+                reasoningDepth,
+                image,
                 cancellationToken))
             {
                 yield return chunk;
@@ -285,6 +330,7 @@ public sealed class AiChatClient : IDisposable
             question,
             history,
             reasoningDepth,
+            image,
             cancellationToken))
         {
             yield return chunk;
@@ -297,6 +343,7 @@ public sealed class AiChatClient : IDisposable
         string question,
         IReadOnlyList<AiConversationTurn> history,
         string reasoningDepth,
+        AiImageAttachment? image,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var messages = new List<object> { new { role = "system", content = instructions } };
@@ -305,7 +352,18 @@ public sealed class AiChatClient : IDisposable
             role = turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ? "assistant" : "user",
             content = Limit(turn.Content, 3500)
         }));
-        messages.Add(new { role = "user", content = question });
+        object userContent = image is null
+            ? question
+            : new object[]
+            {
+                new { type = "text", text = question },
+                new
+                {
+                    type = "image_url",
+                    image_url = new { url = image.DataUri, detail = image.Detail }
+                }
+            };
+        messages.Add(new { role = "user", content = userContent });
 
         var request = new Dictionary<string, object?>
         {
@@ -352,6 +410,7 @@ public sealed class AiChatClient : IDisposable
         string question,
         IReadOnlyList<AiConversationTurn> history,
         string reasoningDepth,
+        AiImageAttachment? image,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var conversation = new StringBuilder();
@@ -362,11 +421,25 @@ public sealed class AiChatClient : IDisposable
         }
         conversation.Append("读者：").Append(question);
 
+        object input = image is null
+            ? conversation.ToString()
+            : new object[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "input_text", text = conversation.ToString() },
+                        new { type = "input_image", image_url = image.DataUri, detail = image.Detail }
+                    }
+                }
+            };
         var request = new Dictionary<string, object?>
         {
             ["model"] = settings.Model,
             ["instructions"] = instructions,
-            ["input"] = conversation.ToString(),
+            ["input"] = input,
             ["stream"] = true
         };
         var normalizedDepth = NormalizeReasoningDepth(reasoningDepth);

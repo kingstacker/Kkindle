@@ -1097,6 +1097,7 @@ public partial class MainWindow
     private int _readerPendingSelectionEndOffset;
     private string _readerPendingSelectionPrefix = string.Empty;
     private string _readerPendingSelectionSuffix = string.Empty;
+    private (double X, double Y)? _readerPendingPdfPoint;
     private double _readerScrollPosition;
     private double _readerScrollRatio;
     private double _readerScrollWidth;
@@ -1142,6 +1143,10 @@ public partial class MainWindow
     private string? _readerPdfSourcePath;
     private bool _readerIsPdf;
     private ReaderAnnotation? _selectedReaderAnnotation;
+    private PdfRegionSelection? _readerPendingPdfRegion;
+    private PdfPaperAnalysis? _readerPdfPaperAnalysis;
+    private IReadOnlyList<PdfOutlineItem> _readerPdfEmbeddedOutline = [];
+    private Task _readerPdfPaperAnalysisTask = Task.CompletedTask;
 
     private sealed record ReaderScrollState(
         double Position,
@@ -1368,6 +1373,7 @@ public partial class MainWindow
     public ObservableCollection<ReaderBookmark> ReaderBookmarks { get; } = [];
     public ObservableCollection<ReaderAnnotation> ReaderAnnotations { get; } = [];
     public ObservableCollection<ReaderSearchResultViewModel> ReaderSearchResults { get; } = [];
+    public ObservableCollection<ReaderPdfPaperNavigationViewModel> ReaderPdfPaperItems { get; } = [];
     public ObservableCollection<ReaderAiMessageViewModel> ReaderAiMessages { get; } = [];
     public ObservableCollection<ReaderAiSourceViewModel> ReaderAiSources { get; } = [];
 
@@ -1444,6 +1450,14 @@ public partial class MainWindow
         _readerIsPdf = false;
         UpdateReaderBookmarkCornerSurface();
         _readerPdfPages = [];
+        _readerPdfPaperAnalysis = null;
+        _readerPdfEmbeddedOutline = [];
+        _readerPdfPaperAnalysisTask = Task.CompletedTask;
+        ReaderPdfPaperItems.Clear();
+        _readerPendingPdfRegion = null;
+        _readerPendingPdfPoint = null;
+        ReaderPdfPaperButton.IsVisible = false;
+        ReaderPdfPaperView.IsVisible = false;
         _readerPdfPage = 1;
         _readerTocExpanded = true;
         _readerTocMinimal = false;
@@ -1458,6 +1472,7 @@ public partial class MainWindow
         ReaderTocList.SelectedItems?.Clear();
         ReaderTocPanel.IsVisible = false;
         ReaderTocView.IsVisible = true;
+        ReaderPdfPaperView.IsVisible = false;
         ReaderBookmarkPane.IsVisible = false;
         ReaderSearchPanel.IsVisible = false;
         ReaderBookmarkEmptyText.IsVisible = ReaderBookmarks.Count == 0;
@@ -5636,6 +5651,12 @@ public partial class MainWindow
                 // automatic TOC follower until this exact destination is in
                 // place. The TOC is then updated once, at the end.
                 pdf.ScrollToTop(NativePdfReaderHost.ReadTargetTop(pdfTarget));
+                var targetOffset = NativePdfReaderHost.ReadTargetOffset(pdfTarget);
+                if (targetOffset >= 0)
+                {
+                    await pdf.EnsurePaperColumnForOffsetAsync(targetOffset, pdfNavigationToken);
+                    pdf.ScrollToOffset(targetOffset);
+                }
                 pdfNavigationToken.ThrowIfCancellationRequested();
                 if (!IsCurrentReaderPdfTocNavigation(requestVersion, pdfNavigationToken))
                     return false;
@@ -7244,6 +7265,50 @@ public partial class MainWindow
                         && ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is { } clickedAnnotation)
                         EditReaderPdfAnnotation(clickedAnnotation);
                     break;
+                case "pdfPointAnnotation":
+                    if (_readerIsPdf
+                        && root.TryGetProperty("page", out var pointPage)
+                        && pointPage.TryGetInt32(out var pointPageNumber)
+                        && root.TryGetProperty("pageX", out var pageX)
+                        && root.TryGetProperty("pageY", out var pageY)
+                        && root.TryGetProperty("x", out var hostX)
+                        && root.TryGetProperty("y", out var hostY)
+                        && pageX.TryGetDouble(out var normalizedX)
+                        && pageY.TryGetDouble(out var normalizedY)
+                        && hostX.TryGetDouble(out var localX)
+                        && hostY.TryGetDouble(out var localY))
+                    {
+                        BeginReaderPdfPointAnnotation(
+                            pointPageNumber,
+                            normalizedX,
+                            normalizedY,
+                            localX,
+                            localY);
+                    }
+                    break;
+                case "pdfRegionSelection":
+                    if (_readerIsPdf
+                        && root.TryGetProperty("page", out var regionPage)
+                        && regionPage.TryGetInt32(out var regionPageNumber)
+                        && root.TryGetProperty("x", out var regionX)
+                        && root.TryGetProperty("y", out var regionY)
+                        && root.TryGetProperty("width", out var regionWidth)
+                        && root.TryGetProperty("height", out var regionHeight)
+                        && regionX.TryGetDouble(out var normalizedRegionX)
+                        && regionY.TryGetDouble(out var normalizedRegionY)
+                        && regionWidth.TryGetDouble(out var normalizedRegionWidth)
+                        && regionHeight.TryGetDouble(out var normalizedRegionHeight))
+                    {
+                        _ = ObserveReaderTaskAsync(
+                            HandleReaderPdfRegionSelectionAsync(
+                                new PdfRegionSelection(
+                                    regionPageNumber,
+                                    normalizedRegionX,
+                                    normalizedRegionY,
+                                    normalizedRegionWidth,
+                                    normalizedRegionHeight)));
+                    }
+                    break;
                 case "link":
                     if (root.TryGetProperty("href", out var href))
                     {
@@ -8359,8 +8424,7 @@ public partial class MainWindow
         }
         if (_readerIsPdf)
         {
-            var page = CurrentReaderHost is NativePdfReaderHost pdf ? pdf.GetAdjacentPage(direction) : _readerPdfPage + direction;
-            if (page != _readerPdfPage) await NavigatePdfPageAsync(page, ReaderToken);
+            await MoveReaderPdfPositionAsync(direction);
             return;
         }
         if (CurrentReaderHost is not { } host) return;
@@ -8598,6 +8662,7 @@ public partial class MainWindow
             {
                 "scroll" => PdfReaderDisplayMode.Continuous,
                 "double" => PdfReaderDisplayMode.TwoPage,
+                "paper-columns" => PdfReaderDisplayMode.PaperColumns,
                 _ => PdfReaderDisplayMode.SinglePage
             });
             return;
@@ -8611,13 +8676,13 @@ public partial class MainWindow
             ShowReaderTransientStatus(T("竖排模式仅支持单页阅读。关闭竖排后可选择滚动或双栏。"));
             return;
         }
-        var flowMode = tag switch
-        {
-            "scroll" => 0,
-            "double" => 1,
-            _ => 1
-        };
-        var twoPage = string.Equals(tag, "double", StringComparison.Ordinal);
+            var flowMode = tag switch
+            {
+                "scroll" => 0,
+                "double" => 1,
+                _ => 1
+            };
+            var twoPage = string.Equals(tag, "double", StringComparison.Ordinal);
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with
         {
             FlowMode = flowMode,
@@ -8626,16 +8691,24 @@ public partial class MainWindow
         SyncReaderFlowMenu();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
         await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
-        ShowReaderTransientStatus(
-            _readerLayout.FlowMode == 0 ? T("已切换为滚动阅读。") : _readerLayout.TwoPageMode ? T("已切换为双栏阅读。") : T("已切换为单页阅读。"));
+            ShowReaderTransientStatus(
+                _readerLayout.FlowMode == 0
+                    ? T("已切换为滚动阅读。")
+                    : _readerLayout.TwoPageMode
+                        ? T("已切换为双栏阅读。")
+                        : T("已切换为单页阅读。"));
     }
 
     private void SyncReaderFlowMenu()
     {
-        if (ReaderScrollModeItem is null || ReaderSinglePageModeItem is null || ReaderTwoPageModeItem is null) return;
+        if (ReaderScrollModeItem is null
+            || ReaderSinglePageModeItem is null
+            || ReaderTwoPageModeItem is null
+            || ReaderPdfColumnModeItem is null) return;
         var pdf = _readerIsPdf ? CurrentReaderHost as NativePdfReaderHost : null;
         var flowMode = pdf is null ? _readerLayout.FlowMode : pdf.DisplayMode == PdfReaderDisplayMode.Continuous ? 0 : 1;
         var twoPage = pdf is null ? _readerLayout.TwoPageMode : pdf.DisplayMode == PdfReaderDisplayMode.TwoPage;
+        var paperColumns = pdf?.DisplayMode == PdfReaderDisplayMode.PaperColumns;
         var vertical = !_readerIsPdf && _readerLayout.VerticalWriting;
         ReaderTwoPageModeItem.Header = _readerIsPdf ? T("双页") : T("双栏");
         if (vertical)
@@ -8646,23 +8719,32 @@ public partial class MainWindow
         }
 
         ReaderScrollModeItem.IsChecked = flowMode == 0;
-        ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage;
+        ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage && !paperColumns;
         ReaderTwoPageModeItem.IsChecked = flowMode == 1 && twoPage;
+        ReaderPdfColumnModeItem.IsVisible = _readerIsPdf;
+        ReaderPdfColumnModeItem.IsChecked = _readerIsPdf && paperColumns;
         // The native engine now implements continuous scroll and the
         // two-column spread for horizontal writing; only vertical writing is
         // restricted to single pages.
         ReaderScrollModeItem.IsEnabled = !vertical;
         ReaderTwoPageModeItem.IsEnabled = !vertical;
         ReaderSinglePageModeItem.IsEnabled = true;
+        ReaderPdfColumnModeItem.IsEnabled = _readerIsPdf;
         if (ReaderFlowButton is not null)
         {
             // Icon-only button: keep the current mode in tooltip and
             // accessibility name, mirroring UpdateReaderToolbar.
-            var flowLabel = flowMode == 0 ? T("滚动") : twoPage ? (_readerIsPdf ? T("双页") : T("双栏")) : T("单页");
+            var flowLabel = flowMode == 0
+                ? T("滚动")
+                : paperColumns
+                    ? T("论文双栏")
+                    : twoPage
+                        ? (_readerIsPdf ? T("双页") : T("双栏"))
+                        : T("单页");
             ToolTip.SetTip(ReaderFlowButton, flowLabel);
             AutomationProperties.SetName(ReaderFlowButton, flowLabel);
             if (ReaderFlowIcon is not null)
-                ReaderFlowIcon.Data = GetReaderFlowIcon(flowMode, twoPage);
+                ReaderFlowIcon.Data = GetReaderFlowIcon(flowMode, twoPage, paperColumns);
         }
     }
 
@@ -9336,9 +9418,17 @@ public partial class MainWindow
         Geometry.Parse("M6 4h7.5l4.5 4.5V20H6Z M13.5 4v4.5H18");
     private static readonly Geometry ReaderFlowDoubleIcon =
         Geometry.Parse("M5 4.5h14v15h-14Z M12 4.5v15");
+    private static readonly Geometry ReaderFlowPaperColumnsIcon =
+        Geometry.Parse("M5 4.5h14v15h-14Z M9.5 4.5v15 M14.5 4.5v15");
 
-    private static Geometry GetReaderFlowIcon(int flowMode, bool twoPage)
-        => flowMode == 0 ? ReaderFlowScrollIcon : twoPage ? ReaderFlowDoubleIcon : ReaderFlowSingleIcon;
+    private static Geometry GetReaderFlowIcon(int flowMode, bool twoPage, bool paperColumns)
+        => flowMode == 0
+            ? ReaderFlowScrollIcon
+            : paperColumns
+                ? ReaderFlowPaperColumnsIcon
+                : twoPage
+                    ? ReaderFlowDoubleIcon
+                    : ReaderFlowSingleIcon;
 
     private void UpdateReaderToolbar()
     {
@@ -9399,6 +9489,22 @@ public partial class MainWindow
             ReaderPdfBadge.IsVisible = _readerIsPdf;
         if (ReaderPdfRotateButton is not null)
             ReaderPdfRotateButton.IsVisible = _readerIsPdf;
+        if (ReaderPdfPointNoteButton is not null)
+        {
+            ReaderPdfPointNoteButton.IsVisible = _readerIsPdf;
+            ReaderPdfPointNoteButton.Content =
+                (CurrentReaderHost as NativePdfReaderHost)?.IsPointAnnotationMode == true
+                    ? "取消页注"
+                    : "页注";
+        }
+        if (ReaderPdfRegionAiButton is not null)
+        {
+            ReaderPdfRegionAiButton.IsVisible = _readerIsPdf;
+            ReaderPdfRegionAiButton.Content =
+                (CurrentReaderHost as NativePdfReaderHost)?.IsRegionSelectionMode == true
+                    ? "取消框选"
+                    : "区域 AI";
+        }
         if (ReaderPreviousButton is not null)
             ReaderPreviousButton.IsEnabled = _readerIsPdf
                 ? (CurrentReaderHost as NativePdfReaderHost)?.CanGoPrevious == true

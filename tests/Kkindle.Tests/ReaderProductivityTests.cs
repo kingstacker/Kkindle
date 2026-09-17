@@ -255,6 +255,26 @@ public sealed class ReaderProductivityTests
     }
 
     [Fact]
+    public void ReflectionExportKeepsMarkdownSourceUntouched()
+    {
+        var markdownSource = "# What stayed with me\n\n- **A useful idea**";
+        var record = new ReadingMaterialRecord(
+            ReadingMaterialSource.Local,
+            "Reflection Book",
+            "读后思考",
+            "书籍级",
+            string.Empty,
+            markdownSource,
+            DateTimeOffset.UtcNow);
+
+        var markdown = ReadingMaterialsExport.BuildMarkdown([record]);
+
+        Assert.Contains("### 读后思考\n\n# What stayed with me", markdown);
+        Assert.DoesNotContain("笔记：# What stayed with me", markdown);
+        Assert.Contains("- **A useful idea**", markdown);
+    }
+
+    [Fact]
     public async Task SearchBookDoesNotRepeatTitleOnlyMatchesAcrossChapterChunks()
     {
         var root = TestHelpers.CreateTempDirectory();

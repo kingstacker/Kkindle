@@ -10,6 +10,117 @@ namespace Kkindle.Tests;
 public sealed class S3SyncTests
 {
     [Fact]
+    public async Task BookReflectionsSurviveSnapshotRoundTripAndNewestEditWins()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            var data = new ReaderDataService(paths);
+            await data.InitializeAsync();
+            var bookId = Guid.NewGuid();
+            var time = DateTimeOffset.UtcNow.AddMinutes(-5);
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO Books (Id, Title, Authors, Tags, Category, IsFavorite, ReadingStatus, CreatedAt, UpdatedAt)
+                    VALUES ($book, 'Reflection sync', '', '', '', 0, 0, $time, $time);
+                    """;
+                command.Parameters.AddWithValue("$book", bookId.ToString());
+                command.Parameters.AddWithValue("$time", time.ToString("O"));
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await data.SaveBookReflectionAsync(new ReaderBookReflection
+            {
+                BookId = bookId,
+                Content = "## First reading\n\n- The first reflection changed how I see this subject.",
+                CreatedAt = time,
+                UpdatedAt = time
+            });
+
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var capture = typeof(S3SyncService).GetMethod("CaptureSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var apply = typeof(S3SyncService).GetMethod("ApplyRemoteSnapshotsAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Task<S3SyncSnapshot> Capture() => (Task<S3SyncSnapshot>)capture.Invoke(
+                service,
+                ["reflection-device", Array.Empty<S3SyncTombstone>(), CancellationToken.None])!;
+            Task Apply(S3SyncSnapshot local, S3SyncSnapshot remote) => (Task)apply.Invoke(
+                service,
+                [null!, new S3SyncSettings(), local, new[] { remote }, null, CancellationToken.None])!;
+
+            var local = await Capture();
+            var wire = JsonSerializer.Serialize(local);
+            var remote = JsonSerializer.Deserialize<S3SyncSnapshot>(wire)!;
+            remote.DeviceId = "another-reflection-device";
+            remote.BookReflections[0].Content = "## New reading\n\n- **The newer reflection** changed my mind again.";
+            remote.BookReflections[0].UpdatedAt = time.AddMinutes(1);
+
+            await Apply(local, remote);
+
+            var saved = await data.GetBookReflectionAsync(bookId);
+            Assert.NotNull(saved);
+            Assert.Equal("## New reading\n\n- **The newer reflection** changed my mind again.", saved!.Content);
+            Assert.Equal(time.AddMinutes(1), saved.UpdatedAt);
+            Assert.Single((await Capture()).BookReflections);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task DeletedBookReflectionProducesSyncTombstone()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            var data = new ReaderDataService(paths);
+            await data.InitializeAsync();
+            var bookId = Guid.NewGuid();
+            var time = DateTimeOffset.UtcNow.AddMinutes(-5);
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO Books (Id, Title, Authors, Tags, Category, IsFavorite, ReadingStatus, CreatedAt, UpdatedAt)
+                    VALUES ($book, 'Reflection deletion sync', '', '', '', 0, 0, $time, $time);
+                    """;
+                command.Parameters.AddWithValue("$book", bookId.ToString());
+                command.Parameters.AddWithValue("$time", time.ToString("O"));
+                await command.ExecuteNonQueryAsync();
+            }
+            await data.SaveBookReflectionAsync(new ReaderBookReflection
+            {
+                BookId = bookId,
+                Content = "Delete me across devices.",
+                CreatedAt = time,
+                UpdatedAt = time
+            });
+
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var capture = typeof(S3SyncService).GetMethod("CaptureSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Task<S3SyncSnapshot> Capture() => (Task<S3SyncSnapshot>)capture.Invoke(
+                service,
+                ["reflection-delete-device", Array.Empty<S3SyncTombstone>(), CancellationToken.None])!;
+
+            _ = await Capture();
+            await data.DeleteBookReflectionAsync(bookId);
+            var afterDelete = await Capture();
+
+            var tombstone = Assert.Single(afterDelete.Tombstones, item =>
+                item.EntityType == "reflection" && item.Key == bookId.ToString("N"));
+            Assert.True(tombstone.DeletedAt > time);
+            Assert.Empty(afterDelete.BookReflections);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task ContentPositionsSurviveSnapshotExportImportAndOlderSnapshots()
     {
         var root = TestHelpers.CreateTempDirectory();

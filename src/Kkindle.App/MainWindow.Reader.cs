@@ -574,8 +574,7 @@ public partial class MainWindow
         _readerPendingAnnotation = null;
         if (_readerIsPdf)
         {
-            var page = CurrentReaderHost is NativePdfReaderHost pdf ? pdf.GetAdjacentPage(offset) : _readerPdfPage + offset;
-            if (page != _readerPdfPage) await NavigatePdfPageAsync(page, ReaderToken);
+            await MoveReaderPdfPositionAsync(offset);
             return;
         }
         if (_readerDocument is null || CurrentReaderHost is null) return;
@@ -718,8 +717,7 @@ public partial class MainWindow
         if (direction == 0) return;
         if (_readerIsPdf)
         {
-            var page = CurrentReaderHost is NativePdfReaderHost pdf ? pdf.GetAdjacentPage(direction) : _readerPdfPage + direction;
-            if (page != _readerPdfPage) await NavigatePdfPageAsync(page, ReaderToken);
+            await MoveReaderPdfPositionAsync(direction);
             return;
         }
 
@@ -999,6 +997,12 @@ public partial class MainWindow
         _readerAssistantVisibleBeforeZen = false;
         _readerIsPdf = false;
         _readerPdfPages = [];
+        _readerPdfPaperAnalysis = null;
+        _readerPdfEmbeddedOutline = [];
+        _readerPdfPaperAnalysisTask = Task.CompletedTask;
+        ReaderPdfPaperItems.Clear();
+        _readerPendingPdfRegion = null;
+        _readerPendingPdfPoint = null;
         _readerPdfSourcePath = null;
         ReaderBookmarks.Clear();
         ReaderAnnotations.Clear();

@@ -12,7 +12,7 @@ namespace Kkindle;
 /// reference rendered answers with MarkdownRichTextBlock; Avalonia ships no
 /// equivalent, so this TextBlock subclass rebuilds its inlines from the plain
 /// markdown text. Supports headings, lists, quotes, fenced code blocks,
-/// separators, bold/italic, inline code and links (rendered as underlined
+/// separators, bold/italic/strikethrough, inline code and links (rendered as underlined
 /// text). AI source citations such as [S1] are rendered as clickable buttons
 /// through CitationAction. Text stays selectable like the reference.
 /// </summary>
@@ -31,7 +31,7 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
         AvaloniaProperty.Register<KreaderMarkdownTextBlock, Action<string>?>(nameof(CitationAction));
 
     private static readonly Regex InlineTokenPattern = new(
-        @"(\[[Ss]\d+\]|\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*|\[[^\]\n]+\]\([^)\n]+\))",
+        @"(\[[Ss]\d+\]|\*\*[^*]+\*\*|`[^`]+`|~~[^~]+~~|\*[^*]+\*|\[[^\]\n]+\]\([^)\n]+\))",
         RegexOptions.Compiled);
 
     private static readonly Regex HeadingPattern = new(
@@ -40,6 +40,10 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
 
     private static readonly Regex ListPattern = new(
         @"^\s*(?:[-*+]|\d+[.)])\s+(.*)$",
+        RegexOptions.Compiled);
+
+    private static readonly Regex TaskListPattern = new(
+        @"^\s*(?:[-*+])\s+\[(?<done>[ xX])\]\s+(?<text>.*)$",
         RegexOptions.Compiled);
 
     private static readonly Regex QuotePattern = new(
@@ -144,6 +148,15 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
                 continue;
             }
 
+            var task = TaskListPattern.Match(trimmed);
+            if (task.Success)
+            {
+                paragraph.Append(task.Groups["done"].Value is "x" or "X" ? "☑ " : "☐ ")
+                    .Append(task.Groups["text"].Value)
+                    .Append('\n');
+                continue;
+            }
+
             var list = ListPattern.Match(trimmed);
             if (list.Success)
             {
@@ -195,6 +208,13 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
                     FontSize = FontSize - 1,
                     Background = new SolidColorBrush(Color.FromArgb(255, 242, 242, 240)),
                     Foreground = new SolidColorBrush(Color.FromArgb(255, 36, 36, 36))
+                });
+            }
+            else if (token.StartsWith("~~", StringComparison.Ordinal) && token.EndsWith("~~", StringComparison.Ordinal))
+            {
+                Inlines?.Add(new Run(token[2..^2])
+                {
+                    TextDecorations = Avalonia.Media.TextDecorations.Strikethrough
                 });
             }
             else if (token.StartsWith('*') && token.EndsWith('*') && token.Length >= 2)

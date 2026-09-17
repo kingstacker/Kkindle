@@ -2394,7 +2394,7 @@ public partial class MainWindow
         _readingMaterialsExportMode = false;
         ShowStage3Page(ReadingMaterialsPage);
         ReadingMaterialsPageTitle.Text = T("笔记管理");
-        ReadingMaterialsStatusText.Text = T("统一浏览本地书籍与设备的划线、笔记和批注。");
+        ReadingMaterialsStatusText.Text = T("统一浏览本地书籍与设备的划线、笔记、批注和读后思考。");
         ReadingMaterialsNotesActions.IsVisible = true;
         SelectAllReadingMaterialsButton.IsVisible = false;
         ExportReadingMaterialsToggleButton.Content = T("导出记录");
@@ -2441,9 +2441,19 @@ public partial class MainWindow
             var annotations = await _readerData.GetAllAnnotationsAsync(
                 _lifetimeCancellation.Token,
                 MaxReadingMaterials);
-            var readingMaterialsTruncated = annotations.Count >= MaxReadingMaterials;
+            var reflections = (await _readerData.GetAllBookReflectionsAsync(
+                    _lifetimeCancellation.Token,
+                    MaxReadingMaterials))
+                .Where(reflection => !string.IsNullOrWhiteSpace(reflection.Content))
+                .ToArray();
+            var readingMaterialsTruncated = annotations.Count >= MaxReadingMaterials
+                || reflections.Length >= MaxReadingMaterials;
+            var materialBookIds = annotations.Select(annotation => annotation.BookId)
+                .Concat(reflections.Select(reflection => reflection.BookId))
+                .Distinct()
+                .ToArray();
             var displayInfos = await _library.GetBookDisplayInfosAsync(
-                annotations.Select(annotation => annotation.BookId).Distinct().ToArray(),
+                materialBookIds,
                 _lifetimeCancellation.Token);
             var titles = displayInfos.ToDictionary(pair => pair.Key, pair => pair.Value.Title);
             foreach (var info in displayInfos.Values)
@@ -2481,6 +2491,21 @@ public partial class MainWindow
                     annotation.UpdatedAt,
                     annotation,
                     null));
+            }
+            foreach (var reflection in reflections)
+            {
+                _allStage3ReadingMaterials.Add(new Stage3ReadingMaterialViewModel(
+                    ReadingMaterialSource.Local,
+                    titles.GetValueOrDefault(reflection.BookId, T("已删除的本地书籍")),
+                    "读后思考",
+                    "读后思考",
+                    "书籍级",
+                    string.Empty,
+                    reflection.Content,
+                    reflection.UpdatedAt,
+                    null,
+                    null,
+                    localReflection: reflection));
             }
 
             if (CurrentDevice is { CanReadNotes: true } device && _kindle is not null)
@@ -2592,7 +2617,7 @@ public partial class MainWindow
             ReadingMaterialGroups.Add(group);
         }
         ReadingMaterialsEmptyText.IsVisible = filtered.Length == 0;
-        ReadingMaterialsEmptyText.Text = T("没有符合条件的划线、笔记与批注");
+        ReadingMaterialsEmptyText.Text = T("没有符合条件的划线、笔记、批注与读后思考");
         var localCount = filtered.Count(item => item.Source == ReadingMaterialSource.Local);
         var kindleCount = filtered.Count(item => item.Source == ReadingMaterialSource.Device);
         ReadingMaterialsSummaryText.Text = T("本地 {0} 条 · 设备 {1} 条 · 当前显示 {2} 条", localCount, kindleCount, filtered.Length);
@@ -2679,6 +2704,11 @@ public partial class MainWindow
     private async void ReadingMaterialEntry_DoubleTapped(object? sender, TappedEventArgs e)
     {
         if (sender is not Control { DataContext: Stage3ReadingMaterialViewModel item }) return;
+        if (item.LocalReflection is { } reflection)
+        {
+            await OpenBookReflectionFromReadingMaterialsAsync(reflection);
+            return;
+        }
         await LocateReadingMaterialAsync(item);
     }
 
@@ -2686,7 +2716,9 @@ public partial class MainWindow
     {
         if (item.LocalAnnotation is not { } annotation)
         {
-            ReadingMaterialsStatusText.Text = T("设备笔记没有可在电脑端定位的正文位置。");
+            ReadingMaterialsStatusText.Text = item.LocalReflection is not null
+                ? T("读后思考没有可在正文中定位的位置，请双击打开书籍详情。")
+                : T("设备笔记没有可在电脑端定位的正文位置。");
             return;
         }
 
@@ -2825,6 +2857,11 @@ public partial class MainWindow
             {
                 if (item.LocalAnnotation is { } annotation)
                     await _readerData.DeleteAnnotationAsync(annotation.Id, _lifetimeCancellation.Token);
+            }
+            foreach (var item in selected.Where(item => item.LocalReflection is not null))
+            {
+                if (item.LocalReflection is { } reflection)
+                    await _readerData.DeleteBookReflectionAsync(reflection.BookId, _lifetimeCancellation.Token);
             }
             await RefreshReadingMaterialsAsync();
         }
@@ -4352,9 +4389,16 @@ public partial class MainWindow
         _s3LocalChangeVersion++;
         _s3DeletionConfirmationPending = false;
         _s3SyncCancelledByUser = false;
-        if (kind == LocalDataChangeKind.Library)
+        if (kind is LocalDataChangeKind.Library or LocalDataChangeKind.BookReflection)
         {
             MarkReadingMaterialsDirty();
+            if (kind == LocalDataChangeKind.BookReflection
+                && LibraryDetailPane.IsVisible
+                && _selectedCard is not null)
+                _ = RefreshBookReflectionDetailsAsync(_selectedCard.Book.Id);
+        }
+        if (kind == LocalDataChangeKind.Library)
+        {
             _ = RefreshBookSyncStatusesAsync(_lifetimeCancellation.Token);
         }
         if (!_s3SyncBusy && _s3SyncStoredSettings.Settings is { Enabled: true, IsConfigured: true })
@@ -4794,6 +4838,8 @@ public partial class MainWindow
             await RefreshReadingDashboardAsync();
         if (ReadingMaterialsPage.IsVisible)
             await RefreshReadingMaterialsAsync();
+        if (LibraryDetailPane.IsVisible && _selectedCard is not null)
+            await RefreshBookReflectionDetailsAsync(_selectedCard.Book.Id);
     }
 
     private async Task RefreshSettingsAfterS3SyncAsync(CancellationToken cancellationToken)
@@ -5807,7 +5853,8 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
         KindleClipping? pairedKindleClipping = null,
         string? sourceDeviceId = null,
         string? sourceDeviceName = null,
-        bool canDeleteDeviceNotes = true)
+        bool canDeleteDeviceNotes = true,
+        ReaderBookReflection? localReflection = null)
     {
         UiText.LanguageChanged += OnLanguageChanged;
         Source = source;
@@ -5821,6 +5868,7 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
         Note = note;
         UpdatedAt = updatedAt;
         LocalAnnotation = localAnnotation;
+        LocalReflection = localReflection;
         KindleClipping = kindleClipping;
         PairedKindleClipping = pairedKindleClipping;
         _typeLabelSource = kindleClipping is { } clipping && pairedKindleClipping is null
@@ -5849,13 +5897,19 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
     public string Note { get; }
     public DateTimeOffset? UpdatedAt { get; }
     public ReaderAnnotation? LocalAnnotation { get; }
+    public ReaderBookReflection? LocalReflection { get; }
     public KindleClipping? KindleClipping { get; }
     public KindleClipping? PairedKindleClipping { get; }
     public string QuoteLabel => string.IsNullOrWhiteSpace(Quote) ? UiText.Get("无划线内容") : UiText.Get("“{0}”", Quote);
-    public string NoteLabel => string.IsNullOrWhiteSpace(Note) ? "" : UiText.Get("批注：{0}", Note);
-    public string ChapterDisplayLabel => UiText.Get("章节：{0}", ChapterLabel);
-    public string SelectedContentLabel => string.IsNullOrWhiteSpace(Quote) ? UiText.Get("选中内容：无") : UiText.Get("选中内容：{0}", Quote);
-    public bool HasNote => !string.IsNullOrWhiteSpace(Note);
+    public bool IsBookReflection => LocalReflection is not null;
+    public string NoteLabel => IsBookReflection || string.IsNullOrWhiteSpace(Note) ? "" : UiText.Get("批注：{0}", Note);
+    public string ChapterDisplayLabel => IsBookReflection
+        ? UiText.Get("书籍级思考")
+        : UiText.Get("章节：{0}", ChapterLabel);
+    public string SelectedContentLabel => IsBookReflection
+        ? UiText.Get("读后思考：{0}", Note)
+        : string.IsNullOrWhiteSpace(Quote) ? UiText.Get("选中内容：无") : UiText.Get("选中内容：{0}", Quote);
+    public bool HasNote => !IsBookReflection && !string.IsNullOrWhiteSpace(Note);
     public string DateLabel => UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? UiText.Get("时间未知");
     public string SearchText => string.Join('\n', SourceLabel, BookTitle, TypeLabel, ChapterLabel, Location, Quote, Note);
     public bool IsSelected

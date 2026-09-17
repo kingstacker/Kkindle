@@ -62,7 +62,7 @@ public sealed partial class S3SyncService
         using (var version = CreateCommand(connection, transaction,
                    "SELECT SchemaVersion FROM S3SyncDeletionControl WHERE Id = 1;"))
         {
-            if (Convert.ToInt32(await version.ExecuteScalarAsync(cancellationToken)) >= 2)
+            if (Convert.ToInt32(await version.ExecuteScalarAsync(cancellationToken)) >= 3)
             {
                 await transaction.CommitAsync(cancellationToken);
                 return;
@@ -77,6 +77,7 @@ public sealed partial class S3SyncService
             DROP TRIGGER IF EXISTS S3SyncDeletionLog_BookCollections;
             DROP TRIGGER IF EXISTS S3SyncDeletionLog_BookCollectionItems;
             DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderAnnotations;
+            DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderBookReflections;
             DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderProgress;
             DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderBookmarks;
             DROP TRIGGER IF EXISTS S3SyncDeletionLog_ReaderLayoutSettings;
@@ -131,6 +132,14 @@ public sealed partial class S3SyncService
                 VALUES ('annotation', OLD.Id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
             END;
 
+            CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_ReaderBookReflections
+            AFTER DELETE ON ReaderBookReflections
+            WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
+            BEGIN
+                INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
+                VALUES ('reflection', OLD.BookId, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+            END;
+
             CREATE TRIGGER IF NOT EXISTS S3SyncDeletionLog_ReaderProgress
             AFTER DELETE ON ReaderProgress
             WHEN (SELECT Suppressed FROM S3SyncDeletionControl WHERE Id = 1) = 0
@@ -162,7 +171,7 @@ public sealed partial class S3SyncService
                 INSERT OR REPLACE INTO S3SyncDeletionLog (EntityType, EntityKey, DeletedAt)
                 VALUES ('stats', OLD.BookFileId, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
             END;
-            UPDATE S3SyncDeletionControl SET SchemaVersion = 2 WHERE Id = 1;
+            UPDATE S3SyncDeletionControl SET SchemaVersion = 3 WHERE Id = 1;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -385,7 +394,25 @@ public sealed partial class S3SyncService
                 });
         }
 
-        using (var command = CreateCommand(connection, transaction, 
+        using (var command = CreateCommand(connection, transaction,
+            """
+            SELECT BookId, Content, CreatedAt, UpdatedAt
+            FROM ReaderBookReflections;
+            """
+            ))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                snapshot.BookReflections.Add(new S3SyncBookReflection
+                {
+                    BookId = ParseGuid(reader.GetString(0), "ReaderBookReflections.BookId"),
+                    Content = reader.GetString(1),
+                    CreatedAt = ParseTimestamp(reader.GetString(2)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(3))
+                });
+        }
+
+        using (var command = CreateCommand(connection, transaction,
             """
             SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
                    ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
@@ -760,6 +787,14 @@ public sealed partial class S3SyncService
                 && !IsTombstoned(tombstoneIndex, "annotation", annotation.Id, annotation.UpdatedAt)
                 && !IsTombstoned(tombstoneIndex, "file", annotation.BookFileId, annotation.UpdatedAt))
             .ToArray();
+        var remoteBookReflections = snapshots
+            .SelectMany(snapshot => snapshot.BookReflections)
+            .GroupBy(reflection => reflection.BookId)
+            .Select(group => group.OrderByDescending(reflection => reflection.UpdatedAt).First())
+            .Where(reflection => !tombstonedBooks.Contains(reflection.BookId)
+                && !IsTombstoned(tombstoneIndex, "book", reflection.BookId, reflection.UpdatedAt)
+                && !IsTombstoned(tombstoneIndex, "reflection", reflection.BookId, reflection.UpdatedAt))
+            .ToArray();
         var remoteProgress = snapshots
             .Where(snapshot => snapshot.ReadingDataReset == readingReset)
             .SelectMany(snapshot => snapshot.Progress)
@@ -808,6 +843,7 @@ public sealed partial class S3SyncService
             {
                 Books = remoteBooks.ToList(), Files = remoteFiles.ToList(), Collections = remoteCollections.ToList(),
                 CollectionItems = remoteItems.ToList(), Annotations = remoteAnnotations.ToList(),
+                BookReflections = remoteBookReflections.ToList(),
                 Progress = remoteProgress.ToList(), Bookmarks = remoteBookmarks.ToList(),
                 Layouts = remoteLayouts.ToList(), ReadingStats = remoteStats.ToList()
             }, tombstoneIndex, bookMap, fileMap, collectionMap);
@@ -816,6 +852,7 @@ public sealed partial class S3SyncService
             remoteCollections = view.Collections.ToArray();
             remoteItems = view.CollectionItems.ToArray();
             remoteAnnotations = view.Annotations.ToArray();
+            remoteBookReflections = view.BookReflections.ToArray();
             remoteProgress = view.Progress.ToArray();
             remoteBookmarks = view.Bookmarks.ToArray();
             remoteLayouts = view.Layouts.ToArray();
@@ -1211,6 +1248,27 @@ public sealed partial class S3SyncService
                 annotationsApplied += affected > 0 ? 1 : 0;
             }
 
+            foreach (var reflection in remoteBookReflections)
+            {
+                if (!bookMap.TryGetValue(reflection.BookId, out var localBookId))
+                    continue;
+                var command = commandCache.Get(
+                    """
+                    INSERT INTO ReaderBookReflections (BookId, Content, CreatedAt, UpdatedAt)
+                    VALUES ($bookId, $content, $createdAt, $updatedAt)
+                    ON CONFLICT(BookId) DO UPDATE SET
+                        Content = excluded.Content, CreatedAt = excluded.CreatedAt,
+                        UpdatedAt = excluded.UpdatedAt
+                    WHERE julianday(excluded.UpdatedAt) > julianday(ReaderBookReflections.UpdatedAt);
+                    """
+                    );
+                AddParameter(command, "$bookId", localBookId.ToString());
+                AddParameter(command, "$content", reflection.Content);
+                AddParameter(command, "$createdAt", reflection.CreatedAt.ToString("O"));
+                AddParameter(command, "$updatedAt", reflection.UpdatedAt.ToString("O"));
+                changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+            }
+
             foreach (var item in remoteProgress)
             {
                 if (!TryMapReaderRow(item.BookFileId, fileMap, locallyKnownFiles, out var localBookId, out var localFileId))
@@ -1390,6 +1448,7 @@ public sealed partial class S3SyncService
                 remoteCollections,
                 remoteItems,
                 remoteAnnotations,
+                remoteBookReflections,
                 remoteProgress,
                 remoteBookmarks,
                 remoteLayouts,
@@ -1675,6 +1734,10 @@ public sealed partial class S3SyncService
                 bookMap.GetValueOrDefault(row.BookId, row.BookId)), row.AddedAt)).ToList();
         view.Annotations = view.Annotations.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
             && !IsTombstoned(tombstones, "annotation", row.Id, row.UpdatedAt)).ToList();
+        view.BookReflections = view.BookReflections.Where(row =>
+            !deletedBooks.Contains(row.BookId)
+            && !Deleted("book", row.BookId, row.UpdatedAt, bookMap)
+            && !Deleted("reflection", row.BookId, row.UpdatedAt, bookMap)).ToList();
         view.Progress = view.Progress.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
             && !Deleted("progress", row.BookFileId, row.UpdatedAt, fileMap)).ToList();
         view.Bookmarks = view.Bookmarks.Where(row => LiveReader(row.BookId, row.BookFileId, row.CreatedAt)
@@ -2120,6 +2183,14 @@ public sealed partial class S3SyncService
         AddParameter(mergeMetadata, "$duplicate", duplicate.Id.ToString());
         await mergeMetadata.ExecuteNonQueryAsync(cancellationToken);
 
+        await MergeDuplicateBookReflectionAsync(
+            connection,
+            transaction,
+            canonical.Id,
+            duplicate.Id,
+            commandCache,
+            cancellationToken);
+
         var copyCollections = commandCache.Get(
             """
             INSERT OR IGNORE INTO BookCollectionItems (CollectionId, BookId, AddedAt)
@@ -2239,6 +2310,51 @@ public sealed partial class S3SyncService
             var absolute = ResolveDataPath(duplicate.CoverPath);
             if (absolute is not null) pathsToDelete.Add(absolute);
         }
+    }
+
+    private static async Task MergeDuplicateBookReflectionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid canonicalBookId,
+        Guid duplicateBookId,
+        SqliteCommandCache commandCache,
+        CancellationToken cancellationToken)
+    {
+        var copy = commandCache.Get(
+            """
+            INSERT OR IGNORE INTO ReaderBookReflections (BookId, Content, CreatedAt, UpdatedAt)
+            SELECT $canonical, Content, CreatedAt, UpdatedAt
+            FROM ReaderBookReflections
+            WHERE BookId = $duplicate;
+            """
+            );
+        AddParameter(copy, "$canonical", canonicalBookId.ToString());
+        AddParameter(copy, "$duplicate", duplicateBookId.ToString());
+        await copy.ExecuteNonQueryAsync(cancellationToken);
+
+        var update = commandCache.Get(
+            """
+            UPDATE ReaderBookReflections
+            SET Content = (SELECT Content FROM ReaderBookReflections WHERE BookId = $duplicate),
+                CreatedAt = CASE WHEN julianday((SELECT CreatedAt FROM ReaderBookReflections WHERE BookId = $duplicate))
+                                      < julianday(CreatedAt)
+                                 THEN (SELECT CreatedAt FROM ReaderBookReflections WHERE BookId = $duplicate)
+                                 ELSE CreatedAt END,
+                UpdatedAt = (SELECT UpdatedAt FROM ReaderBookReflections WHERE BookId = $duplicate)
+            WHERE BookId = $canonical
+              AND EXISTS (SELECT 1 FROM ReaderBookReflections WHERE BookId = $duplicate)
+              AND julianday((SELECT UpdatedAt FROM ReaderBookReflections WHERE BookId = $duplicate))
+                  > julianday(UpdatedAt);
+            """
+            );
+        AddParameter(update, "$canonical", canonicalBookId.ToString());
+        AddParameter(update, "$duplicate", duplicateBookId.ToString());
+        await update.ExecuteNonQueryAsync(cancellationToken);
+
+        var delete = commandCache.Get(
+            "DELETE FROM ReaderBookReflections WHERE BookId = $duplicate;");
+        AddParameter(delete, "$duplicate", duplicateBookId.ToString());
+        await delete.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<List<LocalDuplicateFile>> ReadLocalDuplicateFilesAsync(
@@ -2761,6 +2877,7 @@ public sealed partial class S3SyncService
             case "collection":
                 return collectionMap.TryGetValue(remoteId, out localId);
             case "annotation":
+            case "reflection":
             case "progress":
             case "bookmark":
             case "layout":
@@ -2796,6 +2913,7 @@ public sealed partial class S3SyncService
         IReadOnlyCollection<S3SyncCollection> remoteCollections,
         IReadOnlyCollection<S3SyncCollectionItem> remoteItems,
         IReadOnlyCollection<S3SyncAnnotation> remoteAnnotations,
+        IReadOnlyCollection<S3SyncBookReflection> remoteBookReflections,
         IReadOnlyCollection<S3SyncProgress> remoteProgress,
         IReadOnlyCollection<S3SyncBookmark> remoteBookmarks,
         IReadOnlyCollection<S3SyncLayout> remoteLayouts,
@@ -2812,6 +2930,7 @@ public sealed partial class S3SyncService
             .Select(item => CompositeKey(item.CollectionId, item.BookId))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var localAnnotationIds = localSnapshot.Annotations.Select(item => item.Id).ToHashSet();
+        var localBookReflectionIds = localSnapshot.BookReflections.Select(item => item.BookId).ToHashSet();
         var localProgressIds = localSnapshot.Progress.Select(item => item.BookFileId).ToHashSet();
         var localBookmarkIds = localSnapshot.Bookmarks.Select(item => item.Id).ToHashSet();
         var localLayoutIds = localSnapshot.Layouts.Select(item => item.BookFileId).ToHashSet();
@@ -2841,6 +2960,8 @@ public sealed partial class S3SyncService
             AddLiveKey("collection-item", CompositeKey(item.CollectionId, item.BookId), item.AddedAt);
         foreach (var item in localSnapshot.Annotations)
             AddLive("annotation", item.Id, item.UpdatedAt);
+        foreach (var item in localSnapshot.BookReflections)
+            AddLive("reflection", item.BookId, item.UpdatedAt);
         foreach (var item in localSnapshot.Progress)
             AddLive("progress", item.BookFileId, item.UpdatedAt);
         foreach (var item in localSnapshot.Bookmarks)
@@ -2863,6 +2984,8 @@ public sealed partial class S3SyncService
                 AddLiveKey("collection-item", CompositeKey(collectionId, bookId), item.AddedAt);
         }
         foreach (var item in remoteAnnotations) AddLive("annotation", item.Id, item.UpdatedAt);
+        foreach (var item in remoteBookReflections)
+            if (bookMap.TryGetValue(item.BookId, out var localId)) AddLive("reflection", localId, item.UpdatedAt);
         foreach (var item in remoteProgress)
             if (fileMap.TryGetValue(item.BookFileId, out var localId)) AddLive("progress", localId, item.UpdatedAt);
         foreach (var item in remoteBookmarks) AddLive("bookmark", item.Id, item.CreatedAt);
@@ -2930,6 +3053,7 @@ public sealed partial class S3SyncService
                 "file" => localFileIds.Contains(localId),
                 "collection" => localCollectionIds.Contains(localId),
                 "annotation" => localAnnotationIds.Contains(localId),
+                "reflection" => localBookReflectionIds.Contains(localId),
                 "progress" => localProgressIds.Contains(localId),
                 "bookmark" => localBookmarkIds.Contains(localId),
                 "layout" => localLayoutIds.Contains(localId),
@@ -2979,6 +3103,18 @@ public sealed partial class S3SyncService
                         transaction,
                         "ReaderAnnotations",
                         "Id",
+                        localId,
+                        "UpdatedAt",
+                        tombstone.DeletedAt,
+                        commandCache,
+                        cancellationToken);
+                    break;
+                case "reflection":
+                    changed |= await DeleteVersionedRowAsync(
+                        connection,
+                        transaction,
+                        "ReaderBookReflections",
+                        "BookId",
                         localId,
                         "UpdatedAt",
                         tombstone.DeletedAt,
@@ -3077,6 +3213,7 @@ public sealed partial class S3SyncService
         foreach (var statement in new[]
         {
             "DELETE FROM ReaderAnnotations WHERE BookId = $bookId;",
+            "DELETE FROM ReaderBookReflections WHERE BookId = $bookId;",
             "DELETE FROM ReaderProgress WHERE BookId = $bookId;",
             "DELETE FROM ReaderBookmarks WHERE BookId = $bookId;",
             "DELETE FROM ReaderLayoutSettings WHERE BookId = $bookId;",
@@ -3261,6 +3398,7 @@ public sealed partial class S3SyncService
         foreach (var row in snapshot.Collections) Add("collection", row.Id.ToString("N"), row.CreatedAt);
         foreach (var row in snapshot.CollectionItems) Add("collection-item", CompositeKey(row.CollectionId, row.BookId), row.AddedAt);
         foreach (var row in snapshot.Annotations) Add("annotation", row.Id.ToString("N"), row.UpdatedAt);
+        foreach (var row in snapshot.BookReflections) Add("reflection", row.BookId.ToString("N"), row.UpdatedAt);
         foreach (var row in snapshot.Progress) Add("progress", row.BookFileId.ToString("N"), row.UpdatedAt);
         foreach (var row in snapshot.Bookmarks) Add("bookmark", row.Id.ToString("N"), row.CreatedAt);
         foreach (var row in snapshot.Layouts) Add("layout", row.BookFileId.ToString("N"), row.UpdatedAt);
@@ -3346,6 +3484,14 @@ public sealed partial class S3SyncService
             "annotation",
             previous.Annotations.Select(item => (item.Id.ToString("N"), item.UpdatedAt)),
             current.Annotations.Select(item => item.Id.ToString("N")),
+            result,
+            previous.CreatedAt,
+            current.CreatedAt,
+            recordedDeletionTimes);
+        AddMissing(
+            "reflection",
+            previous.BookReflections.Select(item => (item.BookId.ToString("N"), item.UpdatedAt)),
+            current.BookReflections.Select(item => item.BookId.ToString("N")),
             result,
             previous.CreatedAt,
             current.CreatedAt,
@@ -3442,6 +3588,7 @@ public sealed partial class S3SyncService
             (Name: "收藏夹", Type: "collection", Total: previous.Collections.Count),
             (Name: "收藏夹条目", Type: "collection-item", Total: previous.CollectionItems.Count),
             (Name: "批注", Type: "annotation", Total: previous.Annotations.Count),
+            (Name: "读后思考", Type: "reflection", Total: previous.BookReflections.Count),
             (Name: "阅读进度", Type: "progress", Total: previous.Progress.Count),
             (Name: "书签", Type: "bookmark", Total: previous.Bookmarks.Count),
             (Name: "阅读布局", Type: "layout", Total: previous.Layouts.Count),
