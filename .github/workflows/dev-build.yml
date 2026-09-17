@@ -1,14 +1,14 @@
 name: Development Build
 
-run-name: Development build ${{ inputs.base_version || '0.6.0-dev' }}.${{ github.run_number }}.${{ github.run_attempt }}
+run-name: Development build ${{ inputs.base_version || '1.0.2-dev' }}.${{ github.run_number }}.${{ github.run_attempt }}
 
 on:
   workflow_dispatch:
     inputs:
       base_version:
-        description: "开发版基础版本，例如 0.6.0-dev"
+        description: "开发版基础版本，例如 1.0.2-dev"
         required: true
-        default: "0.6.0-dev"
+        default: "1.0.2-dev"
         type: string
   push:
     branches:
@@ -34,11 +34,11 @@ jobs:
         id: version
         shell: bash
         env:
-          BASE_VERSION: ${{ inputs.base_version || '0.6.0-dev' }}
+          BASE_VERSION: ${{ inputs.base_version || '1.0.2-dev' }}
         run: |
           set -euo pipefail
           if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "base_version must look like 0.6.0-dev" >&2
+            echo "base_version must look like 1.0.2-dev" >&2
             exit 2
           fi
           version="${BASE_VERSION}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
