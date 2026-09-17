@@ -1,5 +1,8 @@
+using Avalonia;
 using Avalonia.Interactivity;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Media;
 using Kkindle.Core;
 
 namespace Kkindle;
@@ -9,6 +12,9 @@ public partial class MainWindow
     private int _bookReflectionDetailsVersion;
     private bool _bookReflectionEditorBusy;
     private ReaderBookReflection? _selectedBookReflection;
+    private Flyout? _bookReflectionFlyout;
+    private Border? _bookReflectionFlyoutHost;
+    private KreaderMarkdownTextBlock? _bookReflectionFlyoutText;
 
     private async Task RefreshBookReflectionDetailsAsync(Guid bookId)
     {
@@ -16,8 +22,7 @@ public partial class MainWindow
         _selectedBookReflection = null;
         DetailReflectionPreviewText.Markdown = T("正在读取读后思考…");
         DetailReflectionUpdatedText.Text = string.Empty;
-        ToolTip.SetTip(DetailReflectionPanel, null);
-        ToolTip.SetTip(DetailReflectionPreviewText, null);
+        SetBookReflectionTooltip(null);
         try
         {
             var reflection = await _readerData.GetBookReflectionAsync(
@@ -42,8 +47,7 @@ public partial class MainWindow
                 "读后思考暂时不可用：{0}",
                 UiText.Localize(exception.Message));
             DetailReflectionUpdatedText.Text = string.Empty;
-            ToolTip.SetTip(DetailReflectionPanel, null);
-            ToolTip.SetTip(DetailReflectionPreviewText, null);
+            SetBookReflectionTooltip(null);
         }
     }
 
@@ -56,17 +60,86 @@ public partial class MainWindow
         {
             DetailReflectionPreviewText.Markdown = T("还没有写下读后思考。");
             DetailReflectionUpdatedText.Text = string.Empty;
-            ToolTip.SetTip(DetailReflectionPanel, null);
-            ToolTip.SetTip(DetailReflectionPreviewText, null);
+            SetBookReflectionTooltip(null);
             return;
         }
 
         DetailReflectionPreviewText.Markdown = BuildBookReflectionPreview(normalizedContent);
-        ToolTip.SetTip(DetailReflectionPanel, normalizedContent);
-        ToolTip.SetTip(DetailReflectionPreviewText, normalizedContent);
+        SetBookReflectionTooltip(normalizedContent);
         DetailReflectionUpdatedText.Text = T(
             "更新时间：{0}",
             reflection.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
+    }
+
+    private void SetBookReflectionTooltip(string? markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            CloseBookReflectionFlyout();
+            return;
+        }
+
+        EnsureBookReflectionFlyout();
+        _bookReflectionFlyoutText!.Markdown = BookReflectionEditorSurface.NormalizeMarkdown(markdown);
+    }
+
+    private void EnsureBookReflectionFlyout()
+    {
+        if (_bookReflectionFlyout is not null)
+            return;
+
+        _bookReflectionFlyoutText = new KreaderMarkdownTextBlock
+        {
+            Width = 330,
+            FontSize = 12,
+            Foreground = AppAppearanceResources.GetBrush("InkBrush"),
+            TextWrapping = TextWrapping.Wrap
+        };
+        _bookReflectionFlyoutHost = new Border
+        {
+            Width = 360,
+            MaxHeight = 300,
+            Padding = new Thickness(14),
+            Background = AppAppearanceResources.GetBrush("PaperBrush"),
+            BorderBrush = AppAppearanceResources.GetBrush("InkBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(0),
+            Child = new ScrollViewer
+            {
+                MaxHeight = 270,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = _bookReflectionFlyoutText
+            }
+        };
+        _bookReflectionFlyout = new Flyout
+        {
+            Content = _bookReflectionFlyoutHost,
+            Placement = PlacementMode.LeftEdgeAlignedTop,
+            ShowMode = FlyoutShowMode.TransientWithDismissOnPointerMoveAway
+        };
+        _bookReflectionFlyout.FlyoutPresenterClasses.Add("bookReflectionFlyoutPresenter");
+        DetailReflectionHoverArea.PointerEntered += (_, _) =>
+            ShowBookReflectionFlyout();
+    }
+
+    private void ShowBookReflectionFlyout()
+    {
+        if (_bookReflectionFlyout is null
+            || _bookReflectionFlyoutText is null
+            || string.IsNullOrWhiteSpace(_bookReflectionFlyoutText.Markdown)
+            || !DetailReflectionHoverArea.IsEffectivelyVisible)
+            return;
+
+        if (!_bookReflectionFlyout.IsOpen)
+            _bookReflectionFlyout.ShowAt(DetailReflectionHoverArea);
+    }
+
+    private void CloseBookReflectionFlyout()
+    {
+        _bookReflectionFlyout?.Hide();
+        if (_bookReflectionFlyoutText is not null)
+            _bookReflectionFlyoutText.Markdown = null;
     }
 
     private async void EditBookReflectionButton_Click(object? sender, RoutedEventArgs e)

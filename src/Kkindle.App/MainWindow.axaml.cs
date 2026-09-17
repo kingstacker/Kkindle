@@ -938,6 +938,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _bookReflectionFlyout?.Hide();
         _sendToKindleWindow?.CloseForShutdown();
         _readerToolbarHideTimer?.Stop();
         _readerToolbarLayoutTimer?.Stop();

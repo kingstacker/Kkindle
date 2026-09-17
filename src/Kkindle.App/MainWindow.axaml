@@ -1498,17 +1498,23 @@
                                                   Data="M 12,20 H 21 M 16.5,3.5 A 2.121,2.121 0 0 1 19.5,6.5 L 7,19 L 3,20 L 4,16 Z" />
                                         </Button>
                                     </Grid>
-                                    <local:KreaderMarkdownTextBlock x:Name="DetailReflectionPreviewText"
-                                                                     Markdown="{DynamicResource Ui.Auto.B8B3CCB23FDFBA65}"
-                                                                     FontSize="12"
-                                                                     Foreground="{DynamicResource MutedInkBrush}"
-                                                                     MaxLines="6"
-                                                                     TextTrimming="CharacterEllipsis"
-                                                                     TextWrapping="Wrap" />
-                                    <TextBlock x:Name="DetailReflectionUpdatedText"
-                                               FontSize="10"
-                                               Foreground="{DynamicResource MutedInkBrush}"
-                                               TextWrapping="Wrap" />
+                                    <Border x:Name="DetailReflectionHoverArea"
+                                            Background="Transparent"
+                                            HorizontalAlignment="Stretch">
+                                        <StackPanel Spacing="8">
+                                            <local:KreaderMarkdownTextBlock x:Name="DetailReflectionPreviewText"
+                                                                             Markdown="{DynamicResource Ui.Auto.B8B3CCB23FDFBA65}"
+                                                                             FontSize="12"
+                                                                             Foreground="{DynamicResource MutedInkBrush}"
+                                                                             MaxLines="6"
+                                                                             TextTrimming="CharacterEllipsis"
+                                                                             TextWrapping="Wrap" />
+                                            <TextBlock x:Name="DetailReflectionUpdatedText"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource MutedInkBrush}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                             </Border>
 

@@ -164,10 +164,21 @@ public sealed partial class SettingsTests
         var preview = scope.Get<KreaderMarkdownTextBlock>("DetailReflectionPreviewText");
         Assert.Contains("A reflection", preview.Markdown ?? string.Empty);
         Assert.Equal(6, preview.MaxLines);
-        Assert.Equal(
-            preview.Markdown,
-            Assert.IsType<string>(ToolTip.GetTip(reflectionPanel)));
-
+        var hoverArea = scope.Get<Border>("DetailReflectionHoverArea");
+        var reflectionFlyout = scope.Field<Flyout>("_bookReflectionFlyout");
+        var flyoutBorder = Assert.IsType<Border>(reflectionFlyout.Content);
+        var flyoutScroll = Assert.IsType<ScrollViewer>(flyoutBorder.Child);
+        var flyoutPreview = Assert.IsType<KreaderMarkdownTextBlock>(flyoutScroll.Content);
+        Assert.Contains("A reflection", flyoutPreview.Markdown ?? string.Empty);
+        Assert.Equal(new CornerRadius(0), flyoutBorder.CornerRadius);
+        Assert.Equal(0, flyoutBorder.BoxShadow.Count);
+        Assert.Equal(PlacementMode.LeftEdgeAlignedTop, reflectionFlyout.Placement);
+        reflectionFlyout.ShowAt(hoverArea);
+        await Render();
+        Assert.True(reflectionFlyout.IsOpen);
+        Assert.True(flyoutPreview.Bounds.Width > 0);
+        Assert.True(flyoutPreview.Bounds.Width <= flyoutScroll.Bounds.Width + 1);
+        reflectionFlyout.Hide();
         var detailStack = scope.Get<StackPanel>("DetailContentStack");
         var separator = scope.Get<Avalonia.Controls.Shapes.Rectangle>("DetailReflectionSeparator");
         var cover = scope.Get<Grid>("DetailCoverAndActions");
