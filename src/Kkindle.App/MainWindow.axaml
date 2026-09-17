@@ -4809,9 +4809,7 @@
                 <Border x:Name="ReaderFooterBar"
                         Grid.Row="2"
                         ZIndex="100"
-                        Background="{DynamicResource ReaderPageBrush}"
-                        BorderBrush="{DynamicResource ReaderBorderBrush}"
-                        BorderThickness="0,1,0,0">
+                        Background="{DynamicResource ReaderPageBrush}">
                     <Border.Transitions>
                         <Transitions>
                             <DoubleTransition Property="Opacity" Duration="0:0:0.18" />

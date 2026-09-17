@@ -167,7 +167,9 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         Assert.True(scope.Get<Border>("ReaderAssistantPanel").Bounds.Width > 200);
         Assert.Same(pageBrush, scope.Get<Border>("ReaderHeaderBar").Background);
         Assert.Same(pageBrush, scope.Get<Grid>("ReaderWindowTitleBar").Background);
-        Assert.Same(pageBrush, scope.Get<Border>("ReaderFooterBar").Background);
+        var footer = scope.Get<Border>("ReaderFooterBar");
+        Assert.Same(pageBrush, footer.Background);
+        Assert.Equal(new Thickness(0), footer.BorderThickness);
         Assert.Same(sidebarBrush, scope.Get<Border>("ReaderTocPanel").Background);
         Assert.Equal(palette.Ink, ((ISolidColorBrush)scope.Get<TextBlock>("ReaderBookInfoText").Foreground!).Color);
         Assert.Equal(palette.Ink, ((ISolidColorBrush)scope.Get<Button>("MinimizeWindowButton").Foreground!).Color);

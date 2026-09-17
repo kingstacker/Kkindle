@@ -39,6 +39,9 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+LanguageDetectionMethod=uilanguage
+ShowLanguageDialog=no
+UsePreviousLanguage=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -49,6 +52,10 @@ VersionInfoVersion={#MyNumericVersion}
 VersionInfoProductName={#MyAppName}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Kkindle Windows installer
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinese"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
