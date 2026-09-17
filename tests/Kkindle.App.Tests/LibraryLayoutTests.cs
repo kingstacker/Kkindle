@@ -161,14 +161,22 @@ public sealed partial class SettingsTests
         var detailActionButton = scope.Get<Button>("DetailDoubanButton");
         Assert.Equal(detailActionButton.Bounds.Width, editReflectionButton.Bounds.Width, 1);
         Assert.Equal(detailActionButton.Bounds.Height, editReflectionButton.Bounds.Height, 1);
-        Assert.Contains("A reflection", scope.Get<KreaderMarkdownTextBlock>("DetailReflectionPreviewText").Markdown ?? string.Empty);
+        var preview = scope.Get<KreaderMarkdownTextBlock>("DetailReflectionPreviewText");
+        Assert.Contains("A reflection", preview.Markdown ?? string.Empty);
+        Assert.Equal(6, preview.MaxLines);
+        Assert.Equal(
+            preview.Markdown,
+            Assert.IsType<string>(ToolTip.GetTip(reflectionPanel)));
 
         var detailStack = scope.Get<StackPanel>("DetailContentStack");
         var separator = scope.Get<Avalonia.Controls.Shapes.Rectangle>("DetailReflectionSeparator");
         var cover = scope.Get<Grid>("DetailCoverAndActions");
         var format = scope.Get<TextBlock>("DetailFormatText");
-        Assert.True(detailStack.Children.IndexOf(separator) < detailStack.Children.IndexOf(cover));
+        var saveRow = Assert.IsType<Grid>(scope.Get<Button>("SaveDetailsButton").Parent);
         Assert.True(detailStack.Children.IndexOf(cover) < detailStack.Children.IndexOf(format));
+        Assert.True(detailStack.Children.IndexOf(format) < detailStack.Children.IndexOf(separator));
+        Assert.True(detailStack.Children.IndexOf(separator) < detailStack.Children.IndexOf(reflectionPanel));
+        Assert.True(detailStack.Children.IndexOf(reflectionPanel) < detailStack.Children.IndexOf(saveRow));
     });
 
     [Fact]

@@ -293,6 +293,10 @@
     <x:String x:Key="Ui.Auto.491ACA2A4EBF6B94">没有符合条件的划线、笔记、批注与读后思考</x:String>
     <x:String x:Key="Ui.Auto.A75D25CD026C6374">一级标题</x:String>
     <x:String x:Key="Ui.Auto.D69947F39796FC11">二级标题</x:String>
+    <x:String x:Key="Ui.Auto.7D96CB13E68934A4">三级标题</x:String>
+    <x:String x:Key="Ui.Auto.F97F347A9C2AA255">四级标题</x:String>
+    <x:String x:Key="Ui.Auto.A85EE90C9B1A5C48">五级标题</x:String>
+    <x:String x:Key="Ui.Auto.C79BD849AA754139">六级标题</x:String>
     <x:String x:Key="Ui.Auto.F6DA93ED21E718AB">粗体</x:String>
     <x:String x:Key="Ui.Auto.217901C51A44D8B1">斜体</x:String>
     <x:String x:Key="Ui.Auto.9EE5773E25A9D739">无序列表</x:String>
@@ -302,6 +306,7 @@
     <x:String x:Key="Ui.Auto.6711D91085B910F7">行内代码</x:String>
     <x:String x:Key="Ui.Auto.DDB4A628815D1385">代码块</x:String>
     <x:String x:Key="Ui.Auto.305378DDD2B86B60">链接</x:String>
+    <x:String x:Key="Ui.Auto.8CC9B8B06E344601">插入图片</x:String>
     <x:String x:Key="Ui.Auto.C64DD5EB2135D0BA">分隔线</x:String>
     <x:String x:Key="Ui.Auto.13D61FEA9F174905">预览</x:String>
     <x:String x:Key="Ui.Auto.16B38790D59B0A31">返回编辑</x:String>
@@ -312,6 +317,18 @@
     <x:String x:Key="Ui.Auto.DAD60EE6BDC98B74">引用内容</x:String>
     <x:String x:Key="Ui.Auto.E6F04FFBAA424001">代码</x:String>
     <x:String x:Key="Ui.Auto.6F64E476BE601DA2">链接文字</x:String>
+    <x:String x:Key="Ui.Auto.131B13AA265996DF">替换</x:String>
+    <x:String x:Key="Ui.Auto.DC2BA467FC7AC962">描述</x:String>
+    <x:String x:Key="Ui.Auto.DBC39D0565E7C7A1">替换图片</x:String>
+    <x:String x:Key="Ui.Auto.0C38C49D915E2A94">编辑图片描述</x:String>
+    <x:String x:Key="Ui.Auto.C655CFFC7E83EEAD">缩小图片</x:String>
+    <x:String x:Key="Ui.Auto.C4189466C4C4068D">放大图片</x:String>
+    <x:String x:Key="Ui.Auto.19EF1B6110EAE14D">删除图片</x:String>
+    <x:String x:Key="Ui.Auto.EE9ACEFE339D258E">图片无法显示</x:String>
+    <x:String x:Key="Ui.Auto.D24C10D37DB0FEEA">图片</x:String>
+    <x:String x:Key="Ui.Auto.BD087005FE206FE7">图片描述（可选）</x:String>
+    <x:String x:Key="Ui.Auto.537352400C495FB8">可选</x:String>
+    <x:String x:Key="Ui.Auto.9C93FFA41AC99128">粘贴的图片</x:String>
     <x:String x:Key="Ui.Auto.6B0A74F3A1DBE985">思考：</x:String>
     <x:String x:Key="Ui.Auto.1BD1893C09003D8A">准备就绪</x:String>
     <x:String x:Key="Ui.Auto.1E2EEF3DABC2ECB5">准备阅读</x:String>

@@ -1,4 +1,5 @@
 using Avalonia.Interactivity;
+using Avalonia.Controls;
 using Kkindle.Core;
 
 namespace Kkindle;
@@ -15,6 +16,8 @@ public partial class MainWindow
         _selectedBookReflection = null;
         DetailReflectionPreviewText.Markdown = T("正在读取读后思考…");
         DetailReflectionUpdatedText.Text = string.Empty;
+        ToolTip.SetTip(DetailReflectionPanel, null);
+        ToolTip.SetTip(DetailReflectionPreviewText, null);
         try
         {
             var reflection = await _readerData.GetBookReflectionAsync(
@@ -39,19 +42,28 @@ public partial class MainWindow
                 "读后思考暂时不可用：{0}",
                 UiText.Localize(exception.Message));
             DetailReflectionUpdatedText.Text = string.Empty;
+            ToolTip.SetTip(DetailReflectionPanel, null);
+            ToolTip.SetTip(DetailReflectionPreviewText, null);
         }
     }
 
     private void UpdateBookReflectionPreview(ReaderBookReflection? reflection)
     {
-        if (reflection is null || string.IsNullOrWhiteSpace(reflection.Content))
+        var normalizedContent = reflection is null
+            ? string.Empty
+            : BookReflectionEditorSurface.NormalizeMarkdown(reflection.Content);
+        if (reflection is null || string.IsNullOrWhiteSpace(normalizedContent))
         {
             DetailReflectionPreviewText.Markdown = T("还没有写下读后思考。");
             DetailReflectionUpdatedText.Text = string.Empty;
+            ToolTip.SetTip(DetailReflectionPanel, null);
+            ToolTip.SetTip(DetailReflectionPreviewText, null);
             return;
         }
 
-        DetailReflectionPreviewText.Markdown = BuildBookReflectionPreview(reflection.Content);
+        DetailReflectionPreviewText.Markdown = BuildBookReflectionPreview(normalizedContent);
+        ToolTip.SetTip(DetailReflectionPanel, normalizedContent);
+        ToolTip.SetTip(DetailReflectionPreviewText, normalizedContent);
         DetailReflectionUpdatedText.Text = T(
             "更新时间：{0}",
             reflection.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
@@ -75,7 +87,9 @@ public partial class MainWindow
                 _lifetimeCancellation.Token);
             var editor = new BookReflectionEditorWindow(
                 card.Title,
-                existing?.Content ?? string.Empty);
+                existing is null
+                    ? string.Empty
+                    : BookReflectionEditorSurface.NormalizeMarkdown(existing.Content));
             var result = await editor.ShowAsync(this);
             if (result is null) return;
 
@@ -133,7 +147,13 @@ public partial class MainWindow
 
     private static string BuildBookReflectionPreview(string content)
     {
-        var normalized = content.Trim().Replace("\r\n", "\n", StringComparison.Ordinal);
+        var normalized = BookReflectionEditorSurface.NormalizeMarkdown(content)
+            .Trim()
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        // Image data is stored inline in the reflection Markdown. Truncating
+        // the raw string in the middle of a data URI would break the preview.
+        if (normalized.Contains("![", StringComparison.Ordinal))
+            return normalized;
         return normalized.Length <= 480
             ? normalized
             : normalized[..480].TrimEnd() + "…";

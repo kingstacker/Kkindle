@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 
 namespace Kkindle;
 
@@ -12,8 +13,8 @@ namespace Kkindle;
 /// reference rendered answers with MarkdownRichTextBlock; Avalonia ships no
 /// equivalent, so this TextBlock subclass rebuilds its inlines from the plain
 /// markdown text. Supports headings, lists, quotes, fenced code blocks,
-/// separators, bold/italic/strikethrough, inline code and links (rendered as underlined
-/// text). AI source citations such as [S1] are rendered as clickable buttons
+/// separators, bold/italic/strikethrough, inline code, links (rendered as underlined
+/// text), and embedded images. AI source citations such as [S1] are rendered as clickable buttons
 /// through CitationAction. Text stays selectable like the reference.
 /// </summary>
 public sealed class KreaderMarkdownTextBlock : TextBlock
@@ -31,7 +32,10 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
         AvaloniaProperty.Register<KreaderMarkdownTextBlock, Action<string>?>(nameof(CitationAction));
 
     private static readonly Regex InlineTokenPattern = new(
-        @"(\[[Ss]\d+\]|\*\*[^*]+\*\*|`[^`]+`|~~[^~]+~~|\*[^*]+\*|\[[^\]\n]+\]\([^)\n]+\))",
+        @"(!\[[^\]\n]*\]\([^)]*\)|\[[Ss]\d+\]|\*\*[^*]+\*\*|`[^`]+`|~~[^~]+~~|\*[^*]+\*|\[[^\]\n]+\]\([^)]*\))",
+        RegexOptions.Compiled);
+    private static readonly Regex ImagePattern = new(
+        @"^\s*!\[(?<alt>[^\]]*)\]\((?<source>[^)\s\r\n]+)(?:\s*=\s*(?<width>\d+)(?:x(?<height>\d+))?)?\)\s*$",
         RegexOptions.Compiled);
 
     private static readonly Regex HeadingPattern = new(
@@ -53,6 +57,8 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
     private static readonly Regex SeparatorPattern = new(
         @"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$",
         RegexOptions.Compiled);
+
+    private readonly List<Bitmap> _markdownBitmaps = [];
 
     public KreaderMarkdownTextBlock()
     {
@@ -76,6 +82,9 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
 
     private void RebuildMarkdownInlines(string? markdown)
     {
+        foreach (var bitmap in _markdownBitmaps)
+            bitmap.Dispose();
+        _markdownBitmaps.Clear();
         Inlines = new InlineCollection();
         if (string.IsNullOrWhiteSpace(markdown)) return;
 
@@ -181,7 +190,14 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
             if (match.Index > position)
                 Inlines?.Add(new Run(text[position..match.Index]));
             var token = match.Value;
-            if (Regex.IsMatch(token, @"^\[[Ss]\d+\]$", RegexOptions.CultureInvariant))
+            if (token.StartsWith("![", StringComparison.Ordinal))
+            {
+                var image = CreateMarkdownImage(token);
+                Inlines?.Add(image is null
+                    ? new Run(token)
+                    : new InlineUIContainer(image));
+            }
+            else if (Regex.IsMatch(token, @"^\[[Ss]\d+\]$", RegexOptions.CultureInvariant))
             {
                 var sourceId = token[1..^1].ToUpperInvariant();
                 var citationButton = new Button
@@ -244,6 +260,57 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
         }
         if (position < text.Length)
             Inlines?.Add(new Run(text[position..]));
+    }
+
+    private Image? CreateMarkdownImage(string token)
+    {
+        var match = ImagePattern.Match(token);
+        if (!match.Success) return null;
+
+        var alt = match.Groups["alt"].Value;
+        var source = match.Groups["source"].Value;
+        Bitmap? bitmap = null;
+        try
+        {
+            if (source.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+            {
+                var comma = source.IndexOf(',');
+                if (comma < 0) return null;
+                var payload = source[(comma + 1)..];
+                var bytes = source[..comma].Contains(";base64", StringComparison.OrdinalIgnoreCase)
+                    ? Convert.FromBase64String(payload)
+                    : Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
+                using var stream = new MemoryStream(bytes, writable: false);
+                bitmap = new Bitmap(stream);
+            }
+            else if (Uri.TryCreate(source, UriKind.Absolute, out var uri)
+                && uri.IsFile
+                && File.Exists(uri.LocalPath))
+            {
+                bitmap = new Bitmap(uri.LocalPath);
+            }
+
+            if (bitmap is null) return null;
+            _markdownBitmaps.Add(bitmap);
+            var image = new Image
+            {
+                Source = bitmap,
+                Stretch = Stretch.Uniform,
+                MaxWidth = 520,
+                MaxHeight = 360
+            };
+            if (int.TryParse(match.Groups["width"].Value, out var width) && width > 0)
+                image.Width = width;
+            if (int.TryParse(match.Groups["height"].Value, out var height) && height > 0)
+                image.Height = height;
+            ToolTip.SetTip(image, alt);
+            return image;
+        }
+        catch
+        {
+            bitmap?.Dispose();
+            return null;
+        }
     }
 
     private void AddHeading(string text, int level)

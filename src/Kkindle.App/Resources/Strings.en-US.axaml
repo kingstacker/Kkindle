@@ -293,6 +293,10 @@
     <x:String x:Key="Ui.Auto.491ACA2A4EBF6B94">No highlights, notes, annotations, or reading reflections match the current filters.</x:String>
     <x:String x:Key="Ui.Auto.A75D25CD026C6374">Heading 1</x:String>
     <x:String x:Key="Ui.Auto.D69947F39796FC11">Heading 2</x:String>
+    <x:String x:Key="Ui.Auto.7D96CB13E68934A4">Heading 3</x:String>
+    <x:String x:Key="Ui.Auto.F97F347A9C2AA255">Heading 4</x:String>
+    <x:String x:Key="Ui.Auto.A85EE90C9B1A5C48">Heading 5</x:String>
+    <x:String x:Key="Ui.Auto.C79BD849AA754139">Heading 6</x:String>
     <x:String x:Key="Ui.Auto.F6DA93ED21E718AB">Bold</x:String>
     <x:String x:Key="Ui.Auto.217901C51A44D8B1">Italic</x:String>
     <x:String x:Key="Ui.Auto.9EE5773E25A9D739">Bulleted list</x:String>
@@ -302,6 +306,7 @@
     <x:String x:Key="Ui.Auto.6711D91085B910F7">Inline code</x:String>
     <x:String x:Key="Ui.Auto.DDB4A628815D1385">Code block</x:String>
     <x:String x:Key="Ui.Auto.305378DDD2B86B60">Link</x:String>
+    <x:String x:Key="Ui.Auto.8CC9B8B06E344601">Insert image</x:String>
     <x:String x:Key="Ui.Auto.C64DD5EB2135D0BA">Divider</x:String>
     <x:String x:Key="Ui.Auto.13D61FEA9F174905">Preview</x:String>
     <x:String x:Key="Ui.Auto.16B38790D59B0A31">Back to edit</x:String>
@@ -312,6 +317,18 @@
     <x:String x:Key="Ui.Auto.DAD60EE6BDC98B74">Quote text</x:String>
     <x:String x:Key="Ui.Auto.E6F04FFBAA424001">Code</x:String>
     <x:String x:Key="Ui.Auto.6F64E476BE601DA2">Link text</x:String>
+    <x:String x:Key="Ui.Auto.131B13AA265996DF">Replace</x:String>
+    <x:String x:Key="Ui.Auto.DC2BA467FC7AC962">Description</x:String>
+    <x:String x:Key="Ui.Auto.DBC39D0565E7C7A1">Replace image</x:String>
+    <x:String x:Key="Ui.Auto.0C38C49D915E2A94">Edit image description</x:String>
+    <x:String x:Key="Ui.Auto.C655CFFC7E83EEAD">Shrink image</x:String>
+    <x:String x:Key="Ui.Auto.C4189466C4C4068D">Enlarge image</x:String>
+    <x:String x:Key="Ui.Auto.19EF1B6110EAE14D">Delete image</x:String>
+    <x:String x:Key="Ui.Auto.EE9ACEFE339D258E">Image cannot be displayed</x:String>
+    <x:String x:Key="Ui.Auto.D24C10D37DB0FEEA">Image</x:String>
+    <x:String x:Key="Ui.Auto.BD087005FE206FE7">Image description (optional)</x:String>
+    <x:String x:Key="Ui.Auto.537352400C495FB8">Optional</x:String>
+    <x:String x:Key="Ui.Auto.9C93FFA41AC99128">Pasted image</x:String>
     <x:String x:Key="Ui.Auto.6B0A74F3A1DBE985">Reflection: </x:String>
     <x:String x:Key="Ui.Auto.1BD1893C09003D8A">Ready</x:String>
     <x:String x:Key="Ui.Auto.1E2EEF3DABC2ECB5">Ready to read</x:String>

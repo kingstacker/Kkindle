@@ -164,8 +164,6 @@ internal sealed class BookReflectionEditorWindow : Window
         _editorSurface.ContentChanged += EditorSurface_ContentChanged;
         _editorSurface.AddHandler(InputElement.KeyDownEvent, Editor_KeyDown, RoutingStrategies.Tunnel);
 
-        var markdownToolbar = CreateMarkdownToolbar();
-
         _counter = new TextBlock
         {
             FontSize = 11,
@@ -188,7 +186,8 @@ internal sealed class BookReflectionEditorWindow : Window
             Padding = new Thickness(16, 8),
             MinWidth = 96
         };
-        saveButton.Click += (_, _) => Complete(new BookReflectionEditorResult(_editorSurface.Markdown.Trim()));
+        saveButton.Click += (_, _) =>
+            Complete(new BookReflectionEditorResult(_editorSurface.Markdown.Trim()));
 
         var actions = new StackPanel
         {
@@ -216,14 +215,13 @@ internal sealed class BookReflectionEditorWindow : Window
 
         var content = new Grid
         {
-            RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto"),
+            RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"),
             RowSpacing = 10,
-            Children = { book, hint, markdownToolbar, _editorSurface, footerBorder }
+            Children = { book, hint, _editorSurface, footerBorder }
         };
         Grid.SetRow(hint, 1);
-        Grid.SetRow(markdownToolbar, 2);
-        Grid.SetRow(_editorSurface, 3);
-        Grid.SetRow(footerBorder, 4);
+        Grid.SetRow(_editorSurface, 2);
+        Grid.SetRow(footerBorder, 3);
 
         var editorBorder = new Border
         {
@@ -267,7 +265,11 @@ internal sealed class BookReflectionEditorWindow : Window
         {
             _editorSurface.FocusEditor();
         });
-        Closed += (_, _) => Complete(null);
+        Closed += (_, _) =>
+        {
+            _editorSurface.Dispose();
+            Complete(null);
+        };
     }
 
     public Task<BookReflectionEditorResult?> ShowAsync(Window owner)
@@ -280,84 +282,7 @@ internal sealed class BookReflectionEditorWindow : Window
 
     private void UpdateCounter()
     {
-        _counter.Text = UiText.Get("{0} 字", _editorSurface.Markdown.Length);
-    }
-
-    private ScrollViewer CreateMarkdownToolbar()
-    {
-        var tools = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 4,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        AddMarkdownTool(tools, "H1", "一级标题", "heading1");
-        AddMarkdownTool(tools, "H2", "二级标题", "heading2");
-        AddMarkdownTool(tools, "B", "粗体", "bold");
-        AddMarkdownTool(tools, "I", "斜体", "italic");
-        AddMarkdownTool(tools, "S", "删除线", "strikethrough");
-        AddMarkdownTool(tools, "•", "无序列表", "unordered");
-        AddMarkdownTool(tools, "1.", "有序列表", "ordered");
-        AddMarkdownTool(tools, "☐", "任务列表", "task");
-        AddMarkdownTool(tools, "❝", "引用", "quote");
-        AddMarkdownTool(tools, "`", "行内代码", "inline-code");
-        AddMarkdownTool(tools, "<>", "代码块", "code-block");
-        AddMarkdownTool(tools, "[]", "链接", "link");
-        AddMarkdownTool(tools, "—", "分隔线", "separator");
-
-        var toolScroll = new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            Content = tools
-        };
-        return toolScroll;
-    }
-
-    private static object CreateMarkdownToolContent(string tag, string content)
-    {
-        if (tag != "code-block")
-            return content;
-
-        var glyph = new AvaloniaPath
-        {
-            Data = Geometry.Parse("M 8,5 L 3,12 L 8,19 M 16,5 L 21,12 L 16,19"),
-            Width = 18,
-            Height = 18,
-            IsHitTestVisible = false
-        };
-        glyph.Classes.Add("libraryGlyph");
-        return glyph;
-    }
-
-    private void AddMarkdownTool(StackPanel tools, string content, string tooltip, string tag)
-    {
-        var button = new Button
-        {
-            Content = CreateMarkdownToolContent(tag, content),
-            Tag = tag,
-            Width = 34,
-            MinWidth = 34,
-            Height = 30,
-            MinHeight = 30,
-            Padding = new Thickness(0),
-            FontSize = 12,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
-        };
-        ToolTip.SetTip(button, UiText.Get(tooltip));
-        button.Classes.Add("bookReflectionMarkdownTool");
-        AutomationProperties.SetName(button, UiText.Get(tooltip));
-        button.Click += MarkdownToolButton_Click;
-        tools.Children.Add(button);
-    }
-
-    private void MarkdownToolButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: string tag }) return;
-        _editorSurface.ApplyMarkdownShortcut(tag);
+        _counter.Text = UiText.Get("{0} 字", _editorSurface.CharacterCount);
     }
 
     private void Editor_KeyDown(object? sender, KeyEventArgs e)
