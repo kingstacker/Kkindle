@@ -16,6 +16,7 @@ using Xunit;
 namespace Kkindle.Ui.Tests;
 
 [Collection("Settings UI")]
+[Trait("Category", "Slow")]
 public sealed class ReaderAppearanceTests(SettingsUiSession session)
 {
     [Theory]
@@ -143,21 +144,31 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task NightChromeMenusAndAssistantUseTheReaderPalette() => Run(async () =>
+    public Task NightReaderSurfacesMenusAndAssistantUseTheReaderPalette() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
         using var host = await LoadChapter(scope, new());
         scope.Window.ReaderAiMessages.Add(new("user", "纸感有哪些可以独立调整？"));
         scope.Window.ReaderAiMessages.Add(new("assistant", "可以调整主题、纸感强度，也可以独立叠加纤维。"));
         scope.Call("ReaderAssistantToggleButton_Click", null, new RoutedEventArgs());
-        scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { Theme = ReaderTheme.Night });
+        scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings
+        {
+            Theme = ReaderTheme.Night,
+            PaperEnabled = true,
+            PaperStrength = 0.8,
+            FibersEnabled = true
+        });
         await scope.Field<Task>("_readerAppearanceSaveTask");
         await Task.Delay(250);
         await ReaderTests.Render();
         var palette = ReaderPalette.For(ReaderTheme.Night);
+        var pageBrush = scope.Window.Resources["ReaderPageBrush"];
+        var sidebarBrush = scope.Window.Resources["ReaderSidebarBrush"];
         Assert.True(scope.Get<Border>("ReaderAssistantPanel").Bounds.Width > 200);
-        Assert.Equal(palette.Chrome, ((ISolidColorBrush)scope.Get<Border>("ReaderHeaderBar").Background!).Color);
-        Assert.Equal(palette.Sidebar, ((ISolidColorBrush)scope.Get<Border>("ReaderTocPanel").Background!).Color);
+        Assert.Same(pageBrush, scope.Get<Border>("ReaderHeaderBar").Background);
+        Assert.Same(pageBrush, scope.Get<Grid>("ReaderWindowTitleBar").Background);
+        Assert.Same(pageBrush, scope.Get<Border>("ReaderFooterBar").Background);
+        Assert.Same(sidebarBrush, scope.Get<Border>("ReaderTocPanel").Background);
         Assert.Equal(palette.Ink, ((ISolidColorBrush)scope.Get<TextBlock>("ReaderBookInfoText").Foreground!).Color);
         Assert.Equal(palette.Ink, ((ISolidColorBrush)scope.Get<Button>("MinimizeWindowButton").Foreground!).Color);
         Assert.Equal(palette.Muted, ((ISolidColorBrush)scope.Get<TextBox>("ReaderAiQuestionBox").PlaceholderForeground!).Color);

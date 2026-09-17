@@ -95,6 +95,41 @@ public sealed partial class S3SyncIntegrationTests
     }
 
     [Fact]
+    public async Task RenamedBookAndFileNamesPropagateWithoutChangingFileIdentity()
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket);
+        var created = await a.AddBookAsync();
+        await a.SyncAsync();
+
+        await using var b = await Device.CreateAsync(bucket);
+        b.Settings = b.Settings with { DownloadBookFilesOnSync = true };
+        await b.SyncAsync();
+        var before = Assert.Single(await b.Library.SearchAsync());
+        var oldFile = Assert.Single(before.Files);
+        var oldPath = b.Library.GetAbsoluteFilePath(oldFile);
+        Assert.True(File.Exists(oldPath));
+
+        await a.Library.RenameBookAsync(created.BookId, "重命名后的书");
+        await a.SyncAsync();
+        var uploaded = bucket.Snapshot(a.SnapshotKey);
+        Assert.Equal("重命名后的书", Assert.Single(uploaded.Books).Title);
+        Assert.Equal("重命名后的书.epub", Assert.Single(uploaded.Files).FileName);
+        Assert.Equal(created.Hash, Assert.Single(uploaded.Files).Sha256);
+
+        await b.SyncAsync();
+
+        var after = Assert.Single(await b.Library.SearchAsync());
+        var renamedFile = Assert.Single(after.Files);
+        var renamedPath = b.Library.GetAbsoluteFilePath(renamedFile);
+        Assert.Equal("重命名后的书", after.Title);
+        Assert.Equal("重命名后的书.epub", Path.GetFileName(renamedFile.RelativePath));
+        Assert.Equal(created.Hash, renamedFile.Sha256);
+        Assert.True(File.Exists(renamedPath));
+        Assert.False(File.Exists(oldPath));
+    }
+
+    [Fact]
     public async Task DeleteBeforeFinalCapture_IsPublishedInTheSameSync()
     {
         var bucket = new MemoryBucket();

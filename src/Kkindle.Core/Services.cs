@@ -35,6 +35,7 @@ public interface IBookLibraryService
         CancellationToken cancellationToken = default,
         Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null);
     Task<BookFile> AddFileToBookAsync(Guid bookId, string sourcePath, CancellationToken cancellationToken = default);
+    Task RenameBookAsync(Guid bookId, string title, CancellationToken cancellationToken = default);
     Task UpdateMetadataAsync(Book book, CancellationToken cancellationToken = default);
     Task<string?> EnsurePdfCoverAsync(Guid bookId, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
     Task DeleteFileAsync(Guid bookId, Guid bookFileId, CancellationToken cancellationToken = default);

@@ -10,6 +10,7 @@ using Xunit;
 namespace Kkindle.Ui.Tests;
 
 [Collection("Settings UI")]
+[Trait("Category", "Slow")]
 public sealed class ReaderTocFollowTests(SettingsUiSession session)
 {
     [Theory]

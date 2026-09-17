@@ -51,7 +51,7 @@ public partial class MainWindow
         var visible = ReaderRoot.IsVisible;
         ReaderThemeScope.IsVisible = visible;
         ReaderWindowTitleBar.Classes.Set("readerChrome", visible);
-        ReaderWindowTitleBar.Background = visible ? (IBrush)Resources["ReaderChromeBrush"]! : Brushes.Transparent;
+        ReaderWindowTitleBar.Background = visible ? (IBrush)Resources["ReaderPageBrush"]! : Brushes.Transparent;
     }
 
     private void SyncReaderAppearanceControls()

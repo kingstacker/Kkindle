@@ -67,6 +67,8 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     {
         Focusable = true;
         ClipToBounds = true;
+        ScrollBarAutoHide.SetIsEnabled(_vertical, true);
+        ScrollBarAutoHide.SetIsEnabled(_horizontal, true);
         VisualChildren.Add(_vertical);
         VisualChildren.Add(_horizontal);
         _vertical.ValueChanged += (_, _) => { if (!_syncingBars) SetPan(new(_pan.X, _vertical.Value)); };
@@ -605,7 +607,11 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         EmitPage();
     }
 
-    public void ScrollBy(double pixels) => SetPan(new(_pan.X, _pan.Y + pixels));
+    public void ScrollBy(double pixels)
+    {
+        ScrollBarAutoHide.Show(_vertical);
+        SetPan(new(_pan.X, _pan.Y + pixels));
+    }
     public void ScrollToTop(double top)
     {
         if (_layout is null) return;

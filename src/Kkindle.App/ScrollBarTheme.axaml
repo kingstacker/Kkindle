@@ -12,8 +12,8 @@
     <ControlTheme x:Key="KkindleScrollBarThumb" TargetType="Thumb">
         <Setter Property="Background" Value="{DynamicResource KkindleScrollBarThumbBrush}" />
         <Setter Property="CornerRadius" Value="0" />
-        <!-- Auto-hide surfaces (see ScrollViewer.bookScroll styles in App.axaml)
-             fade the thumb via Opacity; give it a gentle transition. -->
+        <!-- Auto-hide surfaces (see ScrollViewer.autoHideScroll styles in
+             App.axaml) fade the thumb via Opacity; give it a gentle transition. -->
         <Setter Property="Transitions">
             <Transitions>
                 <DoubleTransition Property="Opacity" Duration="0:0:0.18" />

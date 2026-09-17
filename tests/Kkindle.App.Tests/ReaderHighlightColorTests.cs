@@ -15,6 +15,7 @@ using Xunit;
 namespace Kkindle.Ui.Tests;
 
 [Collection("Settings UI")]
+[Trait("Category", "Slow")]
 public sealed class ReaderHighlightColorTests(SettingsUiSession session)
 {
     internal static readonly string[] MarkerColors = ["#FFD54F", "#81C784", "#64B5F6", "#F48FB1", "#B39DDB", "#FFB74D"];

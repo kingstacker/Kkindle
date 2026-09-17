@@ -6623,20 +6623,6 @@ public partial class MainWindow
             DefaultReaderLayout = layout
         });
 
-        // Keep the basic-settings switch in lockstep without scheduling a
-        // second competing settings write. This is also called by the close
-        // checkpoint, so a quick exit cannot lose a just-selected direction.
-        _suppressAppSettingsAutoSave = true;
-        try
-        {
-            if (DefaultVerticalWritingCheck is not null)
-                DefaultVerticalWritingCheck.IsChecked = _readerLayout.VerticalWriting;
-        }
-        finally
-        {
-            _suppressAppSettingsAutoSave = false;
-        }
-
         await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
         HandleLocalDataChanged(LocalDataChangeKind.Settings);
     }

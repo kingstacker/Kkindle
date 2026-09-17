@@ -33,11 +33,11 @@ jobs:
           dotnet-version: 10.0.400
       - name: Build platform head
         run: dotnet build ${{ matrix.head }} -c Release
-      - name: Run portable tests
+      - name: Run quick portable tests
         run: dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj -c Release
-      - name: Run platform-common tests
+      - name: Run quick platform-common tests
         run: dotnet test tests/Kkindle.Platform.Common.Tests/Kkindle.Platform.Common.Tests.csproj -c Release
-      - name: Run settings UI regression tests
+      - name: Run quick UI smoke tests
         run: >-
           dotnet test tests/Kkindle.App.Tests/Kkindle.App.Tests.csproj -c Release
           --logger "console;verbosity=normal" --logger trx

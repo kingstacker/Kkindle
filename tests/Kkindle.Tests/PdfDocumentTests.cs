@@ -175,6 +175,7 @@ public sealed class PdfDocumentTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task EmbeddedChineseFontHasSearchableSelectableText()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

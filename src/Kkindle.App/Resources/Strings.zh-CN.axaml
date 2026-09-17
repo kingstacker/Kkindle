@@ -406,6 +406,11 @@
     <x:String x:Key="Ui.Auto.4F5B1DE92F8004CA">数据备份与迁移</x:String>
     <x:String x:Key="Ui.Auto.B9BF6916437A77EB">文件大小</x:String>
     <x:String x:Key="Ui.Auto.FDF0B569D820ADE8">新建收藏夹</x:String>
+    <x:String x:Key="Ui.Auto.21CFDFC83869FD19">请输入新的书名。</x:String>
+    <x:String x:Key="Ui.Auto.FE8E14F7FAC0F52A">已将《{0}》重命名为《{1}》。</x:String>
+    <x:String x:Key="Ui.Auto.1F3391484B882A17">重命名书籍失败：{0}</x:String>
+    <x:String x:Key="Ui.Auto.8247EFD8A5E8B7EA">无法重命名书籍</x:String>
+    <x:String x:Key="Ui.Auto.99D5A3710256100B">当前有书籍任务正在进行，请完成后再重命名。</x:String>
     <x:String x:Key="Ui.Auto.75C526D48AF0482C">无动画</x:String>
     <x:String x:Key="Ui.Auto.55DCD2D20A544E05">无存储信息</x:String>
     <x:String x:Key="Ui.Auto.FFB5F47363D4EEDD">日文</x:String>
@@ -497,7 +502,6 @@
     <x:String x:Key="Ui.Auto.DA97EC360354D5D9">禅模式</x:String>
     <x:String x:Key="Ui.Auto.A194128B29390AEF">移除所选</x:String>
     <x:String x:Key="Ui.Auto.FA133D5DE7088336">竖排排版（全局，仅支持单页）</x:String>
-    <x:String x:Key="Ui.Auto.E0119B0BA5ACFA0F">竖排模式（全局）</x:String>
     <x:String x:Key="Ui.Auto.E71AC32B544B0EBF">端口</x:String>
     <x:String x:Key="Ui.Auto.9CD1F9CD7B9AC663">笔记管理</x:String>
     <x:String x:Key="Ui.Auto.737AC585CF7AD245">笔记批注默认收起</x:String>
@@ -980,6 +984,10 @@
     <x:String x:Key="Ui.Auto.534E0ADB602A4942">打开 PDF 阅读器失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.492A56A00F111448">打开下载页</x:String>
     <x:String x:Key="Ui.Auto.C93FCC559DE132A8">打开书籍</x:String>
+    <x:String x:Key="Ui.Auto.0DAE8184E5ADD70C">重命名书籍</x:String>
+    <x:String x:Key="Ui.Auto.88B1A0723B1CD0A9">书籍文件尚未下载，无法打开所在目录。</x:String>
+    <x:String x:Key="Ui.Auto.DBFE3E613D77D6B1">已打开《{0}》所在目录。</x:String>
+    <x:String x:Key="Ui.Auto.A097312463997734">打开书籍所在目录失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.8475751A87475992">打开文件失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.126D69161079D081">打开章节失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.A2E7CD00A0EDA222">扫描失败：{0}</x:String>

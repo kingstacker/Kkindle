@@ -202,6 +202,7 @@ public sealed class WebDavTransportTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public async Task ConfiguredTimeoutCoversDownloadBody()
     {
         var server = new WebDavTestServer();

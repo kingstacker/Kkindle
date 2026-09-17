@@ -140,6 +140,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         Focusable = true;
         ClipToBounds = true;
+        ScrollBarAutoHide.SetIsEnabled(_scrollBar, true);
         ReadyTask = _readyTcs.Task;
         _readyTcs.TrySetResult();
         VisualChildren.Add(_scrollBar);
@@ -598,6 +599,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return;
         }
 
+        ScrollBarAutoHide.Show(_scrollBar);
         var next = ClampScrollOffset(_scrollOffset + delta);
         var edge = next <= 0 && delta < 0
             ? -1

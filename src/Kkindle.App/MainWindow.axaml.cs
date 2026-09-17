@@ -1137,7 +1137,6 @@ public partial class MainWindow : Window
 
     private void UpdateLibraryUi()
     {
-        LibraryBusyProgress.IsVisible = ViewModel.IsBusy;
         SendToKindleWebButton.IsVisible = IsSendToKindleWebEnabled();
         var viewDescription = $"{T("切换视图")} · {DescribeLibraryViewMode(_libraryViewMode)}";
         ToolTip.SetTip(LibraryViewToggleButton, viewDescription);
@@ -2260,6 +2259,81 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task RenameBookFromContextAsync(BookCardViewModel card)
+    {
+        if (_readerDocument is not null || _readerIsPdf)
+        {
+            await ShowMessageAsync(T("无法重命名书籍"), T("当前正在阅读这本书，请先关闭阅读器。"));
+            return;
+        }
+
+        if (_conversionInProgress
+            || _automaticReaderFormatGenerationInProgress
+            || _pinyinGenerationInProgress
+            || _bookTranslationInProgress)
+        {
+            await ShowMessageAsync(T("无法重命名书籍"), T("当前有书籍任务正在进行，请完成后再重命名。"));
+            return;
+        }
+
+        var previousTitle = card.Book.Title;
+        var name = await PromptCollectionNameAsync(
+            previousTitle,
+            T("重命名书籍"),
+            T("请输入新的书名。"));
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var normalizedName = name.Trim();
+        try
+        {
+            await _library.RenameBookAsync(
+                card.Book.Id,
+                normalizedName,
+                _lifetimeCancellation.Token);
+            await RefreshLibraryAsync();
+            SetTaskStatus(T("已将《{0}》重命名为《{1}》。", previousTitle, normalizedName));
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("重命名书籍失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法重命名书籍"), UiText.Localize(exception.Message));
+        }
+    }
+
+    private Task OpenBookDirectoryFromContextAsync(BookCardViewModel card)
+    {
+        try
+        {
+            var localFilePath = card.Book.Files
+                .Select(ViewModel.GetAbsoluteFilePath)
+                .FirstOrDefault(File.Exists);
+            var directory = localFilePath is not null
+                ? Path.GetDirectoryName(localFilePath)
+                : Path.Combine(_paths.Library, card.Book.Id.ToString("N"));
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                SetTaskStatus(T("书籍文件尚未下载，无法打开所在目录。"));
+                return Task.CompletedTask;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = directory,
+                UseShellExecute = true
+            });
+            SetTaskStatus(T("已打开《{0}》所在目录。", card.Title));
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("打开书籍所在目录失败：{0}", UiText.Localize(exception.Message)));
+        }
+
+        return Task.CompletedTask;
+    }
+
     private async Task DeleteFileAsync(BookFile file)
     {
         if (_selectedCard is null) return;
@@ -2384,6 +2458,8 @@ public partial class MainWindow : Window
         }
         openMenu.IsEnabled = openMenu.Items.OfType<MenuItem>().Any(item => item.IsEnabled);
         menu.Items.Add(openMenu);
+        menu.Items.Add(CreateMenuItem(T("重命名书籍"), () => RenameBookFromContextAsync(card)));
+        menu.Items.Add(CreateMenuItem(T("打开书籍所在目录"), () => OpenBookDirectoryFromContextAsync(card)));
         menu.Items.Add(new Separator());
 
         var convertMenu = new MenuItem { Header = T("转换为") };
@@ -3678,9 +3754,14 @@ public partial class MainWindow : Window
         completion?.TrySetResult(true);
     }
 
-    private Task<string?> PromptCollectionNameAsync(string? initialName = null)
+    private Task<string?> PromptCollectionNameAsync(
+        string? initialName = null,
+        string? promptTitle = null,
+        string? placeholder = null)
     {
         if (_collectionNameCompletion is not null) return Task.FromResult<string?>(null);
+        CollectionNamePromptTitleText.Text = promptTitle ?? T("新建收藏夹");
+        CollectionNameBox.PlaceholderText = placeholder ?? T("请输入收藏夹名称。");
         CollectionNameBox.Text = initialName ?? string.Empty;
         ShowOverlay(CollectionNameOverlay);
         CollectionNameBox.Focus();

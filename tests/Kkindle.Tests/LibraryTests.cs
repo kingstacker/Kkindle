@@ -158,6 +158,41 @@ public sealed class LibraryTests
     }
 
     [Fact]
+    public async Task RenamesBookAndGeneratedVariantFilesAsOneOperation()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "原书.epub");
+            var pinyin = Path.Combine(root, "原书_pinyin.epub");
+            var translated = Path.Combine(root, "原书_单译版.epub");
+            CreateEpub(source, "source", "原书");
+            CreateEpub(pinyin, "pinyin", "原书");
+            CreateEpub(translated, "translated", "原书");
+
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([source, pinyin, translated]);
+            var book = Assert.Single(await service.SearchAsync());
+            var previousPaths = book.Files.Select(file => service.GetAbsoluteFilePath(file)).ToArray();
+
+            await service.RenameBookAsync(book.Id, "新书名");
+
+            var renamed = Assert.Single(await service.SearchAsync());
+            Assert.Equal("新书名", renamed.Title);
+            var names = renamed.Files
+                .Select(file => Path.GetFileName(file.RelativePath))
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Assert.Equal(["新书名.epub", "新书名_pinyin.epub", "新书名_单译版.epub"], names);
+            Assert.All(renamed.Files, file => Assert.True(File.Exists(service.GetAbsoluteFilePath(file))));
+            Assert.All(previousPaths, path => Assert.False(File.Exists(path)));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task ExistingDefaultMembershipsAreNormalizedWhenLibraryReopens()
     {
         var root = TestHelpers.CreateTempDirectory();

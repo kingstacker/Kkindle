@@ -348,6 +348,7 @@ public sealed partial class NativePdfReaderHost
         }
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift) || Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y))
         {
+            ScrollBarAutoHide.Show(_horizontal);
             SetPan(new(_pan.X - (e.Delta.X != 0 ? e.Delta.X : e.Delta.Y) * 60, _pan.Y));
             return;
         }

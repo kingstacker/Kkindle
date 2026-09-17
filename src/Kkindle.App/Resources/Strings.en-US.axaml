@@ -406,6 +406,11 @@
     <x:String x:Key="Ui.Auto.4F5B1DE92F8004CA">Data backup and migration</x:String>
     <x:String x:Key="Ui.Auto.B9BF6916437A77EB">File size</x:String>
     <x:String x:Key="Ui.Auto.FDF0B569D820ADE8">New favorite</x:String>
+    <x:String x:Key="Ui.Auto.21CFDFC83869FD19">Enter a new book title.</x:String>
+    <x:String x:Key="Ui.Auto.FE8E14F7FAC0F52A">Renamed &quot;{0}&quot; to &quot;{1}&quot;.</x:String>
+    <x:String x:Key="Ui.Auto.1F3391484B882A17">Rename book failed: {0}</x:String>
+    <x:String x:Key="Ui.Auto.8247EFD8A5E8B7EA">Unable to rename book</x:String>
+    <x:String x:Key="Ui.Auto.99D5A3710256100B">A book task is in progress. Finish it before renaming.</x:String>
     <x:String x:Key="Ui.Auto.75C526D48AF0482C">No animation</x:String>
     <x:String x:Key="Ui.Auto.55DCD2D20A544E05">No storage information</x:String>
     <x:String x:Key="Ui.Auto.FFB5F47363D4EEDD">Japanese</x:String>
@@ -497,7 +502,6 @@
     <x:String x:Key="Ui.Auto.DA97EC360354D5D9">Zen mode</x:String>
     <x:String x:Key="Ui.Auto.A194128B29390AEF">Remove selected</x:String>
     <x:String x:Key="Ui.Auto.FA133D5DE7088336">Vertical layout (global; single-page mode only)</x:String>
-    <x:String x:Key="Ui.Auto.E0119B0BA5ACFA0F">Vertical writing mode (global)</x:String>
     <x:String x:Key="Ui.Auto.E71AC32B544B0EBF">Port</x:String>
     <x:String x:Key="Ui.Auto.9CD1F9CD7B9AC663">Note management</x:String>
     <x:String x:Key="Ui.Auto.737AC585CF7AD245">Collapse notes and annotations by default</x:String>
@@ -980,6 +984,10 @@
     <x:String x:Key="Ui.Auto.534E0ADB602A4942">Failed to open the PDF reader: {0}</x:String>
     <x:String x:Key="Ui.Auto.492A56A00F111448">Open download page</x:String>
     <x:String x:Key="Ui.Auto.C93FCC559DE132A8">Open book</x:String>
+    <x:String x:Key="Ui.Auto.0DAE8184E5ADD70C">Rename book</x:String>
+    <x:String x:Key="Ui.Auto.88B1A0723B1CD0A9">The book file has not been downloaded, so its folder cannot be opened.</x:String>
+    <x:String x:Key="Ui.Auto.DBFE3E613D77D6B1">Opened the folder for &quot;{0}&quot;.</x:String>
+    <x:String x:Key="Ui.Auto.A097312463997734">Failed to open the book folder: {0}</x:String>
     <x:String x:Key="Ui.Auto.8475751A87475992">Failed to open file: {0}</x:String>
     <x:String x:Key="Ui.Auto.126D69161079D081">Failed to open chapter: {0}</x:String>
     <x:String x:Key="Ui.Auto.A2E7CD00A0EDA222">Scan failed: {0}</x:String>

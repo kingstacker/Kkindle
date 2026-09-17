@@ -32,6 +32,7 @@ public sealed class SettingsUiSession : IDisposable
 public sealed class SettingsUiCollection : ICollectionFixture<SettingsUiSession>;
 
 [Collection("Settings UI")]
+[Trait("Category", "Slow")]
 public sealed partial class SettingsTests(SettingsUiSession session)
 {
     [Fact]

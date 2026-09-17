@@ -675,6 +675,7 @@ public sealed partial class S3SyncService
             .GroupBy(file => file.Id)
             .Select(group => group.OrderByDescending(file => file.ModifiedAt).First())
             .ToArray();
+        var remoteBooksById = allRemoteBooks.ToDictionary(book => book.Id);
 
         // Build mappings from the complete remote view before applying
         // tombstones. A stale row may be suppressed below, but its ID is still
@@ -825,6 +826,7 @@ public sealed partial class S3SyncService
         var remoteOnlyFileHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var remoteBookIds = new HashSet<Guid>();
         var coverUpdates = new Dictionary<Guid, (string RelativePath, DateTimeOffset UpdatedAt)>();
+        var synchronizedFileMoves = new List<SynchronizedFileMove>();
         var filesDownloaded = 0;
         var coversDownloaded = false;
 
@@ -855,11 +857,23 @@ public sealed partial class S3SyncService
                 preparedFilesByLocalId[localFileId] = rebound;
                 continue;
             }
-            var relativePath = existing?.RelativePath
-                ?? Path.Combine(
-                    "library",
-                    localBookId.ToString("N"),
-                     GetAvailableFileName(remoteFile.FileName, remoteFile.Sha256, remoteFile.Format, localBookId, plannedRelativePaths));
+            var relativePath = existing?.RelativePath;
+            if (existing is not null
+                && remoteBooksById.TryGetValue(remoteFile.BookId, out var remoteBook)
+                && ShouldApplyRemoteFileName(remoteBook, localBookId, localIdentity))
+            {
+                relativePath = GetAvailableRemoteFilePath(
+                    existing.RelativePath,
+                    remoteFile.FileName,
+                    remoteFile.Format,
+                    remoteFile.Sha256,
+                    plannedRelativePaths);
+            }
+
+            relativePath ??= Path.Combine(
+                "library",
+                localBookId.ToString("N"),
+                GetAvailableFileName(remoteFile.FileName, remoteFile.Sha256, remoteFile.Format, localBookId, plannedRelativePaths));
             var absolutePath = ResolveDataPath(relativePath);
             if (absolutePath is null)
             {
@@ -969,6 +983,8 @@ public sealed partial class S3SyncService
         var booksAdded = 0;
         var addedBookIds = new HashSet<Guid>();
         var annotationsApplied = 0;
+        try
+        {
         await using (var connection = await OpenDatabaseConnectionAsync(cancellationToken))
         await using (var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
         {
@@ -1032,6 +1048,12 @@ public sealed partial class S3SyncService
                 locallyKnownFiles[file.Id] = file.BookId;
             foreach (var prepared in preparedFilesByLocalId.Values)
                 locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
+            MoveSynchronizedFilePaths(
+                preparedFilesByLocalId.Values,
+                currentLocal,
+                pathsToDelete,
+                synchronizedFileMoves,
+                cancellationToken);
             await SuppressDeletionTrackingAsync(connection, transaction, true, cancellationToken);
             using var commandCache = new SqliteCommandCache(connection, transaction);
             foreach (var book in remoteBooks)
@@ -1083,6 +1105,29 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$sha256", prepared.Source.Sha256.ToLowerInvariant());
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
                 locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
+            }
+
+            foreach (var prepared in preparedFilesByLocalId.Values)
+            {
+                if (!currentFileIds.Contains(prepared.LocalFileId)
+                    || string.Equals(
+                        currentLocal.LocalFilePaths.GetValueOrDefault(prepared.LocalFileId),
+                        prepared.RelativePath,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var command = commandCache.Get(
+                    """
+                    UPDATE BookFiles
+                    SET RelativePath = $relativePath
+                    WHERE Id = $id AND BookId = $bookId;
+                    """);
+                AddParameter(command, "$relativePath", prepared.RelativePath);
+                AddParameter(command, "$id", prepared.LocalFileId.ToString());
+                AddParameter(command, "$bookId", prepared.LocalBookId.ToString());
+                changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
             }
 
             foreach (var (bookId, cover) in coverUpdates)
@@ -1368,6 +1413,13 @@ public sealed partial class S3SyncService
                 cancellationToken);
             await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            synchronizedFileMoves.Clear();
+        }
+        }
+        catch
+        {
+            RestoreSynchronizedFileMoves(synchronizedFileMoves);
+            throw;
         }
 
         DeleteScheduledPaths(pathsToDelete, warnings);
@@ -1426,6 +1478,133 @@ public sealed partial class S3SyncService
         AddParameter(addMissingDefault, "$addedAt", DateTimeOffset.UtcNow.ToString("O"));
         changed |= await addMissingDefault.ExecuteNonQueryAsync(cancellationToken) > 0;
         return changed;
+    }
+
+    private static bool ShouldApplyRemoteFileName(
+        S3SyncBook remoteBook,
+        Guid localBookId,
+        LocalDatabaseIdentity localIdentity) =>
+        !localIdentity.BooksById.TryGetValue(localBookId, out var localBook)
+        || remoteBook.UpdatedAt > localBook.UpdatedAt;
+
+    private string GetAvailableRemoteFilePath(
+        string currentRelativePath,
+        string? sourceName,
+        string? format,
+        string? hash,
+        IReadOnlySet<string> plannedRelativePaths)
+    {
+        var currentPath = ResolveDataPath(currentRelativePath);
+        var currentDirectory = Path.GetDirectoryName(currentRelativePath);
+        if (string.IsNullOrWhiteSpace(currentDirectory))
+            currentDirectory = "library";
+
+        var name = SanitizeFileName(sourceName);
+        if (name.Length == 0)
+        {
+            var fallbackHash = IsSha256(hash) ? hash![..12] : Guid.NewGuid().ToString("N");
+            name = $"{fallbackHash}.{format?.Trim().TrimStart('.') ?? "bin"}";
+        }
+        else if (Path.GetExtension(name).Length == 0 && !string.IsNullOrWhiteSpace(format))
+        {
+            name += "." + format.Trim().TrimStart('.');
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(name);
+        var extension = Path.GetExtension(name);
+        var disambiguator = IsSha256(hash) ? hash![..12] : "file";
+        for (var index = 1; ; index++)
+        {
+            var candidateName = index == 1
+                ? name
+                : $"{stem}-{disambiguator}{(index == 2 ? extension : $"-{index - 1}{extension}")}";
+            var candidateRelativePath = Path.Combine(currentDirectory, candidateName);
+            var candidatePath = ResolveDataPath(candidateRelativePath);
+            if (candidatePath is null || plannedRelativePaths.Contains(candidateRelativePath))
+                continue;
+            if (currentPath is not null
+                && string.Equals(candidatePath, currentPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return currentRelativePath;
+            }
+            if (!File.Exists(candidatePath) && !Directory.Exists(candidatePath))
+                return candidateRelativePath;
+        }
+    }
+
+    private void MoveSynchronizedFilePaths(
+        IEnumerable<PreparedSyncFile> preparedFiles,
+        S3SyncSnapshot currentLocal,
+        ICollection<string> pathsToDelete,
+        ICollection<SynchronizedFileMove> moves,
+        CancellationToken cancellationToken)
+    {
+        var currentFiles = currentLocal.Files.ToDictionary(
+            file => file.Id,
+            file => new LocalFileIdentity(
+                file.Id,
+                file.BookId,
+                currentLocal.LocalFilePaths.GetValueOrDefault(file.Id) ?? string.Empty,
+                file.Size,
+                file.Sha256));
+
+        foreach (var prepared in preparedFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!currentFiles.TryGetValue(prepared.LocalFileId, out var existing)
+                || string.IsNullOrWhiteSpace(existing.RelativePath)
+                || string.Equals(existing.RelativePath, prepared.RelativePath, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var sourcePath = ResolveDataPath(existing.RelativePath);
+            var targetPath = ResolveDataPath(prepared.RelativePath);
+            if (sourcePath is null || targetPath is null || !File.Exists(sourcePath))
+                continue;
+
+            if (File.Exists(targetPath))
+            {
+                pathsToDelete.Add(sourcePath);
+                continue;
+            }
+
+            if (!string.Equals(existing.Sha256, prepared.Source.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                pathsToDelete.Add(sourcePath);
+                continue;
+            }
+
+            var directory = Path.GetDirectoryName(targetPath);
+            if (string.IsNullOrWhiteSpace(directory))
+                throw new InvalidDataException(UiText.Get("同步文件目标目录无效。"));
+            Directory.CreateDirectory(directory);
+            var temporaryPath = sourcePath + $".kkindle-sync-rename-{Guid.NewGuid():N}.tmp";
+            var move = new SynchronizedFileMove(sourcePath, targetPath, temporaryPath);
+            moves.Add(move);
+            File.Move(sourcePath, temporaryPath);
+            File.Move(temporaryPath, targetPath);
+            move.TargetMoved = true;
+        }
+    }
+
+    private static void RestoreSynchronizedFileMoves(IEnumerable<SynchronizedFileMove> moves)
+    {
+        foreach (var move in moves.Reverse())
+        {
+            try
+            {
+                if (move.TargetMoved && File.Exists(move.TargetPath))
+                    File.Move(move.TargetPath, move.SourcePath);
+                else if (File.Exists(move.TemporaryPath))
+                    File.Move(move.TemporaryPath, move.SourcePath);
+            }
+            catch
+            {
+                // Preserve the original sync error; the next sync can report
+                // any unusual filesystem residue without losing the cause.
+            }
+        }
     }
 
     private static S3SyncReadingStats MergeRemoteReadingStats(IEnumerable<S3SyncReadingStats> versions)
@@ -3359,6 +3538,17 @@ public sealed partial class S3SyncService
         Guid LocalBookId,
         Guid LocalFileId,
         string RelativePath);
+
+    private sealed class SynchronizedFileMove(
+        string sourcePath,
+        string targetPath,
+        string temporaryPath)
+    {
+        public string SourcePath { get; } = sourcePath;
+        public string TargetPath { get; } = targetPath;
+        public string TemporaryPath { get; } = temporaryPath;
+        public bool TargetMoved { get; set; }
+    }
 
     private sealed record DatabaseMergeResult(
         int BooksAdded,

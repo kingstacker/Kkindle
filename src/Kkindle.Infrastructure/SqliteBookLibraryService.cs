@@ -891,6 +891,84 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         finally { _pdfCoverGate.Release(); }
     }
 
+    public async Task RenameBookAsync(
+        Guid bookId,
+        string title,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedTitle = (title ?? string.Empty).Trim();
+        if (normalizedTitle.Length == 0)
+            throw new ArgumentException("书名不能为空。", nameof(title));
+        if (normalizedTitle.Length > 240)
+            throw new ArgumentException("书名不能超过 240 个字符。", nameof(title));
+
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            var book = await ReadBookByIdAsync(connection, bookId, cancellationToken)
+                ?? throw new FileNotFoundException("指定书籍不存在。", bookId.ToString());
+            var plan = BuildBookRenamePlan(book, normalizedTitle);
+            var titleChanged = !string.Equals(book.Title, normalizedTitle, StringComparison.Ordinal);
+            if (!titleChanged && !plan.Any(item => !string.Equals(
+                    item.SourcePath,
+                    item.TargetPath,
+                    StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            var moves = new List<FileRenameState>();
+            try
+            {
+                MoveFilesToTemporaryPaths(plan, moves, cancellationToken);
+                CompleteFileMoves(moves, cancellationToken);
+
+                await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                var updatedAt = DateTimeOffset.UtcNow;
+                using (var updateBook = connection.CreateCommand())
+                {
+                    updateBook.Transaction = transaction;
+                    updateBook.CommandText = "UPDATE Books SET Title = $title, UpdatedAt = $updatedAt WHERE Id = $bookId;";
+                    updateBook.Parameters.AddWithValue("$title", normalizedTitle);
+                    updateBook.Parameters.AddWithValue("$updatedAt", updatedAt.ToString("O"));
+                    updateBook.Parameters.AddWithValue("$bookId", bookId.ToString());
+                    if (await updateBook.ExecuteNonQueryAsync(cancellationToken) == 0)
+                        throw new InvalidOperationException("书籍已不存在，请刷新书库后重试。");
+                }
+
+                foreach (var item in plan.Where(item => !string.Equals(
+                             item.File.RelativePath,
+                             item.TargetRelativePath,
+                             StringComparison.Ordinal)))
+                {
+                    using var updateFile = connection.CreateCommand();
+                    updateFile.Transaction = transaction;
+                    updateFile.CommandText = """
+                        UPDATE BookFiles
+                        SET RelativePath = $relativePath
+                        WHERE Id = $fileId AND BookId = $bookId;
+                        """;
+                    updateFile.Parameters.AddWithValue("$relativePath", item.TargetRelativePath);
+                    updateFile.Parameters.AddWithValue("$fileId", item.File.Id.ToString());
+                    updateFile.Parameters.AddWithValue("$bookId", bookId.ToString());
+                    if (await updateFile.ExecuteNonQueryAsync(cancellationToken) == 0)
+                        throw new InvalidOperationException("书籍文件记录已不存在，请刷新书库后重试。");
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                RestoreFileMoves(moves);
+                throw;
+            }
+
+            NotifyDataChanged();
+        }
+        finally { _databaseGate.Release(); }
+    }
+
     public async Task UpdateMetadataAsync(Book book, CancellationToken cancellationToken = default)
     {
         book.UpdatedAt = DateTimeOffset.UtcNow;
@@ -1800,6 +1878,115 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         return full;
     }
 
+    private IReadOnlyList<FileRenamePlan> BuildBookRenamePlan(Book book, string title)
+    {
+        var sourcePaths = book.Files
+            .Select(file => ResolveDataPath(file.RelativePath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var plannedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var plan = new List<FileRenamePlan>(book.Files.Count);
+
+        foreach (var file in book.Files
+                     .OrderBy(item => item.Format, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(item => item.Id))
+        {
+            var sourcePath = ResolveDataPath(file.RelativePath);
+            var directory = Path.GetDirectoryName(sourcePath);
+            if (string.IsNullOrWhiteSpace(directory))
+                throw new InvalidOperationException("书籍文件目录无效。");
+
+            var desiredName = BookFileNamePolicy.CreateRenamedFileName(
+                Path.GetFileName(sourcePath),
+                title);
+            var targetPath = GetAvailableRenameTarget(
+                directory,
+                desiredName,
+                sourcePaths,
+                plannedTargets);
+            plannedTargets.Add(targetPath);
+            plan.Add(new FileRenamePlan(
+                file,
+                sourcePath,
+                targetPath,
+                Path.GetRelativePath(_paths.Data, targetPath)));
+        }
+
+        return plan;
+    }
+
+    private static string GetAvailableRenameTarget(
+        string directory,
+        string desiredName,
+        IReadOnlySet<string> sourcePaths,
+        IReadOnlySet<string> plannedTargets)
+    {
+        var stem = Path.GetFileNameWithoutExtension(desiredName);
+        var extension = Path.GetExtension(desiredName);
+        for (var index = 1; ; index++)
+        {
+            var name = index == 1 ? desiredName : $"{stem} ({index}){extension}";
+            var path = Path.GetFullPath(Path.Combine(directory, name));
+            if (plannedTargets.Contains(path)) continue;
+            if ((File.Exists(path) || Directory.Exists(path)) && !sourcePaths.Contains(path)) continue;
+            return path;
+        }
+    }
+
+    private static void MoveFilesToTemporaryPaths(
+        IReadOnlyList<FileRenamePlan> plan,
+        ICollection<FileRenameState> moves,
+        CancellationToken cancellationToken)
+    {
+        foreach (var item in plan)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.Equals(item.SourcePath, item.TargetPath, StringComparison.Ordinal)) continue;
+            if (!File.Exists(item.SourcePath)) continue;
+
+            string temporaryPath;
+            do
+            {
+                temporaryPath = item.SourcePath + $".kkindle-rename-{Guid.NewGuid():N}.tmp";
+            }
+            while (File.Exists(temporaryPath) || Directory.Exists(temporaryPath));
+
+            File.Move(item.SourcePath, temporaryPath);
+            moves.Add(new FileRenameState(item, temporaryPath));
+        }
+    }
+
+    private static void CompleteFileMoves(
+        IReadOnlyList<FileRenameState> moves,
+        CancellationToken cancellationToken)
+    {
+        foreach (var move in moves)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(move.TemporaryPath, move.Plan.TargetPath);
+            move.TargetMoved = true;
+        }
+    }
+
+    private static void RestoreFileMoves(IEnumerable<FileRenameState> moves)
+    {
+        foreach (var move in moves.Reverse())
+        {
+            try
+            {
+                if (move.TargetMoved && File.Exists(move.Plan.TargetPath))
+                    File.Move(move.Plan.TargetPath, move.Plan.SourcePath);
+                else if (File.Exists(move.TemporaryPath))
+                    File.Move(move.TemporaryPath, move.Plan.SourcePath);
+            }
+            catch
+            {
+                // Preserve the original rename/database exception. The next
+                // startup can still expose any unusual filesystem residue.
+            }
+        }
+    }
+
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
     {
         var connection = new SqliteConnection(ConnectionString);
@@ -2326,6 +2513,19 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             if (File.Exists(path)) File.Delete(path);
         }
         catch { }
+    }
+
+    private sealed record FileRenamePlan(
+        BookFile File,
+        string SourcePath,
+        string TargetPath,
+        string TargetRelativePath);
+
+    private sealed class FileRenameState(FileRenamePlan plan, string temporaryPath)
+    {
+        public FileRenamePlan Plan { get; } = plan;
+        public string TemporaryPath { get; } = temporaryPath;
+        public bool TargetMoved { get; set; }
     }
 
     private sealed class TrashEntry

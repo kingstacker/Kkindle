@@ -12,6 +12,7 @@ using Xunit;
 namespace Kkindle.Ui.Tests;
 
 [Collection("Settings UI")]
+[Trait("Category", "Slow")]
 public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "kkindle-reader-stability", Guid.NewGuid().ToString("N"));

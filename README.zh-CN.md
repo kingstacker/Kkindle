@@ -41,8 +41,12 @@ WebDAV 服务地址应指向已存在的目录，例如 `https://dav.example.com
 dotnet restore Kkindle.sln
 dotnet build Kkindle.sln -p:Platform=x64
 dotnet test Kkindle.sln --no-build -p:Platform=x64
+# 发布前需要完整回归时再显式加入慢测试
+dotnet test Kkindle.sln --no-build -p:Platform=x64 -p:RunSlowTests=true
 dotnet run --project src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj -p:Platform=x64
 ```
+
+默认测试会跳过耗时的 UI/渲染/GC 压力用例，只保留核心、平台、设备和少量 UI 冒烟回归；这些用例仍保留在仓库中，可用 `RunSlowTests=true` 手动开启。
 
 Linux 还需要 WebKitGTK 和 Secret Service。Linux/macOS 的运行命令见[跨平台说明](docs/cross-platform.md)。
 

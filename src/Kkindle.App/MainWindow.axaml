@@ -1504,7 +1504,6 @@
                                Foreground="{DynamicResource MutedInkBrush}"
                                VerticalAlignment="Center"
                                IsVisible="False" />
-                    <ProgressBar x:Name="LibraryBusyProgress" Grid.Column="1" Width="120" Height="5" IsIndeterminate="True" IsVisible="False" />
                 </Grid>
             </Grid>
 
@@ -2331,7 +2330,6 @@
                                         <ComboBoxItem Content="{DynamicResource Ui.Auto.F117607AC0E397F4}" Tag="mobi" />
                                     </ComboBox>
                                 </StackPanel>
-                                <ToggleSwitch x:Name="DefaultVerticalWritingCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.E0119B0BA5ACFA0F}" AutomationProperties.Name="{DynamicResource Ui.Auto.E0119B0BA5ACFA0F}" />
                                 <ToggleSwitch x:Name="ReadingMaterialsCollapsedByDefaultCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.737AC585CF7AD245}" AutomationProperties.Name="{DynamicResource Ui.Auto.737AC585CF7AD245}" IsVisible="False" />
                                 <Expander x:Name="SettingsLocalResourcesExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.CB3794787648BF83}" Tag="{DynamicResource Ui.Auto.ECFAB6DAC176937A}" AutomationProperties.Name="{DynamicResource Ui.Auto.CB3794787648BF83}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <StackPanel Spacing="16">
@@ -2852,7 +2850,12 @@
                                         </Grid>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock x:Name="AboutUpdateStatusText" Text="{DynamicResource Ui.Auto.8642A3F7563F3F16}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                            <Button x:Name="CheckForUpdatesButton" Grid.Column="1" Content="{DynamicResource Ui.Auto.7F68EBAD19BA6BCD}" Classes="quiet" Click="CheckForUpdatesButton_Click" />
+                                            <Button x:Name="CheckForUpdatesButton"
+                                                    Grid.Column="1"
+                                                    Content="{DynamicResource Ui.Auto.7F68EBAD19BA6BCD}"
+                                                    ContentTemplate="{StaticResource LibraryRefreshActionContent}"
+                                                    Classes="quiet libraryToolbar"
+                                                    Click="CheckForUpdatesButton_Click" />
                                         </Grid>
                                     </StackPanel>
                                 </Border>
@@ -2890,7 +2893,14 @@
                                         <TextBlock x:Name="AboutLogsDescriptionText" Text="{DynamicResource Ui.About.LogExportDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <TextBlock x:Name="AboutLogsStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                            <Button x:Name="ExportSoftwareLogsButton" Grid.Column="1" Content="{DynamicResource Ui.About.ExportLogs}" ToolTip.Tip="{DynamicResource Ui.About.ExportLogsHint}" AutomationProperties.Name="{DynamicResource Ui.About.ExportLogs}" Classes="quiet" Click="ExportSoftwareLogsButton_Click" />
+                                            <Button x:Name="ExportSoftwareLogsButton"
+                                                    Grid.Column="1"
+                                                    Content="{DynamicResource Ui.About.ExportLogs}"
+                                                    ContentTemplate="{StaticResource LibraryExportActionContent}"
+                                                    ToolTip.Tip="{DynamicResource Ui.About.ExportLogsHint}"
+                                                    AutomationProperties.Name="{DynamicResource Ui.About.ExportLogs}"
+                                                    Classes="quiet libraryToolbar"
+                                                    Click="ExportSoftwareLogsButton_Click" />
                                         </Grid>
                                     </StackPanel>
                                 </Border>
@@ -3240,7 +3250,10 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="{DynamicResource Ui.Auto.FDF0B569D820ADE8}" FontSize="18" FontWeight="Bold" />
+                        <TextBlock x:Name="CollectionNamePromptTitleText"
+                                   Text="{DynamicResource Ui.Auto.FDF0B569D820ADE8}"
+                                   FontSize="18"
+                                   FontWeight="Bold" />
                         <TextBox x:Name="CollectionNameBox" PlaceholderText="{DynamicResource Ui.Auto.B161B3F76A603FB9}" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="7" Margin="0,8,0,0">
                             <Button Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Padding="13,7" Click="CollectionNameCancelButton_Click" />
@@ -3708,7 +3721,7 @@
                                ZIndex="100" />
 
                     <Border Padding="14,8"
-                            Background="{DynamicResource ReaderChromeBrush}"
+                            Background="{DynamicResource ReaderPageBrush}"
                             BorderBrush="{DynamicResource ReaderBorderBrush}"
                             BorderThickness="0,0,0,1">
                         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
@@ -4091,7 +4104,7 @@
 
                 <Border x:Name="ReaderHeaderBar"
                         ZIndex="100"
-                        Background="{DynamicResource ReaderChromeBrush}"
+                        Background="{DynamicResource ReaderPageBrush}"
                         BorderBrush="{DynamicResource ReaderBorderBrush}"
                         BorderThickness="0,0,0,1">
                     <Border.Transitions>
@@ -4789,7 +4802,7 @@
                 <Border x:Name="ReaderFooterBar"
                         Grid.Row="2"
                         ZIndex="100"
-                        Background="{DynamicResource ReaderChromeBrush}"
+                        Background="{DynamicResource ReaderPageBrush}"
                         BorderBrush="{DynamicResource ReaderBorderBrush}"
                         BorderThickness="0,1,0,0">
                     <Border.Transitions>
@@ -4887,7 +4900,7 @@
                                IsHitTestVisible="False"
                                ZIndex="21" />
 
-                    <Border Background="{DynamicResource ReaderChromeBrush}"
+                    <Border Background="{DynamicResource ReaderPageBrush}"
                             BorderBrush="{DynamicResource ReaderBorderBrush}"
                             BorderThickness="0,0,0,1">
                         <Grid Margin="8,2" ColumnDefinitions="*,*,Auto" ColumnSpacing="6">

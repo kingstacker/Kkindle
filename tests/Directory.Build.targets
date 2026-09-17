@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    Headless UI, rendering and GC stress tests are kept in the repository but
+    are not part of the default feedback loop. Set RunSlowTests=true for a
+    deliberate full regression run.
+  -->
+  <PropertyGroup Condition="'$(RunSlowTests)' != 'true' and '$(VSTestTestCaseFilter)' == ''">
+    <VSTestTestCaseFilter>Category!=Slow</VSTestTestCaseFilter>
+  </PropertyGroup>
+</Project>

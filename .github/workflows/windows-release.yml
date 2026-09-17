@@ -56,7 +56,7 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore Kkindle.sln -p:Platform=x64
 
-      - name: Run release tests
+      - name: Run quick release tests
         run: dotnet test Kkindle.sln -c Release -p:Platform=x64 --no-restore
 
       - name: Build Avalonia Windows head

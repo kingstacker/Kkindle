@@ -39,8 +39,12 @@ Requires [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0).
 dotnet restore Kkindle.sln
 dotnet build Kkindle.sln -p:Platform=x64
 dotnet test Kkindle.sln --no-build -p:Platform=x64
+# Run the slow regression suite explicitly before a release
+dotnet test Kkindle.sln --no-build -p:Platform=x64 -p:RunSlowTests=true
 dotnet run --project src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj -p:Platform=x64
 ```
+
+The default test run skips expensive UI, rendering, and GC-stress cases while keeping core, platform, device, and a small UI smoke set. The skipped tests remain in the repository and can be enabled with `RunSlowTests=true`.
 
 Linux also requires WebKitGTK and Secret Service. See [cross-platform notes](docs/cross-platform.md) for Linux and macOS commands.
 

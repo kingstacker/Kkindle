@@ -4027,7 +4027,6 @@ public partial class MainWindow
             PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
             PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
             ApplyPinyinEngineSelection();
-            DefaultVerticalWritingCheck.IsChecked = _appSettings.DefaultReaderLayout.VerticalWriting;
             PopulateBookTranslationControls();
             AboutVersionText.Text = T("版本 {0}", ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly));
             CheckForUpdatesButton.IsEnabled = _updateService is not null;
@@ -4711,6 +4710,10 @@ public partial class MainWindow
                 // rows. Refresh just the badges in that case.
                 await RefreshBookSyncStatusesAsync(token);
             }
+            // Sync applies remote reading data directly to SQLite, so the
+            // ReaderDataService change event is not raised. Refresh the
+            // visible reader-facing views after every completed sync.
+            await RefreshS3AffectedViewsAsync();
             refreshAfterFailure = false;
             var status = result.IsPartial
                 ? T("同步未完成：新增 {0} 本书，下载 {1} 个文件；部分数据未能同步，请重试。", result.BooksAdded, result.FilesDownloaded)
@@ -4757,6 +4760,7 @@ public partial class MainWindow
                     if (_s3RemoteSettingsChanged)
                         await RefreshSettingsAfterS3SyncAsync(_lifetimeCancellation.Token);
                     await RefreshLibraryAfterS3SyncAsync(_lifetimeCancellation.Token);
+                    await RefreshS3AffectedViewsAsync();
                 }
                 catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
                 catch (Exception exception) { Debug.WriteLine($"S3 library refresh failed: {exception.Message}"); }
@@ -4777,6 +4781,18 @@ public partial class MainWindow
         SetupFilterControls();
         await RefreshCollectionsAsync();
         UpdateLibraryUi();
+    }
+
+    private async Task RefreshS3AffectedViewsAsync()
+    {
+        // S3 merges write the reader database directly, so ReaderDataService
+        // does not emit its local change event. Keep both reader-facing
+        // collections in sync even when the page was already open.
+        MarkReadingMaterialsDirty();
+        if (ReadingDashboardPage.IsVisible)
+            await RefreshReadingDashboardAsync();
+        if (ReadingMaterialsPage.IsVisible)
+            await RefreshReadingMaterialsAsync();
     }
 
     private async Task RefreshSettingsAfterS3SyncAsync(CancellationToken cancellationToken)
@@ -4831,7 +4847,6 @@ public partial class MainWindow
         PinyinLocalOnlyCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoConnectDeviceCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        DefaultVerticalWritingCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowSyncStatusIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowLibraryPresenceIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -5293,11 +5308,9 @@ public partial class MainWindow
             PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,
             PinyinEngineId = GetSelectedPinyinEngineId(),
             Translation = ReadBookTranslationSettingsFromControls(),
-            // 阅读器排版参数均为全局设置；这里同步基础设置中的竖排开关。
-            DefaultReaderLayout = _appSettings.DefaultReaderLayout with
-            {
-                VerticalWriting = DefaultVerticalWritingCheck.IsChecked == true
-            }
+            // Reader layout preferences are edited from the reader layout
+            // popup; keep the saved global defaults untouched here.
+            DefaultReaderLayout = _appSettings.DefaultReaderLayout
         });
     }
 
