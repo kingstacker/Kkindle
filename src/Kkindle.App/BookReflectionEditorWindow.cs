@@ -156,7 +156,7 @@ internal sealed class BookReflectionEditorWindow : Window
         _editorSurface.ContentChanged += EditorSurface_ContentChanged;
         _editorSurface.AddHandler(InputElement.KeyDownEvent, Editor_KeyDown, RoutingStrategies.Tunnel);
 
-        _editorSurface.FormattingToolbar.HorizontalAlignment = HorizontalAlignment.Center;
+        _editorSurface.FormattingToolbar.HorizontalAlignment = HorizontalAlignment.Left;
         _editorSurface.FormattingToolbar.VerticalAlignment = VerticalAlignment.Center;
 
         _counter = new TextBlock

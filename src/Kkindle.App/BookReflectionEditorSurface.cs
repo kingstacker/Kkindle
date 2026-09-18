@@ -196,7 +196,7 @@ internal sealed class BookReflectionEditorSurface : Border
             BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             Child = tools
         };
