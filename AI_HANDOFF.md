@@ -24,7 +24,7 @@
 
 ## Kreader 当前实现
 
-- EPUB（含临时转换得到的 MOBI/AZW3）使用 `NativeReaderHost` + `Kkindle.Layout` 自绘；PDF 使用 `NativePdfReaderHost` + PDFium 自绘，支持文字论文的结构/图表/参考文献导航、同页双栏聚焦、文本与任意位置页面批注，以及可选的区域视觉 AI 请求。
+- EPUB（含临时转换得到的 MOBI/AZW3）使用 `NativeReaderHost` + `Kkindle.Layout` 自绘；PDF 使用 `NativePdfReaderHost` + PDFium 自绘，支持文本选择、搜索、TTS、书签与文本/任意位置页面批注。PDF 仅保留连续、单页和双页阅读模式，不包含论文结构导航、论文双栏聚焦或区域视觉 AI。
 - 竖排是固定字格的单页分页布局：`VerticalWriting=true` 时强制 `FlowMode=1`、关闭双页；数字、拉丁字符、禁则和标点规则在 `src/Kkindle.Layout` 中实现。
 - 书籍排版参数（字号、行高、正文宽度、页边距、字体等）按 `BookFile` 保存；竖排和段首缩进是全局偏好。打开书籍时使用 `ReaderLayoutDefaults.ApplyGlobalPreferences` 合并，不能让旧的书籍记录覆盖全局方向。
 - 进度按 `BookFile` 保存。竖排分页的 `ScrollPosition` 是页首正文字符偏移；横排分页是像素偏移；滚动模式是内容像素偏移。原生引擎切换布局时必须保留语义锚点，不能把像素值直接当字符偏移。
@@ -57,6 +57,6 @@ DISPLAY=:0 ./src/Kkindle.Desktop.Linux/bin/Debug/net10.0/Kkindle
 
 - `MainWindow.KreaderValidation.cs` 中两个旧 WebKit 专用验证入口仍返回 `SKIPPED`，应改写为 `NativeReaderHost` / 页面快照验证。
 - 纯图片页没有独立的持久化页索引，当前进度主要依赖字符偏移；若需要保证封面或无文字页精确恢复，应为 `ReaderProgress` 增加页索引及迁移。
-- PDF 的选择、缩放和点击区域能力受平台内置查看器限制。
+- PDF 的选择、缩放和页面点击命中能力受平台内置查看器限制。
 - Linux/macOS 仅支持文件系统挂载型 Kindle；Windows 才支持 WPD/MTP。
 - 升级 SkiaSharp/HarfBuzzSharp 必须同步重跑排版确定性测试，并单独核对页面快照。

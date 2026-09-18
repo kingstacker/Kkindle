@@ -6,7 +6,6 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
-using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -15,7 +14,6 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
-using Avalonia.VisualTree;
 using Kkindle.Core;
 
 namespace Kkindle;
@@ -47,8 +45,7 @@ internal sealed class BookReflectionEditorSurface : Border
         RegexOptions.Compiled);
 
     private readonly StackPanel _blockStack;
-    private readonly Popup _selectionPopup;
-    private Border _selectionPopupBar = null!;
+    public Control FormattingToolbar { get; }
     private readonly List<BlockView> _blocks = [];
     private BlockView? _activeBlock;
     private BlockView? _selectedImage;
@@ -88,13 +85,8 @@ internal sealed class BookReflectionEditorSurface : Border
         ScrollViewer.SetVerticalScrollBarVisibility(scrollViewer, ScrollBarVisibility.Auto);
         ScrollViewer.SetHorizontalScrollBarVisibility(scrollViewer, ScrollBarVisibility.Disabled);
 
-        _selectionPopup = CreateSelectionPopup();
-        var root = new Grid
-        {
-            Children = { scrollViewer, _selectionPopup }
-        };
-        _selectionPopup.ZIndex = 20;
-        Child = root;
+        FormattingToolbar = CreateFormattingToolbar();
+        Child = scrollViewer;
 
         SizeChanged += (_, _) => UpdateImageConstraints();
 
@@ -113,7 +105,6 @@ internal sealed class BookReflectionEditorSurface : Border
         _disposed = true;
         _imageResizeSession = null;
         _selectedImage = null;
-        _selectionPopup.IsOpen = false;
         foreach (var block in _blocks)
             block.Dispose();
     }
@@ -132,7 +123,7 @@ internal sealed class BookReflectionEditorSurface : Border
             AddBlock(new BlockState(), 0);
     }
 
-    private Popup CreateSelectionPopup()
+    private Control CreateFormattingToolbar()
     {
         var tools = new StackPanel
         {
@@ -145,9 +136,21 @@ internal sealed class BookReflectionEditorSurface : Border
         AddToolbarAction(tools, "H3", "三级标题", "heading3");
         AddToolbarSeparator(tools);
         AddToolbarAction(tools, "B", "粗体", "bold");
-        AddToolbarAction(tools, "❝", "引用", "quote");
-        AddToolbarAction(tools, "•", "无序列表", "unordered");
-        AddToolbarAction(tools, "1.", "有序列表", "ordered");
+        AddToolbarAction(
+            tools,
+            CreateToolbarIcon("M5 8H9V12H6C6 14 7 15 9 16M15 8H19V12H16C16 14 17 15 19 16"),
+            "引用",
+            "quote");
+        AddToolbarAction(
+            tools,
+            CreateToolbarIcon("M4 5H7V8H4ZM4 11H7V14H4ZM4 17H7V20H4ZM10 6H20M10 12H20M10 18H20"),
+            "无序列表",
+            "unordered");
+        AddToolbarAction(
+            tools,
+            CreateToolbarIcon("M5 5H7V9H5M5 12L7 11V15H5M5 18L7 17V21H5M10 6H20M10 12H20M10 18H20"),
+            "有序列表",
+            "ordered");
         AddToolbarAction(
             tools,
             CreateToolbarIcon("M10 13a5 5 0 0 0 7.54.54l1.09-1.09a5 5 0 0 0-7.07-7.07l-.63.63M14 11a5 5 0 0 0-7.54-.54l-1.09 1.09a5 5 0 0 0 7.07 7.07l.63-.63"),
@@ -159,26 +162,16 @@ internal sealed class BookReflectionEditorSurface : Border
             "插入图片",
             "image");
 
-        _selectionPopupBar = new Border
+        return new Border
         {
             Padding = new Thickness(3),
-            Background = AppAppearanceResources.GetBrush("ReaderPageBrush"),
+            Background = AppAppearanceResources.GetBrush("PaperBrush"),
             BorderBrush = AppAppearanceResources.GetBrush("ReaderBorderBrush"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(0),
             Child = tools
         };
 
-        var popup = new Popup
-        {
-            IsOpen = false,
-            IsLightDismissEnabled = true,
-            Placement = PlacementMode.Top,
-            VerticalOffset = -8,
-            Child = _selectionPopupBar
-        };
-        popup.Closed += SelectionPopup_Closed;
-        return popup;
     }
 
     private void AddToolbarAction(StackPanel tools, string content, string tooltip, string tag) =>
@@ -197,15 +190,18 @@ internal sealed class BookReflectionEditorSurface : Border
         {
             Content = content,
             Tag = tag,
-            Width = 52,
-            MinWidth = 52,
-            Height = 30,
-            Padding = new Thickness(8, 3),
+            Width = 36,
+            MinWidth = 36,
+            MaxWidth = 36,
+            Height = 32,
+            Padding = new Thickness(0),
+            Background = AppAppearanceResources.GetBrush("PaperBrush"),
             Focusable = false,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
         };
-        button.Classes.Add("readerSelectionAction");
+        button.Content = NormalizeToolbarContent(content, tag);
+        button.Classes.Add("bookReflectionFormattingAction");
         ToolTip.SetTip(button, UiText.Get(tooltip));
         AutomationProperties.SetName(button, UiText.Get(tooltip));
         button.Click += ToolbarButton_Click;
@@ -228,9 +224,38 @@ internal sealed class BookReflectionEditorSurface : Border
             Width = 18,
             Height = 18,
             Stroke = AppAppearanceResources.GetBrush("ReaderInkBrush"),
-            StrokeThickness = 1.5,
+            StrokeThickness = 1.7,
+            StrokeLineCap = PenLineCap.Round,
             IsHitTestVisible = false
         };
+
+    private static object NormalizeToolbarContent(object content, string tag)
+    {
+        if (content is string text)
+        {
+            return new TextBlock
+            {
+                Text = text,
+                Width = 18,
+                Height = 18,
+                FontSize = 12,
+                FontWeight = tag == "bold" ? FontWeight.Bold : FontWeight.Normal,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+        }
+
+        if (content is Control control)
+        {
+            control.Width = 18;
+            control.Height = 18;
+            control.HorizontalAlignment = HorizontalAlignment.Center;
+            control.VerticalAlignment = VerticalAlignment.Center;
+        }
+
+        return content;
+    }
 
     private StackPanel CreateImageActionBar(out List<Button> buttons)
     {
@@ -300,7 +325,8 @@ internal sealed class BookReflectionEditorSurface : Border
         {
             Width = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch
+            VerticalAlignment = VerticalAlignment.Stretch,
+            CornerRadius = new CornerRadius(2)
         };
         var contentHost = new Grid
         {
@@ -420,7 +446,7 @@ internal sealed class BookReflectionEditorSurface : Border
                 CaretBrush = AppAppearanceResources.GetBrush("InkBrush"),
                 SelectionBrush = new SolidColorBrush(Color.FromArgb(68, 17, 17, 17)),
                 SelectionForegroundBrush = Brushes.Transparent,
-                ClearSelectionOnLostFocus = false
+                ClearSelectionOnLostFocus = true
             };
             editor.Classes.Add("bookReflectionEditor");
 
@@ -432,6 +458,7 @@ internal sealed class BookReflectionEditorSurface : Border
             state,
             row,
             marker,
+            contentHost,
             richText,
             editor,
             imageHost,
@@ -447,9 +474,20 @@ internal sealed class BookReflectionEditorSurface : Border
             editor.Tag = view;
             editor.GotFocus += (_, _) =>
             {
+                if (_activeBlock?.Editor is { } previousEditor
+                    && previousEditor != editor)
+                {
+                    previousEditor.SelectionStart = previousEditor.CaretIndex;
+                    previousEditor.SelectionEnd = previousEditor.CaretIndex;
+                }
                 _activeBlock = view;
                 ClearImageSelection();
                 UpdateSelectionToolbar(view);
+            };
+            editor.LostFocus += (_, _) =>
+            {
+                if (_selection?.Block == view)
+                    _selection = null;
             };
             editor.TextChanged += BlockEditor_TextChanged;
             editor.PropertyChanged += BlockEditor_PropertyChanged;
@@ -555,7 +593,6 @@ internal sealed class BookReflectionEditorSurface : Border
         _selectedImage = view;
         _activeBlock = view;
         _selection = null;
-        _selectionPopup.IsOpen = false;
         SetImageControls(view, true);
         view.ImageFrame?.Focus();
     }
@@ -753,7 +790,7 @@ internal sealed class BookReflectionEditorSurface : Border
 
     private async Task ReplaceImageAsync(BlockView view)
     {
-        var topLevel = TopLevel.GetTopLevel(this);
+        var topLevel = GetOwnerWindow();
         if (topLevel is null || view.State.Kind != BlockKind.Image)
             return;
 
@@ -1225,7 +1262,8 @@ internal sealed class BookReflectionEditorSurface : Border
             return;
         }
 
-        view.Marker.IsVisible = true;
+        var isQuote = state.Kind == BlockKind.Quote;
+        view.Marker.IsVisible = !isQuote;
         var markerText = state.Kind switch
         {
             BlockKind.UnorderedList => "•",
@@ -1235,13 +1273,20 @@ internal sealed class BookReflectionEditorSurface : Border
         var markerWidth = state.Kind switch
         {
             BlockKind.UnorderedList or BlockKind.OrderedList => 28,
-            BlockKind.Quote => 3,
             _ => 0
         };
         view.Row.ColumnDefinitions[0].Width = new GridLength(markerWidth);
         view.Marker.Width = markerWidth;
-        view.Marker.Background = state.Kind == BlockKind.Quote
-            ? AppAppearanceResources.GetBrush("MutedInkBrush")
+        view.Row.ColumnSpacing = isQuote ? 0 : 8;
+        view.Row.Background = Brushes.Transparent;
+        view.Marker.Margin = new Thickness(0);
+        view.Marker.Background = Brushes.Transparent;
+        view.ContentHost.HorizontalAlignment = isQuote
+            ? HorizontalAlignment.Left
+            : HorizontalAlignment.Stretch;
+        view.ContentHost.VerticalAlignment = VerticalAlignment.Top;
+        view.ContentHost.Background = isQuote
+            ? AppAppearanceResources.GetBrush("PressedBrush")
             : Brushes.Transparent;
         view.Marker.Child = state.Kind is BlockKind.UnorderedList or BlockKind.OrderedList
             ? new TextBlock
@@ -1258,9 +1303,15 @@ internal sealed class BookReflectionEditorSurface : Border
 
         if (view.RichText is not null)
         {
-            view.RichText.Foreground = state.Kind == BlockKind.Quote
-                ? AppAppearanceResources.GetBrush("MutedInkBrush")
+            view.RichText.Foreground = isQuote
+                ? AppAppearanceResources.GetBrush("InkBrush")
                 : AppAppearanceResources.GetBrush("InkBrush");
+            view.RichText.Margin = isQuote
+                ? new Thickness(12, 10, 16, 10)
+                : new Thickness(0, 5, 0, 5);
+            view.RichText.FontStyle = isQuote
+                ? FontStyle.Italic
+                : FontStyle.Normal;
             view.RichText.FontSize = state.Kind switch
             {
                 BlockKind.Heading1 => 28,
@@ -1274,7 +1325,7 @@ internal sealed class BookReflectionEditorSurface : Border
             view.RichText.FontWeight = IsHeading(state.Kind)
                 ? FontWeight.SemiBold
                 : FontWeight.Normal;
-            view.RichText.SetRuns(state.Inlines);
+            view.RichText.SetRuns(state.Inlines, isQuote);
         }
 
         if (view.Editor is not null)
@@ -1289,12 +1340,19 @@ internal sealed class BookReflectionEditorSurface : Border
                 BlockKind.Heading6 => 16,
                 _ => 15
             };
+            view.Editor.Padding = isQuote
+                ? new Thickness(12, 10, 16, 10)
+                : new Thickness(0, 5, 0, 5);
+            view.Editor.FontStyle = isQuote
+                ? FontStyle.Italic
+                : FontStyle.Normal;
             view.Editor.MinHeight = state.Kind switch
             {
                 BlockKind.Heading1 => 48,
                 BlockKind.Heading2 => 43,
                 BlockKind.Heading3 => 38,
                 BlockKind.Heading4 => 35,
+                BlockKind.Quote => 46,
                 _ => 30
             };
         }
@@ -1310,72 +1368,13 @@ internal sealed class BookReflectionEditorSurface : Border
         {
             if (_selection?.Block == view)
                 _selection = null;
-            _selectionPopup.IsOpen = false;
             return;
         }
 
         _activeBlock = view;
         _selection = new SelectionSnapshot(view, start, end);
-        _selectionPopup.PlacementTarget = view.Editor;
-        _selectionPopup.IsOpen = true;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (_selectionPopup.IsOpen
-                && _selection?.Block == view)
-            {
-                var selectionBounds = GetSelectionBoundsInEditor(view.Editor, start, end);
-                if (selectionBounds is { } bounds)
-                {
-                    // Popup placement is centered on the whole TextBox by
-                    // default. Offset from that center to the actual selected
-                    // range, including wrapped lines and scroll offsets.
-                    _selectionPopup.HorizontalOffset =
-                        bounds.X + bounds.Width / 2 - view.Editor.Bounds.Width / 2;
-                    _selectionPopup.VerticalOffset = bounds.Y - 8;
-                }
-                else
-                {
-                    _selectionPopup.HorizontalOffset = 0;
-                    _selectionPopup.VerticalOffset = -8;
-                }
-            }
-        });
     }
 
-    private static Rect? GetSelectionBoundsInEditor(TextBox editor, int start, int end)
-    {
-        var presenter = editor.GetVisualDescendants().OfType<TextPresenter>().FirstOrDefault();
-        var layout = presenter?.TextLayout;
-        if (presenter is null || layout is null)
-            return null;
-
-        var startRect = layout.HitTestTextPosition(start);
-        var endRect = layout.HitTestTextPosition(end);
-        var startPoint = presenter.TranslatePoint(new Point(startRect.X, startRect.Y), editor);
-        var endPoint = presenter.TranslatePoint(new Point(endRect.X, endRect.Y), editor);
-        if (startPoint is not { } startPosition || endPoint is not { } endPosition)
-            return null;
-
-        var left = Math.Min(startPosition.X, endPosition.X);
-        var top = Math.Min(startPosition.Y, endPosition.Y);
-        var right = Math.Max(
-            startPosition.X + startRect.Width,
-            endPosition.X + endRect.Width);
-        var bottom = Math.Max(
-            startPosition.Y + startRect.Height,
-            endPosition.Y + endRect.Height);
-        return new Rect(left, top, Math.Max(1, right - left), Math.Max(1, bottom - top));
-    }
-
-    private void SelectionPopup_Closed(object? sender, EventArgs e)
-    {
-        if (_disposed || _selection is null)
-            return;
-
-        // A light-dismiss click must not leave the old TextBox selection
-        // highlighted after the user has moved on to another control.
-        CollapseTextSelection(_selection, focusEditor: false);
-    }
 
     private void CollapseTextSelection(
         SelectionSnapshot? selection,
@@ -1383,7 +1382,6 @@ internal sealed class BookReflectionEditorSurface : Border
         bool focusEditor = false)
     {
         _selection = null;
-        _selectionPopup.IsOpen = false;
         if (selection?.Block.Editor is not { } editor)
             return;
 
@@ -1395,35 +1393,50 @@ internal sealed class BookReflectionEditorSurface : Border
             editor.Focus();
     }
 
+    private SelectionSnapshot? GetToolbarSelection(bool allowCaret)
+    {
+        if (_selection is { } selection && _blocks.Contains(selection.Block))
+            return selection;
+
+        if (!allowCaret)
+            return null;
+
+        var view = _activeBlock ?? _blocks.LastOrDefault(block => block.Editor is not null);
+        if (view?.Editor is not { } editor)
+            return null;
+
+        var textLength = editor.Text?.Length ?? 0;
+        var start = Math.Clamp(Math.Min(editor.SelectionStart, editor.SelectionEnd), 0, textLength);
+        var end = Math.Clamp(Math.Max(editor.SelectionStart, editor.SelectionEnd), start, textLength);
+        return new SelectionSnapshot(view, start, end);
+    }
+
     private async void ToolbarButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string action })
             return;
 
-        var selection = _selection;
+        e.Handled = true;
+        var selection = GetToolbarSelection(allowCaret: true);
         switch (action)
         {
             case "bold":
-                ApplyBold();
+                ApplyBold(selection);
                 break;
             case "link":
-                await ApplyLinkAsync();
+                await ApplyLinkAsync(selection);
                 break;
             case "image":
-                await InsertImageAsync();
+                await InsertImageAsync(selection);
                 break;
             default:
-                ApplyBlockAction(action);
+                ApplyBlockAction(action, selection);
                 break;
         }
-        if (selection is not null && _blocks.Contains(selection.Block))
-            CollapseTextSelection(selection, selection.End, focusEditor: true);
-        e.Handled = true;
     }
 
-    private void ApplyBlockAction(string action)
+    private void ApplyBlockAction(string action, SelectionSnapshot? selection)
     {
-        var selection = _selection;
         var view = selection?.Block ?? _activeBlock;
         if (view is null) return;
 
@@ -1451,9 +1464,8 @@ internal sealed class BookReflectionEditorSurface : Border
         RaiseContentChanged();
     }
 
-    private void ApplyBold()
+    private void ApplyBold(SelectionSnapshot? selection)
     {
-        var selection = _selection;
         if (selection is null) return;
 
         var allBold = SliceRuns(
@@ -1472,30 +1484,46 @@ internal sealed class BookReflectionEditorSurface : Border
         RaiseContentChanged();
     }
 
-    private async Task ApplyLinkAsync()
+    private async Task ApplyLinkAsync(SelectionSnapshot? selection)
     {
-        var selection = _selection;
-        if (selection is null) return;
+        var target = selection ?? GetToolbarSelection(allowCaret: true);
+        if (target is null || !_blocks.Contains(target.Block)) return;
 
         var url = await PromptForLinkAsync();
         if (string.IsNullOrWhiteSpace(url)) return;
 
-        selection.Block.State.Inlines = ApplyInlineStyle(
-            selection.Block.State.Inlines,
-            selection.Start,
-            selection.End,
-            InlineStyle.Link,
-            url);
-        RefreshTextBlock(selection.Block);
-        CollapseTextSelection(selection, selection.End, focusEditor: true);
+        var textLength = target.Block.LastPlainText.Length;
+        var start = Math.Clamp(target.Start, 0, textLength);
+        var end = Math.Clamp(target.End, start, textLength);
+        if (start == end)
+        {
+            var before = SliceRuns(target.Block.State.Inlines, 0, start);
+            before.Add(new InlineRun(url, InlineStyle.Link, url));
+            before.AddRange(SliceRuns(target.Block.State.Inlines, end, textLength));
+            target.Block.State.Inlines = MergeRuns(before);
+            SetEditorText(target.Block, target.Block.State.PlainText, start + url.Length);
+            UpdateBlockView(target.Block);
+            CollapseTextSelection(target, start + url.Length, focusEditor: true);
+        }
+        else
+        {
+            target.Block.State.Inlines = ApplyInlineStyle(
+                target.Block.State.Inlines,
+                start,
+                end,
+                InlineStyle.Link,
+                url);
+            RefreshTextBlock(target.Block);
+            CollapseTextSelection(target, end, focusEditor: true);
+        }
         RaiseContentChanged();
     }
 
-    private async Task InsertImageAsync()
+    private async Task InsertImageAsync(SelectionSnapshot? selection)
     {
-        var selection = _selection;
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (selection is null || topLevel is null)
+        var target = selection ?? GetToolbarSelection(allowCaret: true);
+        var topLevel = GetOwnerWindow();
+        if (target is null || topLevel is null)
             return;
 
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -1518,8 +1546,12 @@ internal sealed class BookReflectionEditorSurface : Border
         if (bytes.Length == 0) return;
 
         var source = $"data:{MimeTypeFor(path)};base64,{Convert.ToBase64String(bytes)}";
-        InsertImageBlock(selection, source, Path.GetFileNameWithoutExtension(path));
+        InsertImageBlock(target, source, Path.GetFileNameWithoutExtension(path));
     }
+
+    private Window? GetOwnerWindow() =>
+        TopLevel.GetTopLevel(this) as Window
+        ?? TopLevel.GetTopLevel(FormattingToolbar) as Window;
 
     private void InsertImageBlock(
         SelectionSnapshot selection,
@@ -1563,14 +1595,13 @@ internal sealed class BookReflectionEditorSurface : Border
             FocusBlock(_blocks[index + 2], 0);
         }
 
-        _selectionPopup.IsOpen = false;
         _selection = null;
         RaiseContentChanged();
     }
 
     private async Task<string?> PromptForLinkAsync()
     {
-        var owner = TopLevel.GetTopLevel(this) as Window;
+        var owner = GetOwnerWindow();
         if (owner is null) return null;
 
         var urlBox = new TextBox
@@ -1694,7 +1725,7 @@ internal sealed class BookReflectionEditorSurface : Border
 
     private async Task<string?> PromptForImageAltAsync(string currentAlt)
     {
-        var owner = TopLevel.GetTopLevel(this) as Window;
+        var owner = GetOwnerWindow();
         if (owner is null) return null;
 
         var altBox = new TextBox
@@ -2095,9 +2126,12 @@ internal sealed class BookReflectionEditorSurface : Border
 
     private sealed class ReflectionRichTextBlock : TextBlock
     {
-        public void SetRuns(IReadOnlyList<InlineRun> runs)
+        public void SetRuns(IReadOnlyList<InlineRun> runs, bool quote)
         {
             Inlines = new InlineCollection();
+            if (quote)
+                Inlines.Add(CreateQuoteMark("“"));
+
             foreach (var run in runs)
             {
                 var textRun = new Run(run.Text);
@@ -2110,6 +2144,21 @@ internal sealed class BookReflectionEditorSurface : Border
                 }
                 Inlines?.Add(textRun);
             }
+
+            if (quote)
+                Inlines?.Add(CreateQuoteMark("”"));
+        }
+
+        private Run CreateQuoteMark(string text) => new(text)
+        {
+            Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
+            FontSize = Math.Max(30, FontSize + 16),
+            FontWeight = FontWeight.SemiBold
+        };
+
+        public void SetRuns(IReadOnlyList<InlineRun> runs)
+        {
+            SetRuns(runs, quote: false);
         }
     }
 
@@ -2119,6 +2168,7 @@ internal sealed class BookReflectionEditorSurface : Border
             BlockState state,
             Grid row,
             Border marker,
+            Grid contentHost,
             ReflectionRichTextBlock? richText,
             TextBox? editor,
             Border? imageHost,
@@ -2133,6 +2183,7 @@ internal sealed class BookReflectionEditorSurface : Border
             State = state;
             Row = row;
             Marker = marker;
+            ContentHost = contentHost;
             RichText = richText;
             Editor = editor;
             ImageHost = imageHost;
@@ -2149,6 +2200,7 @@ internal sealed class BookReflectionEditorSurface : Border
         public BlockState State { get; }
         public Grid Row { get; }
         public Border Marker { get; }
+        public Grid ContentHost { get; }
         public ReflectionRichTextBlock? RichText { get; }
         public TextBox? Editor { get; }
         public Border? ImageHost { get; }

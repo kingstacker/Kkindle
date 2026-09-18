@@ -2501,7 +2501,7 @@ public partial class MainWindow
                     "读后思考",
                     "书籍级",
                     string.Empty,
-                    reflection.Content,
+                    BookReflectionEditorSurface.NormalizeMarkdown(reflection.Content),
                     reflection.UpdatedAt,
                     null,
                     null,

@@ -339,11 +339,6 @@ public partial class MainWindow
         return _readerTocScrollBarHideTimer;
     }
 
-    private void ReaderTocMinimalToggleButton_Click(object? sender, RoutedEventArgs e)
-    {
-        SetReaderTocMinimal(!_readerTocMinimal);
-    }
-
     private void ReaderTocCompactExpandButton_Click(object? sender, RoutedEventArgs e)
     {
         SetReaderTocMinimal(false);

@@ -4,36 +4,12 @@ using Avalonia.Controls.Documents;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.Core;
-using Kkindle.Infrastructure;
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 
 namespace Kkindle;
 
 public sealed record ReaderSearchHighlightRange(int Start, int Length);
-
-public sealed class ReaderPdfPaperNavigationViewModel
-{
-    public ReaderPdfPaperNavigationViewModel(PdfPaperNavigationItem item)
-    {
-        Item = item;
-        Title = item.Title;
-        PageLabel = UiText.Get("第 {0} 页", item.PageNumber);
-        (KindLabel, KindGlyph) = item.Kind switch
-        {
-            PdfPaperNavigationKind.Figure => (UiText.Get("图"), "▧"),
-            PdfPaperNavigationKind.Table => (UiText.Get("表"), "▤"),
-            PdfPaperNavigationKind.Reference => (UiText.Get("引"), "§"),
-            _ => (UiText.Get("节"), "¶")
-        };
-    }
-
-    public PdfPaperNavigationItem Item { get; }
-    public string Title { get; }
-    public string PageLabel { get; }
-    public string KindLabel { get; }
-    public string KindGlyph { get; }
-}
 
 public sealed class ReaderSearchResultViewModel : ObservableObject
 {

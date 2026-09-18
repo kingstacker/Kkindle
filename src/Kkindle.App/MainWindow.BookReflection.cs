@@ -119,8 +119,15 @@ public partial class MainWindow
             ShowMode = FlyoutShowMode.TransientWithDismissOnPointerMoveAway
         };
         _bookReflectionFlyout.FlyoutPresenterClasses.Add("bookReflectionFlyoutPresenter");
-        DetailReflectionHoverArea.PointerEntered += (_, _) =>
-            ShowBookReflectionFlyout();
+        DetailReflectionPanel.PointerMoved += (_, e) =>
+        {
+            var position = e.GetPosition(EditBookReflectionButton);
+            if (new Rect(EditBookReflectionButton.Bounds.Size).Contains(position))
+                _bookReflectionFlyout?.Hide();
+            else
+                ShowBookReflectionFlyout();
+        };
+        EditBookReflectionButton.PointerEntered += (_, _) => _bookReflectionFlyout?.Hide();
     }
 
     private void ShowBookReflectionFlyout()
@@ -128,11 +135,11 @@ public partial class MainWindow
         if (_bookReflectionFlyout is null
             || _bookReflectionFlyoutText is null
             || string.IsNullOrWhiteSpace(_bookReflectionFlyoutText.Markdown)
-            || !DetailReflectionHoverArea.IsEffectivelyVisible)
+            || !DetailReflectionPanel.IsEffectivelyVisible)
             return;
 
         if (!_bookReflectionFlyout.IsOpen)
-            _bookReflectionFlyout.ShowAt(DetailReflectionHoverArea);
+            _bookReflectionFlyout.ShowAt(DetailReflectionPanel);
     }
 
     private void CloseBookReflectionFlyout()

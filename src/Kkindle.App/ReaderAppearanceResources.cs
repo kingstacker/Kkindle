@@ -23,15 +23,11 @@ internal static class ReaderAppearanceResources
         Set("Input", palette.Page);
         var pageBrush = ReaderPaperTexture.CreateBrush(palette.Page, appearance);
         resources["ReaderPageBrush"] = pageBrush;
-        // Paper mode is a single sheet of paper. Keep the title bar, reader
-        // chrome, TOC rail and reading canvas on the same textured surface so
-        // the texture does not reveal artificial color bands at their seams.
-        resources["ReaderChromeBrush"] = appearance.PaperEnabled
-            ? pageBrush
-            : ReaderPaperTexture.CreateBrush(palette.Chrome, appearance, 0.65);
-        resources["ReaderSidebarBrush"] = appearance.PaperEnabled
-            ? pageBrush
-            : ReaderPaperTexture.CreateBrush(palette.Sidebar, appearance, 0.8);
+        // The title bar, TOC rail, assistant rail, reading canvas and footer
+        // are one reader surface. Reusing one brush removes visible bands when
+        // a muted theme changes between the chrome and body regions.
+        resources["ReaderChromeBrush"] = pageBrush;
+        resources["ReaderSidebarBrush"] = pageBrush;
 
         void Set(string name, Color color)
         {

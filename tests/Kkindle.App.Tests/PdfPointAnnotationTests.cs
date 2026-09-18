@@ -12,41 +12,8 @@ namespace Kkindle.Ui.Tests;
 
 [Collection("Settings UI")]
 [Trait("Category", "Slow")]
-public sealed class PdfResearchFeaturesTests(SettingsUiSession session)
+public sealed class PdfPointAnnotationTests(SettingsUiSession session)
 {
-    [Fact]
-    public Task PaperModeDetectsColumnsAndTurnsThroughThem() => Run(async () =>
-    {
-        await using var scope = await ReaderTestWindow.Create();
-        var path = PdfFixture.WriteTwoColumn(scope.Paths.ReaderCache);
-        var library = new SqliteBookLibraryService(scope.Paths, new BookMetadataService());
-        await library.ImportAsync([path]);
-        var book = Assert.Single(await library.SearchAsync());
-        using var card = new BookCardViewModel(book, scope.Paths.Data);
-        await scope.Call<Task>(
-            "OpenPdfReaderAsync",
-            card,
-            book.Files[0],
-            library.GetAbsoluteFilePath(book.Files[0]));
-        await scope.Field<Task>("_readerPdfPaperAnalysisTask");
-
-        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
-        Assert.True(scope.Get<Button>("ReaderPdfPaperButton").IsVisible);
-        Assert.NotEmpty(scope.Window.ReaderPdfPaperItems);
-        var fullHeight = pdf.PageBounds.Height;
-        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.PaperColumns);
-
-        Assert.Equal(PdfReaderDisplayMode.PaperColumns, pdf.DisplayMode);
-        Assert.True(pdf.HasDetectedPaperColumns);
-        Assert.True(pdf.PageBounds.Height > fullHeight);
-        Assert.Equal(0, pdf.PaperColumnIndex);
-        Assert.True(await pdf.TurnPaperColumnAsync(1));
-        Assert.Equal(1, pdf.PaperColumnIndex);
-        Assert.False(pdf.CanGoNext);
-        Assert.True(await pdf.TurnPaperColumnAsync(-1));
-        Assert.Equal(0, pdf.PaperColumnIndex);
-    });
-
     [Fact]
     public Task PDFPointAnnotationsPersistTheirNormalizedLocation() => Run(async () =>
     {
@@ -63,14 +30,9 @@ public sealed class PdfResearchFeaturesTests(SettingsUiSession session)
             library.GetAbsoluteFilePath(book.Files[0]));
 
         var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var noteButton = scope.Get<Button>("ReaderPdfPointNoteButton");
+        Assert.IsType<Avalonia.Controls.Shapes.Path>(noteButton.Content);
         await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
-        var regionPng = await pdf.CaptureRegionPngAsync(
-            2,
-            new PdfPageCrop(0.10, 0.15, 0.55, 0.35),
-            CancellationToken.None);
-        Assert.NotNull(regionPng);
-        Assert.True(regionPng!.Length > 100);
-        Assert.Equal(new byte[] { 0x89, 0x50, 0x4e, 0x47 }, regionPng[..4]);
         pdf.SetPointAnnotationMode(true);
         var localPoint = new Point(pdf.PageBounds.Left + pdf.PageBounds.Width * 0.82,
             pdf.PageBounds.Top + pdf.PageBounds.Height * 0.25);

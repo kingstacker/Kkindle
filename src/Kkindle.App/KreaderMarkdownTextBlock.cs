@@ -153,7 +153,8 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
             var quote = QuotePattern.Match(trimmed);
             if (quote.Success)
             {
-                paragraph.Append("▎ ").Append(quote.Groups[1].Value).Append('\n');
+                FlushParagraph();
+                AppendQuote(quote.Groups[1].Value);
                 continue;
             }
 
@@ -325,6 +326,29 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
         Inlines?.Add(new Run(text)
         {
             FontSize = size,
+            FontWeight = FontWeight.SemiBold
+        });
+        AddLineBreak();
+    }
+
+    private void AppendQuote(string text)
+    {
+        var quoteSize = Math.Max(24, FontSize + 12);
+        Inlines?.Add(new Run("“")
+        {
+            Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
+            FontSize = quoteSize,
+            FontWeight = FontWeight.SemiBold
+        });
+        Inlines?.Add(new Run(text)
+        {
+            Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
+            FontStyle = FontStyle.Italic
+        });
+        Inlines?.Add(new Run("”")
+        {
+            Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
+            FontSize = quoteSize,
             FontWeight = FontWeight.SemiBold
         });
         AddLineBreak();

@@ -250,15 +250,8 @@ public partial class MainWindow
             _readerIsPdf = true;
             _readerPdfSourcePath = path;
             _readerPdfPages = [];
-            _readerPdfPaperAnalysis = null;
             _readerPdfEmbeddedOutline = [];
-            _readerPdfPaperAnalysisTask = Task.CompletedTask;
-            ReaderPdfPaperItems.Clear();
-            _readerPendingPdfRegion = null;
             _readerPendingPdfPoint = null;
-            ReaderPdfPaperButton.IsVisible = false;
-            ReaderPdfPaperView.IsVisible = false;
-            ReaderPdfPaperStatusText.Text = T("正在识别论文结构…");
             _readerPdfPage = 1;
             _readerChapterIndex = 0;
             _readerScrollRatio = 0;
@@ -375,7 +368,6 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return false;
         _selectedReaderAnnotation = null;
         _readerPendingPdfPoint = null;
-        _readerPendingPdfRegion = null;
         HideReaderAnnotationInputPopup();
         HideReaderSelectionPopup();
         HideReaderAnnotationHoverPopup();
@@ -497,30 +489,10 @@ public partial class MainWindow
     private void ShowReaderTocTab()
     {
         ReaderTocView.IsVisible = true;
-        ReaderPdfPaperView.IsVisible = false;
         ReaderBookmarkPane.IsVisible = false;
         ReaderSearchPanel.IsVisible = false;
         ReaderTocEmptyText.IsVisible = _readerTocItems.Count == 0;
     }
-
-    private void ShowReaderPdfPaperTab()
-    {
-        if (!_readerIsPdf)
-        {
-            ShowReaderTocTab();
-            return;
-        }
-        _readerTocExpanded = true;
-        _readerTocMinimal = false;
-        ReaderTocView.IsVisible = false;
-        ReaderPdfPaperView.IsVisible = true;
-        ReaderBookmarkPane.IsVisible = false;
-        ReaderSearchPanel.IsVisible = false;
-        ApplyReaderPanelLayout();
-    }
-
-    private void ReaderPdfPaperButton_Click(object? sender, RoutedEventArgs e)
-        => ShowReaderPdfPaperTab();
 
     private void ShowReaderBookmarkTab()
     {
@@ -530,7 +502,6 @@ public partial class MainWindow
         _readerTocExpanded = true;
         _readerTocMinimal = false;
         ReaderTocView.IsVisible = false;
-        ReaderPdfPaperView.IsVisible = false;
         ReaderBookmarkPane.IsVisible = true;
         ReaderSearchPanel.IsVisible = false;
         ReaderBookmarkEmptyText.IsVisible = ReaderBookmarks.Count == 0;
@@ -540,7 +511,6 @@ public partial class MainWindow
     private void ShowReaderSearchTab()
     {
         ReaderTocView.IsVisible = false;
-        ReaderPdfPaperView.IsVisible = false;
         ReaderBookmarkPane.IsVisible = false;
         ReaderSearchPanel.IsVisible = true;
     }

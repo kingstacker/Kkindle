@@ -245,7 +245,6 @@ public partial class MainWindow
                 {
                     if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var x, out var y))
                     {
-                        await pdf.EnsurePaperColumnForPointAsync(x, ReaderToken);
                         pdf.ScrollToPdfPoint(x, y);
                     }
                     else
@@ -443,6 +442,7 @@ public partial class MainWindow
             || page != pdf.PageNumber)
             return;
 
+        UpdateReaderPdfPointNoteButton(false);
         _selectedReaderAnnotation = null;
         _readerPendingSelection = null;
         _readerPendingSelectionStartOffset = 0;

@@ -32,35 +32,11 @@ public sealed partial class NativePdfReaderHost
         _pointAnnotationMode = enabled;
         if (enabled)
         {
-            _regionSelectionMode = false;
-            _regionPointerStart = null;
-            _regionSelection = null;
             ClearSelection();
         }
         Cursor = enabled
             ? new Cursor(StandardCursorType.Cross)
             : new Cursor(StandardCursorType.Arrow);
-        InvalidateVisual();
-    }
-
-    public void SetRegionSelectionMode(bool enabled)
-    {
-        _regionSelectionMode = enabled;
-        _pointAnnotationMode = false;
-        _regionPointerStart = null;
-        _regionSelection = null;
-        if (enabled) ClearSelection();
-        Cursor = enabled
-            ? new Cursor(StandardCursorType.Cross)
-            : new Cursor(StandardCursorType.Arrow);
-        InvalidateVisual();
-    }
-
-    public void ClearRegionSelection()
-    {
-        _regionSelectionMode = false;
-        _regionPointerStart = null;
-        _regionSelection = null;
         InvalidateVisual();
     }
 
@@ -73,30 +49,11 @@ public sealed partial class NativePdfReaderHost
             || page > PageCount)
             return null;
         var bounds = GetPageBounds(page);
-        var crop = GetPageCrop(page).Normalize();
         var size = GetUnrotatedPageSize(bounds);
         var local = new Point(
-            (x - crop.X) / crop.Width * size.Width,
-            (y - crop.Y) / crop.Height * size.Height);
+            x * size.Width,
+            y * size.Height);
         return GetPageTransform(bounds).Transform(local);
-    }
-
-    public async Task EnsurePaperColumnForPointAsync(
-        double x,
-        CancellationToken cancellationToken = default)
-    {
-        if (DisplayMode != PdfReaderDisplayMode.PaperColumns
-            || GetPageContent(PageNumber) is not { } content)
-            return;
-        var columns = PdfPaperAnalysisService.DetectColumns(content);
-        if (!columns.IsTwoColumn) return;
-        var targetColumn = x >= columns.Right.X ? 1 : 0;
-        if (targetColumn == _paperColumnIndex) return;
-        _paperColumnIndex = targetColumn;
-        ClearSelection();
-        RebuildLayout(preservePosition: false);
-        await RefreshViewportAsync(cancellationToken);
-        Emit(new { type = "pdfLayout" });
     }
 
     public void ScrollToPdfPoint(double x, double y)
@@ -104,11 +61,10 @@ public sealed partial class NativePdfReaderHost
         if (_layout is null || PageNumber < 1 || PageNumber > _layout.Pages.Length)
             return;
         var page = GetPageBounds(PageNumber);
-        var crop = GetPageCrop(PageNumber).Normalize();
         var size = GetUnrotatedPageSize(page);
         var local = new Point(
-            (Math.Clamp(x, 0, 1) - crop.X) / crop.Width * size.Width,
-            (Math.Clamp(y, 0, 1) - crop.Y) / crop.Height * size.Height);
+            Math.Clamp(x, 0, 1) * size.Width,
+            Math.Clamp(y, 0, 1) * size.Height);
         var position = GetPageTransform(page).Transform(local);
         SetPan(new(
             position.X - Viewport.Width * 0.2,
@@ -211,12 +167,11 @@ public sealed partial class NativePdfReaderHost
     private Rect GetLocalGlyphBounds(int pageNumber, PdfTextBounds box, Rect page)
     {
         var size = GetUnrotatedPageSize(page);
-        var crop = GetPageCrop(pageNumber).Normalize();
         return new(
-            (box.X - crop.X) / crop.Width * size.Width,
-            (box.Y - crop.Y) / crop.Height * size.Height,
-            box.Width / crop.Width * size.Width,
-            box.Height / crop.Height * size.Height);
+            box.X * size.Width,
+            box.Y * size.Height,
+            box.Width * size.Width,
+            box.Height * size.Height);
     }
 
     private Point GetNormalizedPagePoint(int pageNumber, Point point)
@@ -224,33 +179,9 @@ public sealed partial class NativePdfReaderHost
         var page = GetPageBounds(pageNumber);
         var local = GetPageTransform(page).Invert().Transform(point);
         var size = GetUnrotatedPageSize(page);
-        var crop = GetPageCrop(pageNumber).Normalize();
         return new(
-            Math.Clamp(crop.X + local.X / Math.Max(1, size.Width) * crop.Width, 0, 1),
-            Math.Clamp(crop.Y + local.Y / Math.Max(1, size.Height) * crop.Height, 0, 1));
-    }
-
-    private Rect GetLocalRegionBounds(int pageNumber, PdfPageCrop region, Rect page)
-    {
-        var crop = GetPageCrop(pageNumber).Normalize();
-        var size = GetUnrotatedPageSize(page);
-        region = region.Normalize();
-        return new(
-            (region.X - crop.X) / crop.Width * size.Width,
-            (region.Y - crop.Y) / crop.Height * size.Height,
-            region.Width / crop.Width * size.Width,
-            region.Height / crop.Height * size.Height);
-    }
-
-    private PdfPageCrop GetRegionSelection(Point first, Point second, int pageNumber)
-    {
-        var start = GetNormalizedPagePoint(pageNumber, first);
-        var end = GetNormalizedPagePoint(pageNumber, second);
-        return new PdfPageCrop(
-            Math.Min(start.X, end.X),
-            Math.Min(start.Y, end.Y),
-            Math.Abs(start.X - end.X),
-            Math.Abs(start.Y - end.Y)).Normalize();
+            Math.Clamp(local.X / Math.Max(1, size.Width), 0, 1),
+            Math.Clamp(local.Y / Math.Max(1, size.Height), 0, 1));
     }
 
     private void EmitPointAnnotation(int pageNumber, Point point)
@@ -267,27 +198,6 @@ public sealed partial class NativePdfReaderHost
             pageY = normalized.Y,
             x = Math.Clamp(point.X, 0, Bounds.Width),
             y = Math.Clamp(point.Y, 0, Bounds.Height)
-        });
-    }
-
-    private void EmitRegionSelection(int pageNumber, PdfPageCrop region, Point point)
-    {
-        _regionSelectionMode = false;
-        _regionPointerStart = null;
-        _regionSelectionPage = pageNumber;
-        _regionSelection = region;
-        Cursor = new Cursor(StandardCursorType.Arrow);
-        InvalidateVisual();
-        Emit(new
-        {
-            type = "pdfRegionSelection",
-            page = pageNumber,
-            x = region.X,
-            y = region.Y,
-            width = region.Width,
-            height = region.Height,
-            anchorX = Math.Clamp(point.X, 0, Bounds.Width),
-            anchorY = Math.Clamp(point.Y, 0, Bounds.Height)
         });
     }
 
@@ -337,16 +247,11 @@ public sealed partial class NativePdfReaderHost
             if (_pages.TryGetValue(pageNumber, out var cached) && cached.Bitmap is { } bitmap && cached.Raster is { } raster
                 && raster.Rotation == Rotation && cached.Palette == _palette)
             {
-                var crop = GetRenderedPageCrop(pageNumber);
                 var target = new Rect(
-                    page.X + ((double)raster.Left / raster.PagePixelWidth - crop.X)
-                        / Math.Max(0.01, crop.Width) * page.Width,
-                    page.Y + ((double)raster.Top / raster.PagePixelHeight - crop.Y)
-                        / Math.Max(0.01, crop.Height) * page.Height,
-                    (double)raster.Width / raster.PagePixelWidth
-                        / Math.Max(0.01, crop.Width) * page.Width,
-                    (double)raster.Height / raster.PagePixelHeight
-                        / Math.Max(0.01, crop.Height) * page.Height);
+                    page.X + (double)raster.Left / raster.PagePixelWidth * page.Width,
+                    page.Y + (double)raster.Top / raster.PagePixelHeight * page.Height,
+                    (double)raster.Width / raster.PagePixelWidth * page.Width,
+                    (double)raster.Height / raster.PagePixelHeight * page.Height);
                 context.DrawImage(bitmap, new Rect(bitmap.Size), target);
             }
             using var clip = context.PushClip(page);
@@ -359,27 +264,14 @@ public sealed partial class NativePdfReaderHost
                 if (color == Colors.Black && _palette != ReaderPalette.For(ReaderTheme.Classic)) color = _palette.Ink;
                 if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var pointX, out var pointY))
                 {
-                    var crop = GetPageCrop(pageNumber).Normalize();
                     var size = GetUnrotatedPageSize(page);
-                    var point = new Point(
-                        (pointX - crop.X) / crop.Width * size.Width,
-                        (pointY - crop.Y) / crop.Height * size.Height);
+                    var point = new Point(pointX * size.Width, pointY * size.Height);
                     DrawPointAnnotation(context, point, color);
                     continue;
                 }
                 if (annotation.EndOffset <= annotation.StartOffset) continue;
                 foreach (var rect in GetLocalRangeBounds(pageNumber, annotation.StartOffset, annotation.EndOffset))
                     DrawAnnotation(context, rect, annotation.UnderlineStyle, color);
-            }
-            if (_regionSelectionPage == pageNumber && _regionSelection is { } region)
-            {
-                var selectionBounds = GetLocalRegionBounds(pageNumber, region, page);
-                context.FillRectangle(
-                    new SolidColorBrush(Color.FromArgb(48, 66, 133, 210)),
-                    selectionBounds);
-                context.DrawRectangle(
-                    new Pen(new SolidColorBrush(Color.FromArgb(180, 66, 133, 210)), 1.2),
-                    selectionBounds);
             }
             if (_searchPage == pageNumber)
                 for (var index = 0; index < _search.Count; index++)
@@ -494,15 +386,6 @@ public sealed partial class NativePdfReaderHost
         ActivatePage(page);
         EmitPage();
         ClearHover();
-        if (_regionSelectionMode)
-        {
-            _regionSelectionPage = page;
-            _regionPointerStart = point;
-            _regionSelection = null;
-            e.Pointer.Capture(this);
-            e.Handled = true;
-            return;
-        }
         if (_pointAnnotationMode)
         {
             if (AnnotationAt(point) is { } annotation)
@@ -533,16 +416,6 @@ public sealed partial class NativePdfReaderHost
     {
         base.OnPointerMoved(e);
         var point = e.GetPosition(this);
-        if (_regionPointerStart is { } regionStart)
-        {
-            var regionPage = _regionSelectionPage;
-            if (regionPage > 0)
-            {
-                _regionSelection = GetRegionSelection(regionStart, point, regionPage);
-                InvalidateVisual();
-            }
-            return;
-        }
         if (_pointerStart is { } start && _anchorOffset >= 0)
         {
             _dragging |= Math.Abs(point.X - start.X) + Math.Abs(point.Y - start.Y) > 3;
@@ -555,7 +428,7 @@ public sealed partial class NativePdfReaderHost
         }
         var annotation = AnnotationAt(point);
         var page = PageAtPoint(point);
-        Cursor = new Cursor(_regionSelectionMode || _pointAnnotationMode
+        Cursor = new Cursor(_pointAnnotationMode
             ? StandardCursorType.Cross
             : annotation is not null
                 ? StandardCursorType.Hand
@@ -576,28 +449,6 @@ public sealed partial class NativePdfReaderHost
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        if (_regionPointerStart is { } regionStart)
-        {
-            var point = e.GetPosition(this);
-            var page = _regionSelectionPage;
-            _regionPointerStart = null;
-            e.Pointer.Capture(null);
-            if (page > 0)
-            {
-                var region = GetRegionSelection(regionStart, point, page);
-                if (region.Width >= 0.01 && region.Height >= 0.01)
-                    EmitRegionSelection(page, region, point);
-                else
-                {
-                    _regionSelectionMode = false;
-                    _regionSelection = null;
-                    Cursor = new Cursor(StandardCursorType.Arrow);
-                    InvalidateVisual();
-                }
-            }
-            e.Handled = true;
-            return;
-        }
         if (_pointerStart is null) return;
         var dragged = _dragging;
         _pointerStart = null;
@@ -650,12 +501,9 @@ public sealed partial class NativePdfReaderHost
         }
         else if (e.Key == Key.Escape)
         {
-            if (_pointAnnotationMode || _regionSelectionMode || _regionPointerStart is not null)
+            if (_pointAnnotationMode)
             {
                 _pointAnnotationMode = false;
-                _regionSelectionMode = false;
-                _regionPointerStart = null;
-                _regionSelection = null;
                 Cursor = new Cursor(StandardCursorType.Arrow);
                 InvalidateVisual();
             }

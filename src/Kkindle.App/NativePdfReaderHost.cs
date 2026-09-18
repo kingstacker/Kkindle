@@ -62,12 +62,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private int _searchIndex = -1;
     private string _searchQuery = string.Empty;
     private (int Page, int Start, int Length)? _speechHighlight;
-    private int _paperColumnIndex;
     private bool _pointAnnotationMode;
-    private bool _regionSelectionMode;
-    private Point? _regionPointerStart;
-    private int _regionSelectionPage;
-    private PdfPageCrop? _regionSelection;
 
     public NativePdfReaderHost()
     {
@@ -105,12 +100,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     public PdfReaderDisplayMode DisplayMode { get; private set; } = PdfReaderDisplayMode.Continuous;
     public PdfReaderFitMode FitMode { get; private set; } = PdfReaderFitMode.Width;
     public int Rotation { get; private set; }
-    public int PaperColumnIndex => _paperColumnIndex;
     public bool IsPointAnnotationMode => _pointAnnotationMode;
-    public bool IsRegionSelectionMode => _regionSelectionMode;
-    public bool HasDetectedPaperColumns =>
-        GetPageContent(PageNumber) is { } content
-        && PdfPaperAnalysisService.DetectColumns(content).IsTwoColumn;
     public string? LastError { get; private set; }
     public PdfPageContent? PageContent => GetPageContent(PageNumber);
     public double VisibleTop => GetVisibleTop(new Rect(Viewport));
@@ -118,12 +108,8 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     // edge when following the outline, including after zooming or rotating.
     internal double NavigationTop => GetVisibleTop(new Rect(Viewport).Deflate(PdfReaderLayout.Margin));
     public Rect PageBounds => GetPageBounds(PageNumber);
-    public bool CanGoPrevious => DisplayMode == PdfReaderDisplayMode.PaperColumns
-        ? _paperColumnIndex > 0 || PageNumber > 1
-        : GetAdjacentPage(-1) != PageNumber;
-    public bool CanGoNext => DisplayMode == PdfReaderDisplayMode.PaperColumns
-        ? (_paperColumnIndex == 0 && HasDetectedPaperColumns) || PageNumber < PageCount
-        : GetAdjacentPage(1) != PageNumber;
+    public bool CanGoPrevious => GetAdjacentPage(-1) != PageNumber;
+    public bool CanGoNext => GetAdjacentPage(1) != PageNumber;
     internal int CachedPageCount => _pages.Count;
     internal long CachedRasterBytes => _pages.Values.Sum(page => (long)(page.Raster?.Width ?? 0) * (page.Raster?.Height ?? 0) * 4);
     public IReadOnlyList<int> VisiblePageNumbers => _layout?.VisiblePages(DocumentViewport).ToArray() ?? [];
@@ -172,11 +158,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         _pages.Clear();
         PageCount = count;
         PageNumber = 1;
-        _paperColumnIndex = 0;
         _pointAnnotationMode = false;
-        _regionSelectionMode = false;
-        _regionPointerStart = null;
-        _regionSelection = null;
         _sizes = Enumerable.Repeat(new Size(595, 842), count).ToArray();
         _layout = null;
         _pan = default;
@@ -204,12 +186,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             _viewportCancellation?.Cancel();
             ++_rasterVersion;
             var pageNumber = Math.Clamp(ReadTargetPage(uri), 1, PageCount);
-            if (DisplayMode == PdfReaderDisplayMode.PaperColumns)
-                _paperColumnIndex = 0;
             _pointAnnotationMode = false;
-            _regionSelectionMode = false;
-            _regionPointerStart = null;
-            _regionSelection = null;
             LastError = null;
             var initialPages = DisplayMode == PdfReaderDisplayMode.TwoPage
                 ? Enumerable.Range((pageNumber - 1) / 2 * 2 + 1, Math.Min(2, PageCount - (pageNumber - 1) / 2 * 2)).ToArray()
@@ -305,101 +282,12 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         ? _layout.Pages[page - 1].Translate(-_pan) : new Rect(Viewport);
     internal PdfRasterRegion? GetRenderedRegion(int page) => _pages.GetValueOrDefault(page)?.Raster;
 
-    internal PdfPageCrop GetPageCrop(int page)
-    {
-        if (DisplayMode != PdfReaderDisplayMode.PaperColumns)
-            return PdfPageCrop.Full;
-        var content = GetPageContent(page);
-        if (content is null) return PdfPageCrop.Full;
-        var columns = PdfPaperAnalysisService.DetectColumns(content);
-        if (!columns.IsTwoColumn) return PdfPageCrop.Full;
-        return _paperColumnIndex == 0 ? columns.Left : columns.Right;
-    }
-
-    internal PdfPageCrop GetRenderedPageCrop(int page)
-    {
-        var crop = GetPageCrop(page).Normalize();
-        return Rotation switch
-        {
-            90 => new PdfPageCrop(
-                1 - crop.Y - crop.Height,
-                crop.X,
-                crop.Height,
-                crop.Width).Normalize(),
-            180 => new PdfPageCrop(
-                1 - crop.X - crop.Width,
-                1 - crop.Y - crop.Height,
-                crop.Width,
-                crop.Height).Normalize(),
-            270 => new PdfPageCrop(
-                crop.Y,
-                1 - crop.X - crop.Width,
-                crop.Height,
-                crop.Width).Normalize(),
-            _ => crop
-        };
-    }
-
     public int GetAdjacentPage(int direction)
     {
         if (PageCount == 0 || direction == 0) return PageNumber;
         var first = DisplayMode == PdfReaderDisplayMode.TwoPage ? (PageNumber - 1) / 2 * 2 + 1 : PageNumber;
         var target = first + Math.Sign(direction) * (DisplayMode == PdfReaderDisplayMode.TwoPage ? 2 : 1);
         return target < 1 || target > PageCount ? PageNumber : target;
-    }
-
-    public async Task<bool> TurnPaperColumnAsync(int direction, CancellationToken cancellationToken = default)
-    {
-        if (DisplayMode != PdfReaderDisplayMode.PaperColumns || PageCount == 0)
-            return false;
-        direction = Math.Sign(direction);
-        if (direction == 0) return false;
-
-        if (direction > 0 && _paperColumnIndex == 0 && HasDetectedPaperColumns)
-        {
-            _paperColumnIndex = 1;
-            ClearSelection();
-            RebuildLayout(preservePosition: false);
-            await RefreshViewportAsync(cancellationToken);
-            Emit(new { type = "pdfLayout" });
-            return true;
-        }
-
-        if (direction < 0 && _paperColumnIndex == 1)
-        {
-            _paperColumnIndex = 0;
-            ClearSelection();
-            RebuildLayout(preservePosition: false);
-            await RefreshViewportAsync(cancellationToken);
-            Emit(new { type = "pdfLayout" });
-            return true;
-        }
-
-        var target = PageNumber + direction;
-        if (target < 1 || target > PageCount) return false;
-        _paperColumnIndex = 0;
-        var source = new Uri(_documentPath!).AbsoluteUri + $"#page={target}";
-        return await NavigateAsync(new Uri(source), cancellationToken);
-    }
-
-    public async Task EnsurePaperColumnForOffsetAsync(
-        int offset,
-        CancellationToken cancellationToken = default)
-    {
-        if (DisplayMode != PdfReaderDisplayMode.PaperColumns
-            || GetPageContent(PageNumber) is not { } content)
-            return;
-        var glyph = content.Glyphs.FirstOrDefault(item => item.Offset + item.Length > offset);
-        var columns = PdfPaperAnalysisService.DetectColumns(content);
-        if (glyph is null || !columns.IsTwoColumn) return;
-        var targetColumn = glyph.Bounds.X + glyph.Bounds.Width / 2
-            >= columns.Right.X ? 1 : 0;
-        if (targetColumn == _paperColumnIndex) return;
-        _paperColumnIndex = targetColumn;
-        ClearSelection();
-        RebuildLayout(preservePosition: false);
-        await RefreshViewportAsync(cancellationToken);
-        Emit(new { type = "pdfLayout" });
     }
 
     public void SetAppearance(ReaderAppearanceSettings appearance)
@@ -420,24 +308,15 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     {
         if (!Enum.IsDefined(mode)) return;
         var request = ++_layoutRequest;
-        if ((mode is PdfReaderDisplayMode.TwoPage or PdfReaderDisplayMode.PaperColumns) && PageCount > 0)
+        if (mode == PdfReaderDisplayMode.TwoPage && PageCount > 0)
         {
-            var first = mode == PdfReaderDisplayMode.TwoPage
-                ? (PageNumber - 1) / 2 * 2 + 1
-                : PageNumber;
-            var count = mode == PdfReaderDisplayMode.TwoPage
-                ? Math.Min(2, PageCount - first + 1)
-                : 1;
+            var first = (PageNumber - 1) / 2 * 2 + 1;
+            var count = Math.Min(2, PageCount - first + 1);
             await LoadPageContentsAsync(Enumerable.Range(first, count), _version, _documentCancellation!.Token);
             if (_disposed || request != _layoutRequest) return;
         }
-        if (mode != PdfReaderDisplayMode.PaperColumns)
-            _paperColumnIndex = 0;
         ClearSelection();
         _pointAnnotationMode = false;
-        _regionSelectionMode = false;
-        _regionPointerStart = null;
-        _regionSelection = null;
         DisplayMode = mode;
         RebuildLayout(preservePosition: true);
         await RefreshViewportAsync();
@@ -486,7 +365,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
 
     private double PagePanY => _layout is null ? 0 : Math.Max(0, _pan.Y - _layout.Pages[PageNumber - 1].Y + PdfReaderLayout.Margin);
     public string CaptureViewState() => string.Create(CultureInfo.InvariantCulture,
-        $"pdf-view:{Zoom:R};{_pan.X / Math.Max(1, PageBounds.Width):R};{PagePanY / Math.Max(1, PageBounds.Height):R};{(int)DisplayMode};{(int)FitMode};{Rotation};{_paperColumnIndex}");
+        $"pdf-view:{Zoom:R};{_pan.X / Math.Max(1, PageBounds.Width):R};{PagePanY / Math.Max(1, PageBounds.Height):R};{(int)DisplayMode};{(int)FitMode};{Rotation}");
 
     public void RestoreViewSettings(string? state)
     {
@@ -496,7 +375,6 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         DisplayMode = values.Length == 3 ? PdfReaderDisplayMode.SinglePage : (PdfReaderDisplayMode)(int)values[3];
         FitMode = values.Length == 3 ? PdfReaderFitMode.Width : (PdfReaderFitMode)(int)values[4];
         Rotation = values.Length > 5 ? (int)values[5] : 0;
-        _paperColumnIndex = values.Length > 6 ? Math.Clamp((int)values[6], 0, 1) : 0;
     }
 
     public async Task RestoreViewStateAsync(string? state, int legacyScrollPosition = 0)
@@ -521,13 +399,13 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         var parsed = new double[values.Length];
         for (var index = 0; index < values.Length; index++)
             if (!double.TryParse(values[index], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[index]) || !double.IsFinite(parsed[index])) return null;
+        // Version 1 stored the removed paper-column mode as value 3. Treat
+        // those saved sessions as ordinary single-page PDFs instead of
+        // allowing an unavailable mode to leak into the new reader.
+        if (values.Length >= 5 && parsed[3] == 3) parsed[3] = (int)PdfReaderDisplayMode.SinglePage;
         if (values.Length >= 5 && (parsed[3] != Math.Truncate(parsed[3]) || parsed[4] != Math.Truncate(parsed[4])
             || !Enum.IsDefined((PdfReaderDisplayMode)(int)parsed[3]) || !Enum.IsDefined((PdfReaderFitMode)(int)parsed[4]))) return null;
-        if (values.Length == 6 && parsed[5] is not (0 or 90 or 180 or 270)) return null;
-        if (values.Length == 7
-            && (parsed[5] is not (0 or 90 or 180 or 270)
-                || parsed[6] != Math.Truncate(parsed[6])
-                || parsed[6] is < 0 or > 1)) return null;
+        if (values.Length >= 6 && parsed[5] is not (0 or 90 or 180 or 270)) return null;
         return parsed;
     }
 
@@ -545,8 +423,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             FitMode,
             Zoom,
             _layoutDpi,
-            Rotation,
-            GetPageCrop(PageNumber));
+            Rotation);
         if (preservePosition)
         {
             var page = _layout.Pages[PageNumber - 1];
@@ -624,34 +501,31 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             {
                 if (!_pages.TryGetValue(page, out var cached)) continue;
                 var bounds = GetPageBounds(page);
-                var crop = GetRenderedPageCrop(page);
                 var fullSize = _sizes[page - 1];
                 if (Rotation % 180 != 0) fullSize = new(fullSize.Height, fullSize.Width);
-                var cropWidth = Math.Max(1, fullSize.Width * crop.Width);
-                var cropHeight = Math.Max(1, fullSize.Height * crop.Height);
                 var scale = Math.Max(
-                    bounds.Width / cropWidth,
-                    bounds.Height / cropHeight);
+                    bounds.Width / Math.Max(1, fullSize.Width),
+                    bounds.Height / Math.Max(1, fullSize.Height));
                 var width = Math.Max(1, (int)Math.Round(fullSize.Width * scale * _layoutDpi));
                 var height = Math.Max(1, (int)Math.Round(fullSize.Height * scale * _layoutDpi));
                 var intersection = bounds.Intersect(new Rect(Viewport));
                 if (intersection.Width <= 0 || intersection.Height <= 0) continue;
                 var left = Math.Clamp(
-                    (int)Math.Floor(crop.X * width + (intersection.X - bounds.X) * _layoutDpi),
+                    (int)Math.Floor((intersection.X - bounds.X) * _layoutDpi),
                     0,
                     width - 1);
                 var top = Math.Clamp(
-                    (int)Math.Floor(crop.Y * height + (intersection.Y - bounds.Y) * _layoutDpi),
+                    (int)Math.Floor((intersection.Y - bounds.Y) * _layoutDpi),
                     0,
                     height - 1);
                 var right = Math.Clamp(
-                    (int)Math.Ceiling(crop.X * width + (intersection.Right - bounds.X) * _layoutDpi),
+                    (int)Math.Ceiling((intersection.Right - bounds.X) * _layoutDpi),
                     left + 1,
-                    Math.Max(left + 1, (int)Math.Ceiling((crop.X + crop.Width) * width)));
+                    width);
                 var bottom = Math.Clamp(
-                    (int)Math.Ceiling(crop.Y * height + (intersection.Bottom - bounds.Y) * _layoutDpi),
+                    (int)Math.Ceiling((intersection.Bottom - bounds.Y) * _layoutDpi),
                     top + 1,
-                    Math.Max(top + 1, (int)Math.Ceiling((crop.Y + crop.Height) * height)));
+                    height);
                 if (cached.Raster is { } raster && raster.Rotation == rotation && cached.Palette == palette
                     && raster.PagePixelWidth == width && raster.PagePixelHeight == height
                     && raster.Left <= left && raster.Top <= top && raster.Left + raster.Width >= right && raster.Top + raster.Height >= bottom) continue;
@@ -819,97 +693,6 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         capture.Save(stream, PngBitmapEncoderOptions.Default);
         return Task.FromResult<byte[]?>(stream.ToArray());
     }
-
-    public async Task<byte[]?> CaptureRegionPngAsync(
-        int pageNumber,
-        PdfPageCrop region,
-        CancellationToken cancellationToken = default)
-    {
-        if (pageNumber < 1 || pageNumber > PageCount)
-            return null;
-        if (!_pages.ContainsKey(pageNumber))
-            await LoadPageContentsAsync([pageNumber], _version, _documentCancellation?.Token ?? cancellationToken);
-        if (GetPageContent(pageNumber) is null || _document is null)
-            return null;
-
-        region = TransformRegionForView(region.Normalize());
-        var fullSize = _sizes[pageNumber - 1];
-        if (Rotation % 180 != 0) fullSize = new(fullSize.Height, fullSize.Width);
-        var scale = Math.Min(
-            3d,
-            Math.Sqrt(12_000_000d / Math.Max(1, fullSize.Width * fullSize.Height)));
-        scale = Math.Max(1, scale);
-        var fullWidth = Math.Max(1, (int)Math.Ceiling(fullSize.Width * scale));
-        var fullHeight = Math.Max(1, (int)Math.Ceiling(fullSize.Height * scale));
-        var left = Math.Clamp((int)Math.Floor(region.X * fullWidth), 0, fullWidth - 1);
-        var top = Math.Clamp((int)Math.Floor(region.Y * fullHeight), 0, fullHeight - 1);
-        var right = Math.Clamp((int)Math.Ceiling((region.X + region.Width) * fullWidth), left + 1, fullWidth);
-        var bottom = Math.Clamp((int)Math.Ceiling((region.Y + region.Height) * fullHeight), top + 1, fullHeight);
-        var width = right - left;
-        var height = bottom - top;
-
-        var raster = await Task.Run(() =>
-        {
-            lock (_documentGate)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (_disposed || _document is null) return null;
-                return _document.RenderRegion(
-                    pageNumber,
-                    fullWidth,
-                    fullHeight,
-                    left,
-                    top,
-                    width,
-                    height,
-                    cancellationToken,
-                    Rotation);
-            }
-        }, cancellationToken);
-        if (raster is null) return null;
-
-        var bitmap = new WriteableBitmap(
-            new PixelSize(raster.Width, raster.Height),
-            new Vector(96, 96),
-            PixelFormats.Bgra8888,
-            AlphaFormat.Opaque);
-        using (var frame = bitmap.Lock())
-        {
-            if (frame.RowBytes == raster.Width * 4)
-                Marshal.Copy(raster.Pixels, 0, frame.Address, raster.Pixels.Length);
-            else
-                for (var row = 0; row < raster.Height; row++)
-                    Marshal.Copy(
-                        raster.Pixels,
-                        row * raster.Width * 4,
-                        IntPtr.Add(frame.Address, row * frame.RowBytes),
-                        raster.Width * 4);
-        }
-        await using var stream = new MemoryStream();
-        bitmap.Save(stream, PngBitmapEncoderOptions.Default);
-        bitmap.Dispose();
-        return stream.ToArray();
-    }
-
-    private PdfPageCrop TransformRegionForView(PdfPageCrop region) => Rotation switch
-    {
-        90 => new PdfPageCrop(
-            1 - region.Y - region.Height,
-            region.X,
-            region.Height,
-            region.Width).Normalize(),
-        180 => new PdfPageCrop(
-            1 - region.X - region.Width,
-            1 - region.Y - region.Height,
-            region.Width,
-            region.Height).Normalize(),
-        270 => new PdfPageCrop(
-            region.Y,
-            1 - region.X - region.Width,
-            region.Height,
-            region.Width).Normalize(),
-        _ => region
-    };
 
     public void Stop()
     {

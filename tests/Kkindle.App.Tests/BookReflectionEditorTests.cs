@@ -15,7 +15,7 @@ namespace Kkindle.Ui.Tests;
 public sealed partial class SettingsTests
 {
     [Fact]
-    public Task NativeReflectionEditorShowsFocusedTextAndAnchorsSelectionToolbar() => Run(async () =>
+    public Task NativeReflectionEditorShowsFocusedTextAndUsesFixedToolbar() => Run(async () =>
     {
         var surface = new BookReflectionEditorSurface("这段文字应该显示出来")
         {
@@ -26,7 +26,7 @@ public sealed partial class SettingsTests
         {
             Width = 720,
             Height = 500,
-            Content = surface
+            Content = new StackPanel { Children = { surface.FormattingToolbar, surface } }
         };
         window.Show();
         try
@@ -57,25 +57,19 @@ public sealed partial class SettingsTests
             editor.SelectionStart = 2;
             editor.SelectionEnd = 8;
             await Render();
-            var popup = Assert.Single(surface.GetVisualDescendants().OfType<Popup>());
-            Assert.True(popup.IsOpen);
-            Assert.True(popup.HorizontalOffset < 0,
-                "The selection toolbar should follow a selection near the start of the line.");
-
-            popup.IsOpen = false;
-            await Render();
-            Assert.Equal(editor.SelectionStart, editor.SelectionEnd);
-
-            editor.SelectionStart = 2;
-            editor.SelectionEnd = 8;
-            await Render();
-            var bold = popup.Child!.GetVisualDescendants()
+            Assert.Empty(surface.GetVisualDescendants().OfType<Popup>());
+            Assert.True(surface.FormattingToolbar.IsEffectivelyVisible);
+            var toolbarButtons = surface.FormattingToolbar.GetVisualDescendants()
                 .OfType<Button>()
-                .Single(button => button.Tag as string == "bold");
+                .ToArray();
+            Assert.Equal(9, toolbarButtons.Length);
+            Assert.All(toolbarButtons, button =>
+                Assert.Equal(toolbarButtons[0].Bounds.Width, button.Bounds.Width));
+            var bold = toolbarButtons.Single(button => button.Tag as string == "bold");
             bold.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Render();
             Assert.Equal(editor.SelectionStart, editor.SelectionEnd);
-            Assert.False(popup.IsOpen);
+            Assert.Contains("**文字应该显示**", surface.Markdown);
         }
         finally
         {

@@ -1143,10 +1143,7 @@ public partial class MainWindow
     private string? _readerPdfSourcePath;
     private bool _readerIsPdf;
     private ReaderAnnotation? _selectedReaderAnnotation;
-    private PdfRegionSelection? _readerPendingPdfRegion;
-    private PdfPaperAnalysis? _readerPdfPaperAnalysis;
     private IReadOnlyList<PdfOutlineItem> _readerPdfEmbeddedOutline = [];
-    private Task _readerPdfPaperAnalysisTask = Task.CompletedTask;
 
     private sealed record ReaderScrollState(
         double Position,
@@ -1373,7 +1370,6 @@ public partial class MainWindow
     public ObservableCollection<ReaderBookmark> ReaderBookmarks { get; } = [];
     public ObservableCollection<ReaderAnnotation> ReaderAnnotations { get; } = [];
     public ObservableCollection<ReaderSearchResultViewModel> ReaderSearchResults { get; } = [];
-    public ObservableCollection<ReaderPdfPaperNavigationViewModel> ReaderPdfPaperItems { get; } = [];
     public ObservableCollection<ReaderAiMessageViewModel> ReaderAiMessages { get; } = [];
     public ObservableCollection<ReaderAiSourceViewModel> ReaderAiSources { get; } = [];
 
@@ -1450,14 +1446,8 @@ public partial class MainWindow
         _readerIsPdf = false;
         UpdateReaderBookmarkCornerSurface();
         _readerPdfPages = [];
-        _readerPdfPaperAnalysis = null;
         _readerPdfEmbeddedOutline = [];
-        _readerPdfPaperAnalysisTask = Task.CompletedTask;
-        ReaderPdfPaperItems.Clear();
-        _readerPendingPdfRegion = null;
         _readerPendingPdfPoint = null;
-        ReaderPdfPaperButton.IsVisible = false;
-        ReaderPdfPaperView.IsVisible = false;
         _readerPdfPage = 1;
         _readerTocExpanded = true;
         _readerTocMinimal = false;
@@ -1472,7 +1462,6 @@ public partial class MainWindow
         ReaderTocList.SelectedItems?.Clear();
         ReaderTocPanel.IsVisible = false;
         ReaderTocView.IsVisible = true;
-        ReaderPdfPaperView.IsVisible = false;
         ReaderBookmarkPane.IsVisible = false;
         ReaderSearchPanel.IsVisible = false;
         ReaderBookmarkEmptyText.IsVisible = ReaderBookmarks.Count == 0;
@@ -5654,7 +5643,6 @@ public partial class MainWindow
                 var targetOffset = NativePdfReaderHost.ReadTargetOffset(pdfTarget);
                 if (targetOffset >= 0)
                 {
-                    await pdf.EnsurePaperColumnForOffsetAsync(targetOffset, pdfNavigationToken);
                     pdf.ScrollToOffset(targetOffset);
                 }
                 pdfNavigationToken.ThrowIfCancellationRequested();
@@ -7286,29 +7274,6 @@ public partial class MainWindow
                             localY);
                     }
                     break;
-                case "pdfRegionSelection":
-                    if (_readerIsPdf
-                        && root.TryGetProperty("page", out var regionPage)
-                        && regionPage.TryGetInt32(out var regionPageNumber)
-                        && root.TryGetProperty("x", out var regionX)
-                        && root.TryGetProperty("y", out var regionY)
-                        && root.TryGetProperty("width", out var regionWidth)
-                        && root.TryGetProperty("height", out var regionHeight)
-                        && regionX.TryGetDouble(out var normalizedRegionX)
-                        && regionY.TryGetDouble(out var normalizedRegionY)
-                        && regionWidth.TryGetDouble(out var normalizedRegionWidth)
-                        && regionHeight.TryGetDouble(out var normalizedRegionHeight))
-                    {
-                        _ = ObserveReaderTaskAsync(
-                            HandleReaderPdfRegionSelectionAsync(
-                                new PdfRegionSelection(
-                                    regionPageNumber,
-                                    normalizedRegionX,
-                                    normalizedRegionY,
-                                    normalizedRegionWidth,
-                                    normalizedRegionHeight)));
-                    }
-                    break;
                 case "link":
                     if (root.TryGetProperty("href", out var href))
                     {
@@ -8662,7 +8627,6 @@ public partial class MainWindow
             {
                 "scroll" => PdfReaderDisplayMode.Continuous,
                 "double" => PdfReaderDisplayMode.TwoPage,
-                "paper-columns" => PdfReaderDisplayMode.PaperColumns,
                 _ => PdfReaderDisplayMode.SinglePage
             });
             return;
@@ -8703,12 +8667,10 @@ public partial class MainWindow
     {
         if (ReaderScrollModeItem is null
             || ReaderSinglePageModeItem is null
-            || ReaderTwoPageModeItem is null
-            || ReaderPdfColumnModeItem is null) return;
+            || ReaderTwoPageModeItem is null) return;
         var pdf = _readerIsPdf ? CurrentReaderHost as NativePdfReaderHost : null;
         var flowMode = pdf is null ? _readerLayout.FlowMode : pdf.DisplayMode == PdfReaderDisplayMode.Continuous ? 0 : 1;
         var twoPage = pdf is null ? _readerLayout.TwoPageMode : pdf.DisplayMode == PdfReaderDisplayMode.TwoPage;
-        var paperColumns = pdf?.DisplayMode == PdfReaderDisplayMode.PaperColumns;
         var vertical = !_readerIsPdf && _readerLayout.VerticalWriting;
         ReaderTwoPageModeItem.Header = _readerIsPdf ? T("双页") : T("双栏");
         if (vertical)
@@ -8719,32 +8681,27 @@ public partial class MainWindow
         }
 
         ReaderScrollModeItem.IsChecked = flowMode == 0;
-        ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage && !paperColumns;
+        ReaderSinglePageModeItem.IsChecked = flowMode == 1 && !twoPage;
         ReaderTwoPageModeItem.IsChecked = flowMode == 1 && twoPage;
-        ReaderPdfColumnModeItem.IsVisible = _readerIsPdf;
-        ReaderPdfColumnModeItem.IsChecked = _readerIsPdf && paperColumns;
         // The native engine now implements continuous scroll and the
         // two-column spread for horizontal writing; only vertical writing is
         // restricted to single pages.
         ReaderScrollModeItem.IsEnabled = !vertical;
         ReaderTwoPageModeItem.IsEnabled = !vertical;
         ReaderSinglePageModeItem.IsEnabled = true;
-        ReaderPdfColumnModeItem.IsEnabled = _readerIsPdf;
         if (ReaderFlowButton is not null)
         {
             // Icon-only button: keep the current mode in tooltip and
             // accessibility name, mirroring UpdateReaderToolbar.
             var flowLabel = flowMode == 0
                 ? T("滚动")
-                : paperColumns
-                    ? T("论文双栏")
-                    : twoPage
+                : twoPage
                         ? (_readerIsPdf ? T("双页") : T("双栏"))
                         : T("单页");
             ToolTip.SetTip(ReaderFlowButton, flowLabel);
             AutomationProperties.SetName(ReaderFlowButton, flowLabel);
             if (ReaderFlowIcon is not null)
-                ReaderFlowIcon.Data = GetReaderFlowIcon(flowMode, twoPage, paperColumns);
+                ReaderFlowIcon.Data = GetReaderFlowIcon(flowMode, twoPage);
         }
     }
 
@@ -9418,15 +9375,11 @@ public partial class MainWindow
         Geometry.Parse("M6 4h7.5l4.5 4.5V20H6Z M13.5 4v4.5H18");
     private static readonly Geometry ReaderFlowDoubleIcon =
         Geometry.Parse("M5 4.5h14v15h-14Z M12 4.5v15");
-    private static readonly Geometry ReaderFlowPaperColumnsIcon =
-        Geometry.Parse("M5 4.5h14v15h-14Z M9.5 4.5v15 M14.5 4.5v15");
 
-    private static Geometry GetReaderFlowIcon(int flowMode, bool twoPage, bool paperColumns)
+    private static Geometry GetReaderFlowIcon(int flowMode, bool twoPage)
         => flowMode == 0
             ? ReaderFlowScrollIcon
-            : paperColumns
-                ? ReaderFlowPaperColumnsIcon
-                : twoPage
+            : twoPage
                     ? ReaderFlowDoubleIcon
                     : ReaderFlowSingleIcon;
 
@@ -9492,18 +9445,8 @@ public partial class MainWindow
         if (ReaderPdfPointNoteButton is not null)
         {
             ReaderPdfPointNoteButton.IsVisible = _readerIsPdf;
-            ReaderPdfPointNoteButton.Content =
-                (CurrentReaderHost as NativePdfReaderHost)?.IsPointAnnotationMode == true
-                    ? "取消页注"
-                    : "页注";
-        }
-        if (ReaderPdfRegionAiButton is not null)
-        {
-            ReaderPdfRegionAiButton.IsVisible = _readerIsPdf;
-            ReaderPdfRegionAiButton.Content =
-                (CurrentReaderHost as NativePdfReaderHost)?.IsRegionSelectionMode == true
-                    ? "取消框选"
-                    : "区域 AI";
+            UpdateReaderPdfPointNoteButton(
+                (CurrentReaderHost as NativePdfReaderHost)?.IsPointAnnotationMode == true);
         }
         if (ReaderPreviousButton is not null)
             ReaderPreviousButton.IsEnabled = _readerIsPdf

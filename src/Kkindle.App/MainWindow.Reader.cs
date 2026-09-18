@@ -997,11 +997,7 @@ public partial class MainWindow
         _readerAssistantVisibleBeforeZen = false;
         _readerIsPdf = false;
         _readerPdfPages = [];
-        _readerPdfPaperAnalysis = null;
         _readerPdfEmbeddedOutline = [];
-        _readerPdfPaperAnalysisTask = Task.CompletedTask;
-        ReaderPdfPaperItems.Clear();
-        _readerPendingPdfRegion = null;
         _readerPendingPdfPoint = null;
         _readerPdfSourcePath = null;
         ReaderBookmarks.Clear();

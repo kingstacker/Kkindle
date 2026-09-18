@@ -149,20 +149,15 @@ internal sealed class BookReflectionEditorWindow : Window
             Foreground = AppAppearanceResources.GetBrush("InkBrush"),
             TextWrapping = TextWrapping.Wrap
         };
-        var hint = new TextBlock
-        {
-            Text = UiText.Get("写下你读完这本书后的理解、感受、疑问或行动计划。"),
-            FontSize = 12,
-            Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
-            TextWrapping = TextWrapping.Wrap
-        };
-
         _editorSurface = new BookReflectionEditorSurface(initialContent)
         {
             MinHeight = 280
         };
         _editorSurface.ContentChanged += EditorSurface_ContentChanged;
         _editorSurface.AddHandler(InputElement.KeyDownEvent, Editor_KeyDown, RoutingStrategies.Tunnel);
+
+        _editorSurface.FormattingToolbar.HorizontalAlignment = HorizontalAlignment.Left;
+        _editorSurface.FormattingToolbar.VerticalAlignment = VerticalAlignment.Center;
 
         _counter = new TextBlock
         {
@@ -217,9 +212,9 @@ internal sealed class BookReflectionEditorWindow : Window
         {
             RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"),
             RowSpacing = 10,
-            Children = { book, hint, _editorSurface, footerBorder }
+            Children = { book, _editorSurface.FormattingToolbar, _editorSurface, footerBorder }
         };
-        Grid.SetRow(hint, 1);
+        Grid.SetRow(_editorSurface.FormattingToolbar, 1);
         Grid.SetRow(_editorSurface, 2);
         Grid.SetRow(footerBorder, 3);
 

@@ -85,51 +85,5 @@ internal static class PdfFixture
         return path;
     }
 
-    public static string WriteTwoColumn(string directory)
-    {
-        Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "PDF two column paper.pdf");
-        var content = new StringBuilder("1 1 1 rg 0 0 400 600 re f 0 0 0 rg BT ");
-        content.Append("/F1 16 Tf 36 560 Td (A Two Column Paper) Tj ");
-        content.Append("/F1 11 Tf 0 -28 Td (Abstract) Tj ");
-        content.Append("/F1 9 Tf 0 -18 Td (This abstract spans the left reading area.) Tj ");
-        content.Append("0 -18 Td (1 Introduction) Tj ");
-        for (var line = 1; line <= 12; line++)
-            content.Append($"0 -14 Td (Left body line {line}.) Tj ");
-        content.Append("194 0 Td (2 Methods) Tj ");
-        for (var line = 1; line <= 12; line++)
-            content.Append($"0 -14 Td (Right body line {line}.) Tj ");
-        content.Append("0 -14 Td (Figure 1: Model overview) Tj ");
-        content.Append("0 -14 Td (Table 1: Results) Tj ");
-        content.Append("0 -14 Td (References) Tj ");
-        content.Append("0 -14 Td ([1] A useful paper) Tj ");
-        content.Append("0 -14 Td ([2] Another paper) Tj ET");
-
-        var objects = new List<string>
-        {
-            "<< /Type /Catalog /Pages 2 0 R >>",
-            "<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
-            Stream(content.ToString()),
-            "<< /Title (Two Column Paper) /Author (Kkindle Tests) >>"
-        };
-        using var file = File.Create(path);
-        void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));
-        WriteAscii("%PDF-1.7\n");
-        var offsets = new List<long> { 0 };
-        for (var index = 0; index < objects.Count; index++)
-        {
-            offsets.Add(file.Position);
-            WriteAscii($"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
-        }
-        var xref = file.Position;
-        WriteAscii($"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n");
-        foreach (var offset in offsets.Skip(1))
-            WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
-        WriteAscii($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n{xref}\n%%EOF\n");
-        return path;
-    }
-
     private static string Stream(string content) => $"<< /Length {Encoding.ASCII.GetByteCount(content)} >>\nstream\n{content}\nendstream";
 }

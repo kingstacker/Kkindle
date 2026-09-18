@@ -154,7 +154,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings
         {
             Theme = ReaderTheme.Night,
-            PaperEnabled = true,
+            PaperEnabled = false,
             PaperStrength = 0.8,
             FibersEnabled = true
         });

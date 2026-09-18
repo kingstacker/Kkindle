@@ -16,3 +16,4 @@ artifacts/
 /*.png
 /debug-*.ps1
 /debug-senddiag/
+.opensquilla/
