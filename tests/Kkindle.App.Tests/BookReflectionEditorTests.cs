@@ -129,6 +129,96 @@ public sealed partial class SettingsTests
     });
 
     [Fact]
+    public Task NativeReflectionQuoteAdornmentAndWidthFollowText() => Run(async () =>
+    {
+        var surface = new BookReflectionEditorSurface("> 短引用")
+        {
+            Width = 620,
+            Height = 220
+        };
+        var window = new Window
+        {
+            Width = 720,
+            Height = 500,
+            Content = surface
+        };
+        window.Show();
+        try
+        {
+            await Render();
+
+            var opening = Assert.Single(
+                surface.GetVisualDescendants().OfType<TextBlock>(),
+                text => text.Text == "“");
+            var closing = Assert.Single(
+                surface.GetVisualDescendants().OfType<TextBlock>(),
+                text => text.Text == "”");
+            var contentHost = Assert.IsType<Grid>(opening.Parent);
+            var editor = Assert.Single(surface.GetVisualDescendants().OfType<TextBox>());
+            var shortWidth = contentHost.Bounds.Width;
+
+            Assert.True(opening.Bounds.Width >= 28, "The opening quote must have enough room to render fully.");
+            Assert.True(closing.Bounds.Width >= 28, "The closing quote must remain visible.");
+            Assert.True(shortWidth < surface.Bounds.Width - 40,
+                "A short quote background should follow its text instead of filling the editor width.");
+            Assert.InRange(shortWidth - closing.Bounds.Right, 2, 4);
+
+            editor.Text = "这是一段明显更长的引用文字，用来确认背景宽度会跟随内容自动变化";
+            await Render();
+            Assert.True(contentHost.Bounds.Width > shortWidth + 100,
+                "The quote background should grow when its text grows.");
+        }
+        finally
+        {
+            surface.Dispose();
+            window.Close();
+        }
+    });
+
+    [Fact]
+    public Task NativeReflectionEditorWindowRendersAutoWidthQuote() => Run(async () =>
+    {
+        var window = new BookReflectionEditorWindow("测试书", "> 短引用")
+        {
+            Width = 720,
+            Height = 520
+        };
+        window.Show();
+        try
+        {
+            await Render();
+
+            var opening = Assert.Single(
+                window.GetVisualDescendants().OfType<TextBlock>(),
+                text => text.Text == "“");
+            var closing = Assert.Single(
+                window.GetVisualDescendants().OfType<TextBlock>(),
+                text => text.Text == "”");
+            var contentHost = Assert.IsType<Grid>(opening.Parent);
+            Assert.True(opening.Bounds.Width >= 28);
+            Assert.True(closing.Bounds.Width >= 28);
+            Assert.True(contentHost.Bounds.Width < window.Bounds.Width - 120,
+                "The real editor window must keep a short quote background content-sized.");
+
+            var captureDirectory = Environment.GetEnvironmentVariable("KKINDLE_REFLECTION_ARTIFACTS");
+            if (!string.IsNullOrWhiteSpace(captureDirectory))
+            {
+                Directory.CreateDirectory(captureDirectory);
+                using var frame = new RenderTargetBitmap(
+                    new PixelSize((int)Math.Ceiling(window.Bounds.Width), (int)Math.Ceiling(window.Bounds.Height)));
+                frame.Render(window);
+                frame.Save(
+                    Path.Combine(captureDirectory, "reflection-editor-quote-auto-width.png"),
+                    PngBitmapEncoderOptions.Default);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    [Fact]
     public void ReflectionCitationSearchMatchesAllFields()
     {
         var first = new BookReflectionCitation(

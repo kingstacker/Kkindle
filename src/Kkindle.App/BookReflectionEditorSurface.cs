@@ -43,7 +43,7 @@ internal sealed class BookReflectionEditorSurface : Border
     private const double DefaultImageMaxHeight = 620;
     private const double MinimumImageWidth = 48;
     private const double ImageZoomFactor = 1.2;
-    private const double QuoteAdornmentWidth = 24;
+    private const double QuoteAdornmentMinWidth = 28;
 
     // Toolbar geometry. Buttons and icons share one square content box so the
     // glyphs line up on the same optical centre.
@@ -391,7 +391,7 @@ internal sealed class BookReflectionEditorSurface : Border
         };
         var contentHost = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         Grid.SetColumn(contentHost, 1);
@@ -486,8 +486,7 @@ internal sealed class BookReflectionEditorSurface : Border
             quoteOpening = CreateQuoteAdornment("“", HorizontalAlignment.Left);
             quoteClosing = CreateQuoteAdornment("”", HorizontalAlignment.Right);
             Grid.SetColumn(quoteOpening, 0);
-            Grid.SetColumn(quoteClosing, 0);
-            Grid.SetColumnSpan(quoteClosing, 2);
+            Grid.SetColumn(quoteClosing, 2);
             contentHost.Children.Add(quoteOpening);
 
             richText = new ReflectionRichTextBlock
@@ -611,7 +610,7 @@ internal sealed class BookReflectionEditorSurface : Border
     private static TextBlock CreateQuoteAdornment(string text, HorizontalAlignment alignment) => new()
     {
         Text = text,
-        Width = QuoteAdornmentWidth,
+        MinWidth = QuoteAdornmentMinWidth,
         FontSize = 31,
         FontWeight = FontWeight.SemiBold,
         Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
@@ -620,6 +619,7 @@ internal sealed class BookReflectionEditorSurface : Border
         HorizontalAlignment = alignment,
         VerticalAlignment = text == "“" ? VerticalAlignment.Top : VerticalAlignment.Bottom,
         Margin = text == "“" ? new Thickness(0, 0, 0, 0) : new Thickness(0, 0, 3, 2),
+        ClipToBounds = false,
         IsVisible = false,
         IsHitTestVisible = false,
         ZIndex = 1
@@ -1375,10 +1375,19 @@ internal sealed class BookReflectionEditorSurface : Border
         view.Row.Background = Brushes.Transparent;
         view.Marker.Margin = new Thickness(0);
         view.Marker.Background = Brushes.Transparent;
-        view.ContentHost.HorizontalAlignment = HorizontalAlignment.Stretch;
+        view.ContentHost.HorizontalAlignment = isQuote
+            ? HorizontalAlignment.Left
+            : HorizontalAlignment.Stretch;
         view.ContentHost.VerticalAlignment = VerticalAlignment.Top;
-        view.ContentHost.ColumnDefinitions[0].Width = new GridLength(
-            isQuote ? QuoteAdornmentWidth : 0);
+        view.ContentHost.ColumnDefinitions[0].Width = isQuote
+            ? GridLength.Auto
+            : new GridLength(0);
+        view.ContentHost.ColumnDefinitions[1].Width = isQuote
+            ? GridLength.Auto
+            : new GridLength(1, GridUnitType.Star);
+        view.ContentHost.ColumnDefinitions[2].Width = isQuote
+            ? GridLength.Auto
+            : new GridLength(0);
         view.ContentHost.Background = isQuote
             ? AppAppearanceResources.GetBrush("PressedBrush")
             : Brushes.Transparent;
