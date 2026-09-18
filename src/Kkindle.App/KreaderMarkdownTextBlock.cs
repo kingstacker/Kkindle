@@ -336,23 +336,32 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
         var quoteSize = Math.Max(24, FontSize + 12);
         Inlines?.Add(new Run("“")
         {
-            Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
+            Foreground = ThemeBrush("AccentBrush"),
             FontSize = quoteSize,
             FontWeight = FontWeight.SemiBold
         });
         Inlines?.Add(new Run(text)
         {
-            Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
+            Foreground = ThemeBrush("MutedInkBrush"),
             FontStyle = FontStyle.Italic
         });
         Inlines?.Add(new Run("”")
         {
-            Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
+            Foreground = ThemeBrush("AccentBrush"),
             FontSize = quoteSize,
             FontWeight = FontWeight.SemiBold
         });
         AddLineBreak();
     }
+
+    /// <summary>
+    /// Resolves a theme brush at render time, so a theme change is picked up by
+    /// the next render. Kept local instead of using AppAppearanceResources:
+    /// this file is linked into the portable test project, which compiles it
+    /// without the rest of the application.
+    /// </summary>
+    private static IBrush ThemeBrush(string key) =>
+        Application.Current?.Resources[key] as IBrush ?? Brushes.Black;
 
     private void AppendCodeBlock(string code)
     {
