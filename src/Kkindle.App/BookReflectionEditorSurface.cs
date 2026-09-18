@@ -29,18 +29,12 @@ internal sealed class BookReflectionEditorSurface : Border
     private const double ImageZoomFactor = 1.2;
 
     // Toolbar geometry. Buttons and icons share one square content box so the
-    // text labels and the line icons line up on the same optical centre.
+    // glyphs line up on the same optical centre.
     private const double ToolbarButtonWidth = 34;
     private const double ToolbarButtonHeight = 30;
     private const double ToolbarIconSize = 18;
     private const double ToolbarIconCanvas = 24;
     private const double ToolbarIconStroke = 2;
-    private const double ToolbarLabelFontSize = 12.5;
-    private const double ToolbarBoldFontSize = 13;
-
-    // Latin toolbar labels use the bundled Inter with a system sans fallback.
-    private static readonly FontFamily ToolbarLabelFontFamily =
-        new("Inter, Segoe UI, Helvetica Neue, Arial, sans-serif");
 
     private static readonly Regex HeadingPattern = new(
         @"^\s*(?<marks>#{1,6})(?:\s+(?<text>.*))?$",
@@ -162,10 +156,14 @@ internal sealed class BookReflectionEditorSurface : Border
             "三级标题",
             "heading3");
         AddToolbarSeparator(tools);
-        AddToolbarAction(tools, "B", "粗体", "bold");
         AddToolbarAction(
             tools,
-            CreateToolbarIcon("M5 8H9V12H6C6 14 7 15 9 16M15 8H19V12H16C16 14 17 15 19 16"),
+            CreateToolbarIcon("M7 4.5V19.5M7 4.5H13.5C16.5 4.5 18.5 6 18.5 8.2C18.5 10.3 17 11.5 14.5 11.8H7M7 11.8H14.5C17.5 11.8 19.5 13.2 19.5 15.6C19.5 18.1 17.3 19.5 14 19.5H7"),
+            "粗体",
+            "bold");
+        AddToolbarAction(
+            tools,
+            CreateToolbarIcon("M4.5 5H10.5V10.5H7.5C7.5 14.4 8.8 17 11 19M13.5 5H19.5V10.5H16.5C16.5 14.4 17.8 17 20 19"),
             "引用",
             "quote");
         AddToolbarAction(
@@ -282,26 +280,6 @@ internal sealed class BookReflectionEditorSurface : Border
 
     private static object NormalizeToolbarContent(object content, string tag)
     {
-        if (content is string text)
-        {
-            // These labels are Latin and sit next to line icons. The bundled
-            // KingHwaOldSong has a single face and only synthesises bold, so it
-            // reads as a different language from the icons at this size; the
-            // bundled Inter keeps the row on one optical weight.
-            return new TextBlock
-            {
-                Text = text,
-                Width = ToolbarIconSize,
-                FontFamily = ToolbarLabelFontFamily,
-                FontSize = tag == "bold" ? ToolbarBoldFontSize : ToolbarLabelFontSize,
-                FontWeight = tag == "bold" ? FontWeight.Bold : FontWeight.Normal,
-                Foreground = AppAppearanceResources.GetBrush("InkBrush"),
-                TextAlignment = TextAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-        }
-
         if (content is Control control)
         {
             control.HorizontalAlignment = HorizontalAlignment.Center;

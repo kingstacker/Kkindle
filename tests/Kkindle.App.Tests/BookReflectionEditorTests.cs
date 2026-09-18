@@ -67,6 +67,11 @@ public sealed partial class SettingsTests
             Assert.All(toolbarButtons, button =>
                 Assert.Equal(toolbarButtons[0].Bounds.Width, button.Bounds.Width));
             var bold = toolbarButtons.Single(button => button.Tag as string == "bold");
+            var quote = toolbarButtons.Single(button => button.Tag as string == "quote");
+            Assert.IsType<Viewbox>(bold.Content);
+            Assert.IsType<Viewbox>(quote.Content);
+            Assert.Single(bold.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>());
+            Assert.Single(quote.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>());
             bold.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Render();
             Assert.Equal(editor.SelectionStart, editor.SelectionEnd);
