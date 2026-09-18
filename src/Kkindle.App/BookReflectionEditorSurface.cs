@@ -28,6 +28,20 @@ internal sealed class BookReflectionEditorSurface : Border
     private const double MinimumImageWidth = 48;
     private const double ImageZoomFactor = 1.2;
 
+    // Toolbar geometry. Buttons and icons share one square content box so the
+    // text labels and the line icons line up on the same optical centre.
+    private const double ToolbarButtonWidth = 34;
+    private const double ToolbarButtonHeight = 30;
+    private const double ToolbarIconSize = 18;
+    private const double ToolbarIconCanvas = 24;
+    private const double ToolbarIconStroke = 2;
+    private const double ToolbarLabelFontSize = 12.5;
+    private const double ToolbarBoldFontSize = 13;
+
+    // Latin toolbar labels use the bundled Inter with a system sans fallback.
+    private static readonly FontFamily ToolbarLabelFontFamily =
+        new("Inter, Segoe UI, Helvetica Neue, Arial, sans-serif");
+
     private static readonly Regex HeadingPattern = new(
         @"^\s*(?<marks>#{1,6})(?:\s+(?<text>.*))?$",
         RegexOptions.Compiled);
@@ -128,7 +142,8 @@ internal sealed class BookReflectionEditorSurface : Border
         var tools = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 0
+            Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center
         };
 
         AddToolbarAction(tools, "H1", "一级标题", "heading1");
@@ -148,7 +163,7 @@ internal sealed class BookReflectionEditorSurface : Border
             "unordered");
         AddToolbarAction(
             tools,
-            CreateToolbarIcon("M5 5H7V9H5M5 12L7 11V15H5M5 18L7 17V21H5M10 6H20M10 12H20M10 18H20"),
+            CreateToolbarIcon("M5.5 5.5L7 4.5V7.5H5.5M5.5 11.5L7 10.5V13.5H5.5M5.5 17.5L7 16.5V19.5H5.5M10 6H20M10 12H20M10 18H20"),
             "有序列表",
             "ordered");
         AddToolbarAction(
@@ -164,11 +179,13 @@ internal sealed class BookReflectionEditorSurface : Border
 
         return new Border
         {
-            Padding = new Thickness(3),
+            Padding = new Thickness(5, 4),
             Background = AppAppearanceResources.GetBrush("PaperBrush"),
-            BorderBrush = AppAppearanceResources.GetBrush("ReaderBorderBrush"),
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(0),
+            BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
             Child = tools
         };
 
@@ -186,21 +203,21 @@ internal sealed class BookReflectionEditorSurface : Border
         string tooltip,
         string tag)
     {
+        // Background is deliberately left unset so the shared style owns the
+        // normal, pointerover and pressed states.
         var button = new Button
         {
-            Content = content,
+            Content = NormalizeToolbarContent(content, tag),
             Tag = tag,
-            Width = 36,
-            MinWidth = 36,
-            MaxWidth = 36,
-            Height = 32,
+            Width = ToolbarButtonWidth,
+            MinWidth = ToolbarButtonWidth,
+            MaxWidth = ToolbarButtonWidth,
+            Height = ToolbarButtonHeight,
             Padding = new Thickness(0),
-            Background = AppAppearanceResources.GetBrush("PaperBrush"),
             Focusable = false,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
         };
-        button.Content = NormalizeToolbarContent(content, tag);
         button.Classes.Add("bookReflectionFormattingAction");
         ToolTip.SetTip(button, UiText.Get(tooltip));
         AutomationProperties.SetName(button, UiText.Get(tooltip));
@@ -212,34 +229,61 @@ internal sealed class BookReflectionEditorSurface : Border
         tools.Children.Add(new AvaloniaRectangle
         {
             Width = 1,
-            Height = 18,
-            Margin = new Thickness(2, 0),
-            Fill = AppAppearanceResources.GetBrush("ReaderBorderBrush")
+            Height = 16,
+            Margin = new Thickness(5, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Fill = AppAppearanceResources.GetBrush("HairlineBrush")
         });
 
-    private static AvaloniaPath CreateToolbarIcon(string geometry) =>
-        new()
+    // Icons are authored on a 24x24 grid. Rendering them through a Viewbox of a
+    // fixed size gives every glyph the same scale and keeps the paths that draw
+    // outside the old 18x18 box (the list and image icons) from being clipped.
+    private static Control CreateToolbarIcon(string geometry)
+    {
+        var canvas = new Canvas
         {
-            Data = Geometry.Parse(geometry),
-            Width = 18,
-            Height = 18,
-            Stroke = AppAppearanceResources.GetBrush("ReaderInkBrush"),
-            StrokeThickness = 1.7,
-            StrokeLineCap = PenLineCap.Round,
+            Width = ToolbarIconCanvas,
+            Height = ToolbarIconCanvas,
             IsHitTestVisible = false
         };
+        canvas.Children.Add(new AvaloniaPath
+        {
+            Data = Geometry.Parse(geometry),
+            Stroke = AppAppearanceResources.GetBrush("InkBrush"),
+            StrokeThickness = ToolbarIconStroke,
+            StrokeLineCap = PenLineCap.Round,
+            StrokeJoin = PenLineJoin.Round,
+            IsHitTestVisible = false
+        });
+
+        return new Viewbox
+        {
+            Width = ToolbarIconSize,
+            Height = ToolbarIconSize,
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Child = canvas
+        };
+    }
 
     private static object NormalizeToolbarContent(object content, string tag)
     {
         if (content is string text)
         {
+            // These labels are Latin and sit next to line icons. The bundled
+            // KingHwaOldSong has a single face and only synthesises bold, so it
+            // reads as a different language from the icons at this size; the
+            // bundled Inter keeps the row on one optical weight.
             return new TextBlock
             {
                 Text = text,
-                Width = 18,
-                Height = 18,
-                FontSize = 12,
+                Width = ToolbarIconSize,
+                FontFamily = ToolbarLabelFontFamily,
+                FontSize = tag == "bold" ? ToolbarBoldFontSize : ToolbarLabelFontSize,
                 FontWeight = tag == "bold" ? FontWeight.Bold : FontWeight.Normal,
+                Foreground = AppAppearanceResources.GetBrush("InkBrush"),
                 TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
@@ -248,8 +292,6 @@ internal sealed class BookReflectionEditorSurface : Border
 
         if (content is Control control)
         {
-            control.Width = 18;
-            control.Height = 18;
             control.HorizontalAlignment = HorizontalAlignment.Center;
             control.VerticalAlignment = VerticalAlignment.Center;
         }

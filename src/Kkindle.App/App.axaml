@@ -367,26 +367,30 @@
         </Style>
         <Style Selector="Button.bookReflectionFormattingAction">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="Width" Value="36" />
-            <Setter Property="MinWidth" Value="36" />
-            <Setter Property="MaxWidth" Value="36" />
-            <Setter Property="Height" Value="32" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Width" Value="34" />
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="MaxWidth" Value="34" />
+            <Setter Property="Height" Value="30" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="12.5" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Transitions">
                 <Transitions />
             </Setter>
         </Style>
-        <Style Selector="Button.bookReflectionFormattingAction:pointerover,
-                         Button.bookReflectionFormattingAction:pressed">
-            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+        <Style Selector="Button.bookReflectionFormattingAction:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.bookReflectionFormattingAction:pressed">
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
