@@ -645,6 +645,24 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         while (!condition()) await Task.Delay(10, timeout.Token);
     }
 
+    /// <summary>
+    /// Waits for a transition-driven property to reach its final value. Unlike
+    /// <see cref="Until"/> this also pumps the headless render timer, because
+    /// Avalonia transitions only advance when the render clock ticks: polling
+    /// alone would spin until the deadline without the value ever moving.
+    /// </summary>
+    private static async Task UntilSettled(Func<bool> condition, string because)
+    {
+        var deadline = Task.Delay(TimeSpan.FromSeconds(8));
+        while (!condition() && !deadline.IsCompleted)
+        {
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            await Task.Delay(10);
+        }
+
+        Assert.True(condition(), because);
+    }
+
     private static void AssertWithinWindow(Control control, Window window)
     {
         var position = control.TranslatePoint(default, window)!.Value;

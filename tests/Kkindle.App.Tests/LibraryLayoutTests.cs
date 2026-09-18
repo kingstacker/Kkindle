@@ -306,9 +306,16 @@ public sealed partial class SettingsTests
         viewer.Offset = new Vector(0, 50);
         await Render();
         Assert.Contains("scrolling", viewer.Classes);
+        // The thumb fades through an opacity transition, so wait for it to
+        // settle rather than assuming a fixed render delay is long enough.
+        await UntilSettled(() => thumb.Opacity >= 1, "The scrollbar thumb did not fade in while scrolling.");
         Assert.Equal(1, thumb.Opacity);
-        await Task.Delay(800);
-        await Render();
+
+        // The idle class is removed by a dispatcher timer; the settle loop
+        // below keeps real time flowing until both effects have finished.
+        await UntilSettled(
+            () => !viewer.Classes.Contains("scrolling") && thumb.Opacity <= 0,
+            "The scrollbar thumb did not fade out after scrolling stopped.");
         Assert.DoesNotContain("scrolling", viewer.Classes);
         Assert.Equal(0, thumb.Opacity);
     });

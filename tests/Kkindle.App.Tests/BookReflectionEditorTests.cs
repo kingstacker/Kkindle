@@ -7,6 +7,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
+using Kkindle.Core;
 using SkiaSharp;
 using Xunit;
 
@@ -163,7 +164,10 @@ public sealed partial class SettingsTests
                 KeyModifiers = KeyModifiers.Control
             });
             await Until(() => surface.Markdown.Contains("data:image/png;base64", StringComparison.Ordinal));
-            Assert.Contains("粘贴的图片", surface.Markdown, StringComparison.Ordinal);
+            // The alt text is localised, so compare against whichever language is
+            // active rather than hardcoding the Chinese string: the suite also
+            // runs on hosts whose system language is English.
+            Assert.Contains(UiText.Get("粘贴的图片"), surface.Markdown, StringComparison.Ordinal);
             Assert.Single(surface.GetVisualDescendants().OfType<Image>());
 
             await window.Clipboard!.SetTextAsync("普通文字粘贴");
