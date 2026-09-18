@@ -60,6 +60,11 @@ public sealed partial class SettingsTests
             await Render();
             Assert.Empty(surface.GetVisualDescendants().OfType<Popup>());
             Assert.True(surface.FormattingToolbar.IsEffectivelyVisible);
+            var toolbarFrame = Assert.IsType<Border>(surface.FormattingToolbar);
+            Assert.Equal(0, toolbarFrame.CornerRadius.TopLeft);
+            Assert.Equal(0, toolbarFrame.CornerRadius.TopRight);
+            Assert.Equal(0, toolbarFrame.CornerRadius.BottomRight);
+            Assert.Equal(0, toolbarFrame.CornerRadius.BottomLeft);
             var toolbarButtons = surface.FormattingToolbar.GetVisualDescendants()
                 .OfType<Button>()
                 .ToArray();
@@ -119,7 +124,58 @@ public sealed partial class SettingsTests
             quoteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Render();
             Assert.Equal(1, editor.CaretIndex);
-            Assert.Equal("> 新的引用", surface.Markdown);
+            Assert.Equal("新的引用", surface.Markdown);
+        }
+        finally
+        {
+            surface.Dispose();
+            window.Close();
+        }
+    });
+
+    [Fact]
+    public Task NativeReflectionBlockButtonsToggleBackToParagraph() => Run(async () =>
+    {
+        const string text = "可切换格式";
+        var surface = new BookReflectionEditorSurface(text)
+        {
+            Width = 620,
+            Height = 220
+        };
+        var window = new Window
+        {
+            Width = 720,
+            Height = 500,
+            Content = surface
+        };
+        window.Show();
+        try
+        {
+            await Render();
+            var editor = Assert.Single(surface.GetVisualDescendants().OfType<TextBox>());
+            var cases = new[]
+            {
+                (Tag: "heading1", Markdown: "# " + text),
+                (Tag: "quote", Markdown: "> " + text),
+                (Tag: "unordered", Markdown: "- " + text),
+                (Tag: "ordered", Markdown: "1. " + text)
+            };
+
+            foreach (var testCase in cases)
+            {
+                var button = surface.FormattingToolbar.GetVisualDescendants()
+                    .OfType<Button>()
+                    .Single(candidate => candidate.Tag as string == testCase.Tag);
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Render();
+                Assert.Equal(testCase.Markdown, surface.Markdown);
+                Assert.Equal(text, editor.Text);
+
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Render();
+                Assert.Equal(text, surface.Markdown);
+                Assert.Equal(text, editor.Text);
+            }
         }
         finally
         {
@@ -155,10 +211,14 @@ public sealed partial class SettingsTests
                 text => text.Text == "”");
             var contentHost = Assert.IsType<Grid>(opening.Parent);
             var editor = Assert.Single(surface.GetVisualDescendants().OfType<TextBox>());
+            var richText = Assert.IsAssignableFrom<TextBlock>(contentHost.Children[1]);
             var shortWidth = contentHost.Bounds.Width;
 
             Assert.True(opening.Bounds.Width >= 28, "The opening quote must have enough room to render fully.");
             Assert.True(closing.Bounds.Width >= 28, "The closing quote must remain visible.");
+            Assert.True(richText.Margin.Left > 0, "Quote text should have horizontal breathing room.");
+            Assert.Equal(richText.Margin.Left, richText.Margin.Right);
+            Assert.Equal(editor.Padding.Left, editor.Padding.Right);
             Assert.True(shortWidth < surface.Bounds.Width - 40,
                 "A short quote background should follow its text instead of filling the editor width.");
             Assert.InRange(shortWidth - closing.Bounds.Right, 2, 4);
@@ -229,7 +289,63 @@ public sealed partial class SettingsTests
         Assert.Equal(second, BookReflectionEditorSurface.FilterCitations([first, second], "重点").Single());
         Assert.Equal(first, BookReflectionEditorSurface.FilterCitations([first, second], "第一章").Single());
         Assert.Equal(2, BookReflectionEditorSurface.FilterCitations([first, second], null).Count);
+        Assert.Equal(first, BookReflectionEditorSurface.FilterCitations([first, second], null, "书一").First());
+        Assert.Equal(first, BookReflectionEditorSurface.FilterCitations([first, second], null, "《书一》").First());
     }
+
+    [Fact]
+    public void ReflectionCitationSourceKeepsBookTitle()
+    {
+        Assert.Equal("--《书一》", BookReflectionEditorSurface.FormatCitationSource("《书一》"));
+        Assert.Equal("--《书二》", BookReflectionEditorSurface.FormatCitationSource("书二"));
+        Assert.Equal(string.Empty, BookReflectionEditorSurface.FormatCitationSource(null));
+    }
+
+    [Fact]
+    public Task NativeReflectionCitationSourceRendersSmallAndPersists() => Run(async () =>
+    {
+        var surface = new BookReflectionEditorSurface("> 获得了一等奖\n>\n> --《书一》")
+        {
+            Width = 620,
+            Height = 220
+        };
+        var window = new Window
+        {
+            Width = 720,
+            Height = 500,
+            Content = surface
+        };
+        window.Show();
+        try
+        {
+            await Render();
+
+            var editor = Assert.Single(surface.GetVisualDescendants().OfType<TextBox>());
+            Assert.Equal("获得了一等奖", editor.Text);
+            Assert.True(editor.IsReadOnly);
+            var source = Assert.Single(
+                surface.GetVisualDescendants().OfType<TextBlock>(),
+                text => text.Text == "--《书一》");
+            Assert.True(source.IsVisible);
+            Assert.InRange(source.FontSize, 1, 14);
+            Assert.Equal("> 获得了一等奖\n>\n> --《书一》", surface.Markdown);
+
+            editor.Focus();
+            editor.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Key = Key.Delete
+            });
+            await Render();
+            Assert.DoesNotContain("--《书一》", surface.Markdown, StringComparison.Ordinal);
+            Assert.DoesNotContain("获得了一等奖", surface.Markdown, StringComparison.Ordinal);
+        }
+        finally
+        {
+            surface.Dispose();
+            window.Close();
+        }
+    });
 
     [Fact]
     public void ReadingMaterialReflectionUsesMarkdownPreviewContent()

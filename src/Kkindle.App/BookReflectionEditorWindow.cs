@@ -152,7 +152,7 @@ internal sealed class BookReflectionEditorWindow : Window
             Foreground = AppAppearanceResources.GetBrush("InkBrush"),
             TextWrapping = TextWrapping.Wrap
         };
-        _editorSurface = new BookReflectionEditorSurface(initialContent, citations)
+        _editorSurface = new BookReflectionEditorSurface(initialContent, citations, bookTitle)
         {
             MinHeight = 280
         };
