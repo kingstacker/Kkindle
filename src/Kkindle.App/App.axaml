@@ -2472,6 +2472,38 @@
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
 
+        <!-- The citation picker keeps hover and selection quiet and distinct.
+             The default global ListBoxItem rules use a full InkBrush fill for
+             both states, which makes a selected row and a hovered row compete
+             visually. The picker draws the state on its content row instead. -->
+        <Style Selector="ListBox.citationPickerList ListBoxItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:selected,
+                         ListBox.citationPickerList ListBoxItem:selected:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem Border.citationPickerRow">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:pointerover Border.citationPickerRow">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:selected Border.citationPickerRow,
+                         ListBox.citationPickerList ListBoxItem:selected:pointerover Border.citationPickerRow">
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="2,0,0,0" />
+        </Style>
+
         <!-- The Douban picker draws the selected state on the candidate card
              itself. Keep the ListBoxItem shell transparent so its bottom
              margin cannot leak the Fluent accent colour as a stray bar. -->

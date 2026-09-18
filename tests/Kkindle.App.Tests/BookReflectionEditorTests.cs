@@ -380,6 +380,39 @@ public sealed partial class SettingsTests
     }
 
     [Fact]
+    public void ReadingMaterialReflectionPreviewOmitsImagesAndKeepsOneLine()
+    {
+        var reflection = new ReaderBookReflection
+        {
+            BookId = Guid.NewGuid(),
+            Content = "\"只是当时\\n\\n# 哈哈\\n\\n![图片](data:image/png;base64,abc)\""
+        };
+        var item = new Stage3ReadingMaterialViewModel(
+            ReadingMaterialSource.Local,
+            "测试书",
+            "读后思考",
+            "读后思考",
+            "书籍级",
+            string.Empty,
+            reflection.Content,
+            reflection.UpdatedAt,
+            null,
+            null,
+            localReflection: reflection);
+        try
+        {
+            Assert.Equal("只是当时", item.ReflectionPreviewText);
+            Assert.DoesNotContain("![图片]", item.ReflectionPreviewMarkdown, StringComparison.Ordinal);
+            Assert.Contains("# 哈哈", item.ReflectionPreviewMarkdown, StringComparison.Ordinal);
+            Assert.Equal("只是当时\n\n哈哈", item.ReflectionTooltipText);
+        }
+        finally
+        {
+            item.Dispose();
+        }
+    }
+
+    [Fact]
     public Task NativeReflectionImagesCanBeSizedAndDeleted() => Run(async () =>
     {
         const string pixel =

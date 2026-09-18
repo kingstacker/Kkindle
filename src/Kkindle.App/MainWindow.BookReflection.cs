@@ -64,8 +64,9 @@ public partial class MainWindow
             return;
         }
 
-        DetailReflectionPreviewText.Markdown = BuildBookReflectionPreview(normalizedContent);
-        SetBookReflectionTooltip(normalizedContent);
+        var previewContent = BookReflectionEditorSurface.RemoveImagesForPreview(normalizedContent);
+        DetailReflectionPreviewText.Markdown = BuildBookReflectionPreview(previewContent);
+        SetBookReflectionTooltip(previewContent);
         DetailReflectionUpdatedText.Text = T(
             "更新时间：{0}",
             reflection.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
@@ -80,7 +81,7 @@ public partial class MainWindow
         }
 
         EnsureBookReflectionFlyout();
-        _bookReflectionFlyoutText!.Markdown = BookReflectionEditorSurface.NormalizeMarkdown(markdown);
+        _bookReflectionFlyoutText!.Markdown = BookReflectionEditorSurface.RemoveImagesForPreview(markdown);
     }
 
     private void EnsureBookReflectionFlyout()
@@ -267,13 +268,9 @@ public partial class MainWindow
 
     private static string BuildBookReflectionPreview(string content)
     {
-        var normalized = BookReflectionEditorSurface.NormalizeMarkdown(content)
+        var normalized = BookReflectionEditorSurface.RemoveImagesForPreview(content)
             .Trim()
             .Replace("\r\n", "\n", StringComparison.Ordinal);
-        // Image data is stored inline in the reflection Markdown. Truncating
-        // the raw string in the middle of a data URI would break the preview.
-        if (normalized.Contains("![", StringComparison.Ordinal))
-            return normalized;
         return normalized.Length <= 480
             ? normalized
             : normalized[..480].TrimEnd() + "…";

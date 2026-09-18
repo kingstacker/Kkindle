@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -79,6 +80,8 @@ public partial class MainWindow
     private bool _suppressS3SettingsDraftTracking;
     private DateTimeOffset? _lastS3SyncAt;
     private bool _readingMaterialsExportMode;
+    private Popup? _readingMaterialPreviewPopup;
+    private Border? _readingMaterialPreviewTarget;
     private bool _suppressMainAiProviderChange;
     private bool _suppressMainAiModelChange;
     private bool _deviceGridView = true;
@@ -2704,12 +2707,80 @@ public partial class MainWindow
     private async void ReadingMaterialEntry_DoubleTapped(object? sender, TappedEventArgs e)
     {
         if (sender is not Control { DataContext: Stage3ReadingMaterialViewModel item }) return;
+        e.Handled = true;
         if (item.LocalReflection is { } reflection)
         {
             await OpenBookReflectionFromReadingMaterialsAsync(reflection);
             return;
         }
         await LocateReadingMaterialAsync(item);
+    }
+
+    private void ReadingMaterialEntry_PointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is not Border border
+            || border.DataContext is not Stage3ReadingMaterialViewModel { IsBookReflection: true } item
+            || string.IsNullOrWhiteSpace(item.ReflectionPreviewMarkdown))
+            return;
+
+        CloseReadingMaterialPreviewPopup();
+        var preview = new KreaderMarkdownTextBlock
+        {
+            Width = 330,
+            Markdown = item.ReflectionPreviewMarkdown,
+            FontSize = 12,
+            Foreground = AppAppearanceResources.GetBrush("InkBrush"),
+            TextWrapping = TextWrapping.Wrap
+        };
+        var host = new Border
+        {
+            Width = 360,
+            MaxHeight = 300,
+            Padding = new Thickness(14),
+            Background = AppAppearanceResources.GetBrush("PaperBrush"),
+            BorderBrush = AppAppearanceResources.GetBrush("InkBrush"),
+            BorderThickness = new Thickness(1),
+            IsHitTestVisible = false,
+            Child = new ScrollViewer
+            {
+                MaxHeight = 270,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = preview
+            }
+        };
+        _readingMaterialPreviewTarget = border;
+        _readingMaterialPreviewPopup = new Popup
+        {
+            Child = host,
+            PlacementTarget = border,
+            Placement = PlacementMode.Pointer,
+            HorizontalOffset = 6,
+            VerticalOffset = 6,
+            IsLightDismissEnabled = false,
+            ShouldUseOverlayLayer = false,
+            TakesFocusFromNativeControl = false,
+            IsHitTestVisible = false
+        };
+        _readingMaterialPreviewPopup.IsOpen = true;
+    }
+
+    private void ReadingMaterialEntry_PointerExited(object? sender, PointerEventArgs e)
+    {
+        if (ReferenceEquals(sender, _readingMaterialPreviewTarget))
+            CloseReadingMaterialPreviewPopup();
+    }
+
+    private void CloseReadingMaterialPreviewPopup()
+    {
+        if (_readingMaterialPreviewPopup is not null)
+        {
+            _readingMaterialPreviewPopup.IsOpen = false;
+            _readingMaterialPreviewPopup.Child = null;
+        }
+
+        _readingMaterialPreviewPopup = null;
+        _readingMaterialPreviewTarget = null;
     }
 
     private async Task LocateReadingMaterialAsync(Stage3ReadingMaterialViewModel item)
@@ -5913,6 +5984,15 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
     public string ReflectionMarkdown => IsBookReflection
         ? BookReflectionEditorSurface.NormalizeMarkdown(Note)
         : string.Empty;
+    public string ReflectionPreviewMarkdown => IsBookReflection
+        ? BookReflectionEditorSurface.RemoveImagesForPreview(ReflectionMarkdown)
+        : string.Empty;
+    public string ReflectionPreviewText => IsBookReflection
+        ? GetReflectionPreviewText(ReflectionPreviewMarkdown)
+        : string.Empty;
+    public string? ReflectionTooltipText => IsBookReflection
+        ? GetReflectionTooltipText(ReflectionPreviewMarkdown)
+        : null;
     public bool HasNote => !IsBookReflection && !string.IsNullOrWhiteSpace(Note);
     public string DateLabel => UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? UiText.Get("时间未知");
     public string SearchText => string.Join('\n', SourceLabel, BookTitle, TypeLabel, ChapterLabel, Location, Quote, Note);
@@ -5923,6 +6003,32 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
     }
 
     public ReadingMaterialRecord ToRecord() => new(Source, BookTitle, TypeLabel, Location, Quote, Note, UpdatedAt, SourceDeviceId, SourceDeviceName);
+
+    private static string GetReflectionPreviewText(string markdown)
+    {
+        foreach (var line in GetReflectionTextLines(markdown))
+        {
+            if (line.Length > 0)
+                return line;
+        }
+
+        return string.Empty;
+    }
+
+    private static string GetReflectionTooltipText(string markdown) =>
+        string.Join(Environment.NewLine, GetReflectionTextLines(markdown)).Trim();
+
+    private static IEnumerable<string> GetReflectionTextLines(string markdown)
+    {
+        foreach (var line in markdown.ReplaceLineEndings("\n").Split('\n'))
+        {
+            var text = line.Trim();
+            text = Regex.Replace(text, @"^#{1,6}\s*", string.Empty);
+            text = Regex.Replace(text, @"(\*\*|__|~~|`)", string.Empty);
+            text = Regex.Replace(text, @"\[(?<label>[^\]]+)\]\([^)]*\)", "${label}");
+            yield return text;
+        }
+    }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
@@ -5935,6 +6041,9 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
         OnPropertyChanged(nameof(SelectedContentLabel));
         OnPropertyChanged(nameof(IsNotBookReflection));
         OnPropertyChanged(nameof(ReflectionMarkdown));
+        OnPropertyChanged(nameof(ReflectionPreviewMarkdown));
+        OnPropertyChanged(nameof(ReflectionPreviewText));
+        OnPropertyChanged(nameof(ReflectionTooltipText));
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(SearchText));
     }

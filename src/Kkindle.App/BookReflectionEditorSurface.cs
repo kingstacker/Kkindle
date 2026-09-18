@@ -52,7 +52,7 @@ internal sealed class BookReflectionEditorSurface : Border
     private const double ToolbarButtonHeight = 30;
     private const double ToolbarIconSize = 18;
     private const double ToolbarIconCanvas = 24;
-    private const double ToolbarIconStroke = 2;
+    private const double ToolbarIconStroke = 1;
 
     private static readonly Regex HeadingPattern = new(
         @"^\s*(?<marks>#{1,6})(?:\s+(?<text>.*))?$",
@@ -65,6 +65,9 @@ internal sealed class BookReflectionEditorSurface : Border
         RegexOptions.Compiled);
     private static readonly Regex ImagePattern = new(
         @"^\s*!\[(?<alt>[^\]]*)\]\((?<source>[^)\s\r\n]+)(?:\s*=\s*(?<width>\d+)(?:x(?<height>\d+))?)?\)\s*$",
+        RegexOptions.Compiled);
+    private static readonly Regex MarkdownImageTokenPattern = new(
+        @"!\[[^\]\r\n]*\]\([^\)\r\n]*\)",
         RegexOptions.Compiled);
     private static readonly Regex InlinePattern = new(
         @"(\*\*(?<bold>[^*\r\n]+)\*\*|\[(?<label>[^\]\r\n]+)\]\((?<url>[^)\r\n]+)\))",
@@ -210,14 +213,14 @@ internal sealed class BookReflectionEditorSurface : Border
             "bold");
         AddToolbarAction(
             tools,
-            CreateToolbarIcon("M4.5 5H10.5V10.5H7.5C7.5 14.4 8.8 17 11 19M13.5 5H19.5V10.5H16.5C16.5 14.4 17.8 17 20 19"),
+            CreateToolbarIcon("M5.5 10.5V6.5C5.5 5.4 6.4 4.5 7.5 4.5H10V8H7.5C7.5 9.7 8.3 10.5 10 10.5M15.5 10.5V6.5C15.5 5.4 16.4 4.5 17.5 4.5H20V8H17.5C17.5 9.7 18.3 10.5 20 10.5"),
             "引用",
             "quote");
         if (_citations.Count > 0)
         {
             AddToolbarAction(
                 tools,
-                CreateToolbarIcon("M4.5 5H10.5V10.5H7.5C7.5 14.4 8.8 17 11 19M13.5 5H19.5V10.5H16.5C16.5 14.4 17.8 17 20 19M17 14V22M13 18H21"),
+                CreateToolbarIcon("M5 5H19V15H12L8 19V15H5ZM9 9H15M9 12H17M19 16V22M16 19H22"),
                 "引用批注",
                 "citation");
         }
@@ -300,9 +303,9 @@ internal sealed class BookReflectionEditorSurface : Border
             Fill = AppAppearanceResources.GetBrush("HairlineBrush")
         });
 
-    // Icons are authored on a 24x24 grid. Rendering them through a Viewbox of a
-    // fixed size gives every glyph the same scale and keeps the paths that draw
-    // outside the old 18x18 box (the list and image icons) from being clipped.
+    // Icons are authored on a 24x24 grid with a deliberately light one-pixel
+    // stroke. Rendering them through a fixed-size Viewbox keeps the whole
+    // toolbar visually quiet and prevents larger paths from being clipped.
     private static Control CreateToolbarIcon(string geometry)
     {
         var canvas = new Canvas
@@ -1892,6 +1895,7 @@ internal sealed class BookReflectionEditorSurface : Border
             BorderThickness = new Thickness(0),
             SelectionMode = SelectionMode.Single
         };
+        list.Classes.Add("citationPickerList");
         var emptyText = new TextBlock
         {
             Text = UiText.Get("没有找到匹配的批注。"),
@@ -1926,11 +1930,13 @@ internal sealed class BookReflectionEditorSurface : Border
                 Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
                 TextWrapping = TextWrapping.Wrap
             };
-            return new Border
+            var row = new Border
             {
                 Padding = new Thickness(10, 8),
                 Child = new StackPanel { Spacing = 3, Children = { quote, meta } }
             };
+            row.Classes.Add("citationPickerRow");
+            return row;
         });
 
         void RefreshList()
@@ -2939,6 +2945,23 @@ internal sealed class BookReflectionEditorSurface : Border
             }
         }
         return normalized;
+    }
+
+    internal static string RemoveImagesForPreview(string markdown)
+    {
+        var normalized = NormalizeMarkdown(markdown).ReplaceLineEndings("\n");
+        var lines = normalized.Split('\n');
+        var preview = new StringBuilder(normalized.Length);
+
+        foreach (var line in lines)
+        {
+            if (ImagePattern.IsMatch(line))
+                continue;
+
+            preview.AppendLine(MarkdownImageTokenPattern.Replace(line, string.Empty));
+        }
+
+        return preview.ToString().Trim();
     }
 
     private static bool LooksLikeNestedJsonString(string value) =>

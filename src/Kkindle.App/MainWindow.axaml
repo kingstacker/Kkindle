@@ -2058,7 +2058,7 @@
                                             <ItemsControl ItemsSource="{Binding Items}" IsVisible="{Binding IsExpanded}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate x:DataType="local:Stage3ReadingMaterialViewModel">
-                                                        <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="12,10" DoubleTapped="ReadingMaterialEntry_DoubleTapped">
+                                                        <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="12,10" DoubleTapped="ReadingMaterialEntry_DoubleTapped" PointerEntered="ReadingMaterialEntry_PointerEntered" PointerExited="ReadingMaterialEntry_PointerExited">
                                                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                                                                 <CheckBox IsChecked="{Binding IsSelected}"
                                                                           VerticalAlignment="Top"
@@ -2082,34 +2082,14 @@
                                                                                TextTrimming="CharacterEllipsis"
                                                                                TextWrapping="Wrap"
                                                                                IsVisible="{Binding IsNotBookReflection}" />
-                                                                    <local:KreaderMarkdownTextBlock Markdown="{Binding ReflectionMarkdown}"
-                                                                                                     FontSize="12"
-                                                                                                     MaxWidth="560"
-                                                                                                     MaxLines="8"
-                                                                                                     TextTrimming="CharacterEllipsis"
-                                                                                                     TextWrapping="Wrap"
-                                                                                                     HorizontalAlignment="Left"
-                                                                                                     IsVisible="{Binding IsBookReflection}">
-                                                                        <ToolTip.Tip>
-                                                                            <ToolTip DataContext="{Binding}">
-                                                                                <Border Width="520"
-                                                                                        MaxHeight="360"
-                                                                                        Padding="14"
-                                                                                        Background="{DynamicResource PaperBrush}"
-                                                                                        BorderBrush="{DynamicResource HairlineBrush}"
-                                                                                        BorderThickness="1">
-                                                                                    <ScrollViewer MaxHeight="330"
-                                                                                                  HorizontalScrollBarVisibility="Disabled"
-                                                                                                  VerticalScrollBarVisibility="Auto">
-                                                                                        <local:KreaderMarkdownTextBlock Markdown="{Binding ReflectionMarkdown}"
-                                                                                                                         FontSize="13"
-                                                                                                                         Foreground="{DynamicResource InkBrush}"
-                                                                                                                         TextWrapping="Wrap" />
-                                                                                    </ScrollViewer>
-                                                                                </Border>
-                                                                            </ToolTip>
-                                                                        </ToolTip.Tip>
-                                                                    </local:KreaderMarkdownTextBlock>
+                                                                     <TextBlock Text="{Binding ReflectionPreviewText}"
+                                                                                FontSize="12"
+                                                                                MaxLines="1"
+                                                                                TextTrimming="CharacterEllipsis"
+                                                                                TextWrapping="NoWrap"
+                                                                                HorizontalAlignment="Left"
+                                                                                IsVisible="{Binding IsBookReflection}">
+                                                                     </TextBlock>
                                                                     <TextBlock Text="{Binding NoteLabel}"
                                                                                FontSize="11"
                                                                                Foreground="{DynamicResource MutedInkBrush}"
