@@ -146,9 +146,21 @@ internal sealed class BookReflectionEditorSurface : Border
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        AddToolbarAction(tools, "H1", "一级标题", "heading1");
-        AddToolbarAction(tools, "H2", "二级标题", "heading2");
-        AddToolbarAction(tools, "H3", "三级标题", "heading3");
+        AddToolbarAction(
+            tools,
+            CreateToolbarIcon("M4 5V19M11 5V19M4 12H11M15.5 8L18 5.5V19"),
+            "一级标题",
+            "heading1");
+        AddToolbarAction(
+            tools,
+            CreateToolbarIcon("M4 5V19M11 5V19M4 12H11M14.5 8.5A3 3 0 0 1 20.5 8.5C20.5 11.5 14.5 13 14.5 19H20.5"),
+            "二级标题",
+            "heading2");
+        AddToolbarAction(
+            tools,
+            CreateToolbarIcon("M4 5V19M11 5V19M4 12H11M14.5 8.5C17 5.5 21 6.5 21 9.5C21 11.7 18.5 12 16.5 12C18.5 12 21 12.3 21 14.5C21 17.5 17 18.5 14.5 15.5"),
+            "三级标题",
+            "heading3");
         AddToolbarSeparator(tools);
         AddToolbarAction(tools, "B", "粗体", "bold");
         AddToolbarAction(
