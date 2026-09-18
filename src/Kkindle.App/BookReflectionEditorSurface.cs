@@ -31,7 +31,7 @@ internal sealed record BookReflectionCitation(
     DateTimeOffset UpdatedAt)
 {
     public string DisplayText => string.IsNullOrWhiteSpace(SelectedText)
-        ? Note
+        ? string.IsNullOrWhiteSpace(Note) ? UiText.Get("未命名批注") : Note
         : SelectedText;
 
     public string SearchText => string.Join('\n', BookTitle, ChapterLabel, SelectedText, Note);
@@ -1674,7 +1674,7 @@ internal sealed class BookReflectionEditorSurface : Border
             SetEditorText(view, view.State.PlainText, view.State.PlainText.Length);
             UpdateBlockView(view);
             AddBlock(new BlockState(), index + 1);
-            FocusBlock(_blocks[index + 1], 0);
+            FocusBlock(view, view.State.PlainText.Length);
         }
         else if (before.Count == 0)
         {
@@ -1683,7 +1683,7 @@ internal sealed class BookReflectionEditorSurface : Border
             SetEditorText(view, view.State.PlainText, view.State.PlainText.Length);
             UpdateBlockView(view);
             AddBlock(new BlockState { Inlines = after }, index + 1);
-            FocusBlock(_blocks[index + 1], 0);
+            FocusBlock(view, view.State.PlainText.Length);
         }
         else
         {
@@ -1692,7 +1692,7 @@ internal sealed class BookReflectionEditorSurface : Border
             UpdateBlockView(view);
             AddBlock(quote, index + 1);
             AddBlock(new BlockState { Inlines = after }, index + 2);
-            FocusBlock(_blocks[index + 2], 0);
+            FocusBlock(_blocks[index + 1], text.Length);
         }
 
         _selection = null;

@@ -168,8 +168,6 @@ public partial class MainWindow
             _lifetimeCancellation.Token);
         var fallbackTitle = T("已删除的本地书籍");
         return annotations
-            .Where(annotation => !string.IsNullOrWhiteSpace(annotation.SelectedText)
-                || !string.IsNullOrWhiteSpace(annotation.Note))
             .Select(annotation => new BookReflectionCitation(
                 annotation.Id,
                 displayInfos.GetValueOrDefault(annotation.BookId)?.Title ?? fallbackTitle,
