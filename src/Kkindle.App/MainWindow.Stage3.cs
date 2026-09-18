@@ -5907,8 +5907,12 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
         ? UiText.Get("书籍级思考")
         : UiText.Get("章节：{0}", ChapterLabel);
     public string SelectedContentLabel => IsBookReflection
-        ? UiText.Get("读后思考：{0}", Note)
+        ? string.Empty
         : string.IsNullOrWhiteSpace(Quote) ? UiText.Get("选中内容：无") : UiText.Get("选中内容：{0}", Quote);
+    public bool IsNotBookReflection => !IsBookReflection;
+    public string ReflectionMarkdown => IsBookReflection
+        ? BookReflectionEditorSurface.NormalizeMarkdown(Note)
+        : string.Empty;
     public bool HasNote => !IsBookReflection && !string.IsNullOrWhiteSpace(Note);
     public string DateLabel => UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? UiText.Get("时间未知");
     public string SearchText => string.Join('\n', SourceLabel, BookTitle, TypeLabel, ChapterLabel, Location, Quote, Note);
@@ -5929,6 +5933,8 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
         OnPropertyChanged(nameof(NoteLabel));
         OnPropertyChanged(nameof(ChapterDisplayLabel));
         OnPropertyChanged(nameof(SelectedContentLabel));
+        OnPropertyChanged(nameof(IsNotBookReflection));
+        OnPropertyChanged(nameof(ReflectionMarkdown));
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(SearchText));
     }

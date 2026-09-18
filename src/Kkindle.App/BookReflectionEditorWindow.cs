@@ -34,7 +34,10 @@ internal sealed class BookReflectionEditorWindow : Window
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _completed;
 
-    public BookReflectionEditorWindow(string bookTitle, string initialContent)
+    public BookReflectionEditorWindow(
+        string bookTitle,
+        string initialContent,
+        IReadOnlyList<BookReflectionCitation>? citations = null)
     {
         Title = UiText.Get("读后思考编辑");
         Width = 900;
@@ -149,7 +152,7 @@ internal sealed class BookReflectionEditorWindow : Window
             Foreground = AppAppearanceResources.GetBrush("InkBrush"),
             TextWrapping = TextWrapping.Wrap
         };
-        _editorSurface = new BookReflectionEditorSurface(initialContent)
+        _editorSurface = new BookReflectionEditorSurface(initialContent, citations)
         {
             MinHeight = 280
         };

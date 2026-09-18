@@ -7,6 +7,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -21,12 +22,28 @@ namespace Kkindle;
 using AvaloniaPath = Avalonia.Controls.Shapes.Path;
 using AvaloniaRectangle = Avalonia.Controls.Shapes.Rectangle;
 
+internal sealed record BookReflectionCitation(
+    Guid Id,
+    string BookTitle,
+    string ChapterLabel,
+    string SelectedText,
+    string Note,
+    DateTimeOffset UpdatedAt)
+{
+    public string DisplayText => string.IsNullOrWhiteSpace(SelectedText)
+        ? Note
+        : SelectedText;
+
+    public string SearchText => string.Join('\n', BookTitle, ChapterLabel, SelectedText, Note);
+}
+
 internal sealed class BookReflectionEditorSurface : Border
 {
     private const double DefaultImageMaxWidth = 900;
     private const double DefaultImageMaxHeight = 620;
     private const double MinimumImageWidth = 48;
     private const double ImageZoomFactor = 1.2;
+    private const double QuoteAdornmentWidth = 24;
 
     // Toolbar geometry. Buttons and icons share one square content box so the
     // glyphs line up on the same optical centre.
@@ -53,6 +70,7 @@ internal sealed class BookReflectionEditorSurface : Border
         RegexOptions.Compiled);
 
     private readonly StackPanel _blockStack;
+    private readonly IReadOnlyList<BookReflectionCitation> _citations;
     public Control FormattingToolbar { get; }
     private readonly List<BlockView> _blocks = [];
     private BlockView? _activeBlock;
@@ -70,8 +88,11 @@ internal sealed class BookReflectionEditorSurface : Border
         .Where(block => block.State.Kind != BlockKind.Image)
         .Sum(block => block.State.PlainText.Length);
 
-    public BookReflectionEditorSurface(string initialContent)
+    public BookReflectionEditorSurface(
+        string initialContent,
+        IReadOnlyList<BookReflectionCitation>? citations = null)
     {
+        _citations = citations ?? [];
         Background = AppAppearanceResources.GetBrush("PaperBrush");
         BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush");
         BorderThickness = new Thickness(1, 1, 1, 0);
@@ -166,6 +187,14 @@ internal sealed class BookReflectionEditorSurface : Border
             CreateToolbarIcon("M4.5 5H10.5V10.5H7.5C7.5 14.4 8.8 17 11 19M13.5 5H19.5V10.5H16.5C16.5 14.4 17.8 17 20 19"),
             "引用",
             "quote");
+        if (_citations.Count > 0)
+        {
+            AddToolbarAction(
+                tools,
+                CreateToolbarIcon("M4.5 5H10.5V10.5H7.5C7.5 14.4 8.8 17 11 19M13.5 5H19.5V10.5H16.5C16.5 14.4 17.8 17 20 19M17 14V22M13 18H21"),
+                "引用批注",
+                "citation");
+        }
         AddToolbarAction(
             tools,
             CreateToolbarIcon("M4 5H7V8H4ZM4 11H7V14H4ZM4 17H7V20H4ZM10 6H20M10 12H20M10 18H20"),
@@ -362,6 +391,7 @@ internal sealed class BookReflectionEditorSurface : Border
         };
         var contentHost = new Grid
         {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*"),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         Grid.SetColumn(contentHost, 1);
@@ -370,6 +400,8 @@ internal sealed class BookReflectionEditorSurface : Border
 
         ReflectionRichTextBlock? richText = null;
         TextBox? editor = null;
+        TextBlock? quoteOpening = null;
+        TextBlock? quoteClosing = null;
         Border? imageHost = null;
         Bitmap? imageBitmap = null;
         Image? imageControl = null;
@@ -446,10 +478,18 @@ internal sealed class BookReflectionEditorSurface : Border
             imageActionBar = CreateImageActionBar(out imageActionButtons);
             imageFrame.Children.Add(imageActionBar);
             imageHost.Child = imageFrame;
+            Grid.SetColumn(imageHost, 1);
             contentHost.Children.Add(imageHost);
         }
         else
         {
+            quoteOpening = CreateQuoteAdornment("“", HorizontalAlignment.Left);
+            quoteClosing = CreateQuoteAdornment("”", HorizontalAlignment.Right);
+            Grid.SetColumn(quoteOpening, 0);
+            Grid.SetColumn(quoteClosing, 0);
+            Grid.SetColumnSpan(quoteClosing, 2);
+            contentHost.Children.Add(quoteOpening);
+
             richText = new ReflectionRichTextBlock
             {
                 IsHitTestVisible = false,
@@ -459,6 +499,7 @@ internal sealed class BookReflectionEditorSurface : Border
                 Margin = new Thickness(0, 5, 0, 5),
                 FontFamily = new FontFamily("fonts:Kkindle#KingHwaOldSong")
             };
+            Grid.SetColumn(richText, 1);
 
             editor = new TextBox
             {
@@ -480,10 +521,12 @@ internal sealed class BookReflectionEditorSurface : Border
                 SelectionForegroundBrush = Brushes.Transparent,
                 ClearSelectionOnLostFocus = true
             };
+            Grid.SetColumn(editor, 1);
             editor.Classes.Add("bookReflectionEditor");
 
             contentHost.Children.Add(richText);
             contentHost.Children.Add(editor);
+            contentHost.Children.Add(quoteClosing);
         }
 
         var view = new BlockView(
@@ -493,6 +536,8 @@ internal sealed class BookReflectionEditorSurface : Border
             contentHost,
             richText,
             editor,
+            quoteOpening,
+            quoteClosing,
             imageHost,
             imageBitmap,
             imageControl,
@@ -562,6 +607,23 @@ internal sealed class BookReflectionEditorSurface : Border
         UpdateBlockView(view);
         return view;
     }
+
+    private static TextBlock CreateQuoteAdornment(string text, HorizontalAlignment alignment) => new()
+    {
+        Text = text,
+        Width = QuoteAdornmentWidth,
+        FontSize = 31,
+        FontWeight = FontWeight.SemiBold,
+        Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
+        FontFamily = new FontFamily("fonts:Kkindle#KingHwaOldSong"),
+        TextAlignment = alignment == HorizontalAlignment.Right ? TextAlignment.Right : TextAlignment.Left,
+        HorizontalAlignment = alignment,
+        VerticalAlignment = text == "“" ? VerticalAlignment.Top : VerticalAlignment.Bottom,
+        Margin = text == "“" ? new Thickness(0, 0, 0, 0) : new Thickness(0, 0, 3, 2),
+        IsVisible = false,
+        IsHitTestVisible = false,
+        ZIndex = 1
+    };
 
     private void ImageFrame_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -1313,13 +1375,15 @@ internal sealed class BookReflectionEditorSurface : Border
         view.Row.Background = Brushes.Transparent;
         view.Marker.Margin = new Thickness(0);
         view.Marker.Background = Brushes.Transparent;
-        view.ContentHost.HorizontalAlignment = isQuote
-            ? HorizontalAlignment.Left
-            : HorizontalAlignment.Stretch;
+        view.ContentHost.HorizontalAlignment = HorizontalAlignment.Stretch;
         view.ContentHost.VerticalAlignment = VerticalAlignment.Top;
+        view.ContentHost.ColumnDefinitions[0].Width = new GridLength(
+            isQuote ? QuoteAdornmentWidth : 0);
         view.ContentHost.Background = isQuote
             ? AppAppearanceResources.GetBrush("PressedBrush")
             : Brushes.Transparent;
+        view.QuoteOpening?.SetCurrentValue(IsVisibleProperty, isQuote);
+        view.QuoteClosing?.SetCurrentValue(IsVisibleProperty, isQuote);
         view.Marker.Child = state.Kind is BlockKind.UnorderedList or BlockKind.OrderedList
             ? new TextBlock
             {
@@ -1339,7 +1403,7 @@ internal sealed class BookReflectionEditorSurface : Border
                 ? AppAppearanceResources.GetBrush("InkBrush")
                 : AppAppearanceResources.GetBrush("InkBrush");
             view.RichText.Margin = isQuote
-                ? new Thickness(12, 10, 16, 10)
+                ? new Thickness(0, 10, 22, 10)
                 : new Thickness(0, 5, 0, 5);
             view.RichText.FontStyle = isQuote
                 ? FontStyle.Italic
@@ -1373,7 +1437,7 @@ internal sealed class BookReflectionEditorSurface : Border
                 _ => 15
             };
             view.Editor.Padding = isQuote
-                ? new Thickness(12, 10, 16, 10)
+                ? new Thickness(0, 10, 22, 10)
                 : new Thickness(0, 5, 0, 5);
             view.Editor.FontStyle = isQuote
                 ? FontStyle.Italic
@@ -1457,6 +1521,9 @@ internal sealed class BookReflectionEditorSurface : Border
                 break;
             case "link":
                 await ApplyLinkAsync(selection);
+                break;
+            case "citation":
+                await InsertCitationAsync(selection);
                 break;
             case "image":
                 await InsertImageAsync(selection);
@@ -1549,6 +1616,252 @@ internal sealed class BookReflectionEditorSurface : Border
             CollapseTextSelection(target, end, focusEditor: true);
         }
         RaiseContentChanged();
+    }
+
+    private async Task InsertCitationAsync(SelectionSnapshot? selection)
+    {
+        var target = selection ?? GetToolbarSelection(allowCaret: true);
+        if (target is null || !_blocks.Contains(target.Block))
+            return;
+
+        var citation = await PickCitationAsync();
+        if (citation is null || string.IsNullOrWhiteSpace(citation.DisplayText))
+            return;
+
+        InsertCitationBlock(target, citation.DisplayText.Trim());
+    }
+
+    private void InsertCitationBlock(SelectionSnapshot selection, string text)
+    {
+        var view = selection.Block;
+        var index = _blocks.IndexOf(view);
+        if (index < 0 || text.Length == 0)
+            return;
+
+        var length = view.LastPlainText.Length;
+        var start = Math.Clamp(selection.Start, 0, length);
+        var end = Math.Clamp(selection.End, start, length);
+        var before = SliceRuns(view.State.Inlines, 0, start);
+        var after = SliceRuns(view.State.Inlines, end, length);
+        var inserted = ParseInline(text.ReplaceLineEndings("\n"));
+
+        // In an existing quote field, replace the selected text in place. This
+        // keeps the TextBox's character offsets identical to the rendered text,
+        // so the caret lands immediately after the inserted citation.
+        if (view.State.Kind == BlockKind.Quote)
+        {
+            before.AddRange(inserted);
+            before.AddRange(after);
+            view.State.Inlines = MergeRuns(before);
+            var caret = start + text.Length;
+            SetEditorText(view, view.State.PlainText, caret);
+            UpdateBlockView(view);
+            FocusBlock(view, caret);
+            RaiseContentChanged();
+            return;
+        }
+
+        var quote = new BlockState
+        {
+            Kind = BlockKind.Quote,
+            Inlines = inserted
+        };
+
+        if (before.Count == 0 && after.Count == 0)
+        {
+            view.State.Kind = BlockKind.Quote;
+            view.State.Inlines = inserted;
+            SetEditorText(view, view.State.PlainText, view.State.PlainText.Length);
+            UpdateBlockView(view);
+            AddBlock(new BlockState(), index + 1);
+            FocusBlock(_blocks[index + 1], 0);
+        }
+        else if (before.Count == 0)
+        {
+            view.State.Kind = BlockKind.Quote;
+            view.State.Inlines = inserted;
+            SetEditorText(view, view.State.PlainText, view.State.PlainText.Length);
+            UpdateBlockView(view);
+            AddBlock(new BlockState { Inlines = after }, index + 1);
+            FocusBlock(_blocks[index + 1], 0);
+        }
+        else
+        {
+            view.State.Inlines = before;
+            SetEditorText(view, view.State.PlainText, view.State.PlainText.Length);
+            UpdateBlockView(view);
+            AddBlock(quote, index + 1);
+            AddBlock(new BlockState { Inlines = after }, index + 2);
+            FocusBlock(_blocks[index + 2], 0);
+        }
+
+        _selection = null;
+        RaiseContentChanged();
+    }
+
+    internal static IReadOnlyList<BookReflectionCitation> FilterCitations(
+        IEnumerable<BookReflectionCitation> citations,
+        string? query)
+    {
+        var normalizedQuery = query?.Trim() ?? string.Empty;
+        return citations
+            .Where(citation => normalizedQuery.Length == 0
+                || citation.SearchText.Contains(normalizedQuery, StringComparison.CurrentCultureIgnoreCase))
+            .OrderByDescending(citation => citation.UpdatedAt)
+            .ToArray();
+    }
+
+    private async Task<BookReflectionCitation?> PickCitationAsync()
+    {
+        var owner = GetOwnerWindow();
+        if (owner is null || _citations.Count == 0)
+            return null;
+
+        var searchBox = new TextBox
+        {
+            MinHeight = 34,
+            PlaceholderText = UiText.Get("搜索书名、章节、划线或批注")
+        };
+        var list = new ListBox
+        {
+            MinHeight = 260,
+            MaxHeight = 420,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            SelectionMode = SelectionMode.Single
+        };
+        var emptyText = new TextBlock
+        {
+            Text = UiText.Get("没有找到匹配的批注。"),
+            Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 16),
+            IsVisible = false
+        };
+        list.ItemTemplate = new FuncDataTemplate<BookReflectionCitation>((citation, _) =>
+        {
+            var quote = new TextBlock
+            {
+                Text = citation.DisplayText,
+                FontSize = 13,
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 3
+            };
+            var meta = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(citation.ChapterLabel)
+                    ? citation.BookTitle
+                    : $"{citation.BookTitle} · {citation.ChapterLabel}",
+                FontSize = 10,
+                Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            return new Border
+            {
+                Padding = new Thickness(10, 8),
+                Child = new StackPanel { Spacing = 3, Children = { quote, meta } }
+            };
+        });
+
+        void RefreshList()
+        {
+            var query = searchBox.Text?.Trim() ?? string.Empty;
+            var filtered = FilterCitations(_citations, query);
+            list.ItemsSource = filtered;
+            list.SelectedIndex = filtered.Count > 0 ? 0 : -1;
+            emptyText.IsVisible = filtered.Count == 0;
+        }
+
+        var completion = new TaskCompletionSource<BookReflectionCitation?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var dialog = new Window
+        {
+            Title = UiText.Get("引用批注"),
+            Width = 600,
+            Height = 560,
+            MinWidth = 480,
+            MinHeight = 420,
+            CanResize = true,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = AppAppearanceResources.GetBrush("PaperBrush")
+        };
+
+        void Complete(BookReflectionCitation? result)
+        {
+            completion.TrySetResult(result);
+            dialog.Close();
+        }
+
+        var cancelButton = new Button
+        {
+            Content = UiText.Get("取消"),
+            Padding = new Thickness(14, 7)
+        };
+        cancelButton.Classes.Add("quiet");
+        cancelButton.Click += (_, _) => Complete(null);
+
+        var insertButton = new Button
+        {
+            Content = UiText.Get("插入引用"),
+            Padding = new Thickness(14, 7),
+            MinWidth = 92
+        };
+        insertButton.Click += (_, _) =>
+            Complete(list.SelectedItem as BookReflectionCitation);
+        list.DoubleTapped += (_, _) =>
+        {
+            if (list.SelectedItem is BookReflectionCitation citation)
+                Complete(citation);
+        };
+        searchBox.TextChanged += (_, _) => RefreshList();
+        searchBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter && list.SelectedItem is BookReflectionCitation citation)
+            {
+                e.Handled = true;
+                Complete(citation);
+            }
+            else if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                Complete(null);
+            }
+        };
+
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 8,
+            Children = { cancelButton, insertButton }
+        };
+        var fields = new Grid
+        {
+            RowDefinitions = new RowDefinitions("Auto,*,Auto"),
+            RowSpacing = 10,
+            Children =
+            {
+                searchBox,
+                new Grid { Children = { list, emptyText } },
+                actions
+            }
+        };
+        Grid.SetRow(searchBox, 0);
+        Grid.SetRow(fields.Children[1], 1);
+        Grid.SetRow(actions, 2);
+        dialog.Content = new Border
+        {
+            Padding = new Thickness(22),
+            Child = fields
+        };
+        dialog.Closed += (_, _) => completion.TrySetResult(null);
+        dialog.Opened += (_, _) =>
+        {
+            RefreshList();
+            searchBox.Focus();
+        };
+        dialog.Show(owner);
+        return await completion.Task;
     }
 
     private async Task InsertImageAsync(SelectionSnapshot? selection)
@@ -2161,8 +2474,6 @@ internal sealed class BookReflectionEditorSurface : Border
         public void SetRuns(IReadOnlyList<InlineRun> runs, bool quote)
         {
             Inlines = new InlineCollection();
-            if (quote)
-                Inlines.Add(CreateQuoteMark("“"));
 
             foreach (var run in runs)
             {
@@ -2176,17 +2487,7 @@ internal sealed class BookReflectionEditorSurface : Border
                 }
                 Inlines?.Add(textRun);
             }
-
-            if (quote)
-                Inlines?.Add(CreateQuoteMark("”"));
         }
-
-        private Run CreateQuoteMark(string text) => new(text)
-        {
-            Foreground = AppAppearanceResources.GetBrush("AccentBrush"),
-            FontSize = Math.Max(30, FontSize + 16),
-            FontWeight = FontWeight.SemiBold
-        };
 
         public void SetRuns(IReadOnlyList<InlineRun> runs)
         {
@@ -2203,6 +2504,8 @@ internal sealed class BookReflectionEditorSurface : Border
             Grid contentHost,
             ReflectionRichTextBlock? richText,
             TextBox? editor,
+            TextBlock? quoteOpening,
+            TextBlock? quoteClosing,
             Border? imageHost,
             Bitmap? imageBitmap,
             Image? imageControl,
@@ -2218,6 +2521,8 @@ internal sealed class BookReflectionEditorSurface : Border
             ContentHost = contentHost;
             RichText = richText;
             Editor = editor;
+            QuoteOpening = quoteOpening;
+            QuoteClosing = quoteClosing;
             ImageHost = imageHost;
             ImageBitmap = imageBitmap;
             ImageControl = imageControl;
@@ -2235,6 +2540,8 @@ internal sealed class BookReflectionEditorSurface : Border
         public Grid ContentHost { get; }
         public ReflectionRichTextBlock? RichText { get; }
         public TextBox? Editor { get; }
+        public TextBlock? QuoteOpening { get; }
+        public TextBlock? QuoteClosing { get; }
         public Border? ImageHost { get; }
         public Bitmap? ImageBitmap { get; set; }
         public Image? ImageControl { get; }

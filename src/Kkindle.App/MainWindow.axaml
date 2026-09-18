@@ -2080,7 +2080,36 @@
                                                                                FontSize="12"
                                                                                MaxLines="8"
                                                                                TextTrimming="CharacterEllipsis"
-                                                                               TextWrapping="Wrap" />
+                                                                               TextWrapping="Wrap"
+                                                                               IsVisible="{Binding IsNotBookReflection}" />
+                                                                    <local:KreaderMarkdownTextBlock Markdown="{Binding ReflectionMarkdown}"
+                                                                                                     FontSize="12"
+                                                                                                     MaxWidth="560"
+                                                                                                     MaxLines="8"
+                                                                                                     TextTrimming="CharacterEllipsis"
+                                                                                                     TextWrapping="Wrap"
+                                                                                                     HorizontalAlignment="Left"
+                                                                                                     IsVisible="{Binding IsBookReflection}">
+                                                                        <ToolTip.Tip>
+                                                                            <ToolTip DataContext="{Binding}">
+                                                                                <Border Width="520"
+                                                                                        MaxHeight="360"
+                                                                                        Padding="14"
+                                                                                        Background="{DynamicResource PaperBrush}"
+                                                                                        BorderBrush="{DynamicResource HairlineBrush}"
+                                                                                        BorderThickness="1">
+                                                                                    <ScrollViewer MaxHeight="330"
+                                                                                                  HorizontalScrollBarVisibility="Disabled"
+                                                                                                  VerticalScrollBarVisibility="Auto">
+                                                                                        <local:KreaderMarkdownTextBlock Markdown="{Binding ReflectionMarkdown}"
+                                                                                                                         FontSize="13"
+                                                                                                                         Foreground="{DynamicResource InkBrush}"
+                                                                                                                         TextWrapping="Wrap" />
+                                                                                    </ScrollViewer>
+                                                                                </Border>
+                                                                            </ToolTip>
+                                                                        </ToolTip.Tip>
+                                                                    </local:KreaderMarkdownTextBlock>
                                                                     <TextBlock Text="{Binding NoteLabel}"
                                                                                FontSize="11"
                                                                                Foreground="{DynamicResource MutedInkBrush}"

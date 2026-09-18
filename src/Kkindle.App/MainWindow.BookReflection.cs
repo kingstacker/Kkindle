@@ -155,6 +155,46 @@ public partial class MainWindow
             await EditBookReflectionAsync(_selectedCard);
     }
 
+    private async Task<IReadOnlyList<BookReflectionCitation>> LoadBookReflectionCitationsAsync()
+    {
+        var annotations = await _readerData.GetAllAnnotationsAsync(
+            _lifetimeCancellation.Token);
+        if (annotations.Count == 0)
+            return [];
+
+        var bookIds = annotations.Select(annotation => annotation.BookId).Distinct().ToArray();
+        var displayInfos = await _library.GetBookDisplayInfosAsync(
+            bookIds,
+            _lifetimeCancellation.Token);
+        var fallbackTitle = T("已删除的本地书籍");
+        return annotations
+            .Where(annotation => !string.IsNullOrWhiteSpace(annotation.SelectedText)
+                || !string.IsNullOrWhiteSpace(annotation.Note))
+            .Select(annotation => new BookReflectionCitation(
+                annotation.Id,
+                displayInfos.GetValueOrDefault(annotation.BookId)?.Title ?? fallbackTitle,
+                ResolveBookReflectionCitationChapter(annotation.ChapterPath),
+                annotation.SelectedText,
+                annotation.Note,
+                annotation.UpdatedAt))
+            .ToArray();
+    }
+
+    private static string ResolveBookReflectionCitationChapter(string chapterPath)
+    {
+        if (chapterPath.StartsWith("pdf:page:", StringComparison.OrdinalIgnoreCase))
+        {
+            var pageText = chapterPath["pdf:page:".Length..];
+            return int.TryParse(pageText, out var page) && page > 0
+                ? UiText.Get("第 {0} 页", page)
+                : "PDF";
+        }
+
+        var normalized = chapterPath.Replace('\\', '/').TrimEnd('/');
+        var name = Path.GetFileNameWithoutExtension(normalized);
+        return string.IsNullOrWhiteSpace(name) ? UiText.Get("未指定章节") : name;
+    }
+
     private async Task EditBookReflectionAsync(BookCardViewModel card)
     {
         if (_bookReflectionEditorBusy) return;
@@ -165,11 +205,13 @@ public partial class MainWindow
             var existing = await _readerData.GetBookReflectionAsync(
                 card.Book.Id,
                 _lifetimeCancellation.Token);
+            var citations = await LoadBookReflectionCitationsAsync();
             var editor = new BookReflectionEditorWindow(
                 card.Title,
                 existing is null
                     ? string.Empty
-                    : BookReflectionEditorSurface.NormalizeMarkdown(existing.Content));
+                    : BookReflectionEditorSurface.NormalizeMarkdown(existing.Content),
+                citations);
             var result = await editor.ShowAsync(this);
             if (result is null) return;
 

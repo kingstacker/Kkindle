@@ -85,6 +85,95 @@ public sealed partial class SettingsTests
     });
 
     [Fact]
+    public Task NativeReflectionQuoteIsEditableAndKeepsCaretOffsets() => Run(async () =>
+    {
+        var surface = new BookReflectionEditorSurface("> 原来的引用")
+        {
+            Width = 620,
+            Height = 220
+        };
+        var window = new Window
+        {
+            Width = 720,
+            Height = 500,
+            Content = surface
+        };
+        window.Show();
+        try
+        {
+            await Render();
+            var editor = Assert.Single(surface.GetVisualDescendants().OfType<TextBox>());
+            Assert.Equal("原来的引用", editor.Text);
+            editor.Focus();
+            editor.CaretIndex = 3;
+            editor.Text = "新的引用";
+            await Render();
+            Assert.Equal("新的引用", editor.Text);
+            Assert.Equal(3, editor.CaretIndex);
+            Assert.Equal("> 新的引用", surface.Markdown);
+
+            editor.CaretIndex = 1;
+            var quoteButton = surface.FormattingToolbar.GetVisualDescendants()
+                .OfType<Button>()
+                .Single(button => button.Tag as string == "quote");
+            quoteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Render();
+            Assert.Equal(1, editor.CaretIndex);
+            Assert.Equal("> 新的引用", surface.Markdown);
+        }
+        finally
+        {
+            surface.Dispose();
+            window.Close();
+        }
+    });
+
+    [Fact]
+    public void ReflectionCitationSearchMatchesAllFields()
+    {
+        var first = new BookReflectionCitation(
+            Guid.NewGuid(), "书一", "第一章", "被选中的句子", "我的批注", DateTimeOffset.UtcNow.AddMinutes(-1));
+        var second = new BookReflectionCitation(
+            Guid.NewGuid(), "书二", "第二章", "另一段", "重点结论", DateTimeOffset.UtcNow);
+
+        Assert.Equal(second, BookReflectionEditorSurface.FilterCitations([first, second], "重点").Single());
+        Assert.Equal(first, BookReflectionEditorSurface.FilterCitations([first, second], "第一章").Single());
+        Assert.Equal(2, BookReflectionEditorSurface.FilterCitations([first, second], null).Count);
+    }
+
+    [Fact]
+    public void ReadingMaterialReflectionUsesMarkdownPreviewContent()
+    {
+        var reflection = new ReaderBookReflection
+        {
+            BookId = Guid.NewGuid(),
+            Content = "\"# 标题\\n\\n**重点**\""
+        };
+        var item = new Stage3ReadingMaterialViewModel(
+            ReadingMaterialSource.Local,
+            "测试书",
+            "读后思考",
+            "读后思考",
+            "书籍级",
+            string.Empty,
+            reflection.Content,
+            reflection.UpdatedAt,
+            null,
+            null,
+            localReflection: reflection);
+        try
+        {
+            Assert.Equal("# 标题\n\n**重点**", item.ReflectionMarkdown);
+            Assert.False(item.IsNotBookReflection);
+            Assert.Empty(item.SelectedContentLabel);
+        }
+        finally
+        {
+            item.Dispose();
+        }
+    }
+
+    [Fact]
     public Task NativeReflectionImagesCanBeSizedAndDeleted() => Run(async () =>
     {
         const string pixel =
