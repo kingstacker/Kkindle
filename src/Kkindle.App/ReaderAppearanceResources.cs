@@ -23,9 +23,9 @@ internal static class ReaderAppearanceResources
         Set("Input", palette.Page);
         var pageBrush = ReaderPaperTexture.CreateBrush(palette.Page, appearance);
         resources["ReaderPageBrush"] = pageBrush;
-        // The title bar, TOC rail, assistant rail, reading canvas and footer
-        // are one reader surface. Reusing one brush removes visible bands when
-        // a muted theme changes between the chrome and body regions.
+        // Structural reader panes are transparent and reveal the single paper
+        // surface painted by ReaderRoot. Keep these aliases for standalone
+        // controls and popups that still need an opaque reader background.
         resources["ReaderChromeBrush"] = pageBrush;
         resources["ReaderSidebarBrush"] = pageBrush;
 

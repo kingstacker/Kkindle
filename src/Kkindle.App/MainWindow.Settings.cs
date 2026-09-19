@@ -42,25 +42,34 @@ public partial class MainWindow
 
     private void SettingsButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (BlockNavigationWhileTransferring()) return;
         ShowStage3Page(SettingsPage, SettingsNavigationButton);
         SettingsDataPathText.Text = _paths.Data;
         ShowSettingsSection(_activeSettingsCategory);
     }
 
-    private void SystemBackupNavigationButton_Click(object? sender, RoutedEventArgs e) =>
+    private void SystemBackupNavigationButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (BlockNavigationWhileTransferring()) return;
         OpenSettingsExpander("Data", SettingsBackupExpander);
+    }
 
-    private void SystemS3SyncNavigationButton_Click(object? sender, RoutedEventArgs e) =>
+    private void SystemS3SyncNavigationButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (BlockNavigationWhileTransferring()) return;
         OpenSettingsExpander("Data", SettingsS3Expander);
+    }
 
     private void KindleEmailSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (BlockNavigationWhileTransferring()) return;
         OpenSettingsExpander("Kindle", SettingsSendToKindleExpander);
         FocusSettingsControl(KindleEmailRecipientBox);
     }
 
     private async void ReaderAiSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (BlockNavigationWhileTransferring()) return;
         OpenSettingsExpander("Reading", SettingsAiExpander);
         await EnsureMainReaderAiSettingsLoadedAsync();
         if (SettingsReadingSection.IsVisible && SettingsAiExpander.IsExpanded)
@@ -259,6 +268,7 @@ public partial class MainWindow
 
     private void OpenSettingsExpander(string category, Expander expander)
     {
+        if (BlockNavigationWhileTransferring()) return;
         ShowStage3Page(SettingsPage, SettingsNavigationButton);
         ShowSettingsSection(category);
         expander.IsExpanded = true;

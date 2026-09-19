@@ -49,17 +49,6 @@ public partial class MainWindow
     {
         var color = ReaderMarkerColorForSelection();
         ReaderSelectionMarkerColorPreview.Background = new SolidColorBrush(Color.Parse(color));
-        ReaderSelectionMarkerColorText.Text = color switch
-        {
-            "#000000" => T("黑白反色"),
-            "#FFD54F" => T("黄色"),
-            "#81C784" => T("绿色"),
-            "#64B5F6" => T("蓝色"),
-            "#F48FB1" => T("粉色"),
-            "#B39DDB" => T("紫色"),
-            "#FFB74D" => T("橙色"),
-            _ => color
-        };
         foreach (var option in ReaderSelectionMarkerPalette.Children.OfType<Button>())
             option.Classes.Set("selected", string.Equals(option.Tag as string, color, StringComparison.OrdinalIgnoreCase));
     }

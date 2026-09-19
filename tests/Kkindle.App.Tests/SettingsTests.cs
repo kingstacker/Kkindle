@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -543,13 +544,48 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     {
         await using var scope = await TestWindow.Create();
 
-        scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "正在发送…", null, true, false);
+        scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "正在发送…", null, true, false, false);
         await Render();
 
         Assert.True(scope.Get<Control>("TransferToast").IsEffectivelyVisible);
         Assert.True(scope.Get<ProgressBar>("TransferToastProgress").IsEffectivelyVisible);
+        Assert.True(scope.Get<Control>("TransferToastSpinnerIcon").IsVisible);
+        var spinner = scope.Get<Control>("TransferToastSpinnerIcon");
+        var beforeRotation = Assert.IsType<RotateTransform>(spinner.RenderTransform).Angle;
+        scope.Call("TickTaskSpinner");
+        var afterRotation = Assert.IsType<RotateTransform>(spinner.RenderTransform).Angle;
+        Assert.NotEqual(beforeRotation, afterRotation);
+        Assert.False(scope.Get<Control>("TransferToastSuccessIcon").IsVisible);
         Assert.False(scope.Get<Control>("TaskProgressPopup").IsEffectivelyVisible);
         Assert.False(scope.Get<Control>("ConfirmationOverlay").IsEffectivelyVisible);
+
+        using var transferCancellation = new CancellationTokenSource();
+        scope.Set("_isTransferring", true);
+        scope.Set("_transferCancellation", transferCancellation);
+        scope.Call("ShowTransferToast", "发送到设备", "正在发送…", 0d, false, false, false);
+        Assert.True(scope.Get<Control>("TransferToastCancelButton").IsVisible);
+        scope.Call("TransferToastCancelButton_Click", null, new RoutedEventArgs());
+        Assert.False(transferCancellation.IsCancellationRequested);
+        Assert.True(scope.Field<bool>("_transferStopRequested"));
+        Assert.Contains("当前书籍发送完成后将停止", scope.Get<TextBlock>("TransferToastMessageText").Text);
+
+        // A book can report 100% while a batch still has more books. The
+        // overall task must keep its spinner and stop affordance until the
+        // explicit completed state arrives.
+        scope.Set("_transferStopRequested", false);
+        scope.Call("ShowTransferToast", "发送到设备", "单本已完成", 100d, false, false, false);
+        Assert.True(scope.Get<Control>("TransferToastSpinnerIcon").IsVisible);
+        Assert.True(scope.Get<Control>("TransferToastCancelButton").IsVisible);
+        Assert.NotNull(scope.Get<Button>("TransferToastCancelButton").ContentTemplate);
+
+        scope.Call("ShowTransferToast", "发送到设备", "已完成", 100d, false, true, true);
+        await Render();
+        Assert.False(scope.Get<Control>("TransferToastSpinnerIcon").IsVisible);
+        Assert.True(scope.Get<Control>("TransferToastSuccessIcon").IsVisible);
+        Assert.Equal("任务完成", scope.Get<TextBlock>("TransferToastMessageText").Text);
+        scope.Set("_transferCancellation", null);
+        scope.Set("_isTransferring", false);
+        scope.Set("_transferStopRequested", false);
     });
 
     [Fact]
@@ -700,7 +736,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         public S3SyncService Sync => Field<S3SyncService>("_s3SyncService");
         public T Get<T>(string name) where T : Control => window.FindControl<T>(name)!;
         public T Field<T>(string name) => (T)typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-        public void Set(string name, object value) => typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, value);
+        public void Set(string name, object? value) => typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, value);
         public object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, args);
         public T Call<T>(string name, params object?[] args) => (T)Call(name, args)!;
 

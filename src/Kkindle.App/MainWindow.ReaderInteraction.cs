@@ -7249,9 +7249,14 @@ public partial class MainWindow
                     ReaderStatusText.Text = UiText.Localize(ReadString(root, "message"));
                     break;
                 case "annotationClick":
-                    if (_readerIsPdf && Guid.TryParse(ReadString(root, "id"), out var annotationId)
+                    if (Guid.TryParse(ReadString(root, "id"), out var annotationId)
                         && ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is { } clickedAnnotation)
-                        EditReaderPdfAnnotation(clickedAnnotation);
+                    {
+                        if (_readerIsPdf)
+                            EditReaderPdfAnnotation(clickedAnnotation);
+                        else
+                            EditReaderAnnotation(clickedAnnotation);
+                    }
                     break;
                 case "pdfPointAnnotation":
                     if (_readerIsPdf
@@ -7578,6 +7583,9 @@ public partial class MainWindow
             return;
         }
 
+        var showDeleteAction = _selectedReaderAnnotation is not null;
+        ReaderSelectionDeleteSeparator.IsVisible = showDeleteAction;
+        ReaderSelectionDeleteButton.IsVisible = showDeleteAction;
         // Remember where the selection sits so the annotation input window can
         // open at the same spot after the bar hands off to it.
         _readerLastSelectionPopupAnchor = placementPoint;
@@ -7665,6 +7673,10 @@ public partial class MainWindow
         StopReaderSelectionHighlightPointerTracking();
         if (ReaderSelectionHighlightMenuButton?.Flyout is PopupFlyoutBase { IsOpen: true } flyout)
             flyout.Hide();
+        if (ReaderSelectionDeleteSeparator is not null)
+            ReaderSelectionDeleteSeparator.IsVisible = false;
+        if (ReaderSelectionDeleteButton is not null)
+            ReaderSelectionDeleteButton.IsVisible = false;
         if (ReaderSelectionHostPopup is not null)
             ReaderSelectionHostPopup.IsOpen = false;
     }
@@ -7857,14 +7869,39 @@ public partial class MainWindow
         ShowReaderAnnotationInputPopup();
     }
 
-    private void ReaderSelectionAiButton_Click(object? sender, RoutedEventArgs e)
+    private async void ReaderSelectionAiButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await ExplainReaderSelectionWithAiAsync();
+    }
+
+    private async Task ExplainReaderSelectionWithAiAsync()
     {
         HideReaderSelectionPopup();
         if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
+        if (!_appSettings.AiEnabled)
+        {
+            await ShowMessageAsync(T("AI 助手"), T("AI 已在应用设置中关闭。"));
+            return;
+        }
+
+        if (!_appSettings.NetworkEnabled)
+        {
+            await ShowMessageAsync(T("AI 助手"), T("网络访问已关闭，无法调用 AI 服务。"));
+            return;
+        }
+
+        if (!_readerAiSettings.IsConfigured)
+        {
+            await ShowMessageAsync(
+                T("AI 助手设置"),
+                T("请先到设置面板的 AI 助手设置中填写 Base URL、模型和 API Key。"));
+            return;
+        }
+
         ShowReaderAiTab();
-        _ = ObserveReaderTaskAsync(SendReaderAiQuestionAsync(
+        await SendReaderAiQuestionAsync(
             T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection),
-            ReaderAiRequestKind.SelectionExplain));
+            ReaderAiRequestKind.SelectionExplain);
     }
 
     private void ReaderSelectionSearchButton_Click(object? sender, RoutedEventArgs e)
@@ -7906,13 +7943,7 @@ public partial class MainWindow
                 ShowReaderAnnotationInputPopup();
                 break;
             case "ai":
-                if (!string.IsNullOrWhiteSpace(_readerPendingSelection))
-                {
-                    ShowReaderAiTab();
-                    _ = ObserveReaderTaskAsync(SendReaderAiQuestionAsync(
-                        T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection),
-                        ReaderAiRequestKind.SelectionExplain));
-                }
+                _ = ObserveReaderTaskAsync(ExplainReaderSelectionWithAiAsync());
                 break;
             case "search":
                 if (string.IsNullOrWhiteSpace(_readerPendingSelection)) break;

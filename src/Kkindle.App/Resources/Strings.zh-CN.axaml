@@ -243,6 +243,7 @@
     <x:String x:Key="Ui.Auto.AAAAB2436F31B66E">从书库删除</x:String>
     <x:String x:Key="Ui.Auto.C2F860918778ACC8">从豆瓣匹配书籍信息</x:String>
     <x:String x:Key="Ui.Auto.B341B84A73883BDA">任务进度</x:String>
+    <x:String x:Key="Ui.Auto.324225EEF1D76994">任务完成</x:String>
     <x:String x:Key="Ui.Auto.7D4146CA082798F0">作者</x:String>
     <x:String x:Key="Ui.Auto.98BFA63342D1FDA2">使用 SSL/TLS</x:String>
     <x:String x:Key="Ui.Device.ModelExample">例如 Kindle Paperwhite、Kobo Libra</x:String>

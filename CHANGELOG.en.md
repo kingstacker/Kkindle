@@ -6,6 +6,21 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.2 (2026-09-19)
+
+### Fixed
+
+- Fixed device-library scanning waiting for all metadata enrichment before showing any books; the enumerated list now appears progressively.
+- Fixed the device library not being refreshed after the complete device-send task, so newly sent and updated books appear in the latest list.
+- Fixed the bottom-right task spinner not continuously indicating active send, delete, import, export, backup, and related tasks.
+- Fixed rubber-band selections remaining after a task completed or the user switched between the computer and device libraries.
+- Fixed state cleanup for reader annotation editing, deletion, and reading-reflection previews.
+
+### Improved
+
+- Improved library rubber-band auto-scroll, selection state handling, and navigation blocking during active tasks.
+- Improved reader annotation controls, annotation anchoring, and reading-reflection group previews.
+
 ## 1.0.0 (2026-09-15)
 
 ### Added

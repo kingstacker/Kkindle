@@ -190,6 +190,12 @@ public partial class MainWindow
     private async void ReaderAnnotationInputSaveButton_Click(object? sender, RoutedEventArgs e)
         => await SaveReaderAnnotationAsync(ReaderAnnotationInputBox.Text ?? string.Empty);
 
+    private async void ReaderSelectionDeleteButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_selectedReaderAnnotation is { } annotation)
+            await DeleteReaderAnnotationAsync(annotation);
+    }
+
     private void ReaderAnnotationInputBox_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
@@ -291,17 +297,38 @@ public partial class MainWindow
     private async void ReaderAnnotationItemDeleteButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: ReaderAnnotation annotation }) return;
+        await DeleteReaderAnnotationAsync(annotation);
+    }
+
+    private async Task DeleteReaderAnnotationAsync(ReaderAnnotation annotation)
+    {
+        var isEditing = ReferenceEquals(_selectedReaderAnnotation, annotation);
         try
         {
             await _readerData.DeleteAnnotationAsync(annotation.Id, ReaderToken);
             MarkReadingMaterialsDirty();
-            if (ReferenceEquals(_selectedReaderAnnotation, annotation))
-                _selectedReaderAnnotation = null;
             await RefreshReaderAnnotationsAsync(ReaderToken);
             if (IsLinuxReaderTextFallbackActive())
                 ApplyLinuxReaderTextFallbackAnnotationRanges();
             if (CurrentReaderHost is { } host)
+            {
                 await ApplySavedAnnotationsAsync(host, ReaderToken);
+                if (isEditing)
+                    await ClearCurrentReaderSelectionAsync(host);
+            }
+            if (isEditing)
+            {
+                HideReaderSelectionPopup();
+                HideReaderAnnotationHoverPopup();
+                HideReaderAnnotationInputPopup();
+                _readerPendingSelection = null;
+                _readerPendingSelectionStartOffset = 0;
+                _readerPendingSelectionEndOffset = 0;
+                _readerPendingSelectionPrefix = string.Empty;
+                _readerPendingSelectionSuffix = string.Empty;
+                _readerPendingPdfPoint = null;
+                _selectedReaderAnnotation = null;
+            }
             ShowReaderTransientStatus(T("批注已删除"));
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
@@ -381,6 +408,47 @@ public partial class MainWindow
             "marker" => "marker",
             _ => "solid"
         };
+
+    private void EditReaderAnnotation(ReaderAnnotation annotation)
+    {
+        if (_readerIsPdf
+            || !string.Equals(
+                annotation.ChapterPath,
+                GetReaderChapterPath(),
+                StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _selectedReaderAnnotation = annotation;
+        _readerPendingSelection = annotation.SelectedText;
+        _readerPendingSelectionStartOffset = annotation.StartOffset;
+        _readerPendingSelectionEndOffset = annotation.EndOffset;
+        _readerPendingSelectionPrefix = annotation.Prefix;
+        _readerPendingSelectionSuffix = annotation.Suffix;
+        _readerPendingPdfPoint = null;
+        _readerLastHighlightStyle = NormalizeReaderAnnotationStyle(annotation.UnderlineStyle);
+        _readerLastMarkerColor = NormalizeReaderAnnotationColor(annotation.Color);
+        _readerLastSelectionPopupAnchor = null;
+        _readerLastSelectionPopupBottom = null;
+
+        if (CurrentReaderHost is NativeReaderHost nativeReader)
+        {
+            var bounds = nativeReader.GetAnnotationBounds(annotation);
+            if (bounds.Count > 0
+                && nativeReader.TranslatePoint(
+                    new Point(bounds[0].X, bounds[0].Y),
+                    ReaderWebViewHost) is { } anchor)
+            {
+                _readerLastSelectionPopupAnchor = anchor;
+                _readerLastSelectionPopupBottom = anchor.Y + bounds[0].Height;
+            }
+        }
+
+        HideReaderAnnotationHoverPopup();
+        HideReaderSelectionPopup();
+        ShowReaderSelectionPopup(
+            _readerLastSelectionPopupAnchor,
+            _readerLastSelectionPopupBottom);
+    }
 
     private async Task PerformReaderSelectionDictionaryAsync()
     {

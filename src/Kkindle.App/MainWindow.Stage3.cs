@@ -34,6 +34,7 @@ public partial class MainWindow
     private const int DevicePageSize = 200;
     private readonly DispatcherTimer _stage3Timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _transferToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly DispatcherTimer _taskSpinnerTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private readonly DispatcherTimer _deviceStatusToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _s3SyncTimer = new() { Interval = TimeSpan.FromMinutes(1) };
     private readonly DispatcherTimer _s3LocalChangeSyncTimer = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -51,6 +52,9 @@ public partial class MainWindow
     private IReadOnlyList<LibraryBookMatch> _libraryMatchRecords = [];
     private BookLibraryComparisonResult? _libraryPresenceComparison;
     private Task? _deviceWarmTask;
+    private Task? _deviceBookScanTask;
+    private CancellationTokenSource? _deviceBookScanCancellation;
+    private long _deviceBookScanGeneration;
     private bool _isRefreshingDevices;
     private double _deviceUsedRatio;
     private Point? _deviceStatusToastPosition;
@@ -90,7 +94,14 @@ public partial class MainWindow
     private bool _deviceRubberBandPressedOnCard;
     private bool _deviceRubberBandPointerSequenceHandled;
     private Point _deviceRubberBandStart;
+    private Point _deviceRubberBandStartContent;
     private Point _deviceRubberBandCurrent;
+    private Point _deviceRubberBandPointerPosition;
+    private readonly DispatcherTimer _deviceRubberBandAutoScrollTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(50)
+    };
+    private double _deviceRubberBandAutoScrollDelta;
 
     // Device-operation coordination (WinUI reference): every Kindle session
     // operation is tracked so eject can drain active work before requesting
@@ -101,6 +112,10 @@ public partial class MainWindow
     private bool _isTransferring;
     private readonly SemaphoreSlim _deviceBookExportGate = new(1, 1);
     private CancellationTokenSource? _transferCancellation;
+    private CancellationTokenSource? _transferPrefetchCancellation;
+    private bool _transferStopRequested;
+    private Control? _taskSpinnerIcon;
+    private double _taskSpinnerAngle;
 
     // Application-settings real-time auto-save (600 ms debounce).
     private bool _suppressAppSettingsAutoSave;
@@ -157,6 +172,7 @@ public partial class MainWindow
             _transferToastTimer.Stop();
             HideTransferToast();
         };
+        _taskSpinnerTimer.Tick += (_, _) => TickTaskSpinner();
         _deviceStatusToastTimer.Tick += (_, _) =>
         {
             _deviceStatusToastTimer.Stop();
@@ -173,25 +189,55 @@ public partial class MainWindow
     // stack. Popups fade out over ~220 ms instead of vanishing abruptly.
     private void ShowTaskProgressPopup()
     {
+        StopTransferToastSpinner();
         TransferToast.IsVisible = false;
         TransferToast.Opacity = 0;
+        StartTaskSpinner(TaskProgressPopupSpinnerIcon);
         TaskProgressPopup.IsVisible = true;
         TaskProgressPopup.Opacity = 1;
     }
 
-    private void HideTaskProgressPopup() => FadeOutPopup(TaskProgressPopup);
+    private void HideTaskProgressPopup()
+    {
+        StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
+        FadeOutPopup(TaskProgressPopup);
+    }
 
     private void ShowTransferToast(
         string title,
         string message,
         double? progress = null,
         bool isIndeterminate = false,
-        bool autoHide = false)
+        bool autoHide = false,
+        bool completed = false)
     {
+        StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
         TaskProgressPopup.IsVisible = false;
         TaskProgressPopup.Opacity = 0;
         TransferToastTitleText.Text = title;
-        TransferToastMessageText.Text = message;
+        TransferToastMessageText.Text = completed
+            ? T("任务完成")
+            : _transferStopRequested && _isTransferring
+                ? T("当前书籍发送完成后将停止…")
+                : message;
+        // A per-file progress callback can legitimately report 100% while a
+        // batch task still has more files to process. Only the explicit
+        // overall completion state or an auto-hidden terminal state stops the
+        // activity indicator.
+        var transferActive = !completed && !autoHide;
+        TransferToastSuccessIcon.IsVisible = completed;
+        TransferToastCancelButton.IsVisible = _isTransferring && transferActive;
+        TransferToastCancelButton.IsEnabled = !_transferStopRequested;
+        TransferToastSpinnerIcon.IsVisible = transferActive;
+        if (transferActive)
+        {
+            // A previous completion toast may still have an auto-hide timer;
+            // it must not hide or stop the newly started task animation.
+            _transferToastTimer.Stop();
+            StartTaskSpinner(TransferToastSpinnerIcon);
+        }
+        else
+            StopTransferToastSpinner();
         if (isIndeterminate)
         {
             TransferToastProgress.IsIndeterminate = true;
@@ -219,7 +265,72 @@ public partial class MainWindow
     private void HideTransferToast()
     {
         _transferToastTimer.Stop();
+        StopTransferToastSpinner();
+        TransferToastCancelButton.IsVisible = false;
         FadeOutPopup(TransferToast);
+    }
+
+    private void StopTransferToastSpinner()
+    {
+        StopTaskSpinnerFor(TransferToastSpinnerIcon);
+    }
+
+    private void StartTaskSpinner(Control icon)
+    {
+        if (ReferenceEquals(_taskSpinnerIcon, icon) && _taskSpinnerTimer.IsEnabled)
+            return;
+
+        StopTaskSpinner();
+        _taskSpinnerIcon = icon;
+        _taskSpinnerAngle = 0;
+        icon.RenderTransform = new RotateTransform(0);
+        icon.IsVisible = true;
+        _taskSpinnerTimer.Start();
+    }
+
+    private void StopTaskSpinnerFor(Control icon)
+    {
+        if (ReferenceEquals(_taskSpinnerIcon, icon))
+        {
+            StopTaskSpinner();
+            return;
+        }
+
+        icon.RenderTransform = new RotateTransform(0);
+        icon.IsVisible = false;
+    }
+
+    private void StopTaskSpinner()
+    {
+        _taskSpinnerTimer.Stop();
+        var icon = _taskSpinnerIcon;
+        _taskSpinnerIcon = null;
+        _taskSpinnerAngle = 0;
+        if (icon is null) return;
+        icon.RenderTransform = new RotateTransform(0);
+        icon.IsVisible = false;
+    }
+
+    private void TickTaskSpinner()
+    {
+        if (_taskSpinnerIcon is not { IsVisible: true } icon)
+        {
+            StopTaskSpinner();
+            return;
+        }
+
+        _taskSpinnerAngle = (_taskSpinnerAngle + 18) % 360;
+        icon.RenderTransform = new RotateTransform(_taskSpinnerAngle);
+    }
+
+    private void TransferToastCancelButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!_isTransferring) return;
+        _transferStopRequested = true;
+        TransferToastCancelButton.IsEnabled = false;
+        TransferToastMessageText.Text = T("当前书籍发送完成后将停止…");
+        SetTaskStatus(T("当前书籍发送完成后将停止发送。"));
+        _transferPrefetchCancellation?.Cancel();
     }
 
     private async void FadeOutPopup(Control popup)
@@ -396,6 +507,10 @@ public partial class MainWindow
 
     private void ShowLibraryPage()
     {
+        if (BlockNavigationWhileTransferring()) return;
+        ClearBookMultiSelection();
+        if (DevicePage.IsVisible)
+            ClearDeviceBookSelection();
         WindowBrandText.IsVisible = false;
         SetSidebarActive(AllBooksButton);
         FadeInPage(LibraryWorkspace);
@@ -411,6 +526,10 @@ public partial class MainWindow
 
     private void ShowStage3Page(Control page, Button? activeButton = null)
     {
+        if (BlockNavigationWhileTransferring()) return;
+        ClearBookMultiSelection();
+        if (DevicePage.IsVisible && !ReferenceEquals(page, DevicePage))
+            ClearDeviceBookSelection();
         WindowBrandText.IsVisible = false;
         activeButton ??= page switch
         {
@@ -433,6 +552,30 @@ public partial class MainWindow
         ReadingMaterialsPage.IsVisible = ReferenceEquals(page, ReadingMaterialsPage);
         ReadingDashboardPage.IsVisible = ReferenceEquals(page, ReadingDashboardPage);
         SettingsPage.IsVisible = ReferenceEquals(page, SettingsPage);
+    }
+
+    private bool BlockNavigationWhileTransferring()
+    {
+        if (!_isTransferring) return false;
+        SetTaskStatus(T("正在发送书籍，完成或停止后才能切换功能区。"));
+        TransferToastMessageText.Text = T("正在发送，请完成或停止任务后再切换功能区。" );
+        return true;
+    }
+
+    private void SetTransferNavigationEnabled(bool enabled)
+    {
+        Button[] navigationButtons =
+        [
+            AllBooksButton,
+            KindleBooksButton,
+            FontManagementButton,
+            DictionaryManagementButton,
+            ReaderNotesNavigationButton,
+            ReadingDashboardButton,
+            SettingsNavigationButton
+        ];
+        foreach (var button in navigationButtons)
+            button.IsEnabled = enabled;
     }
 
     private void SetSidebarActive(Button activeButton)
@@ -593,6 +736,10 @@ public partial class MainWindow
 
     private void SetDisconnectedDeviceUi(string? detail = null)
     {
+        _deviceBookScanGeneration++;
+        _deviceBookScanCancellation?.Cancel();
+        _deviceBookScanCancellation = null;
+        _deviceBookScanTask = null;
         foreach (var book in DeviceBooks) book.Dispose();
         DeviceBooks.Clear();
         _libraryPresenceComparison = null;
@@ -637,32 +784,83 @@ public partial class MainWindow
             DeviceStorageUsedBar.Width = usedWidth;
     }
 
-    private async Task RefreshDeviceBooksAsync(CancellationToken cancellationToken = default) =>
-        await TrackDeviceOperationAsync(() => RefreshDeviceBooksCoreAsync(cancellationToken));
+    private async Task RefreshDeviceBooksAsync(CancellationToken cancellationToken = default)
+    {
+        // A second refresh request should not open another MTP/USB scan while
+        // the first one is still reading the device. The existing scan is
+        // already publishing partial results, so there is nothing useful to
+        // gain by competing with it.
+        if (_deviceBookScanTask is { IsCompleted: false }) return;
+
+        using var scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _deviceBookScanCancellation = scanCancellation;
+        var task = TrackDeviceOperationAsync(() => RefreshDeviceBooksCoreAsync(scanCancellation.Token));
+        _deviceBookScanTask = task;
+        try
+        {
+            await task;
+        }
+        finally
+        {
+            if (ReferenceEquals(_deviceBookScanCancellation, scanCancellation))
+                _deviceBookScanCancellation = null;
+            if (ReferenceEquals(_deviceBookScanTask, task))
+                _deviceBookScanTask = null;
+        }
+    }
+
+    private async Task RefreshDeviceBooksAfterTransferAsync(
+        KindleDevice device,
+        CancellationToken cancellationToken)
+    {
+        // The send operation owns the whole batch. Mark the shelf dirty first
+        // so leaving the device page cannot skip the next authoritative scan.
+        _deviceBooksDirty = true;
+        if (!IsCurrentDevice(device)) return;
+
+        // A warm-up scan can still be finishing when the transfer completes.
+        // Wait for that scan, then issue a fresh scan instead of silently
+        // dropping the refresh because RefreshDeviceBooksAsync is single-flight.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (_deviceBookScanTask is { } existing && !existing.IsCompleted)
+            {
+                try { await existing.WaitAsync(cancellationToken); }
+                catch (OperationCanceledException) { return; }
+            }
+
+            if (!IsCurrentDevice(device)) return;
+            await RefreshDeviceBooksAsync(cancellationToken);
+            if (_deviceBookScanTask is not { } started || started.IsCompleted) return;
+        }
+    }
 
     private async Task RefreshDeviceBooksCoreAsync(CancellationToken cancellationToken)
     {
         if (_kindle is null || CurrentDevice is not { } device) return;
 
+        var scanGeneration = ++_deviceBookScanGeneration;
+
         DevicePageStatusText.Text = T("正在扫描设备书籍…");
         DeviceBookEmptyText.Text = T("正在读取设备书库…");
-        DeviceBookEmptyState.IsVisible = true;
+        if (DeviceBooks.Count == 0)
+            DeviceBookEmptyState.IsVisible = true;
         try
         {
-            var books = await _kindle.ScanBooksAsync(device, cancellationToken);
-            if (!IsCurrentDevice(device)) return;
-            foreach (var old in DeviceBooks) old.Dispose();
-            DeviceBooks.Clear();
-            _libraryPresenceComparison = null;
-            VisibleDeviceBooks.Clear();
-            _filteredDeviceBooks = [];
-            _devicePageIndex = 0;
-            _devicePageCount = 1;
-            foreach (var book in books)
-                DeviceBooks.Add(new KindleBookCardViewModel(book));
-            DeviceBookCountText.Text = DeviceBooks.Count.ToString();
-            UpdateDeviceBookSelectionUi();
+            var progress = new Progress<KindleScanProgress>(update =>
+            {
+                if (scanGeneration != _deviceBookScanGeneration || !IsCurrentDevice(device)) return;
+                ApplyDeviceBookScanProgress(update);
+            });
+            var books = await _kindle.ScanBooksProgressivelyAsync(device, progress, cancellationToken);
+            if (!IsCurrentDevice(device) || scanGeneration != _deviceBookScanGeneration) return;
 
+            // Progress<T> posts callbacks to the UI dispatcher. Invalidate
+            // queued partial updates before applying the authoritative final
+            // snapshot so a late callback cannot resurrect a dictionary entry.
+            _deviceBookScanGeneration++;
+            ReplaceDeviceBookCards(books, resetPage: true);
+            _libraryPresenceComparison = null;
             RefreshLibraryPresenceState();
             DevicePageStatusText.Text = T("已读取 {0} 本书 · {1}", books.Count, device.ConnectionLabel);
             _deviceBooksLoaded = true;
@@ -670,15 +868,117 @@ public partial class MainWindow
         }
         catch (OperationCanceledException)
         {
+            if (scanGeneration == _deviceBookScanGeneration)
+                _deviceBookScanGeneration++;
         }
         catch (Exception exception)
         {
+            if (scanGeneration == _deviceBookScanGeneration)
+                _deviceBookScanGeneration++;
             if (!IsCurrentDevice(device)) return;
-            DeviceBookEmptyText.Text = T("扫描失败：{0}", UiText.Localize(exception.Message));
-            DeviceBookEmptyState.IsVisible = true;
-            DevicePageStatusText.Text = T("设备书库扫描失败。");
+            if (DeviceBooks.Count == 0)
+            {
+                DeviceBookEmptyText.Text = T("扫描失败：{0}", UiText.Localize(exception.Message));
+                DeviceBookEmptyState.IsVisible = true;
+                DevicePageStatusText.Text = T("设备书库扫描失败。");
+            }
+            else
+            {
+                // Keep the fallback cards already published by the progressive
+                // scan. A failed enrichment pass must not turn a visible
+                // device library back into an empty state.
+                DevicePageStatusText.Text = T("设备信息已读取部分内容：{0}", UiText.Localize(exception.Message));
+            }
         }
     }
+
+    private void ApplyDeviceBookScanProgress(KindleScanProgress progress)
+    {
+        if (progress.Stage == KindleScanStage.Enumerated)
+        {
+            ReplaceDeviceBookCards(progress.Books, resetPage: true);
+            _libraryPresenceComparison = null;
+            RefreshLibraryPresenceState(refreshDeviceView: false);
+            if (DeviceBooks.Count == 0)
+            {
+                DeviceBookEmptyText.Text = T("正在读取设备书库…");
+                DeviceBookEmptyState.IsVisible = true;
+            }
+            return;
+        }
+
+        var added = false;
+        foreach (var book in progress.Books)
+        {
+            var card = FindDeviceBookCard(book.RelativePath);
+            if (card is null)
+            {
+                DeviceBooks.Add(new KindleBookCardViewModel(book));
+                added = true;
+            }
+            else
+            {
+                card.UpdateBook(book);
+            }
+        }
+
+        var removed = false;
+        foreach (var path in progress.RemovedPaths)
+        {
+            var card = FindDeviceBookCard(path);
+            if (card is null) continue;
+            DeviceBooks.Remove(card);
+            card.Dispose();
+            removed = true;
+        }
+
+        DeviceBookCountText.Text = DeviceBooks.Count.ToString();
+        UpdateDeviceBookSelectionUi();
+        if (added || removed)
+            ApplyDeviceBookFilter(resetPage: false);
+        if (DeviceBooks.Count == 0)
+        {
+            DeviceBookEmptyText.Text = T("正在读取设备书库…");
+            DeviceBookEmptyState.IsVisible = true;
+        }
+    }
+
+    private KindleBookCardViewModel? FindDeviceBookCard(string relativePath) =>
+        DeviceBooks.FirstOrDefault(card => string.Equals(
+            NormalizeDeviceBookPath(card.Book.RelativePath),
+            NormalizeDeviceBookPath(relativePath),
+            StringComparison.OrdinalIgnoreCase));
+
+    private void ReplaceDeviceBookCards(IReadOnlyList<KindleBook> books, bool resetPage)
+    {
+        var incoming = books
+            .GroupBy(book => NormalizeDeviceBookPath(book.RelativePath), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToDictionary(book => NormalizeDeviceBookPath(book.RelativePath), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var old in DeviceBooks.ToArray())
+        {
+            if (incoming.ContainsKey(NormalizeDeviceBookPath(old.Book.RelativePath))) continue;
+            DeviceBooks.Remove(old);
+            old.Dispose();
+        }
+
+        foreach (var book in incoming.Values)
+        {
+            var card = FindDeviceBookCard(book.RelativePath);
+            if (card is null)
+                DeviceBooks.Add(new KindleBookCardViewModel(book));
+            else
+                card.UpdateBook(book);
+        }
+
+        DeviceBookCountText.Text = DeviceBooks.Count.ToString();
+        UpdateDeviceBookSelectionUi();
+        ApplyDeviceBookFilter(resetPage);
+    }
+
+    private static string NormalizeDeviceBookPath(string path) =>
+        path.Replace('/', '\\').TrimStart('\\');
 
     private void RefreshLibraryPresenceState(bool refreshDeviceView = true)
     {
@@ -835,6 +1135,7 @@ public partial class MainWindow
 
     private async Task OpenKindlePageAsync()
     {
+        if (BlockNavigationWhileTransferring()) return;
         ShowStage3Page(DevicePage);
         await RefreshDevicesAsync(scanBooks: true);
         if (CurrentDevice is not null && (!_deviceBooksLoaded || _deviceBooksDirty))
@@ -1023,8 +1324,7 @@ public partial class MainWindow
 
         if (_deviceGridView)
         {
-            _deviceRubberBandStart = e.GetPosition(DeviceBookGridScroll);
-            _deviceRubberBandCurrent = _deviceRubberBandStart;
+            SetDeviceRubberBandStart(e.GetPosition(DeviceBookGridScroll));
             _deviceRubberBandSelecting = false;
             _deviceRubberBandPressedOnCard = true;
             _deviceRubberBandPointerSequenceHandled = false;
@@ -1065,8 +1365,7 @@ public partial class MainWindow
         _deviceRubberBandPressedOnCard = IsDeviceBookCardSource(e.Source);
         if (_deviceRubberBandPressedOnCard) return;
 
-        _deviceRubberBandStart = e.GetPosition(DeviceBookGridScroll);
-        _deviceRubberBandCurrent = _deviceRubberBandStart;
+        SetDeviceRubberBandStart(e.GetPosition(DeviceBookGridScroll));
         _deviceRubberBandSelecting = false;
         _deviceRubberBandPointerSequenceHandled = false;
         e.Pointer.Capture(DeviceBookGridScroll);
@@ -1078,7 +1377,8 @@ public partial class MainWindow
         if (!_deviceGridView
             || !e.GetCurrentPoint(DeviceBookGridScroll).Properties.IsLeftButtonPressed)
             return;
-        _deviceRubberBandCurrent = e.GetPosition(DeviceBookGridScroll);
+        _deviceRubberBandPointerPosition = e.GetPosition(DeviceBookGridScroll);
+        _deviceRubberBandCurrent = _deviceRubberBandPointerPosition;
         if (!_deviceRubberBandSelecting)
         {
             var deltaX = _deviceRubberBandCurrent.X - _deviceRubberBandStart.X;
@@ -1086,10 +1386,12 @@ public partial class MainWindow
             if (Math.Max(Math.Abs(deltaX), Math.Abs(deltaY)) < RubberBandDragThreshold)
                 return;
             _deviceRubberBandSelecting = true;
+            foreach (var card in DeviceBooks) card.IsSelected = false;
             e.Pointer.Capture(DeviceBookGridScroll);
             DeviceRubberBandRectangle.IsVisible = true;
         }
         UpdateDeviceRubberBandSelection();
+        UpdateDeviceRubberBandAutoScroll();
         e.Handled = true;
     }
 
@@ -1104,7 +1406,8 @@ public partial class MainWindow
             _deviceRubberBandPressedOnCard = false;
             return;
         }
-        _deviceRubberBandCurrent = e.GetPosition(DeviceBookGridScroll);
+        _deviceRubberBandPointerPosition = e.GetPosition(DeviceBookGridScroll);
+        _deviceRubberBandCurrent = _deviceRubberBandPointerPosition;
         UpdateDeviceRubberBandSelection();
         FinishDeviceRubberBandSelection(e.Pointer);
         _deviceRubberBandPressedOnCard = false;
@@ -1113,6 +1416,7 @@ public partial class MainWindow
 
     private void DeviceBookGrid_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
+        StopDeviceRubberBandAutoScroll();
         if (_deviceRubberBandSelecting
             && !ReferenceEquals(e.Pointer.Captured, DeviceBookGridScroll))
             FinishDeviceRubberBandSelection(null);
@@ -1121,31 +1425,118 @@ public partial class MainWindow
 
     private void UpdateDeviceRubberBandSelection()
     {
-        var left = Math.Min(_deviceRubberBandStart.X, _deviceRubberBandCurrent.X);
-        var top = Math.Min(_deviceRubberBandStart.Y, _deviceRubberBandCurrent.Y);
-        var width = Math.Abs(_deviceRubberBandCurrent.X - _deviceRubberBandStart.X);
-        var height = Math.Abs(_deviceRubberBandCurrent.Y - _deviceRubberBandStart.Y);
-        Canvas.SetLeft(DeviceRubberBandRectangle, left);
-        Canvas.SetTop(DeviceRubberBandRectangle, top);
-        DeviceRubberBandRectangle.Width = width;
-        DeviceRubberBandRectangle.Height = height;
+        var scrollOffsetY = Math.Max(0, DeviceBookGridScroll.Offset.Y);
+        var currentContent = new Point(
+            _deviceRubberBandCurrent.X,
+            _deviceRubberBandCurrent.Y + scrollOffsetY);
+        var contentLeft = Math.Min(_deviceRubberBandStartContent.X, currentContent.X);
+        var contentTop = Math.Min(_deviceRubberBandStartContent.Y, currentContent.Y);
+        var contentWidth = Math.Abs(currentContent.X - _deviceRubberBandStartContent.X);
+        var contentHeight = Math.Abs(currentContent.Y - _deviceRubberBandStartContent.Y);
+        var selection = new Rect(contentLeft, contentTop, contentWidth, contentHeight);
+        var viewportTop = contentTop - scrollOffsetY;
+        var viewportBottom = contentTop + contentHeight - scrollOffsetY;
+        var visibleTop = Math.Clamp(viewportTop, 0, Math.Max(0, DeviceBookGridScroll.Bounds.Height));
+        var visibleBottom = Math.Clamp(viewportBottom, 0, Math.Max(0, DeviceBookGridScroll.Bounds.Height));
+        Canvas.SetLeft(DeviceRubberBandRectangle, contentLeft);
+        Canvas.SetTop(DeviceRubberBandRectangle, Math.Min(visibleTop, visibleBottom));
+        DeviceRubberBandRectangle.Width = contentWidth;
+        DeviceRubberBandRectangle.Height = Math.Abs(visibleBottom - visibleTop);
 
-        var selection = new Rect(left, top, width, height);
-        foreach (var card in DeviceBooks) card.IsSelected = false;
         foreach (var card in VisibleDeviceBooks)
         {
             if (DeviceBookGridItems.ContainerFromItem(card) is not Control container) continue;
             var origin = container.TranslatePoint(default, DeviceBookGridScroll);
             if (origin is not { } point) continue;
-            if (new Rect(point, container.Bounds.Size).Intersects(selection))
-                card.IsSelected = true;
+            var bounds = new Rect(
+                point.X,
+                point.Y + scrollOffsetY,
+                container.Bounds.Width,
+                container.Bounds.Height);
+            card.IsSelected = bounds.Intersects(selection);
         }
         _deviceMultiSelectAnchor = VisibleDeviceBooks.FirstOrDefault(card => card.IsSelected);
         UpdateDeviceBookSelectionUi();
     }
 
+    private void SetDeviceRubberBandStart(Point point)
+    {
+        _deviceRubberBandStart = point;
+        _deviceRubberBandCurrent = point;
+        _deviceRubberBandPointerPosition = point;
+        _deviceRubberBandStartContent = new Point(
+            point.X,
+            point.Y + Math.Max(0, DeviceBookGridScroll.Offset.Y));
+    }
+
+    private void UpdateDeviceRubberBandAutoScroll()
+    {
+        if (!_deviceRubberBandSelecting
+            || !_deviceGridView
+            || DeviceBookGridScroll.Viewport.Height <= 0)
+        {
+            StopDeviceRubberBandAutoScroll();
+            return;
+        }
+
+        const double edge = 52;
+        var pointerY = _deviceRubberBandPointerPosition.Y;
+        var viewportHeight = DeviceBookGridScroll.Viewport.Height;
+        var maximumOffset = Math.Max(0, DeviceBookGridScroll.Extent.Height - viewportHeight);
+        var speed = 0d;
+        if (pointerY < edge && DeviceBookGridScroll.Offset.Y > 0)
+        {
+            var intensity = Math.Clamp((edge - pointerY) / edge, 0, 1);
+            speed = -Math.Max(4, 28 * intensity);
+        }
+        else if (pointerY > viewportHeight - edge && DeviceBookGridScroll.Offset.Y < maximumOffset)
+        {
+            var intensity = Math.Clamp((pointerY - (viewportHeight - edge)) / edge, 0, 1);
+            speed = Math.Max(4, 28 * intensity);
+        }
+
+        if (speed == 0)
+        {
+            StopDeviceRubberBandAutoScroll();
+            return;
+        }
+
+        _deviceRubberBandAutoScrollDelta = speed;
+        _deviceRubberBandAutoScrollTimer.Start();
+    }
+
+    private void TickDeviceRubberBandAutoScroll()
+    {
+        if (!_deviceRubberBandSelecting || !_deviceGridView)
+        {
+            StopDeviceRubberBandAutoScroll();
+            return;
+        }
+
+        var maximumOffset = Math.Max(0, DeviceBookGridScroll.Extent.Height - DeviceBookGridScroll.Viewport.Height);
+        var nextOffset = Math.Clamp(
+            DeviceBookGridScroll.Offset.Y + _deviceRubberBandAutoScrollDelta,
+            0,
+            maximumOffset);
+        if (Math.Abs(nextOffset - DeviceBookGridScroll.Offset.Y) < 0.1)
+        {
+            StopDeviceRubberBandAutoScroll();
+            return;
+        }
+
+        DeviceBookGridScroll.Offset = new Vector(DeviceBookGridScroll.Offset.X, nextOffset);
+        UpdateDeviceRubberBandSelection();
+    }
+
+    private void StopDeviceRubberBandAutoScroll()
+    {
+        _deviceRubberBandAutoScrollDelta = 0;
+        _deviceRubberBandAutoScrollTimer.Stop();
+    }
+
     private void FinishDeviceRubberBandSelection(IPointer? pointer)
     {
+        StopDeviceRubberBandAutoScroll();
         _deviceRubberBandSelecting = false;
         _deviceRubberBandPointerSequenceHandled = true;
         pointer?.Capture(null);
@@ -1690,6 +2081,8 @@ public partial class MainWindow
             return;
 
         _isTransferring = true;
+        _transferStopRequested = false;
+        SetTransferNavigationEnabled(false);
         _transferCancellation?.Dispose();
         _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         var cancellation = _transferCancellation;
@@ -1697,6 +2090,33 @@ public partial class MainWindow
         ShowTaskProgressPopup();
         ShowTransferToast(T("发送到设备"), T("正在发送 {0} 本书…", cards.Count), progress: 0);
         var acceptProgressUpdates = true;
+        Task<PreparedKindleTransfer>? lookaheadTask = null;
+        CancellationTokenSource? lookaheadCancellation = null;
+
+        async Task DisposeLookaheadAsync()
+        {
+            lookaheadCancellation?.Cancel();
+            if (lookaheadTask is not null)
+            {
+                try
+                {
+                    var prepared = await lookaheadTask;
+                    prepared.Dispose();
+                }
+                catch
+                {
+                    // A cancelled or failed pre-conversion has already
+                    // cleaned its temporary directory in PrepareKindleTransferAsync.
+                }
+            }
+
+            lookaheadTask = null;
+            if (ReferenceEquals(_transferPrefetchCancellation, lookaheadCancellation))
+                _transferPrefetchCancellation = null;
+            lookaheadCancellation?.Dispose();
+            lookaheadCancellation = null;
+        }
+
         try
         {
             var progress = new Progress<TransferProgress>(value =>
@@ -1708,14 +2128,52 @@ public partial class MainWindow
             });
             for (var index = 0; index < cards.Count; index++)
             {
+                if (_transferStopRequested) break;
                 var card = cards[index];
                 ShowTransferToast(
                     T("发送到设备"),
                     T("正在发送《{0}》（{1}/{2}）…", card.Title, index + 1, cards.Count),
                     progress: index * 100 / cards.Count);
+                PreparedKindleTransfer? prepared = null;
                 try
                 {
-                    using var prepared = await PrepareKindleTransferAsync(device, card.Book, progress, cancellation.Token);
+                    if (lookaheadTask is not null)
+                    {
+                        var pending = lookaheadTask;
+                        var pendingCancellation = lookaheadCancellation;
+                        lookaheadTask = null;
+                        lookaheadCancellation = null;
+                        if (ReferenceEquals(_transferPrefetchCancellation, pendingCancellation))
+                            _transferPrefetchCancellation = null;
+                        try
+                        {
+                            prepared = await pending;
+                        }
+                        finally
+                        {
+                            pendingCancellation?.Dispose();
+                        }
+                    }
+                    else
+                    {
+                        prepared = await PrepareKindleTransferAsync(device, card.Book, progress, cancellation.Token);
+                    }
+
+                    // Start converting the next book before the current one is
+                    // written to the device. Only one Calibre conversion is
+                    // prefetched, so conversion stays serialized while it
+                    // overlaps the device transfer.
+                    if (index + 1 < cards.Count && !_transferStopRequested)
+                    {
+                        lookaheadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+                        _transferPrefetchCancellation = lookaheadCancellation;
+                        lookaheadTask = PrepareKindleTransferAsync(
+                            device,
+                            cards[index + 1].Book,
+                            progress: null,
+                            lookaheadCancellation.Token);
+                    }
+
                     await EnsureCurrentDeviceAsync(device);
                     await _kindle.SendBookAsync(
                         device,
@@ -1733,15 +2191,25 @@ public partial class MainWindow
                 catch (Exception exception)
                 {
                     skipped++;
-                    ShowTransferToast(T("发送到设备"), T("《{0}》发送失败：{1}", card.Title, UiText.Localize(exception.Message)), autoHide: true);
+                    ShowTransferToast(
+                        T("发送到设备"),
+                        T("《{0}》发送失败：{1}", card.Title, UiText.Localize(exception.Message)),
+                        progress: index * 100d / cards.Count);
+                }
+                finally
+                {
+                    prepared?.Dispose();
                 }
             }
 
+            await DisposeLookaheadAsync();
             acceptProgressUpdates = false;
-            var completionMessage = skipped > 0
-                ? T("发送完成：成功 {0} 本，失败 {1} 本。", sent, skipped)
-                : T("已发送 {0} 本书到 {1}。", sent, device.Name);
-            ShowTransferToast(T("发送到设备"), completionMessage, progress: 100, autoHide: true);
+            var completionMessage = _transferStopRequested
+                ? T("已完成当前书籍，发送已停止：成功 {0} 本，失败 {1} 本。", sent, skipped)
+                : skipped > 0
+                    ? T("发送完成：成功 {0} 本，失败 {1} 本。", sent, skipped)
+                    : T("已发送 {0} 本书到 {1}。", sent, device.Name);
+            ShowTransferToast(T("发送到设备"), completionMessage, progress: 100, autoHide: true, completed: true);
             SetTaskStatus(completionMessage);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -1757,14 +2225,15 @@ public partial class MainWindow
         }
         finally
         {
+            await DisposeLookaheadAsync();
             _isTransferring = false;
+            ClearBookMultiSelection();
+            SetTransferNavigationEnabled(true);
+            _transferStopRequested = false;
             if (ReferenceEquals(_transferCancellation, cancellation)) _transferCancellation = null;
             cancellation.Dispose();
             HideTaskProgressPopup();
-            if (DevicePage.IsVisible)
-                await RefreshDeviceBooksAsync(_lifetimeCancellation.Token);
-            else
-                _deviceBooksDirty = true;
+            await RefreshDeviceBooksAfterTransferAsync(device, _lifetimeCancellation.Token);
         }
     }
 
@@ -1876,6 +2345,7 @@ public partial class MainWindow
             {
                 SetTaskStatus(T("邮件发送已取消"));
                 ShowTransferToast(transferTitle, T("邮件发送已取消"), autoHide: true);
+                ClearBookMultiSelection();
                 return;
             }
             catch (Exception exception)
@@ -1892,7 +2362,8 @@ public partial class MainWindow
             ? T("已通过邮件发送 {0} 本书，跳过或失败 {1} 本。", sent, skipped)
             : T("已通过邮件发送 {0} 本书。", sent);
         SetTaskStatus(emailCompletionMessage);
-        ShowTransferToast(transferTitle, emailCompletionMessage, progress: 100, autoHide: true);
+        ShowTransferToast(transferTitle, emailCompletionMessage, progress: 100, autoHide: true, completed: true);
+        ClearBookMultiSelection();
     }
 
     private async void SendSelectedBookToKindleButton_Click(object? sender, RoutedEventArgs e) =>
@@ -1951,6 +2422,8 @@ public partial class MainWindow
                 + DeviceTransferDescription(device)))
                 return;
             _isTransferring = true;
+            _transferStopRequested = false;
+            SetTransferNavigationEnabled(false);
             _transferCancellation?.Dispose();
             _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
             var cancellation = _transferCancellation;
@@ -1979,20 +2452,23 @@ public partial class MainWindow
                     progress,
                     cancellationToken: cancellation.Token,
                     coverOverridePath: prepared.CoverOverridePath);
-                ShowTransferToast(T("发送到设备"), T("已发送《{0}》到 {1}。", card.Title, device.Name), progress: 100, autoHide: true);
-                SetTaskStatus(T("已发送《{0}》到 {1}。", card.Title, device.Name));
+                var completionMessage = _transferStopRequested
+                    ? T("已完成当前书籍，发送已停止。")
+                    : T("已发送《{0}》到 {1}。", card.Title, device.Name);
+                ShowTransferToast(T("发送到设备"), completionMessage, progress: 100, autoHide: true, completed: true);
+                SetTaskStatus(completionMessage);
             }
             finally
             {
                 if (ReferenceEquals(_transferCancellation, cancellation)) _transferCancellation = null;
                 cancellation.Dispose();
                 _isTransferring = false;
+                ClearBookMultiSelection();
+                SetTransferNavigationEnabled(true);
+                _transferStopRequested = false;
                 HideTaskProgressPopup();
             }
-            if (DevicePage.IsVisible)
-                await RefreshDeviceBooksAsync(_lifetimeCancellation.Token);
-            else
-                _deviceBooksDirty = true;
+            await RefreshDeviceBooksAfterTransferAsync(device, _lifetimeCancellation.Token);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -2075,12 +2551,14 @@ public partial class MainWindow
                 _lifetimeCancellation.Token);
             var completionMessage = T("已通过邮件发送《{0}》。", card.Title);
             SetTaskStatus(completionMessage);
-            ShowTransferToast(transferTitle, T("邮件已发送。Amazon 完成转换后，书籍会出现在 Kindle 或 Kindle 应用中。"), progress: 100, autoHide: true);
+            ShowTransferToast(transferTitle, T("邮件已发送。Amazon 完成转换后，书籍会出现在 Kindle 或 Kindle 应用中。"), progress: 100, autoHide: true, completed: true);
+            ClearBookMultiSelection();
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
             SetTaskStatus(T("邮件发送已取消"));
             ShowTransferToast(T("发送到 Kindle 邮箱"), T("邮件发送已取消"), autoHide: true);
+            ClearBookMultiSelection();
         }
         catch (Exception exception)
         {
@@ -2088,6 +2566,7 @@ public partial class MainWindow
             var failure = UiText.Localize(KindleEmailSender.DescribeFailure(exception));
             SetTaskStatus(T("邮件发送失败：{0}", failure));
             ShowTransferToast(T("发送到 Kindle 邮箱"), T("邮件发送失败：{0}", failure), autoHide: true);
+            ClearBookMultiSelection();
         }
     }
 
@@ -2276,7 +2755,7 @@ public partial class MainWindow
                     ? T("导出完成：成功 {0} 本，失败 {1} 本。", imported, failed)
                     : T("导出完成：成功 {0} 本，跳过 {1} 个重复或已有文件，失败 {2} 本。", imported, skipped, failed);
             DevicePageStatusText.Text = completionMessage;
-            ShowTransferToast(T("导出到电脑书库"), completionMessage, progress: 100);
+            ShowTransferToast(T("导出到电脑书库"), completionMessage, progress: 100, autoHide: true, completed: true);
             if (failed > 0)
             {
                 if (calibreMissing)
@@ -2305,6 +2784,7 @@ public partial class MainWindow
         }
         finally
         {
+            ClearDeviceBookSelection();
             HideTaskProgressPopup();
             HideTransferToast();
             try { if (Directory.Exists(temporaryDirectory)) Directory.Delete(temporaryDirectory, recursive: true); }
@@ -2359,7 +2839,8 @@ public partial class MainWindow
         UpdateDeviceBookSelectionUi();
         var completionMessage = T("已从设备删除 {0} 本书。", removed);
         DevicePageStatusText.Text = completionMessage;
-        ShowTransferToast(T("从设备删除书籍"), completionMessage, progress: 100, autoHide: true);
+        ShowTransferToast(T("从设备删除书籍"), completionMessage, progress: 100, autoHide: true, completed: true);
+        ClearDeviceBookSelection();
         if (firstFailure is not null)
             await ShowMessageAsync(T("无法从设备删除"), UiText.Localize(firstFailure));
     }
@@ -2383,7 +2864,8 @@ public partial class MainWindow
                 RefreshLibraryPresenceState();
                 UpdateDeviceBookSelectionUi();
                 DevicePageStatusText.Text = T("已从设备删除《{0}》。", card.Title);
-                ShowTransferToast(T("从设备删除书籍"), T("已从设备删除《{0}》。", card.Title), progress: 100, autoHide: true);
+                ShowTransferToast(T("从设备删除书籍"), T("已从设备删除《{0}》。", card.Title), progress: 100, autoHide: true, completed: true);
+                ClearDeviceBookSelection();
             }
             catch (Exception exception)
             {
@@ -2394,6 +2876,7 @@ public partial class MainWindow
 
     private async void ReaderNotesNavigationButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (BlockNavigationWhileTransferring()) return;
         _readingMaterialsExportMode = false;
         ShowStage3Page(ReadingMaterialsPage);
         ReadingMaterialsPageTitle.Text = T("笔记管理");
@@ -3003,6 +3486,7 @@ public partial class MainWindow
 
     private async Task OpenDeviceResourcePageAsync(KindleResourceKind kind)
     {
+        if (BlockNavigationWhileTransferring()) return;
         _deviceResourceKind = kind;
         ShowStage3Page(DeviceResourcePage);
         DeviceResourcePageTitle.Text = kind == KindleResourceKind.Font ? T("字体管理") : T("字典管理");
@@ -3426,7 +3910,7 @@ public partial class MainWindow
                 DeviceResourceStatusText.Text = T("已导入 {0} 个文件，但设备资源缓存刷新失败，请点击刷新。", paths.Length);
                 return;
             }
-            ShowTransferToast(T("导入设备资源"), T("已导入 {0} 个文件。", paths.Length), progress: 100, autoHide: true);
+            ShowTransferToast(T("导入设备资源"), T("已导入 {0} 个文件。", paths.Length), progress: 100, autoHide: true, completed: true);
         }
         catch (Exception exception)
         {
@@ -3470,7 +3954,7 @@ public partial class MainWindow
                 await EnsureCurrentDeviceAsync(device);
                 await _kindle.ExportResourceAsync(device, resource, path, _lifetimeCancellation.Token);
                 DeviceResourceStatusText.Text = T("已导出 {0}", resource.FileName);
-                ShowTransferToast(T("导出设备资源"), T("已导出 {0}", resource.FileName), progress: 100, autoHide: true);
+                ShowTransferToast(T("导出设备资源"), T("已导出 {0}", resource.FileName), progress: 100, autoHide: true, completed: true);
             }
             catch (Exception exception) { DeviceResourceStatusText.Text = T("导出失败：{0}", UiText.Localize(exception.Message)); }
         });
@@ -3494,7 +3978,7 @@ public partial class MainWindow
                 await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
                 await RefreshDeviceResourceCachesAsync(device);
                 DeviceResourceStatusText.Text = T("已删除 {0}", resource.FileName);
-                ShowTransferToast(T("删除设备资源"), T("已删除 {0}", resource.FileName), progress: 100, autoHide: true);
+                ShowTransferToast(T("删除设备资源"), T("已删除 {0}", resource.FileName), progress: 100, autoHide: true, completed: true);
             }
             catch (Exception exception) { DeviceResourceStatusText.Text = T("删除失败：{0}", UiText.Localize(exception.Message)); }
         });
@@ -3502,6 +3986,7 @@ public partial class MainWindow
 
     private async void ReadingDashboardButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (BlockNavigationWhileTransferring()) return;
         ShowStage3Page(ReadingDashboardPage);
         await RefreshReadingDashboardAsync();
     }
@@ -5817,7 +6302,13 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
         UiText.LanguageChanged += OnLanguageChanged;
         Source = source;
         _bookTitleSource = string.IsNullOrWhiteSpace(bookTitle) ? "未命名书籍" : bookTitle;
-        Items = items;
+        // A book-level reflection is the primary note for the book and should
+        // stay at the top of its expanded group. Keep the remaining entries in
+        // their existing recency order.
+        Items = items
+            .OrderByDescending(item => item.IsBookReflection)
+            .ThenByDescending(item => item.UpdatedAt ?? DateTimeOffset.MinValue)
+            .ToArray();
         IsMixedSource = isMixedSource;
         IsExportMode = isExportMode;
         _isExpanded = isExpanded;
@@ -6070,7 +6561,32 @@ public sealed class KindleBookCardViewModel : ObservableObject, IDisposable
         Book = book;
     }
 
-    public KindleBook Book { get; }
+    public KindleBook Book { get; private set; }
+
+    public void UpdateBook(KindleBook book)
+    {
+        var coverChanged = !string.Equals(Book.CoverPath, book.CoverPath, StringComparison.OrdinalIgnoreCase);
+        Book = book;
+        if (coverChanged)
+        {
+            _coverImage?.Dispose();
+            _coverImage = null;
+            _coverLoadAttempted = false;
+        }
+
+        OnPropertyChanged(nameof(Book));
+        OnPropertyChanged(nameof(CoverImage));
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(Authors));
+        OnPropertyChanged(nameof(FormatLabel));
+        OnPropertyChanged(nameof(SizeLabel));
+        OnPropertyChanged(nameof(InfoLabel));
+        OnPropertyChanged(nameof(FileName));
+        OnPropertyChanged(nameof(RelativePath));
+        OnPropertyChanged(nameof(ModifiedLabel));
+        OnPropertyChanged(nameof(HashLabel));
+    }
+
     public Bitmap? CoverImage
     {
         get

@@ -131,6 +131,13 @@ public sealed partial class SettingsTests
         Assert.True(scope.Get<Border>("MultiSelectionBar").IsVisible);
         AssertWithinWindow(scope.Get<Border>("MultiSelectionBar"), scope.Window);
         Assert.InRange(Math.Abs(shelf.Bounds.Width - originalWidth), 0, 1);
+
+        // Leaving the library must not carry the rubber-band selection into a
+        // later return to the page.
+        scope.Call("ShowStage3Page", scope.Get<Grid>("DevicePage"), null);
+        await Render();
+        Assert.False(scope.Get<Border>("MultiSelectionBar").IsVisible);
+        Assert.Empty(scope.Field<HashSet<Guid>>("_selectedBookIds"));
     });
 
     [Fact]

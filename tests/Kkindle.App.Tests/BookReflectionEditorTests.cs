@@ -16,6 +16,58 @@ namespace Kkindle.Ui.Tests;
 public sealed partial class SettingsTests
 {
     [Fact]
+    public Task ReflectionAppearsBeforeAnnotationsInBookNotesGroup() => Run(async () =>
+    {
+        var reflection = new ReaderBookReflection
+        {
+            BookId = Guid.NewGuid(),
+            Content = "读后思考"
+        };
+        var annotation = new Stage3ReadingMaterialViewModel(
+            ReadingMaterialSource.Local,
+            "测试书",
+            "划线",
+            "chapter.xhtml",
+            "chapter.xhtml · 1-2",
+            "摘录",
+            string.Empty,
+            DateTimeOffset.UtcNow,
+            new ReaderAnnotation(),
+            null);
+        var reflectionItem = new Stage3ReadingMaterialViewModel(
+            ReadingMaterialSource.Local,
+            "测试书",
+            "读后思考",
+            "读后思考",
+            "书籍级",
+            string.Empty,
+            reflection.Content,
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            null,
+            null,
+            localReflection: reflection);
+        var group = new Stage3ReadingMaterialGroupViewModel(
+            ReadingMaterialSource.Local,
+            "测试书",
+            [annotation, reflectionItem],
+            null,
+            isExpanded: true);
+        try
+        {
+            Assert.Same(reflectionItem, group.Items[0]);
+            Assert.Same(annotation, group.Items[1]);
+        }
+        finally
+        {
+            group.Dispose();
+            annotation.Dispose();
+            reflectionItem.Dispose();
+        }
+
+        await Task.CompletedTask;
+    });
+
+    [Fact]
     public Task NativeReflectionEditorShowsFocusedTextAndUsesFixedToolbar() => Run(async () =>
     {
         var surface = new BookReflectionEditorSurface("这段文字应该显示出来")

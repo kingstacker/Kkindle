@@ -243,6 +243,7 @@
     <x:String x:Key="Ui.Auto.AAAAB2436F31B66E">Remove from library</x:String>
     <x:String x:Key="Ui.Auto.C2F860918778ACC8">Match book information with Douban</x:String>
     <x:String x:Key="Ui.Auto.B341B84A73883BDA">Task progress</x:String>
+    <x:String x:Key="Ui.Auto.324225EEF1D76994">Task complete</x:String>
     <x:String x:Key="Ui.Auto.7D4146CA082798F0">Author</x:String>
     <x:String x:Key="Ui.Auto.98BFA63342D1FDA2">Use SSL/TLS</x:String>
     <x:String x:Key="Ui.Device.ModelExample">For example, Kindle Paperwhite or Kobo Libra</x:String>
