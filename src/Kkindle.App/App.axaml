@@ -279,6 +279,13 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
+        <Style Selector="FlyoutPresenter.bookReflectionFlyoutPresenter">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
 
         <!-- Avalonia's ScrollBar already owns the interaction state needed for
              automatic hiding. This keeps the behavior in the control theme,
@@ -358,6 +365,35 @@
             <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
+        <Style Selector="Button.bookReflectionFormattingAction">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Width" Value="34" />
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="MaxWidth" Value="34" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Transitions">
+                <Transitions />
+            </Setter>
+        </Style>
+        <Style Selector="Button.bookReflectionFormattingAction:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.bookReflectionFormattingAction:pressed">
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
         <Style Selector="Button.readerFootnoteMarker">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Background" Value="Transparent" />
@@ -433,6 +469,23 @@
         <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+        <!-- The native reflection editor draws the formatted text behind a
+             transparent TextBox input layer. Keep Fluent from painting its
+             focused underline over that shared writing surface. -->
+        <Style Selector="TextBox.bookReflectionEditor">
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.bookReflectionEditor /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.bookReflectionEditor:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
         </Style>
         <Style Selector="TextBox.readerAiQuestionInput /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="Transparent" />
@@ -2023,6 +2076,9 @@
         <Style Selector="Button.readerHeader:pressed">
             <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
+        <Style Selector="Button.readerHeader.active">
+            <Setter Property="Background" Value="{DynamicResource ReaderSelectedBrush}" />
+        </Style>
         <!-- KReader header glyphs share one full button slot. The presenter
              fills the slot and the content alignment, rather than the glyph's
              desired size, determines the exact centre of every rectangle. -->
@@ -2414,6 +2470,38 @@
         <Style Selector="ListBoxItem:selected:pointerover">
             <Setter Property="Background" Value="{DynamicResource InkBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+        </Style>
+
+        <!-- The citation picker keeps hover and selection quiet and distinct.
+             The default global ListBoxItem rules use a full InkBrush fill for
+             both states, which makes a selected row and a hovered row compete
+             visually. The picker draws the state on its content row instead. -->
+        <Style Selector="ListBox.citationPickerList ListBoxItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:selected,
+                         ListBox.citationPickerList ListBoxItem:selected:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem Border.citationPickerRow">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:pointerover Border.citationPickerRow">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="ListBox.citationPickerList ListBoxItem:selected Border.citationPickerRow,
+                         ListBox.citationPickerList ListBoxItem:selected:pointerover Border.citationPickerRow">
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="2,0,0,0" />
         </Style>
 
         <!-- The Douban picker draws the selected state on the candidate card

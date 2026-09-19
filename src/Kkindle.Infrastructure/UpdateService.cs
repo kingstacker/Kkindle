@@ -12,6 +12,7 @@ public sealed class UpdateService : IDisposable
     private const string LatestManifestUrl = "https://github.com/kingstacker/Kkindle/releases/latest/download/update-manifest.json";
     private const string LatestReleasePageUrl = "https://github.com/kingstacker/Kkindle/releases/latest";
     private const string LatestReleaseUrl = "https://api.github.com/repos/kingstacker/Kkindle/releases/latest";
+    private const string DevelopmentReleasesUrl = "https://api.github.com/repos/kingstacker/Kkindle/releases?per_page=100";
     private const long MaximumChecksumFileSize = 1024 * 1024;
     private static readonly Regex VersionPattern = new(
         "^[vV]?(?<major>0|[1-9][0-9]*)\\.(?<minor>0|[1-9][0-9]*)\\.(?<patch>0|[1-9][0-9]*)(?:\\.(?<revision>0|[1-9][0-9]*))?(?:-(?<prerelease>[0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$",
@@ -53,14 +54,24 @@ public sealed class UpdateService : IDisposable
     public bool CanInstall => _installer.CanInstall;
     public string UnavailableReason => _installer.UnavailableReason;
 
+    public Task<AppUpdateInfo?> CheckForUpdateAsync(
+        string currentVersion,
+        CancellationToken cancellationToken = default) =>
+        CheckForUpdateAsync(currentVersion, AppUpdateChannel.Stable, cancellationToken);
+
     public async Task<AppUpdateInfo?> CheckForUpdateAsync(
         string currentVersion,
+        AppUpdateChannel channel,
         CancellationToken cancellationToken = default)
     {
         var current = SemanticVersion.Parse(currentVersion, "当前应用版本");
-        var release = await GetLatestReleaseAsync(cancellationToken);
+        var release = await GetLatestReleaseAsync(channel, cancellationToken);
 
-        if (release.Draft || release.Prerelease) return null;
+        if (release is null
+            || release.Draft
+            || channel == AppUpdateChannel.Stable && release.Prerelease
+            || channel == AppUpdateChannel.Development && !IsDevelopmentRelease(release))
+            return null;
         var tagName = release.TagName?.Trim() ?? string.Empty;
         var latest = SemanticVersion.Parse(tagName, "GitHub Release 版本");
         if (latest.CompareTo(current) <= 0) return null;
@@ -172,8 +183,28 @@ public sealed class UpdateService : IDisposable
     internal static int CompareVersions(string left, string right) =>
         SemanticVersion.Parse(left, nameof(left)).CompareTo(SemanticVersion.Parse(right, nameof(right)));
 
-    private async Task<GitHubRelease> GetLatestReleaseAsync(CancellationToken cancellationToken)
+    public static bool IsDevelopmentVersion(string? value)
     {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try
+        {
+            var version = SemanticVersion.Parse(value, "版本");
+            return version.Prerelease.Length > 0
+                && string.Equals(version.Prerelease[0], "dev", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<GitHubRelease?> GetLatestReleaseAsync(
+        AppUpdateChannel channel,
+        CancellationToken cancellationToken)
+    {
+        if (channel == AppUpdateChannel.Development)
+            return await GetLatestDevelopmentReleaseAsync(cancellationToken);
+
         using (var manifestResponse = await _httpClient.GetAsync(LatestManifestUrl, cancellationToken))
         {
             if (manifestResponse.IsSuccessStatusCode)
@@ -193,6 +224,53 @@ public sealed class UpdateService : IDisposable
         using var apiResponse = await _httpClient.GetAsync(LatestReleaseUrl, cancellationToken);
         apiResponse.EnsureSuccessStatusCode();
         return await DeserializeReleaseAsync(apiResponse, cancellationToken);
+    }
+
+    private async Task<GitHubRelease?> GetLatestDevelopmentReleaseAsync(
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(DevelopmentReleasesUrl, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var releases = await JsonSerializer.DeserializeAsync<GitHubRelease[]>(
+            responseStream,
+            cancellationToken: cancellationToken)
+            ?? [];
+
+        GitHubRelease? latestRelease = null;
+        SemanticVersion latestVersion = default;
+        foreach (var release in releases)
+        {
+            if (!TryParseDevelopmentVersion(release, out var version)) continue;
+            if (latestRelease is not null && version.CompareTo(latestVersion) <= 0) continue;
+            latestRelease = release;
+            latestVersion = version;
+        }
+
+        return latestRelease;
+    }
+
+    private static bool IsDevelopmentRelease(GitHubRelease release) =>
+        TryParseDevelopmentVersion(release, out _);
+
+    private static bool TryParseDevelopmentVersion(
+        GitHubRelease release,
+        out SemanticVersion version)
+    {
+        version = default;
+        if (release.Draft || !release.Prerelease) return false;
+
+        try
+        {
+            version = SemanticVersion.Parse(release.TagName ?? string.Empty, "GitHub Release 版本");
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+
+        return version.Prerelease.Length > 0
+            && string.Equals(version.Prerelease[0], "dev", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<GitHubRelease> DeserializeReleaseAsync(

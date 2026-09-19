@@ -1,5 +1,11 @@
 namespace Kkindle.Core;
 
+public enum AppUpdateChannel
+{
+    Stable,
+    Development
+}
+
 public sealed record AppUpdateAsset(string Name, Uri DownloadUrl, long Size);
 
 public sealed record AppUpdateInfo(

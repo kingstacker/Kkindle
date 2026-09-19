@@ -69,6 +69,15 @@ public sealed partial class ReaderDataService
                 CREATE INDEX IF NOT EXISTS IX_ReaderAnnotations_BookFile
                     ON ReaderAnnotations(BookFileId, ChapterPath, StartOffset);
 
+                CREATE TABLE IF NOT EXISTS ReaderBookReflections (
+                    BookId TEXT PRIMARY KEY,
+                    Content TEXT NOT NULL DEFAULT '',
+                    CreatedAt TEXT NOT NULL,
+                    UpdatedAt TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_ReaderBookReflections_UpdatedAt
+                    ON ReaderBookReflections(UpdatedAt);
+
                 CREATE TABLE IF NOT EXISTS BookContentChunks (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     BookId TEXT NOT NULL,
@@ -311,6 +320,103 @@ public sealed partial class ReaderDataService
             var changed = await command.ExecuteNonQueryAsync(cancellationToken);
             if (changed > 0)
                 NotifyDataChanged(LocalDataChangeKind.Annotation);
+        }
+        finally
+        {
+            _databaseGate.Release();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Book-level reflections.
+    // ------------------------------------------------------------------
+
+    public async Task<ReaderBookReflection?> GetBookReflectionAsync(
+        Guid bookId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT BookId, Content, CreatedAt, UpdatedAt
+            FROM ReaderBookReflections
+            WHERE BookId = $bookId;
+            """;
+        command.Parameters.AddWithValue("$bookId", bookId.ToString());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadBookReflection(reader) : null;
+    }
+
+    public async Task<IReadOnlyList<ReaderBookReflection>> GetAllBookReflectionsAsync(
+        CancellationToken cancellationToken = default,
+        int limit = int.MaxValue)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT BookId, Content, CreatedAt, UpdatedAt
+            FROM ReaderBookReflections
+            ORDER BY UpdatedAt DESC, BookId
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 100_000));
+        var result = new List<ReaderBookReflection>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(ReadBookReflection(reader));
+        return result;
+    }
+
+    private static ReaderBookReflection ReadBookReflection(SqliteDataReader reader) => new()
+    {
+        BookId = Guid.Parse(reader.GetString(0)),
+        Content = reader.GetString(1),
+        CreatedAt = DateTimeOffset.Parse(reader.GetString(2)),
+        UpdatedAt = DateTimeOffset.Parse(reader.GetString(3))
+    };
+
+    public async Task SaveBookReflectionAsync(
+        ReaderBookReflection reflection,
+        CancellationToken cancellationToken = default)
+    {
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO ReaderBookReflections (BookId, Content, CreatedAt, UpdatedAt)
+                VALUES ($bookId, $content, $createdAt, $updatedAt)
+                ON CONFLICT(BookId) DO UPDATE SET
+                    Content = $content, CreatedAt = $createdAt, UpdatedAt = $updatedAt;
+                """;
+            command.Parameters.AddWithValue("$bookId", reflection.BookId.ToString());
+            command.Parameters.AddWithValue("$content", reflection.Content);
+            command.Parameters.AddWithValue("$createdAt", reflection.CreatedAt.ToString("O"));
+            command.Parameters.AddWithValue("$updatedAt", reflection.UpdatedAt.ToString("O"));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            NotifyDataChanged(LocalDataChangeKind.BookReflection);
+        }
+        finally
+        {
+            _databaseGate.Release();
+        }
+    }
+
+    public async Task DeleteBookReflectionAsync(
+        Guid bookId,
+        CancellationToken cancellationToken = default)
+    {
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM ReaderBookReflections WHERE BookId = $bookId;";
+            command.Parameters.AddWithValue("$bookId", bookId.ToString());
+            var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (changed > 0)
+                NotifyDataChanged(LocalDataChangeKind.BookReflection);
         }
         finally
         {

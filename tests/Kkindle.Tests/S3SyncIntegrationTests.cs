@@ -273,6 +273,48 @@ public sealed partial class S3SyncIntegrationTests
     }
 
     [Fact]
+    public async Task BookReflection_SyncsEditsAndDeletionAcrossDevices()
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket);
+        var book = await a.AddBookAsync();
+        var firstEdit = DateTimeOffset.UtcNow.AddMinutes(-3);
+        await a.Reader.SaveBookReflectionAsync(new ReaderBookReflection
+        {
+            BookId = book.BookId,
+            Content = "## First reflection\n\n- The first reflection.",
+            CreatedAt = firstEdit,
+            UpdatedAt = firstEdit
+        });
+        await a.SyncAsync();
+
+        await using var b = await Device.CreateAsync(bucket);
+        await b.SyncAsync();
+        var copied = await b.Reader.GetBookReflectionAsync(book.BookId);
+        Assert.NotNull(copied);
+        Assert.Equal("## First reflection\n\n- The first reflection.", copied!.Content);
+
+        var secondEdit = DateTimeOffset.UtcNow.AddMinutes(-2);
+        await a.Reader.SaveBookReflectionAsync(new ReaderBookReflection
+        {
+            BookId = book.BookId,
+            Content = "## Edited reflection\n\n- The edited reflection.",
+            CreatedAt = firstEdit,
+            UpdatedAt = secondEdit
+        });
+        await a.SyncAsync();
+        await b.SyncAsync();
+        Assert.Equal("## Edited reflection\n\n- The edited reflection.", (await b.Reader.GetBookReflectionAsync(book.BookId))!.Content);
+
+        await a.Reader.DeleteBookReflectionAsync(book.BookId);
+        await a.SyncAsync();
+        Assert.Contains(bucket.Snapshot(a.SnapshotKey).Tombstones, item =>
+            item.EntityType == "reflection" && item.Key == book.BookId.ToString("N"));
+        await b.SyncAsync();
+        Assert.Null(await b.Reader.GetBookReflectionAsync(book.BookId));
+    }
+
+    [Fact]
     public async Task SettingsChangedDuringDownload_AreNotOverwritten()
     {
         var bucket = new MemoryBucket();

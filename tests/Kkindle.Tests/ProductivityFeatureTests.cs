@@ -33,6 +33,7 @@ public sealed class ProductivityFeatureTests
                 AiEnabled = false,
                 NetworkEnabled = false,
                 AutoUpdateCheckEnabled = false,
+                DevelopmentUpdateCheckEnabled = true,
                 AutoConnectDevice = true,
                 CompareKindleLibraryEnabled = false,
                 PinyinContextMenuEnabled = true,
@@ -68,6 +69,7 @@ public sealed class ProductivityFeatureTests
             Assert.False(restored.AiEnabled);
             Assert.False(restored.NetworkEnabled);
             Assert.False(restored.AutoUpdateCheckEnabled);
+            Assert.True(restored.DevelopmentUpdateCheckEnabled);
             Assert.True(restored.AutoConnectDevice);
             Assert.False(restored.CompareKindleLibraryEnabled);
             Assert.True(restored.PinyinContextMenuEnabled);
@@ -119,6 +121,7 @@ public sealed class ProductivityFeatureTests
             Assert.True(defaults.AutoConnectDevice);
             Assert.True(defaults.CompareKindleLibraryEnabled);
             Assert.True(defaults.AutoUpdateCheckEnabled);
+            Assert.False(defaults.DevelopmentUpdateCheckEnabled);
             Assert.True(defaults.PinyinContextMenuEnabled);
             Assert.True(defaults.PinyinLocalOnly);
             Assert.True(defaults.Translation.ContextMenuEnabled);

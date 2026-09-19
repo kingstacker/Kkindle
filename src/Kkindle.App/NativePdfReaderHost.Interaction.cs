@@ -27,6 +27,51 @@ public sealed partial class NativePdfReaderHost
         EmitSelection();
     }
 
+    public void SetPointAnnotationMode(bool enabled)
+    {
+        _pointAnnotationMode = enabled;
+        if (enabled)
+        {
+            ClearSelection();
+        }
+        Cursor = enabled
+            ? new Cursor(StandardCursorType.Cross)
+            : new Cursor(StandardCursorType.Arrow);
+        InvalidateVisual();
+    }
+
+    public Point? GetPdfPointPosition(ReaderAnnotation annotation)
+    {
+        if (!ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var x, out var y)
+            || !annotation.ChapterPath.StartsWith("pdf:", StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(annotation.ChapterPath[(annotation.ChapterPath.LastIndexOf(':') + 1)..], out var page)
+            || page < 1
+            || page > PageCount)
+            return null;
+        var bounds = GetPageBounds(page);
+        var size = GetUnrotatedPageSize(bounds);
+        var local = new Point(
+            x * size.Width,
+            y * size.Height);
+        return GetPageTransform(bounds).Transform(local);
+    }
+
+    public void ScrollToPdfPoint(double x, double y)
+    {
+        if (_layout is null || PageNumber < 1 || PageNumber > _layout.Pages.Length)
+            return;
+        var page = GetPageBounds(PageNumber);
+        var size = GetUnrotatedPageSize(page);
+        var local = new Point(
+            Math.Clamp(x, 0, 1) * size.Width,
+            Math.Clamp(y, 0, 1) * size.Height);
+        var position = GetPageTransform(page).Transform(local);
+        SetPan(new(
+            position.X - Viewport.Width * 0.2,
+            position.Y - Viewport.Height * 0.25),
+            trackPage: false);
+    }
+
     public void SelectRange(int start, int end)
     {
         var text = PageContent?.Text ?? string.Empty;
@@ -106,7 +151,7 @@ public sealed partial class NativePdfReaderHost
         var glyph = PageContent?.Glyphs.FirstOrDefault(item => item.Offset + item.Length > offset);
         if (glyph is null || _layout is null) return;
         var page = _layout.Pages[PageNumber - 1];
-        var bounds = GetLocalGlyphBounds(glyph.Bounds, page).TransformToAABB(GetPageTransform(page));
+        var bounds = GetLocalGlyphBounds(PageNumber, glyph.Bounds, page).TransformToAABB(GetPageTransform(page));
         SetPan(new(bounds.X - Viewport.Width * 0.2, bounds.Y - Viewport.Height * 0.25), trackPage: false);
     }
 
@@ -119,10 +164,41 @@ public sealed partial class NativePdfReaderHost
         _ => new(1, 0, 0, 1, page.Left, page.Top)
     };
 
-    private Rect GetLocalGlyphBounds(PdfTextBounds box, Rect page)
+    private Rect GetLocalGlyphBounds(int pageNumber, PdfTextBounds box, Rect page)
     {
         var size = GetUnrotatedPageSize(page);
-        return new(box.X * size.Width, box.Y * size.Height, box.Width * size.Width, box.Height * size.Height);
+        return new(
+            box.X * size.Width,
+            box.Y * size.Height,
+            box.Width * size.Width,
+            box.Height * size.Height);
+    }
+
+    private Point GetNormalizedPagePoint(int pageNumber, Point point)
+    {
+        var page = GetPageBounds(pageNumber);
+        var local = GetPageTransform(page).Invert().Transform(point);
+        var size = GetUnrotatedPageSize(page);
+        return new(
+            Math.Clamp(local.X / Math.Max(1, size.Width), 0, 1),
+            Math.Clamp(local.Y / Math.Max(1, size.Height), 0, 1));
+    }
+
+    private void EmitPointAnnotation(int pageNumber, Point point)
+    {
+        var normalized = GetNormalizedPagePoint(pageNumber, point);
+        _pointAnnotationMode = false;
+        Cursor = new Cursor(StandardCursorType.Arrow);
+        ClearSelection();
+        Emit(new
+        {
+            type = "pdfPointAnnotation",
+            page = pageNumber,
+            pageX = normalized.X,
+            pageY = normalized.Y,
+            x = Math.Clamp(point.X, 0, Bounds.Width),
+            y = Math.Clamp(point.Y, 0, Bounds.Height)
+        });
     }
 
     public IReadOnlyList<Rect> GetRangeBounds(int start, int end) => GetRangeBounds(PageNumber, start, end);
@@ -142,7 +218,7 @@ public sealed partial class NativePdfReaderHost
         {
             if (glyph.Offset >= end) break;
             if (glyph.Offset + glyph.Length <= start) continue;
-            var rect = GetLocalGlyphBounds(glyph.Bounds, page);
+            var rect = GetLocalGlyphBounds(pageNumber, glyph.Bounds, page);
             if (rectangles.Count > 0)
             {
                 var previous = rectangles[^1];
@@ -171,7 +247,8 @@ public sealed partial class NativePdfReaderHost
             if (_pages.TryGetValue(pageNumber, out var cached) && cached.Bitmap is { } bitmap && cached.Raster is { } raster
                 && raster.Rotation == Rotation && cached.Palette == _palette)
             {
-                var target = new Rect(page.X + (double)raster.Left / raster.PagePixelWidth * page.Width,
+                var target = new Rect(
+                    page.X + (double)raster.Left / raster.PagePixelWidth * page.Width,
                     page.Y + (double)raster.Top / raster.PagePixelHeight * page.Height,
                     (double)raster.Width / raster.PagePixelWidth * page.Width,
                     (double)raster.Height / raster.PagePixelHeight * page.Height);
@@ -183,9 +260,16 @@ public sealed partial class NativePdfReaderHost
             using var transform = context.PushTransform(GetPageTransform(page));
             foreach (var annotation in AnnotationsForPage(pageNumber))
             {
-                if (annotation.EndOffset <= annotation.StartOffset) continue;
                 var color = Color.TryParse(annotation.Color, out var parsed) ? parsed : Colors.Black;
                 if (color == Colors.Black && _palette != ReaderPalette.For(ReaderTheme.Classic)) color = _palette.Ink;
+                if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var pointX, out var pointY))
+                {
+                    var size = GetUnrotatedPageSize(page);
+                    var point = new Point(pointX * size.Width, pointY * size.Height);
+                    DrawPointAnnotation(context, point, color);
+                    continue;
+                }
+                if (annotation.EndOffset <= annotation.StartOffset) continue;
                 foreach (var rect in GetLocalRangeBounds(pageNumber, annotation.StartOffset, annotation.EndOffset))
                     DrawAnnotation(context, rect, annotation.UnderlineStyle, color);
             }
@@ -238,6 +322,15 @@ public sealed partial class NativePdfReaderHost
         }
     }
 
+    private static void DrawPointAnnotation(DrawingContext context, Point point, Color color)
+    {
+        var brush = new SolidColorBrush(color == Colors.Black
+            ? Color.FromArgb(235, 45, 45, 45)
+            : Color.FromArgb(235, color.R, color.G, color.B));
+        context.DrawEllipse(brush, null, point, 5, 5);
+        context.DrawEllipse(null, new Pen(new SolidColorBrush(Colors.White), 1), point, 3.2, 3.2);
+    }
+
     private int PageAtPoint(Point point) => VisiblePageNumbers.FirstOrDefault(page => GetPageBounds(page).Contains(point));
     private int HitOffset(int pageNumber, Point point, bool nearest)
     {
@@ -245,12 +338,11 @@ public sealed partial class NativePdfReaderHost
         if (content is null || !nearest && !GetPageBounds(pageNumber).Contains(point)) return -1;
         var page = GetPageBounds(pageNumber);
         point = GetPageTransform(page).Invert().Transform(point);
-        var size = GetUnrotatedPageSize(page);
         PdfTextGlyph? best = null;
         var bestDistance = double.MaxValue;
         foreach (var glyph in content.Glyphs)
         {
-            var rect = GetLocalGlyphBounds(glyph.Bounds, page);
+            var rect = GetLocalGlyphBounds(pageNumber, glyph.Bounds, page);
             var dx = Math.Max(0, Math.Max(rect.Left - point.X, point.X - rect.Right));
             var dy = Math.Max(0, Math.Max(rect.Top - point.Y, point.Y - rect.Bottom));
             var distance = dx * dx + dy * dy;
@@ -259,23 +351,50 @@ public sealed partial class NativePdfReaderHost
             bestDistance = distance;
         }
         if (best is null || !nearest && bestDistance > 64) return -1;
-        var centerX = (best.Bounds.X + best.Bounds.Width / 2) * size.Width;
-        var centerY = (best.Bounds.Y + best.Bounds.Height / 2) * size.Height;
-        var after = (point.X - centerX) * best.AdvanceX * size.Width + (point.Y - centerY) * best.AdvanceY * size.Height > 0;
+        var bestBounds = GetLocalGlyphBounds(pageNumber, best.Bounds, page);
+        var after = (point.X - bestBounds.Center.X) * best.AdvanceX
+            + (point.Y - bestBounds.Center.Y) * best.AdvanceY > 0;
         return best.Offset + (after ? best.Length : 0);
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (e.Source != this || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
-        Focus();
         var point = e.GetPosition(this);
         var page = PageAtPoint(point);
-        if (page == 0) { ClearSelection(); return; }
+        var properties = e.GetCurrentPoint(this).Properties;
+        if (e.Source != this) return;
+        if (properties.IsRightButtonPressed)
+        {
+            if (page > 0)
+            {
+                if (AnnotationAt(point) is { } annotation)
+                    Emit(new { type = "annotationClick", id = annotation.Id });
+                else
+                    EmitPointAnnotation(page, point);
+            }
+            e.Handled = true;
+            return;
+        }
+        if (!properties.IsLeftButtonPressed) return;
+        Focus();
+        if (page == 0)
+        {
+            ClearSelection();
+            return;
+        }
         ActivatePage(page);
         EmitPage();
         ClearHover();
+        if (_pointAnnotationMode)
+        {
+            if (AnnotationAt(point) is { } annotation)
+                Emit(new { type = "annotationClick", id = annotation.Id });
+            else
+                EmitPointAnnotation(page, point);
+            e.Handled = true;
+            return;
+        }
         _selectionPage = page;
         _anchorOffset = HitOffset(page, point, false);
         _pointerStart = point;
@@ -309,7 +428,13 @@ public sealed partial class NativePdfReaderHost
         }
         var annotation = AnnotationAt(point);
         var page = PageAtPoint(point);
-        Cursor = new Cursor(annotation is not null ? StandardCursorType.Hand : page > 0 && HitOffset(page, point, false) >= 0 ? StandardCursorType.Ibeam : StandardCursorType.Arrow);
+        Cursor = new Cursor(_pointAnnotationMode
+            ? StandardCursorType.Cross
+            : annotation is not null
+                ? StandardCursorType.Hand
+                : page > 0 && HitOffset(page, point, false) >= 0
+                    ? StandardCursorType.Ibeam
+                    : StandardCursorType.Arrow);
         if (annotation is not null && !string.IsNullOrWhiteSpace(annotation.Note))
         {
             if (_hoveredAnnotation != annotation.Id)
@@ -374,7 +499,17 @@ public sealed partial class NativePdfReaderHost
             else if (e.Key == Key.C && _selectionEnd > _selectionStart) { Emit(new { type = "selectionAction", action = "copy" }); e.Handled = true; }
             else if (e.Key is Key.D0 or Key.NumPad0) { _ = SetFitModeAsync(PdfReaderFitMode.Width); e.Handled = true; }
         }
-        else if (e.Key == Key.Escape) { ClearSelection(); e.Handled = true; }
+        else if (e.Key == Key.Escape)
+        {
+            if (_pointAnnotationMode)
+            {
+                _pointAnnotationMode = false;
+                Cursor = new Cursor(StandardCursorType.Arrow);
+                InvalidateVisual();
+            }
+            ClearSelection();
+            e.Handled = true;
+        }
         else if (e.Key is Key.PageDown or Key.Space or Key.PageUp && DisplayMode == PdfReaderDisplayMode.Continuous)
         {
             ScrollBy((e.Key == Key.PageUp ? -1 : 1) * Math.Max(60, Viewport.Height - 48));
@@ -395,8 +530,20 @@ public sealed partial class NativePdfReaderHost
     private ReaderAnnotation? AnnotationAt(Point point)
     {
         var page = PageAtPoint(point);
-        return page == 0 ? null : AnnotationsForPage(page).FirstOrDefault(annotation =>
-            GetRangeBounds(page, annotation.StartOffset, annotation.EndOffset).Any(rect => rect.Inflate(4).Contains(point)));
+        if (page == 0) return null;
+        foreach (var annotation in AnnotationsForPage(page))
+        {
+            if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out _, out _)
+                && GetPdfPointPosition(annotation) is { } marker
+                && (marker.X - point.X) * (marker.X - point.X)
+                    + (marker.Y - point.Y) * (marker.Y - point.Y) <= 100)
+                return annotation;
+            if (annotation.EndOffset > annotation.StartOffset
+                && GetRangeBounds(page, annotation.StartOffset, annotation.EndOffset)
+                    .Any(rect => rect.Inflate(4).Contains(point)))
+                return annotation;
+        }
+        return null;
     }
 
     private void ClearHover()

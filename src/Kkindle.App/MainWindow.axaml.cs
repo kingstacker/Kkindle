@@ -28,7 +28,7 @@ public partial class MainWindow : Window
     private const string MaximizeGlyphData = "M 0.5,0.5 H 9.5 V 9.5 H 0.5 Z";
     private const string RestoreGlyphData = "M 2.5,0.5 H 9.5 V 7.5 M 0.5,2.5 H 7.5 V 9.5 H 0.5 Z";
     private const string SidebarChevronDownData = "M 1,2 L 5,6 L 9,2";
-    private const string SidebarChevronRightData = "M 2,1 L 6,5 L 2,9";
+    private const string SidebarChevronRightData = "M 3,1 L 7,5 L 3,9";
     private const string LibraryGridGlyphData = "M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z";
     private const string LibraryListGlyphData = "M 4,6 H 6 M 10,6 H 20 M 4,12 H 6 M 10,12 H 20 M 4,18 H 6 M 10,18 H 20";
     private const string LibraryCollectionsGlyphData = "M 3,7 H 9 L 11,9 H 21 V 20 H 3 Z";
@@ -155,9 +155,17 @@ public partial class MainWindow : Window
     private bool _rubberBandSelecting;
     private bool _rubberBandPointerSequenceHandled;
     private Point _rubberBandStart;
+    private Point _rubberBandStartContent;
     private Point _rubberBandCurrent;
+    private Point _rubberBandPointerPosition;
     private bool _rubberBandPressedOnCard;
     private bool _rubberBandGestureActive;
+    private readonly DispatcherTimer _rubberBandAutoScrollTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(50)
+    };
+    private double _rubberBandAutoScrollDelta;
+    private ScrollViewer? _bookGridScrollViewer;
 
     public MainWindow()
         : this(CreateDefaultDependencies())
@@ -384,6 +392,7 @@ public partial class MainWindow : Window
         LibraryContentHost.SizeChanged += (_, _) => UpdateBookGridLayout();
         LibraryWorkspace.SizeChanged += (_, _) => UpdateBookGridLayout();
         SizeChanged += (_, _) => UpdateBookGridLayout();
+        _rubberBandAutoScrollTimer.Tick += (_, _) => TickRubberBandAutoScroll();
         LibraryRoot.AddHandler(
             InputElement.PointerPressedEvent,
             LibraryRoot_PointerPressed,
@@ -427,6 +436,7 @@ public partial class MainWindow : Window
             DeviceBookGrid_PointerCaptureLost,
             RoutingStrategies.Bubble,
             handledEventsToo: true);
+        _deviceRubberBandAutoScrollTimer.Tick += (_, _) => TickDeviceRubberBandAutoScroll();
         DataContext = this;
         Closed += MainWindow_Closed;
         Closing += MainWindow_Closing;
@@ -478,7 +488,11 @@ public partial class MainWindow : Window
     // classes the App.axaml auto-hide styles key on. The ListBox can rebuild
     // its template ScrollViewer when its visual tree changes, so the caller
     // also retries from TemplateApplied.
-    private void AttachBookGridAutoHideScrollbar() => AttachBookAutoHideScrollbar(BookGrid);
+    private void AttachBookGridAutoHideScrollbar()
+    {
+        _bookGridScrollViewer = BookGrid.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        AttachBookAutoHideScrollbar(BookGrid);
+    }
 
     private void AttachBookListAutoHideScrollbar() => AttachBookAutoHideScrollbar(BookList);
 
@@ -600,6 +614,8 @@ public partial class MainWindow : Window
         {
             DetailCollectionsText.Text = DescribeBookCollections(_selectedCard);
             UpdateDetailActionIcons(_selectedCard.Book.IsFavorite, _selectedCard.Book.ReadingStatus);
+            if (LibraryDetailPane.IsVisible)
+                UpdateBookReflectionPreview(_selectedBookReflection);
         }
         UpdateDeviceBookSelectionUi();
         UpdateDeviceBookPaginationUi();
@@ -936,6 +952,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _bookReflectionFlyout?.Hide();
         _sendToKindleWindow?.CloseForShutdown();
         _readerToolbarHideTimer?.Stop();
         _readerToolbarLayoutTimer?.Stop();
@@ -951,6 +968,7 @@ public partial class MainWindow : Window
         StopS3SyncIndicatorAnimation();
         StopReaderAiThinkingAnimation();
         _transferToastTimer.Stop();
+        StopTaskSpinner();
         _deviceStatusToastTimer.Stop();
         _appSettingsAutoSaveCancellation?.Cancel();
         _appSettingsAutoSaveCancellation?.Dispose();
@@ -1362,6 +1380,7 @@ public partial class MainWindow : Window
         }
 
         ShowLibraryDetailPane();
+        _ = RefreshBookReflectionDetailsAsync(card.Book.Id);
     }
 
     private string DescribeBookCollections(BookCardViewModel card)
@@ -3949,6 +3968,7 @@ public partial class MainWindow : Window
 
     private void ShowAllBooksButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        if (BlockNavigationWhileTransferring()) return;
         ShowLibraryPage();
         ViewModel.CollectionFilterId = null;
         ViewModel.CollectionFilterName = null;
@@ -4153,8 +4173,7 @@ public partial class MainWindow : Window
 
         // 记录框选起点：网格左侧没有空白（卡片从视口左缘开始），从左往右
         // 框选必须允许起点落在卡片上，拖动超过阈值后同样进入框选。
-        _rubberBandStart = e.GetPosition(BookGrid);
-        _rubberBandCurrent = _rubberBandStart;
+        SetRubberBandStart(e.GetPosition(BookGrid));
         _rubberBandSelecting = false;
         _rubberBandPointerSequenceHandled = false;
         _rubberBandPressedOnCard = true;
@@ -4225,8 +4244,7 @@ public partial class MainWindow : Window
         _rubberBandPressedOnCard = IsBookCardSource(e.Source);
         if (_rubberBandPressedOnCard) return;
 
-        _rubberBandStart = e.GetPosition(BookGrid);
-        _rubberBandCurrent = _rubberBandStart;
+        SetRubberBandStart(e.GetPosition(BookGrid));
         _rubberBandSelecting = false;
         _rubberBandPointerSequenceHandled = false;
         _rubberBandGestureActive = true;
@@ -4239,7 +4257,8 @@ public partial class MainWindow : Window
         if (!_rubberBandGestureActive
             || !e.GetCurrentPoint(BookGrid).Properties.IsLeftButtonPressed)
             return;
-        _rubberBandCurrent = e.GetPosition(BookGrid);
+        _rubberBandPointerPosition = e.GetPosition(BookGrid);
+        _rubberBandCurrent = _rubberBandPointerPosition;
         if (!_rubberBandSelecting)
         {
             // 框选支持任意方向：任一轴拖拽超过阈值就启动，避免点选时
@@ -4250,6 +4269,7 @@ public partial class MainWindow : Window
                 return;
             CancelPendingBookDetailClick();
             _rubberBandSelecting = true;
+            _selectedBookIds.Clear();
             e.Pointer.Capture(BookGrid);
             RubberBandRectangle.IsVisible = true;
             // 框选从卡片上起步时，按下那一刻已弹出详情页；进入框选即收起，
@@ -4258,6 +4278,7 @@ public partial class MainWindow : Window
                 ClearSelectedBook();
         }
         UpdateRubberBandSelection();
+        UpdateRubberBandAutoScroll();
         e.Handled = true;
     }
 
@@ -4280,7 +4301,8 @@ public partial class MainWindow : Window
             _rubberBandPressedOnCard = false;
             return;
         }
-        _rubberBandCurrent = e.GetPosition(BookGrid);
+        _rubberBandPointerPosition = e.GetPosition(BookGrid);
+        _rubberBandCurrent = _rubberBandPointerPosition;
         UpdateRubberBandSelection();
         FinishRubberBandSelection(e.Pointer);
         _rubberBandPressedOnCard = false;
@@ -4289,6 +4311,7 @@ public partial class MainWindow : Window
 
     private void BookGrid_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
+        StopRubberBandAutoScroll();
         if (ReferenceEquals(e.Pointer.Captured, BookGrid))
             return;
         if (_rubberBandSelecting)
@@ -4301,39 +4324,140 @@ public partial class MainWindow : Window
     {
         if (e.Key != Key.Escape) return;
         e.Handled = true;
+        StopRubberBandAutoScroll();
         _selectedBookIds.Clear();
         _multiSelectAnchor = null;
         BookGrid.SelectedItems?.Clear();
         UpdateMultiSelectionUi();
     }
 
+    private void SetRubberBandStart(Point point)
+    {
+        _rubberBandStart = point;
+        _rubberBandCurrent = point;
+        _rubberBandPointerPosition = point;
+        _rubberBandStartContent = new Point(point.X, point.Y + GetBookGridScrollOffsetY());
+    }
+
+    private double GetBookGridScrollOffsetY()
+    {
+        if (_bookGridScrollViewer is { } viewer)
+            return Math.Max(0, viewer.Offset.Y);
+        return 0;
+    }
+
     private void UpdateRubberBandSelection()
     {
-        var left = Math.Min(_rubberBandStart.X, _rubberBandCurrent.X);
-        var top = Math.Min(_rubberBandStart.Y, _rubberBandCurrent.Y);
-        var width = Math.Abs(_rubberBandCurrent.X - _rubberBandStart.X);
-        var height = Math.Abs(_rubberBandCurrent.Y - _rubberBandStart.Y);
-        Canvas.SetLeft(RubberBandRectangle, left);
-        Canvas.SetTop(RubberBandRectangle, top);
-        RubberBandRectangle.Width = width;
-        RubberBandRectangle.Height = height;
+        var scrollOffsetY = GetBookGridScrollOffsetY();
+        var currentContent = new Point(
+            _rubberBandCurrent.X,
+            _rubberBandCurrent.Y + scrollOffsetY);
+        var contentLeft = Math.Min(_rubberBandStartContent.X, currentContent.X);
+        var contentTop = Math.Min(_rubberBandStartContent.Y, currentContent.Y);
+        var contentWidth = Math.Abs(currentContent.X - _rubberBandStartContent.X);
+        var contentHeight = Math.Abs(currentContent.Y - _rubberBandStartContent.Y);
+        var selection = new Rect(contentLeft, contentTop, contentWidth, contentHeight);
 
-        var selection = new Rect(left, top, width, height);
-        _selectedBookIds.Clear();
+        // The rectangle is painted in viewport coordinates while card bounds
+        // are compared in content coordinates. Once the viewport auto-scrolls,
+        // keep the part of the rectangle that is currently visible on screen.
+        var viewportTop = contentTop - scrollOffsetY;
+        var viewportBottom = contentTop + contentHeight - scrollOffsetY;
+        var visibleTop = Math.Clamp(viewportTop, 0, Math.Max(0, BookGrid.Bounds.Height));
+        var visibleBottom = Math.Clamp(viewportBottom, 0, Math.Max(0, BookGrid.Bounds.Height));
+        Canvas.SetLeft(RubberBandRectangle, contentLeft);
+        Canvas.SetTop(RubberBandRectangle, Math.Min(visibleTop, visibleBottom));
+        RubberBandRectangle.Width = contentWidth;
+        RubberBandRectangle.Height = Math.Abs(visibleBottom - visibleTop);
+
         foreach (var card in ViewModel.Books)
         {
             if (BookGrid.ContainerFromItem(card) is not Control container) continue;
             var origin = container.TranslatePoint(default, BookGrid);
             if (origin is not { } point) continue;
-            var bounds = new Rect(point, container.Bounds.Size);
-            if (bounds.Intersects(selection)) _selectedBookIds.Add(card.Book.Id);
+            var bounds = new Rect(
+                point.X,
+                point.Y + scrollOffsetY,
+                container.Bounds.Width,
+                container.Bounds.Height);
+            if (bounds.Intersects(selection))
+                _selectedBookIds.Add(card.Book.Id);
+            else
+                _selectedBookIds.Remove(card.Book.Id);
         }
         _multiSelectAnchor = ViewModel.Books.FirstOrDefault(card => _selectedBookIds.Contains(card.Book.Id));
         UpdateMultiSelectionUi();
     }
 
+    private void UpdateRubberBandAutoScroll()
+    {
+        if (!_rubberBandSelecting
+            || _bookGridScrollViewer is not { } viewer
+            || viewer.Viewport.Height <= 0)
+        {
+            StopRubberBandAutoScroll();
+            return;
+        }
+
+        const double edge = 52;
+        var pointerY = _rubberBandPointerPosition.Y;
+        var viewportHeight = viewer.Viewport.Height;
+        var maximumOffset = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+        var speed = 0d;
+        if (pointerY < edge && viewer.Offset.Y > 0)
+        {
+            var intensity = Math.Clamp((edge - pointerY) / edge, 0, 1);
+            speed = -Math.Max(4, 28 * intensity);
+        }
+        else if (pointerY > viewportHeight - edge && viewer.Offset.Y < maximumOffset)
+        {
+            var intensity = Math.Clamp((pointerY - (viewportHeight - edge)) / edge, 0, 1);
+            speed = Math.Max(4, 28 * intensity);
+        }
+
+        if (speed == 0)
+        {
+            StopRubberBandAutoScroll();
+            return;
+        }
+
+        _rubberBandAutoScrollDelta = speed;
+        _rubberBandAutoScrollTimer.Start();
+    }
+
+    private void TickRubberBandAutoScroll()
+    {
+        if (!_rubberBandSelecting
+            || _bookGridScrollViewer is not { } viewer)
+        {
+            StopRubberBandAutoScroll();
+            return;
+        }
+
+        var maximumOffset = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+        var nextOffset = Math.Clamp(
+            viewer.Offset.Y + _rubberBandAutoScrollDelta,
+            0,
+            maximumOffset);
+        if (Math.Abs(nextOffset - viewer.Offset.Y) < 0.1)
+        {
+            StopRubberBandAutoScroll();
+            return;
+        }
+
+        viewer.Offset = new Vector(viewer.Offset.X, nextOffset);
+        UpdateRubberBandSelection();
+    }
+
+    private void StopRubberBandAutoScroll()
+    {
+        _rubberBandAutoScrollDelta = 0;
+        _rubberBandAutoScrollTimer.Stop();
+    }
+
     private void FinishRubberBandSelection(IPointer? pointer)
     {
+        StopRubberBandAutoScroll();
         _rubberBandSelecting = false;
         _rubberBandPointerSequenceHandled = true;
         pointer?.Capture(null);
@@ -4652,7 +4776,7 @@ public partial class MainWindow : Window
     private async void DeleteSelectedBooksButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => await DeleteSelectedBooksAsync();
 
-    private void ClearMultiSelectionButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void ClearBookMultiSelection()
     {
         _selectedBookIds.Clear();
         _multiSelectAnchor = null;
@@ -4660,6 +4784,9 @@ public partial class MainWindow : Window
         BookList.SelectedItems?.Clear();
         UpdateMultiSelectionUi();
     }
+
+    private void ClearMultiSelectionButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        ClearBookMultiSelection();
 
     private async void OpenFileButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

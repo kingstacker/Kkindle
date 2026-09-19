@@ -88,7 +88,9 @@ public static class ReaderAnnotationExport
     private static string BuildLocationLabel(ReaderAnnotation annotation)
     {
         var location = annotation.ChapterPath;
-        if (!string.IsNullOrWhiteSpace(annotation.Fragment))
+        if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var x, out var y))
+            location += UiText.Get("（页面位置 {0:0.0}%, {1:0.0}%）", x * 100, y * 100);
+        else if (!string.IsNullOrWhiteSpace(annotation.Fragment))
             location += "#" + annotation.Fragment;
         return UiText.Get("{0}（偏移 {1}–{2}）", location, annotation.StartOffset, annotation.EndOffset);
     }

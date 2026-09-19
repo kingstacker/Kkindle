@@ -250,6 +250,8 @@ public partial class MainWindow
             _readerIsPdf = true;
             _readerPdfSourcePath = path;
             _readerPdfPages = [];
+            _readerPdfEmbeddedOutline = [];
+            _readerPendingPdfPoint = null;
             _readerPdfPage = 1;
             _readerChapterIndex = 0;
             _readerScrollRatio = 0;
@@ -365,6 +367,7 @@ public partial class MainWindow
         if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not NativePdfReaderHost host) return false;
         if (string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return false;
         _selectedReaderAnnotation = null;
+        _readerPendingPdfPoint = null;
         HideReaderAnnotationInputPopup();
         HideReaderSelectionPopup();
         HideReaderAnnotationHoverPopup();

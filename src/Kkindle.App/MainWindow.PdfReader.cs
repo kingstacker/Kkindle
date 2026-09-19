@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Automation;
 using Avalonia.Interactivity;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
@@ -29,17 +30,9 @@ public partial class MainWindow
             await Task.Delay(60, token);
             var info = await host.ReadDocumentInfoAsync(token);
             if (!IsCurrentPdfSession(host, fileId, token)) return;
-            var source = new Uri(_readerPdfSourcePath!).AbsoluteUri;
-            _readerTocItems = info.Outline.Count > 0
-                ? info.Outline.Select((item, index) => new EpubReaderNavigationItem(item.Title,
-                    source + $"#page={item.PageNumber}&top={(item.Top ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture)}&outline={index}",
-                    item.PageNumber - 1, item.Level)).ToArray()
-                : _readerPdfPages.Select(page => new EpubReaderNavigationItem(T("第 {0} 页", page.PageNumber),
-                    source + $"#page={page.PageNumber}", page.PageNumber - 1)).ToArray();
-            BuildReaderTocRows();
-            CollapseReaderTocToCurrentChapter(_readerChapterIndex);
-            SetReaderCompactNavigationItems(_readerTocItems);
-            ReaderTocEmptyText.IsVisible = false;
+            _readerPdfEmbeddedOutline = info.Outline;
+            RebuildReaderPdfNavigationItems();
+            ReaderTocEmptyText.IsVisible = _readerTocItems.Count == 0;
             SyncReaderPdfTocSelection();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -65,6 +58,46 @@ public partial class MainWindow
         {
             if (IsCurrentPdfSession(host, fileId, token)) _readerPdfIndexError = exception.Message;
         }
+    }
+
+    private void RebuildReaderPdfNavigationItems()
+    {
+        if (!_readerIsPdf || string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return;
+        var source = new Uri(_readerPdfSourcePath).AbsoluteUri;
+        _readerTocItems = _readerPdfEmbeddedOutline.Count > 0
+            ? _readerPdfEmbeddedOutline.Select((item, index) => new EpubReaderNavigationItem(
+                item.Title,
+                source + $"#page={item.PageNumber}&top={(item.Top ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture)}&outline={index}",
+                item.PageNumber - 1,
+                item.Level)).ToArray()
+            : _readerPdfPages.Select(page => new EpubReaderNavigationItem(
+                T("第 {0} 页", page.PageNumber),
+                source + $"#page={page.PageNumber}",
+                page.PageNumber - 1)).ToArray();
+        BuildReaderTocRows();
+        CollapseReaderTocToCurrentChapter(_readerChapterIndex);
+        SetReaderCompactNavigationItems(_readerTocItems);
+        ReaderTocEmptyText.IsVisible = _readerTocItems.Count == 0;
+        SyncReaderPdfTocSelection();
+    }
+
+    private void ReaderPdfPointNoteButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        var enabled = !pdf.IsPointAnnotationMode;
+        pdf.SetPointAnnotationMode(enabled);
+        UpdateReaderPdfPointNoteButton(enabled);
+        ShowReaderTransientStatus(enabled
+            ? T("请点击或右键点击 PDF 任意位置添加页面批注。")
+            : T("已取消页面批注模式。"));
+    }
+
+    private void UpdateReaderPdfPointNoteButton(bool enabled)
+    {
+        var label = enabled ? T("取消页面批注") : T("添加页面批注");
+        ToolTip.SetTip(ReaderPdfPointNoteButton, label);
+        AutomationProperties.SetName(ReaderPdfPointNoteButton, label);
+        ReaderPdfPointNoteButton.Classes.Set("active", enabled);
     }
 
     private async Task EnsureReaderPdfTextIndexAsync(CancellationToken token)
@@ -132,5 +165,15 @@ public partial class MainWindow
             if (last > first) return $"{first}–{last} / {total}";
         }
         return T("{0} / {1}", _readerPdfPage, total);
+    }
+
+    private async Task MoveReaderPdfPositionAsync(int direction)
+    {
+        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        direction = Math.Sign(direction);
+        if (direction == 0) return;
+        var page = pdf.GetAdjacentPage(direction);
+        if (page != _readerPdfPage)
+            await NavigatePdfPageAsync(page, ReaderToken);
     }
 }

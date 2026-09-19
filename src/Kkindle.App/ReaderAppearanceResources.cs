@@ -21,9 +21,13 @@ internal static class ReaderAppearanceResources
         Set("Accent", palette.Accent);
         Set("OnAccent", palette.OnAccent);
         Set("Input", palette.Page);
-        resources["ReaderPageBrush"] = ReaderPaperTexture.CreateBrush(palette.Page, appearance);
-        resources["ReaderChromeBrush"] = ReaderPaperTexture.CreateBrush(palette.Chrome, appearance, 0.65);
-        resources["ReaderSidebarBrush"] = ReaderPaperTexture.CreateBrush(palette.Sidebar, appearance, 0.8);
+        var pageBrush = ReaderPaperTexture.CreateBrush(palette.Page, appearance);
+        resources["ReaderPageBrush"] = pageBrush;
+        // Structural reader panes are transparent and reveal the single paper
+        // surface painted by ReaderRoot. Keep these aliases for standalone
+        // controls and popups that still need an opaque reader background.
+        resources["ReaderChromeBrush"] = pageBrush;
+        resources["ReaderSidebarBrush"] = pageBrush;
 
         void Set(string name, Color color)
         {

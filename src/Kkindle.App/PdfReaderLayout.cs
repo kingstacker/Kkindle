@@ -30,7 +30,11 @@ internal sealed class PdfReaderLayout
         var availableWidth = Math.Max(1, viewport.Width - Margin * 2);
         var availableHeight = Math.Max(1, viewport.Height - Margin * 2);
         double Snap(double value) => Math.Round(value * dpi) / dpi;
-        Size PageSize(int index) => rotation % 180 == 0 ? sizes[index] : new(sizes[index].Height, sizes[index].Width);
+        Size PageSize(int index)
+        {
+            var size = sizes[index];
+            return rotation % 180 == 0 ? size : new(size.Height, size.Width);
+        }
         var extentWidth = viewport.Width;
         var extentHeight = viewport.Height;
         if (mode == PdfReaderDisplayMode.TwoPage)

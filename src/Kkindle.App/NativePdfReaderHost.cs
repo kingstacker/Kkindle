@@ -62,6 +62,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private int _searchIndex = -1;
     private string _searchQuery = string.Empty;
     private (int Page, int Start, int Length)? _speechHighlight;
+    private bool _pointAnnotationMode;
 
     public NativePdfReaderHost()
     {
@@ -99,6 +100,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     public PdfReaderDisplayMode DisplayMode { get; private set; } = PdfReaderDisplayMode.Continuous;
     public PdfReaderFitMode FitMode { get; private set; } = PdfReaderFitMode.Width;
     public int Rotation { get; private set; }
+    public bool IsPointAnnotationMode => _pointAnnotationMode;
     public string? LastError { get; private set; }
     public PdfPageContent? PageContent => GetPageContent(PageNumber);
     public double VisibleTop => GetVisibleTop(new Rect(Viewport));
@@ -156,6 +158,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         _pages.Clear();
         PageCount = count;
         PageNumber = 1;
+        _pointAnnotationMode = false;
         _sizes = Enumerable.Repeat(new Size(595, 842), count).ToArray();
         _layout = null;
         _pan = default;
@@ -183,6 +186,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             _viewportCancellation?.Cancel();
             ++_rasterVersion;
             var pageNumber = Math.Clamp(ReadTargetPage(uri), 1, PageCount);
+            _pointAnnotationMode = false;
             LastError = null;
             var initialPages = DisplayMode == PdfReaderDisplayMode.TwoPage
                 ? Enumerable.Range((pageNumber - 1) / 2 * 2 + 1, Math.Min(2, PageCount - (pageNumber - 1) / 2 * 2)).ToArray()
@@ -263,6 +267,13 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     public static int ReadTargetPage(Uri uri) => int.TryParse(ReadTargetValue(uri, "page"), out var page) ? Math.Max(1, page) : 1;
     public static double ReadTargetTop(Uri uri) => double.TryParse(ReadTargetValue(uri, "top"), NumberStyles.Float, CultureInfo.InvariantCulture, out var top)
         && double.IsFinite(top) ? Math.Clamp(top, 0, 1) : 0;
+    public static int ReadTargetOffset(Uri uri) => int.TryParse(
+        ReadTargetValue(uri, "offset"),
+        NumberStyles.Integer,
+        CultureInfo.InvariantCulture,
+        out var offset)
+            ? Math.Max(0, offset)
+            : -1;
     private static string? ReadTargetValue(Uri uri, string key) => uri.Fragment.TrimStart('#').Split('&')
         .Select(part => part.Split('=', 2)).FirstOrDefault(parts => parts.Length == 2 && parts[0] == key)?[1];
 
@@ -300,10 +311,12 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         if (mode == PdfReaderDisplayMode.TwoPage && PageCount > 0)
         {
             var first = (PageNumber - 1) / 2 * 2 + 1;
-            await LoadPageContentsAsync(Enumerable.Range(first, Math.Min(2, PageCount - first + 1)), _version, _documentCancellation!.Token);
+            var count = Math.Min(2, PageCount - first + 1);
+            await LoadPageContentsAsync(Enumerable.Range(first, count), _version, _documentCancellation!.Token);
             if (_disposed || request != _layoutRequest) return;
         }
         ClearSelection();
+        _pointAnnotationMode = false;
         DisplayMode = mode;
         RebuildLayout(preservePosition: true);
         await RefreshViewportAsync();
@@ -382,13 +395,17 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private static double[]? ParseViewState(string? state)
     {
         var values = state?.StartsWith("pdf-view:", StringComparison.Ordinal) == true ? state[9..].Split(';') : [];
-        if (values.Length is not (3 or 5 or 6)) return null;
+        if (values.Length is not (3 or 5 or 6 or 7)) return null;
         var parsed = new double[values.Length];
         for (var index = 0; index < values.Length; index++)
             if (!double.TryParse(values[index], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[index]) || !double.IsFinite(parsed[index])) return null;
+        // Version 1 stored the removed paper-column mode as value 3. Treat
+        // those saved sessions as ordinary single-page PDFs instead of
+        // allowing an unavailable mode to leak into the new reader.
+        if (values.Length >= 5 && parsed[3] == 3) parsed[3] = (int)PdfReaderDisplayMode.SinglePage;
         if (values.Length >= 5 && (parsed[3] != Math.Truncate(parsed[3]) || parsed[4] != Math.Truncate(parsed[4])
             || !Enum.IsDefined((PdfReaderDisplayMode)(int)parsed[3]) || !Enum.IsDefined((PdfReaderFitMode)(int)parsed[4]))) return null;
-        if (values.Length == 6 && parsed[5] is not (0 or 90 or 180 or 270)) return null;
+        if (values.Length >= 6 && parsed[5] is not (0 or 90 or 180 or 270)) return null;
         return parsed;
     }
 
@@ -398,7 +415,15 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         var fractionX = _pan.X / Math.Max(1, PageBounds.Width);
         var fractionY = PagePanY / Math.Max(1, PageBounds.Height);
         _layoutDpi = DeviceScaling;
-        _layout = new(_sizes, Viewport, PageNumber, DisplayMode, FitMode, Zoom, _layoutDpi, Rotation);
+        _layout = new(
+            _sizes,
+            Viewport,
+            PageNumber,
+            DisplayMode,
+            FitMode,
+            Zoom,
+            _layoutDpi,
+            Rotation);
         if (preservePosition)
         {
             var page = _layout.Pages[PageNumber - 1];
@@ -476,14 +501,31 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             {
                 if (!_pages.TryGetValue(page, out var cached)) continue;
                 var bounds = GetPageBounds(page);
-                var width = Math.Max(1, (int)Math.Round(bounds.Width * _layoutDpi));
-                var height = Math.Max(1, (int)Math.Round(bounds.Height * _layoutDpi));
+                var fullSize = _sizes[page - 1];
+                if (Rotation % 180 != 0) fullSize = new(fullSize.Height, fullSize.Width);
+                var scale = Math.Max(
+                    bounds.Width / Math.Max(1, fullSize.Width),
+                    bounds.Height / Math.Max(1, fullSize.Height));
+                var width = Math.Max(1, (int)Math.Round(fullSize.Width * scale * _layoutDpi));
+                var height = Math.Max(1, (int)Math.Round(fullSize.Height * scale * _layoutDpi));
                 var intersection = bounds.Intersect(new Rect(Viewport));
                 if (intersection.Width <= 0 || intersection.Height <= 0) continue;
-                var left = Math.Clamp((int)Math.Floor((intersection.X - bounds.X) * _layoutDpi), 0, width - 1);
-                var top = Math.Clamp((int)Math.Floor((intersection.Y - bounds.Y) * _layoutDpi), 0, height - 1);
-                var right = Math.Clamp((int)Math.Ceiling((intersection.Right - bounds.X) * _layoutDpi), left + 1, width);
-                var bottom = Math.Clamp((int)Math.Ceiling((intersection.Bottom - bounds.Y) * _layoutDpi), top + 1, height);
+                var left = Math.Clamp(
+                    (int)Math.Floor((intersection.X - bounds.X) * _layoutDpi),
+                    0,
+                    width - 1);
+                var top = Math.Clamp(
+                    (int)Math.Floor((intersection.Y - bounds.Y) * _layoutDpi),
+                    0,
+                    height - 1);
+                var right = Math.Clamp(
+                    (int)Math.Ceiling((intersection.Right - bounds.X) * _layoutDpi),
+                    left + 1,
+                    width);
+                var bottom = Math.Clamp(
+                    (int)Math.Ceiling((intersection.Bottom - bounds.Y) * _layoutDpi),
+                    top + 1,
+                    height);
                 if (cached.Raster is { } raster && raster.Rotation == rotation && cached.Palette == palette
                     && raster.PagePixelWidth == width && raster.PagePixelHeight == height
                     && raster.Left <= left && raster.Top <= top && raster.Left + raster.Width >= right && raster.Top + raster.Height >= bottom) continue;

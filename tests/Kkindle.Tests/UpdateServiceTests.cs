@@ -61,6 +61,106 @@ public sealed class UpdateServiceTests
     }
 
     [Fact]
+    public async Task DevelopmentChannelSelectsNewestDevelopmentRelease()
+    {
+        const string responseJson = """
+            [
+              {
+                "tag_name": "v1.2.0-dev.2",
+                "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.2",
+                "body": "Older development release",
+                "draft": false,
+                "prerelease": true,
+                "assets": [
+                  {
+                    "name": "Kkindle-1.2.0-dev.2-win-x64-setup.exe",
+                    "browser_download_url": "https://example.test/Kkindle-1.2.0-dev.2-win-x64-setup.exe",
+                    "size": 1234
+                  },
+                  {
+                    "name": "SHA256SUMS.txt",
+                    "browser_download_url": "https://example.test/SHA256SUMS.txt",
+                    "size": 128
+                  }
+                ]
+              },
+              {
+                "tag_name": "v1.2.0-dev.10",
+                "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.10",
+                "body": "Newest development release",
+                "body_en": "Newest development release",
+                "draft": false,
+                "prerelease": true,
+                "assets": [
+                  {
+                    "name": "Kkindle-1.2.0-dev.10-win-x64-setup.exe",
+                    "browser_download_url": "https://example.test/Kkindle-1.2.0-dev.10-win-x64-setup.exe",
+                    "size": 1234
+                  },
+                  {
+                    "name": "SHA256SUMS.txt",
+                    "browser_download_url": "https://example.test/SHA256SUMS.txt",
+                    "size": 128
+                  }
+                ]
+              },
+              {
+                "tag_name": "v1.3.0-beta.1",
+                "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.3.0-beta.1",
+                "body": "Beta release",
+                "draft": false,
+                "prerelease": true,
+                "assets": []
+              },
+              {
+                "tag_name": "v1.3.0",
+                "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.3.0",
+                "body": "Stable release",
+                "draft": false,
+                "prerelease": false,
+                "assets": []
+              }
+            ]
+            """;
+        using var client = new HttpClient(new StubHandler(_ => JsonResponse(responseJson)));
+        using var service = new UpdateService(
+            new TestInstaller(),
+            client,
+            Path.GetTempPath());
+
+        var update = await service.CheckForUpdateAsync(
+            "1.2.0-dev.2",
+            AppUpdateChannel.Development);
+
+        Assert.NotNull(update);
+        Assert.Equal("1.2.0-dev.10", update.Version);
+        Assert.Equal("Newest development release", update.ReleaseNotes);
+        Assert.Equal("Kkindle-1.2.0-dev.10-win-x64-setup.exe", update.Package.Name);
+    }
+
+    [Fact]
+    public async Task StableChannelDoesNotAcceptDevelopmentRelease()
+    {
+        const string responseJson = """
+            {
+              "tag_name": "v1.2.0-dev.10",
+              "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.10",
+              "body": "Development release",
+              "draft": false,
+              "prerelease": true,
+              "assets": []
+            }
+            """;
+        using var client = new HttpClient(new StubHandler(_ => JsonResponse(responseJson)));
+        using var service = new UpdateService(
+            new TestInstaller(),
+            client,
+            Path.GetTempPath());
+
+        Assert.Null(await service.CheckForUpdateAsync("1.1.0"));
+    }
+
+    [Fact]
     public async Task ReturnsNullWhenCurrentDevelopmentVersionIsNewer()
     {
         const string responseJson = """

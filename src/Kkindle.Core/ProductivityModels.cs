@@ -63,6 +63,7 @@ public sealed record AppSettings
     public string EmbeddingModelId { get; init; } = DefaultEmbeddingModelId;
     public string PinyinEngineId { get; init; } = DefaultPinyinEngineId;
     public bool AutoUpdateCheckEnabled { get; init; } = true;
+    public bool DevelopmentUpdateCheckEnabled { get; init; }
 
     // Update checks run at most once per calendar day; the timestamp and the
     // discovered update summary persist so the title-bar badge survives restarts

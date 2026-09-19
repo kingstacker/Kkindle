@@ -79,7 +79,8 @@ public sealed partial class ReaderDataService
 {
     /// <summary>
     /// Clears reading statistics and progress atomically, retaining library
-    /// files, bookmarks, annotations, layout preferences and sync identity.
+    /// files, bookmarks, annotations, reflections, layout preferences and sync
+    /// identity.
     /// Call only after the reader has finished saving its current session.
     /// </summary>
     public async Task ResetReadingDataAsync(CancellationToken cancellationToken = default)

@@ -22,6 +22,20 @@ public sealed class ReaderAnnotation
     public string DisplayNote => string.IsNullOrWhiteSpace(Note) ? UiText.Get("仅划线") : Note;
 }
 
+/// <summary>
+/// A book-level reflection is intentionally separate from an annotation.
+/// An annotation belongs to a quoted location in one book file; a reflection
+/// belongs to the logical book and therefore survives switching between EPUB,
+/// PDF, and other formats of the same book.
+/// </summary>
+public sealed class ReaderBookReflection
+{
+    public Guid BookId { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed record BookContentChunk(
     long Id,
     Guid BookId,

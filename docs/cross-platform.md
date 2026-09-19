@@ -44,8 +44,9 @@ and macOS. PDF pages and first-page covers use the same renderer; its text
 geometry drives selection, underlines, highlights and editable comments.
 Continuous scrolling, single-page and two-page modes share that page map.
 View rotation is saved with reading progress; selection, annotations and outline
-destinations rotate with the page. Paper and neutral ink follow the reader theme,
-while saturated colors in figures are preserved. Classic keeps the original colors.
+destinations rotate with the page. Paper, chrome and neutral ink share the reader
+theme surface, while saturated colors in figures are preserved. Classic keeps the
+original colors.
 The reader renders clipped BGRA regions at the current display scale directly
 from PDFium, avoiding PNG round-trips and enlarged low-resolution page images.
 Its bounded page cache is independent of the full document's scroll extent.
@@ -54,14 +55,16 @@ finish loading in the background. Closing a book cancels that background work.
 Embedded outlines retain their hierarchy and page destinations. PDFs without
 outlines have a page list. Text PDFs also support local search, AI context and
 TTS. Scanned pages support viewing, page navigation, bookmarks and page notes;
-OCR is not included. PDF zoom and the position within a page are restored
-without changing EPUB typography preferences.
+OCR is not included. PDF page notes can be anchored to arbitrary normalized page
+positions. PDF zoom and the position within a page are restored without changing
+EPUB typography preferences.
 
 The `Development Build` GitHub Actions workflow can be run manually or by
-pushing the `develop`/`dev/**` branches. It appends the Actions run number to a
-base version such as `0.6.0-dev`, uploads three-platform packages as seven-day
-workflow artifacts, and never creates a Git tag or GitHub Release. Development
-macOS packages always use ad-hoc signing.
+pushing the `dev`, `develop`, or `dev/**` branches. It appends the Actions run
+number to a base version such as `1.0.2-dev`, builds Windows installer and
+three-platform packages, and publishes a GitHub pre-release tagged with the
+development version. The workflow also keeps the per-platform artifacts for
+seven days. Development macOS packages always use ad-hoc signing.
 
 Calibre is not bundled in any Windows, Linux or macOS archive. It is optional and is
 discovered from the application directory, standard install locations or

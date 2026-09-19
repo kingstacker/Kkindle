@@ -33,7 +33,9 @@ public static class ReadingMaterialsExport
                 if (!string.IsNullOrWhiteSpace(item.Note))
                 {
                     await WriteLineAsync(writer, string.Empty, cancellationToken);
-                    await WriteLineAsync(writer, UiText.Get("笔记：") + item.Note, cancellationToken);
+                    await WriteLineAsync(writer, IsReflection(item)
+                        ? item.Note.ReplaceLineEndings("\n")
+                        : UiText.Get("笔记：") + item.Note, cancellationToken);
                 }
                 if (!string.IsNullOrWhiteSpace(item.Location))
                 {
@@ -75,7 +77,9 @@ public static class ReadingMaterialsExport
                 var header = $"- {item.Type}" + (string.IsNullOrWhiteSpace(item.Location) ? string.Empty : $" · {item.Location}");
                 await WriteLineAsync(writer, header, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(item.Quote)) await WriteLineAsync(writer, item.Quote, cancellationToken);
-                if (!string.IsNullOrWhiteSpace(item.Note)) await WriteLineAsync(writer, UiText.Get("笔记：") + item.Note, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(item.Note)) await WriteLineAsync(writer,
+                    IsReflection(item) ? UiText.Get("思考：") + item.Note : UiText.Get("笔记：") + item.Note,
+                    cancellationToken);
                 if (item.UpdatedAt is { } time)
                     await WriteLineAsync(writer, UiText.Get("时间：") + time.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), cancellationToken);
                 await WriteLineAsync(writer, string.Empty, cancellationToken);
@@ -105,14 +109,19 @@ public static class ReadingMaterialsExport
             {
                 builder.Append("### ").AppendLine(item.Type);
                 if (!string.IsNullOrWhiteSpace(item.Quote)) builder.Append("> ").AppendLine(item.Quote.ReplaceLineEndings("\n> "));
-                if (!string.IsNullOrWhiteSpace(item.Note)) builder.AppendLine().Append(UiText.Get("笔记：")).AppendLine(item.Note);
+                if (!string.IsNullOrWhiteSpace(item.Note))
+                {
+                    builder.AppendLine();
+                    if (IsReflection(item)) builder.AppendLine(item.Note.ReplaceLineEndings("\n"));
+                    else builder.Append(UiText.Get("笔记：")).AppendLine(item.Note);
+                }
                 if (!string.IsNullOrWhiteSpace(item.Location)) builder.AppendLine().Append(UiText.Get("位置：")).AppendLine(item.Location);
                 if (item.UpdatedAt is { } time) builder.Append(UiText.Get("时间：")).AppendLine(time.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
                 builder.AppendLine();
             }
         });
         if (records.Count == 0) builder.AppendLine(UiText.Get("暂无划线与笔记。"));
-        return builder.ToString();
+        return builder.ToString().ReplaceLineEndings("\n");
     }
 
     public static string BuildPlainText(IReadOnlyList<ReadingMaterialRecord> records)
@@ -127,7 +136,8 @@ public static class ReadingMaterialsExport
                 if (!string.IsNullOrWhiteSpace(item.Location)) builder.Append(" · ").Append(item.Location);
                 builder.AppendLine();
                 if (!string.IsNullOrWhiteSpace(item.Quote)) builder.AppendLine(item.Quote);
-                if (!string.IsNullOrWhiteSpace(item.Note)) builder.Append(UiText.Get("笔记：")).AppendLine(item.Note);
+                if (!string.IsNullOrWhiteSpace(item.Note))
+                    builder.Append(UiText.Get(IsReflection(item) ? "思考：" : "笔记：")).AppendLine(item.Note);
                 if (item.UpdatedAt is { } time) builder.Append(UiText.Get("时间：")).AppendLine(time.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
                 builder.AppendLine();
             }
@@ -144,4 +154,9 @@ public static class ReadingMaterialsExport
         foreach (var bookGroup in sourceGroup.GroupBy(item => item.BookTitle, StringComparer.CurrentCultureIgnoreCase))
             append(sourceGroup.First().SourceLabel, bookGroup.Key, bookGroup.ToArray());
     }
+
+    private static bool IsReflection(ReadingMaterialRecord item) =>
+        string.Equals(item.Type, UiText.Get("读后思考"), StringComparison.OrdinalIgnoreCase)
+        || string.Equals(item.Type, "读后思考", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(item.Type, "Reading reflection", StringComparison.OrdinalIgnoreCase);
 }

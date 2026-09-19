@@ -641,6 +641,38 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         InvalidateVisual();
     }
 
+    /// <summary>
+    /// Returns the visible body bounds of an annotation in control coordinates.
+    /// The reader uses the same overlay geometry for painting and hit testing,
+    /// so the editor popup can stay anchored to the mark in every presentation
+    /// mode (single page, spread, and continuous scroll).
+    /// </summary>
+    public IReadOnlyList<Rect> GetAnnotationBounds(ReaderAnnotation annotation)
+    {
+        if (_layout is null || annotation.EndOffset <= annotation.StartOffset)
+            return [];
+
+        var bounds = new List<Rect>();
+        foreach (var pageIndex in VisiblePageIndexes())
+        {
+            var bands = _layout.GetOverlayRects(
+                pageIndex,
+                annotation.StartOffset,
+                annotation.EndOffset - annotation.StartOffset);
+            var origin = PageOrigin(pageIndex);
+            foreach (var band in bands)
+            {
+                bounds.Add(new Rect(
+                    origin.X + band.Left,
+                    origin.Y + band.Top,
+                    band.Width,
+                    band.Height));
+            }
+        }
+
+        return bounds;
+    }
+
     public void SetSearchHighlights(List<(int Start, int Length)>? hits, int? focusIndex)
     {
         _searchHits = hits;
@@ -2456,7 +2488,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         _selecting = false;
-        if (clickSide is not null)
+        var clickedAnnotation = releasedMap is { } annotationMap
+            && TryGetAnnotationAt(
+                annotationMap.Page,
+                new Point(annotationMap.Local.X, annotationMap.Local.Y),
+                out var annotation)
+            ? annotation
+            : null;
+        if (clickedAnnotation is not null)
+        {
+            Emit(new { type = "annotationClick", id = clickedAnnotation.Id });
+        }
+        else if (clickSide is not null)
         {
             Emit(new { type = "pageClick", side = clickSide });
         }
@@ -2618,7 +2661,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         if (position is { } point
             && _hoveredFootnoteHref is null
             && MapPointToPage(point) is { } mapped
-            && TryGetAnnotationAt(mapped.Page, new Point(mapped.Local.X, mapped.Local.Y), out var annotation))
+            && TryGetAnnotationAt(mapped.Page, new Point(mapped.Local.X, mapped.Local.Y), out var annotation)
+            && !string.IsNullOrWhiteSpace(annotation.Note))
         {
             if (_hoveredAnnotationId != annotation.Id)
             {
@@ -2694,13 +2738,6 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             var page = _layout.Pages[pageIndex];
             foreach (var candidate in _annotations)
             {
-                // A highlight without a note is only a visual mark. It must
-                // not become a hover target that opens an empty preview.
-                if (string.IsNullOrWhiteSpace(candidate.Note))
-                {
-                    continue;
-                }
-
                 if (candidate.EndOffset <= candidate.StartOffset)
                 {
                     continue;

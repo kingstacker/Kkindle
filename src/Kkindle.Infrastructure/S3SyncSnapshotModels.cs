@@ -19,6 +19,7 @@ internal sealed class S3SyncSnapshot
     public List<S3SyncCollection> Collections { get; set; } = [];
     public List<S3SyncCollectionItem> CollectionItems { get; set; } = [];
     public List<S3SyncAnnotation> Annotations { get; set; } = [];
+    public List<S3SyncBookReflection> BookReflections { get; set; } = [];
     public List<S3SyncProgress> Progress { get; set; } = [];
     public List<S3SyncBookmark> Bookmarks { get; set; } = [];
     public List<S3SyncLayout> Layouts { get; set; } = [];
@@ -110,6 +111,14 @@ internal sealed class S3SyncAnnotation
     public string Color { get; set; } = string.Empty;
     public string UnderlineStyle { get; set; } = string.Empty;
     public string Note { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+internal sealed class S3SyncBookReflection
+{
+    public Guid BookId { get; set; }
+    public string Content { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -209,6 +218,7 @@ internal sealed class S3SyncAppSettings
     public bool AiEnabled { get; set; } = true;
     public bool NetworkEnabled { get; set; } = true;
     public bool AutoUpdateCheckEnabled { get; set; } = true;
+    public bool DevelopmentUpdateCheckEnabled { get; set; }
     public bool AutoDoubanMatchOnImport { get; set; }
     public bool CompareKindleLibraryEnabled { get; set; } = true;
     public bool GridGalleryDisplay { get; set; }

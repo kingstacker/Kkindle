@@ -154,7 +154,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings
         {
             Theme = ReaderTheme.Night,
-            PaperEnabled = true,
+            PaperEnabled = false,
             PaperStrength = 0.8,
             FibersEnabled = true
         });
@@ -164,11 +164,18 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         var palette = ReaderPalette.For(ReaderTheme.Night);
         var pageBrush = scope.Window.Resources["ReaderPageBrush"];
         var sidebarBrush = scope.Window.Resources["ReaderSidebarBrush"];
+        var chromeBrush = scope.Window.Resources["ReaderChromeBrush"];
+        Assert.Same(pageBrush, sidebarBrush);
+        Assert.Same(pageBrush, chromeBrush);
         Assert.True(scope.Get<Border>("ReaderAssistantPanel").Bounds.Width > 200);
-        Assert.Same(pageBrush, scope.Get<Border>("ReaderHeaderBar").Background);
+        Assert.Equal(Colors.Transparent, ((ISolidColorBrush)scope.Get<Border>("ReaderTocHeaderBar").Background!).Color);
+        Assert.Equal(Colors.Transparent, ((ISolidColorBrush)scope.Get<Border>("ReaderAssistantHeaderBar").Background!).Color);
+        Assert.Equal(Colors.Transparent, ((ISolidColorBrush)scope.Get<Border>("ReaderHeaderBar").Background!).Color);
         Assert.Same(pageBrush, scope.Get<Grid>("ReaderWindowTitleBar").Background);
-        Assert.Same(pageBrush, scope.Get<Border>("ReaderFooterBar").Background);
-        Assert.Same(sidebarBrush, scope.Get<Border>("ReaderTocPanel").Background);
+        var footer = scope.Get<Border>("ReaderFooterBar");
+        Assert.Equal(Colors.Transparent, ((ISolidColorBrush)footer.Background!).Color);
+        Assert.Equal(new Thickness(0), footer.BorderThickness);
+        Assert.Equal(Colors.Transparent, ((ISolidColorBrush)scope.Get<Border>("ReaderTocPanel").Background!).Color);
         Assert.Equal(palette.Ink, ((ISolidColorBrush)scope.Get<TextBlock>("ReaderBookInfoText").Foreground!).Color);
         Assert.Equal(palette.Ink, ((ISolidColorBrush)scope.Get<Button>("MinimizeWindowButton").Foreground!).Color);
         Assert.Equal(palette.Muted, ((ISolidColorBrush)scope.Get<TextBox>("ReaderAiQuestionBox").PlaceholderForeground!).Color);

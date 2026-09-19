@@ -8,6 +8,7 @@ public enum LocalDataChangeKind
     ReadingProgress,
     ReadingLayout,
     ReadingStats,
+    BookReflection,
     Settings,
     ReadingDataReset
 }
