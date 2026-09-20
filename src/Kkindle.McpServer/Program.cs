@@ -1,0 +1,114 @@
+using System.Reflection;
+using Kkindle.Core;
+using Kkindle.Infrastructure;
+using Kkindle.McpServer;
+using Kkindle.Platform.Common;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Server;
+
+var paths = new AppPaths(McpRootPath.Resolve(args));
+var mcpSettings = LoadMcpSettings(paths);
+var metadata = new BookMetadataService();
+var library = new SqliteBookLibraryService(paths, metadata);
+var readerData = new ReaderDataService(paths);
+var devices = new MassStorageKindleDeviceService(paths, metadata);
+var ejectDevices = McpPlatformServices.CreateEjectService(paths, metadata);
+var formatConverter = new BookFormatConversionService();
+var emailSettingsStore = new KindleEmailSettingsStore(paths, new McpSecretProtector());
+var emailSender = new KindleEmailSender();
+var mcpTools = new KkindleMcpTools(
+    library,
+    readerData,
+    devices,
+    formatConverter,
+    emailSettingsStore,
+    emailSender,
+    ejectDevices);
+var enabledTools = CreateEnabledTools(mcpTools, mcpSettings);
+
+var builder = Host.CreateApplicationBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole(options =>
+{
+    // stdout is reserved for MCP JSON-RPC messages.
+    options.LogToStandardErrorThreshold = LogLevel.Trace;
+});
+
+builder.Services.AddSingleton(paths);
+builder.Services.AddSingleton<IBookLibraryService>(library);
+builder.Services.AddSingleton(readerData);
+builder.Services.AddSingleton<IKindleDeviceService>(devices);
+builder.Services.AddSingleton<IBookFormatConverter>(formatConverter);
+builder.Services.AddSingleton(emailSettingsStore);
+builder.Services.AddSingleton(emailSender);
+builder.Services.AddSingleton(mcpTools);
+if (ejectDevices is not null)
+    builder.Services.AddSingleton(ejectDevices);
+builder.Services
+    .AddMcpServer()
+    .WithStdioServerTransport()
+    // ModelContextProtocol supports registering a concrete tool collection, so
+    // disabled settings are absent from both tools/list and tools/call.
+    .WithTools(enabledTools);
+
+using var host = builder.Build();
+await host.Services.GetRequiredService<IBookLibraryService>().InitializeAsync();
+await host.Services.GetRequiredService<ReaderDataService>().InitializeAsync();
+await host.RunAsync();
+
+static McpServerSettings LoadMcpSettings(AppPaths paths)
+{
+    try
+    {
+        var settings = new AppSettingsStore(paths).LoadSynchronously();
+        return McpServerSettings.Normalize(settings.McpServer);
+    }
+    catch
+    {
+        // A missing, unreadable, or malformed settings file must not make the
+        // standalone server unusable. The record defaults keep every tool on.
+        return new McpServerSettings();
+    }
+}
+
+static IReadOnlyList<McpServerTool> CreateEnabledTools(
+    KkindleMcpTools target,
+    McpServerSettings settings)
+{
+    var registrations = new (bool Enabled, string MethodName)[]
+    {
+        (settings.BookLibraryEnabled, nameof(KkindleMcpTools.ListLibraryAsync)),
+        (settings.SearchBooksEnabled, nameof(KkindleMcpTools.SearchBooksAsync)),
+        (settings.BookMetadataEnabled, nameof(KkindleMcpTools.GetBookMetadataAsync)),
+        (settings.ReadingProgressEnabled, nameof(KkindleMcpTools.GetReadingProgressAsync)),
+        (settings.RecentBooksEnabled, nameof(KkindleMcpTools.ListRecentAsync)),
+        (settings.TagsEnabled, nameof(KkindleMcpTools.ListTagsAsync)),
+        (settings.CollectionsEnabled, nameof(KkindleMcpTools.ListCollectionsAsync)),
+        (settings.BookFileEnabled, nameof(KkindleMcpTools.GetBookFileAsync)),
+        (settings.DeviceListEnabled, nameof(KkindleMcpTools.ListDevicesAsync)),
+        (settings.DeviceStatusEnabled, nameof(KkindleMcpTools.DeviceStatusAsync)),
+        (settings.DeviceLibraryEnabled, nameof(KkindleMcpTools.ListDeviceLibraryAsync)),
+        (settings.EjectDeviceEnabled, nameof(KkindleMcpTools.EjectDeviceAsync)),
+        (settings.SendToKindleEnabled, nameof(KkindleMcpTools.SendToKindleAsync)),
+        (settings.ConvertBookEnabled, nameof(KkindleMcpTools.ConvertBookAsync)),
+        (settings.ImportBookEnabled, nameof(KkindleMcpTools.ImportBookAsync))
+    };
+
+    return registrations
+        .Where(registration => registration.Enabled)
+        .Select(registration => CreateTool(target, registration.MethodName))
+        .ToArray();
+}
+
+static McpServerTool CreateTool(KkindleMcpTools target, string methodName)
+{
+    var method = typeof(KkindleMcpTools).GetMethod(
+        methodName,
+        BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+    if (method is null)
+        throw new InvalidOperationException($"MCP tool method '{methodName}' was not found.");
+
+    return McpServerTool.Create(method, target, options: null);
+}
