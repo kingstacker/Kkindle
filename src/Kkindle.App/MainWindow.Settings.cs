@@ -45,6 +45,7 @@ public partial class MainWindow
         if (BlockNavigationWhileTransferring()) return;
         ShowStage3Page(SettingsPage, SettingsNavigationButton);
         SettingsDataPathText.Text = _paths.Data;
+        InitializeMcpSettings();
         ShowSettingsSection(_activeSettingsCategory);
     }
 
@@ -89,6 +90,7 @@ public partial class MainWindow
             ["Reading"] = SettingsReadingSection,
             ["Kindle"] = SettingsKindleSection,
             ["Data"] = SettingsDataSection,
+            ["Integrations"] = SettingsIntegrationsSection,
             ["About"] = SettingsAboutSection
         };
         if (!sections.TryGetValue(tag, out var activeSection))
@@ -106,7 +108,7 @@ public partial class MainWindow
             SettingsScrollViewer.Offset = default;
         _activeSettingsCategory = tag;
         UpdateS3SettingsActions();
-        Button[] buttons = [SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsAboutButton];
+        Button[] buttons = [SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsIntegrationsButton, SettingsAboutButton];
         foreach (var button in buttons)
         {
             var active = string.Equals(button.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase);
@@ -293,6 +295,8 @@ public partial class MainWindow
                 await RefreshPlatformDiagnosticsAsync();
             else if (ReferenceEquals(sender, SettingsLocalResourcesExpander))
                 await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
+            else if (ReferenceEquals(sender, SettingsMcpExpander))
+                RefreshMcpExecutableStatus();
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
         catch (Exception exception)
@@ -431,6 +435,7 @@ public partial class MainWindow
 
     private async Task<bool> PrepareSettingsForExitAsync()
     {
+        if (!await FlushMcpSettingsAsync()) return false;
         if (!await FlushAppSettingsAsync()) return false;
         if (_s3SettingsSaveTask is { IsCompleted: false } saving && !await saving) return false;
         UpdateS3SettingsDraftState();

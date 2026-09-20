@@ -91,6 +91,7 @@ public sealed record AppSettings
     public bool PinyinContextMenuEnabled { get; init; } = true;
     public bool PinyinLocalOnly { get; init; } = true;
     public BookTranslationSettings Translation { get; init; } = new();
+    public McpServerSettings McpServer { get; init; } = new();
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ReaderVerticalDebugBoxesEnabled { get; init; }
     public ReaderLayoutSettings DefaultReaderLayout { get; init; } = new();
@@ -129,7 +130,60 @@ public sealed record AppSettings
             AutoBackupRetention = Math.Clamp(settings.AutoBackupRetention, 1, 30),
             DefaultReaderLayout = ReaderLayoutDefaults.Normalize(settings.DefaultReaderLayout ?? new ReaderLayoutSettings()),
             ReaderAppearance = ReaderAppearanceSettings.Normalize(settings.ReaderAppearance),
-            Translation = BookTranslationSettings.Normalize(settings.Translation)
+            Translation = BookTranslationSettings.Normalize(settings.Translation),
+            McpServer = McpServerSettings.Normalize(settings.McpServer)
+        };
+    }
+}
+
+public sealed record McpServerSettings
+{
+    public bool Enabled { get; init; } = true;
+    public string Transport { get; init; } = "stdio";
+    public int HttpPort { get; init; } = 8765;
+    public string AccessToken { get; init; } = string.Empty;
+    public bool BookLibraryEnabled { get; init; } = true;
+    public bool SearchBooksEnabled { get; init; } = true;
+    public bool BookMetadataEnabled { get; init; } = true;
+    public bool ReadingProgressEnabled { get; init; } = true;
+    public bool RecentBooksEnabled { get; init; } = true;
+    public bool TagsEnabled { get; init; } = true;
+    public bool CollectionsEnabled { get; init; } = true;
+    public bool BookFileEnabled { get; init; } = true;
+    public bool DeviceListEnabled { get; init; } = true;
+    public bool DeviceStatusEnabled { get; init; } = true;
+    public bool DeviceLibraryEnabled { get; init; } = true;
+    public bool EjectDeviceEnabled { get; init; } = true;
+    public bool SendToKindleEnabled { get; init; } = true;
+    public bool ConvertBookEnabled { get; init; } = true;
+    public bool ImportBookEnabled { get; init; } = true;
+
+    public static McpServerSettings Normalize(McpServerSettings? settings)
+    {
+        settings ??= new McpServerSettings();
+        var transport = (settings.Transport ?? string.Empty).Trim().ToLowerInvariant();
+        if (transport is not ("stdio" or "http")) transport = "stdio";
+
+        return settings with
+        {
+            Transport = transport,
+            HttpPort = Math.Clamp(settings.HttpPort, 1, 65535),
+            AccessToken = (settings.AccessToken ?? string.Empty).Trim(),
+            BookLibraryEnabled = settings.BookLibraryEnabled,
+            SearchBooksEnabled = settings.SearchBooksEnabled,
+            BookMetadataEnabled = settings.BookMetadataEnabled,
+            ReadingProgressEnabled = settings.ReadingProgressEnabled,
+            RecentBooksEnabled = settings.RecentBooksEnabled,
+            TagsEnabled = settings.TagsEnabled,
+            CollectionsEnabled = settings.CollectionsEnabled,
+            BookFileEnabled = settings.BookFileEnabled,
+            DeviceListEnabled = settings.DeviceListEnabled,
+            DeviceStatusEnabled = settings.DeviceStatusEnabled,
+            DeviceLibraryEnabled = settings.DeviceLibraryEnabled,
+            EjectDeviceEnabled = settings.EjectDeviceEnabled,
+            SendToKindleEnabled = settings.SendToKindleEnabled,
+            ConvertBookEnabled = settings.ConvertBookEnabled,
+            ImportBookEnabled = settings.ImportBookEnabled
         };
     }
 }
