@@ -3062,21 +3062,24 @@
                                     </Grid>
                                 </Border>
                                 <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="6" Padding="16">
-                                    <StackPanel Spacing="10">
-                                        <TextBlock Text="{DynamicResource Ui.About.LogExportTitle}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="AboutLogsDescriptionText" Text="{DynamicResource Ui.About.LogExportDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Spacing="10" VerticalAlignment="Center">
+                                            <TextBlock Text="{DynamicResource Ui.About.LogExportTitle}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="AboutLogsDescriptionText" Text="{DynamicResource Ui.About.LogExportDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <TextBlock x:Name="AboutLogsStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                            <Button x:Name="ExportSoftwareLogsButton"
-                                                    Grid.Column="1"
-                                                    Content="{DynamicResource Ui.About.ExportLogs}"
-                                                    ContentTemplate="{StaticResource LibraryExportActionContent}"
-                                                    ToolTip.Tip="{DynamicResource Ui.About.ExportLogsHint}"
-                                                    AutomationProperties.Name="{DynamicResource Ui.About.ExportLogs}"
-                                                    Classes="quiet libraryToolbar"
-                                                    Click="ExportSoftwareLogsButton_Click" />
-                                        </Grid>
-                                    </StackPanel>
+                                        </StackPanel>
+                                        <Button x:Name="ExportSoftwareLogsButton"
+                                                Grid.Column="1"
+                                                Content="{DynamicResource Ui.About.ExportLogs}"
+                                                ContentTemplate="{StaticResource LibraryExportActionContent}"
+                                                ToolTip.Tip="{DynamicResource Ui.About.ExportLogsHint}"
+                                                AutomationProperties.Name="{DynamicResource Ui.About.ExportLogs}"
+                                                Classes="quiet libraryToolbar"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                VerticalContentAlignment="Center"
+                                                Click="ExportSoftwareLogsButton_Click" />
+                                    </Grid>
                                 </Border>
                                 <Expander x:Name="SettingsDiagnosticsExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Tag="{DynamicResource Ui.Auto.B66D6EE56E8CAEDF}" AutomationProperties.Name="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsDiagnosticsSection" Padding="0">

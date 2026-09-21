@@ -75,6 +75,7 @@ public sealed partial class SettingsTests
             Width = 620,
             Height = 120
         };
+        Assert.Equal(1, surface.BorderThickness.Bottom);
         var window = new Window
         {
             Width = 720,

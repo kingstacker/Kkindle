@@ -1739,7 +1739,7 @@ public partial class MainWindow : Window
             SetTaskStatus(T("正在导入 {0} 个位置…", inputPaths.Length));
             ShowTaskProgressPopup();
             TaskProgressPopupText.Text = T("正在导入 {0} 个位置…", inputPaths.Length);
-            var progress = new Progress<TransferProgress>(value =>
+            using var progress = new CoalescingUiProgress<TransferProgress>(value =>
             {
                 var message = string.IsNullOrWhiteSpace(value.Message)
                     ? T("正在导入：{0:0}%", value.Percentage)

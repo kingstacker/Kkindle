@@ -108,7 +108,7 @@ internal sealed class BookReflectionEditorSurface : Border
         _currentBookTitle = currentBookTitle?.Trim() ?? string.Empty;
         Background = AppAppearanceResources.GetBrush("PaperBrush");
         BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush");
-        BorderThickness = new Thickness(1, 1, 1, 0);
+        BorderThickness = new Thickness(1);
         ClipToBounds = true;
 
         _blockStack = new StackPanel

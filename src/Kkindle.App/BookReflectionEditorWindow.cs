@@ -206,7 +206,7 @@ internal sealed class BookReflectionEditorWindow : Window
         var footerBorder = new Border
         {
             BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
-            BorderThickness = new Thickness(0, 1, 0, 0),
+            BorderThickness = new Thickness(0),
             Padding = new Thickness(0, 10, 0, 0),
             Child = footer
         };
