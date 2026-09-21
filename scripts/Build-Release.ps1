@@ -98,6 +98,40 @@ if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf)) {
     throw "Published output does not contain LICENSE: $licensePath"
 }
 
+$mcpProjectPath = Join-Path $repositoryRoot 'src\Kkindle.McpServer\Kkindle.McpServer.csproj'
+if (-not (Test-Path -LiteralPath $mcpProjectPath -PathType Leaf)) {
+    throw "MCP server project was not found: $mcpProjectPath"
+}
+
+$mcpPublishDirectory = Join-Path $publishDirectory 'mcp'
+New-Item -ItemType Directory -Path $mcpPublishDirectory -Force | Out-Null
+$mcpPublishArguments = @(
+    'publish', $mcpProjectPath,
+    '-c', 'Release',
+    '-f', 'net10.0-windows10.0.19041.0',
+    '-p:Platform=x64',
+    '-r', 'win-x64',
+    '--self-contained', 'true',
+    "-p:Version=$Version",
+    '-o', $mcpPublishDirectory
+)
+
+Push-Location $repositoryRoot
+try {
+    & dotnet @mcpPublishArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "MCP server publish failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    Pop-Location
+}
+
+$mcpApplicationPath = Join-Path $mcpPublishDirectory 'Kkindle.McpServer.exe'
+if (-not (Test-Path -LiteralPath $mcpApplicationPath -PathType Leaf)) {
+    throw "Published output does not contain Kkindle.McpServer.exe: $mcpApplicationPath"
+}
+
 $portableArchive = Join-Path $OutputRoot "Kkindle-$Version-win-x64-portable.zip"
 Compress-Archive -Path (Join-Path $publishDirectory '*') -DestinationPath $portableArchive -CompressionLevel Optimal
 
