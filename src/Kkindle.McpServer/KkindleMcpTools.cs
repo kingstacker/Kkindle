@@ -345,6 +345,381 @@ public sealed class KkindleMcpTools
                 summary.BookCount)).ToArray());
     }
 
+    /// <summary>Creates a new library collection (收藏夹).</summary>
+    [McpServerTool(
+        Name = "create_collection",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Create a new Kkindle library collection (收藏夹).")]
+    public async Task<CollectionOperationResult> CreateCollectionAsync(
+        [Description("Name of the collection to create; must not be blank and at most 200 characters.")] string name,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = ValidateCollectionName(name);
+        var collection = await RunLibraryMutationAsync(
+            ct => _library.CreateCollectionAsync(normalizedName, ct),
+            "Create collection",
+            cancellationToken);
+        return new CollectionOperationResult(
+            collection.Id,
+            collection.Name,
+            true,
+            [$"Created collection '{collection.Name}'."]);
+    }
+
+    /// <summary>Renames an existing library collection (收藏夹).</summary>
+    [McpServerTool(
+        Name = "rename_collection",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Rename a Kkindle library collection (收藏夹).")]
+    public async Task<CollectionOperationResult> RenameCollectionAsync(
+        [Description("Collection GUID returned by list_collections.")] Guid collectionId,
+        [Description("New collection name; must not be blank and at most 200 characters.")] string name,
+        CancellationToken cancellationToken = default)
+    {
+        var (_, currentName) = await RequireCollectionAsync(collectionId, cancellationToken);
+        var normalizedName = ValidateCollectionName(name);
+        await RunLibraryMutationAsync(
+            ct => _library.RenameCollectionAsync(collectionId, normalizedName, ct),
+            "Rename collection",
+            cancellationToken);
+        return new CollectionOperationResult(
+            collectionId,
+            normalizedName,
+            true,
+            [$"Renamed collection '{currentName}' to '{normalizedName}'."]);
+    }
+
+    /// <summary>Deletes a library collection (收藏夹). The books inside are not deleted.</summary>
+    [McpServerTool(
+        Name = "delete_collection",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Delete a Kkindle library collection (收藏夹); the books inside are kept and become uncollected.")]
+    public async Task<CollectionOperationResult> DeleteCollectionAsync(
+        [Description("Collection GUID returned by list_collections.")] Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var (_, name) = await RequireCollectionAsync(collectionId, cancellationToken);
+        await RunLibraryMutationAsync(
+            ct => _library.DeleteCollectionAsync(collectionId, ct),
+            "Delete collection",
+            cancellationToken);
+        return new CollectionOperationResult(
+            collectionId,
+            name,
+            true,
+            [$"Deleted collection '{name}'."]);
+    }
+
+    /// <summary>Empties a library collection without deleting the books themselves.</summary>
+    [McpServerTool(
+        Name = "clear_collection",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Remove every book from a Kkindle collection; the collection itself and the books are kept.")]
+    public async Task<CollectionOperationResult> ClearCollectionAsync(
+        [Description("Collection GUID returned by list_collections.")] Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var (_, name) = await RequireCollectionAsync(collectionId, cancellationToken);
+        await RunLibraryMutationAsync(
+            ct => _library.ClearCollectionAsync(collectionId, ct),
+            "Clear collection",
+            cancellationToken);
+        return new CollectionOperationResult(
+            collectionId,
+            name,
+            true,
+            [$"Cleared collection '{name}'."]);
+    }
+
+    /// <summary>Moves every book of the source collection into the target one, then deletes the source.</summary>
+    [McpServerTool(
+        Name = "merge_collections",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Merge source collection into target collection (books move to the target) and delete the source.")]
+    public async Task<CollectionOperationResult> MergeCollectionsAsync(
+        [Description("Source collection GUID whose books are moved into the target; it is deleted afterwards.")] Guid sourceCollectionId,
+        [Description("Target collection GUID that receives the books.")] Guid targetCollectionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceCollectionId == targetCollectionId)
+            throw new McpException("sourceCollectionId and targetCollectionId must be different.");
+        var (_, sourceName) = await RequireCollectionAsync(sourceCollectionId, cancellationToken);
+        var (_, targetName) = await RequireCollectionAsync(targetCollectionId, cancellationToken);
+        await RunLibraryMutationAsync(
+            ct => _library.MergeCollectionsAsync(sourceCollectionId, targetCollectionId, ct),
+            "Merge collections",
+            cancellationToken);
+        return new CollectionOperationResult(
+            targetCollectionId,
+            targetName,
+            true,
+            [$"Merged collection '{sourceName}' into '{targetName}'."]);
+    }
+
+    /// <summary>Adds one library book to a collection (收藏夹).</summary>
+    [McpServerTool(
+        Name = "add_book_to_collection",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Add one library book to a Kkindle collection (收藏夹).")]
+    public async Task<CollectionBookOperationResult> AddBookToCollectionAsync(
+        [Description("Book GUID returned by list_library or search_books.")] Guid bookId,
+        [Description("Collection GUID returned by list_collections.")] Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var book = await GetBookOrThrowAsync(bookId, cancellationToken);
+        var (_, collectionName) = await RequireCollectionAsync(collectionId, cancellationToken);
+        await RunLibraryMutationAsync(
+            ct => _library.AddBookToCollectionAsync(bookId, collectionId, ct),
+            "Add book to collection",
+            cancellationToken);
+        return new CollectionBookOperationResult(
+            bookId,
+            collectionId,
+            collectionName,
+            true,
+            [$"Added '{book.Title}' to collection '{collectionName}'."]);
+    }
+
+    /// <summary>Removes one library book from a collection (收藏夹).</summary>
+    [McpServerTool(
+        Name = "remove_book_from_collection",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Remove one library book from a Kkindle collection (收藏夹); the book itself is kept.")]
+    public async Task<CollectionBookOperationResult> RemoveBookFromCollectionAsync(
+        [Description("Book GUID returned by list_library or search_books.")] Guid bookId,
+        [Description("Collection GUID returned by list_collections.")] Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var book = await GetBookOrThrowAsync(bookId, cancellationToken);
+        var (_, collectionName) = await RequireCollectionAsync(collectionId, cancellationToken);
+        await RunLibraryMutationAsync(
+            ct => _library.RemoveBookFromCollectionAsync(bookId, collectionId, ct),
+            "Remove book from collection",
+            cancellationToken);
+        return new CollectionBookOperationResult(
+            bookId,
+            collectionId,
+            collectionName,
+            true,
+            [$"Removed '{book.Title}' from collection '{collectionName}'."]);
+    }
+
+    /// <summary>Searches the indexed text content of one book and returns matching passages.</summary>
+    [McpServerTool(
+        Name = "search_book_content",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Search inside one book's indexed text and return matching passages with chapter context; empty results usually mean the reader index for that book has not been built yet.")]
+    public async Task<BookContentSearchResult> SearchBookContentAsync(
+        [Description("Book GUID returned by list_library or search_books.")] string bookId,
+        [Description("Search keyword or phrase, up to 200 characters.")] string query,
+        [Description("Maximum number of matching passages to return (1-100). Defaults to 6.")] int limit = 6,
+        [Description("When true, only whole-phrase matches are returned.")] bool exactPhraseOnly = false,
+        CancellationToken cancellationToken = default)
+    {
+        var id = ParseBookId(bookId);
+        var book = await GetBookOrThrowAsync(id, cancellationToken);
+        var normalizedQuery = ValidateQuery(query);
+        var clampedLimit = ValidateSearchContentLimit(limit);
+        var chunks = await _readerData.SearchBookAsync(
+            id,
+            normalizedQuery,
+            clampedLimit,
+            cancellationToken,
+            exactPhraseOnly);
+        var formatsByFile = book.Files
+            .GroupBy(file => file.Id)
+            .ToDictionary(group => group.Key, group => group.First().Format);
+        var matches = chunks
+            .Select(chunk => new BookContentMatch(
+                chunk.BookFileId,
+                formatsByFile.TryGetValue(chunk.BookFileId, out var format) ? format : string.Empty,
+                chunk.ChapterIndex,
+                chunk.ChapterTitle,
+                chunk.ChapterPath,
+                chunk.StartOffset,
+                chunk.EndOffset,
+                chunk.Content,
+                chunk.Rank))
+            .ToArray();
+        return new BookContentSearchResult(id, book.Title, normalizedQuery, matches.Length, matches);
+    }
+
+    /// <summary>Lists every highlight/annotation (划线/批注) saved for one book.</summary>
+    [McpServerTool(
+        Name = "list_book_annotations",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("List all highlights and annotations (划线/批注) for one book across its formats, newest first.")]
+    public async Task<BookAnnotationsResult> ListBookAnnotationsAsync(
+        [Description("Book GUID returned by list_library or search_books.")] string bookId,
+        [Description("Maximum annotations per book format to return (1-1000). Defaults to 200.")] int limit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        var id = ParseBookId(bookId);
+        var book = await GetBookOrThrowAsync(id, cancellationToken);
+        var clampedLimit = ValidateAnnotationLimit(limit);
+        var annotations = new List<BookAnnotationInfo>();
+        foreach (var file in book.Files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var items = await _readerData.GetAnnotationsAsync(file.Id, cancellationToken, clampedLimit);
+            foreach (var annotation in items)
+            {
+                annotations.Add(new BookAnnotationInfo(
+                    annotation.Id,
+                    annotation.BookFileId,
+                    file.Format,
+                    annotation.ChapterPath,
+                    annotation.Fragment,
+                    annotation.StartOffset,
+                    annotation.EndOffset,
+                    annotation.SelectedText,
+                    annotation.Prefix,
+                    annotation.Suffix,
+                    annotation.Color,
+                    annotation.UnderlineStyle,
+                    annotation.Note,
+                    annotation.CreatedAt,
+                    annotation.UpdatedAt));
+            }
+        }
+        var ordered = annotations
+            .OrderByDescending(annotation => annotation.UpdatedAt)
+            .ThenBy(annotation => annotation.Id)
+            .ToArray();
+        return new BookAnnotationsResult(id, book.Title, ordered.Length, ordered);
+    }
+
+    /// <summary>Lists every bookmark (书签) saved for one book.</summary>
+    [McpServerTool(
+        Name = "list_bookmarks",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("List all bookmarks (书签) for one book across its formats.")]
+    public async Task<BookBookmarksResult> ListBookmarksAsync(
+        [Description("Book GUID returned by list_library or search_books.")] string bookId,
+        [Description("Maximum bookmarks per book format to return (1-1000). Defaults to 200.")] int limit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        var id = ParseBookId(bookId);
+        var book = await GetBookOrThrowAsync(id, cancellationToken);
+        var clampedLimit = ValidateAnnotationLimit(limit);
+        var bookmarks = new List<BookBookmarkInfo>();
+        foreach (var file in book.Files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var items = await _readerData.GetBookmarksAsync(file.Id, cancellationToken, clampedLimit);
+            foreach (var bookmark in items)
+            {
+                bookmarks.Add(new BookBookmarkInfo(
+                    bookmark.Id,
+                    bookmark.BookFileId,
+                    file.Format,
+                    bookmark.ChapterPath,
+                    bookmark.Fragment,
+                    bookmark.ChapterIndex,
+                    bookmark.ScrollPosition,
+                    bookmark.FlowMode,
+                    bookmark.Title,
+                    bookmark.Quote,
+                    bookmark.CreatedAt,
+                    bookmark.ContentPosition));
+            }
+        }
+        var ordered = bookmarks
+            .OrderBy(bookmark => bookmark.ChapterIndex)
+            .ThenBy(bookmark => bookmark.CreatedAt)
+            .ToArray();
+        return new BookBookmarksResult(id, book.Title, ordered.Length, ordered);
+    }
+
+    /// <summary>Returns aggregate reading statistics and recent reading activity.</summary>
+    [McpServerTool(
+        Name = "get_reading_dashboard",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Get reading statistics (books started/finished, total reading time, average progress, bookmark and annotation counts) and recent books plus daily reading time.")]
+    public async Task<ReadingDashboardResult> GetReadingDashboardAsync(
+        [Description("Maximum number of recent books to include (1-50). Defaults to 12.")] int recentLimit = 12,
+        CancellationToken cancellationToken = default)
+    {
+        var limit = recentLimit is < 1 or > 50
+            ? throw new McpException($"recentLimit must be between 1 and 50; received {recentLimit}.")
+            : recentLimit;
+        var dashboard = await _readerData.GetReadingDashboardAsync(limit, cancellationToken);
+        var recent = new List<DashboardRecentBookInfo>(dashboard.RecentBooks.Count);
+        foreach (var item in dashboard.RecentBooks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string? authors = null;
+            if (item.IsInLibrary)
+            {
+                var book = await _library.GetBookAsync(item.BookId, cancellationToken);
+                authors = book?.Authors;
+            }
+            recent.Add(new DashboardRecentBookInfo(
+                item.BookId,
+                item.BookFileId,
+                string.IsNullOrWhiteSpace(item.Title) ? authors ?? string.Empty : item.Title,
+                ClampProgress(item.ProgressPercent),
+                item.CumulativeSeconds,
+                item.UpdatedAt,
+                item.IsInLibrary,
+                authors));
+        }
+        return new ReadingDashboardResult(
+            dashboard.BooksStarted,
+            dashboard.BooksFinished,
+            dashboard.TotalSeconds,
+            ClampProgress(dashboard.AverageProgress),
+            dashboard.BookmarkCount,
+            dashboard.AnnotationCount,
+            recent,
+            dashboard.DailyReading
+                .Select(day => new DashboardDayInfo(day.Date, day.ActiveSeconds))
+                .ToArray());
+    }
     /// <summary>Returns absolute paths for all stored files of one book.</summary>
     [McpServerTool(
         Name = "get_book_file",
@@ -1148,6 +1523,69 @@ private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken canc
     private static double ClampProgress(double value) =>
         double.IsFinite(value) ? Math.Clamp(value, 0, 100) : 0;
 
+    private async Task<(Guid Id, string Name)> RequireCollectionAsync(
+        Guid collectionId,
+        CancellationToken cancellationToken)
+    {
+        var collections = await _library.GetCollectionsAsync(cancellationToken);
+        var collection = collections.FirstOrDefault(candidate => candidate.Id == collectionId)
+            ?? throw new McpException($"Collection '{collectionId}' was not found in the Kkindle library.");
+        return (collection.Id, collection.Name);
+    }
+
+    private static async Task RunLibraryMutationAsync(
+        Func<CancellationToken, Task> action,
+        string actionName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await action(cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new McpException($"{actionName} failed: {exception.Message}");
+        }
+    }
+
+    private static async Task<T> RunLibraryMutationAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        string actionName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await action(cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new McpException($"{actionName} failed: {exception.Message}");
+        }
+    }
+
+    private static string ValidateCollectionName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new McpException("name must not be blank.");
+        var normalized = name.Trim();
+        if (normalized.Length > 200)
+            throw new McpException("name must be at most 200 characters.");
+        return normalized;
+    }
+
+    private static int ValidateSearchContentLimit(int value)
+    {
+        if (value is < 1 or > 100)
+            throw new McpException($"limit must be between 1 and 100; received {value}.");
+        return value;
+    }
+
+    private static int ValidateAnnotationLimit(int value)
+    {
+        if (value is < 1 or > 1000)
+            throw new McpException($"limit must be between 1 and 1000; received {value}.");
+        return value;
+    }
     private sealed record ResolvedSendSource(
         Guid? BookId,
         string Title,
@@ -1384,3 +1822,110 @@ public sealed record DeleteDeviceBookResult(
     bool DryRun,
     bool Deleted,
     IReadOnlyList<string> Actions);
+
+/// <summary>Outcome of a collection create/rename/delete/clear/merge operation.</summary>
+public sealed record CollectionOperationResult(
+    Guid CollectionId,
+    string CollectionName,
+    bool Done,
+    IReadOnlyList<string> Actions);
+
+/// <summary>Outcome of adding or removing a book in a collection.</summary>
+public sealed record CollectionBookOperationResult(
+    Guid BookId,
+    Guid CollectionId,
+    string CollectionName,
+    bool Done,
+    IReadOnlyList<string> Actions);
+
+/// <summary>Matching passages found inside one book.</summary>
+public sealed record BookContentSearchResult(
+    Guid BookId,
+    string Title,
+    string Query,
+    int TotalCount,
+    IReadOnlyList<BookContentMatch> Matches);
+
+/// <summary>One matching passage inside a book.</summary>
+public sealed record BookContentMatch(
+    Guid BookFileId,
+    string Format,
+    int ChapterIndex,
+    string ChapterTitle,
+    string ChapterPath,
+    int StartOffset,
+    int EndOffset,
+    string Content,
+    double Rank);
+
+/// <summary>Highlights and annotations belonging to one book.</summary>
+public sealed record BookAnnotationsResult(
+    Guid BookId,
+    string Title,
+    int TotalCount,
+    IReadOnlyList<BookAnnotationInfo> Annotations);
+
+/// <summary>One highlight/annotation (划线/批注).</summary>
+public sealed record BookAnnotationInfo(
+    Guid Id,
+    Guid BookFileId,
+    string Format,
+    string ChapterPath,
+    string? Fragment,
+    int StartOffset,
+    int EndOffset,
+    string SelectedText,
+    string Prefix,
+    string Suffix,
+    string Color,
+    string UnderlineStyle,
+    string Note,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+/// <summary>Bookmarks belonging to one book.</summary>
+public sealed record BookBookmarksResult(
+    Guid BookId,
+    string Title,
+    int TotalCount,
+    IReadOnlyList<BookBookmarkInfo> Bookmarks);
+
+/// <summary>One bookmark (书签).</summary>
+public sealed record BookBookmarkInfo(
+    Guid Id,
+    Guid BookFileId,
+    string Format,
+    string ChapterPath,
+    string? Fragment,
+    int ChapterIndex,
+    int? ScrollPosition,
+    int FlowMode,
+    string Title,
+    string Quote,
+    DateTimeOffset CreatedAt,
+    ReaderContentPosition? ContentPosition);
+
+/// <summary>Aggregate reading statistics and recent activity.</summary>
+public sealed record ReadingDashboardResult(
+    int BooksStarted,
+    int BooksFinished,
+    long TotalSeconds,
+    double AverageProgress,
+    int BookmarkCount,
+    int AnnotationCount,
+    IReadOnlyList<DashboardRecentBookInfo> RecentBooks,
+    IReadOnlyList<DashboardDayInfo> DailyReading);
+
+/// <summary>One recently read book entry within the dashboard.</summary>
+public sealed record DashboardRecentBookInfo(
+    Guid BookId,
+    Guid BookFileId,
+    string Title,
+    double ProgressPercent,
+    long CumulativeSeconds,
+    DateTimeOffset UpdatedAt,
+    bool IsInLibrary,
+    string? Authors);
+
+/// <summary>Reading time aggregated for one day.</summary>
+public sealed record DashboardDayInfo(DateOnly Date, long ActiveSeconds);

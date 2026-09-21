@@ -111,7 +111,18 @@ static IReadOnlyList<McpServerTool> CreateEnabledTools(
         (settings.ConvertBookEnabled, nameof(KkindleMcpTools.ConvertBookAsync)),
         (settings.ImportBookEnabled, nameof(KkindleMcpTools.ImportBookAsync)),
         (settings.DeleteBookEnabled, nameof(KkindleMcpTools.DeleteBookAsync)),
-        (settings.DeleteDeviceBookEnabled, nameof(KkindleMcpTools.DeleteDeviceBookAsync))
+        (settings.DeleteDeviceBookEnabled, nameof(KkindleMcpTools.DeleteDeviceBookAsync)),
+        (settings.CollectionManageEnabled, nameof(KkindleMcpTools.CreateCollectionAsync)),
+        (settings.CollectionManageEnabled, nameof(KkindleMcpTools.RenameCollectionAsync)),
+        (settings.CollectionManageEnabled, nameof(KkindleMcpTools.DeleteCollectionAsync)),
+        (settings.CollectionManageEnabled, nameof(KkindleMcpTools.ClearCollectionAsync)),
+        (settings.CollectionManageEnabled, nameof(KkindleMcpTools.MergeCollectionsAsync)),
+        (settings.CollectionManageEnabled, nameof(KkindleMcpTools.AddBookToCollectionAsync)),
+        (settings.CollectionManageEnabled, nameof(KkindleMcpTools.RemoveBookFromCollectionAsync)),
+        (settings.SearchBookContentEnabled, nameof(KkindleMcpTools.SearchBookContentAsync)),
+        (settings.AnnotationsEnabled, nameof(KkindleMcpTools.ListBookAnnotationsAsync)),
+        (settings.BookmarksEnabled, nameof(KkindleMcpTools.ListBookmarksAsync)),
+        (settings.ReadingDashboardEnabled, nameof(KkindleMcpTools.GetReadingDashboardAsync))
     };
 
     return registrations
