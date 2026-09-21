@@ -157,6 +157,8 @@ public sealed record McpServerSettings
     public bool SendToKindleEnabled { get; init; } = true;
     public bool ConvertBookEnabled { get; init; } = true;
     public bool ImportBookEnabled { get; init; } = true;
+    public bool DeleteBookEnabled { get; init; } = true;
+    public bool DeleteDeviceBookEnabled { get; init; } = true;
 
     public static McpServerSettings Normalize(McpServerSettings? settings)
     {
@@ -183,7 +185,9 @@ public sealed record McpServerSettings
             EjectDeviceEnabled = settings.EjectDeviceEnabled,
             SendToKindleEnabled = settings.SendToKindleEnabled,
             ConvertBookEnabled = settings.ConvertBookEnabled,
-            ImportBookEnabled = settings.ImportBookEnabled
+            ImportBookEnabled = settings.ImportBookEnabled,
+            DeleteBookEnabled = settings.DeleteBookEnabled,
+            DeleteDeviceBookEnabled = settings.DeleteDeviceBookEnabled
         };
     }
 }

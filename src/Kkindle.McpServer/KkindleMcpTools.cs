@@ -707,7 +707,69 @@ public sealed class KkindleMcpTools
             item.Message ?? "Imported");
     }
 
-    private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Removes one library book by moving it to the library trash. dryRun
+    /// defaults to true so a client must explicitly request the deletion.
+    /// </summary>
+    [McpServerTool(
+        Name = "delete_book",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Move a Kkindle library book and its files to the trash (recoverable in the desktop app). dryRun defaults to true; set dryRun=false to actually delete.")]
+    public async Task<DeleteBookResult> DeleteBookAsync(
+        [Description("Book GUID returned by list_library or search_books.")] Guid bookId,
+        [Description("When true, only report the planned action. Defaults to true; false performs the deletion.")] bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        var book = await GetBookOrThrowAsync(bookId, cancellationToken);
+        var actions = new[] { $"Move '{book.Title}' and its library files to trash." };
+        if (dryRun)
+            return new DeleteBookResult(book.Id, book.Title, dryRun, false, actions);
+
+        await _library.DeleteAsync(bookId, cancellationToken);
+        return new DeleteBookResult(book.Id, book.Title, false, true, actions);
+    }
+
+    /// <summary>
+    /// Removes one book file from a connected device by its device-relative
+    /// path (as reported by list_device_library). dryRun defaults to true so
+    /// a client must explicitly request the deletion.
+    /// </summary>
+    [McpServerTool(
+        Name = "delete_device_book",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description("Delete one book from a connected Kindle or supported reader device. dryRun defaults to true; set dryRun=false to actually delete.")]
+    public async Task<DeleteDeviceBookResult> DeleteDeviceBookAsync(
+        [Description("Device-relative path of the book file, exactly as reported by list_device_library.")] string relativePath,
+        [Description("Optional device identity, root path, or exact device name; required when more than one device is connected.")] string? deviceId = null,
+        [Description("When true, only report the planned action. Defaults to true; false performs the deletion.")] bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            throw new McpException("relativePath must not be empty.");
+
+        var device = await ResolveSingleDeviceAsync(deviceId, cancellationToken);
+        var books = await _devices.ScanBooksAsync(device, cancellationToken);
+        var book = books.FirstOrDefault(candidate => string.Equals(
+                candidate.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase))
+            ?? throw new McpException(
+                $"No book with relative path '{relativePath}' was found on device '{device.Name}' ({device.RootPath}).");
+
+        var actions = new[] { $"Delete '{book.Title}' ({book.RelativePath}) from '{device.Name}'." };
+        if (dryRun)
+            return new DeleteDeviceBookResult(device.Identity, device.Name, book.RelativePath, book.Title, dryRun, false, actions);
+
+        await _devices.RemoveBookAsync(device, book, cancellationToken);
+        return new DeleteDeviceBookResult(device.Identity, device.Name, book.RelativePath, book.Title, false, true, actions);
+    }
+private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken cancellationToken)
     {
         return await _library.GetBookAsync(bookId, cancellationToken)
             ?? throw new McpException($"Book '{bookId}' was not found in the Kkindle library.");
@@ -1306,3 +1368,19 @@ public sealed record ImportBookResult(
     string Format,
     IReadOnlyList<BookFilePathInfo> Files,
     string Message);
+
+public sealed record DeleteBookResult(
+    Guid BookId,
+    string Title,
+    bool DryRun,
+    bool Deleted,
+    IReadOnlyList<string> Actions);
+
+public sealed record DeleteDeviceBookResult(
+    string DeviceId,
+    string DeviceName,
+    string RelativePath,
+    string Title,
+    bool DryRun,
+    bool Deleted,
+    IReadOnlyList<string> Actions);
