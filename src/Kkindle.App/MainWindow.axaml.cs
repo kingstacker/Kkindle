@@ -63,6 +63,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _windowStateAnimationCancellation;
     private bool _windowMinimizeAnimationInProgress;
     private int _windowStateAnimationVersion;
+    private FileSystemWatcher? _databaseChangeWatcher;
+    private DispatcherTimer? _crossProcessDataRefreshTimer;
+    private DateTime _lastInProcessDataChangeUtc = DateTime.MinValue;
+    private bool _crossProcessRefreshBusy;
 
     private readonly AppPaths _paths;
     private readonly string _rootConfigurationDirectory;
@@ -742,6 +746,7 @@ public partial class MainWindow : Window
             await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
             SetupFilterControls();
             await RefreshCollectionsAsync();
+            InitializeCrossProcessDatabaseWatcher();
             _filterControlsReady = true;
             UpdateLibraryUi();
             SetTaskStatus(ViewModel.StatusText);
@@ -959,6 +964,9 @@ public partial class MainWindow : Window
         CancelWindowStateAnimation();
         _library.DataChanged -= LocalLibraryDataChanged;
         _readerData.DataChanged -= LocalReaderDataChanged;
+        _databaseChangeWatcher?.Dispose();
+        _databaseChangeWatcher = null;
+        _crossProcessDataRefreshTimer?.Stop();
         _s3SyncService.RemoteSettingsApplied -= S3RemoteSettingsApplied;
         _s3LocalChangeSyncTimer.Stop();
         UiText.LanguageChanged -= MainWindowLanguageChanged;
@@ -1054,6 +1062,73 @@ public partial class MainWindow : Window
         foreach (var item in DoubanCandidates) item.Dispose();
         foreach (var item in _allStage3ReadingMaterials) item.Dispose();
         ViewModel.Dispose();
+    }
+
+    private void InitializeCrossProcessDatabaseWatcher()
+    {
+        if (_databaseChangeWatcher is not null) return;
+        var watcher = new FileSystemWatcher(_paths.Data, "kkindle.db*")
+        {
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
+            IncludeSubdirectories = false,
+            EnableRaisingEvents = false
+        };
+        watcher.Changed += CrossProcessDatabaseFileChanged;
+        watcher.Created += CrossProcessDatabaseFileChanged;
+        watcher.Deleted += CrossProcessDatabaseFileChanged;
+        watcher.Renamed += CrossProcessDatabaseFileRenamed;
+        watcher.EnableRaisingEvents = true;
+        _databaseChangeWatcher = watcher;
+
+        _crossProcessDataRefreshTimer ??= new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(900)
+        };
+        _crossProcessDataRefreshTimer.Tick -= CrossProcessDataRefreshTimer_Tick;
+        _crossProcessDataRefreshTimer.Tick += CrossProcessDataRefreshTimer_Tick;
+    }
+
+    private void CrossProcessDatabaseFileChanged(object sender, FileSystemEventArgs e) =>
+        ScheduleCrossProcessDatabaseRefresh();
+
+    private void CrossProcessDatabaseFileRenamed(object sender, RenamedEventArgs e) =>
+        ScheduleCrossProcessDatabaseRefresh();
+
+    private void ScheduleCrossProcessDatabaseRefresh()
+    {
+        if (_lifetimeCancellation.IsCancellationRequested) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_lifetimeCancellation.IsCancellationRequested
+                || DateTime.UtcNow - _lastInProcessDataChangeUtc < TimeSpan.FromSeconds(2))
+                return;
+            _crossProcessDataRefreshTimer?.Stop();
+            _crossProcessDataRefreshTimer?.Start();
+        }, DispatcherPriority.Background);
+    }
+
+    private async void CrossProcessDataRefreshTimer_Tick(object? sender, EventArgs e)
+    {
+        _crossProcessDataRefreshTimer?.Stop();
+        if (_crossProcessRefreshBusy || _lifetimeCancellation.IsCancellationRequested) return;
+        _crossProcessRefreshBusy = true;
+        try
+        {
+            await RefreshLibraryAsync();
+            await RefreshCollectionsAsync();
+            HandleLocalDataChanged(LocalDataChangeKind.Library);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("读取其他进程的书库变更失败：{0}", UiText.Localize(exception.Message)));
+        }
+        finally
+        {
+            _crossProcessRefreshBusy = false;
+        }
     }
 
     private void SetupFilterControls()

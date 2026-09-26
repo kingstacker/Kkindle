@@ -28,13 +28,16 @@ public sealed record EpubReaderDocument(
 
 public sealed class EpubReaderPreparationService
 {
+    private const long MaximumEpubEntryBytes = 256L * 1024 * 1024;
+    private const long MaximumEpubExpandedBytes = 1024L * 1024 * 1024;
+    private const int MaximumEpubEntries = 100_000;
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     private const string ReaderIndexFileName = ".kkindle-reader-index.json";
     private const string ReaderIndexFormatVersion = "2";
     private const int PhysicalTocFullScanChapterLimit = 256;
     // Bump whenever sanitization changes. Existing reader caches otherwise
     // keep stale sanitized markup indefinitely.
-    private const string ExtractionFormatVersion = "70";
+    private const string ExtractionFormatVersion = "71";
     private const string ContentSecurityPolicyBase =
         "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
         "connect-src 'none'; form-action 'none'; img-src 'self' file:; " +
@@ -95,18 +98,26 @@ public sealed class EpubReaderPreparationService
 
         if (!extractionReady)
         {
-            TryDeleteFile(Path.Combine(cacheRoot, ReaderIndexFileName));
+            TryDeleteDirectory(cacheRoot);
+            Directory.CreateDirectory(cacheRoot);
             // Re-extract on every format-version mismatch. Re-sanitizing an
             // already transformed cache cannot restore content removed by an
             // older sanitizer and would leave bridge changes version-skewed.
-            await ExtractSafelyAsync(epubPath, cacheRoot, cancellationToken);
-
-            await SanitizeExtractedResourcesAsync(cacheRoot, cancellationToken);
-            await File.WriteAllTextAsync(
-                extractionReadyPath,
-                $"{cacheKey}\n{ExtractionFormatVersion}",
-                Encoding.UTF8,
-                cancellationToken);
+            try
+            {
+                await ExtractSafelyAsync(epubPath, cacheRoot, cancellationToken);
+                await SanitizeExtractedResourcesAsync(cacheRoot, cancellationToken);
+                await File.WriteAllTextAsync(
+                    extractionReadyPath,
+                    $"{cacheKey}\n{ExtractionFormatVersion}",
+                    Encoding.UTF8,
+                    cancellationToken);
+            }
+            catch
+            {
+                TryDeleteDirectory(cacheRoot);
+                throw;
+            }
         }
 
         var containerPath = Path.Combine(cacheRoot, "META-INF", "container.xml");
@@ -134,7 +145,11 @@ public sealed class EpubReaderPreparationService
                 element.Attribute("media-type")?.Value,
                 element.Attribute("properties")?.Value))
             .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Href))
-            .ToDictionary(item => item.Id!, item => item, StringComparer.Ordinal);
+            // Some malformed EPUBs repeat a manifest id. Keep the first
+            // declaration deterministically instead of throwing from
+            // ToDictionary and failing the whole reader load.
+            .GroupBy(item => item.Id!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
         var packageDirectory = Path.GetDirectoryName(packagePath)!;
         var chapters = new List<string>();
@@ -1364,9 +1379,13 @@ public sealed class EpubReaderPreparationService
         await using var input = new FileStream(epubPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
         using var archive = new ICSharpCode.SharpZipLib.Zip.ZipInputStream(input);
         var extracted = 0;
+        var entryCount = 0;
+        long expandedBytes = 0;
         while (archive.GetNextEntry() is { } entry)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (++entryCount > MaximumEpubEntries)
+                throw new EpubExtractionLimitException("EPUB 包含过多文件，已拒绝解压。");
             if (string.IsNullOrEmpty(entry.Name)) continue;
 
             var destination = ResolveContainedPath(destinationRoot, entry.Name);
@@ -1378,7 +1397,7 @@ public sealed class EpubReaderPreparationService
 
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-            await archive.CopyToAsync(output, 81920, cancellationToken);
+            expandedBytes += await CopyEpubEntryAsync(archive, output, entry.Size, expandedBytes, cancellationToken);
             extracted++;
         }
 
@@ -1393,6 +1412,9 @@ public sealed class EpubReaderPreparationService
     {
         await using var input = new FileStream(epubPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
         using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false);
+        if (archive.Entries.Count > MaximumEpubEntries)
+            throw new EpubExtractionLimitException("EPUB 包含过多文件，已拒绝解压。");
+        long expandedBytes = 0;
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1404,11 +1426,14 @@ public sealed class EpubReaderPreparationService
                 Directory.CreateDirectory(destination);
                 continue;
             }
+            if (entry.Length > MaximumEpubEntryBytes
+                || entry.Length > MaximumEpubExpandedBytes - expandedBytes)
+                throw new EpubExtractionLimitException("EPUB 解压后的数据超过安全上限，已拒绝解压。");
 
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             await using var source = entry.Open();
             await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-            await source.CopyToAsync(output, cancellationToken);
+            expandedBytes += await CopyEpubEntryAsync(source, output, entry.Length, expandedBytes, cancellationToken);
         }
     }
 
@@ -1422,9 +1447,13 @@ public sealed class EpubReaderPreparationService
         // image) can be skipped instead of aborting the whole book.
         using var archive = new ICSharpCode.SharpZipLib.Zip.ZipFile(epubPath);
         var extracted = 0;
+        var entryCount = 0;
+        long expandedBytes = 0;
         foreach (ICSharpCode.SharpZipLib.Zip.ZipEntry entry in archive)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (++entryCount > MaximumEpubEntries)
+                throw new EpubExtractionLimitException("EPUB 包含过多文件，已拒绝解压。");
             if (string.IsNullOrEmpty(entry.Name)) continue;
 
             var destination = ResolveContainedPath(destinationRoot, entry.Name);
@@ -1433,13 +1462,16 @@ public sealed class EpubReaderPreparationService
                 Directory.CreateDirectory(destination);
                 continue;
             }
+            if (entry.Size > MaximumEpubEntryBytes
+                || entry.Size > MaximumEpubExpandedBytes - expandedBytes)
+                throw new EpubExtractionLimitException("EPUB 解压后的数据超过安全上限，已拒绝解压。");
 
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             try
             {
                 await using var source = archive.GetInputStream(entry);
                 await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-                await source.CopyToAsync(output, 81920, cancellationToken);
+                expandedBytes += await CopyEpubEntryAsync(source, output, entry.Size, expandedBytes, cancellationToken);
                 extracted++;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1461,9 +1493,45 @@ public sealed class EpubReaderPreparationService
             throw new InvalidDataException("EPUB 压缩包已损坏，无法读取。");
     }
 
+    private static async Task<long> CopyEpubEntryAsync(
+        Stream source,
+        Stream destination,
+        long declaredLength,
+        long expandedBeforeEntry,
+        CancellationToken cancellationToken)
+    {
+        var maximumEntryRemaining = MaximumEpubEntryBytes;
+        var maximumPackageRemaining = MaximumEpubExpandedBytes - expandedBeforeEntry;
+        if (declaredLength > maximumEntryRemaining || declaredLength > maximumPackageRemaining)
+            throw new EpubExtractionLimitException("EPUB 解压后的数据超过安全上限，已拒绝解压。");
+
+        var buffer = new byte[81920];
+        long copied = 0;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = await source.ReadAsync(buffer, cancellationToken);
+            if (read == 0) break;
+            copied += read;
+            if (copied > maximumEntryRemaining || copied > maximumPackageRemaining)
+                throw new EpubExtractionLimitException("EPUB 解压后的数据超过安全上限，已拒绝解压。");
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+        return copied;
+    }
+
+    private sealed class EpubExtractionLimitException(string message) : IOException(message);
+
     private static void TryDeleteFile(string path)
     {
         try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
@@ -1585,7 +1653,9 @@ public sealed class EpubReaderPreparationService
         var htmlFiles = Directory.EnumerateFiles(cacheRoot, "*.*", SearchOption.AllDirectories)
             .Where(path => Path.GetExtension(path).Equals(".xhtml", StringComparison.OrdinalIgnoreCase)
                 || Path.GetExtension(path).Equals(".html", StringComparison.OrdinalIgnoreCase)
-                || Path.GetExtension(path).Equals(".htm", StringComparison.OrdinalIgnoreCase))
+                || Path.GetExtension(path).Equals(".htm", StringComparison.OrdinalIgnoreCase)
+                || Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase)
+                || Path.GetExtension(path).Equals(".svg", StringComparison.OrdinalIgnoreCase))
             .ToArray();
         await Parallel.ForEachAsync(
             htmlFiles,
@@ -1678,6 +1748,11 @@ public sealed class EpubReaderPreparationService
     {
         var document = await LoadXmlAsync(path, cancellationToken);
         var root = document.Root ?? throw new InvalidDataException("EPUB HTML 缺少根元素。");
+        var isHtmlDocument = root.Name.LocalName.Equals("html", StringComparison.OrdinalIgnoreCase)
+            || root.Descendants().Any(element => element.Name.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase));
+        var isSvgDocument = root.Name.LocalName.Equals("svg", StringComparison.OrdinalIgnoreCase);
+        if (!isHtmlDocument && !isSvgDocument)
+            return;
         var namespaceName = root.Name.Namespace;
         var elements = root.DescendantsAndSelf().ToArray();
         foreach (var element in elements)
@@ -1728,7 +1803,8 @@ public sealed class EpubReaderPreparationService
                     continue;
                 }
 
-                if (attributeName is "src" or "href" or "action" or "poster" or "data"
+                if (attributeName is "src" or "href" or "data-src" or "data-href"
+                    or "action" or "poster" or "data"
                     or "cite" or "formaction" or "xlink:href")
                 {
                     if (!IsSafeLocalReference(attribute.Value, path, cacheRoot))
@@ -1781,19 +1857,19 @@ public sealed class EpubReaderPreparationService
         MarkVerticalInlineRuns(root);
 
         var head = root.Elements().FirstOrDefault(element => element.Name.LocalName == "head");
-        if (head is null)
+        if (isHtmlDocument && head is null)
         {
             head = new XElement(namespaceName + "head");
             root.AddFirst(head);
         }
 
-        head.Elements()
-            .Where(element => element.Name.LocalName == "meta"
-                && string.Equals(
-                    element.Attribute("http-equiv")?.Value,
-                    "Content-Security-Policy",
-                    StringComparison.OrdinalIgnoreCase))
-            .Remove();
+        head?.Elements()
+             .Where(element => element.Name.LocalName == "meta"
+                 && string.Equals(
+                     element.Attribute("http-equiv")?.Value,
+                     "Content-Security-Policy",
+                     StringComparison.OrdinalIgnoreCase))
+             .Remove();
 
         // The self-drawn engine renders the sanitized XHTML directly; the
         // WebView bridge script and its CSP nonce are no longer injected.

@@ -168,6 +168,7 @@ public sealed record AiStreamChunk(string Text, string Reasoning);
 
 public sealed class AiChatClient : IDisposable
 {
+    private static readonly TimeSpan StreamIdleTimeout = TimeSpan.FromSeconds(90);
     private readonly HttpClient _httpClient;
 
     public AiChatClient(HttpMessageHandler? handler = null)
@@ -508,8 +509,25 @@ public sealed class AiChatClient : IDisposable
         var sawServerSentEvent = false;
         var eventName = string.Empty;
 
-        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        while (true)
         {
+            string? line;
+            using (var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                idle.CancelAfter(StreamIdleTimeout);
+                try
+                {
+                    line = await reader.ReadLineAsync(idle.Token);
+                }
+                catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new TimeoutException(
+                        $"AI 流式回复连续 {StreamIdleTimeout.TotalSeconds:0} 秒没有数据。",
+                        exception);
+                }
+            }
+
+            if (line is null) break;
             if (line.Length == 0)
             {
                 if (eventData.Length == 0) continue;

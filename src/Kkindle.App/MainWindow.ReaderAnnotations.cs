@@ -343,8 +343,21 @@ public partial class MainWindow
     private async Task PerformReaderSelectionCopyAsync()
     {
         if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is not null) await clipboard.SetTextAsync(_readerPendingSelection);
+        try
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard
+                ?? throw new InvalidOperationException(T("当前窗口无法访问剪贴板。"));
+            await clipboard.SetTextAsync(_readerPendingSelection);
+        }
+        catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            ReaderStatusText.Text = T("复制失败：{0}", UiText.Localize(exception.Message));
+            return;
+        }
         // Clear the live DOM selection so the highlighted text returns to the
         // normal body rendering after the copy action (WinUI reference); the
         // in-page selection bar hides itself once the selection is empty.
@@ -454,7 +467,20 @@ public partial class MainWindow
     {
         if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
         var term = _readerPendingSelection.Trim();
-        var entries = await _dictionaryService.LookupAsync(term, ReaderToken);
+        IReadOnlyList<DictionaryEntry> entries;
+        try
+        {
+            entries = await _dictionaryService.LookupAsync(term, ReaderToken);
+        }
+        catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            ReaderStatusText.Text = T("词典查询失败：{0}", UiText.Localize(exception.Message));
+            return;
+        }
         // Show every dictionary entry in a dialog, matching the WinUI
         // reference's ReaderSelectionDictionaryButton_Click.
         await ShowMessageAsync(T("词典 · {0}", term), entries.Count == 0

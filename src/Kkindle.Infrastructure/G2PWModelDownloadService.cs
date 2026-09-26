@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 
 namespace Kkindle.Infrastructure;
 
@@ -7,7 +8,10 @@ public sealed record G2PWModelDownloadSource(
     Uri ArchiveUri,
     Uri VocabularyUri,
     Uri PinyinMapUri,
-    long? ExpectedArchiveBytes = null);
+    long? ExpectedArchiveBytes = null,
+    string? ExpectedArchiveSha256 = null,
+    string? ExpectedVocabularySha256 = null,
+    string? ExpectedPinyinMapSha256 = null);
 
 public static class G2PWModelPackage
 {
@@ -19,9 +23,12 @@ public static class G2PWModelPackage
 
     public static G2PWModelDownloadSource DefaultSource { get; } = new(
         new Uri("https://storage.googleapis.com/esun-ai/g2pW/G2PWModel-v2-onnx.zip"),
-        new Uri("https://huggingface.co/google-bert/bert-base-chinese/resolve/main/vocab.txt"),
-        new Uri("https://raw.githubusercontent.com/GitYCC/g2pW/master/g2pw/bopomofo_to_pinyin_wo_tune_dict.json"),
-        ArchiveExpectedBytes);
+        new Uri("https://huggingface.co/google-bert/bert-base-chinese/resolve/8f23c25b06e129b6c986331a13d8d025a92cf0ea/vocab.txt"),
+        new Uri("https://raw.githubusercontent.com/GitYCC/g2pW/d1b5f8ddbbda9cb6cdba9e4422493550fea56c32/g2pw/bopomofo_to_pinyin_wo_tune_dict.json"),
+        ArchiveExpectedBytes,
+        ExpectedArchiveSha256: "699F3C1FD7FB0E2C2D49ED2486826FD5BFF233FEE7759350A91C3B49AEDC4ED2",
+        ExpectedVocabularySha256: "45BBAC6B341C319ADC98A532532882E91A9CEFC0329AA57BAC9AE761C27B291C",
+        ExpectedPinyinMapSha256: "0FE90E26BE7653023772B3AD2D08952961BBF295FB39BA685C7172D3D9769F52");
 
     public static IReadOnlyList<string> RequiredFiles { get; } =
     [
@@ -149,6 +156,7 @@ public sealed class G2PWModelDownloadService : IDisposable
                 archivePath,
                 MaximumArchiveBytes,
                 _source.ExpectedArchiveBytes,
+                _source.ExpectedArchiveSha256,
                 "下载 g2pW 模型",
                 "G2PWModel-v2-onnx.zip",
                 0,
@@ -168,6 +176,7 @@ public sealed class G2PWModelDownloadService : IDisposable
                 vocabularyPath,
                 MaximumVocabularyBytes,
                 expectedBytes: null,
+                expectedSha256: _source.ExpectedVocabularySha256,
                 "下载 BERT 词表",
                 "vocab.txt",
                 completedBytes,
@@ -179,6 +188,7 @@ public sealed class G2PWModelDownloadService : IDisposable
                 mapPath,
                 MaximumPinyinMapBytes,
                 expectedBytes: null,
+                expectedSha256: _source.ExpectedPinyinMapSha256,
                 "下载拼音映射",
                 "bopomofo_to_pinyin_wo_tune_dict.json",
                 completedBytes,
@@ -204,6 +214,7 @@ public sealed class G2PWModelDownloadService : IDisposable
         string destination,
         long maximumBytes,
         long? expectedBytes,
+        string? expectedSha256,
         string stage,
         string fileName,
         long completedBytes,
@@ -232,6 +243,7 @@ public sealed class G2PWModelDownloadService : IDisposable
                 .ReadAsStreamAsync(cancellationToken)
                 .ConfigureAwait(false);
             long received = 0;
+            using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             await using (var output = new FileStream(
                 partialPath,
                 FileMode.CreateNew,
@@ -248,6 +260,7 @@ public sealed class G2PWModelDownloadService : IDisposable
                     received += read;
                     if (received > maximumBytes)
                         throw new InvalidDataException($"g2pW 文件 {fileName} 超过大小限制。");
+                    hasher.AppendData(buffer, 0, read);
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
                         .ConfigureAwait(false);
                     Report(
@@ -263,6 +276,10 @@ public sealed class G2PWModelDownloadService : IDisposable
 
             if (expectedBytes is > 0 && received != expectedBytes.Value)
                 throw new InvalidDataException($"g2pW 文件 {fileName} 大小校验失败。");
+            var actualSha256 = Convert.ToHexString(hasher.GetHashAndReset());
+            if (!string.IsNullOrWhiteSpace(expectedSha256)
+                && !actualSha256.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"g2pW 文件 {fileName} SHA-256 校验失败。");
             File.Move(partialPath, destination, overwrite: true);
             return received;
         }
@@ -369,6 +386,16 @@ public sealed class G2PWModelDownloadService : IDisposable
         EnsureTrustedDownloadUri(source.PinyinMapUri);
         if (source.ExpectedArchiveBytes is <= 0 or > MaximumArchiveBytes)
             throw new ArgumentException("g2pW 模型压缩包大小校验值无效。", nameof(source));
+        foreach (var hash in new[]
+                 {
+                     source.ExpectedArchiveSha256,
+                     source.ExpectedVocabularySha256,
+                     source.ExpectedPinyinMapSha256
+                 }.Where(value => value is not null))
+        {
+            if (hash!.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character)))
+                throw new ArgumentException("g2pW SHA-256 校验值无效。", nameof(source));
+        }
     }
 
     private static HttpMessageHandler CreateHttpHandler(string? proxyAddress)

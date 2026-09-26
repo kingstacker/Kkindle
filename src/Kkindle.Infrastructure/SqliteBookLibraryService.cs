@@ -60,6 +60,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         _paths.EnsureDirectories();
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await using var connection = await OpenConnectionAsync(cancellationToken);
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -99,7 +100,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             CREATE TABLE IF NOT EXISTS BookCollections (
                 Id TEXT PRIMARY KEY,
                 Name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                CreatedAt TEXT NOT NULL
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS BookCollectionItems (
                 CollectionId TEXT NOT NULL REFERENCES BookCollections(Id) ON DELETE CASCADE,
@@ -118,6 +120,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 DeletedAt TEXT NOT NULL,
                 BookJson TEXT NULL,
                 FileJson TEXT NULL,
+                BookFileId TEXT NULL,
                 TrashPath TEXT NOT NULL,
                 OriginalPath TEXT NOT NULL,
                 TrashCoverPath TEXT NULL,
@@ -126,10 +129,81 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             CREATE INDEX IF NOT EXISTS IX_LibraryTrash_DeletedAt ON LibraryTrash(DeletedAt DESC);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureLibraryTrashBookFileIdColumnAsync(connection, cancellationToken);
+        await EnsureBookCollectionUpdatedAtColumnAsync(connection, cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
         await EnsureDefaultCollectionAsync(connection, cancellationToken);
         await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
+    }
+
+    private static async Task EnsureLibraryTrashBookFileIdColumnAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var inspect = connection.CreateCommand();
+        inspect.CommandText = "PRAGMA table_info(LibraryTrash);";
+        await using (var reader = await inspect.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                columns.Add(reader.GetString(1));
+        }
+
+        if (columns.Contains("BookFileId")) return;
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE LibraryTrash ADD COLUMN BookFileId TEXT NULL;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureBookCollectionUpdatedAtColumnAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var inspect = connection.CreateCommand();
+        inspect.CommandText = "PRAGMA table_info(BookCollections);";
+        await using (var reader = await inspect.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                columns.Add(reader.GetString(1));
+        }
+
+        if (columns.Contains("UpdatedAt")) return;
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE BookCollections ADD COLUMN UpdatedAt TEXT NOT NULL DEFAULT '';";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+        using var backfill = connection.CreateCommand();
+        backfill.CommandText = "UPDATE BookCollections SET UpdatedAt = CreatedAt WHERE UpdatedAt = '';";
+        await backfill.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<bool> TableExistsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name);";
+        command.Parameters.AddWithValue("$name", tableName);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) != 0;
+    }
+
+    private static async Task DeletePurgeReaderRowsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string commandText,
+        string parameterName,
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = commandText;
+        command.Parameters.AddWithValue(parameterName, id.ToString());
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     // The "未收藏" collection is a system view: a book belongs to it exactly
@@ -149,12 +223,13 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             collectionId = Guid.NewGuid();
             var insert = connection.CreateCommand();
             insert.CommandText = """
-                INSERT INTO BookCollections (Id, Name, CreatedAt)
-                VALUES ($id, $name, $createdAt);
+                INSERT INTO BookCollections (Id, Name, CreatedAt, UpdatedAt)
+                VALUES ($id, $name, $createdAt, $updatedAt);
                 """;
             insert.Parameters.AddWithValue("$id", collectionId.Value.ToString());
             insert.Parameters.AddWithValue("$name", BookLibraryDefaults.UncollectedCollectionName);
             insert.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("O"));
+            insert.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -524,13 +599,13 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         var clauses = new List<string> { "WHERE 1 = 1" };
         clauses.Add("AND ($query = '' OR b.Title LIKE $like OR b.Authors LIKE $like OR b.Tags LIKE $like OR b.Series LIKE $like)");
         if (!string.IsNullOrWhiteSpace(author))
-            clauses.Add("AND instr(',' || lower(replace(replace(replace(replace(coalesce(b.Authors, ''), '，', ','), ';', ','), '；', ','), ' ', '')) || ',', ',' || $authorToken || ',') > 0");
+            clauses.Add("AND instr(',' || unicode_lower(replace(replace(replace(replace(coalesce(b.Authors, ''), '，', ','), ';', ','), '；', ','), ' ', '')) || ',', ',' || $authorToken || ',') > 0");
         if (!string.IsNullOrWhiteSpace(tag))
-            clauses.Add("AND instr(',' || lower(replace(replace(replace(replace(coalesce(b.Tags, ''), '，', ','), ';', ','), '；', ','), ' ', '')) || ',', ',' || $tagToken || ',') > 0");
+            clauses.Add("AND instr(',' || unicode_lower(replace(replace(replace(replace(coalesce(b.Tags, ''), '，', ','), ';', ','), '；', ','), ' ', '')) || ',', ',' || $tagToken || ',') > 0");
         if (!string.IsNullOrWhiteSpace(format))
             clauses.Add("AND EXISTS (SELECT 1 FROM BookFiles f WHERE f.BookId = b.Id AND lower(f.Format) = lower($format))");
         if (!string.IsNullOrWhiteSpace(category))
-            clauses.Add("AND lower(trim(coalesce(b.Category, ''))) = lower(trim($category))");
+            clauses.Add("AND unicode_lower(trim(coalesce(b.Category, ''))) = unicode_lower(trim($category))");
         if (collectionId is not null)
             clauses.Add("AND EXISTS (SELECT 1 FROM BookCollectionItems ci WHERE ci.BookId = b.Id AND ci.CollectionId = $collectionId)");
         if (readingStatus is not null)
@@ -584,6 +659,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         CancellationToken cancellationToken = default,
         Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         var files = ExpandInputFiles(paths).ToList();
         var result = new ImportBatchResult();
         result.BookDetailsAvailable = files.Count <= DetailedImportResultLimit;
@@ -783,6 +859,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         string sourcePath,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         var source = Path.GetFullPath(sourcePath);
         if (!File.Exists(source))
             throw new FileNotFoundException("待添加的书籍文件不存在。", source);
@@ -859,6 +936,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
     public async Task<string?> EnsurePdfCoverAsync(Guid bookId, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _pdfCoverGate.WaitAsync(cancellationToken);
         try
         {
@@ -896,6 +974,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         string title,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         var normalizedTitle = (title ?? string.Empty).Trim();
         if (normalizedTitle.Length == 0)
             throw new ArgumentException("书名不能为空。", nameof(title));
@@ -971,6 +1050,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
     public async Task UpdateMetadataAsync(Book book, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         book.UpdatedAt = DateTimeOffset.UtcNow;
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await UpdateBookRowAsync(connection, book, cancellationToken);
@@ -982,6 +1062,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         Guid bookFileId,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1002,6 +1083,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
     public async Task DeleteAsync(Guid bookId, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1051,6 +1133,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         Guid trashItemId,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1071,6 +1154,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         Guid trashItemId,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1081,10 +1165,52 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             if (!string.IsNullOrWhiteSpace(entry.TrashCoverPath))
                 DeletePath(ResolveDataPath(entry.TrashCoverPath));
 
-            var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM LibraryTrash WHERE Id = $id;";
-            command.Parameters.AddWithValue("$id", trashItemId.ToString());
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                if (entry.Kind == LibraryTrashItemKind.Book)
+                {
+                    if (await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                        await DeletePurgeReaderRowsAsync(
+                            connection,
+                            transaction,
+                            "DELETE FROM ReaderAnnotations WHERE BookId = $bookId;",
+                            "$bookId",
+                            entry.BookId,
+                            cancellationToken);
+                    if (await TableExistsAsync(connection, transaction, "ReaderBookReflections", cancellationToken))
+                        await DeletePurgeReaderRowsAsync(
+                            connection,
+                            transaction,
+                            "DELETE FROM ReaderBookReflections WHERE BookId = $bookId;",
+                            "$bookId",
+                            entry.BookId,
+                            cancellationToken);
+                }
+                else if (entry.BookFileId is { } purgedFileId
+                    && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                {
+                    await DeletePurgeReaderRowsAsync(
+                        connection,
+                        transaction,
+                        "DELETE FROM ReaderAnnotations WHERE BookFileId = $bookFileId;",
+                        "$bookFileId",
+                        purgedFileId,
+                        cancellationToken);
+                }
+
+                var delete = connection.CreateCommand();
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM LibraryTrash WHERE Id = $id;";
+                delete.Parameters.AddWithValue("$id", trashItemId.ToString());
+                await delete.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
             NotifyDataChanged();
         }
         finally { _databaseGate.Release(); }
@@ -1188,6 +1314,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             Id = trashId,
             Kind = LibraryTrashItemKind.File,
             BookId = book.Id,
+            BookFileId = file.Id,
             Title = book.Title,
             Format = file.Format,
             Size = file.Size,
@@ -1419,7 +1546,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, CreatedAt FROM BookCollections ORDER BY Name COLLATE NOCASE;";
+        command.CommandText = "SELECT Id, Name, CreatedAt, UpdatedAt FROM BookCollections ORDER BY Name COLLATE NOCASE;";
         var collections = new List<BookCollection>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1428,7 +1555,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             {
                 Id = Guid.Parse(reader.GetString(0)),
                 Name = reader.GetString(1),
-                CreatedAt = DateTimeOffset.Parse(reader.GetString(2))
+                CreatedAt = DateTimeOffset.Parse(reader.GetString(2)),
+                UpdatedAt = DateTimeOffset.Parse(reader.GetString(3))
             });
         }
         return collections;
@@ -1438,6 +1566,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         string name,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         var normalizedName = (name ?? string.Empty).Trim();
         if (normalizedName.Length == 0)
             throw new ArgumentException("收藏夹名称不能为空。", nameof(name));
@@ -1458,13 +1587,15 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             {
                 Id = Guid.NewGuid(),
                 Name = normalizedName,
-                CreatedAt = DateTimeOffset.UtcNow
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
             };
             var insert = connection.CreateCommand();
-            insert.CommandText = "INSERT INTO BookCollections (Id, Name, CreatedAt) VALUES ($id, $name, $createdAt);";
+            insert.CommandText = "INSERT INTO BookCollections (Id, Name, CreatedAt, UpdatedAt) VALUES ($id, $name, $createdAt, $updatedAt);";
             insert.Parameters.AddWithValue("$id", collection.Id.ToString());
             insert.Parameters.AddWithValue("$name", collection.Name);
             insert.Parameters.AddWithValue("$createdAt", collection.CreatedAt.ToString("O"));
+            insert.Parameters.AddWithValue("$updatedAt", collection.UpdatedAt.ToString("O"));
             await insert.ExecuteNonQueryAsync(cancellationToken);
             NotifyDataChanged();
             return collection;
@@ -1482,6 +1613,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         string name,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         var normalizedName = (name ?? string.Empty).Trim();
         if (normalizedName.Length == 0)
             throw new ArgumentException("收藏夹名称不能为空。", nameof(name));
@@ -1520,8 +1652,9 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
                 var update = connection.CreateCommand();
                 update.Transaction = transaction;
-                update.CommandText = "UPDATE BookCollections SET Name = $name WHERE Id = $collectionId;";
+                update.CommandText = "UPDATE BookCollections SET Name = $name, UpdatedAt = $updatedAt WHERE Id = $collectionId;";
                 update.Parameters.AddWithValue("$name", normalizedName);
+                update.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
                 update.Parameters.AddWithValue("$collectionId", collectionId.ToString());
                 if (await update.ExecuteNonQueryAsync(cancellationToken) == 0)
                     throw new InvalidOperationException("收藏夹已不存在。");
@@ -1540,6 +1673,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
     public async Task ClearCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1608,6 +1742,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
     public async Task DissolveCollectionAsync(Guid collectionId, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1678,6 +1813,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         Guid targetCollectionId,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         if (sourceCollectionId == targetCollectionId)
             throw new InvalidOperationException("收藏夹不能合并到自身。");
 
@@ -1787,6 +1923,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         bool add,
         CancellationToken cancellationToken)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1991,6 +2128,10 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     {
         var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
+        connection.CreateFunction<string?, string?>(
+            "unicode_lower",
+            static value => value?.ToLowerInvariant(),
+            isDeterministic: true);
         var foreignKeys = connection.CreateCommand();
         foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
         await foreignKeys.ExecuteNonQueryAsync(cancellationToken);
@@ -2009,9 +2150,42 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
             if (Directory.Exists(input))
             {
-                foreach (var file in Directory.EnumerateFiles(input, "*.*", SearchOption.AllDirectories)
+                foreach (var file in EnumerateSupportedFiles(input)
                     .Where(x => SupportedExtensions.Contains(Path.GetExtension(x))))
                     yield return Path.GetFullPath(file);
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateSupportedFiles(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(Path.GetFullPath(root));
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            string[] files;
+            try { files = Directory.GetFiles(directory, "*.*", SearchOption.TopDirectoryOnly); }
+            catch (UnauthorizedAccessException) { continue; }
+            catch (IOException) { continue; }
+
+            foreach (var file in files)
+                yield return file;
+
+            string[] children;
+            try { children = Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly); }
+            catch (UnauthorizedAccessException) { continue; }
+            catch (IOException) { continue; }
+
+            foreach (var child in children)
+            {
+                try
+                {
+                    if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0)
+                        pending.Push(child);
+                }
+                catch (UnauthorizedAccessException) { }
+                catch (IOException) { }
             }
         }
     }
@@ -2396,10 +2570,10 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO LibraryTrash
-                (Id, Kind, BookId, Title, Format, Size, DeletedAt, BookJson, FileJson,
+                (Id, Kind, BookId, Title, Format, Size, DeletedAt, BookJson, FileJson, BookFileId,
                  TrashPath, OriginalPath, TrashCoverPath, OriginalCoverPath)
             VALUES
-                ($id, $kind, $bookId, $title, $format, $size, $deletedAt, $bookJson, $fileJson,
+                ($id, $kind, $bookId, $title, $format, $size, $deletedAt, $bookJson, $fileJson, $bookFileId,
                  $trashPath, $originalPath, $trashCoverPath, $originalCoverPath);
             """;
         command.Parameters.AddWithValue("$id", entry.Id.ToString());
@@ -2411,6 +2585,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         command.Parameters.AddWithValue("$deletedAt", entry.DeletedAt.ToString("O"));
         command.Parameters.AddWithValue("$bookJson", (object?)entry.BookJson ?? DBNull.Value);
         command.Parameters.AddWithValue("$fileJson", (object?)entry.FileJson ?? DBNull.Value);
+        command.Parameters.AddWithValue("$bookFileId", (object?)entry.BookFileId?.ToString() ?? DBNull.Value);
         command.Parameters.AddWithValue("$trashPath", entry.TrashPath);
         command.Parameters.AddWithValue("$originalPath", entry.OriginalPath);
         command.Parameters.AddWithValue("$trashCoverPath", (object?)entry.TrashCoverPath ?? DBNull.Value);
@@ -2438,7 +2613,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     {
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, Kind, BookId, Title, Format, Size, DeletedAt, BookJson, FileJson,
+            SELECT Id, Kind, BookId, Title, Format, Size, DeletedAt, BookJson, FileJson, BookFileId,
                    TrashPath, OriginalPath, TrashCoverPath, OriginalCoverPath
             FROM LibraryTrash WHERE Id = $id LIMIT 1;
             """;
@@ -2460,10 +2635,13 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             DeletedAt = DateTimeOffset.Parse(reader.GetString(6)),
             BookJson = reader.IsDBNull(7) ? null : reader.GetString(7),
             FileJson = reader.IsDBNull(8) ? null : reader.GetString(8),
-            TrashPath = reader.GetString(9),
-            OriginalPath = reader.GetString(10),
-            TrashCoverPath = reader.IsDBNull(11) ? null : reader.GetString(11),
-            OriginalCoverPath = reader.IsDBNull(12) ? null : reader.GetString(12)
+            BookFileId = !reader.IsDBNull(9) && Guid.TryParse(reader.GetString(9), out var bookFileId)
+                ? bookFileId
+                : null,
+            TrashPath = reader.GetString(10),
+            OriginalPath = reader.GetString(11),
+            TrashCoverPath = reader.IsDBNull(12) ? null : reader.GetString(12),
+            OriginalCoverPath = reader.IsDBNull(13) ? null : reader.GetString(13)
         };
     }
 
@@ -2539,6 +2717,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         public DateTimeOffset DeletedAt { get; init; }
         public string? BookJson { get; init; }
         public string? FileJson { get; init; }
+        public Guid? BookFileId { get; init; }
         public string TrashPath { get; init; } = string.Empty;
         public string OriginalPath { get; init; } = string.Empty;
         public string? TrashCoverPath { get; init; }

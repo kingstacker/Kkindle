@@ -492,6 +492,8 @@ public sealed class KkindleMcpTools
     {
         var book = await GetBookOrThrowAsync(bookId, cancellationToken);
         var (_, collectionName) = await RequireCollectionAsync(collectionId, cancellationToken);
+        if (collectionName.Equals(BookLibraryDefaults.UncollectedCollectionName, StringComparison.OrdinalIgnoreCase))
+            throw new McpException("‘未收藏’是系统视图，不能直接添加。请移除这本书的所有自定义收藏夹成员关系。");
         await RunLibraryMutationAsync(
             ct => _library.AddBookToCollectionAsync(bookId, collectionId, ct),
             "Add book to collection",
@@ -870,7 +872,59 @@ public sealed class KkindleMcpTools
                 deviceName = device.Name;
                 actions.Add($"Send '{source.Path}' as {source.Format.ToUpperInvariant()} to USB device '{device.Name}'.");
                 if (!dryRun)
-                    await _devices.SendBookAsync(device, source.BookFile, source.Path, cancellationToken: cancellationToken);
+                {
+                    if (DeviceTransferPolicy.RequiresKindleConversion(device.Profile, source.BookFile))
+                    {
+                        var temporaryDirectory = Path.Combine(
+                            Path.GetTempPath(),
+                            "Kkindle",
+                            "mcp-kindle-send",
+                            Guid.NewGuid().ToString("N"));
+                        Directory.CreateDirectory(temporaryDirectory);
+                        try
+                        {
+                            var convertedPath = Path.Combine(
+                                temporaryDirectory,
+                                KindleTransferPolicy.CreateSafeFileName(source.Title, ".azw3"));
+                            var converter = _formatConverter
+                                ?? throw new McpException("Book format conversion is not registered in this MCP server.");
+                            await converter.ConvertAsync(
+                                source.Path,
+                                convertedPath,
+                                cancellationToken: cancellationToken,
+                                metadata: new FormatConversionMetadata(source.Title, string.Empty));
+                            var convertedInfo = new FileInfo(convertedPath);
+                            var convertedFile = new BookFile
+                            {
+                                Id = source.BookFile.Id,
+                                BookId = source.BookFile.BookId,
+                                Format = "azw3",
+                                RelativePath = Path.GetFileName(convertedPath),
+                                Size = convertedInfo.Length,
+                                Sha256 = await Hashing.Sha256Async(convertedPath, cancellationToken)
+                            };
+                            await _devices.SendBookAsync(
+                                device,
+                                convertedFile,
+                                convertedPath,
+                                cancellationToken: cancellationToken);
+                        }
+                        finally
+                        {
+                            try { Directory.Delete(temporaryDirectory, recursive: true); }
+                            catch (IOException) { }
+                            catch (UnauthorizedAccessException) { }
+                        }
+                    }
+                    else
+                    {
+                        await _devices.SendBookAsync(
+                            device,
+                            source.BookFile,
+                            source.Path,
+                            cancellationToken: cancellationToken);
+                    }
+                }
                 break;
             }
             case "email":
@@ -1203,13 +1257,16 @@ private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken canc
 
         var sourcePath = ValidateExistingFilePath(filePath!, nameof(filePath));
         var format = BookFormatConversionPolicy.Normalize(Path.GetExtension(sourcePath));
+        var sourceHash = await Hashing.Sha256Async(sourcePath, cancellationToken);
+        var sourceIdentity = new Guid(Convert.FromHexString(sourceHash[..32]));
         var sourceFile = new BookFile
         {
-            Id = Guid.Empty,
+            Id = sourceIdentity,
             BookId = Guid.Empty,
             Format = format,
             RelativePath = sourcePath,
-            Size = new FileInfo(sourcePath).Length
+            Size = new FileInfo(sourcePath).Length,
+            Sha256 = sourceHash
         };
         if (channel == "usb" && KindleTransferPolicy.GetCandidates([sourceFile]).Count == 0)
             throw new McpException($"The file format '{format}' is not supported by USB Kindle transfer.");

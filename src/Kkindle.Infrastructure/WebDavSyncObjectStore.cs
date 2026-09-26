@@ -17,7 +17,7 @@ namespace Kkindle.Infrastructure;
 internal sealed class WebDavSyncObjectStore : ISyncObjectStore
 {
     private static readonly XNamespace Dav = "DAV:";
-    private const string PropertiesXml = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>";
+    private const string PropertiesXml = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:getlastmodified/></d:prop></d:propfind>";
     private readonly S3SyncSettings _settings;
     private readonly Uri _root;
     private readonly string _rootPath;
@@ -91,6 +91,41 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
         }
     }
 
+    public async Task<IReadOnlyList<SyncObjectMetadata>> ListObjectsAsync(
+        string prefix,
+        CancellationToken cancellationToken)
+    {
+        await EnsureEndpointAsync(cancellationToken);
+        try
+        {
+            var result = new Dictionary<string, SyncObjectMetadata>(StringComparer.Ordinal);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var queue = new Queue<string>();
+            queue.Enqueue(prefix.TrimEnd('/'));
+            while (queue.TryDequeue(out var collection))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!seen.Add(collection)) continue;
+                if (seen.Count > 10_000) throw InvalidListing();
+                var entries = await ReadCollectionAsync(collection, depthOne: true, allowMissing: true, cancellationToken);
+                if (entries is null) continue;
+                foreach (var entry in entries)
+                {
+                    if (entry.Key == collection) continue;
+                    if (entry.IsCollection) queue.Enqueue(entry.Key);
+                    else result[entry.Key] = new SyncObjectMetadata(entry.Key, entry.LastModified);
+                    if (result.Count > 200_000) throw InvalidListing();
+                }
+            }
+            return result.Values.ToArray();
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode is HttpStatusCode.Forbidden
+            or HttpStatusCode.BadRequest or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
+        {
+            throw new SyncListingUnavailableException(exception.Message, exception);
+        }
+    }
+
     public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken) => WithTimeoutAsync(async token =>
     {
         using var request = new HttpRequestMessage(HttpMethod.Head, ObjectUri(key));
@@ -108,20 +143,41 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
         return true;
     }, cancellationToken);
 
-    public async Task<SyncObjectRead> OpenReadAsync(string key, CancellationToken cancellationToken)
+    public async Task<SyncObjectRead> OpenReadAsync(
+        string key,
+        CancellationToken cancellationToken,
+        long rangeStart = 0)
     {
         var timeout = CreateTimeout(cancellationToken);
         HttpResponseMessage? response = null;
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, ObjectUri(key));
+            if (rangeStart > 0)
+                request.Headers.Range = new RangeHeaderValue(rangeStart, null);
             response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (response.StatusCode == HttpStatusCode.NotFound)
                 throw new SyncObjectNotFoundException(UiText.Get("远端同步对象不存在。"));
-            EnsureSuccess(response, "GET");
+            if (rangeStart > 0 && response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+            {
+                response.Dispose();
+                response = null;
+                timeout.Dispose();
+                return await OpenReadAsync(key, cancellationToken, rangeStart: 0);
+            }
+            if (response.StatusCode != HttpStatusCode.PartialContent || rangeStart <= 0)
+                EnsureSuccess(response, "GET");
             var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-            return new SyncObjectRead(new TimedReadStream(stream, timeout.Token, cancellationToken),
-                response.Content.Headers.ContentLength ?? -1, new DownloadLease(response, timeout));
+            return new SyncObjectRead(new TimedReadStream(
+                    stream,
+                    timeout,
+                    cancellationToken,
+                    TimeSpan.FromSeconds(_settings.TimeoutSeconds)),
+                response.Content.Headers.ContentLength ?? -1,
+                new DownloadLease(response, timeout),
+                isPartialResponse: response.StatusCode == HttpStatusCode.PartialContent,
+                totalLength: response.Content.Headers.ContentRange?.Length
+                    ?? response.Content.Headers.ContentLength);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -145,16 +201,29 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
         var published = false;
         try
         {
-            await WithTimeoutAsync(async token =>
+            using (var timeout = CreateTimeout(cancellationToken))
             {
                 using var request = new HttpRequestMessage(HttpMethod.Put, ObjectUri(temporaryKey))
                 {
-                    Content = new UploadContent(input, contentType)
+                    Content = new UploadContent(
+                        input,
+                        contentType,
+                        timeout,
+                        TimeSpan.FromSeconds(_settings.TimeoutSeconds))
                 };
-                using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-                EnsureSuccess(response, "PUT");
-                return true;
-            }, cancellationToken);
+                try
+                {
+                    using var response = await _client.SendAsync(
+                        request,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        timeout.Token);
+                    EnsureSuccess(response, "PUT");
+                }
+                catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw RequestTimeout(exception);
+                }
+            }
 
             await WithTimeoutAsync(async token =>
             {
@@ -173,6 +242,9 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
         }
     }
 
+    public Task DeleteAsync(string key, CancellationToken cancellationToken) =>
+        DeleteInternalAsync(key, cancellationToken);
+
     public async Task TestWriteAsync(string prefix, CancellationToken cancellationToken)
     {
         var key = $"{prefix}/.kkindle-connection-{Guid.NewGuid():N}.bin";
@@ -190,7 +262,7 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
                     || await response.ResponseStream.ReadAsync(new byte[1], cancellationToken) != 0)
                     throw new InvalidDataException(UiText.Get("WebDAV 测试文件校验失败。"));
             }
-            await DeleteAsync(key, cancellationToken);
+            await DeleteInternalAsync(key, cancellationToken);
             cleaned = true;
         }
         finally
@@ -291,18 +363,32 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
                     var code = StatusCode(status.Value);
                     if (code is < 200 or >= 300) throw RequestFailure("PROPFIND", (HttpStatusCode)code);
                 }
-                var type = item.Elements(Dav + "propstat")
+                var successfulProperties = item.Elements(Dav + "propstat")
                     .Where(prop => StatusCode(prop.Element(Dav + "status")?.Value) is >= 200 and < 300)
-                    .Select(prop => prop.Element(Dav + "prop")?.Element(Dav + "resourcetype"))
+                    .Select(prop => prop.Element(Dav + "prop"))
+                    .Where(prop => prop is not null)
+                    .ToArray();
+                var type = successfulProperties
+                    .Select(properties => properties!.Element(Dav + "resourcetype"))
                     .FirstOrDefault(prop => prop is not null);
                 if (type is null) throw InvalidListing();
+                var lastModifiedText = successfulProperties
+                    .Select(properties => properties!.Element(Dav + "getlastmodified")?.Value)
+                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+                DateTimeOffset? lastModified = DateTimeOffset.TryParse(
+                    lastModifiedText,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out var parsedLastModified)
+                    ? parsedLastModified
+                    : null;
                 var isCollection = type.Element(Dav + "collection") is not null;
                 if (entryKey == key)
                 {
                     if (!isCollection) throw InvalidListing();
                     foundSelf = true;
                 }
-                result.Add(new DavEntry(entryKey, isCollection));
+                result.Add(new DavEntry(entryKey, isCollection, lastModified));
             }
             if (!foundSelf) throw InvalidListing();
             return result;
@@ -343,7 +429,7 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
             ? code : throw InvalidListing();
     }
 
-    private Task<bool> DeleteAsync(string key, CancellationToken cancellationToken) => WithTimeoutAsync(async token =>
+    private Task<bool> DeleteInternalAsync(string key, CancellationToken cancellationToken) => WithTimeoutAsync(async token =>
     {
         using var request = new HttpRequestMessage(HttpMethod.Delete, ObjectUri(key));
         using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
@@ -356,7 +442,7 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
         // Cleanup only the unique file created by this operation, even when
         // the user has cancelled. A cleanup failure must not hide the cause.
         using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        try { await DeleteAsync(key, cleanup.Token); }
+        try { await DeleteInternalAsync(key, cleanup.Token); }
         catch (Exception exception) when (exception is HttpRequestException or IOException or OperationCanceledException or TimeoutException) { }
     }
 
@@ -408,7 +494,7 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
         _directoryGate.Dispose();
     }
 
-    private sealed record DavEntry(string Key, bool IsCollection);
+    private sealed record DavEntry(string Key, bool IsCollection, DateTimeOffset? LastModified);
 
     private sealed class DownloadLease(HttpResponseMessage response, CancellationTokenSource timeout) : IDisposable
     {
@@ -418,10 +504,18 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
     private sealed class UploadContent : HttpContent
     {
         private readonly Stream _input;
+        private readonly CancellationTokenSource _timeout;
+        private readonly TimeSpan _idleTimeout;
 
-        public UploadContent(Stream input, string contentType)
+        public UploadContent(
+            Stream input,
+            string contentType,
+            CancellationTokenSource timeout,
+            TimeSpan idleTimeout)
         {
             _input = input;
+            _timeout = timeout;
+            _idleTimeout = idleTimeout;
             Headers.ContentType = new MediaTypeHeaderValue(contentType);
         }
 
@@ -430,14 +524,58 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
             length = _input.CanSeek ? _input.Length - _input.Position : 0;
             return _input.CanSeek;
         }
-        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => _input.CopyToAsync(stream);
-        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken) =>
-            _input.CopyToAsync(stream, cancellationToken);
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            CopyWithIdleTimeoutAsync(stream, _timeout.Token);
+
+        protected override Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context,
+            CancellationToken cancellationToken) =>
+            CopyWithIdleTimeoutAsync(stream, cancellationToken);
+
+        private async Task CopyWithIdleTimeoutAsync(Stream destination, CancellationToken cancellationToken)
+        {
+            var buffer = new byte[128 * 1024];
+            while (true)
+            {
+                var read = await _input.ReadAsync(buffer, cancellationToken);
+                if (read == 0) return;
+                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                _timeout.CancelAfter(_idleTimeout);
+            }
+        }
     }
 
-    private sealed class TimedReadStream(Stream inner, CancellationToken timeoutToken, CancellationToken requestToken) : Stream
+    private sealed class TimedReadStream : Stream
     {
-        public override bool CanRead => inner.CanRead;
+        private readonly Stream _inner;
+        private readonly CancellationTokenSource? _timeoutSource;
+        private readonly CancellationToken _timeoutToken;
+        private readonly CancellationToken _requestToken;
+        private readonly TimeSpan _idleTimeout;
+
+        public TimedReadStream(Stream inner, CancellationToken timeoutToken, CancellationToken requestToken)
+        {
+            _inner = inner;
+            _timeoutToken = timeoutToken;
+            _requestToken = requestToken;
+            _idleTimeout = Timeout.InfiniteTimeSpan;
+        }
+
+        public TimedReadStream(
+            Stream inner,
+            CancellationTokenSource timeoutSource,
+            CancellationToken requestToken,
+            TimeSpan idleTimeout)
+        {
+            _inner = inner;
+            _timeoutSource = timeoutSource;
+            _timeoutToken = timeoutSource.Token;
+            _requestToken = requestToken;
+            _idleTimeout = idleTimeout;
+        }
+
+        public override bool CanRead => _inner.CanRead;
         public override bool CanSeek => false;
         public override bool CanWrite => false;
         public override long Length => throw new NotSupportedException();
@@ -451,10 +589,17 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
             ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutToken, cancellationToken);
-            try { return await inner.ReadAsync(buffer, linked.Token); }
-            catch (OperationCanceledException exception) when (!requestToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            _timeoutSource?.CancelAfter(_idleTimeout);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_timeoutToken, cancellationToken);
+            try
+            {
+                var read = await _inner.ReadAsync(buffer, linked.Token);
+                if (read > 0) _timeoutSource?.CancelAfter(_idleTimeout);
+                return read;
+            }
+            catch (OperationCanceledException exception) when (!_requestToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             { throw RequestTimeout(exception); }
         }
+
     }
 }

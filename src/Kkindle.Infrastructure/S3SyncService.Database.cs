@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using Kkindle.Core;
 using Microsoft.Data.Sqlite;
 
@@ -236,6 +237,19 @@ public sealed partial class S3SyncService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private async Task ClearRecordedDeletionTimesThroughAsync(
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        using var command = CreateCommand(connection, null, """
+            DELETE FROM S3SyncDeletionLog
+            WHERE julianday(DeletedAt) <= julianday($cutoff);
+            """);
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task<S3SyncSnapshot> CaptureDatabaseSnapshotAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -332,7 +346,7 @@ public sealed partial class S3SyncService
 
         using (var command = CreateCommand(connection, transaction, 
             """
-            SELECT Id, Name, CreatedAt
+            SELECT Id, Name, CreatedAt, UpdatedAt
             FROM BookCollections;
             """
             ))
@@ -343,7 +357,8 @@ public sealed partial class S3SyncService
                 {
                     Id = ParseGuid(reader.GetString(0), "BookCollections.Id"),
                     Name = reader.GetString(1),
-                    CreatedAt = ParseTimestamp(reader.GetString(2))
+                    CreatedAt = ParseTimestamp(reader.GetString(2)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(3))
                 });
         }
 
@@ -599,7 +614,6 @@ public sealed partial class S3SyncService
                 CollectionsMutuallyExclusive = app.CollectionsMutuallyExclusive,
                 AutoBackupRetention = app.AutoBackupRetention,
                 AiEnabled = app.AiEnabled,
-                NetworkEnabled = app.NetworkEnabled,
                 AutoUpdateCheckEnabled = app.AutoUpdateCheckEnabled,
                 DevelopmentUpdateCheckEnabled = app.DevelopmentUpdateCheckEnabled,
                 AutoDoubanMatchOnImport = app.AutoDoubanMatchOnImport,
@@ -670,11 +684,9 @@ public sealed partial class S3SyncService
         var warnings = new List<string>();
         var isPartial = false;
         var pathsToDelete = new List<string>();
-        var duplicateBooksMerged = await ConsolidateLocalDuplicateBooksAsync(
-            pathsToDelete,
-            cancellationToken);
-        if (duplicateBooksMerged > 0)
-            warnings.Add(UiText.Get("已自动合并 {0} 本重复书籍。", duplicateBooksMerged));
+        // Book identity is the persisted GUID. Equal title/author text is not
+        // enough to prove that two editions or translations are the same book.
+        const int duplicateBooksMerged = 0;
         var readingHistoryMerged = await ConsolidateLocalReadingHistoryAsync(cancellationToken);
 
         if (snapshots.Length == 0)
@@ -713,13 +725,11 @@ public sealed partial class S3SyncService
         var allRemoteCollections = snapshots
             .SelectMany(snapshot => snapshot.Collections)
             .GroupBy(collection => collection.Id)
-            .Select(group => group.OrderByDescending(collection => collection.CreatedAt).First())
+            .Select(group => group.OrderByDescending(CollectionUpdatedAt).First())
             .ToArray();
         var collectionMap = BuildCollectionMap(allRemoteCollections, localIdentity);
-        // Use the identity read after local duplicate consolidation.  The
-        // captured snapshot can still contain IDs that consolidation just
-        // removed; adding those stale IDs back would let an old remote row
-        // resurrect a duplicate book during this same merge.
+        // Stable IDs are the book identity. Duplicate titles and author names
+        // remain separate records, even when a remote snapshot contains them.
         AddLocalIdentityMappings(localIdentity, bookMap, fileMap, collectionMap);
 
         var tombstoneIndex = BuildTombstoneIndex(localSnapshot.Tombstones);
@@ -737,7 +747,7 @@ public sealed partial class S3SyncService
                 && !localIdentity.FilesById.ContainsKey(file.Id))
                 fileMap[file.Id] = file.Id;
         foreach (var collection in allRemoteCollections)
-            if (IsTombstoned(tombstoneIndex, "collection", collection.Id, collection.CreatedAt)
+            if (IsTombstoned(tombstoneIndex, "collection", collection.Id, CollectionUpdatedAt(collection))
                 && !localIdentity.CollectionsById.ContainsKey(collection.Id))
                 collectionMap[collection.Id] = collection.Id;
         var tombstonedBooks = allRemoteBooks
@@ -758,7 +768,7 @@ public sealed partial class S3SyncService
                 tombstoneIndex,
                 "collection",
                 collection.Id,
-                collection.CreatedAt))
+                CollectionUpdatedAt(collection)))
             .Select(collection => collection.Id)
             .ToHashSet();
         var remoteCollections = allRemoteCollections
@@ -1023,6 +1033,7 @@ public sealed partial class S3SyncService
         var annotationsApplied = 0;
         try
         {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await using (var connection = await OpenDatabaseConnectionAsync(cancellationToken))
         await using (var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
         {
@@ -1116,13 +1127,18 @@ public sealed partial class S3SyncService
                 if (!collectionMap.TryGetValue(collection.Id, out var localCollectionId)) continue;
                 var command = commandCache.Get(
                     """
-                    INSERT OR IGNORE INTO BookCollections (Id, Name, CreatedAt)
-                    VALUES ($id, $name, $createdAt);
+                    INSERT INTO BookCollections (Id, Name, CreatedAt, UpdatedAt)
+                    VALUES ($id, $name, $createdAt, $updatedAt)
+                    ON CONFLICT(Id) DO UPDATE SET
+                        Name = excluded.Name,
+                        UpdatedAt = excluded.UpdatedAt
+                    WHERE julianday(excluded.UpdatedAt) > julianday(BookCollections.UpdatedAt);
                     """
                     );
                 AddParameter(command, "$id", localCollectionId.ToString());
                 AddParameter(command, "$name", collection.Name);
                 AddParameter(command, "$createdAt", collection.CreatedAt.ToString("O"));
+                AddParameter(command, "$updatedAt", CollectionUpdatedAt(collection).ToString("O"));
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
             }
 
@@ -1717,10 +1733,19 @@ public sealed partial class S3SyncService
             || (map.TryGetValue(id, out var mapped) && IsTombstoned(tombstones, type, mapped, version));
         var deletedBooks = view.Books.Where(book => Deleted("book", book.Id, book.UpdatedAt, bookMap))
             .Select(book => book.Id).ToHashSet();
-        var deletedCollections = view.Collections.Where(row => Deleted("collection", row.Id, row.CreatedAt, collectionMap))
+        var restoredBooks = view.Books
+            .Where(book => !Deleted("book", book.Id, book.UpdatedAt, bookMap))
+            .Select(book => book.Id)
+            .ToHashSet();
+        var restoredFiles = view.Files
+            .Where(file => !Deleted("file", file.Id, file.ModifiedAt, fileMap))
+            .Select(file => file.Id)
+            .ToHashSet();
+        var deletedCollections = view.Collections.Where(row => Deleted("collection", row.Id, CollectionUpdatedAt(row), collectionMap))
             .Select(row => row.Id).ToHashSet();
         bool LiveReader(Guid book, Guid file, DateTimeOffset version) => !deletedBooks.Contains(book)
-            && !Deleted("book", book, version, bookMap) && !Deleted("file", file, version, fileMap);
+            && (restoredBooks.Contains(book) || !Deleted("book", book, version, bookMap))
+            && (restoredFiles.Contains(file) || !Deleted("file", file, version, fileMap));
         view.Books = view.Books.Where(book => !deletedBooks.Contains(book.Id)).ToList();
         view.Files = view.Files.Where(file => LiveReader(file.BookId, file.Id, file.ModifiedAt)).ToList();
         view.Collections = view.Collections.Where(row => !deletedCollections.Contains(row.Id)).ToList();
@@ -1796,7 +1821,7 @@ public sealed partial class S3SyncService
             }
         }
 
-        using (var command = CreateCommand(connection, null, "SELECT Id, Name, CreatedAt FROM BookCollections;"))
+        using (var command = CreateCommand(connection, null, "SELECT Id, Name, CreatedAt, UpdatedAt FROM BookCollections;"))
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
@@ -1804,7 +1829,8 @@ public sealed partial class S3SyncService
                 var collection = new LocalCollectionIdentity(
                     ParseGuid(reader.GetString(0), "BookCollections.Id"),
                     reader.GetString(1),
-                    ParseTimestamp(reader.GetString(2)));
+                    ParseTimestamp(reader.GetString(2)),
+                    ParseTimestamp(reader.GetString(3)));
                 identity.CollectionsById[collection.Id] = collection;
             }
         }
@@ -1819,73 +1845,12 @@ public sealed partial class S3SyncService
     {
         var result = new Dictionary<Guid, Guid>();
         var usedLocalIds = new HashSet<Guid>(localIdentity.BooksById.Keys);
-        var localFileCounts = localIdentity.FilesById.Values
-            .GroupBy(file => file.BookId)
-            .ToDictionary(group => group.Key, group => group.Count());
-        var localByTitle = localIdentity.BooksById.Values
-            .GroupBy(book => BuildBookMatchKey(book.Title, book.Authors), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                group => group.Key,
-                group => group
-                    .OrderByDescending(book => localFileCounts.GetValueOrDefault(book.Id))
-                    .ThenByDescending(book => book.UpdatedAt)
-                    .ThenBy(book => book.CreatedAt)
-                    .ThenBy(book => book.Id)
-                    .First()
-                    .Id,
-                StringComparer.OrdinalIgnoreCase);
-        var remoteByTitle = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-        var remoteFileBearing = remoteFiles
-            .Where(file => IsSha256(file.Sha256))
-            .Select(file => file.BookId)
-            .ToHashSet();
-
-        // A book imported on two devices can have different GUIDs. Process
-        // file-bearing/newer rows first, then let later rows with the same
-        // title+author key reuse the first local identity.
-        foreach (var remoteBook in remoteBooks
-                     .OrderByDescending(book => remoteFileBearing.Contains(book.Id))
-                     .ThenByDescending(book => book.UpdatedAt)
-                     .ThenBy(book => book.Id))
+        foreach (var remoteBook in remoteBooks.OrderBy(book => book.Id))
         {
-            var matchKey = BuildBookMatchKey(remoteBook.Title, remoteBook.Authors);
-            if (CanUseBookMatchKey(remoteBook.Title, remoteBook.Authors)
-                && remoteByTitle.TryGetValue(matchKey, out var remoteMatch))
-            {
-                result[remoteBook.Id] = remoteMatch;
-                continue;
-            }
-
-            Guid localId;
-            if (localIdentity.BooksById.ContainsKey(remoteBook.Id))
-            {
-                localId = remoteBook.Id;
-            }
-            else
-            {
-                var fileMatch = remoteFiles
-                    .Where(file => file.BookId == remoteBook.Id && IsSha256(file.Sha256))
-                    .Select(file => localIdentity.FilesByHash.GetValueOrDefault(file.Sha256))
-                    .FirstOrDefault(file => file is not null);
-                if (fileMatch is not null)
-                {
-                    localId = fileMatch.BookId;
-                }
-                else if (localByTitle.TryGetValue(matchKey, out var titleMatch))
-                {
-                    localId = titleMatch;
-                }
-                else
-                {
-                    localId = remoteBook.Id;
-                    if (!usedLocalIds.Add(localId))
-                        localId = Guid.NewGuid();
-                }
-            }
-
+            var localId = remoteBook.Id;
+            if (!usedLocalIds.Contains(localId))
+                usedLocalIds.Add(localId);
             result[remoteBook.Id] = localId;
-            if (CanUseBookMatchKey(remoteBook.Title, remoteBook.Authors))
-                remoteByTitle[matchKey] = localId;
         }
 
         return result;
@@ -1898,28 +1863,35 @@ public sealed partial class S3SyncService
     {
         var result = new Dictionary<Guid, Guid>();
         var usedLocalIds = new HashSet<Guid>(localIdentity.FilesById.Keys);
-        var remoteByHash = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var localByBookAndHash = localIdentity.FilesById.Values
+            .Where(file => IsSha256(file.Sha256))
+            .GroupBy(file => $"{file.BookId:N}:{file.Sha256}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var remoteByBookAndHash = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         foreach (var remoteFile in remoteFiles)
         {
+            var localBookId = bookMap.GetValueOrDefault(remoteFile.BookId, remoteFile.BookId);
+            var hashKey = $"{localBookId:N}:{remoteFile.Sha256}";
             if (localIdentity.FilesById.TryGetValue(remoteFile.Id, out var byId)
+                && byId.BookId == localBookId
                 && string.Equals(byId.Sha256, remoteFile.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 result[remoteFile.Id] = byId.Id;
                 if (IsSha256(remoteFile.Sha256))
-                    remoteByHash[remoteFile.Sha256] = byId.Id;
+                    remoteByBookAndHash[hashKey] = byId.Id;
                 continue;
             }
 
             if (IsSha256(remoteFile.Sha256)
-                && localIdentity.FilesByHash.TryGetValue(remoteFile.Sha256, out var byHash))
+                && localByBookAndHash.TryGetValue(hashKey, out var byHash))
             {
                 result[remoteFile.Id] = byHash.Id;
-                remoteByHash[remoteFile.Sha256] = byHash.Id;
+                remoteByBookAndHash[hashKey] = byHash.Id;
                 continue;
             }
 
             if (IsSha256(remoteFile.Sha256)
-                && remoteByHash.TryGetValue(remoteFile.Sha256, out var remoteMatch))
+                && remoteByBookAndHash.TryGetValue(hashKey, out var remoteMatch))
             {
                 result[remoteFile.Id] = remoteMatch;
                 continue;
@@ -1930,7 +1902,7 @@ public sealed partial class S3SyncService
                 localId = Guid.NewGuid();
             result[remoteFile.Id] = localId;
             if (IsSha256(remoteFile.Sha256))
-                remoteByHash[remoteFile.Sha256] = localId;
+                remoteByBookAndHash[hashKey] = localId;
         }
         return result;
     }
@@ -1946,7 +1918,7 @@ public sealed partial class S3SyncService
             .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
 
         foreach (var remoteCollection in remoteCollections.GroupBy(collection => collection.Id)
-                     .Select(group => group.OrderByDescending(collection => collection.CreatedAt).First()))
+                     .Select(group => group.OrderByDescending(CollectionUpdatedAt).First()))
         {
             if (localIdentity.CollectionsById.ContainsKey(remoteCollection.Id))
             {
@@ -2038,6 +2010,9 @@ public sealed partial class S3SyncService
             ? id.ToString("N")
             : value;
     }
+
+    private static DateTimeOffset CollectionUpdatedAt(S3SyncCollection collection) =>
+        collection.UpdatedAt == default ? collection.CreatedAt : collection.UpdatedAt;
 
     private static string BuildBookMatchKey(string? title, string? authors) =>
         $"{title?.Trim()}\u001f{authors?.Trim()}";
@@ -2739,50 +2714,106 @@ public sealed partial class S3SyncService
         if (string.IsNullOrWhiteSpace(directory))
             throw new InvalidDataException("同步文件目标目录无效。");
         Directory.CreateDirectory(directory);
-        var temporaryPath = targetPath + $".sync-{Guid.NewGuid():N}.part";
+        var temporaryPath = targetPath + $".sync-{hash.ToLowerInvariant()}.part";
+        var decryptedPath = temporaryPath + ".plain";
+        var keepPartial = true;
         try
         {
-            using var response = await client.OpenReadAsync(BlobKey(settings, hash), cancellationToken);
-            if (settings.EncryptionKey.Length == 0)
+            if (settings.EncryptionKey.Length == 0 && File.Exists(temporaryPath))
             {
-                await using var output = new FileStream(
-                    temporaryPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None,
-                    1024 * 128,
-                    useAsync: true);
-                await response.ResponseStream.CopyToAsync(output, cancellationToken);
-            }
-            else
-            {
-                await DecryptBlobToPathAsync(
-                    response.ResponseStream,
-                    temporaryPath,
-                    settings.EncryptionKey,
-                    cancellationToken);
+                var partialHash = await Hashing.Sha256Async(temporaryPath, cancellationToken);
+                if (partialHash.Equals(hash, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Move(temporaryPath, targetPath, overwrite: true);
+                    return true;
+                }
             }
 
-            var actualHash = await Hashing.Sha256Async(temporaryPath, cancellationToken);
+            var partialLength = File.Exists(temporaryPath) ? new FileInfo(temporaryPath).Length : 0;
+            using var response = await client.OpenReadAsync(
+                BlobKey(settings, hash),
+                cancellationToken,
+                rangeStart: partialLength);
+            if (partialLength > 0 && !response.IsPartialResponse)
+            {
+                TryDeleteSyncPartialFile(temporaryPath);
+                partialLength = 0;
+            }
+
+            await using (var output = new FileStream(
+                temporaryPath,
+                partialLength > 0 ? FileMode.Append : FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                1024 * 128,
+                useAsync: true))
+            {
+                await response.ResponseStream.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+
+            var remoteLength = response.TotalLength;
+            var receivedLength = new FileInfo(temporaryPath).Length;
+            if (remoteLength is > 0 && receivedLength != remoteLength.Value)
+            {
+                if (receivedLength < remoteLength.Value)
+                    throw new TimeoutException("远端文件传输中断，已保存部分数据；下次同步会从断点继续。");
+                keepPartial = false;
+                throw new InvalidDataException("远端文件长度超过响应声明，已拒绝安装。");
+            }
+
+            var candidatePath = temporaryPath;
+            if (settings.EncryptionKey.Length > 0)
+            {
+                await using var encryptedInput = new FileStream(
+                    temporaryPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    1024 * 128,
+                    useAsync: true);
+                try
+                {
+                    await DecryptBlobToPathAsync(
+                        encryptedInput,
+                        decryptedPath,
+                        settings.EncryptionKey,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is InvalidDataException or CryptographicException)
+                {
+                    keepPartial = false;
+                    throw;
+                }
+                candidatePath = decryptedPath;
+            }
+
+            var actualHash = await Hashing.Sha256Async(candidatePath, cancellationToken);
             if (!string.Equals(actualHash, hash, StringComparison.OrdinalIgnoreCase))
+            {
+                keepPartial = false;
                 throw new InvalidDataException("下载后的同步文件校验值不匹配。");
-            File.Move(temporaryPath, targetPath, overwrite: true);
+            }
+
+            File.Move(candidatePath, targetPath, overwrite: true);
+            if (settings.EncryptionKey.Length > 0)
+                TryDeleteSyncPartialFile(temporaryPath);
+            keepPartial = false;
             progress?.Report(UiText.Get("已下载 {0}", Path.GetFileName(targetPath)));
             return true;
         }
         finally
         {
-            try
-            {
-                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
+            TryDeleteSyncPartialFile(decryptedPath);
+            if (!keepPartial) TryDeleteSyncPartialFile(temporaryPath);
         }
+    }
+
+    private static void TryDeleteSyncPartialFile(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private const string UpsertBookSql =
@@ -2955,7 +2986,7 @@ public sealed partial class S3SyncService
         foreach (var item in localSnapshot.Files)
             AddLive("file", item.Id, item.ModifiedAt);
         foreach (var item in localSnapshot.Collections)
-            AddLive("collection", item.Id, item.CreatedAt);
+            AddLive("collection", item.Id, CollectionUpdatedAt(item));
         foreach (var item in localSnapshot.CollectionItems)
             AddLiveKey("collection-item", CompositeKey(item.CollectionId, item.BookId), item.AddedAt);
         foreach (var item in localSnapshot.Annotations)
@@ -2976,7 +3007,7 @@ public sealed partial class S3SyncService
         foreach (var item in remoteFiles)
             if (fileMap.TryGetValue(item.Id, out var localId)) AddLive("file", localId, item.ModifiedAt);
         foreach (var item in remoteCollections)
-            if (collectionMap.TryGetValue(item.Id, out var localId)) AddLive("collection", localId, item.CreatedAt);
+            if (collectionMap.TryGetValue(item.Id, out var localId)) AddLive("collection", localId, CollectionUpdatedAt(item));
         foreach (var item in remoteItems)
         {
             if (collectionMap.TryGetValue(item.CollectionId, out var collectionId)
@@ -3301,7 +3332,9 @@ public sealed partial class S3SyncService
             .ToArray();
         if (candidates.Length == 0) return false;
         using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
+        var settingsAtMergeStart = localSettings;
         localSettings = await CaptureSettingsUnderLockAsync(cancellationToken);
+        PreserveSettingsTimestampsForUnchangedValues(localSettings, settingsAtMergeStart);
         S3SyncSettingsSnapshot Latest(Func<S3SyncSettingsSnapshot, DateTimeOffset?> version) =>
             candidates.MaxBy(settings => version(settings) ?? settings.UpdatedAt)!;
         var applied = false;
@@ -3323,7 +3356,8 @@ public sealed partial class S3SyncService
                 CollectionsMutuallyExclusive = remoteApp.CollectionsMutuallyExclusive,
                 AutoBackupRetention = remoteApp.AutoBackupRetention,
                 AiEnabled = remoteApp.AiEnabled,
-                NetworkEnabled = remoteApp.NetworkEnabled,
+                // Network access is a device-local privacy and safety choice;
+                // it is deliberately absent from synchronized settings.
                 AutoUpdateCheckEnabled = remoteApp.AutoUpdateCheckEnabled,
                 DevelopmentUpdateCheckEnabled = remoteApp.DevelopmentUpdateCheckEnabled,
                 AutoDoubanMatchOnImport = remoteApp.AutoDoubanMatchOnImport,
@@ -3395,7 +3429,7 @@ public sealed partial class S3SyncService
         void Add(string type, string key, DateTimeOffset version) => result[VersionKey(type, key)] = version;
         foreach (var row in snapshot.Books) Add("book", row.Id.ToString("N"), row.UpdatedAt);
         foreach (var row in snapshot.Files) Add("file", row.Id.ToString("N"), row.ModifiedAt);
-        foreach (var row in snapshot.Collections) Add("collection", row.Id.ToString("N"), row.CreatedAt);
+        foreach (var row in snapshot.Collections) Add("collection", row.Id.ToString("N"), CollectionUpdatedAt(row));
         foreach (var row in snapshot.CollectionItems) Add("collection-item", CompositeKey(row.CollectionId, row.BookId), row.AddedAt);
         foreach (var row in snapshot.Annotations) Add("annotation", row.Id.ToString("N"), row.UpdatedAt);
         foreach (var row in snapshot.BookReflections) Add("reflection", row.BookId.ToString("N"), row.UpdatedAt);
@@ -3466,7 +3500,7 @@ public sealed partial class S3SyncService
             recordedDeletionTimes);
         AddMissing(
             "collection",
-            previous.Collections.Select(item => (item.Id.ToString("N"), item.CreatedAt)),
+            previous.Collections.Select(item => (item.Id.ToString("N"), CollectionUpdatedAt(item))),
             current.Collections.Select(item => item.Id.ToString("N")),
             result,
             previous.CreatedAt,
@@ -3669,7 +3703,7 @@ public sealed partial class S3SyncService
         long Size,
         string Sha256);
 
-    private sealed record LocalCollectionIdentity(Guid Id, string Name, DateTimeOffset CreatedAt);
+    private sealed record LocalCollectionIdentity(Guid Id, string Name, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
     private sealed record LocalDuplicateBook(
         Guid Id,

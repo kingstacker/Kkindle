@@ -18,14 +18,37 @@ public sealed class LinuxSecretProtector : AesGcmSecretProtector
             allowFailure: true);
         if (lookup.ExitCode == 0 && !string.IsNullOrWhiteSpace(lookup.Output))
             return ParseStoredKey(lookup.Output);
+        if (lookup.ExitCode == 0 || !IsMissingSecret(lookup.Error))
+            throw new InvalidOperationException(
+                $"Unable to read the existing Kkindle key from Secret Service; no new key was created. {lookup.Error}");
+
         var key = CreateKey();
         var store = RunSecretTool(
             ["store", "--label=Kkindle secret protection key", "application", ApplicationAttribute, "purpose", PurposeAttribute],
-            Convert.ToBase64String(key) + Environment.NewLine);
+            Convert.ToBase64String(key) + Environment.NewLine,
+            allowFailure: true);
         if (store.ExitCode != 0)
+        {
+            var racedLookup = RunSecretTool(
+                ["lookup", "application", ApplicationAttribute, "purpose", PurposeAttribute],
+                allowFailure: true);
+            if (racedLookup.ExitCode == 0 && !string.IsNullOrWhiteSpace(racedLookup.Output))
+                return ParseStoredKey(racedLookup.Output);
             throw new InvalidOperationException($"Unable to store the Kkindle key in Secret Service: {store.Error}");
-        return key;
+        }
+        var verified = RunSecretTool(
+            ["lookup", "application", ApplicationAttribute, "purpose", PurposeAttribute],
+            allowFailure: true);
+        if (verified.ExitCode == 0 && !string.IsNullOrWhiteSpace(verified.Output))
+            return ParseStoredKey(verified.Output);
+        throw new InvalidOperationException("Secret Service did not retain the generated Kkindle key.");
     }
+
+    private static bool IsMissingSecret(string error) =>
+        string.IsNullOrWhiteSpace(error)
+        || error.Contains("no such secret", StringComparison.OrdinalIgnoreCase)
+        || error.Contains("no matching secret", StringComparison.OrdinalIgnoreCase)
+        || error.Contains("not found", StringComparison.OrdinalIgnoreCase);
 
     private static CommandResult RunSecretTool(IReadOnlyList<string> arguments, string? standardInput = null, bool allowFailure = false)
     {

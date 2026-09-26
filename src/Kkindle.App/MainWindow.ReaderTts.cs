@@ -84,6 +84,11 @@ public partial class MainWindow
     /// </summary>
     private void LogTtsDebug(string stage, string detail)
     {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("KKINDLE_TTS_DEBUG"),
+                "1",
+                StringComparison.Ordinal))
+            return;
         try
         {
             var entry = JsonSerializer.Serialize(new

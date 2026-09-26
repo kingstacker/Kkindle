@@ -157,9 +157,9 @@ public sealed record McpServerSettings
     public bool SendToKindleEnabled { get; init; } = true;
     public bool ConvertBookEnabled { get; init; } = true;
     public bool ImportBookEnabled { get; init; } = true;
-    public bool DeleteBookEnabled { get; init; } = true;
-    public bool DeleteDeviceBookEnabled { get; init; } = true;
-    public bool CollectionManageEnabled { get; init; } = true;
+    public bool DeleteBookEnabled { get; init; }
+    public bool DeleteDeviceBookEnabled { get; init; }
+    public bool CollectionManageEnabled { get; init; }
     public bool SearchBookContentEnabled { get; init; } = true;
     public bool AnnotationsEnabled { get; init; } = true;
     public bool BookmarksEnabled { get; init; } = true;

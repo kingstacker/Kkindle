@@ -288,7 +288,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
                 var path = lookup.StandardOutput
                     .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
                     .Select(line => line.Trim())
-                    .FirstOrDefault(line => File.Exists(line));
+                    .FirstOrDefault(IsSafeExecutableFile);
                 if (path is not null)
                 {
                     path = Path.GetFullPath(path);
@@ -350,13 +350,13 @@ public sealed class EdgeTtsEngine : ITtsEngine
     {
         if (string.IsNullOrWhiteSpace(name)) return null;
         if (Path.IsPathRooted(name))
-            return File.Exists(name) ? Path.GetFullPath(name) : null;
+            return IsSafeExecutableFile(name) ? Path.GetFullPath(name) : null;
 
         var pathValue = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrWhiteSpace(pathValue)) return null;
 
         string[] names = OperatingSystem.IsWindows()
-            ? [name, $"{name}.exe", $"{name}.cmd", $"{name}.bat"]
+            ? [name, $"{name}.exe"]
             : [name];
         foreach (var directory in pathValue.Split(
                      Path.PathSeparator,
@@ -367,7 +367,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
                 try
                 {
                     var candidate = Path.Combine(directory.Trim(), candidateName);
-                    if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+                    if (IsSafeExecutableFile(candidate)) return Path.GetFullPath(candidate);
                 }
                 catch
                 {
@@ -377,6 +377,17 @@ public sealed class EdgeTtsEngine : ITtsEngine
         }
 
         return null;
+    }
+
+    private static bool IsSafeExecutableFile(string path)
+    {
+        if (!File.Exists(path)) return false;
+        if (!OperatingSystem.IsWindows()) return true;
+        var extension = Path.GetExtension(path);
+        // Running .cmd/.bat through Windows command processing exposes text
+        // arguments to cmd.exe metacharacter parsing. Only launch native
+        // executables from the text-to-speech integration.
+        return extension.Length == 0 || extension.Equals(".exe", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<ProcessResult> RunProcessAsync(

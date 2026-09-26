@@ -41,6 +41,7 @@ public sealed class BookCollection
     public Guid Id { get; set; }
     public string Name { get; set; } = "新收藏夹";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class BookFile

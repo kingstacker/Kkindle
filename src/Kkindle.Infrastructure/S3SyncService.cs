@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Amazon.S3;
 using Kkindle.Core;
+using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Infrastructure;
 
@@ -31,6 +32,8 @@ public sealed partial class S3SyncService
     private const int BlobEncryptionChunkBytes = 1024 * 1024;
     private const double LargeDeletionRatio = 0.50;
     private const int LargeDeletionMinimumEntities = 10;
+    private static readonly TimeSpan RetiredDeviceSnapshotRetention = TimeSpan.FromDays(365);
+    private static readonly TimeSpan UnreferencedBlobRetention = TimeSpan.FromDays(30);
     private static readonly byte[] EncryptionMagic = Encoding.ASCII.GetBytes("KKINDLE-SYNC1");
     private static readonly byte[] StreamingEncryptionMagic = Encoding.ASCII.GetBytes("KKINDLE-SYNC2");
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -133,16 +136,8 @@ public sealed partial class S3SyncService
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
-            await SaveStateAsync(new S3SyncState
-            {
-                DeviceId = deviceId,
-                StorageIdentity = string.Empty,
-                LastUploadedSnapshot = null,
-                Tombstones = [],
-                RemoteBookIds = [],
-                RemoteOnlyFileHashes = []
-            }, cancellationToken);
-            await ClearRecordedDeletionTimesAsync(cancellationToken);
+            using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+            await ResetLocalBaselineCoreAsync(deviceId, cancellationToken);
         }
         finally
         {
@@ -336,9 +331,18 @@ public sealed partial class S3SyncService
                 : CreateEncryptionSession(normalized.EncryptionKey);
             _paths.EnsureDirectories();
             await InitializeDeletionTrackingAsync(cancellationToken, deviceId);
+            if (File.Exists(GetPendingBaselineResetPath()))
+            {
+                using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+                await ResetLocalBaselineCoreAsync(deviceId, cancellationToken);
+            }
             var storageIdentity = BuildStorageIdentity(normalized);
             var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
             var local = await CaptureSnapshotAsync(deviceId, state.Tombstones, cancellationToken);
+            local.TombstonesPrunedBefore = state.LastUploadedSnapshot?.TombstonesPrunedBefore;
+            PreserveSettingsTimestampsForUnchangedValues(
+                local.Settings,
+                state.LastUploadedSnapshot?.Settings);
             var recordedDeletionTimes = local.LocalDeletionTimes;
             var detectedDeletions = DetectDeletedEntitiesWithRecordedTimes(
                 state.LastUploadedSnapshot,
@@ -363,6 +367,72 @@ public sealed partial class S3SyncService
                 state.LastUploadedSnapshot is not null,
                 progress,
                 cancellationToken);
+
+            var tombstoneWatermark = Max(
+                local.TombstonesPrunedBefore ?? DateTimeOffset.MinValue,
+                remoteSnapshots.Select(snapshot => snapshot.TombstonesPrunedBefore ?? DateTimeOffset.MinValue)
+                    .DefaultIfEmpty(DateTimeOffset.MinValue)
+                    .Max());
+            if (tombstoneWatermark > DateTimeOffset.MinValue)
+            {
+                local.TombstonesPrunedBefore = tombstoneWatermark;
+                local.Tombstones = local.Tombstones
+                    .Where(tombstone => tombstone.DeletedAt > tombstoneWatermark)
+                    .ToList();
+                local.LocalDeletionTimes = local.LocalDeletionTimes
+                    .Where(entry => entry.Value > tombstoneWatermark)
+                    .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
+                recordedDeletionTimes = local.LocalDeletionTimes;
+                state.Tombstones = local.Tombstones;
+                detectedDeletions = detectedDeletions
+                    .Where(tombstone => tombstone.DeletedAt > tombstoneWatermark)
+                    .ToList();
+                foreach (var remote in remoteSnapshots)
+                {
+                    remote.TombstonesPrunedBefore = Max(
+                        remote.TombstonesPrunedBefore ?? DateTimeOffset.MinValue,
+                        tombstoneWatermark);
+                    remote.Tombstones = (remote.Tombstones ?? [])
+                        .Where(tombstone => tombstone.DeletedAt > tombstoneWatermark)
+                        .ToList();
+                }
+            }
+
+            local.Tombstones = MergeTombstones(
+                local.Tombstones,
+                remoteSnapshots.SelectMany(snapshot => snapshot.Tombstones ?? []));
+            var restoredEntityKeys = await ResolveLocalRestorationsAsync(
+                local,
+                state.LastUploadedSnapshot,
+                remoteSnapshots,
+                cancellationToken);
+            if (restoredEntityKeys.Count > 0)
+            {
+                local.Tombstones = local.Tombstones
+                    .Where(tombstone => !restoredEntityKeys.Contains(VersionKey(tombstone.EntityType, tombstone.Key)))
+                    .ToList();
+                local.LocalDeletionTimes = local.LocalDeletionTimes
+                    .Where(entry => !restoredEntityKeys.Contains(entry.Key))
+                    .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
+                recordedDeletionTimes = local.LocalDeletionTimes;
+                detectedDeletions = detectedDeletions
+                    .Where(tombstone => !restoredEntityKeys.Contains(VersionKey(tombstone.EntityType, tombstone.Key)))
+                    .ToList();
+                state.Tombstones = local.Tombstones;
+                foreach (var remote in remoteSnapshots)
+                    remote.Tombstones = (remote.Tombstones ?? [])
+                        .Where(tombstone => !restoredEntityKeys.Contains(VersionKey(tombstone.EntityType, tombstone.Key)))
+                        .ToList();
+            }
+            LiftRemoteDeletionVersionsOverUnchangedLocalRows(
+                local,
+                state.LastUploadedSnapshot,
+                remoteSnapshots);
+            LiftLocalDeletionVersionsOverObservedRemoteRows(
+                local,
+                remoteSnapshots,
+                detectedDeletions,
+                tombstoneWatermark);
 
             progress?.Report(UiText.Get("正在合并书籍和阅读数据…"));
             var databaseResult = await ApplyRemoteSnapshotsAsync(
@@ -398,7 +468,11 @@ public sealed partial class S3SyncService
             // a complete converged view, so a third device can catch up from it
             // without having to contact every previous device forever.
             var finalSnapshot = await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
-            var finalDeletions = finalSnapshot.LocalDeletionTimes;
+            finalSnapshot.TombstonesPrunedBefore = local.TombstonesPrunedBefore;
+            var finalDeletions = finalSnapshot.LocalDeletionTimes
+                .Where(entry => finalSnapshot.TombstonesPrunedBefore is not { } watermark
+                    || entry.Value > watermark)
+                .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
             var recordedTombstones = GetRecordedTombstones(finalDeletions, finalSnapshot, state.LastUploadedSnapshot);
             EnsureDeletionVolumeIsSafe(state.LastUploadedSnapshot,
                 MergeTombstones(FilterReadingTombstones(detectedDeletions, finalSnapshot.ReadingDataReset), recordedTombstones),
@@ -434,9 +508,34 @@ public sealed partial class S3SyncService
                 .ToList();
             await SaveStateAsync(state, cancellationToken);
 
+            string? cleanupWarning = null;
+            try
+            {
+                cleanupWarning = await CleanupRemoteStorageAsync(
+                    client,
+                    normalized,
+                    deviceId,
+                    finalSnapshot,
+                    state,
+                    remoteSnapshots,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The converged snapshot and local sync state are already
+                // durable. A cancelled cleanup can resume on the next sync.
+            }
+            catch (Exception exception) when (exception is IOException or HttpRequestException or AmazonS3Exception or TimeoutException)
+            {
+                cleanupWarning = UiText.Get("远端清理未完成：{0}", UiText.Localize(exception.Message));
+            }
+            state.LastUploadedSnapshot = finalSnapshot;
+            state.Tombstones = finalSnapshot.Tombstones;
+            await SaveStateAsync(state, cancellationToken);
+
             var warning = string.Join(
                 " ",
-                new[] { uploadWarning, databaseResult.Warning }
+                new[] { uploadWarning, databaseResult.Warning, cleanupWarning }
                     .Where(message => !string.IsNullOrWhiteSpace(message)));
             return new S3SyncResult(
                 remoteSnapshots
@@ -461,6 +560,350 @@ public sealed partial class S3SyncService
             _syncGate.Release();
         }
     }
+
+    private static void PreserveSettingsTimestampsForUnchangedValues(
+        S3SyncSettingsSnapshot? current,
+        S3SyncSettingsSnapshot? previous)
+    {
+        if (current is null || previous is null) return;
+        if (AppSyncSettingsEqual(current.App, previous.App))
+            current.AppUpdatedAt = previous.AppUpdatedAt;
+        if (AiSyncSettingsEqual(current.Ai, previous.Ai))
+            current.AiUpdatedAt = previous.AiUpdatedAt;
+        if (EmailSyncSettingsEqual(current.KindleEmail, previous.KindleEmail))
+            current.KindleEmailUpdatedAt = previous.KindleEmailUpdatedAt;
+
+        current.UpdatedAt = new[]
+        {
+            current.AppUpdatedAt ?? DateTimeOffset.MinValue,
+            current.AiUpdatedAt ?? DateTimeOffset.MinValue,
+            current.KindleEmailUpdatedAt ?? DateTimeOffset.MinValue
+        }.Max();
+    }
+
+    private static void LiftLocalDeletionVersionsOverObservedRemoteRows(
+        S3SyncSnapshot local,
+        IReadOnlyList<S3SyncSnapshot> remoteSnapshots,
+        IReadOnlyCollection<S3SyncTombstone> localDeletions,
+        DateTimeOffset existingWatermark)
+    {
+        if (localDeletions.Count == 0 || local.Tombstones.Count == 0) return;
+        var localDeletionKeys = localDeletions
+            .Select(tombstone => VersionKey(tombstone.EntityType, tombstone.Key))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var remoteVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, version) in GetSnapshotEntityVersions(local))
+            remoteVersions[key] = version;
+        foreach (var snapshot in remoteSnapshots)
+        {
+            foreach (var (key, version) in GetSnapshotEntityVersions(snapshot))
+                if (!remoteVersions.TryGetValue(key, out var existing) || version > existing)
+                    remoteVersions[key] = version;
+        }
+
+        foreach (var tombstone in local.Tombstones)
+        {
+            var key = VersionKey(tombstone.EntityType, tombstone.Key);
+            if (localDeletionKeys.Contains(key)
+                && remoteVersions.TryGetValue(key, out var remoteVersion)
+                && remoteVersion >= tombstone.DeletedAt)
+            {
+                // Wall clocks on two devices are not a reliable ordering
+                // source. The delete was recorded locally after the last local
+                // baseline, so make it newer than the stale remote row it is
+                // intended to suppress.
+                tombstone.DeletedAt = Max(remoteVersion, existingWatermark).AddTicks(1);
+            }
+        }
+    }
+
+    private static void LiftRemoteDeletionVersionsOverUnchangedLocalRows(
+        S3SyncSnapshot local,
+        S3SyncSnapshot? previousLocal,
+        IReadOnlyList<S3SyncSnapshot> remoteSnapshots)
+    {
+        if (previousLocal is null || remoteSnapshots.Count == 0) return;
+        var unchangedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddUnchangedKeys(local.Books, previousLocal.Books, item => item.Id.ToString("N"), "book", unchangedKeys);
+        AddUnchangedKeys(local.Files, previousLocal.Files, item => item.Id.ToString("N"), "file", unchangedKeys);
+        AddUnchangedKeys(local.Collections, previousLocal.Collections, item => item.Id.ToString("N"), "collection", unchangedKeys);
+        AddUnchangedKeys(local.CollectionItems, previousLocal.CollectionItems,
+            item => CompositeKey(item.CollectionId, item.BookId), "collection-item", unchangedKeys);
+        AddUnchangedKeys(local.Annotations, previousLocal.Annotations, item => item.Id.ToString("N"), "annotation", unchangedKeys);
+        AddUnchangedKeys(local.BookReflections, previousLocal.BookReflections, item => item.BookId.ToString("N"), "reflection", unchangedKeys);
+        AddUnchangedKeys(local.Progress, previousLocal.Progress, item => item.BookFileId.ToString("N"), "progress", unchangedKeys);
+        AddUnchangedKeys(local.Bookmarks, previousLocal.Bookmarks, item => item.Id.ToString("N"), "bookmark", unchangedKeys);
+        AddUnchangedKeys(local.Layouts, previousLocal.Layouts, item => item.BookFileId.ToString("N"), "layout", unchangedKeys);
+        AddUnchangedKeys(local.ReadingStats, previousLocal.ReadingStats, item => item.BookFileId.ToString("N"), "stats", unchangedKeys);
+        if (unchangedKeys.Count == 0) return;
+
+        var remoteVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, version) in GetSnapshotEntityVersions(local))
+            remoteVersions[key] = version;
+        foreach (var snapshot in remoteSnapshots)
+        {
+            foreach (var (key, version) in GetSnapshotEntityVersions(snapshot))
+                if (!remoteVersions.TryGetValue(key, out var existing) || version > existing)
+                    remoteVersions[key] = version;
+        }
+
+        var tombstones = local.Tombstones.ToDictionary(
+            tombstone => VersionKey(tombstone.EntityType, tombstone.Key),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var remoteTombstone in remoteSnapshots.SelectMany(snapshot => snapshot.Tombstones ?? []))
+        {
+            var key = VersionKey(remoteTombstone.EntityType, remoteTombstone.Key);
+            if (!unchangedKeys.Contains(key)) continue;
+            var observedVersion = remoteVersions.GetValueOrDefault(key, DateTimeOffset.MinValue);
+            var deletionVersion = Max(remoteTombstone.DeletedAt, observedVersion).AddTicks(1);
+            if (tombstones.TryGetValue(key, out var localTombstone))
+            {
+                if (deletionVersion > localTombstone.DeletedAt)
+                    localTombstone.DeletedAt = deletionVersion;
+            }
+            else
+            {
+                localTombstone = new S3SyncTombstone
+                {
+                    EntityType = remoteTombstone.EntityType,
+                    Key = remoteTombstone.Key,
+                    DeletedAt = deletionVersion,
+                    ReadingDataResetId = remoteTombstone.ReadingDataResetId
+                };
+                local.Tombstones.Add(localTombstone);
+                tombstones[key] = localTombstone;
+            }
+        }
+    }
+
+    private static void AddUnchangedKeys<T>(
+        IEnumerable<T> currentRows,
+        IEnumerable<T> previousRows,
+        Func<T, string> id,
+        string entityType,
+        ISet<string> output)
+    {
+        var previous = previousRows.ToDictionary(id, StringComparer.OrdinalIgnoreCase);
+        foreach (var current in currentRows)
+        {
+            var entityId = id(current);
+            if (previous.TryGetValue(entityId, out var old)
+                && string.Equals(
+                    JsonSerializer.Serialize(current, JsonOptions),
+                    JsonSerializer.Serialize(old, JsonOptions),
+                    StringComparison.Ordinal))
+                output.Add(VersionKey(entityType, entityId));
+        }
+    }
+
+    private async Task<HashSet<string>> ResolveLocalRestorationsAsync(
+        S3SyncSnapshot local,
+        S3SyncSnapshot? previousLocal,
+        IReadOnlyList<S3SyncSnapshot> remoteSnapshots,
+        CancellationToken cancellationToken)
+    {
+        if (local.Tombstones.Count == 0) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var previousBooks = (previousLocal?.Books ?? [])
+            .ToDictionary(item => item.Id);
+        var previousFiles = (previousLocal?.Files ?? [])
+            .ToDictionary(item => item.Id);
+        var deletionVersions = MergeTombstones(
+                local.Tombstones,
+                remoteSnapshots.SelectMany(snapshot => snapshot.Tombstones ?? []))
+            .GroupBy(tombstone => VersionKey(tombstone.EntityType, tombstone.Key), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Max(item => item.DeletedAt), StringComparer.OrdinalIgnoreCase);
+        var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var updatedBookVersions = new Dictionary<Guid, DateTimeOffset>();
+
+        foreach (var book in local.Books)
+        {
+            var bookKey = VersionKey("book", book.Id);
+            var changedSinceBaseline = !previousBooks.TryGetValue(book.Id, out var previous)
+                || !JsonSerializer.Serialize(book, JsonOptions)
+                    .Equals(JsonSerializer.Serialize(previous, JsonOptions), StringComparison.Ordinal);
+            if (!changedSinceBaseline || !deletionVersions.TryGetValue(bookKey, out var bookDeletedAt))
+                continue;
+
+            resolved.Add(bookKey);
+            var restoreVersion = bookDeletedAt;
+            foreach (var file in local.Files.Where(item => item.BookId == book.Id))
+            {
+                var fileKey = VersionKey("file", file.Id);
+                if (deletionVersions.TryGetValue(fileKey, out var fileDeletedAt))
+                {
+                    resolved.Add(fileKey);
+                    if (fileDeletedAt > restoreVersion) restoreVersion = fileDeletedAt;
+                }
+            }
+            restoreVersion = GetVersionAfter(book.UpdatedAt, restoreVersion);
+            book.UpdatedAt = restoreVersion;
+            updatedBookVersions[book.Id] = restoreVersion;
+        }
+
+        foreach (var file in local.Files)
+        {
+            var fileKey = VersionKey("file", file.Id);
+            var changedSinceBaseline = !previousFiles.TryGetValue(file.Id, out var previous)
+                || !JsonSerializer.Serialize(file, JsonOptions)
+                    .Equals(JsonSerializer.Serialize(previous, JsonOptions), StringComparison.Ordinal);
+            if (!changedSinceBaseline || !deletionVersions.TryGetValue(fileKey, out var deletedAt))
+                continue;
+
+            resolved.Add(fileKey);
+            if (updatedBookVersions.ContainsKey(file.BookId)) continue;
+            var book = local.Books.FirstOrDefault(item => item.Id == file.BookId);
+            if (book is null) continue;
+            var restoreVersion = GetVersionAfter(book.UpdatedAt, deletedAt);
+            book.UpdatedAt = restoreVersion;
+            updatedBookVersions[book.Id] = restoreVersion;
+        }
+
+        if (resolved.Count == 0) return resolved;
+        foreach (var file in local.Files)
+            if (updatedBookVersions.TryGetValue(file.BookId, out var version))
+                file.ModifiedAt = version;
+
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        foreach (var (bookId, updatedAt) in updatedBookVersions)
+        {
+            using var update = CreateCommand(connection, transaction, """
+                UPDATE Books SET UpdatedAt = $updatedAt
+                WHERE Id = $bookId AND julianday(UpdatedAt) < julianday($updatedAt);
+                """);
+            AddParameter(update, "$updatedAt", updatedAt.ToString("O"));
+            AddParameter(update, "$bookId", bookId.ToString());
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        using (var hasDeletionLog = CreateCommand(connection, transaction,
+                   "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'S3SyncDeletionLog');"))
+        {
+            if (Convert.ToInt32(await hasDeletionLog.ExecuteScalarAsync(cancellationToken)) != 0)
+            {
+                foreach (var versionKey in resolved)
+                {
+                    var separator = versionKey.IndexOf(':');
+                    if (separator <= 0) continue;
+                    var entityType = versionKey[..separator];
+                    var entityId = versionKey[(separator + 1)..];
+                    if (entityType is not ("book" or "file")) continue;
+                    using var delete = CreateCommand(connection, transaction, """
+                        DELETE FROM S3SyncDeletionLog
+                        WHERE EntityType = $entityType
+                          AND lower(replace(EntityKey, '-', '')) = $entityId;
+                        """);
+                    AddParameter(delete, "$entityType", entityType);
+                    AddParameter(delete, "$entityId", entityId.ToLowerInvariant());
+                    await delete.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return resolved;
+    }
+
+    private static DateTimeOffset GetVersionAfter(DateTimeOffset current, DateTimeOffset deletion) =>
+        current > deletion ? current : deletion.AddTicks(1);
+
+    private async Task ResetLocalBaselineCoreAsync(
+        string deviceId,
+        CancellationToken cancellationToken)
+    {
+        var markerPath = GetPendingBaselineResetPath();
+        var markerTemporaryPath = markerPath + ".tmp";
+        await File.WriteAllTextAsync(
+            markerTemporaryPath,
+            DateTimeOffset.UtcNow.ToString("O"),
+            cancellationToken);
+        SettingsFile.Publish(markerTemporaryPath, markerPath);
+
+        await ClearRecordedDeletionTimesAsync(cancellationToken);
+        await SaveStateAsync(new S3SyncState
+        {
+            DeviceId = NormalizeDeviceId(deviceId),
+            StorageIdentity = string.Empty,
+            LastUploadedSnapshot = null,
+            Tombstones = [],
+            RemoteBookIds = [],
+            RemoteOnlyFileHashes = []
+        }, cancellationToken);
+        try { File.Delete(markerPath); }
+        catch (FileNotFoundException) { }
+    }
+
+    private string GetPendingBaselineResetPath() =>
+        Path.Combine(_paths.Data, AppBackupService.PendingSyncBaselineResetFileName);
+
+    private static bool AppSyncSettingsEqual(S3SyncAppSettings? left, S3SyncAppSettings? right)
+    {
+        if (left is null || right is null) return left is null && right is null;
+        var leftValues = JsonSerializer.Serialize(new
+        {
+            left.UiLanguage,
+            left.PreferredOpenFormat,
+            left.AutoBackupEnabled,
+            left.AutoGenerateEpubAndAzw3OnImport,
+            left.CollectionsMutuallyExclusive,
+            left.AutoBackupRetention,
+            left.AiEnabled,
+            left.AutoUpdateCheckEnabled,
+            left.DevelopmentUpdateCheckEnabled,
+            left.AutoDoubanMatchOnImport,
+            left.CompareKindleLibraryEnabled,
+            left.GridGalleryDisplay,
+            left.ShowSyncStatusIcon,
+            left.ShowLibraryPresenceIcon,
+            left.ReadingMaterialsCollapsedByDefault,
+            left.PinyinContextMenuEnabled,
+            left.PinyinLocalOnly,
+            left.PinyinEngineId,
+            left.DefaultReaderLayout
+        });
+        var rightValues = JsonSerializer.Serialize(new
+        {
+            right.UiLanguage,
+            right.PreferredOpenFormat,
+            right.AutoBackupEnabled,
+            right.AutoGenerateEpubAndAzw3OnImport,
+            right.CollectionsMutuallyExclusive,
+            right.AutoBackupRetention,
+            right.AiEnabled,
+            right.AutoUpdateCheckEnabled,
+            right.DevelopmentUpdateCheckEnabled,
+            right.AutoDoubanMatchOnImport,
+            right.CompareKindleLibraryEnabled,
+            right.GridGalleryDisplay,
+            right.ShowSyncStatusIcon,
+            right.ShowLibraryPresenceIcon,
+            right.ReadingMaterialsCollapsedByDefault,
+            right.PinyinContextMenuEnabled,
+            right.PinyinLocalOnly,
+            right.PinyinEngineId,
+            right.DefaultReaderLayout
+        });
+        return string.Equals(leftValues, rightValues, StringComparison.Ordinal);
+    }
+
+    private static bool AiSyncSettingsEqual(S3SyncAiSettings? left, S3SyncAiSettings? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : string.Equals(left.Provider, right.Provider, StringComparison.Ordinal)
+              && string.Equals(left.BaseUrl, right.BaseUrl, StringComparison.Ordinal)
+              && string.Equals(left.Model, right.Model, StringComparison.Ordinal);
+
+    private static bool EmailSyncSettingsEqual(
+        S3SyncKindleEmailSettings? left,
+        S3SyncKindleEmailSettings? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : string.Equals(left.KindleEmailAddress, right.KindleEmailAddress, StringComparison.OrdinalIgnoreCase)
+              && string.Equals(left.SenderEmailAddress, right.SenderEmailAddress, StringComparison.OrdinalIgnoreCase)
+              && string.Equals(left.SmtpHost, right.SmtpHost, StringComparison.OrdinalIgnoreCase)
+              && left.SmtpPort == right.SmtpPort
+              && string.Equals(left.SmtpUsername, right.SmtpUsername, StringComparison.Ordinal)
+              && left.EnableSsl == right.EnableSsl;
 
     private static void ThrowIfInvalid(S3SyncSettings settings)
     {
@@ -767,6 +1210,353 @@ public sealed partial class S3SyncService
         using var stream = new MemoryStream(payload, writable: false);
         await client.PutAsync(SnapshotKey(settings, snapshot.DeviceId), stream,
             "application/octet-stream", cancellationToken);
+    }
+
+    private async Task<string?> CleanupRemoteStorageAsync(
+        ISyncObjectStore client,
+        S3SyncSettings settings,
+        string localDeviceId,
+        S3SyncSnapshot localSnapshot,
+        S3SyncState state,
+        IReadOnlyList<S3SyncSnapshot> downloadedRemoteSnapshots,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<SyncObjectMetadata> deviceObjects;
+        try
+        {
+            deviceObjects = await client.ListObjectsAsync(
+                $"{settings.Prefix}/devices/",
+                cancellationToken);
+        }
+        catch (SyncListingUnavailableException)
+        {
+            return null;
+        }
+
+        var snapshotsByDevice = downloadedRemoteSnapshots
+            .Where(snapshot => !string.Equals(
+                NormalizeKnownDeviceId(snapshot.DeviceId),
+                NormalizeDeviceId(localDeviceId),
+                StringComparison.OrdinalIgnoreCase))
+            .GroupBy(snapshot => NormalizeKnownDeviceId(snapshot.DeviceId), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.CreatedAt).First(), StringComparer.OrdinalIgnoreCase);
+        var localId = NormalizeDeviceId(localDeviceId);
+        var deletedSnapshots = new HashSet<string>(StringComparer.Ordinal);
+        var cleanupErrors = new List<string>();
+        var retiredBefore = DateTimeOffset.UtcNow - RetiredDeviceSnapshotRetention;
+
+        foreach (var remoteObject in deviceObjects
+                     .Where(item => item.Key.EndsWith("/snapshot.bin", StringComparison.OrdinalIgnoreCase)
+                         && item.LastModified is { } modified
+                         && modified <= retiredBefore)
+                     .OrderBy(item => item.LastModified))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryReadSnapshotDeviceId(settings, remoteObject.Key, out var snapshotDeviceId)
+                || string.Equals(snapshotDeviceId, localId, StringComparison.OrdinalIgnoreCase)
+                || !snapshotsByDevice.TryGetValue(snapshotDeviceId, out var candidate))
+                continue;
+
+            var targets = snapshotsByDevice
+                .Where(pair => !string.Equals(pair.Key, snapshotDeviceId, StringComparison.OrdinalIgnoreCase)
+                    && !deletedSnapshots.Contains(SnapshotKey(settings, pair.Key)))
+                .Select(pair => pair.Value)
+                .Append(localSnapshot)
+                .ToArray();
+            if (!SnapshotIsSubsumed(candidate, targets)) continue;
+
+            try
+            {
+                await client.DeleteAsync(remoteObject.Key, cancellationToken);
+                deletedSnapshots.Add(remoteObject.Key);
+                snapshotsByDevice.Remove(snapshotDeviceId);
+            }
+            catch (Exception exception) when (exception is IOException or HttpRequestException or AmazonS3Exception or TimeoutException)
+            {
+                cleanupErrors.Add(exception.Message);
+            }
+        }
+
+        var retainedSnapshots = snapshotsByDevice.Values.Append(localSnapshot).ToArray();
+        var compactedWatermark = GetTombstoneCompactionWatermark(retainedSnapshots);
+        var existingWatermark = retainedSnapshots
+            .Select(snapshot => snapshot.TombstonesPrunedBefore ?? DateTimeOffset.MinValue)
+            .DefaultIfEmpty(DateTimeOffset.MinValue)
+            .Max();
+        if (compactedWatermark > existingWatermark)
+        {
+            localSnapshot.Tombstones = (localSnapshot.Tombstones ?? [])
+                .Where(tombstone => tombstone.DeletedAt > compactedWatermark)
+                .ToList();
+            localSnapshot.TombstonesPrunedBefore = compactedWatermark;
+            state.LastUploadedSnapshot = localSnapshot;
+            state.Tombstones = localSnapshot.Tombstones;
+            await SaveStateAsync(state, cancellationToken);
+            using (await AppDataProcessLock.AcquireAsync(_paths, cancellationToken))
+                await ClearRecordedDeletionTimesThroughAsync(compactedWatermark, cancellationToken);
+            await UploadSnapshotAsync(client, settings, localSnapshot, cancellationToken);
+        }
+
+        retainedSnapshots = snapshotsByDevice.Values.Append(localSnapshot).ToArray();
+        var referencedBlobKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var snapshot in retainedSnapshots)
+        {
+            foreach (var file in snapshot.Files)
+                if (IsSha256(file.Sha256)) referencedBlobKeys.Add(BlobKey(settings, file.Sha256));
+            foreach (var book in snapshot.Books)
+                if (IsSha256(book.CoverHash)) referencedBlobKeys.Add(BlobKey(settings, book.CoverHash!));
+        }
+
+        IReadOnlyList<SyncObjectMetadata> blobObjects;
+        try
+        {
+            blobObjects = await client.ListObjectsAsync(
+                BlobKey(settings, string.Empty),
+                cancellationToken);
+        }
+        catch (SyncListingUnavailableException)
+        {
+            return cleanupErrors.Count == 0
+                ? null
+                : UiText.Get("已清理部分远端快照，但对象清理失败：{0}", string.Join("; ", cleanupErrors.Distinct()));
+        }
+
+        var orphanBefore = DateTimeOffset.UtcNow - UnreferencedBlobRetention;
+        foreach (var blob in blobObjects)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (referencedBlobKeys.Contains(blob.Key)
+                || blob.LastModified is not { } modified
+                || modified > orphanBefore)
+                continue;
+            try
+            {
+                await client.DeleteAsync(blob.Key, cancellationToken);
+            }
+            catch (Exception exception) when (exception is IOException or HttpRequestException or AmazonS3Exception or TimeoutException)
+            {
+                cleanupErrors.Add(exception.Message);
+            }
+        }
+
+        if (client is S3SyncObjectStore s3Store)
+        {
+            try
+            {
+                await s3Store.CleanupIncompleteMultipartUploadsAsync(
+                    TimeSpan.FromDays(180),
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is IOException or HttpRequestException or AmazonS3Exception or TimeoutException)
+            {
+                cleanupErrors.Add(exception.Message);
+            }
+        }
+
+        return cleanupErrors.Count == 0
+            ? null
+            : UiText.Get("远端清理未完成：{0}", string.Join("; ", cleanupErrors.Distinct()));
+    }
+
+    private static bool TryReadSnapshotDeviceId(
+        S3SyncSettings settings,
+        string key,
+        out string deviceId)
+    {
+        deviceId = string.Empty;
+        var marker = $"{settings.Prefix}/devices/";
+        const string suffix = "/snapshot.bin";
+        if (!key.StartsWith(marker, StringComparison.OrdinalIgnoreCase)
+            || !key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var candidate = key[marker.Length..^suffix.Length];
+        if (!Guid.TryParse(candidate, out var parsed)) return false;
+        deviceId = parsed.ToString("N");
+        return true;
+    }
+
+    private static bool SnapshotIsSubsumed(
+        S3SyncSnapshot candidate,
+        IReadOnlyList<S3SyncSnapshot> targets)
+    {
+        if (targets.Count == 0) return false;
+        var targetLiveRows = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        var tombstoneVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in targets)
+        {
+            foreach (var (key, version) in GetSnapshotEntityVersions(target))
+                if (!targetLiveRows.TryGetValue(key, out var existing) || version > existing)
+                    targetLiveRows[key] = version;
+            foreach (var tombstone in target.Tombstones ?? [])
+            {
+                var key = VersionKey(tombstone.EntityType, tombstone.Key);
+                if (!tombstoneVersions.TryGetValue(key, out var existing) || tombstone.DeletedAt > existing)
+                    tombstoneVersions[key] = tombstone.DeletedAt;
+            }
+        }
+
+        var targetSnapshots = targets.ToArray();
+        bool RowsCovered<T>(
+            IEnumerable<T> sourceRows,
+            IEnumerable<T> targetRows,
+            Func<T, string> key,
+            Func<T, DateTimeOffset> version,
+            Func<T, IEnumerable<string>> fallbackTombstones)
+        {
+            var byKey = targetRows
+                .GroupBy(key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+            foreach (var source in sourceRows)
+            {
+                var sourceKey = key(source);
+                var sourceVersion = version(source);
+                if (byKey.TryGetValue(sourceKey, out var alternatives)
+                    && alternatives.Any(target => version(target) >= sourceVersion
+                        && JsonSerializer.Serialize(target, JsonOptions)
+                            .Equals(JsonSerializer.Serialize(source, JsonOptions), StringComparison.Ordinal)))
+                    continue;
+
+                var covered = fallbackTombstones(source).Any(tombstoneKey =>
+                    tombstoneVersions.TryGetValue(tombstoneKey, out var deletedAt)
+                    && deletedAt >= sourceVersion);
+                if (!covered) return false;
+            }
+            return true;
+        }
+
+        var targetBooks = targetSnapshots.SelectMany(snapshot => snapshot.Books);
+        var targetFiles = targetSnapshots.SelectMany(snapshot => snapshot.Files);
+        var targetCollections = targetSnapshots.SelectMany(snapshot => snapshot.Collections);
+        var targetItems = targetSnapshots.SelectMany(snapshot => snapshot.CollectionItems);
+        var targetAnnotations = targetSnapshots.SelectMany(snapshot => snapshot.Annotations);
+        var targetReflections = targetSnapshots.SelectMany(snapshot => snapshot.BookReflections);
+        var targetProgress = targetSnapshots.SelectMany(snapshot => snapshot.Progress);
+        var targetBookmarks = targetSnapshots.SelectMany(snapshot => snapshot.Bookmarks);
+        var targetLayouts = targetSnapshots.SelectMany(snapshot => snapshot.Layouts);
+        var targetStats = targetSnapshots.SelectMany(snapshot => snapshot.ReadingStats);
+
+        if (!RowsCovered(candidate.Books, targetBooks,
+                item => item.Id.ToString("N"), item => item.UpdatedAt,
+                item => [VersionKey("book", item.Id)])) return false;
+        if (!RowsCovered(candidate.Files, targetFiles,
+                item => item.Id.ToString("N"), item => item.ModifiedAt,
+                item => [VersionKey("file", item.Id), VersionKey("book", item.BookId)])) return false;
+        if (!RowsCovered(candidate.Collections, targetCollections,
+                item => item.Id.ToString("N"), CollectionUpdatedAt,
+                item => [VersionKey("collection", item.Id)])) return false;
+        if (!RowsCovered(candidate.CollectionItems, targetItems,
+                item => CompositeKey(item.CollectionId, item.BookId), item => item.AddedAt,
+                item => [
+                    VersionKey("collection-item", CompositeKey(item.CollectionId, item.BookId)),
+                    VersionKey("collection", item.CollectionId),
+                    VersionKey("book", item.BookId)
+                ])) return false;
+        if (!RowsCovered(candidate.Annotations, targetAnnotations,
+                item => item.Id.ToString("N"), item => item.UpdatedAt,
+                item => [VersionKey("annotation", item.Id), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
+        if (!RowsCovered(candidate.BookReflections, targetReflections,
+                item => item.BookId.ToString("N"), item => item.UpdatedAt,
+                item => [VersionKey("reflection", item.BookId), VersionKey("book", item.BookId)])) return false;
+        if (!RowsCovered(candidate.Progress, targetProgress,
+                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
+                item => [VersionKey("progress", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
+        if (!RowsCovered(candidate.Bookmarks, targetBookmarks,
+                item => item.Id.ToString("N"), item => item.CreatedAt,
+                item => [VersionKey("bookmark", item.Id), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
+        if (!RowsCovered(candidate.Layouts, targetLayouts,
+                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
+                item => [VersionKey("layout", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
+        if (!RowsCovered(candidate.ReadingStats, targetStats,
+                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
+                item => [VersionKey("stats", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
+
+        foreach (var tombstone in candidate.Tombstones ?? [])
+        {
+            var key = VersionKey(tombstone.EntityType, tombstone.Key);
+            if (tombstoneVersions.TryGetValue(key, out var deletedAt) && deletedAt >= tombstone.DeletedAt) continue;
+            if (targetLiveRows.TryGetValue(key, out var liveVersion) && liveVersion > tombstone.DeletedAt) continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static DateTimeOffset GetTombstoneCompactionWatermark(
+        IReadOnlyList<S3SyncSnapshot> snapshots)
+    {
+        var existingWatermark = snapshots
+            .Select(snapshot => snapshot.TombstonesPrunedBefore ?? DateTimeOffset.MinValue)
+            .DefaultIfEmpty(DateTimeOffset.MinValue)
+            .Max();
+        var retentionCutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(365);
+        var versions = snapshots
+            .SelectMany(snapshot => (snapshot.Tombstones ?? []).Select(tombstone => (
+                Key: VersionKey(tombstone.EntityType, tombstone.Key),
+                DeviceId: NormalizeKnownDeviceId(snapshot.DeviceId),
+                tombstone.DeletedAt)))
+            .Where(item => item.DeletedAt > existingWatermark)
+            .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (versions.Length == 0) return existingWatermark;
+
+        var commonKeys = versions
+            .Where(group => group.Select(item => item.DeviceId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == snapshots.Count
+                && snapshots.All(snapshot => !ContainsEntityAtOrBefore(
+                    snapshot,
+                    group.Key,
+                    group.Max(item => item.DeletedAt))))
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var oldestUnreplicated = versions
+            .Where(group => !commonKeys.Contains(group.Key))
+            .Select(group => group.Min(item => item.DeletedAt))
+            .Where(date => date <= retentionCutoff)
+            .DefaultIfEmpty(retentionCutoff.AddTicks(1))
+            .Min();
+        var upperBound = oldestUnreplicated <= retentionCutoff
+            ? oldestUnreplicated.AddTicks(-1)
+            : retentionCutoff;
+        var safeCommonVersions = versions
+            .Where(group => commonKeys.Contains(group.Key))
+            .Select(group => group.Max(item => item.DeletedAt))
+            .Where(date => date <= upperBound)
+            .ToArray();
+        if (safeCommonVersions.Length == 0) return existingWatermark;
+        return Max(existingWatermark, safeCommonVersions.Max());
+    }
+
+    private static bool ContainsEntityAtOrBefore(
+        S3SyncSnapshot snapshot,
+        string versionKey,
+        DateTimeOffset deletedAt)
+    {
+        var separator = versionKey.IndexOf(':');
+        if (separator <= 0) return false;
+        var type = versionKey[..separator];
+        var rawKey = versionKey[(separator + 1)..];
+        if (type == "book" && Guid.TryParse(rawKey, out var bookId))
+        {
+            return snapshot.Books.Any(row => row.Id == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.Files.Any(row => row.BookId == bookId && row.ModifiedAt <= deletedAt)
+                || snapshot.Annotations.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.BookReflections.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.Progress.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.Bookmarks.Any(row => row.BookId == bookId && row.CreatedAt <= deletedAt)
+                || snapshot.Layouts.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.ReadingStats.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.CollectionItems.Any(row => row.BookId == bookId && row.AddedAt <= deletedAt);
+        }
+        if (type == "file" && Guid.TryParse(rawKey, out var fileId))
+        {
+            return snapshot.Files.Any(row => row.Id == fileId && row.ModifiedAt <= deletedAt)
+                || snapshot.Annotations.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
+                || snapshot.Progress.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
+                || snapshot.Bookmarks.Any(row => row.BookFileId == fileId && row.CreatedAt <= deletedAt)
+                || snapshot.Layouts.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
+                || snapshot.ReadingStats.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt);
+        }
+
+        return GetSnapshotEntityVersions(snapshot).TryGetValue(versionKey, out var liveVersion)
+            && liveVersion <= deletedAt;
     }
 
     private async Task<List<S3SyncSnapshot>> DownloadRemoteSnapshotsAsync(

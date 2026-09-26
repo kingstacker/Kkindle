@@ -43,6 +43,7 @@ public sealed partial class ReaderDataService
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         _paths.EnsureDirectories();
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -213,7 +214,12 @@ public sealed partial class ReaderDataService
                    SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
             FROM ReaderAnnotations
             WHERE BookFileId = $bookFileId
-            ORDER BY ChapterPath COLLATE NOCASE, StartOffset, CreatedAt
+            ORDER BY
+                CASE WHEN ChapterPath LIKE 'pdf:page:%' THEN 0 ELSE 1 END,
+                CASE WHEN ChapterPath LIKE 'pdf:page:%'
+                     THEN CAST(substr(ChapterPath, 10) AS INTEGER)
+                     ELSE 0 END,
+                ChapterPath COLLATE NOCASE, StartOffset, CreatedAt
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
@@ -266,6 +272,7 @@ public sealed partial class ReaderDataService
 
     public async Task SaveAnnotationAsync(ReaderAnnotation annotation, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -310,6 +317,7 @@ public sealed partial class ReaderDataService
 
     public async Task DeleteAnnotationAsync(Guid annotationId, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -379,6 +387,7 @@ public sealed partial class ReaderDataService
         ReaderBookReflection reflection,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -407,6 +416,7 @@ public sealed partial class ReaderDataService
         Guid bookId,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1412,7 +1422,8 @@ public sealed partial class ReaderDataService
         string query,
         int limit = 6,
         CancellationToken cancellationToken = default,
-        bool exactPhraseOnly = false)
+        bool exactPhraseOnly = false,
+        Guid? bookFileId = null)
     {
         var terms = BuildSearchTerms(query);
         if (terms.Count == 0) return [];
@@ -1431,7 +1442,7 @@ public sealed partial class ReaderDataService
         {
             try
             {
-                var ftsResults = await SearchFullTextAsync(bookId, terms, candidateLimit, cancellationToken);
+                var ftsResults = await SearchFullTextAsync(bookId, bookFileId, terms, candidateLimit, cancellationToken);
                 if (ftsResults.Count > 0)
                 {
                     var matches = exactPhraseOnly
@@ -1447,7 +1458,7 @@ public sealed partial class ReaderDataService
             }
         }
 
-        var likeResults = await SearchLikeAsync(bookId, terms, candidateLimit, cancellationToken);
+        var likeResults = await SearchLikeAsync(bookId, bookFileId, terms, candidateLimit, cancellationToken);
         var filtered = exactPhraseOnly
             ? FilterExactPhraseMatches(likeResults, query)
             : likeResults;
@@ -1580,6 +1591,7 @@ public sealed partial class ReaderDataService
 
     private async Task<IReadOnlyList<BookContentChunk>> SearchFullTextAsync(
         Guid bookId,
+        Guid? bookFileId,
         IReadOnlyList<string> terms,
         int limit,
         CancellationToken cancellationToken)
@@ -1607,12 +1619,14 @@ public sealed partial class ReaderDataService
                 FROM BookContentFts
                 INNER JOIN BookContentChunks c ON c.Id = BookContentFts.rowid
                 WHERE BookContentFts MATCH $contentQuery AND c.BookId = $bookId
+                  AND ($bookFileId IS NULL OR c.BookFileId = $bookFileId)
                 UNION ALL
                 SELECT c.Id, bm25(BookContentFts, 1.0, 2.8) AS Rank
                 FROM BookContentFts
                 INNER JOIN BookContentChunks c ON c.Id = BookContentFts.rowid
                 WHERE BookContentFts MATCH $titleQuery
                   AND c.BookId = $bookId
+                  AND ($bookFileId IS NULL OR c.BookFileId = $bookFileId)
                   AND c.ChunkIndex = 0
             ), best_matches AS (
                 SELECT Id, MIN(Rank) AS Rank
@@ -1630,6 +1644,7 @@ public sealed partial class ReaderDataService
         command.Parameters.AddWithValue("$contentQuery", contentMatch);
         command.Parameters.AddWithValue("$titleQuery", titleMatch);
         command.Parameters.AddWithValue("$bookId", bookId.ToString());
+        command.Parameters.AddWithValue("$bookFileId", (object?)bookFileId?.ToString() ?? DBNull.Value);
         command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 1500));
         var result = new List<BookContentChunk>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1643,6 +1658,7 @@ public sealed partial class ReaderDataService
 
     private async Task<IReadOnlyList<BookContentChunk>> SearchLikeAsync(
         Guid bookId,
+        Guid? bookFileId,
         IReadOnlyList<string> terms,
         int limit,
         CancellationToken cancellationToken)
@@ -1663,11 +1679,14 @@ public sealed partial class ReaderDataService
             SELECT Id, BookId, BookFileId, SourceHash, ChapterIndex, ChunkIndex, ChapterTitle,
                    ChapterPath, StartOffset, EndOffset, Content
             FROM BookContentChunks
-            WHERE BookId = $bookId AND ({string.Join(" OR ", predicates)})
+            WHERE BookId = $bookId
+              AND ($bookFileId IS NULL OR BookFileId = $bookFileId)
+              AND ({string.Join(" OR ", predicates)})
             ORDER BY ChapterIndex, ChunkIndex
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$bookId", bookId.ToString());
+        command.Parameters.AddWithValue("$bookFileId", (object?)bookFileId?.ToString() ?? DBNull.Value);
         command.Parameters.AddWithValue("$limit", limit == int.MaxValue ? -1 : Math.Clamp(limit, 1, 1500));
         var result = new List<BookContentChunk>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1787,8 +1806,6 @@ public sealed partial class ReaderDataService
     {
         if (string.IsNullOrWhiteSpace(query)) return [];
         var normalized = WhitespaceRegex().Replace(query.Trim(), " ");
-        foreach (var stopPhrase in ChineseStopPhrases)
-            normalized = normalized.Replace(stopPhrase, string.Empty, StringComparison.OrdinalIgnoreCase);
 
         var terms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in LatinWordRegex().Matches(normalized))
@@ -1935,13 +1952,6 @@ public sealed partial class ReaderDataService
         }
         return vector;
     }
-
-    private static readonly string[] ChineseStopPhrases =
-    [
-        "请根据", "请帮我", "这本书", "本书", "这一章", "本章", "当前章节", "当前",
-        "如何", "怎么", "什么是", "为什么", "哪些", "是否", "请", "帮我", "一下",
-        "总结", "概括", "解释", "分析", "介绍", "关于", "根据"
-    ];
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();

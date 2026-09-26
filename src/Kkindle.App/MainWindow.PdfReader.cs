@@ -174,6 +174,22 @@ public partial class MainWindow
         if (direction == 0) return;
         var page = pdf.GetAdjacentPage(direction);
         if (page != _readerPdfPage)
-            await NavigatePdfPageAsync(page, ReaderToken);
+        {
+            var token = ReaderToken;
+            try
+            {
+                await NavigatePdfPageAsync(page, token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // Closing or replacing the reader cancels the in-flight page
+                // animation and is a normal navigation outcome.
+            }
+            catch (ObjectDisposedException) when (!ReferenceEquals(pdf, CurrentReaderHost))
+            {
+                // The outgoing PDF host can be disposed while its transition
+                // callback is still completing.
+            }
+        }
     }
 }

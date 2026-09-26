@@ -6,7 +6,6 @@ public static class KindleTransferPolicy
 {
     private const int MaximumFileNameUtf8Bytes = 120;
     private static readonly string[] PreferredFormats = ["azw3", "mobi", "epub", "pdf"];
-    private static readonly char[] SubtitleSeparators = ['（', '(', '【', '['];
 
     public static BookFile? SelectPreferred(IEnumerable<BookFile>? files) =>
         GetCandidates(files).FirstOrDefault();
@@ -40,21 +39,21 @@ public static class KindleTransferPolicy
             || (stem.Length == 32 && stem.All(Uri.IsHexDigit));
     }
 
-    public static string CreateSafeFileName(string? title, string extension)
+    public static string CreateSafeFileName(string? title, string extension, Guid? stableId = null)
     {
         extension = extension.StartsWith('.') ? extension : $".{extension}";
+        var uniqueSuffix = stableId is { } id ? $"_{id:N}" : string.Empty;
         var invalid = Path.GetInvalidFileNameChars();
         var stem = new string((title ?? string.Empty)
             .Select(character => invalid.Contains(character) || char.IsControl(character) ? '_' : character)
             .ToArray())
             .Trim()
             .TrimEnd('.');
-
-        var separatorIndex = stem.IndexOfAny(SubtitleSeparators);
-        if (separatorIndex >= 2) stem = stem[..separatorIndex].Trim();
         if (string.IsNullOrWhiteSpace(stem)) stem = "book";
 
-        var byteBudget = MaximumFileNameUtf8Bytes - Encoding.UTF8.GetByteCount(extension);
+        var byteBudget = MaximumFileNameUtf8Bytes
+            - Encoding.UTF8.GetByteCount(extension)
+            - Encoding.UTF8.GetByteCount(uniqueSuffix);
         var builder = new StringBuilder();
         var usedBytes = 0;
         foreach (var rune in stem.EnumerateRunes())
@@ -65,6 +64,6 @@ public static class KindleTransferPolicy
         }
 
         var safeStem = builder.ToString().Trim().TrimEnd('.');
-        return $"{(safeStem.Length == 0 ? "book" : safeStem)}{extension.ToLowerInvariant()}";
+        return $"{(safeStem.Length == 0 ? "book" : safeStem)}{uniqueSuffix}{extension.ToLowerInvariant()}";
     }
 }

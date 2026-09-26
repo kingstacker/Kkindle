@@ -5,6 +5,7 @@ namespace Kkindle.Platform.Common;
 
 public abstract class AesGcmSecretProtector : ISecretProtector
 {
+    private const string KeyInitializationMutexName = "Kkindle.SecretProtectionKey.Initialize";
     private static ReadOnlySpan<byte> Header => [0x4B, 0x4B, 0x53, 0x01];
     private const int KeySize = 32;
     private const int NonceSize = 12;
@@ -14,7 +15,7 @@ public abstract class AesGcmSecretProtector : ISecretProtector
     {
         ArgumentNullException.ThrowIfNull(value);
         if (value.Length == 0) return [];
-        var key = GetOrCreateKey();
+        var key = GetOrCreateKeySafely();
         ValidateKey(key);
         try
         {
@@ -40,7 +41,7 @@ public abstract class AesGcmSecretProtector : ISecretProtector
         if (value.Length == 0) return [];
         if (value.Length < Header.Length + NonceSize + TagSize || !value.AsSpan(0, Header.Length).SequenceEqual(Header))
             throw new CryptographicException("The protected secret has an unsupported format.");
-        var key = GetOrCreateKey();
+        var key = GetOrCreateKeySafely();
         ValidateKey(key);
         try
         {
@@ -59,6 +60,22 @@ public abstract class AesGcmSecretProtector : ISecretProtector
     }
 
     protected abstract byte[] GetOrCreateKey();
+
+    private byte[] GetOrCreateKeySafely()
+    {
+        using var mutex = new Mutex(initiallyOwned: false, KeyInitializationMutexName);
+        try
+        {
+            try { mutex.WaitOne(); }
+            catch (AbandonedMutexException) { }
+            return GetOrCreateKey();
+        }
+        finally
+        {
+            try { mutex.ReleaseMutex(); }
+            catch (ApplicationException) { }
+        }
+    }
 
     protected static byte[] ParseStoredKey(string encoded)
     {

@@ -77,14 +77,59 @@ static McpServerSettings LoadMcpSettings(AppPaths paths)
 {
     try
     {
-        var settings = new AppSettingsStore(paths).LoadSynchronously();
+        paths.EnsureDirectories();
+        using var stream = new FileStream(
+            paths.Settings,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Delete);
+        var deserialized = JsonSerializer.Deserialize<AppSettings>(
+            stream,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (deserialized?.McpServer is null)
+            throw new JsonException("The app settings file does not contain MCP settings.");
+        var settings = AppSettings.Normalize(deserialized);
         return McpServerSettings.Normalize(settings.McpServer);
     }
-    catch
+    catch (FileNotFoundException)
     {
-        // A missing, unreadable, or malformed settings file must not make the
-        // standalone server unusable. The record defaults keep every tool on.
-        return new McpServerSettings();
+        return McpServerSettings.Normalize(new AppSettings().McpServer);
+    }
+    catch (DirectoryNotFoundException)
+    {
+        return McpServerSettings.Normalize(new AppSettings().McpServer);
+    }
+    catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+    {
+        // A corrupt or unreadable configuration must fail closed. Enabling
+        // destructive tools from model defaults would turn a settings error
+        // into an authorization change.
+        return new McpServerSettings
+        {
+            Enabled = false,
+            BookLibraryEnabled = false,
+            SearchBooksEnabled = false,
+            BookMetadataEnabled = false,
+            ReadingProgressEnabled = false,
+            RecentBooksEnabled = false,
+            TagsEnabled = false,
+            CollectionsEnabled = false,
+            BookFileEnabled = false,
+            DeviceListEnabled = false,
+            DeviceStatusEnabled = false,
+            DeviceLibraryEnabled = false,
+            EjectDeviceEnabled = false,
+            SendToKindleEnabled = false,
+            ConvertBookEnabled = false,
+            ImportBookEnabled = false,
+            DeleteBookEnabled = false,
+            DeleteDeviceBookEnabled = false,
+            CollectionManageEnabled = false,
+            SearchBookContentEnabled = false,
+            AnnotationsEnabled = false,
+            BookmarksEnabled = false,
+            ReadingDashboardEnabled = false
+        };
     }
 }
 
@@ -93,6 +138,9 @@ static IReadOnlyList<McpServerTool> CreateEnabledTools(
     McpServerSettings settings,
     JsonSerializerOptions serializerOptions)
 {
+    if (!settings.Enabled)
+        return [];
+
     var registrations = new (bool Enabled, string MethodName)[]
     {
         (settings.BookLibraryEnabled, nameof(KkindleMcpTools.ListLibraryAsync)),

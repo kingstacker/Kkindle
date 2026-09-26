@@ -483,23 +483,40 @@ public partial class MainWindow
 
     private async Task PreloadNextReaderChapterAsync(CancellationToken cancellationToken)
     {
-        if (_readerDocument is null
+        var document = _readerDocument;
+        var sourceChapterIndex = _readerChapterIndex;
+        if (document is null
             || HiddenReaderHost is not { } host
             || !IsReaderHostReady(host)
-            || _readerChapterIndex >= _readerDocument.Chapters.Count - 1) return;
+            || sourceChapterIndex >= document.Chapters.Count - 1) return;
 
-        var target = new Uri(_readerDocument.Chapters[_readerChapterIndex + 1]);
+        var targetChapterIndex = sourceChapterIndex + 1;
+        var target = new Uri(document.Chapters[targetChapterIndex]);
         CancelReaderChapterPreload();
         using var preloadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _readerChapterPreloadCancellation = preloadCancellation;
         _readerChapterPreloadTarget = target;
         try
         {
-            await NavigateReaderHostAndWaitAsync(
+            var loaded = await NavigateReaderHostAndWaitAsync(
                 host,
                 target,
                 preloadCancellation.Token,
                 isPreload: true);
+            if (loaded
+                && (!ReferenceEquals(document, _readerDocument)
+                    || (_readerChapterIndex != sourceChapterIndex
+                        && !ReferenceEquals(host, CurrentReaderHost))))
+            {
+                // A foreground jump took over while the speculative load was
+                // finishing. Discard its hidden document so it cannot be
+                // reused as stale chapter state on the next navigation.
+                if (!ReferenceEquals(host, CurrentReaderHost))
+                {
+                    _readerLoadedHostSources.Remove(host);
+                    host.Stop();
+                }
+            }
         }
         catch (OperationCanceledException) when (preloadCancellation.IsCancellationRequested)
         {
@@ -539,6 +556,11 @@ public partial class MainWindow
     /// </summary>
     private void LogReaderChapterTiming(string stage, Stopwatch clock)
     {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("KKINDLE_READER_TIMING"),
+                "1",
+                StringComparison.Ordinal))
+            return;
         try
         {
             var entry = JsonSerializer.Serialize(new

@@ -20,6 +20,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
     };
 
     private readonly IMetadataService _metadata;
+    private readonly IBookFormatConverter _formatConverter;
     private readonly string _coverCacheDirectory;
     private readonly IReadOnlyList<string> _mountRoots;
     private readonly Func<KindleDevice, CancellationToken, Task> _eject;
@@ -28,10 +29,12 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         AppPaths paths,
         IMetadataService metadata,
         IEnumerable<string>? mountRoots = null,
-        Func<KindleDevice, CancellationToken, Task>? eject = null)
+        Func<KindleDevice, CancellationToken, Task>? eject = null,
+        IBookFormatConverter? formatConverter = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
+        _formatConverter = formatConverter ?? new BookFormatConversionService();
         _coverCacheDirectory = Path.Combine(paths.Covers, "kindle");
         Directory.CreateDirectory(_coverCacheDirectory);
         _mountRoots = (mountRoots ?? DefaultMountRoots())
@@ -130,13 +133,43 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
     {
         EnsureMassStorage(device);
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("书籍源文件不存在。", sourcePath);
+        string? convertedDirectory = null;
+        try
+        {
+            if (DeviceTransferPolicy.RequiresKindleConversion(device.Profile, bookFile))
+            {
+                convertedDirectory = Path.Combine(Path.GetTempPath(), "Kkindle", "usb-send", Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(convertedDirectory);
+                var displayTitle = Path.GetFileNameWithoutExtension(sourcePath);
+                var convertedPath = Path.Combine(
+                    convertedDirectory,
+                    KindleTransferPolicy.CreateSafeFileName(displayTitle, ".azw3"));
+                await _formatConverter.ConvertAsync(
+                    sourcePath,
+                    convertedPath,
+                    cancellationToken: cancellationToken,
+                    metadata: new FormatConversionMetadata(displayTitle, string.Empty, coverOverridePath));
+                var convertedInfo = new FileInfo(convertedPath);
+                bookFile = new BookFile
+                {
+                    Id = bookFile.Id,
+                    BookId = bookFile.BookId,
+                    Format = "azw3",
+                    RelativePath = Path.GetFileName(convertedPath),
+                    Size = convertedInfo.Length,
+                    Sha256 = await Hashing.Sha256Async(convertedPath, cancellationToken)
+                };
+                sourcePath = convertedPath;
+            }
+
         if (!device.Profile.SupportsBookFile(sourcePath))
             throw new NotSupportedException(UiText.Get("当前设备不支持此书籍格式。"));
         var documents = GetDocumentsRoot(device);
         Directory.CreateDirectory(documents);
         var fileName = KindleTransferPolicy.CreateSafeFileName(
             Path.GetFileNameWithoutExtension(sourcePath),
-            Path.GetExtension(sourcePath));
+            Path.GetExtension(sourcePath),
+            bookFile.Id);
         // Re-sending a book replaces the existing copy instead of creating a
         // "title (2).azw3" duplicate, so updated covers and metadata actually
         // reach the book's existing Kindle entry.
@@ -161,6 +194,16 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         finally
         {
             TryDelete(temporary);
+        }
+        }
+        finally
+        {
+            if (convertedDirectory is not null)
+            {
+                try { Directory.Delete(convertedDirectory, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 

@@ -1158,7 +1158,8 @@ public partial class MainWindow
                     query,
                     MaxWholeBookSearchResults,
                     ReaderToken,
-                    exactPhraseOnly: true);
+                    exactPhraseOnly: true,
+                    bookFileId: _readerBookFile.Id);
                 // The same visible excerpt can come from duplicate EPUB spine
                 // entries or legacy chunks with different paths/offsets. At this
                 // final presentation boundary, identical title + snippet means an

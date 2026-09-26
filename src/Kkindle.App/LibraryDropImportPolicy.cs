@@ -64,7 +64,7 @@ internal static class LibraryDropImportPolicy
                 }
 
                 if (!Directory.Exists(fullPath)) continue;
-                foreach (var file in Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories))
+                foreach (var file in EnumerateFilesSkippingInaccessibleDirectories(fullPath))
                 {
                     if (SupportedExtensions.Contains(Path.GetExtension(file)))
                         files.Add(Path.GetFullPath(file));
@@ -79,6 +79,61 @@ internal static class LibraryDropImportPolicy
         }
 
         return files.OrderBy(path => path, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    }
+
+    private static IEnumerable<string> EnumerateFilesSkippingInaccessibleDirectories(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            string[] directoryFiles;
+            try
+            {
+                directoryFiles = Directory.GetFiles(directory, "*", SearchOption.TopDirectoryOnly);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var file in directoryFiles)
+                yield return file;
+
+            string[] childDirectories;
+            try
+            {
+                childDirectories = Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var childDirectory in childDirectories)
+            {
+                try
+                {
+                    if ((File.GetAttributes(childDirectory) & FileAttributes.ReparsePoint) == 0)
+                        pending.Push(childDirectory);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
     }
 
     private static string? GetLocalPath(IStorageItem item)
