@@ -106,7 +106,7 @@ public sealed partial class S3SyncService
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
-            var current = await _settingsStore.LoadAsync(cancellationToken);
+            var current = await _settingsStore.LoadAsync(cancellationToken, initializeIfMissing: false);
             if (current.Settings.EncryptionKey != normalized.EncryptionKey
                 && SameRemoteDirectory(current.Settings, normalized))
             {

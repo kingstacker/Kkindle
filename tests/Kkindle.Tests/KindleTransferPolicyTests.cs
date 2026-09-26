@@ -49,6 +49,20 @@ public sealed class KindleTransferPolicyTests
     }
 
     [Fact]
+    public void AddsStableIdToDisambiguateSameTitleFiles()
+    {
+        var firstId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var secondId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+        var firstName = KindleTransferPolicy.CreateSafeFileName("同名", ".epub", firstId);
+        var secondName = KindleTransferPolicy.CreateSafeFileName("同名", ".epub", secondId);
+
+        Assert.NotEqual(firstName, secondName);
+        Assert.EndsWith($"_{firstId:N}.epub", firstName, StringComparison.Ordinal);
+        Assert.EndsWith($"_{secondId:N}.epub", secondName, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConvertsEpubAndMobiButKeepsExistingAzw3AndPdf()
     {
         Assert.False(KindleTransferPolicy.RequiresConversionToAzw3(new BookFile { Format = "azw3" }));

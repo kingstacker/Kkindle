@@ -443,7 +443,7 @@ public sealed class LibraryTests
     }
 
     [Fact]
-    public async Task DeletingBookAlsoDeletesItsReaderAnnotations()
+    public async Task BookAnnotationsRemainRecoverableUntilTrashIsPurged()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -458,7 +458,7 @@ public sealed class LibraryTests
 
             var reader = new ReaderDataService(paths);
             await reader.InitializeAsync();
-            await reader.SaveAnnotationAsync(new ReaderAnnotation
+            var annotation = new ReaderAnnotation
             {
                 BookId = book.Id,
                 BookFileId = book.Files[0].Id,
@@ -466,11 +466,20 @@ public sealed class LibraryTests
                 SelectedText = "要随书删除的内容",
                 Note = "这条笔记不应成为孤儿记录。",
                 EndOffset = 8
-            });
+            };
+            await reader.SaveAnnotationAsync(annotation);
             Assert.Single(await reader.GetAllAnnotationsAsync());
 
             await library.DeleteAsync(book.Id);
+            var trash = Assert.Single(await library.GetTrashItemsAsync());
+            Assert.Equal(annotation.Id, Assert.Single(await reader.GetAllAnnotationsAsync()).Id);
 
+            await library.RestoreTrashItemAsync(trash.Id);
+            Assert.Equal(annotation.Id, Assert.Single(await reader.GetAllAnnotationsAsync()).Id);
+
+            await library.DeleteAsync(book.Id);
+            trash = Assert.Single(await library.GetTrashItemsAsync());
+            await library.PurgeTrashItemAsync(trash.Id);
             Assert.Empty(await reader.GetAllAnnotationsAsync());
         }
         finally { TestHelpers.TryDelete(root); }

@@ -684,13 +684,17 @@ public sealed partial class S3SyncService
         var warnings = new List<string>();
         var isPartial = false;
         var pathsToDelete = new List<string>();
-        // Book identity is the persisted GUID. Equal title/author text is not
-        // enough to prove that two editions or translations are the same book.
-        const int duplicateBooksMerged = 0;
+        // Only merge independently imported records when they contain the
+        // same file content. Matching metadata alone can represent editions.
+        var duplicateBooksMerged = await ConsolidateLocalDuplicateBooksAsync(
+            pathsToDelete,
+            cancellationToken);
         var readingHistoryMerged = await ConsolidateLocalReadingHistoryAsync(cancellationToken);
 
         if (snapshots.Length == 0)
         {
+            if (duplicateBooksMerged > 0)
+                warnings.Add(UiText.Get("已自动合并 {0} 本重复书籍。", duplicateBooksMerged));
             DeleteScheduledPaths(pathsToDelete, warnings);
             return new DatabaseMergeResult(
                 0,
@@ -728,8 +732,8 @@ public sealed partial class S3SyncService
             .Select(group => group.OrderByDescending(CollectionUpdatedAt).First())
             .ToArray();
         var collectionMap = BuildCollectionMap(allRemoteCollections, localIdentity);
-        // Stable IDs are the book identity. Duplicate titles and author names
-        // remain separate records, even when a remote snapshot contains them.
+        // Keep IDs stable unless a remote file has an exact hash match in the
+        // local library. Matching titles or authors alone never merges editions.
         AddLocalIdentityMappings(localIdentity, bookMap, fileMap, collectionMap);
 
         var tombstoneIndex = BuildTombstoneIndex(localSnapshot.Tombstones);
@@ -1481,6 +1485,15 @@ public sealed partial class S3SyncService
                 transaction,
                 cancellationToken);
 
+            var booksMergedAfterRemoteApply = await ConsolidateLocalDuplicateBooksInTransactionAsync(
+                connection,
+                transaction,
+                pathsToDelete,
+                commandCache,
+                cancellationToken);
+            duplicateBooksMerged += booksMergedAfterRemoteApply;
+            changed |= booksMergedAfterRemoteApply > 0;
+
             changed |= await ConsolidateReadingHistoryRowsAsync(connection, transaction, commandCache, cancellationToken);
             await RemoveReferencedScheduledPathsAsync(
                 connection,
@@ -1490,6 +1503,8 @@ public sealed partial class S3SyncService
             await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             synchronizedFileMoves.Clear();
+            if (duplicateBooksMerged > 0)
+                warnings.Add(UiText.Get("已自动合并 {0} 本重复书籍。", duplicateBooksMerged));
         }
         }
         catch
@@ -1844,13 +1859,44 @@ public sealed partial class S3SyncService
         LocalDatabaseIdentity localIdentity)
     {
         var result = new Dictionary<Guid, Guid>();
-        var usedLocalIds = new HashSet<Guid>(localIdentity.BooksById.Keys);
+        var localBookByHash = localIdentity.FilesById.Values
+            .Where(file => IsSha256(file.Sha256))
+            .GroupBy(file => file.Sha256, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                Hash = group.Key,
+                BookIds = group.Select(file => file.BookId).Distinct().ToArray()
+            })
+            .Where(group => group.BookIds.Length == 1)
+            .ToDictionary(group => group.Hash, group => group.BookIds[0], StringComparer.OrdinalIgnoreCase);
+        var remoteHashesByBook = remoteFiles
+            .Where(file => IsSha256(file.Sha256))
+            .GroupBy(file => file.BookId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(file => file.Sha256).ToHashSet(StringComparer.OrdinalIgnoreCase));
+
         foreach (var remoteBook in remoteBooks.OrderBy(book => book.Id))
         {
-            var localId = remoteBook.Id;
-            if (!usedLocalIds.Contains(localId))
-                usedLocalIds.Add(localId);
-            result[remoteBook.Id] = localId;
+            if (localIdentity.BooksById.ContainsKey(remoteBook.Id))
+            {
+                result[remoteBook.Id] = remoteBook.Id;
+                continue;
+            }
+
+            var matchingLocalBooks = remoteHashesByBook.TryGetValue(remoteBook.Id, out var hashes)
+                ? hashes.Where(localBookByHash.ContainsKey)
+                    .Select(hash => localBookByHash[hash])
+                    .Distinct()
+                    .ToArray()
+                : [];
+            // A shared content hash is strong identity evidence. A unique
+            // match prevents duplicate book rows when separate devices
+            // imported the same file, without collapsing different editions
+            // that merely share a title and author.
+            result[remoteBook.Id] = matchingLocalBooks.Length == 1
+                ? matchingLocalBooks[0]
+                : remoteBook.Id;
         }
 
         return result;
@@ -2014,22 +2060,34 @@ public sealed partial class S3SyncService
     private static DateTimeOffset CollectionUpdatedAt(S3SyncCollection collection) =>
         collection.UpdatedAt == default ? collection.CreatedAt : collection.UpdatedAt;
 
-    private static string BuildBookMatchKey(string? title, string? authors) =>
-        $"{title?.Trim()}\u001f{authors?.Trim()}";
-
-    private static bool CanUseBookMatchKey(string? title, string? authors) =>
-        !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(authors);
-
     private async Task<int> ConsolidateLocalDuplicateBooksAsync(
         ICollection<string> pathsToDelete,
         CancellationToken cancellationToken)
     {
-        var books = new List<LocalDuplicateBook>();
         await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
         await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await SuppressDeletionTrackingAsync(connection, transaction, true, cancellationToken);
+        using var commandCache = new SqliteCommandCache(connection, transaction);
+        var merged = await ConsolidateLocalDuplicateBooksInTransactionAsync(
+            connection,
+            transaction,
+            pathsToDelete,
+            commandCache,
+            cancellationToken);
+        await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return merged;
+    }
 
+    private async Task<int> ConsolidateLocalDuplicateBooksInTransactionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ICollection<string> pathsToDelete,
+        SqliteCommandCache commandCache,
+        CancellationToken cancellationToken)
+    {
+        var books = new List<LocalDuplicateBook>();
         using (var command = CreateCommand(connection, transaction,
             """
             SELECT b.Id, b.Title, b.Authors, b.CreatedAt, b.UpdatedAt, b.CoverPath,
@@ -2051,11 +2109,49 @@ public sealed partial class S3SyncService
             }
         }
 
+        var fileHashesByBook = new Dictionary<Guid, HashSet<string>>();
+        using (var command = CreateCommand(connection, transaction,
+            "SELECT BookId, Sha256 FROM BookFiles;"))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var bookId = ParseGuid(reader.GetString(0), "BookFiles.BookId");
+                var hash = reader.GetString(1);
+                if (!IsSha256(hash)) continue;
+                if (!fileHashesByBook.TryGetValue(bookId, out var hashes))
+                    fileHashesByBook[bookId] = hashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                hashes.Add(hash);
+            }
+        }
+
+        var parentByBookId = books.ToDictionary(book => book.Id, book => book.Id);
+        Guid FindRoot(Guid id)
+        {
+            var parent = parentByBookId[id];
+            if (parent != id) parentByBookId[id] = FindRoot(parent);
+            return parentByBookId[id];
+        }
+
+        void Union(Guid left, Guid right)
+        {
+            var leftRoot = FindRoot(left);
+            var rightRoot = FindRoot(right);
+            if (leftRoot != rightRoot) parentByBookId[rightRoot] = leftRoot;
+        }
+
+        foreach (var group in fileHashesByBook
+                     .SelectMany(entry => entry.Value.Select(hash => (Hash: hash, BookId: entry.Key)))
+                     .GroupBy(entry => entry.Hash, StringComparer.OrdinalIgnoreCase))
+        {
+            var bookIds = group.Select(entry => entry.BookId).Distinct().ToArray();
+            for (var index = 1; index < bookIds.Length; index++)
+                Union(bookIds[0], bookIds[index]);
+        }
+
         var merged = 0;
-        using var commandCache = new SqliteCommandCache(connection, transaction);
         foreach (var group in books
-                     .Where(book => CanUseBookMatchKey(book.Title, book.Authors))
-                     .GroupBy(book => BuildBookMatchKey(book.Title, book.Authors), StringComparer.OrdinalIgnoreCase)
+                     .GroupBy(book => FindRoot(book.Id))
                      .Where(group => group.Count() > 1))
         {
             var canonical = group
@@ -2080,8 +2176,6 @@ public sealed partial class S3SyncService
             }
         }
 
-        await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         return merged;
     }
 

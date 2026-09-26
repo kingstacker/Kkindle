@@ -6,6 +6,7 @@ public static class KindleTransferPolicy
 {
     private const int MaximumFileNameUtf8Bytes = 120;
     private static readonly string[] PreferredFormats = ["azw3", "mobi", "epub", "pdf"];
+    private static readonly char[] SubtitleSeparators = ['（', '(', '【', '['];
 
     public static BookFile? SelectPreferred(IEnumerable<BookFile>? files) =>
         GetCandidates(files).FirstOrDefault();
@@ -49,6 +50,8 @@ public static class KindleTransferPolicy
             .ToArray())
             .Trim()
             .TrimEnd('.');
+        var separatorIndex = stem.IndexOfAny(SubtitleSeparators);
+        if (separatorIndex >= 2) stem = stem[..separatorIndex].Trim();
         if (string.IsNullOrWhiteSpace(stem)) stem = "book";
 
         var byteBudget = MaximumFileNameUtf8Bytes

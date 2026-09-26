@@ -1806,6 +1806,8 @@ public sealed partial class ReaderDataService
     {
         if (string.IsNullOrWhiteSpace(query)) return [];
         var normalized = WhitespaceRegex().Replace(query.Trim(), " ");
+        foreach (var stopPhrase in ChineseStopPhrases)
+            normalized = normalized.Replace(stopPhrase, string.Empty, StringComparison.OrdinalIgnoreCase);
 
         var terms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in LatinWordRegex().Matches(normalized))
@@ -1952,6 +1954,13 @@ public sealed partial class ReaderDataService
         }
         return vector;
     }
+
+    private static readonly string[] ChineseStopPhrases =
+    [
+        "请根据", "请帮我", "这本书", "本书", "这一章", "本章", "当前章节", "当前",
+        "如何", "怎么", "什么是", "为什么", "哪些", "是否", "请", "帮我", "一下",
+        "总结", "概括", "解释", "分析", "介绍", "关于", "根据"
+    ];
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
