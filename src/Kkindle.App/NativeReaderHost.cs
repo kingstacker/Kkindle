@@ -1859,7 +1859,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 new PixelSize(pixelWidth, pixelHeight),
                 new Vector(96, 96),
                 PixelFormats.Bgra8888,
-                AlphaFormat.Opaque);
+                AlphaFormat.Premul);
             _bitmapPixelWidth = pixelWidth;
             _bitmapPixelHeight = pixelHeight;
             _bitmapDirty = true;
@@ -1871,13 +1871,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             _bitmapDirty = false;
         }
 
+        // ReaderRoot owns the paper surface. Keep this canvas transparent so
+        // its texture continues seamlessly behind the native text and overlays.
         if (_bitmap is not null)
         {
             context.DrawImage(_bitmap, new Rect(0, 0, width, height));
-        }
-        else
-        {
-            context.FillRectangle(new SolidColorBrush(_palette.Page), new Rect(0, 0, width, height));
         }
     }
 
@@ -1889,7 +1887,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         using var frame = _bitmap.Lock();
-        var info = new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
+        var info = new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
         using var surface = SKSurface.Create(info, frame.Address, frame.RowBytes);
         if (surface is null)
         {
@@ -1897,11 +1895,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var canvas = surface.Canvas;
-        canvas.Clear(ReaderPalette.ToSkia(_palette.Page));
+        canvas.Clear(SKColors.Transparent);
         canvas.Save();
         canvas.Scale((float)scaling);
-        ReaderPaperTexture.Paint(canvas,
-            new SKRect(0, 0, (float)Bounds.Width, (float)Bounds.Height), _palette.Page, _appearance);
 
         switch (_presentation)
         {
@@ -3234,12 +3230,29 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         try
         {
             using var frame = bitmap.Lock();
-            var info = new SKImageInfo(
+            var contentInfo = new SKImageInfo(
                 _bitmapPixelWidth,
                 _bitmapPixelHeight,
                 SKColorType.Bgra8888,
                 SKAlphaType.Premul);
-            using var image = SKImage.FromPixelCopy(info, frame.Address, frame.RowBytes);
+            using var content = SKImage.FromPixelCopy(contentInfo, frame.Address, frame.RowBytes);
+            var snapshotInfo = new SKImageInfo(
+                _bitmapPixelWidth,
+                _bitmapPixelHeight,
+                SKColorType.Bgra8888,
+                SKAlphaType.Opaque);
+            using var surface = SKSurface.Create(snapshotInfo);
+            if (surface is null) return Task.FromResult<byte[]?>(null);
+
+            var canvas = surface.Canvas;
+            canvas.Clear(ReaderPalette.ToSkia(_palette.Page));
+            canvas.Save();
+            canvas.Scale((float)CurrentScaling);
+            var bounds = new SKRect(0, 0, (float)Bounds.Width, (float)Bounds.Height);
+            ReaderPaperTexture.Paint(canvas, bounds, _palette.Page, _appearance);
+            canvas.DrawImage(content, bounds);
+            canvas.Restore();
+            using var image = surface.Snapshot();
             using var data = image.Encode(SKEncodedImageFormat.Png, 90);
             return Task.FromResult<byte[]?>(data.ToArray());
         }

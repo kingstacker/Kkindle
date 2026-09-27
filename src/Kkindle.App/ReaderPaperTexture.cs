@@ -114,11 +114,13 @@ public static class ReaderPaperTexture
             for (var y = 0; y < TileSize; y++)
             for (var x = 0; x < TileSize; x++)
             {
-                var variation = 14 * Noise(x, y, 6, 17)
-                    + 8 * Noise(x, y, 24, 71)
-                    + 4 * Noise(x, y, 96, 133)
-                    + 12 * Hash(x, y, 239);
-                var alpha = (byte)Math.Clamp((int)Math.Round(Math.Abs(variation)), 0, 45);
+                // Keep broad tonal shifts quiet; the fiber layer supplies the
+                // visible paper character without making large areas look tinted.
+                var variation = 5 * Noise(x, y, 6, 17)
+                    + 2 * Noise(x, y, 24, 71)
+                    + Noise(x, y, 96, 133)
+                    + 3 * Hash(x, y, 239);
+                var alpha = (byte)Math.Clamp((int)Math.Round(Math.Abs(variation)), 0, 11);
                 var offset = (y * TileSize + x) * 4;
                 // Premultiplied white brightens; black darkens. The original
                 // palette stays visible through the tiny alpha variations.
