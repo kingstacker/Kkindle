@@ -18,9 +18,12 @@ public sealed class ReaderDeviceTests
             var service = new KindleDeviceService(new AppPaths(Path.Combine(root, "app")), new Metadata());
             var source = Path.Combine(root, "书籍.epub");
             await File.WriteAllTextAsync(source, "native epub payload");
-            var file = new BookFile { Format = "epub", Sha256 = await Hashing.Sha256Async(source) };
+            var file = new BookFile { Id = Guid.NewGuid(), Format = "epub", Sha256 = await Hashing.Sha256Async(source) };
             await service.SendBookAsync(device, file, source);
-            Assert.Equal(await File.ReadAllBytesAsync(source), await File.ReadAllBytesAsync(Path.Combine(deviceRoot, "书籍.epub")));
+            var deviceBookPath = Path.Combine(
+                deviceRoot,
+                KindleTransferPolicy.CreateSafeFileName("书籍", ".epub", file.Id));
+            Assert.Equal(await File.ReadAllBytesAsync(source), await File.ReadAllBytesAsync(deviceBookPath));
             Assert.False(Directory.Exists(Path.Combine(deviceRoot, "documents")));
             Assert.False(Directory.Exists(Path.Combine(deviceRoot, "system")));
             var book = Assert.Single(await service.ScanBooksAsync(device));
