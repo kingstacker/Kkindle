@@ -23,6 +23,26 @@ internal static class ShellFileOperation
         if (failure is not null) throw new IOException("Windows 无法删除设备文件。", failure);
     }
 
+    public static void RenamePermanently(object shellFolderItem, string newName)
+    {
+        if (string.IsNullOrWhiteSpace(newName)
+            || newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || newName.IndexOfAny(['\\', '/']) >= 0)
+            throw new ArgumentException("设备文件名无效。", nameof(newName));
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { RenameOnStaThread(shellFolderItem, newName); }
+            catch (Exception exception) { failure = exception; }
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        if (!thread.Join(TimeSpan.FromSeconds(30)))
+            throw new TimeoutException("等待 Windows 重命名设备文件超时。");
+        if (failure is not null) throw new IOException("Windows 无法重命名设备文件。", failure);
+    }
+
     public static void CopyToLocal(
         object shellFolderItem,
         string destinationPath,
@@ -56,7 +76,7 @@ internal static class ShellFileOperation
             if (expectedSize > 0 && new FileInfo(temporary).Length != expectedSize)
                 throw new IOException("Windows 读取的设备文件大小不完整。");
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, destination, overwrite: true);
+            File.Move(temporary, destination, overwrite: false);
         }
         finally
         {
@@ -68,26 +88,7 @@ internal static class ShellFileOperation
 
     private static void DeleteOnStaThread(object shellFolderItem)
     {
-        var itemGuid = typeof(IShellItem).GUID;
-        var unknown = Marshal.GetIUnknownForObject(shellFolderItem);
-        IntPtr itemIdList = IntPtr.Zero;
-        try
-        {
-            Marshal.ThrowExceptionForHR(SHGetIDListFromObject(unknown, out itemIdList));
-        }
-        finally
-        {
-            Marshal.Release(unknown);
-        }
-        IShellItem item;
-        try
-        {
-            Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(itemIdList, ref itemGuid, out item));
-        }
-        finally
-        {
-            if (itemIdList != IntPtr.Zero) Marshal.FreeCoTaskMem(itemIdList);
-        }
+        var item = CreateShellItem(shellFolderItem);
         var operation = (IFileOperation)new FileOperation();
         try
         {
@@ -101,6 +102,50 @@ internal static class ShellFileOperation
         {
             if (Marshal.IsComObject(operation)) Marshal.FinalReleaseComObject(operation);
             if (Marshal.IsComObject(item)) Marshal.FinalReleaseComObject(item);
+        }
+    }
+
+    private static void RenameOnStaThread(object shellFolderItem, string newName)
+    {
+        var item = CreateShellItem(shellFolderItem);
+        var operation = (IFileOperation)new FileOperation();
+        try
+        {
+            Marshal.ThrowExceptionForHR(operation.SetOperationFlags(FofSilent | FofNoConfirmation | FofNoErrorUi));
+            Marshal.ThrowExceptionForHR(operation.RenameItem(item, newName, IntPtr.Zero));
+            Marshal.ThrowExceptionForHR(operation.PerformOperations());
+            Marshal.ThrowExceptionForHR(operation.GetAnyOperationsAborted(out var aborted));
+            if (aborted) throw new OperationCanceledException("设备文件重命名已取消。");
+        }
+        finally
+        {
+            if (Marshal.IsComObject(operation)) Marshal.FinalReleaseComObject(operation);
+            if (Marshal.IsComObject(item)) Marshal.FinalReleaseComObject(item);
+        }
+    }
+
+    private static IShellItem CreateShellItem(object shellFolderItem)
+    {
+        var itemGuid = typeof(IShellItem).GUID;
+        var unknown = Marshal.GetIUnknownForObject(shellFolderItem);
+        IntPtr itemIdList = IntPtr.Zero;
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHGetIDListFromObject(unknown, out itemIdList));
+        }
+        finally
+        {
+            Marshal.Release(unknown);
+        }
+
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(itemIdList, ref itemGuid, out var item));
+            return item;
+        }
+        finally
+        {
+            if (itemIdList != IntPtr.Zero) Marshal.FreeCoTaskMem(itemIdList);
         }
     }
 

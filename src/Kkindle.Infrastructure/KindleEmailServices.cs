@@ -1,8 +1,10 @@
-using System.Net;
-using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 using Kkindle.Core;
+using MailKit.Net.Smtp;
+using MailKit.Security;
+using MimeKit;
+using MailAddress = System.Net.Mail.MailAddress;
 
 namespace Kkindle.Infrastructure;
 
@@ -181,9 +183,8 @@ public sealed class KindleEmailSender
             || string.Equals(root.Message, exception.Message, StringComparison.Ordinal))
             return exception.Message;
 
-        // SmtpClient often wraps the useful socket/TLS reason in the generic
-        // "Failure sending mail." exception. Keep both pieces visible in the
-        // settings page while the complete exception remains in the log.
+        // Keep the root socket/TLS reason visible alongside the protocol
+        // error so provider configuration failures are actionable.
         return $"{exception.Message} ({root.Message})";
     }
 
@@ -193,12 +194,11 @@ public sealed class KindleEmailSender
     {
         ValidateSettings(settings);
 
-        using var message = CreateMessage(
+        var message = CreateMessage(
             settings,
             "Kkindle 测试邮件",
             "这是一封来自 Kkindle 的测试邮件，用于验证 Kindle 邮箱发信配置。");
-        using var client = CreateClient(settings);
-        await client.SendMailAsync(message, cancellationToken);
+        await SendMessageAsync(settings, message, cancellationToken);
     }
 
     public async Task SendAsync(
@@ -214,14 +214,30 @@ public sealed class KindleEmailSender
             throw new InvalidOperationException(
                 $"书籍文件大小为 {fileSizeBytes / (1024d * 1024d):0.#} MB，超过 Send to Kindle 邮箱单本 50 MB 的限制。");
 
-        using var message = CreateMessage(
+        var message = CreateMessage(
             settings,
             string.IsNullOrWhiteSpace(subject) ? "Send to Kindle" : subject.Trim(),
             "Sent from Kkindle.");
-        message.Attachments.Add(new Attachment(filePath));
-
-        using var client = CreateClient(settings);
-        await client.SendMailAsync(message, cancellationToken);
+        await using var attachmentStream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            128 * 1024,
+            useAsync: true);
+        var attachment = new MimePart("application", "octet-stream")
+        {
+            Content = new MimeContent(attachmentStream, ContentEncoding.Default),
+            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+            ContentTransferEncoding = ContentEncoding.Base64,
+            FileName = Path.GetFileName(filePath)
+        };
+        message.Body = new Multipart("mixed")
+        {
+            new TextPart("plain") { Text = "Sent from Kkindle." },
+            attachment
+        };
+        await SendMessageAsync(settings, message, cancellationToken);
     }
 
     private static void ValidateSettings(KindleEmailSettings settings)
@@ -230,26 +246,33 @@ public sealed class KindleEmailSender
         if (validationError is not null) throw new InvalidOperationException(validationError);
     }
 
-    private static MailMessage CreateMessage(KindleEmailSettings settings, string subject, string body)
+    private static MimeMessage CreateMessage(KindleEmailSettings settings, string subject, string body)
     {
-        var message = new MailMessage
-        {
-            From = new MailAddress(settings.SenderEmailAddress),
-            Subject = subject,
-            Body = body,
-            IsBodyHtml = false,
-            SubjectEncoding = Encoding.UTF8,
-            BodyEncoding = Encoding.UTF8
-        };
-        message.To.Add(new MailAddress(settings.KindleEmailAddress));
+        var message = new MimeMessage();
+        message.From.Add(MailboxAddress.Parse(settings.SenderEmailAddress));
+        message.To.Add(MailboxAddress.Parse(settings.KindleEmailAddress));
+        message.Subject = subject;
+        message.Body = new TextPart("plain") { Text = body };
         return message;
     }
 
-    private static SmtpClient CreateClient(KindleEmailSettings settings) => new(settings.SmtpHost, settings.SmtpPort)
+    private static async Task SendMessageAsync(
+        KindleEmailSettings settings,
+        MimeMessage message,
+        CancellationToken cancellationToken)
     {
-        EnableSsl = settings.EnableSsl,
-        UseDefaultCredentials = false,
-        Credentials = new NetworkCredential(settings.SmtpUsername, settings.SmtpPassword),
-        DeliveryMethod = SmtpDeliveryMethod.Network
-    };
+        using var client = new SmtpClient
+        {
+            Timeout = 180_000
+        };
+        var socketOptions = !settings.EnableSsl
+            ? SecureSocketOptions.None
+            : settings.SmtpPort == 465
+                ? SecureSocketOptions.SslOnConnect
+                : SecureSocketOptions.StartTls;
+        await client.ConnectAsync(settings.SmtpHost, settings.SmtpPort, socketOptions, cancellationToken);
+        await client.AuthenticateAsync(settings.SmtpUsername, settings.SmtpPassword, cancellationToken);
+        await client.SendAsync(message, cancellationToken);
+        await client.DisconnectAsync(quit: true, cancellationToken);
+    }
 }

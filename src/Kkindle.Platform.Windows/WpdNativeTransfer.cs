@@ -20,7 +20,7 @@ internal static class WpdNativeTransfer
     private static readonly PropertyKey WpdObjectSize = new(WpdObjectPropertySet, 11);
     private static readonly PropertyKey WpdObjectOriginalFileName = new(WpdObjectPropertySet, 12);
     private static readonly PropertyKey WpdResourceDefault = new(
-        new Guid("E81E79BE-34F0-41BF-ACF9-FD6A0A438717"),
+        new Guid("E81E79BE-34F0-41BF-B53F-F1A06AE87842"),
         0);
     private const uint StgmRead = 0;
 
@@ -82,7 +82,7 @@ internal static class WpdNativeTransfer
                 expectedSize,
                 optimalReadBufferSize,
                 cancellationToken);
-            File.Move(temporaryPath, destinationPath, true);
+            File.Move(temporaryPath, destinationPath, overwrite: false);
         }
         finally
         {

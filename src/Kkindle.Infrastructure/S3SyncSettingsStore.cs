@@ -26,13 +26,16 @@ public sealed class S3SyncSettingsStore
 
     public string SettingsPath => Path.Combine(_paths.Data, "s3-sync-settings.json");
 
-    public async Task<S3SyncStoredSettings> LoadAsync(CancellationToken cancellationToken = default)
+    public async Task<S3SyncStoredSettings> LoadAsync(
+        CancellationToken cancellationToken = default,
+        bool initializeIfMissing = true)
     {
         _paths.EnsureDirectories();
         if (!File.Exists(SettingsPath))
         {
             var initial = new S3SyncStoredSettings(Guid.NewGuid().ToString("N"), new S3SyncSettings());
-            await SaveAsync(initial.DeviceId, initial.Settings, cancellationToken);
+            if (initializeIfMissing)
+                await SaveAsync(initial.DeviceId, initial.Settings, cancellationToken);
             return initial;
         }
 

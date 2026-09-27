@@ -28,6 +28,7 @@ public sealed class AppBackupService
     private const string AiSettingsPath = "ai-settings.json";
     private const string KindleEmailSettingsPath = "kindle-email-settings.json";
     private const string S3SyncSettingsPath = "s3-sync-settings.json";
+    internal const string PendingSyncBaselineResetFileName = ".kkindle-sync-baseline-reset";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -53,6 +54,7 @@ public sealed class AppBackupService
         string destinationPath,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         if (string.IsNullOrWhiteSpace(destinationPath))
             throw new ArgumentException("请选择备份文件的保存位置。", nameof(destinationPath));
 
@@ -117,6 +119,7 @@ public sealed class AppBackupService
         string sourcePath,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         if (string.IsNullOrWhiteSpace(sourcePath))
             throw new ArgumentException("请选择要导入的备份文件。", nameof(sourcePath));
 
@@ -167,8 +170,16 @@ public sealed class AppBackupService
             var movedPaths = new List<(string Source, string Backup)>();
             var replacementStarted = false;
             var retainRollback = false;
+            var baselineResetMarker = Path.Combine(_paths.Data, PendingSyncBaselineResetFileName);
             try
             {
+                // If the process stops after replacing the library but before
+                // the sync baseline is reset, the next sync sees this marker
+                // and completes the reset before detecting deletions.
+                await File.WriteAllTextAsync(
+                    baselineResetMarker,
+                    DateTimeOffset.UtcNow.ToString("O"),
+                    cancellationToken);
                 await CreateDatabaseSnapshotAsync(
                     Path.Combine(rollbackRoot, "kkindle.db"),
                     cancellationToken);
@@ -216,6 +227,7 @@ public sealed class AppBackupService
                             new AggregateException(importException, rollbackException));
                     }
                 }
+                TryDeleteFile(baselineResetMarker);
                 throw;
             }
             finally

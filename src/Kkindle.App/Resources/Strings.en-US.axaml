@@ -1983,6 +1983,17 @@
     <x:String x:Key="Ui.Mcp.Tool.ConvertBookDescription">Use the existing converter without overwriting conflicting output files.</x:String>
     <x:String x:Key="Ui.Mcp.Tool.ImportBook">import_book</x:String>
     <x:String x:Key="Ui.Mcp.Tool.ImportBookDescription">Import into the library; duplicates and same-book conflicts return errors without overwriting.</x:String>
+    <x:String x:Key="Ui.Mcp.OperationsGroup">Operations and reading data</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteBook">delete_book</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteBookDescription">Move a book and its files to the recoverable trash; calls preview by default.</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteDeviceBook">delete_device_book</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteDeviceBookDescription">Delete a book from a connected device; calls preview by default.</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.CollectionManage">Manage collections</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.CollectionManageDescription">Allow creating, renaming, merging, or deleting collections.</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.SearchBookContent">search_book_content</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.Annotations">list_book_annotations</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.Bookmarks">list_bookmarks</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.ReadingDashboard">get_reading_dashboard</x:String>
     <x:String x:Key="Ui.Mcp.Tools">Read-only and operation tools are registered according to the switches above; disabled tools are unavailable after the next MCP server start.</x:String>
     <x:String x:Key="Ui.Mcp.CopyAiPrompt">Copy connection instructions</x:String>
     <x:String x:Key="Ui.Mcp.CopyHermes">Copy Hermes connection config</x:String>

@@ -58,17 +58,21 @@ public sealed record EmbeddingModelPackage(
         [
             new EmbeddingModelFile(
                 "model.onnx",
-                new Uri("https://huggingface.co/Qdrant/bge-small-zh-v1.5/resolve/main/model_optimized.onnx"),
+                new Uri("https://huggingface.co/Qdrant/bge-small-zh-v1.5/resolve/46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59/model_optimized.onnx"),
                 MaximumBytes: 150L * 1024 * 1024,
                 ExpectedSha256: "1294ea4b6331115a353d81f96b85e8c8d7fdcc284453d5b2fab5b016230aad38"),
             new EmbeddingModelFile(
                 "vocab.txt",
-                new Uri("https://huggingface.co/Qdrant/bge-small-zh-v1.5/resolve/main/vocab.txt"),
-                MaximumBytes: 2L * 1024 * 1024),
+                new Uri("https://huggingface.co/Qdrant/bge-small-zh-v1.5/resolve/46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59/vocab.txt"),
+                MaximumBytes: 2L * 1024 * 1024,
+                ExpectedBytes: 109_540,
+                ExpectedSha256: "45BBAC6B341C319ADC98A532532882E91A9CEFC0329AA57BAC9AE761C27B291C"),
             new EmbeddingModelFile(
                 "tokenizer_config.json",
-                new Uri("https://huggingface.co/Qdrant/bge-small-zh-v1.5/resolve/main/tokenizer_config.json"),
-                MaximumBytes: 1L * 1024 * 1024)
+                new Uri("https://huggingface.co/Qdrant/bge-small-zh-v1.5/resolve/46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59/tokenizer_config.json"),
+                MaximumBytes: 1L * 1024 * 1024,
+                ExpectedBytes: 367,
+                ExpectedSha256: "E6F3B96DB926A37D4039995FBF5AD17DE158DFB8F6343D607E4DBAAD18D75F5A")
         ]);
 
     /// <summary>
@@ -101,7 +105,8 @@ public sealed record EmbeddingModelPackage(
                 "tokenizer_config.json",
                 new Uri("https://huggingface.co/intfloat/multilingual-e5-small/resolve/03415a4be176a1620747c692ed433219fabc3def/onnx/tokenizer_config.json"),
                 MaximumBytes: 1L * 1024 * 1024,
-                ExpectedBytes: 443)
+                ExpectedBytes: 443,
+                ExpectedSha256: "A1D6BC8734A6F635DC158508BEF000F8E2E5A759C7D92F984B2C86E5FF53425B")
         ],
         TokenizerKind: EmbeddingTokenizerKind.SentencePieceXlmRoberta,
         TokenizerFileName: "sentencepiece.bpe.model",

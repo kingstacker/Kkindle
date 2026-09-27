@@ -1983,6 +1983,17 @@
     <x:String x:Key="Ui.Mcp.Tool.ConvertBookDescription">使用现有转换器生成目标格式，不覆盖冲突文件。</x:String>
     <x:String x:Key="Ui.Mcp.Tool.ImportBook">import_book</x:String>
     <x:String x:Key="Ui.Mcp.Tool.ImportBookDescription">导入书籍到书库；重复或同书冲突返回错误，不覆盖文件。</x:String>
+    <x:String x:Key="Ui.Mcp.OperationsGroup">操作权限与阅读数据</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteBook">delete_book</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteBookDescription">把书籍和文件移入可恢复的回收站；调用默认只预览。</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteDeviceBook">delete_device_book</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.DeleteDeviceBookDescription">从已连接设备删除书籍；调用默认只预览。</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.CollectionManage">收藏夹管理</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.CollectionManageDescription">允许创建、重命名、合并或删除收藏夹。</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.SearchBookContent">search_book_content</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.Annotations">list_book_annotations</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.Bookmarks">list_bookmarks</x:String>
+    <x:String x:Key="Ui.Mcp.Tool.ReadingDashboard">get_reading_dashboard</x:String>
     <x:String x:Key="Ui.Mcp.Tools">只读工具与操作工具会按上面的开关注册；关闭的工具将在下次启动 MCP server 后不再提供。</x:String>
     <x:String x:Key="Ui.Mcp.CopyAiPrompt">复制接入说明</x:String>
     <x:String x:Key="Ui.Mcp.CopyHermes">复制 Hermes 接入配置</x:String>

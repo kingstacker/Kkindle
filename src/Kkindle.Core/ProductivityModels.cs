@@ -157,6 +157,13 @@ public sealed record McpServerSettings
     public bool SendToKindleEnabled { get; init; } = true;
     public bool ConvertBookEnabled { get; init; } = true;
     public bool ImportBookEnabled { get; init; } = true;
+    public bool DeleteBookEnabled { get; init; }
+    public bool DeleteDeviceBookEnabled { get; init; }
+    public bool CollectionManageEnabled { get; init; }
+    public bool SearchBookContentEnabled { get; init; } = true;
+    public bool AnnotationsEnabled { get; init; } = true;
+    public bool BookmarksEnabled { get; init; } = true;
+    public bool ReadingDashboardEnabled { get; init; } = true;
 
     public static McpServerSettings Normalize(McpServerSettings? settings)
     {
@@ -183,7 +190,14 @@ public sealed record McpServerSettings
             EjectDeviceEnabled = settings.EjectDeviceEnabled,
             SendToKindleEnabled = settings.SendToKindleEnabled,
             ConvertBookEnabled = settings.ConvertBookEnabled,
-            ImportBookEnabled = settings.ImportBookEnabled
+            ImportBookEnabled = settings.ImportBookEnabled,
+            DeleteBookEnabled = settings.DeleteBookEnabled,
+            DeleteDeviceBookEnabled = settings.DeleteDeviceBookEnabled,
+            CollectionManageEnabled = settings.CollectionManageEnabled,
+            SearchBookContentEnabled = settings.SearchBookContentEnabled,
+            AnnotationsEnabled = settings.AnnotationsEnabled,
+            BookmarksEnabled = settings.BookmarksEnabled,
+            ReadingDashboardEnabled = settings.ReadingDashboardEnabled
         };
     }
 }

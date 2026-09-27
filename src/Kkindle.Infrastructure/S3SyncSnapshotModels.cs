@@ -25,6 +25,7 @@ internal sealed class S3SyncSnapshot
     public List<S3SyncLayout> Layouts { get; set; } = [];
     public List<S3SyncReadingStats> ReadingStats { get; set; } = [];
     public List<S3SyncTombstone> Tombstones { get; set; } = [];
+    public DateTimeOffset? TombstonesPrunedBefore { get; set; }
 
     // These maps are populated only while capturing the local snapshot. They
     // are deliberately excluded from the wire format: relative paths are
@@ -87,6 +88,7 @@ internal sealed class S3SyncCollection
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 internal sealed class S3SyncCollectionItem
@@ -216,7 +218,6 @@ internal sealed class S3SyncAppSettings
     public bool CollectionsMutuallyExclusive { get; set; } = true;
     public int AutoBackupRetention { get; set; } = 5;
     public bool AiEnabled { get; set; } = true;
-    public bool NetworkEnabled { get; set; } = true;
     public bool AutoUpdateCheckEnabled { get; set; } = true;
     public bool DevelopmentUpdateCheckEnabled { get; set; }
     public bool AutoDoubanMatchOnImport { get; set; }

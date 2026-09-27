@@ -5117,6 +5117,7 @@ public partial class MainWindow
         }
 
         if (_lifetimeCancellation.IsCancellationRequested) return;
+        _lastInProcessDataChangeUtc = DateTime.UtcNow;
         _s3LocalChangeVersion++;
         _s3DeletionConfirmationPending = false;
         _s3SyncCancelledByUser = false;

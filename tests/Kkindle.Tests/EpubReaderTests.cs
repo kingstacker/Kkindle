@@ -878,7 +878,7 @@ public sealed class EpubReaderTests
             Assert.Contains("original chapter", html, StringComparison.Ordinal);
             Assert.DoesNotContain("kkindle-vertical-latin", html, StringComparison.Ordinal);
             Assert.DoesNotContain("stale transformed chapter", html, StringComparison.Ordinal);
-            Assert.EndsWith("\n70", markerText, StringComparison.Ordinal);
+            Assert.EndsWith("\n71", markerText, StringComparison.Ordinal);
         }
         finally { TestHelpers.TryDelete(root); }
     }

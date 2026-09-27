@@ -5706,6 +5706,22 @@ public partial class MainWindow
             CompleteReaderTtsNavigationRequest(navigationRequestVersion);
             return false;
         }
+        if (CurrentReaderHost is not { } currentHost
+            || !ReaderHostHasLoadedDocument(currentHost, target))
+        {
+            // Commit an open annotation against the outgoing chapter before
+            // the active host changes. If the save fails, keep the editor open
+            // and cancel navigation so the draft cannot be attached to the
+            // next chapter by a later Save click.
+            if (ReaderAnnotationInputPopup.IsOpen)
+            {
+                await SaveReaderAnnotationAsync(ReaderAnnotationInputBox.Text ?? string.Empty);
+                if (ReaderAnnotationInputPopup.IsOpen)
+                    return false;
+            }
+            HideReaderAnnotationInputPopup();
+            HideReaderAnnotationHoverPopup();
+        }
         CancelReaderChapterPreload(target);
         PruneReaderPendingLocations(intent);
         HideReaderSelectionPopup();

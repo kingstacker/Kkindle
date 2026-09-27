@@ -53,6 +53,7 @@ public sealed class XhtmlChapterLoader
     private MicroCss? _css;
     private string _chapterPath = string.Empty;
     private string _chapterDir = string.Empty;
+    private string _resourceRoot = string.Empty;
     private CancellationToken _cancellationToken;
 
     public XhtmlChapterLoader(bool paragraphIndent = true)
@@ -75,6 +76,7 @@ public sealed class XhtmlChapterLoader
         _css = null;
         _chapterPath = Path.GetFullPath(chapterPath);
         _chapterDir = Path.GetDirectoryName(_chapterPath) ?? string.Empty;
+        _resourceRoot = FindResourceRoot(_chapterPath, _chapterDir);
 
         var document = LoadDocument(_chapterPath);
         cancellationToken.ThrowIfCancellationRequested();
@@ -90,7 +92,7 @@ public sealed class XhtmlChapterLoader
             };
         }
 
-        _css = CollectStylesheets(document, _chapterDir);
+        _css = CollectStylesheets(document, _chapterDir, _resourceRoot);
 
         var body = document.Root
             .Descendants()
@@ -139,7 +141,7 @@ public sealed class XhtmlChapterLoader
         }
     }
 
-    private MicroCss CollectStylesheets(XDocument document, string chapterDir)
+    private MicroCss CollectStylesheets(XDocument document, string chapterDir, string resourceRoot)
     {
         var sources = new List<string>();
         var head = document.Root?
@@ -157,7 +159,7 @@ public sealed class XhtmlChapterLoader
                     continue;
                 }
 
-                var cssPath = ResolveLocalPath(href, chapterDir);
+                var cssPath = ResolveLocalPath(href, chapterDir, resourceRoot);
                 if (cssPath is not null && File.Exists(cssPath))
                 {
                     try
@@ -180,7 +182,7 @@ public sealed class XhtmlChapterLoader
         return MicroCss.Parse(sources.ToArray());
     }
 
-    private static string? ResolveLocalPath(string href, string baseDir)
+    private static string? ResolveLocalPath(string href, string baseDir, string resourceRoot)
     {
         if (string.IsNullOrWhiteSpace(href))
         {
@@ -195,24 +197,45 @@ public sealed class XhtmlChapterLoader
 
         try
         {
-            if (Uri.TryCreate(pathPart, UriKind.Absolute, out var absolute))
-            {
-                if (!absolute.IsFile)
-                {
-                    return null;
-                }
+            var decoded = Uri.UnescapeDataString(pathPart).Replace('/', Path.DirectorySeparatorChar);
+            // Spine resources are archive-relative. Never follow file:, drive,
+            // UNC, or other rooted paths supplied by the publication.
+            if (Path.IsPathRooted(decoded)
+                || Regex.IsMatch(decoded, @"^[A-Za-z][A-Za-z0-9+.-]*:", RegexOptions.CultureInvariant))
+                return null;
 
-                pathPart = absolute.LocalPath;
-            }
-
-            var decoded = Uri.UnescapeDataString(pathPart);
-            return Path.GetFullPath(Path.Combine(baseDir, decoded));
+            var fullPath = Path.GetFullPath(Path.Combine(baseDir, decoded));
+            var relative = Path.GetRelativePath(resourceRoot, fullPath);
+            if (Path.IsPathRooted(relative)
+                || relative.Equals("..", StringComparison.Ordinal)
+                || relative.StartsWith(".." + Path.DirectorySeparatorChar, PathComparison))
+                return null;
+            return fullPath;
         }
-        catch (UriFormatException)
+        catch (Exception exception) when (exception is UriFormatException or ArgumentException or IOException)
         {
             return null;
         }
     }
+
+    private static string FindResourceRoot(string chapterPath, string chapterDirectory)
+    {
+        // EPUB extraction uses the SHA-256 key as the cache directory name.
+        // Finding that path boundary lets legal ../ links reach package files
+        // while preventing a chapter from reading files outside its archive.
+        for (var directory = new DirectoryInfo(chapterDirectory); directory is not null; directory = directory.Parent)
+        {
+            var name = directory.Name;
+            if (name.Length == 64 && name.All(Uri.IsHexDigit))
+                return directory.FullName;
+        }
+
+        return chapterDirectory;
+    }
+
+    private static StringComparison PathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
 
     private static string StripQueryAndFragment(string value)
     {
@@ -263,7 +286,7 @@ public sealed class XhtmlChapterLoader
             var fragmentPart = hash >= 0 ? href[(hash + 1)..] : null;
             var targetPath = pathPart.Length == 0
                 ? _chapterPath
-                : ResolveLocalPath(pathPart, _chapterDir);
+                : ResolveLocalPath(pathPart, _chapterDir, _resourceRoot);
             if (targetPath is null)
             {
                 return null;
@@ -858,7 +881,7 @@ public sealed class XhtmlChapterLoader
     private void AddImageBlock(XElement element, FlowContext? ctx = null)
     {
         var src = GetImageReference(element);
-        var path = ResolveLocalPath(src ?? string.Empty, _chapterDir);
+        var path = ResolveLocalPath(src ?? string.Empty, _chapterDir, _resourceRoot);
         path = ResolveRasterImagePath(path);
         if (path is null)
         {
@@ -899,7 +922,7 @@ public sealed class XhtmlChapterLoader
     private void AddInlineImage(XElement element, FlowContext ctx)
     {
         var src = GetImageReference(element);
-        var path = ResolveRasterImagePath(ResolveLocalPath(src ?? string.Empty, _chapterDir));
+        var path = ResolveRasterImagePath(ResolveLocalPath(src ?? string.Empty, _chapterDir, _resourceRoot));
         if (path is null || !File.Exists(path))
         {
             return;
@@ -935,7 +958,7 @@ public sealed class XhtmlChapterLoader
                 .FirstOrDefault(child => child.Name.LocalName.Equals("image", StringComparison.OrdinalIgnoreCase));
             source = image is null ? null : GetImageReference(image);
         }
-        var path = ResolveRasterImagePath(ResolveLocalPath(source ?? string.Empty, _chapterDir));
+        var path = ResolveRasterImagePath(ResolveLocalPath(source ?? string.Empty, _chapterDir, _resourceRoot));
         if (path is null)
         {
             // Preserve the SVG's text nodes in the offset stream even when a
@@ -1099,7 +1122,7 @@ public sealed class XhtmlChapterLoader
         return null;
     }
 
-    private static string? ResolveRasterImagePath(string? path)
+    private string? ResolveRasterImagePath(string? path)
     {
         if (path is null || !path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
         {
@@ -1113,7 +1136,7 @@ public sealed class XhtmlChapterLoader
             foreach (var image in svg.Descendants().Where(e => e.Name.LocalName.Equals("image", StringComparison.OrdinalIgnoreCase)))
             {
                 var reference = GetImageReference(image);
-                var candidate = ResolveLocalPath(reference ?? string.Empty, baseDir);
+                var candidate = ResolveLocalPath(reference ?? string.Empty, baseDir, _resourceRoot);
                 if (candidate is not null && File.Exists(candidate)
                     && !candidate.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
                 {

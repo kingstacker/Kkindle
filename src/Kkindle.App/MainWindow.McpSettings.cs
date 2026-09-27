@@ -54,6 +54,13 @@ public partial class MainWindow
         McpSendToKindleEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
         McpConvertBookEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
         McpImportBookEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpDeleteBookEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpDeleteDeviceBookEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpCollectionManageEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpSearchBookContentEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpAnnotationsEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpBookmarksEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpReadingDashboardEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
         _mcpSettingsInitialized = true;
 
         if (McpSettingsHaveUnsavedChanges())
@@ -88,6 +95,13 @@ public partial class MainWindow
             McpSendToKindleEnabledCheck.IsChecked = settings.SendToKindleEnabled;
             McpConvertBookEnabledCheck.IsChecked = settings.ConvertBookEnabled;
             McpImportBookEnabledCheck.IsChecked = settings.ImportBookEnabled;
+            McpDeleteBookEnabledCheck.IsChecked = settings.DeleteBookEnabled;
+            McpDeleteDeviceBookEnabledCheck.IsChecked = settings.DeleteDeviceBookEnabled;
+            McpCollectionManageEnabledCheck.IsChecked = settings.CollectionManageEnabled;
+            McpSearchBookContentEnabledCheck.IsChecked = settings.SearchBookContentEnabled;
+            McpAnnotationsEnabledCheck.IsChecked = settings.AnnotationsEnabled;
+            McpBookmarksEnabledCheck.IsChecked = settings.BookmarksEnabled;
+            McpReadingDashboardEnabledCheck.IsChecked = settings.ReadingDashboardEnabled;
             McpSettingsStatusText.Text = string.Empty;
             UpdateMcpTransportControls();
         }
@@ -163,7 +177,14 @@ public partial class MainWindow
         EjectDeviceEnabled = McpEjectDeviceEnabledCheck.IsChecked != false,
         SendToKindleEnabled = McpSendToKindleEnabledCheck.IsChecked != false,
         ConvertBookEnabled = McpConvertBookEnabledCheck.IsChecked != false,
-        ImportBookEnabled = McpImportBookEnabledCheck.IsChecked != false
+        ImportBookEnabled = McpImportBookEnabledCheck.IsChecked != false,
+        DeleteBookEnabled = McpDeleteBookEnabledCheck.IsChecked == true,
+        DeleteDeviceBookEnabled = McpDeleteDeviceBookEnabledCheck.IsChecked == true,
+        CollectionManageEnabled = McpCollectionManageEnabledCheck.IsChecked == true,
+        SearchBookContentEnabled = McpSearchBookContentEnabledCheck.IsChecked == true,
+        AnnotationsEnabled = McpAnnotationsEnabledCheck.IsChecked == true,
+        BookmarksEnabled = McpBookmarksEnabledCheck.IsChecked == true,
+        ReadingDashboardEnabled = McpReadingDashboardEnabledCheck.IsChecked == true
     });
 
     private void ScheduleMcpSettingsAutoSave()
@@ -422,6 +443,20 @@ public partial class MainWindow
             features.Add(("convert_book", T("格式转换")));
         if (settings.ImportBookEnabled)
             features.Add(("import_book", T("导入书库")));
+        if (settings.DeleteBookEnabled)
+            features.Add(("delete_book", T("移入回收站")));
+        if (settings.DeleteDeviceBookEnabled)
+            features.Add(("delete_device_book", T("删除设备书籍")));
+        if (settings.CollectionManageEnabled)
+            features.Add(("create/rename/delete_collection", T("收藏夹管理")));
+        if (settings.SearchBookContentEnabled)
+            features.Add(("search_book_content", T("书内搜索")));
+        if (settings.AnnotationsEnabled)
+            features.Add(("list_book_annotations", T("书籍批注")));
+        if (settings.BookmarksEnabled)
+            features.Add(("list_bookmarks", T("书签")));
+        if (settings.ReadingDashboardEnabled)
+            features.Add(("get_reading_dashboard", T("阅读统计面板")));
         return features;
     }
 

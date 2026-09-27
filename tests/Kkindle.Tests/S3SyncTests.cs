@@ -369,7 +369,7 @@ public sealed class S3SyncTests
     }
 
     [Fact]
-    public async Task Consolidation_KeepsFileBearingBookAndMergesDuplicateMetadata()
+    public async Task Consolidation_DoesNotMergeBooksWithOnlyMatchingMetadata()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -401,11 +401,14 @@ public sealed class S3SyncTests
                          'covers/duplicate.jpg', $created, $updated);
                     INSERT INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256)
                     VALUES ($file, $canonical, 'azw3', 'library/canonical/book.azw3', 4,
-                            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+                            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+                           ($duplicateFile, $duplicate, 'azw3', 'library/duplicate/book.azw3', 4,
+                            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
                     """;
                 command.Parameters.AddWithValue("$canonical", canonicalId.ToString());
                 command.Parameters.AddWithValue("$duplicate", duplicateId.ToString());
                 command.Parameters.AddWithValue("$file", Guid.NewGuid().ToString());
+                command.Parameters.AddWithValue("$duplicateFile", Guid.NewGuid().ToString());
                 command.Parameters.AddWithValue("$created", createdAt.ToString("O"));
                 command.Parameters.AddWithValue("$updated", duplicateUpdatedAt.ToString("O"));
                 await command.ExecuteNonQueryAsync();
@@ -421,21 +424,13 @@ public sealed class S3SyncTests
                 service,
                 [pathsToDelete, CancellationToken.None])!;
 
-            Assert.Equal(1, await mergeTask);
+            Assert.Equal(0, await mergeTask);
             await using var verify = new SqliteConnection($"Data Source={paths.Database}");
             await verify.OpenAsync();
             var count = verify.CreateCommand();
             count.CommandText = "SELECT COUNT(*) FROM Books WHERE Title = '同一本书';";
-            Assert.Equal(1L, (long)(await count.ExecuteScalarAsync())!);
-
-            var metadata = verify.CreateCommand();
-            metadata.CommandText = "SELECT Id, Description, IsFavorite FROM Books WHERE Title = '同一本书';";
-            await using var reader = await metadata.ExecuteReaderAsync();
-            Assert.True(await reader.ReadAsync());
-            Assert.Equal(canonicalId.ToString(), reader.GetString(0));
-            Assert.Equal("重复记录的简介", reader.GetString(1));
-            Assert.Equal(1, reader.GetInt32(2));
-            Assert.Single(pathsToDelete, path => path.EndsWith("duplicate.jpg", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(2L, (long)(await count.ExecuteScalarAsync())!);
+            Assert.Empty(pathsToDelete);
         }
         finally
         {

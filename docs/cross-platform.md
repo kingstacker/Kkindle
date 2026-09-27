@@ -61,7 +61,7 @@ EPUB typography preferences.
 
 The `Development Build` GitHub Actions workflow can be run manually or by
 pushing the `dev`, `develop`, or `dev/**` branches. It appends the Actions run
-number to a base version such as `1.0.2-dev`, builds Windows installer and
+number to a base version such as `1.0.5-dev`, builds Windows installer and
 three-platform packages, and publishes a GitHub pre-release tagged with the
 development version. The workflow also keeps the per-platform artifacts for
 seven days. Development macOS packages always use ad-hoc signing.

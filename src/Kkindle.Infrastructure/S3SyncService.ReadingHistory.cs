@@ -7,6 +7,7 @@ public sealed partial class S3SyncService
     private async Task<bool> ConsolidateLocalReadingHistoryAsync(CancellationToken cancellationToken)
     {
         await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await SuppressDeletionTrackingAsync(connection, transaction, true, cancellationToken);
         using var commands = new SqliteCommandCache(connection, transaction);
