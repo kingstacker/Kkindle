@@ -463,32 +463,6 @@ public partial class MainWindow
             _readerLastSelectionPopupBottom);
     }
 
-    private async Task PerformReaderSelectionDictionaryAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
-        var term = _readerPendingSelection.Trim();
-        IReadOnlyList<DictionaryEntry> entries;
-        try
-        {
-            entries = await _dictionaryService.LookupAsync(term, ReaderToken);
-        }
-        catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (Exception exception)
-        {
-            ReaderStatusText.Text = T("词典查询失败：{0}", UiText.Localize(exception.Message));
-            return;
-        }
-        // Show every dictionary entry in a dialog, matching the WinUI
-        // reference's ReaderSelectionDictionaryButton_Click.
-        await ShowMessageAsync(T("词典 · {0}", term), entries.Count == 0
-            ? T("没有找到释义。请先在“字典管理”中导入词典。")
-            : string.Join("\n\n", entries.Select(entry => $"[{entry.DictionaryName}] {entry.Definition}")),
-            T("返回阅读"));
-    }
-
     private void EditReaderPdfAnnotation(ReaderAnnotation annotation)
     {
         if (!_readerIsPdf || !TryGetReaderPdfPage(annotation.ChapterPath, out var page) || page != _readerPdfPage) return;

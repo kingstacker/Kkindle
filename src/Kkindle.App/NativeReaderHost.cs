@@ -3195,8 +3195,17 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return null;
         }
 
+        var firstBand = rects[0];
+        // In a spread, later wrapped lines can start farther left than the
+        // selected text's first line. Anchoring to the minimum X across every
+        // band puts the floating bar at the page margin instead of beside the
+        // selection. GetOverlayRects preserves text order, so its first band
+        // is the correct horizontal anchor.
+        var left = IsSpread
+            ? firstBand.Left
+            : rects.Min(rect => rect.Left);
         return (
-            rects.Min(rect => rect.Left),
+            left,
             rects.Min(rect => rect.Top),
             rects.Max(rect => rect.Bottom));
     }

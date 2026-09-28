@@ -6057,7 +6057,8 @@
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionSearchButton_Click" />
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button Content="{DynamicResource Ui.Auto.854581A8F04CE575}"
+                        <Button x:Name="ReaderSelectionDictionaryButton"
+                                Content="{DynamicResource Ui.Auto.5935BB8194ABA677}"
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionDictionaryButton_Click" />
                         <Rectangle x:Name="ReaderSelectionDeleteSeparator"
@@ -6146,6 +6147,109 @@
                                     IsEnabled="False"
                                     Click="ReaderTranslationCopyButton_Click" />
                         </Grid>
+                    </Grid>
+                </Border>
+            </Popup>
+
+            <Popup x:Name="ReaderDictionaryHostPopup"
+                   IsOpen="False"
+                   IsLightDismissEnabled="True"
+                   OverlayDismissEventPassThrough="True"
+                   ShouldUseOverlayLayer="True"
+                   TakesFocusFromNativeControl="False"
+                   Closed="ReaderDictionaryHostPopup_Closed">
+                <Border x:Name="ReaderDictionaryPopup"
+                        Width="440"
+                        MaxHeight="500"
+                        Padding="12"
+                        Background="{DynamicResource ReaderPageBrush}"
+                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="0">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <StackPanel Spacing="2" VerticalAlignment="Center">
+                                <TextBlock x:Name="ReaderDictionaryTermText"
+                                           FontSize="15"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Foreground="{DynamicResource ReaderMutedBrush}"
+                                           FontSize="11"
+                                           Text="{DynamicResource Ui.Auto.5935BB8194ABA677}" />
+                            </StackPanel>
+                            <Button x:Name="ReaderDictionaryCloseButton"
+                                    Grid.Column="1"
+                                    Classes="quiet"
+                                    Content="×"
+                                    ToolTip.Tip="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
+                                    AutomationProperties.Name="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
+                                    Click="ReaderDictionaryCloseButton_Click" />
+                        </Grid>
+                        <ScrollViewer Grid.Row="1"
+                                      MaxHeight="420"
+                                      VerticalScrollBarVisibility="Auto">
+                            <StackPanel Spacing="9">
+                                <Border Padding="9"
+                                        Background="{DynamicResource ReaderHoverBrush}"
+                                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                                        BorderThickness="1">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Text="{DynamicResource Ui.Auto.F0486713A9BABBE5}" />
+                                        <TextBlock x:Name="ReaderDictionaryLocalStatusText"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock x:Name="ReaderDictionaryLocalResultText"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Padding="9"
+                                        Background="{DynamicResource ReaderHoverBrush}"
+                                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                                        BorderThickness="1">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Text="{DynamicResource Ui.Auto.138FACD84448FED4}" />
+                                        <TextBlock x:Name="ReaderDictionaryWikipediaPrivacyText"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   Text="{DynamicResource Ui.Auto.FB54F1209B4A7324}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock x:Name="ReaderDictionaryWikipediaStatusText"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <StackPanel x:Name="ReaderDictionaryWikipediaResultPanel"
+                                                    IsVisible="False"
+                                                    Spacing="5">
+                                            <TextBlock x:Name="ReaderDictionaryWikipediaTitleText"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock x:Name="ReaderDictionaryWikipediaExtractText"
+                                                       TextWrapping="Wrap" />
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                <TextBlock x:Name="ReaderDictionaryAttributionText"
+                                                           VerticalAlignment="Center"
+                                                           FontSize="10"
+                                                           Foreground="{DynamicResource ReaderMutedBrush}"
+                                                           Text="{DynamicResource Ui.Auto.E15BDB444E1C8F75}"
+                                                           TextWrapping="Wrap" />
+                                                <Button x:Name="ReaderDictionaryWikipediaOpenButton"
+                                                        Grid.Column="1"
+                                                        Classes="quiet"
+                                                        Content="{DynamicResource Ui.Auto.3665885A4FDCEC0A}"
+                                                        Click="ReaderDictionaryWikipediaOpenButton_Click" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
                     </Grid>
                 </Border>
             </Popup>
