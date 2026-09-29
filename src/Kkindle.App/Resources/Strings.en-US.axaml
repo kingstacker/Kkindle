@@ -268,7 +268,6 @@
     <x:String x:Key="Ui.Auto.0A379C1E7398FBA1">Any status</x:String>
     <x:String x:Key="Ui.Auto.B25B2E4E11693509">Any language</x:String>
     <x:String x:Key="Ui.Auto.52D25A9E30BA94F1">About</x:String>
-    <x:String x:Key="Ui.Integrations.Title">Integrations</x:String>
     <x:String x:Key="Ui.About.UserGroup">QQ group: 1109898894</x:String>
     <x:String x:Key="Ui.About.LogExportTitle">Software logs</x:String>
     <x:String x:Key="Ui.About.LogExportDescription">Export runtime logs and environment diagnostics for troubleshooting. Email passwords, API keys, and book files are not packaged.</x:String>

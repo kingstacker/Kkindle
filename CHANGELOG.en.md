@@ -6,6 +6,25 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.6 (2026-09-29)
+
+### Added
+
+- Added dictionary and Wikipedia lookup popups to the reader.
+
+### Fixed
+
+- Fixed data consistency and recovery issues across sync, library import, reader annotations, MCP tools, and Kindle transfers.
+- Strengthened path and integrity checks for EPUB, MCP, device-file, and model-download handling.
+- Fixed the MCP server keeping files in use during installer updates.
+
+### Improved
+
+- Improved S3/WebDAV file matching, interrupted-transfer recovery, concurrent access, and deletion safeguards.
+- Improved reader lookup popup positioning so it stays with the selected page in two-page reading.
+- Moved MCP server settings to the “Reading & AI” category and collapsed the section by default.
+- Added the official website link to the top of both README files.
+
 ## 1.0.2 (2026-09-19)
 
 ### Fixed
