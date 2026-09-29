@@ -5128,8 +5128,16 @@ public partial class MainWindow : Window
         await animation.RunAsync(this, cancellationToken);
     }
 
-    private void MaximizeWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-        => ToggleMaximized();
+    private async void MaximizeWindowButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_readerZenMode)
+        {
+            await ExitReaderZenModeSmoothlyAsync();
+            return;
+        }
+
+        ToggleMaximized();
+    }
 
     // The caption X saves and closes the current reading session. From the
     // library it parks the application in the system tray; 退出 exits it.
@@ -5152,13 +5160,19 @@ public partial class MainWindow : Window
     }
 
     private void ToggleMaximized()
-        => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        => WindowState = WindowState is WindowState.Maximized or WindowState.FullScreen
+            ? WindowState.Normal
+            : WindowState.Maximized;
 
     private void UpdateMaximizeGlyph()
     {
-        var isMaximized = WindowState == WindowState.Maximized;
+        var isMaximized = WindowState is WindowState.Maximized or WindowState.FullScreen;
         MaximizeWindowGlyph.Data = Geometry.Parse(isMaximized ? RestoreGlyphData : MaximizeGlyphData);
         AutomationProperties.SetName(MaximizeWindowButton, isMaximized ? T("还原") : T("最大化"));
+        if (ReaderZenPopupMaximizeGlyph is not null)
+            ReaderZenPopupMaximizeGlyph.Data = Geometry.Parse(isMaximized ? RestoreGlyphData : MaximizeGlyphData);
+        if (ReaderZenPopupMaximizeButton is not null)
+            AutomationProperties.SetName(ReaderZenPopupMaximizeButton, isMaximized ? T("还原") : T("最大化"));
     }
 
     private void LibraryRoot_SizeChanged(object? sender, SizeChangedEventArgs e)

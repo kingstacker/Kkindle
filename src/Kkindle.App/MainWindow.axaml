@@ -2334,7 +2334,6 @@
                         <Button x:Name="SettingsReadingButton" Content="{DynamicResource Ui.Auto.959378340D4DE6CD}" Classes="settingsCategory" Tag="Reading" Click="SettingsCategoryButton_Click" />
                         <Button x:Name="SettingsKindleButton" Content="{DynamicResource Ui.Auto.795007E173C70289}" Classes="settingsCategory" Tag="Kindle" Click="SettingsCategoryButton_Click" />
                         <Button x:Name="SettingsDataButton" Content="{DynamicResource Ui.Auto.1173D06BC2EA23F0}" Classes="settingsCategory" Tag="Data" Click="SettingsCategoryButton_Click" />
-                        <Button x:Name="SettingsIntegrationsButton" Content="{DynamicResource Ui.Integrations.Title}" Classes="settingsCategory" Tag="Integrations" Click="SettingsCategoryButton_Click" />
                         <Button x:Name="SettingsAboutButton" Content="{DynamicResource Ui.Auto.0A114F362A5F259E}" Classes="settingsCategory" Tag="About" Click="SettingsCategoryButton_Click" />
                     </WrapPanel>
                     <ScrollViewer x:Name="SettingsScrollViewer" Classes="settingsScroll" Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,12,20">
@@ -2645,6 +2644,108 @@
                                         </StackPanel>
                                     </Border>
                                 </Expander>
+                                <StackPanel Spacing="16">
+                                    <Expander x:Name="SettingsMcpExpander" IsExpanded="False" Classes="settingsExpander" Header="{DynamicResource Ui.Mcp.Title}" Tag="{DynamicResource Ui.Mcp.Description}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Title}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
+                                        <Border x:Name="McpSettingsSection" Padding="0">
+                                            <StackPanel Spacing="14">
+                                                <TextBlock Text="{DynamicResource Ui.Mcp.ExecutableTitle}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Mcp.ExecutablePathLabel}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                <TextBlock x:Name="McpExecutablePathText" FontSize="12" TextWrapping="Wrap" />
+                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                    <Ellipse x:Name="McpExecutableStatusDot" Width="7" Height="7" VerticalAlignment="Center" Fill="{DynamicResource DangerBrush}" />
+                                                    <TextBlock x:Name="McpExecutableStatusText" FontSize="12" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <ToggleSwitch x:Name="McpEnabledCheck" IsChecked="True" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Enabled}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Enabled}" />
+                                                <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                                                    <TextBlock Text="{DynamicResource Ui.Mcp.Transport}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                    <ComboBox x:Name="McpTransportBox" Grid.Column="1" SelectedIndex="0" AutomationProperties.Name="{DynamicResource Ui.Mcp.Transport}" FontSize="14">
+                                                        <ComboBoxItem Content="{DynamicResource Ui.Mcp.Transport.Stdio}" Tag="stdio" />
+                                                        <ComboBoxItem Content="{DynamicResource Ui.Mcp.Transport.Http}" Tag="http" />
+                                                    </ComboBox>
+                                                </Grid>
+                                                <Border x:Name="McpHttpSettingsPanel" Classes="flatSubsection" Padding="12" IsVisible="False">
+                                                    <StackPanel Spacing="9">
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.HttpReserved}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Port}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                            <NumericUpDown x:Name="McpHttpPortBox" Grid.Column="1" Minimum="1" Maximum="65535" Increment="1" Value="8765" AutomationProperties.Name="{DynamicResource Ui.Mcp.Port}" FontSize="14" />
+                                                        </Grid>
+                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                            <TextBox x:Name="McpAccessTokenBox" PlaceholderText="{DynamicResource Ui.Mcp.AccessTokenPlaceholder}" AutomationProperties.Name="{DynamicResource Ui.Mcp.AccessToken}" FontSize="14" />
+                                                            <Button Grid.Column="1" Content="{DynamicResource Ui.Mcp.GenerateToken}" Classes="quiet" Click="GenerateMcpAccessTokenButton_Click" />
+                                                        </Grid>
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.AccessTokenHint}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border x:Name="McpFeatureSettingsPanel" Classes="flatSubsection" Padding="12">
+                                                    <StackPanel Spacing="8">
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Features}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.FeaturesHint}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.BookLibraryGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                                        <StackPanel Spacing="0">
+                                                            <ToggleSwitch x:Name="McpBookLibraryEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ListLibrary}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ListLibrary}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ListLibraryDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpSearchBooksEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.SearchBooks}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.SearchBooks}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.SearchBooksDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpBookMetadataEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.BookMetadata}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.BookMetadata}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.BookMetadataDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpReadingProgressEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ReadingProgress}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ReadingProgress}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ReadingProgressDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpRecentBooksEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.RecentBooks}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.RecentBooks}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.RecentBooksDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpTagsEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Tags}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Tags}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.TagsDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpCollectionsEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Collections}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Collections}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.CollectionsDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpBookFileEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.BookFile}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.BookFile}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.BookFileDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,0" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.DeviceGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                                        <StackPanel Spacing="0">
+                                                            <ToggleSwitch x:Name="McpDeviceListEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeviceList}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeviceList}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeviceListDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpDeviceStatusEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeviceStatus}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeviceStatus}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeviceStatusDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpDeviceLibraryEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeviceLibrary}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeviceLibrary}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeviceLibraryDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpEjectDeviceEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.EjectDevice}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.EjectDevice}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.EjectDeviceDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,0" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.TransferGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                                        <StackPanel Spacing="0">
+                                                            <ToggleSwitch x:Name="McpSendToKindleEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.SendToKindle}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.SendToKindle}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.SendToKindleDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpConvertBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ConvertBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ConvertBook}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ConvertBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpImportBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ImportBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ImportBook}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ImportBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,0" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <TextBlock Text="{DynamicResource Ui.Mcp.OperationsGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                                        <StackPanel Spacing="0">
+                                                            <ToggleSwitch x:Name="McpDeleteBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeleteBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeleteBook}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeleteBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpDeleteDeviceBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeleteDeviceBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeleteDeviceBook}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeleteDeviceBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpCollectionManageEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.CollectionManage}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.CollectionManage}" />
+                                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tool.CollectionManageDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
+                                                            <ToggleSwitch x:Name="McpSearchBookContentEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.SearchBookContent}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.SearchBookContent}" />
+                                                            <ToggleSwitch x:Name="McpAnnotationsEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Annotations}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Annotations}" />
+                                                            <ToggleSwitch x:Name="McpBookmarksEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Bookmarks}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Bookmarks}" />
+                                                            <ToggleSwitch x:Name="McpReadingDashboardEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ReadingDashboard}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ReadingDashboard}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </Border>
+                                                <TextBlock Text="{DynamicResource Ui.Mcp.Tools}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                <WrapPanel Orientation="Horizontal">
+                                                    <Button x:Name="CopyAiPromptButton" Content="{DynamicResource Ui.Mcp.CopyAiPrompt}" Margin="0,0,8,8" Click="CopyAiPromptButton_Click" />
+                                                    <Button Content="{DynamicResource Ui.Mcp.CopyHermes}" Margin="0,0,8,8" Click="CopyHermesMcpConfigurationButton_Click" />
+                                                    <Button Content="{DynamicResource Ui.Mcp.CopyCodex}" Classes="quiet" Margin="0,0,8,8" Click="CopyCodexMcpConfigurationButton_Click" />
+                                                </WrapPanel>
+                                                <TextBlock x:Name="McpSettingsStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Expander>
+                                </StackPanel>
                             </StackPanel>
                             <StackPanel Spacing="16" x:Name="SettingsKindleSection" IsVisible="False">
                                 <TextBlock Text="{DynamicResource Ui.Auto.A43615418478EEAC}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
@@ -2895,108 +2996,6 @@
                                             </ListBox>
                                             <TextBlock x:Name="LibraryTrashEmptyText" Text="回收站为空。" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" IsVisible="True" TextWrapping="Wrap" />
                                             <TextBlock x:Name="LibraryTrashStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Border>
-                                </Expander>
-                            </StackPanel>
-                            <StackPanel Spacing="16" x:Name="SettingsIntegrationsSection" IsVisible="False">
-                                <Expander x:Name="SettingsMcpExpander" IsExpanded="True" Classes="settingsExpander" Header="{DynamicResource Ui.Mcp.Title}" Tag="{DynamicResource Ui.Mcp.Description}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Title}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
-                                    <Border x:Name="McpSettingsSection" Padding="0">
-                                        <StackPanel Spacing="14">
-                                            <TextBlock Text="{DynamicResource Ui.Mcp.ExecutableTitle}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock Text="{DynamicResource Ui.Mcp.ExecutablePathLabel}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <TextBlock x:Name="McpExecutablePathText" FontSize="12" TextWrapping="Wrap" />
-                                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                                <Ellipse x:Name="McpExecutableStatusDot" Width="7" Height="7" VerticalAlignment="Center" Fill="{DynamicResource DangerBrush}" />
-                                                <TextBlock x:Name="McpExecutableStatusText" FontSize="12" TextWrapping="Wrap" />
-                                            </StackPanel>
-                                            <ToggleSwitch x:Name="McpEnabledCheck" IsChecked="True" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Enabled}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Enabled}" />
-                                            <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                                                <TextBlock Text="{DynamicResource Ui.Mcp.Transport}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <ComboBox x:Name="McpTransportBox" Grid.Column="1" SelectedIndex="0" AutomationProperties.Name="{DynamicResource Ui.Mcp.Transport}" FontSize="14">
-                                                    <ComboBoxItem Content="{DynamicResource Ui.Mcp.Transport.Stdio}" Tag="stdio" />
-                                                    <ComboBoxItem Content="{DynamicResource Ui.Mcp.Transport.Http}" Tag="http" />
-                                                </ComboBox>
-                                            </Grid>
-                                            <Border x:Name="McpHttpSettingsPanel" Classes="flatSubsection" Padding="12" IsVisible="False">
-                                                <StackPanel Spacing="9">
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.HttpReserved}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                    <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Port}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                        <NumericUpDown x:Name="McpHttpPortBox" Grid.Column="1" Minimum="1" Maximum="65535" Increment="1" Value="8765" AutomationProperties.Name="{DynamicResource Ui.Mcp.Port}" FontSize="14" />
-                                                    </Grid>
-                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                        <TextBox x:Name="McpAccessTokenBox" PlaceholderText="{DynamicResource Ui.Mcp.AccessTokenPlaceholder}" AutomationProperties.Name="{DynamicResource Ui.Mcp.AccessToken}" FontSize="14" />
-                                                        <Button Grid.Column="1" Content="{DynamicResource Ui.Mcp.GenerateToken}" Classes="quiet" Click="GenerateMcpAccessTokenButton_Click" />
-                                                    </Grid>
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.AccessTokenHint}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                </StackPanel>
-                                            </Border>
-                                            <Border x:Name="McpFeatureSettingsPanel" Classes="flatSubsection" Padding="12">
-                                                <StackPanel Spacing="8">
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.Features}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.FeaturesHint}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.BookLibraryGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                                    <StackPanel Spacing="0">
-                                                        <ToggleSwitch x:Name="McpBookLibraryEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ListLibrary}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ListLibrary}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ListLibraryDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpSearchBooksEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.SearchBooks}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.SearchBooks}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.SearchBooksDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpBookMetadataEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.BookMetadata}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.BookMetadata}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.BookMetadataDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpReadingProgressEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ReadingProgress}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ReadingProgress}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ReadingProgressDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpRecentBooksEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.RecentBooks}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.RecentBooks}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.RecentBooksDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpTagsEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Tags}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Tags}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.TagsDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpCollectionsEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Collections}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Collections}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.CollectionsDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpBookFileEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.BookFile}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.BookFile}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.BookFileDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,0" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.DeviceGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                                    <StackPanel Spacing="0">
-                                                        <ToggleSwitch x:Name="McpDeviceListEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeviceList}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeviceList}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeviceListDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpDeviceStatusEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeviceStatus}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeviceStatus}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeviceStatusDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpDeviceLibraryEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeviceLibrary}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeviceLibrary}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeviceLibraryDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpEjectDeviceEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.EjectDevice}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.EjectDevice}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.EjectDeviceDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,0" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.TransferGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                                    <StackPanel Spacing="0">
-                                                        <ToggleSwitch x:Name="McpSendToKindleEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.SendToKindle}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.SendToKindle}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.SendToKindleDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpConvertBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ConvertBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ConvertBook}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ConvertBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpImportBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ImportBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ImportBook}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.ImportBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,0" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{DynamicResource Ui.Mcp.OperationsGroup}" FontSize="13" FontWeight="SemiBold" Margin="0,4,0,0" />
-                                                    <StackPanel Spacing="0">
-                                                        <ToggleSwitch x:Name="McpDeleteBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeleteBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeleteBook}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeleteBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpDeleteDeviceBookEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.DeleteDeviceBook}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.DeleteDeviceBook}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.DeleteDeviceBookDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpCollectionManageEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.CollectionManage}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.CollectionManage}" />
-                                                        <TextBlock Text="{DynamicResource Ui.Mcp.Tool.CollectionManageDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" Margin="12,0,0,4" TextWrapping="Wrap" />
-                                                        <ToggleSwitch x:Name="McpSearchBookContentEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.SearchBookContent}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.SearchBookContent}" />
-                                                        <ToggleSwitch x:Name="McpAnnotationsEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Annotations}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Annotations}" />
-                                                        <ToggleSwitch x:Name="McpBookmarksEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.Bookmarks}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.Bookmarks}" />
-                                                        <ToggleSwitch x:Name="McpReadingDashboardEnabledCheck" IsChecked="True" Classes="settingsToggle" Content="{DynamicResource Ui.Mcp.Tool.ReadingDashboard}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Tool.ReadingDashboard}" />
-                                                    </StackPanel>
-                                                </StackPanel>
-                                            </Border>
-                                            <TextBlock Text="{DynamicResource Ui.Mcp.Tools}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <WrapPanel Orientation="Horizontal">
-                                                <Button x:Name="CopyAiPromptButton" Content="{DynamicResource Ui.Mcp.CopyAiPrompt}" Margin="0,0,8,8" Click="CopyAiPromptButton_Click" />
-                                                <Button Content="{DynamicResource Ui.Mcp.CopyHermes}" Margin="0,0,8,8" Click="CopyHermesMcpConfigurationButton_Click" />
-                                                <Button Content="{DynamicResource Ui.Mcp.CopyCodex}" Classes="quiet" Margin="0,0,8,8" Click="CopyCodexMcpConfigurationButton_Click" />
-                                            </WrapPanel>
-                                            <TextBlock x:Name="McpSettingsStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                 </Expander>
@@ -6057,7 +6056,8 @@
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionSearchButton_Click" />
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button Content="{DynamicResource Ui.Auto.854581A8F04CE575}"
+                        <Button x:Name="ReaderSelectionDictionaryButton"
+                                Content="{DynamicResource Ui.Auto.5935BB8194ABA677}"
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionDictionaryButton_Click" />
                         <Rectangle x:Name="ReaderSelectionDeleteSeparator"
@@ -6146,6 +6146,109 @@
                                     IsEnabled="False"
                                     Click="ReaderTranslationCopyButton_Click" />
                         </Grid>
+                    </Grid>
+                </Border>
+            </Popup>
+
+            <Popup x:Name="ReaderDictionaryHostPopup"
+                   IsOpen="False"
+                   IsLightDismissEnabled="True"
+                   OverlayDismissEventPassThrough="True"
+                   ShouldUseOverlayLayer="True"
+                   TakesFocusFromNativeControl="False"
+                   Closed="ReaderDictionaryHostPopup_Closed">
+                <Border x:Name="ReaderDictionaryPopup"
+                        Width="440"
+                        MaxHeight="500"
+                        Padding="12"
+                        Background="{DynamicResource ReaderPageBrush}"
+                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="0">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <StackPanel Spacing="2" VerticalAlignment="Center">
+                                <TextBlock x:Name="ReaderDictionaryTermText"
+                                           FontSize="15"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Foreground="{DynamicResource ReaderMutedBrush}"
+                                           FontSize="11"
+                                           Text="{DynamicResource Ui.Auto.5935BB8194ABA677}" />
+                            </StackPanel>
+                            <Button x:Name="ReaderDictionaryCloseButton"
+                                    Grid.Column="1"
+                                    Classes="quiet"
+                                    Content="×"
+                                    ToolTip.Tip="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
+                                    AutomationProperties.Name="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
+                                    Click="ReaderDictionaryCloseButton_Click" />
+                        </Grid>
+                        <ScrollViewer Grid.Row="1"
+                                      MaxHeight="420"
+                                      VerticalScrollBarVisibility="Auto">
+                            <StackPanel Spacing="9">
+                                <Border Padding="9"
+                                        Background="{DynamicResource ReaderHoverBrush}"
+                                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                                        BorderThickness="1">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Text="{DynamicResource Ui.Auto.F0486713A9BABBE5}" />
+                                        <TextBlock x:Name="ReaderDictionaryLocalStatusText"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock x:Name="ReaderDictionaryLocalResultText"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Padding="9"
+                                        Background="{DynamicResource ReaderHoverBrush}"
+                                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                                        BorderThickness="1">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Text="{DynamicResource Ui.Auto.138FACD84448FED4}" />
+                                        <TextBlock x:Name="ReaderDictionaryWikipediaPrivacyText"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   Text="{DynamicResource Ui.Auto.FB54F1209B4A7324}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock x:Name="ReaderDictionaryWikipediaStatusText"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <StackPanel x:Name="ReaderDictionaryWikipediaResultPanel"
+                                                    IsVisible="False"
+                                                    Spacing="5">
+                                            <TextBlock x:Name="ReaderDictionaryWikipediaTitleText"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock x:Name="ReaderDictionaryWikipediaExtractText"
+                                                       TextWrapping="Wrap" />
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                <TextBlock x:Name="ReaderDictionaryAttributionText"
+                                                           VerticalAlignment="Center"
+                                                           FontSize="10"
+                                                           Foreground="{DynamicResource ReaderMutedBrush}"
+                                                           Text="{DynamicResource Ui.Auto.E15BDB444E1C8F75}"
+                                                           TextWrapping="Wrap" />
+                                                <Button x:Name="ReaderDictionaryWikipediaOpenButton"
+                                                        Grid.Column="1"
+                                                        Classes="quiet"
+                                                        Content="{DynamicResource Ui.Auto.3665885A4FDCEC0A}"
+                                                        Click="ReaderDictionaryWikipediaOpenButton_Click" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
                     </Grid>
                 </Border>
             </Popup>

@@ -3173,30 +3173,32 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 ? boundary
                 : boundary - 1;
             var page = _layout.Pages[pageIndex];
-            var candidates = new[]
+            // Only this page's actual selection boundary is a valid fallback.
+            // Falling back to an arbitrary page edge lets the first visible
+            // page steal the popup anchor when the selection is on the next
+            // page of a spread.
+            if (boundaryCharacter >= 0
+                && boundaryCharacter >= page.TextStartOffset
+                && boundaryCharacter < page.TextEndOffset
+                && _layout.GetCharRect(pageIndex, boundaryCharacter) is { } rect)
             {
-                boundaryCharacter,
-                page.TextStartOffset,
-                page.TextEndOffset - 1,
-            };
-            foreach (var candidate in candidates.Distinct())
-            {
-                if (candidate < 0
-                    || candidate < page.TextStartOffset
-                    || candidate >= page.TextEndOffset
-                    || _layout.GetCharRect(pageIndex, candidate) is not { } rect)
-                {
-                    continue;
-                }
-
                 return (rect.Left, rect.Top, rect.Bottom);
             }
 
             return null;
         }
 
+        var firstBand = rects[0];
+        // In a spread, later wrapped lines can start farther left than the
+        // selected text's first line. Anchoring to the minimum X across every
+        // band puts the floating bar at the page margin instead of beside the
+        // selection. GetOverlayRects preserves text order, so its first band
+        // is the correct horizontal anchor.
+        var left = IsSpread
+            ? firstBand.Left
+            : rects.Min(rect => rect.Left);
         return (
-            rects.Min(rect => rect.Left),
+            left,
             rects.Min(rect => rect.Top),
             rects.Max(rect => rect.Bottom));
     }

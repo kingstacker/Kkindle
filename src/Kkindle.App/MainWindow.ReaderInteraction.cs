@@ -7593,6 +7593,8 @@ public partial class MainWindow
     {
         if (ReaderTranslationHostPopup.IsOpen)
             HideReaderTranslationPopup(clearSelection: false);
+        if (ReaderDictionaryHostPopup.IsOpen)
+            HideReaderDictionaryPopup(clearSelection: false);
         if (string.IsNullOrWhiteSpace(_readerPendingSelection))
         {
             HideReaderSelectionPopup();
@@ -7685,6 +7687,7 @@ public partial class MainWindow
     private void HideReaderSelectionPopup()
     {
         HideReaderTranslationPopup(clearSelection: false);
+        HideReaderDictionaryPopup(clearSelection: false);
         ReaderMarkerPaletteFlyout?.Hide();
         StopReaderSelectionHighlightPointerTracking();
         if (ReaderSelectionHighlightMenuButton?.Flyout is PopupFlyoutBase { IsOpen: true } flyout)
@@ -7699,7 +7702,9 @@ public partial class MainWindow
 
     private void ReaderRoot_SelectionDismissPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if ((!ReaderSelectionHostPopup.IsOpen && !ReaderTranslationHostPopup.IsOpen)
+        if ((!ReaderSelectionHostPopup.IsOpen
+                && !ReaderTranslationHostPopup.IsOpen
+                && !ReaderDictionaryHostPopup.IsOpen)
             || string.IsNullOrWhiteSpace(_readerPendingSelection)
             || !e.GetCurrentPoint(ReaderRoot).Properties.IsLeftButtonPressed)
             return;
@@ -7717,6 +7722,8 @@ public partial class MainWindow
                 || source.GetVisualAncestors().Contains(ReaderSelectionMarkerPalette)
                 || ReferenceEquals(source, ReaderTranslationPopup)
                 || source.GetVisualAncestors().Contains(ReaderTranslationPopup)
+                || ReferenceEquals(source, ReaderDictionaryPopup)
+                || source.GetVisualAncestors().Contains(ReaderDictionaryPopup)
                 || source is ComboBoxItem))
             return;
 
@@ -7931,7 +7938,6 @@ public partial class MainWindow
 
     private async void ReaderSelectionDictionaryButton_Click(object? sender, RoutedEventArgs e)
     {
-        HideReaderSelectionPopup();
         await PerformReaderSelectionDictionaryAsync();
     }
 
@@ -8861,12 +8867,9 @@ public partial class MainWindow
             _readerTocMinimalBeforeZen = ReaderTocCompactPanel.IsVisible;
             CaptureReaderWindowStyleBeforeZen();
             _readerZenMode = true;
-            // Use a borderless maximized window instead of the platform's
-            // FullScreen state. Windows can reveal its own auto-hidden
-            // caption strip when the pointer touches the top edge of a true
-            // FullScreen window; the custom zen popup should be the only
-            // chrome that appears there.
-            WindowState = WindowState.Maximized;
+            // FullScreen covers the taskbar as well as the usable work area;
+            // the custom zen popup remains the only reader chrome.
+            WindowState = WindowState.FullScreen;
             ApplyReaderZenWindowChrome();
             Dispatcher.UIThread.Post(
                 ApplyReaderZenWindowChrome,

@@ -90,7 +90,6 @@ public partial class MainWindow
             ["Reading"] = SettingsReadingSection,
             ["Kindle"] = SettingsKindleSection,
             ["Data"] = SettingsDataSection,
-            ["Integrations"] = SettingsIntegrationsSection,
             ["About"] = SettingsAboutSection
         };
         if (!sections.TryGetValue(tag, out var activeSection))
@@ -108,7 +107,7 @@ public partial class MainWindow
             SettingsScrollViewer.Offset = default;
         _activeSettingsCategory = tag;
         UpdateS3SettingsActions();
-        Button[] buttons = [SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsIntegrationsButton, SettingsAboutButton];
+        Button[] buttons = [SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsAboutButton];
         foreach (var button in buttons)
         {
             var active = string.Equals(button.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase);
