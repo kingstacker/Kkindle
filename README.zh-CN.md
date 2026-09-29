@@ -21,7 +21,7 @@ Kkindle 是一款基于 Avalonia 的跨平台电子书与 Kindle 管理器。它
 
 ## 下载
 
-通过[官网国内镜像下载](https://kkindle.stacker.beauty/#downloads)获取 Windows、Linux 或 macOS 安装包；页面会自动选择最新稳定版。
+通过[官网下载页](https://kkindle.stacker.beauty/#downloads)获取 Windows、Linux 或 macOS 安装包；页面会自动选择最新稳定版。
 
 备用下载：[GitHub Releases](https://github.com/kingstacker/Kkindle/releases)。
 
