@@ -9,6 +9,7 @@ namespace Kkindle.Infrastructure;
 
 public sealed class UpdateService : IDisposable
 {
+    private const string MirrorManifestUrl = "https://kkindle.stacker.beauty/update-manifest.json";
     private const string LatestManifestUrl = "https://github.com/kingstacker/Kkindle/releases/latest/download/update-manifest.json";
     private const string LatestReleasePageUrl = "https://github.com/kingstacker/Kkindle/releases/latest";
     private const string LatestReleaseUrl = "https://api.github.com/repos/kingstacker/Kkindle/releases/latest";
@@ -205,6 +206,9 @@ public sealed class UpdateService : IDisposable
         if (channel == AppUpdateChannel.Development)
             return await GetLatestDevelopmentReleaseAsync(cancellationToken);
 
+        if (await TryGetReleaseFromMirrorAsync(cancellationToken) is { } mirroredRelease)
+            return mirroredRelease;
+
         using (var manifestResponse = await _httpClient.GetAsync(LatestManifestUrl, cancellationToken))
         {
             if (manifestResponse.IsSuccessStatusCode)
@@ -224,6 +228,22 @@ public sealed class UpdateService : IDisposable
         using var apiResponse = await _httpClient.GetAsync(LatestReleaseUrl, cancellationToken);
         apiResponse.EnsureSuccessStatusCode();
         return await DeserializeReleaseAsync(apiResponse, cancellationToken);
+    }
+
+    private async Task<GitHubRelease?> TryGetReleaseFromMirrorAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(MirrorManifestUrl, cancellationToken);
+            if (!response.IsSuccessStatusCode) return null;
+            return await DeserializeReleaseAsync(response, cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException
+            or JsonException or InvalidDataException or IOException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+            return null;
+        }
     }
 
     private async Task<GitHubRelease?> GetLatestDevelopmentReleaseAsync(

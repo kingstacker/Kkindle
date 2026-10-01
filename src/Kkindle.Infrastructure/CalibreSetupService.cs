@@ -2,7 +2,9 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Kkindle.Infrastructure;
 
@@ -21,6 +23,7 @@ public sealed record CalibreSetupResult(string ExecutablePath, string Message);
 /// </summary>
 public sealed class CalibreSetupService : IDisposable
 {
+    internal static readonly Uri MirrorManifestUri = new("https://kkindle.stacker.beauty/calibre.json");
     internal static readonly Uri WindowsDownloadUri = new("https://calibre-ebook.com/dist/win64");
     internal static readonly Uri MacOSDownloadUri = new("https://calibre-ebook.com/dist/osx");
     internal static readonly Uri LinuxInstallerUri = new("https://download.calibre-ebook.com/linux-installer.sh");
@@ -121,7 +124,7 @@ public sealed class CalibreSetupService : IDisposable
         {
             var pluginPath = Path.Combine(workDirectory, "KFX Input.zip");
             progress?.Report(new CalibreSetupProgress("正在从 Calibre 官方插件索引下载 KFX Input…"));
-            await DownloadAsync(KfxInputPluginUri, pluginPath, MaximumPluginDownloadBytes, progress, cancellationToken);
+            await DownloadCalibreArtifactAsync(CalibreMirrorTarget.KfxInputPlugin, KfxInputPluginUri, pluginPath, MaximumPluginDownloadBytes, progress, cancellationToken);
             ValidateKfxPluginPackage(pluginPath);
 
             progress?.Report(new CalibreSetupProgress("正在安装 KFX Input…"));
@@ -157,7 +160,7 @@ public sealed class CalibreSetupService : IDisposable
     {
         var installer = Path.Combine(workDirectory, "calibre-installer.msi");
         progress?.Report(new CalibreSetupProgress("正在下载 Calibre Windows 安装程序…"));
-        await DownloadAsync(WindowsDownloadUri, installer, MaximumCalibreDownloadBytes, progress, cancellationToken);
+        await DownloadCalibreArtifactAsync(CalibreMirrorTarget.WindowsMsi, WindowsDownloadUri, installer, MaximumCalibreDownloadBytes, progress, cancellationToken);
         await ValidateMsiAsync(installer, cancellationToken);
         await VerifyWindowsSignatureAsync(installer, cancellationToken);
 
@@ -215,7 +218,7 @@ public sealed class CalibreSetupService : IDisposable
     {
         var image = Path.Combine(workDirectory, "calibre.dmg");
         progress?.Report(new CalibreSetupProgress("正在下载 Calibre macOS 磁盘映像…"));
-        await DownloadAsync(MacOSDownloadUri, image, MaximumCalibreDownloadBytes, progress, cancellationToken);
+        await DownloadCalibreArtifactAsync(CalibreMirrorTarget.MacOsDmg, MacOSDownloadUri, image, MaximumCalibreDownloadBytes, progress, cancellationToken);
         await ValidateDmgAsync(image, cancellationToken);
 
         var verify = await RunCommandAsync("/usr/bin/hdiutil", ["verify", image], cancellationToken);
@@ -295,6 +298,60 @@ public sealed class CalibreSetupService : IDisposable
             if (hasBackup && Directory.Exists(backupApp)) Directory.Move(backupApp, destinationApp);
             throw;
         }
+    }
+
+    internal async Task DownloadCalibreArtifactAsync(
+        CalibreMirrorTarget target,
+        Uri officialUri,
+        string destination,
+        long maximumBytes,
+        IProgress<CalibreSetupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        // Bound mirror attempts separately; the existing official download keeps its timeout policy.
+        using var mirrorTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        mirrorTimeout.CancelAfter(TimeSpan.FromMinutes(10));
+        var mirrorToken = mirrorTimeout.Token;
+        var mirrorStarted = false;
+        var mirrorSucceeded = false;
+        try
+        {
+            using var response = await _httpClient.GetAsync(MirrorManifestUri, mirrorToken);
+            response.EnsureSuccessStatusCode();
+            EnsureTrustedDownloadUri(response.RequestMessage?.RequestUri ?? MirrorManifestUri);
+            await using var manifestStream = await response.Content.ReadAsStreamAsync(mirrorToken);
+            var manifest = await JsonSerializer.DeserializeAsync<CalibreMirrorManifest>(manifestStream, cancellationToken: mirrorToken);
+            var file = manifest?.SelectFile(target);
+            if (file is null || file.Size > maximumBytes)
+                throw new InvalidDataException("Calibre 镜像清单没有有效的下载项。");
+            var uri = file.GetDownloadUri();
+            EnsureTrustedDownloadUri(uri);
+            mirrorStarted = true;
+            await DownloadAsync(uri, destination, maximumBytes, progress, mirrorToken);
+            await using (var stream = File.OpenRead(destination))
+            {
+                if (stream.Length != file.Size)
+                    throw new InvalidDataException("Calibre 镜像文件大小校验失败。");
+                var hash = await SHA256.HashDataAsync(stream, mirrorToken);
+                if (!Convert.ToHexString(hash).Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Calibre 镜像 SHA256 校验失败。");
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            mirrorSucceeded = true;
+            return;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException
+            or JsonException or InvalidDataException or IOException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+        }
+        finally
+        {
+            if (mirrorStarted && !mirrorSucceeded) File.Delete(destination);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await DownloadAsync(officialUri, destination, maximumBytes, progress, cancellationToken);
     }
 
     private async Task DownloadAsync(
@@ -417,14 +474,15 @@ public sealed class CalibreSetupService : IDisposable
         return ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodedCommand];
     }
 
-    private static void EnsureTrustedDownloadUri(Uri uri)
+    internal static void EnsureTrustedDownloadUri(Uri uri)
     {
         if (uri.Scheme != Uri.UriSchemeHttps) throw new InvalidDataException("下载地址不是 HTTPS。");
         var host = uri.IdnHost;
         var trusted = host.Equals("calibre-ebook.com", StringComparison.OrdinalIgnoreCase)
             || host.EndsWith(".calibre-ebook.com", StringComparison.OrdinalIgnoreCase)
             || host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase);
+            || host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("kkindle.stacker.beauty", StringComparison.OrdinalIgnoreCase);
         if (!trusted) throw new InvalidDataException($"下载被重定向到未受信任的主机：{host}");
     }
 
