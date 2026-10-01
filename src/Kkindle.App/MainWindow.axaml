@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -378,20 +378,12 @@
                     Background="{DynamicResource SidebarBrush}"
                     BorderBrush="{DynamicResource HairlineBrush}"
                     BorderThickness="0,0,1,0">
-                <Grid RowDefinitions="Auto,*,Auto" Margin="18,24,18,18">
-                    <Grid ColumnDefinitions="Auto,*,Auto">
-                        <Border Width="34" Height="34" Background="{DynamicResource InkBrush}">
-                            <TextBlock Text="K"
-                                       Foreground="{DynamicResource PaperBrush}"
-                                       FontSize="20"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center" />
-                        </Border>
-                        <StackPanel Grid.Column="1"
+                <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="18,24,18,18">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0"
                                     VerticalAlignment="Center"
                                     Spacing="0"
-                                    Margin="10,0,0,0">
+                                    Margin="16,0,0,0">
                             <StackPanel Orientation="Horizontal" Spacing="5">
                                 <TextBlock Text="Kkindle"
                                            FontSize="18"
@@ -416,7 +408,7 @@
                                        Foreground="{DynamicResource MutedInkBrush}" />
                         </StackPanel>
                         <Button x:Name="S3SyncIndicatorButton"
-                                Grid.Column="2"
+                                Grid.Column="1"
                                 HorizontalAlignment="Right"
                                 Classes="syncIndicator"
                                 Click="S3SyncIndicatorButton_Click"
@@ -474,17 +466,17 @@
                     </Grid>
 
                     <ScrollViewer Grid.Row="1"
-                                  Margin="0,24,0,16"
+                                  Margin="0,20,0,12"
                                   VerticalScrollBarVisibility="Hidden"
                                   HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel Spacing="16">
-                            <StackPanel Spacing="3">
+                        <StackPanel Spacing="6">
+                            <StackPanel Spacing="2">
                                 <Button x:Name="BookManagementSectionButton"
                                         Classes="sidebarSection"
                                         Click="SidebarSectionButton_Click">
                                     <Button.Content>
                                         <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarBooksGeometry}" />
+                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.82" Data="{StaticResource SidebarBooksGeometry}" />
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.FB55F8EAEF4BB602}" />
                                             <Path x:Name="BookManagementChevron"
                                                   Grid.Column="3"
@@ -497,23 +489,22 @@
                                         </Grid>
                                     </Button.Content>
                                 </Button>
-                                <StackPanel x:Name="BookManagementChildren" Spacing="3">
+                                <StackPanel x:Name="BookManagementChildren" Spacing="2">
                                     <Button x:Name="AllBooksButton"
                                             Classes="sidebarItem active"
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.FAFE70E30BE14271}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.AA12555D73B23489}"
                                             Click="ShowAllBooksButton_Click">
-                                        <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.9" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarComputerGeometry}" />
+                                        <Grid Classes="sidebarEntry" ColumnDefinitions="0,0,*,Auto">
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.FAFE70E30BE14271}" />
                                             <Border Grid.Column="3"
                                                     Margin="6,0,0,0"
                                                     HorizontalAlignment="Right"
                                                     VerticalAlignment="Center"
-                                                    CornerRadius="9"
-                                                    Background="#10000000"
-                                                    Padding="6,1">
-                                                <TextBlock x:Name="SidebarCountText" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextAlignment="Center" />
+                                                    CornerRadius="0"
+                                                    Background="Transparent"
+                                                    Padding="0">
+                                                <TextBlock x:Name="SidebarCountText" Classes="sidebarCount" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextAlignment="Center" />
                                             </Border>
                                         </Grid>
                                     </Button>
@@ -522,30 +513,29 @@
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.EC63017A628AB5D9}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.4897495CB792933E}"
                                             Click="KindleBooksButton_Click">
-                                        <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.9" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarDeviceLibraryGeometry}" />
+                                        <Grid Classes="sidebarEntry" ColumnDefinitions="0,0,*,Auto">
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.EC63017A628AB5D9}" />
                                             <Border Grid.Column="3"
                                                     Margin="6,0,0,0"
                                                     HorizontalAlignment="Right"
                                                     VerticalAlignment="Center"
-                                                    CornerRadius="9"
-                                                    Background="#10000000"
-                                                    Padding="6,1">
-                                                <TextBlock x:Name="DeviceBookCountText" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextAlignment="Center" />
+                                                    CornerRadius="0"
+                                                    Background="Transparent"
+                                                    Padding="0">
+                                                <TextBlock x:Name="DeviceBookCountText" Classes="sidebarCount" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextAlignment="Center" />
                                             </Border>
                                         </Grid>
                                     </Button>
                                 </StackPanel>
                             </StackPanel>
 
-                            <StackPanel Spacing="3">
+                            <StackPanel Spacing="2">
                                 <Button x:Name="DeviceManagementSectionButton"
                                         Classes="sidebarSection"
                                         Click="SidebarSectionButton_Click">
                                     <Button.Content>
                                         <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarDevicesGeometry}" />
+                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.82" Data="{StaticResource SidebarDevicesGeometry}" />
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.7E708DD49F0A4215}" />
                                             <Path x:Name="DeviceManagementChevron"
                                                   Grid.Column="3"
@@ -558,14 +548,13 @@
                                         </Grid>
                                     </Button.Content>
                                 </Button>
-                                <StackPanel x:Name="DeviceManagementChildren" Spacing="3" IsVisible="False">
+                                <StackPanel x:Name="DeviceManagementChildren" Spacing="2" IsVisible="False">
                                     <Button x:Name="FontManagementButton"
                                             Classes="sidebarItem"
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.A654447A8C906AB1}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.2E572B6D78B5FE75}"
                                             Click="FontManagementButton_Click">
-                                        <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.9" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarFontsGeometry}" />
+                                        <Grid Classes="sidebarEntry" ColumnDefinitions="0,0,*,Auto">
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.A654447A8C906AB1}" />
                                         </Grid>
                                     </Button>
@@ -574,21 +563,20 @@
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.8B62411F753D8465}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.27D8F6DDB26F435B}"
                                             Click="DictionaryManagementButton_Click">
-                                        <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.9" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarDictionaryGeometry}" />
+                                        <Grid Classes="sidebarEntry" ColumnDefinitions="0,0,*,Auto">
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.8B62411F753D8465}" />
                                         </Grid>
                                     </Button>
                                 </StackPanel>
                             </StackPanel>
 
-                            <StackPanel Spacing="3">
+                            <StackPanel Spacing="2">
                                 <Button x:Name="ReadingSectionButton"
                                         Classes="sidebarSection"
                                         Click="SidebarSectionButton_Click">
                                     <Button.Content>
                                         <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarReadingGeometry}" />
+                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.82" Data="{StaticResource SidebarReadingGeometry}" />
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.7EDB884BEE9690C4}" />
                                             <Path x:Name="ReadingChevron"
                                                   Grid.Column="3"
@@ -601,14 +589,13 @@
                                         </Grid>
                                     </Button.Content>
                                 </Button>
-                                <StackPanel x:Name="ReadingChildren" Spacing="3" IsVisible="False">
+                                <StackPanel x:Name="ReadingChildren" Spacing="2" IsVisible="False">
                                     <Button x:Name="ReaderNotesNavigationButton"
                                             Classes="sidebarItem"
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.8A7525B1492FB848}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.477A9BD5C415C9E7}"
                                             Click="ReaderNotesNavigationButton_Click">
-                                        <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.9" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarNotesGeometry}" />
+                                        <Grid Classes="sidebarEntry" ColumnDefinitions="0,0,*,Auto">
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.8A7525B1492FB848}" />
                                         </Grid>
                                     </Button>
@@ -617,28 +604,27 @@
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.440C143379A34160}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.A6F23A1728A8C25E}"
                                             Click="ReadingDashboardButton_Click">
-                                        <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.9" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarStatisticsGeometry}" />
+                                        <Grid Classes="sidebarEntry" ColumnDefinitions="0,0,*,Auto">
                                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.440C143379A34160}" />
                                         </Grid>
                                     </Button>
                                 </StackPanel>
                             </StackPanel>
-
-                            <Button x:Name="SettingsNavigationButton"
-                                    Classes="sidebarPrimaryItem"
-                                    AutomationProperties.Name="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}"
-                                    Click="SettingsButton_Click">
-                                <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
-                                    <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" Stroke="{DynamicResource InkBrush}" Data="{StaticResource SidebarSettingsGeometry}" />
-                                    <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" />
-                                </Grid>
-                            </Button>
                         </StackPanel>
                     </ScrollViewer>
 
+                    <Button x:Name="SettingsNavigationButton"
+                            Grid.Row="2" Margin="0,0,0,12" Classes="sidebarPrimaryItem"
+                            AutomationProperties.Name="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}"
+                            Click="SettingsButton_Click">
+                        <Grid Classes="sidebarEntry" ColumnDefinitions="24,8,*,Auto">
+                            <local:SidebarGlyph Classes="libraryGlyph sidebarGlyph" IconScale="0.82" Data="{StaticResource SidebarSettingsGeometry}" />
+                            <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" />
+                        </Grid>
+                    </Button>
+
                     <Border x:Name="DeviceStatusBox"
-                            Grid.Row="2"
+                            Grid.Row="3"
                             Padding="10"
                             Background="Transparent">
                         <StackPanel Spacing="5">
@@ -2326,8 +2312,10 @@
             <Grid x:Name="SettingsPage" Classes="settingsPage" Grid.Column="1" Margin="30,24,30,18" IsVisible="False">
                 <Grid RowDefinitions="Auto,Auto,*,Auto" MaxWidth="820" HorizontalAlignment="Left" Width="{Binding Bounds.Width, ElementName=SettingsPage}">
                     <StackPanel Spacing="4">
-                        <TextBlock Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap" />
-                        <TextBlock x:Name="SettingsStatusText" Text="{DynamicResource Ui.Auto.709BDE6F962E3F2A}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap"
+                                   ToolTip.Tip="{DynamicResource Ui.Auto.709BDE6F962E3F2A}" />
+                        <TextBlock x:Name="SettingsStatusText" Text=""
+                                   IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                     </StackPanel>
                     <WrapPanel x:Name="SettingsCategoryButtons" Grid.Row="1" Margin="0,20,0,16" Orientation="Horizontal">
                         <Button x:Name="SettingsLibraryButton" Content="{DynamicResource Ui.Auto.979ACDE39C51149E}" Classes="settingsCategory" Tag="Library" Click="SettingsCategoryButton_Click" />
@@ -2349,9 +2337,7 @@
                                 </Grid>
                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,4,0,4">
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
-                                        <TextBlock Text="{DynamicResource Ui.Appearance.MainTheme}" FontSize="14" TextWrapping="Wrap" />
-                                        <TextBlock Text="{DynamicResource Ui.Appearance.MainThemeHint}" FontSize="11"
-                                                   Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <TextBlock ToolTip.Tip="{DynamicResource Ui.Appearance.MainThemeHint}" Text="{DynamicResource Ui.Appearance.MainTheme}" FontSize="14" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <ComboBox x:Name="MainThemeBox" Grid.Column="1" Width="180" SelectedIndex="0"
                                               VerticalAlignment="Center" FontSize="14"
@@ -3059,8 +3045,7 @@
                                                 </Grid>
                                             </Border>
                                             <StackPanel Spacing="3" VerticalAlignment="Center">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                <TextBlock ToolTip.Tip="{DynamicResource Ui.Auto.2D1996A469BDAB92}" Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </StackPanel>
                                         <Border Grid.Column="1" Width="76" Height="76" Background="{DynamicResource SoftHoverBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
@@ -3076,8 +3061,13 @@
                                 <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="6" Padding="16">
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                         <StackPanel Grid.Column="0" Spacing="10" VerticalAlignment="Center">
+                                            <ToolTip.Tip>
+                                                <StackPanel MaxWidth="420" Spacing="6">
+                                                    <TextBlock Text="{Binding Text, ElementName=AboutLogsDescriptionText}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </ToolTip.Tip>
                                             <TextBlock Text="{DynamicResource Ui.About.LogExportTitle}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock x:Name="AboutLogsDescriptionText" Text="{DynamicResource Ui.About.LogExportDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <TextBlock IsVisible="False" x:Name="AboutLogsDescriptionText" Text="{DynamicResource Ui.About.LogExportDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <TextBlock x:Name="AboutLogsStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
                                         </StackPanel>
                                         <Button x:Name="ExportSoftwareLogsButton"

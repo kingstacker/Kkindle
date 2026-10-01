@@ -599,13 +599,21 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         var button = scope.Get<Button>("ExportSoftwareLogsButton");
         Assert.True(button.IsEffectivelyVisible);
         Assert.Equal("导出软件日志", button.Content?.ToString());
-        Assert.Contains("不会打包邮箱密码", scope.Get<TextBlock>("AboutLogsDescriptionText").Text);
+        var description = scope.Get<TextBlock>("AboutLogsDescriptionText");
+        Assert.False(description.IsVisible);
+        var helpTarget = (Control)description.Parent!;
+        var help = Assert.IsType<StackPanel>(ToolTip.GetTip(helpTarget));
+        ToolTip.SetIsOpen(helpTarget, true);
+        await Render();
+        var helpText = Assert.IsType<TextBlock>(Assert.Single(help.Children));
+        Assert.Contains("不会打包邮箱密码", helpText.Text);
         Assert.True(string.IsNullOrEmpty(scope.Get<TextBlock>("AboutLogsStatusText").Text));
 
         ((Kkindle.App)Application.Current!).ApplyLanguage("en-US");
         await Render();
         Assert.Equal("Export software logs", button.Content?.ToString());
-        Assert.Contains("Email passwords", scope.Get<TextBlock>("AboutLogsDescriptionText").Text);
+        Assert.Contains("Email passwords", helpText.Text);
+        ToolTip.SetIsOpen(helpTarget, false);
     });
 
     [Fact]

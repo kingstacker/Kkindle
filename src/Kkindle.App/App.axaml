@@ -773,30 +773,29 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
 
-        <!-- Navigation uses a 15px label and a 24px icon canvas. Semibold
-             section labels preserve the hierarchy at the same readable size. -->
+        <!-- Primary navigation owns the icon and stronger type; children stay quiet. -->
         <Style Selector="Button.sidebarSection">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Height" Value="42" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="15" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Padding="12,6,0,6"
+                    <Border Padding="12,6,12,6"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="6">
+                            CornerRadius="{TemplateBinding CornerRadius}">
                         <Border.Transitions>
                             <Transitions>
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -832,21 +831,20 @@
             <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
         </Style>
 
-        <!-- Settings shares the destination icon/label columns and keeps its
-             semibold top-level label and quiet gray active row. -->
+        <!-- Persistent utility entry uses the same quiet typography. -->
         <Style Selector="Button.sidebarPrimaryItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Height" Value="42" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="15" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
@@ -855,7 +853,7 @@
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="{TemplateBinding CornerRadius}"
-                            Padding="12,6,0,6">
+                            Padding="12,6,12,6">
                         <Border.Transitions>
                             <Transitions>
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -881,7 +879,7 @@
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
@@ -894,14 +892,12 @@
             <Setter Property="CornerRadius" Value="0" />
         </Style>
 
-        <!-- Sidebar entries share one selection language: a square light-gray
-             row with a restrained black leading bar. This also applies to
-             grouped child entries. -->
+        <!-- Selected destinations use a small dot and a quiet background. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="38" />
+            <Setter Property="Height" Value="36" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -911,7 +907,7 @@
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Border Background="{TemplateBinding Background}"
@@ -921,13 +917,15 @@
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
                             </Transitions>
                         </Border.Transitions>
-                        <Grid ColumnDefinitions="3,21,*">
-                            <Border Width="3"
-                                    Height="24"
-                                    Background="{TemplateBinding BorderBrush}"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center" />
-                            <ContentPresenter Grid.Column="2"
+                        <Grid>
+                            <Ellipse x:Name="SelectionDot"
+                                     Width="4" Height="4"
+                                     Margin="31,0,0,0"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Center"
+                                     Fill="{TemplateBinding Foreground}"
+                                     IsHitTestVisible="False" />
+                            <ContentPresenter Margin="44,0,12,0"
                                               Content="{TemplateBinding Content}"
                                               Foreground="{TemplateBinding Foreground}"
                                               HorizontalAlignment="Stretch"
@@ -945,28 +943,42 @@
             <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
+        <Style Selector="Button.sidebarItem /template/ Ellipse#SelectionDot">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Button.sidebarItem.active /template/ Ellipse#SelectionDot">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
         <Style Selector="Button.sidebarItem.active">
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="FontWeight" Value="Normal" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
-        <!-- Keep the active row stable when the pointer remains over it. The
-             selected state should read as navigation, not as a rounded hover
-             capsule. -->
+        <!-- Selection remains stable while hovered or focused. -->
         <Style Selector="Button.sidebarItem.active:pointerover,
                          Button.sidebarItem.active:focus-visible">
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
 
+        <Style Selector="TextBlock.sidebarLabel, TextBlock.sidebarCount">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+        </Style>
         <Style Selector="TextBlock.sidebarLabel">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Foreground" Value="{Binding $parent[Button].Foreground}" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="TextWrapping" Value="NoWrap" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style Selector="Button.sidebarSection TextBlock.sidebarLabel, Button.sidebarPrimaryItem TextBlock.sidebarLabel">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
         <!-- Settings use one row of categories and a bounded reading width. -->
@@ -1068,11 +1080,13 @@
             </Setter>
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{TemplateBinding Background}" Padding="16,12" MinHeight="60">
+                    <Border Background="{TemplateBinding Background}" Padding="16,12" MinHeight="44">
+                        <ToolTip.Tip>
+                            <TextBlock Text="{TemplateBinding Tag}" MaxWidth="420" TextWrapping="Wrap" />
+                        </ToolTip.Tip>
                         <Grid ColumnDefinitions="*,20" ColumnSpacing="12">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{TemplateBinding Content}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                <TextBlock Text="{TemplateBinding Tag}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                             </StackPanel>
                             <Path x:Name="SettingsExpanderChevron" Grid.Column="1" Width="10" Height="10"
                                   Data="M 2,1 L 6,5 L 2,9" Stroke="{DynamicResource InkBrush}"

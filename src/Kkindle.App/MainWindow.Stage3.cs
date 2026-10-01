@@ -6134,7 +6134,7 @@ public partial class MainWindow
             foreach (var group in ReadingMaterialGroups)
                 group.IsExpanded = !settings.ReadingMaterialsCollapsedByDefault;
             UpdateLibraryUi();
-            SettingsStatusText.Text = T("常用偏好自动保存；服务配置展开后编辑。");
+            SettingsStatusText.Text = string.Empty;
             if (_appSettingsStartupSettled && !_s3SyncExitInProgress && _appSettingsAutoSaveShowStatus)
                 ShowSettingsSavedStatus();
             _appSettingsAutoSaveShowStatus = true;
