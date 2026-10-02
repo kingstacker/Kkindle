@@ -24,6 +24,10 @@ public sealed class SidebarGlyphTests(SettingsUiSession session)
         var toolbar = new GlyphPath
         {
             Classes = { "libraryGlyph" }, Data = source, Stroke = Brushes.Black,
+            // Compare the pen at the same canvas size; production toolbar
+            // glyphs now use a smaller canvas and Uniform scaling.
+            Width = 24, Height = 24, Stretch = Stretch.None,
+            StrokeThickness = 1.5,
             Fill = Brushes.Transparent, UseLayoutRounding = false
         };
         var panel = new Canvas { Children = { parent, child, toolbar }, UseLayoutRounding = false };
@@ -96,6 +100,7 @@ public sealed class SidebarGlyphTests(SettingsUiSession session)
     {
         Classes = { "libraryGlyph", "sidebarGlyph" },
         Data = source, IconScale = scale, Width = 24, Height = 24, Stretch = Stretch.None,
+        StrokeThickness = 1.5,
         Stroke = Brushes.Black, Fill = Brushes.Transparent, UseLayoutRounding = false
     };
 
