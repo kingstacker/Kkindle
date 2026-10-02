@@ -1561,6 +1561,24 @@
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
             <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
+        <Style Selector="ComboBoxItem.mainThemeOption:selected">
+            <Setter Property="Foreground" Value="{DynamicResource ThemeOptionInk}" />
+            <Setter Property="Background" Value="{DynamicResource ThemeOptionPaper}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ComboBoxItem.mainThemeOption:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource ThemeOptionInk}" />
+            <Setter Property="Background" Value="{DynamicResource ThemeOptionPaper}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ComboBoxItem.mainThemeOption:selected:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource ThemeOptionInk}" />
+            <Setter Property="Background" Value="{DynamicResource ThemeOptionPaper}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
         <!-- Fluent paints the ProgressBar fill with the accent colour; keep
              every progress bar (import, transfer, conversion) ink-on-paper. -->
         <Style Selector="ProgressBar">
@@ -2128,9 +2146,9 @@
                          Grid.readerShell Button.readerHeader > Grid > Path">
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Width" Value="18" />
-            <Setter Property="Height" Value="18" />
-            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Stretch" Value="None" />
             <Setter Property="UseLayoutRounding" Value="True" />
         </Style>
         <Style Selector="Button.readerHeader.ttsActive">

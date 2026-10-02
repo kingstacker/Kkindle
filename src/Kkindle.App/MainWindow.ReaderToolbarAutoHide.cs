@@ -67,12 +67,26 @@ public partial class MainWindow
         {
             if (e.Property == IsVisibleProperty) UpdateReaderToolbarAutoHide();
         };
+        foreach (var panel in new Control[]
+        {
+            ReaderTocPanel, ReaderTocCompactPanel, ReaderAssistantPanel, ReaderSearchPanel
+        })
+        {
+            panel.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == IsVisibleProperty) UpdateReaderToolbarAutoHide();
+            };
+        }
     }
 
     private void UpdateReaderToolbarAutoHide()
     {
         var enabled = ReaderRoot.IsVisible && !_readerZenMode
             && !_readerTocExpanded
+            && !ReaderTocPanel.IsVisible
+            && !ReaderTocCompactPanel.IsVisible
+            && !ReaderAssistantPanel.IsVisible
+            && !ReaderSearchPanel.IsVisible
             && Volatile.Read(ref _readerCloseInProgress) == 0;
         var changed = enabled != _readerToolbarAutoHideEnabled;
         _readerToolbarAutoHideEnabled = enabled;

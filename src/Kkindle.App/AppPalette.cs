@@ -12,7 +12,7 @@ internal sealed record AppPalette(
     {
         AppTheme.Night => Night,
         AppTheme.Green => Green,
-        AppTheme.WarmBrown => WarmBrown,
+        AppTheme.MistBlue => MistBlue,
         AppTheme.Ivory => Ivory,
         _ => Classic
     };
@@ -29,10 +29,10 @@ internal sealed record AppPalette(
         "#EDF3EA", "#E1EBDD", "#F4F7F0", "#27392A", "#4F624E", "#657460",
         "#CCD8C6", "#ADBFA6", "#E0EADB", "#D2E0CA", "#D8E3D0",
         "#48683E", "#3C5934", "#314A2B", "#FAFCF7");
-    private static readonly AppPalette WarmBrown = Create(
-        "#F4EBDF", "#E7D8C3", "#FAF3E9", "#433427", "#65513D", "#7B6650",
-        "#D9CAB4", "#BCA587", "#E9DCC9", "#DDCBB2", "#E3D3BC",
-        "#866044", "#755136", "#62422C", "#FFFAF2");
+    private static readonly AppPalette MistBlue = Create(
+        "#E8EFF5", "#DEE7EF", "#F1F5F9", "#283746", "#4B5D6D", "#6C7D8D",
+        "#CAD5DF", "#A6B8C8", "#DBE5EE", "#CBD9E5", "#D4E0EA",
+        "#486B89", "#3D5D79", "#314D66", "#F7FAFD");
     private static readonly AppPalette Ivory = Create(
         "#F8F5EC", "#EFEADD", "#FCFAF4", "#37342D", "#5E584D", "#797162",
         "#DCD5C6", "#BFB5A0", "#ECE6D8", "#DFD5C1", "#E7DFCD",

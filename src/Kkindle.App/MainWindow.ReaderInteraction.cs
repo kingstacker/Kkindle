@@ -1109,6 +1109,7 @@ public partial class MainWindow
     private int _readerBookPageCountSequence;
     private DateTimeOffset _readerSessionStarted;
     private WindowState _readerWindowStateBeforeZen = WindowState.Normal;
+    private Avalonia.Styling.ControlTheme? _readerWindowDecorationsThemeBeforeZen;
     private bool _readerZenMode;
     private bool _readerAssistantVisibleBeforeZen = true;
     private bool _readerTocExpandedBeforeZen = true;
@@ -8862,13 +8863,17 @@ public partial class MainWindow
         if (!_readerZenMode)
         {
             _readerWindowStateBeforeZen = WindowState;
+            _readerWindowDecorationsThemeBeforeZen = WindowDecorationsTheme;
+            WindowDecorationsTheme = (Avalonia.Styling.ControlTheme)Resources["ReaderZenWindowDecorations"]!;
             _readerAssistantVisibleBeforeZen = ReaderAssistantPanel.IsVisible;
             _readerTocExpandedBeforeZen = ReaderTocPanel.IsVisible;
             _readerTocMinimalBeforeZen = ReaderTocCompactPanel.IsVisible;
             CaptureReaderWindowStyleBeforeZen();
             _readerZenMode = true;
-            // FullScreen covers the taskbar as well as the usable work area;
-            // the custom zen popup remains the only reader chrome.
+            // True fullscreen hides the taskbar. The empty decorations theme
+            // removes Fluent's separate fullscreen caption popover.
+            ExtendClientAreaToDecorationsHint = true;
+            ExtendClientAreaTitleBarHeightHint = 0;
             WindowState = WindowState.FullScreen;
             ApplyReaderZenWindowChrome();
             Dispatcher.UIThread.Post(
@@ -8960,6 +8965,9 @@ public partial class MainWindow
     {
         if (!_readerZenMode) return;
         WindowState = _readerWindowStateBeforeZen;
+        WindowDecorationsTheme = _readerWindowDecorationsThemeBeforeZen;
+        ExtendClientAreaToDecorationsHint = false;
+        ExtendClientAreaTitleBarHeightHint = -1;
         WindowDecorations = Avalonia.Controls.WindowDecorations.None;
         _readerZenMode = false;
         RestoreReaderWindowChromeAfterZen();

@@ -39,7 +39,7 @@ public sealed class ReaderAppearanceSettingsTests
     {
         var enabled = new ReaderAppearanceSettings
         {
-            Theme = ReaderTheme.WarmBrown, PaperEnabled = true, PaperStrength = 0.8, FibersEnabled = true
+            Theme = ReaderTheme.MistBlue, PaperEnabled = true, PaperStrength = 0.8, FibersEnabled = true
         };
         var disabled = ReaderAppearanceSettings.Normalize(enabled with { PaperEnabled = false });
         Assert.Equal(0, disabled.EffectivePaperStrength);
@@ -52,7 +52,7 @@ public sealed class ReaderAppearanceSettingsTests
     [InlineData(ReaderTheme.Classic)]
     [InlineData(ReaderTheme.Night)]
     [InlineData(ReaderTheme.Green)]
-    [InlineData(ReaderTheme.WarmBrown)]
+    [InlineData(ReaderTheme.MistBlue)]
     [InlineData(ReaderTheme.Ivory)]
     public async Task AppearancePersistsAlongsideLayoutWithoutReplacingIt(ReaderTheme theme)
     {

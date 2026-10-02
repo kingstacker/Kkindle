@@ -65,7 +65,7 @@ public partial class MainWindow
             return;
 
         NormalizeLibrarySortChrome(LibrarySortBox);
-        AlignShelfToolbar(LibraryToolbar, LibraryWorkspace, LibraryContentHost);
+        AlignShelfToolbar(LibraryToolbar, LibraryBody, LibraryContentHost, alignDetailBoundary: true);
         AlignCollectionHeader(LibraryToolbar, CollectionHeader);
         AlignLibraryListRightEdge(LibraryToolbar, BookList);
     }
@@ -83,7 +83,7 @@ public partial class MainWindow
             sortBackground.MinWidth = 0;
     }
 
-    private static void AlignShelfToolbar(Grid toolbar, Control workspace, Control shelfViewport)
+    private static void AlignShelfToolbar(Grid toolbar, Control workspace, Control shelfViewport, bool alignDetailBoundary = false)
     {
         if (shelfViewport.Bounds.Width <= 0
             || shelfViewport.TranslatePoint(default, workspace) is not { } origin)
@@ -98,7 +98,9 @@ public partial class MainWindow
 
         // Keep the action row usable when a docked detail pane leaves only a narrow book column.
         right = Math.Min(right, Math.Max(6, workspace.Bounds.Width - left - actions.DesiredSize.Width));
-        var margin = new Thickness(left, 22, right, 18);
+        // Book content keeps its own top inset; the detail pane starts directly
+        // at the toolbar boundary, including when actions wrap to a second row.
+        var margin = new Thickness(left, 22, right, alignDetailBoundary ? 0 : 18);
         if (toolbar.Margin != margin)
             toolbar.Margin = margin;
     }

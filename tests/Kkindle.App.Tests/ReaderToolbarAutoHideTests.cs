@@ -124,6 +124,24 @@ public sealed class ReaderToolbarAutoHideTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task AssistantPanelKeepsToolbarsVisibleUntilClosed() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var host = await ReaderAppearanceTests.LoadChapter(scope, new());
+        CloseToc(scope);
+        MovePointer(scope, 0.5, 0.5);
+        await WaitForToolbars(scope, visible: false);
+        scope.Get<Border>("ReaderAssistantPanel").IsVisible = true;
+        await WaitForToolbars(scope, visible: true);
+        await Task.Delay(1750);
+        Assert.False(scope.Field<bool>("_readerToolbarAutoHideEnabled"));
+        Assert.Equal(1, scope.Get<Border>("ReaderHeaderBar").Opacity);
+        scope.Get<Border>("ReaderAssistantPanel").IsVisible = false;
+        await WaitForToolbars(scope, visible: false);
+        Detach(scope);
+    });
+
+    [Fact]
     public Task MenuAndSettingsStayVisibleUntilTheirInteractionEnds() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
