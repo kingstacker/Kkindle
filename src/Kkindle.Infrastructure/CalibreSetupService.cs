@@ -123,7 +123,7 @@ public sealed class CalibreSetupService : IDisposable
         try
         {
             var pluginPath = Path.Combine(workDirectory, "KFX Input.zip");
-            progress?.Report(new CalibreSetupProgress("正在从 Calibre 官方插件索引下载 KFX Input…"));
+            progress?.Report(new CalibreSetupProgress("正在下载 KFX Input 插件…"));
             await DownloadCalibreArtifactAsync(CalibreMirrorTarget.KfxInputPlugin, KfxInputPluginUri, pluginPath, MaximumPluginDownloadBytes, progress, cancellationToken);
             ValidateKfxPluginPackage(pluginPath);
 
