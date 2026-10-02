@@ -286,6 +286,7 @@ public sealed partial class S3SyncIntegrationTests
         await device.Reader.AddReadingTimeAsync(longRead.BookId, longRead.FileId, 600, 50, 5, 10);
         await device.Reader.AddReadingTimeAsync(longRead.BookId, secondFormat.FileId, 300, 100, 10, 10);
         await device.Reader.AddReadingTimeAsync(recent.BookId, recent.FileId, 30, 10, 1, 10);
+        await MarkAchievementBookFinishedAsync(device, longRead.BookId);
 
         var dashboard = await device.Reader.GetReadingDashboardAsync(recentLimit: 1);
 

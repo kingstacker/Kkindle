@@ -10,14 +10,16 @@ public sealed partial class ReaderDataService
     // Version 2 excludes ruby pronunciation from the searchable body text.
     private const int CurrentTextExtractionVersion = 2;
     private readonly AppPaths _paths;
+    private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
     private bool _ftsAvailable;
 
     public event EventHandler<LocalDataChangedEventArgs>? DataChanged;
 
-    public ReaderDataService(AppPaths paths)
+    public ReaderDataService(AppPaths paths, TimeProvider? timeProvider = null)
     {
         _paths = paths;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     private void NotifyDataChanged(LocalDataChangeKind kind)
@@ -191,6 +193,8 @@ public sealed partial class ReaderDataService
             await using (var syncTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
             {
                 await ReadingTimeSyncTracker.EnsureSchemaAsync(connection, syncTransaction, cancellationToken);
+                await ReaderAchievementStore.EnsureAsync(connection, syncTransaction, cancellationToken);
+                await ReaderAchievementStore.EvaluateAsync(connection, syncTransaction, _timeProvider.GetUtcNow(), _timeProvider.LocalTimeZone, true, cancellationToken);
                 await syncTransaction.CommitAsync(cancellationToken);
             }
 
@@ -948,7 +952,8 @@ public sealed partial class ReaderDataService
             })
             .OrderByDescending(item => item.UpdatedAt).ThenBy(item => item.BookId).ToArray();
         var started = books.Length;
-        var finished = books.Count(item => item.ProgressPercent >= 99.5);
+        var completions = await ReaderAchievementStore.CaptureAsync(connection, null, cancellationToken);
+        var finished = ReaderAchievementStore.DistinctCompletions(completions.Completions).Count;
         var seconds = books.Sum(item => item.CumulativeSeconds);
         var average = books.Length == 0 ? 0 : books.Average(item => item.ProgressPercent);
 
@@ -973,25 +978,9 @@ public sealed partial class ReaderDataService
 
         var recentBooks = books.Take(Math.Clamp(recentLimit, 1, 100)).ToArray();
 
-        var firstDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-13));
-        var dailyCommand = connection.CreateCommand();
-        dailyCommand.CommandText = """
-            SELECT ReadingDate, COALESCE(SUM(Seconds), 0)
-            FROM S3SyncReadingDayCounters
-            WHERE ReadingDate >= $cutoff
-            GROUP BY ReadingDate
-            ORDER BY ReadingDate;
-            """;
-        dailyCommand.Parameters.AddWithValue("$cutoff", firstDay.ToString("yyyy-MM-dd"));
-        var dailyValues = new Dictionary<DateOnly, long>();
-        await using (var reader = await dailyCommand.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                if (DateOnly.TryParse(reader.GetString(0), out var day))
-                    dailyValues[day] = reader.GetInt64(1);
-            }
-        }
+        var firstDay = DateOnly.FromDateTime(_timeProvider.GetLocalNow().Date.AddDays(-13));
+        var calendar = await ReadingLocalCalendar.ReadAsync(connection, null, cancellationToken);
+        var dailyValues = calendar.Days.ToDictionary(day => day.Date, day => day.ActiveSeconds);
         var dailyReading = Enumerable.Range(0, 14)
             .Select(offset => firstDay.AddDays(offset))
             .Select(day => new ReadingDashboardDay(day, dailyValues.GetValueOrDefault(day)))
@@ -1012,7 +1001,8 @@ public sealed partial class ReaderDataService
         double progressPercent,
         int completedChapters,
         int totalChapters,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTimeOffset? intervalEnd = null)
     {
         if (activeSeconds <= 0) return;
         await _databaseGate.WaitAsync(cancellationToken);
@@ -1020,7 +1010,7 @@ public sealed partial class ReaderDataService
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-            var recordedAt = DateTimeOffset.UtcNow;
+            var recordedAt = _timeProvider.GetUtcNow();
             var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
@@ -1058,8 +1048,10 @@ public sealed partial class ReaderDataService
             session.Parameters.AddWithValue("$recordedAt", recordedAt.ToString("O"));
             await session.ExecuteNonQueryAsync(cancellationToken);
             await ReadingTimeSyncTracker.RecordReadingDayAsync(
-                connection, transaction, bookFileId, recordedAt, activeSeconds, cancellationToken);
+                connection, transaction, bookFileId, intervalEnd ?? recordedAt, activeSeconds, cancellationToken,
+                intervalEnd is { } ended ? TimeZoneInfo.CreateCustomTimeZone("Recorded offset", ended.Offset, "Recorded offset", "Recorded offset") : _timeProvider.LocalTimeZone);
             await ReadingTimeSyncTracker.RecordCurrentTotalAsync(connection, transaction, bookFileId, cancellationToken);
+            await ReaderAchievementStore.EvaluateAsync(connection, transaction, recordedAt, _timeProvider.LocalTimeZone, false, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             NotifyDataChanged(LocalDataChangeKind.ReadingStats);
         }

@@ -14,6 +14,8 @@ internal sealed class S3SyncSnapshot
     public S3SyncSettingsSnapshot? Settings { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ReadingDataReset? ReadingDataReset { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ReadingAchievementSnapshot? ReadingAchievements { get; set; }
     public List<S3SyncBook> Books { get; set; } = [];
     public List<S3SyncBookFile> Files { get; set; } = [];
     public List<S3SyncCollection> Collections { get; set; } = [];
@@ -182,6 +184,8 @@ internal sealed class S3SyncReadingStats
     public long CumulativeSeconds { get; set; }
     public Dictionary<string, long> SecondsByDevice { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<string, Dictionary<string, long>> SecondsByDateByDevice { get; set; } =
+        new(StringComparer.Ordinal);
+    public Dictionary<string, Dictionary<string, long>> LocalDaysByDevice { get; set; } =
         new(StringComparer.Ordinal);
     public double ProgressPercent { get; set; }
     public int CompletedChapters { get; set; }

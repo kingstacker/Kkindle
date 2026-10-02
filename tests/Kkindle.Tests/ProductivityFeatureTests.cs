@@ -449,7 +449,8 @@ public sealed class ProductivityFeatureTests
 
             var dashboard = await service.GetReadingDashboardAsync();
             Assert.Equal(1, dashboard.BooksStarted);
-            Assert.Equal(1, dashboard.BooksFinished);
+            // Reaching the last page does not confirm a completed book.
+            Assert.Equal(0, dashboard.BooksFinished);
             Assert.Equal(120, dashboard.TotalSeconds);
             Assert.Equal(100, dashboard.AverageProgress);
             Assert.Equal(1, dashboard.BookmarkCount);

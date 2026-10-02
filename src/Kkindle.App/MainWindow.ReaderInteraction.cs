@@ -1114,7 +1114,7 @@ public partial class MainWindow
     private bool _readerAssistantVisibleBeforeZen = true;
     private bool _readerTocExpandedBeforeZen = true;
     private bool _readerTocMinimalBeforeZen;
-    private long _readerActiveSeconds;
+    private readonly ReadingTimeBuffer _readerActiveTime = new();
     private DispatcherTimer? _readerStatsTimer;
     private readonly SemaphoreSlim _readerStatsFlushGate = new(1, 1);
     private int _readerTransientStatusSequence;
@@ -1454,7 +1454,7 @@ public partial class MainWindow
         _readerTocMinimal = false;
         _readerTocExpandedBeforeZen = true;
         _readerTocMinimalBeforeZen = false;
-        _readerActiveSeconds = 0;
+        _readerActiveTime.Clear();
         ReaderBookInfoText.Text = _readerBookCard?.Title ?? UiText.Get("目录");
         BuildReaderTocRows();
         CollapseReaderTocToCurrentChapter(_readerChapterIndex);
@@ -6656,8 +6656,8 @@ public partial class MainWindow
     // ------------------------------------------------------------------
     // Reading stats: cumulative active reading time plus a progress
     // snapshot. Time only accrues while the window is active and the
-    // reader pane is visible, so simply leaving the book open is not
-    // counted as reading time. Mirrors the WinUI reference.
+    // reader pane is visible. Background time is excluded; this does not
+    // attempt to infer attention while the reader remains in the foreground.
     // ------------------------------------------------------------------
 
     private void StartReaderStatsTimer()
@@ -6681,8 +6681,8 @@ public partial class MainWindow
     private void ReaderStatsTimer_Tick(object? sender, EventArgs e)
     {
         if (!IsActive || !ReaderRoot.IsVisible) return;
-        _readerActiveSeconds++;
-        if (_readerActiveSeconds % 30 == 0)
+        _readerActiveTime.AddSecond(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()).ToLocalTime());
+        if (_readerActiveTime.PendingSeconds % 30 == 0)
             _ = FlushReaderActiveSecondsAsync();
     }
 
@@ -6691,25 +6691,28 @@ public partial class MainWindow
         await _readerStatsFlushGate.WaitAsync();
         try
         {
-            if (_readerBookCard is null || _readerBookFile is null || _readerActiveSeconds <= 0) return;
-            var activeSeconds = Interlocked.Exchange(ref _readerActiveSeconds, 0);
-            if (activeSeconds <= 0) return;
-            try
+            if (_readerBookCard is null || _readerBookFile is null || _readerActiveTime.PendingSeconds <= 0) return;
+            var slices = _readerActiveTime.Drain();
+            for (var index = 0; index < slices.Count; index++)
             {
-                await _readerData.AddReadingTimeAsync(
-                    _readerBookCard.Book.Id,
-                    _readerBookFile.Id,
-                    activeSeconds,
-                    CalculateReaderProgressPercent(),
-                    _readerChapterIndex,
-                    _readerDocument?.Chapters.Count ?? (_readerIsPdf ? _readerPdfPages.Count : 0),
-                    CancellationToken.None);
-            }
-            catch
-            {
-                // Keep unsaved seconds pending so the next periodic flush or
-                // reader close can retry instead of silently losing time.
-                Interlocked.Add(ref _readerActiveSeconds, activeSeconds);
+                try
+                {
+                    await _readerData.AddReadingTimeAsync(
+                        _readerBookCard.Book.Id,
+                        _readerBookFile.Id,
+                        slices[index].Seconds,
+                        CalculateReaderProgressPercent(),
+                        _readerChapterIndex,
+                        _readerDocument?.Chapters.Count ?? (_readerIsPdf ? _readerPdfPages.Count : 0),
+                        CancellationToken.None, slices[index].EndedAt);
+                }
+                catch
+                {
+                    // Retry only unwritten slices; previously saved dates must
+                    // not be counted again if a later write fails.
+                    _readerActiveTime.Restore(slices.Skip(index));
+                    break;
+                }
             }
         }
         finally

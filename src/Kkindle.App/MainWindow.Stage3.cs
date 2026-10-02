@@ -4186,6 +4186,7 @@ public partial class MainWindow
         try
         {
             var dashboard = await _readerData.GetReadingDashboardAsync(100, _lifetimeCancellation.Token);
+            var achievements = await _readerData.GetReadingAchievementsAsync(_lifetimeCancellation.Token);
             DashboardBooksStartedText.Text = T("{0} 本", dashboard.BooksStarted);
             DashboardBooksFinishedText.Text = T("{0} 本", dashboard.BooksFinished);
             DashboardTotalTimeText.Text = FormatReadingTime(dashboard.TotalSeconds);
@@ -4196,7 +4197,7 @@ public partial class MainWindow
             DashboardDailyAverageText.Text = weekSeconds == 0
                 ? T("近 7 天日均 —")
                 : T("近 7 天日均 {0}", FormatReadingTime((long)Math.Round(weekSeconds / 7d)));
-            DashboardStreakText.Text = T("{0} 天", ComputeReadingStreakDays(dashboard.DailyReading));
+            PopulateReadingAchievements(achievements);
             DashboardStatusText.IsVisible = false;
 
             string BookTitle(ReadingDashboardBook item)
@@ -4243,6 +4244,7 @@ public partial class MainWindow
                 ("75–99%", (double)progressValues.Count(value => value >= 75 && value < 99.5), T("{0} 本", progressValues.Count(value => value >= 75 && value < 99.5))),
                 ("完成", (double)progressValues.Count(value => value >= 99.5), T("{0} 本", progressValues.Count(value => value >= 99.5)))
             ]);
+            await ShowPendingAchievementNoticeAsync(achievements);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -4252,20 +4254,6 @@ public partial class MainWindow
             DashboardStatusText.Text = T("阅读数据暂时不可用：{0}", UiText.Localize(exception.Message));
             DashboardStatusText.IsVisible = true;
         }
-    }
-
-    // Consecutive active days inside the 14-day window, ending today or
-    // yesterday (today alone may not have started yet without breaking it).
-    private static int ComputeReadingStreakDays(IReadOnlyList<ReadingDashboardDay> days)
-    {
-        var streak = 0;
-        for (var i = days.Count - 1; i >= 0; i--)
-        {
-            if (days[i].ActiveSeconds > 0) streak++;
-            else if (streak == 0 && i == days.Count - 1) continue;
-            else break;
-        }
-        return streak;
     }
 
     private static void PopulateDashboardBars(

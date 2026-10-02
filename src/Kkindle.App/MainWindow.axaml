@@ -29,6 +29,23 @@
         KeyDown="MainWindow_KeyDown">
 
     <Window.Resources>
+        <DataTemplate x:Key="ReadingAchievementCardTemplate" x:DataType="local:ReadingAchievementViewModel">
+            <Button Classes="quiet" Margin="0,0,10,10" Padding="14,12" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                    Click="AchievementCard_Click" AutomationProperties.Name="{Binding AccessibleLabel}" ToolTip.Tip="{Binding Rule}">
+                <StackPanel Spacing="7" MinWidth="130">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{Binding Category}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Level}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" />
+                    </Grid>
+                    <Border Height="54" Width="54" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" HorizontalAlignment="Center" Opacity="{Binding IconOpacity}">
+                        <Path Data="{Binding Icon}" Width="29" Height="29" Stretch="Uniform" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.4" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                    <TextBlock Text="{Binding ProgressLabel}" FontSize="11" HorizontalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}" />
+                    <ProgressBar Value="{Binding Percent}" Minimum="0" Maximum="100" Height="2" Foreground="{DynamicResource InkBrush}" Background="{DynamicResource HairlineBrush}" />
+                </StackPanel>
+            </Button>
+        </DataTemplate>
         <!-- Zen owns its caption controls; omit Fluent's fullscreen popover. -->
         <ControlTheme x:Key="ReaderZenWindowDecorations" TargetType="chrome:WindowDrawnDecorations">
             <Setter Property="Template">
@@ -2297,7 +2314,7 @@
                                 <StackPanel Spacing="3">
                                     <TextBlock Text="{DynamicResource Ui.Auto.A4D3E9ED3C64AE28}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                     <TextBlock x:Name="DashboardStreakText" Text="{DynamicResource Ui.Auto.2E878CA6410E7711}" FontSize="22" FontWeight="SemiBold" />
-                                    <TextBlock Text="{DynamicResource Ui.Auto.FBD5755F75159075}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" />
+                                    <TextBlock Text="{DynamicResource Ui.Achievements.DailyMinimum}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="2" Classes="flatMetric" Padding="14,12">
@@ -2320,6 +2337,47 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
+                        <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="14,16,4,6">
+                            <StackPanel Spacing="12">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                    <StackPanel Spacing="4">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <TextBlock Text="{DynamicResource Ui.Achievements.Title}" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock x:Name="AchievementCountText" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="AchievementNextText" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+                                    </StackPanel>
+                                    <Button x:Name="AchievementViewAllButton" Grid.Column="1" Classes="quiet" Content="{DynamicResource Ui.Achievements.ViewAll}" Click="AchievementViewAllButton_Click" VerticalAlignment="Top" Margin="0,0,10,0" />
+                                </Grid>
+                                <ItemsControl x:Name="AchievementPreview" ItemsSource="{Binding RecentAchievements}" ItemTemplate="{StaticResource ReadingAchievementCardTemplate}">
+                                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                                <StackPanel x:Name="AchievementWall" IsVisible="False" Spacing="12">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <TextBlock x:Name="AchievementStreakDetailText" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <ComboBox x:Name="AchievementFilterBox" Grid.Column="1" SelectedIndex="0" MinWidth="130" Margin="0,0,10,0" SelectionChanged="AchievementFilterBox_SelectionChanged" AutomationProperties.Name="{DynamicResource Ui.Achievements.Filter}">
+                                            <ComboBoxItem Content="{DynamicResource Ui.Achievements.All}" />
+                                            <ComboBoxItem Content="{DynamicResource Ui.Achievements.Earned}" />
+                                            <ComboBoxItem Content="{DynamicResource Ui.Achievements.Locked}" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <ItemsControl ItemsSource="{Binding VisibleAchievements}" ItemTemplate="{StaticResource ReadingAchievementCardTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                    <TextBlock x:Name="AchievementFilterEmptyText" Text="{DynamicResource Ui.Achievements.Empty}" IsVisible="False" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" />
+                                </StackPanel>
+                                <Border x:Name="AchievementDetails" IsVisible="False" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" Padding="12" Margin="0,0,10,0">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock x:Name="AchievementDetailName" FontSize="14" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="AchievementDetailRule" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="AchievementDetailProgress" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="{DynamicResource Ui.Achievements.Rules}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" Margin="0,0,10,0" />
+                                <TextBlock x:Name="AchievementHistoryText" Text="{DynamicResource Ui.Achievements.Legacy}" IsVisible="False" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" Margin="0,0,10,0" />
+                                <CheckBox x:Name="AchievementNotificationsCheckBox" Content="{DynamicResource Ui.Achievements.Notifications}" FontSize="11" IsChecked="True" IsCheckedChanged="AchievementNotificationsCheckBox_Changed" />
+                            </StackPanel>
+                        </Border>
                         <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="16">
                             <Border Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
                                 <StackPanel Spacing="10">
@@ -2420,6 +2478,11 @@
                 </ScrollViewer>
             </Grid>
 
+            <Border x:Name="AchievementToast" Grid.Column="1" ZIndex="1000" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    MaxWidth="380" Margin="24" Padding="16,12" IsVisible="False" IsHitTestVisible="False"
+                    BorderBrush="{DynamicResource InkBrush}" BorderThickness="1" Background="{DynamicResource PaperBrush}">
+                <TextBlock x:Name="AchievementToastText" FontSize="13" TextWrapping="Wrap" />
+            </Border>
             <!-- One settings destination; inactive categories and collapsed forms leave the focus tree. -->
             <Grid x:Name="SettingsPage" Classes="settingsPage" Grid.Column="1" Margin="30,24,30,18" IsVisible="False">
                 <Grid RowDefinitions="Auto,Auto,*,Auto" MaxWidth="820" HorizontalAlignment="Left" Width="{Binding Bounds.Width, ElementName=SettingsPage}">
@@ -3114,6 +3177,7 @@
                                         <StackPanel Spacing="10">
                                             <TextBlock Text="{DynamicResource Ui.Auto.C9FD4D3CBC6F284A}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <Button x:Name="ResetReadingDataButton" Content="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" AutomationProperties.Name="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" Classes="quiet" HorizontalAlignment="Left" Click="ResetReadingDataButton_Click" />
+                                            <CheckBox x:Name="ResetReadingAchievementsCheckBox" Content="{DynamicResource Ui.Achievements.Reset}" FontSize="12" IsChecked="False" />
                                             <TextBlock x:Name="SettingsReadingDataStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>

@@ -1043,7 +1043,7 @@ public partial class MainWindow
         _readerDocument = null;
         _readerBookCard = null;
         _readerBookFile = null;
-        await Task.CompletedTask;
+        await ShowPendingAchievementNoticeAsync();
         }
         finally
         {

@@ -985,6 +985,7 @@ public partial class MainWindow : Window
         _transferToastTimer.Stop();
         StopTaskSpinner();
         _deviceStatusToastTimer.Stop();
+        _achievementToastHide?.Dispose();
         _appSettingsAutoSaveCancellation?.Cancel();
         _appSettingsAutoSaveCancellation?.Dispose();
         _appSettingsAutoSaveCancellation = null;
@@ -3000,6 +3001,7 @@ public partial class MainWindow : Window
     {
         card.Book.ReadingStatus = status;
         await SaveBookMetadataAsync(card, T("已标记为“{0}”。", GetReadingStatusName(status)));
+        if (status == LibraryReadingStatus.Finished) await ShowPendingAchievementNoticeAsync();
     }
 
     private async Task ToggleBookCollectionAsync(BookCardViewModel card, BookCollectionFolderViewModel folder)

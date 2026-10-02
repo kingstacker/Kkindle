@@ -22,7 +22,7 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public sealed partial class S3SyncService
 {
-    private const int SnapshotVersion = 3;
+    private const int SnapshotVersion = 4;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
     private const int EncryptionNonceBytes = 12;
@@ -1380,6 +1380,15 @@ public sealed partial class S3SyncService
         IReadOnlyList<S3SyncSnapshot> targets)
     {
         if (targets.Count == 0) return false;
+        if (!ReaderAchievementStore.IsCovered(candidate.ReadingAchievements, targets.Select(t => t.ReadingAchievements))) return false;
+        foreach (var stats in candidate.ReadingStats)
+        {
+            var coveredDays = ReadingLocalCalendar.Merge(targets.SelectMany(t => t.ReadingStats)
+                .Where(s => s.BookFileId == stats.BookFileId).Select(s => s.LocalDaysByDevice));
+            foreach (var (device, dates) in stats.LocalDaysByDevice ?? [])
+            foreach (var (date, seconds) in dates)
+                if (!coveredDays.TryGetValue(device, out var known) || known.GetValueOrDefault(date) < seconds) return false;
+        }
         var targetLiveRows = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         var tombstoneVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         foreach (var target in targets)
@@ -1581,6 +1590,7 @@ public sealed partial class S3SyncService
             if (snapshot.Version > SnapshotVersion)
                 throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
             ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
+            ReaderAchievementStore.Validate(snapshot.ReadingAchievements);
             if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
                 throw new InvalidDataException("同步快照缺少有效的设备 ID。");
             snapshot.DeviceId = parsedDeviceId.ToString("N");

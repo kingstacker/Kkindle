@@ -33,11 +33,14 @@ public partial class MainWindow
         ResetReadingDataButton.IsEnabled = false;
         _s3LocalChangeSyncTimer.Stop();
         SettingsReadingDataStatusText.Text = string.Empty;
+        var clearAchievements = ResetReadingAchievementsCheckBox.IsChecked == true;
+        ResetReadingAchievementsCheckBox.IsEnabled = false;
         try
         {
             if (!await ConfirmAsync(
                     T("重置阅读数据"),
-                    T("确定清除所有阅读统计和进度吗？包括累计时长、每日统计和最近阅读记录。书籍、书签、划线与批注将保留。此操作无法撤销，开启云端同步后也会重置其他设备上的阅读统计和进度。"),
+                    T("确定清除所有阅读统计和进度吗？包括累计时长、每日统计和最近阅读记录。书籍、书签、划线与批注将保留。此操作无法撤销，开启云端同步后也会重置其他设备上的阅读统计和进度。")
+                        + "\n\n" + (clearAchievements ? T("已获得的勋章和完读记录也将清除，并同步到其他设备。") : T("已获得的勋章和完读记录将保留。")),
                     T("确认重置"), _lifetimeCancellation.Token, allowDiagnosticAutoConfirm: false))
                 return;
 
@@ -50,7 +53,7 @@ public partial class MainWindow
             }
 
             SettingsReadingDataStatusText.Text = T("正在重置阅读数据…");
-            await _readerData.ResetReadingDataAsync(_lifetimeCancellation.Token);
+            await _readerData.ResetReadingDataAsync(clearAchievements, _lifetimeCancellation.Token);
             await RefreshReadingDashboardAsync();
             SettingsReadingDataStatusText.Text = T("阅读统计和进度已重置。书籍、书签、划线与批注已保留。");
         }
@@ -63,6 +66,7 @@ public partial class MainWindow
         {
             _readingDataResetBusy = false;
             ResetReadingDataButton.IsEnabled = true;
+            ResetReadingAchievementsCheckBox.IsEnabled = true;
             if (HasPendingS3LocalChanges && IsAutomaticS3SyncReady())
                 ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce);
         }
