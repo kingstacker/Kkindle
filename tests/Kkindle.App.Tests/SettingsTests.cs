@@ -416,6 +416,8 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.False(scope.Get<Control>("S3RegionBox").IsEffectivelyVisible);
         scope.Get<Expander>("SettingsS3Expander").IsExpanded = false;
         await Render();
+        Assert.False(scope.Get<Control>("S3EndpointBox").IsEffectivelyEnabled);
+        await Until(() => !scope.Get<Control>("S3EndpointBox").IsEffectivelyVisible);
         Assert.False(scope.Get<Control>("S3EndpointBox").IsEffectivelyVisible);
         Assert.False(scope.Get<Control>("S3SaveSettingsButton").IsEffectivelyVisible);
     });

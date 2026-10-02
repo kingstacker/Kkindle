@@ -23,7 +23,8 @@ public sealed class UpdateService : IDisposable
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly IAppUpdateInstaller _installer;
-    private readonly HttpClient _httpClient;
+    private HttpClient _httpClient;
+    private string? _proxyAddress;
     private readonly bool _ownsHttpClient;
     private readonly string _downloadRoot;
 
@@ -53,6 +54,20 @@ public sealed class UpdateService : IDisposable
     }
 
     public bool CanInstall => _installer.CanInstall;
+    public void ConfigureProxy(string? proxyAddress)
+    {
+        var normalized = TranslationProxy.NormalizeAddress(proxyAddress);
+        if (!_ownsHttpClient || normalized == _proxyAddress) return;
+        var handler = normalized.Length == 0
+            ? new HttpClientHandler { UseProxy = false }
+            : TranslationProxy.CreateHandler(normalized);
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(10) };
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Kkindle-Updater", "1.0"));
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        _httpClient.Dispose();
+        _httpClient = client;
+        _proxyAddress = normalized;
+    }
     public string UnavailableReason => _installer.UnavailableReason;
 
     public Task<AppUpdateInfo?> CheckForUpdateAsync(

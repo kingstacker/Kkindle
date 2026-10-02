@@ -134,7 +134,7 @@ public partial class MainWindow
         TranslationAiRpmBox.Value = settings.AiRequestsPerMinute;
         TranslationAiRpmPane.IsVisible = settings.Provider == BookTranslationProvider.Ai;
         TranslationGoogleProxyBox.Text = settings.GoogleProxyAddress;
-        TranslationGoogleProxyPane.IsVisible = settings.Provider == BookTranslationProvider.GoogleFree;
+        TranslationGoogleProxyPane.IsVisible = true;
         TranslationTranslatedOutputCheck.IsChecked = settings.OutputMode.HasFlag(BookTranslationOutputMode.Translated);
         TranslationBilingualOutputCheck.IsChecked = settings.OutputMode.HasFlag(BookTranslationOutputMode.Bilingual);
         TranslationContextMenuEnabledCheck.IsChecked = settings.ContextMenuEnabled;
@@ -174,7 +174,7 @@ public partial class MainWindow
         if (TranslationAiRpmPane is not null)
             TranslationAiRpmPane.IsVisible = TranslationProviderBox.SelectedIndex == 0;
         if (TranslationGoogleProxyPane is not null)
-            TranslationGoogleProxyPane.IsVisible = TranslationProviderBox.SelectedIndex == 2;
+            TranslationGoogleProxyPane.IsVisible = true;
         if (_bookTranslationPaused && _bookTranslationProgressWindow is { } progressWindow)
             progressWindow.SetSelectedProvider(ReadBookTranslationProviderFromControls());
         if (_suppressAppSettingsAutoSave) return;

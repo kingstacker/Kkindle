@@ -33,6 +33,8 @@ var ejectDevices = McpPlatformServices.CreateEjectService(paths, metadata);
 var formatConverter = new BookFormatConversionService();
 var emailSettingsStore = new KindleEmailSettingsStore(paths, new McpSecretProtector());
 var emailSender = new KindleEmailSender();
+using var zLibraryService = new ZLibraryService();
+var zLibrarySettingsStore = new ZLibrarySettingsStore(paths, new McpSecretProtector());
 var mcpTools = new KkindleMcpTools(
     library,
     readerData,
@@ -40,7 +42,9 @@ var mcpTools = new KkindleMcpTools(
     formatConverter,
     emailSettingsStore,
     emailSender,
-    ejectDevices);
+    ejectDevices,
+    zLibraryService,
+    zLibrarySettingsStore);
 var enabledTools = CreateEnabledTools(mcpTools, mcpSettings, mcpSerializerOptions);
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -58,6 +62,8 @@ builder.Services.AddSingleton<IKindleDeviceService>(devices);
 builder.Services.AddSingleton<IBookFormatConverter>(formatConverter);
 builder.Services.AddSingleton(emailSettingsStore);
 builder.Services.AddSingleton(emailSender);
+builder.Services.AddSingleton<IZLibraryService>(zLibraryService);
+builder.Services.AddSingleton(zLibrarySettingsStore);
 builder.Services.AddSingleton(mcpTools);
 if (ejectDevices is not null)
     builder.Services.AddSingleton(ejectDevices);
@@ -128,7 +134,9 @@ static McpServerSettings LoadMcpSettings(AppPaths paths)
             SearchBookContentEnabled = false,
             AnnotationsEnabled = false,
             BookmarksEnabled = false,
-            ReadingDashboardEnabled = false
+            ReadingDashboardEnabled = false,
+            ZLibrarySearchEnabled = false,
+            ZLibraryDownloadEnabled = false
         };
     }
 }
@@ -170,7 +178,9 @@ static IReadOnlyList<McpServerTool> CreateEnabledTools(
         (settings.SearchBookContentEnabled, nameof(KkindleMcpTools.SearchBookContentAsync)),
         (settings.AnnotationsEnabled, nameof(KkindleMcpTools.ListBookAnnotationsAsync)),
         (settings.BookmarksEnabled, nameof(KkindleMcpTools.ListBookmarksAsync)),
-        (settings.ReadingDashboardEnabled, nameof(KkindleMcpTools.GetReadingDashboardAsync))
+        (settings.ReadingDashboardEnabled, nameof(KkindleMcpTools.GetReadingDashboardAsync)),
+        (settings.ZLibrarySearchEnabled, nameof(KkindleMcpTools.SearchZLibraryAsync)),
+        (settings.ZLibraryDownloadEnabled, nameof(KkindleMcpTools.DownloadZLibraryAsync))
     };
 
     return registrations

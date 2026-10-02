@@ -73,7 +73,7 @@ public partial class MainWindow
         S3SyncCloudIcon.Stroke = state == S3SyncIndicatorState.NotConfigured
             ? AppAppearanceResources.GetBrush("MutedInkBrush")
             : AppAppearanceResources.GetBrush("InkBrush");
-        S3SyncCloudIcon.StrokeThickness = needsAttention ? 1.9 : 1.6;
+        S3SyncCloudIcon.StrokeThickness = needsAttention ? 1.6 : 1.4;
 
         var tooltip = BuildS3SyncIndicatorTooltip();
         ToolTip.SetTip(S3SyncIndicatorButton, tooltip);

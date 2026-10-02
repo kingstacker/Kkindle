@@ -114,8 +114,8 @@
                             <Grid ColumnDefinitions="48,*,Auto" ColumnSpacing="16">
                                 <Border Width="48" Height="48" Background="{DynamicResource SoftHoverBrush}"
                                         VerticalAlignment="Center">
-                                    <Path Data="M 12,16 V 2 M 7,7 L 12,2 L 17,7 M 3,15 V 22 H 21 V 15"
-                                          Width="24" Height="24" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.4"
+                                    <Path Stretch="Uniform" Data="M 12,16 V 2 M 7,7 L 12,2 L 17,7 M 3,15 V 22 H 21 V 15"
+                                          Width="18" Height="18" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.4"
                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
@@ -140,8 +140,8 @@
                                     <Grid>
                                         <Grid x:Name="EmptyQueuePanel" ColumnDefinitions="Auto,Auto" ColumnSpacing="14"
                                               MinHeight="88" Margin="16,0" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                            <Path Data="M 3,2 H 15 L 21,8 V 27 H 3 Z M 15,2 V 8 H 21 M 7,14 H 17 M 7,19 H 14"
-                                                  Width="24" Height="28" Stroke="{DynamicResource SubtleInkBrush}" StrokeThickness="1.2"
+                                            <Path Stretch="Uniform" Data="M 3,2 H 15 L 21,8 V 27 H 3 Z M 15,2 V 8 H 21 M 7,14 H 17 M 7,19 H 14"
+                                                  Width="18" Height="21" Stroke="{DynamicResource SubtleInkBrush}" StrokeThickness="1.2"
                                                   VerticalAlignment="Center" />
                                             <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
                                                 <TextBlock Text="{DynamicResource Ui.KindleWeb.Queue.EmptyTitle}" FontSize="14" />

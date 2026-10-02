@@ -68,6 +68,33 @@ public interface IBookFormatConverter
         FormatConversionMetadata? metadata = null);
 }
 
+public interface IZLibraryService
+{
+    bool IsLoggedIn { get; }
+    string ActiveBaseUrl { get; }
+    Task LoginAsync(
+        string email,
+        string password,
+        string baseUrl,
+        CancellationToken cancellationToken = default);
+    Task<ZLibrarySearchResult> SearchAsync(
+        string query,
+        int page = 1,
+        int limit = 20,
+        IReadOnlyList<string>? extensions = null,
+        IReadOnlyList<string>? languages = null,
+        CancellationToken cancellationToken = default);
+    Task<string?> GetDownloadUrlAsync(
+        ZLibraryBook book,
+        string preferredExtension,
+        CancellationToken cancellationToken = default);
+    Task<string> DownloadAsync(
+        ZLibraryBook book,
+        string destinationDirectory,
+        IProgress<TransferProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IPinyinBookService
 {
     Task<PinyinBookResumeInfo?> FindResumeAsync(

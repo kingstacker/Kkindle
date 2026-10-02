@@ -30,6 +30,10 @@ internal static class AppAppearanceResources
         Set("AccentPressed", palette.AccentPressed);
         Set("OnAccent", palette.OnAccent);
         var dark = palette.Paper.R < 90;
+        Set("SidebarIcon", dark ? palette.Muted : Color.Parse("#404040"));
+        Set("SidebarChevron", dark ? palette.Muted : Color.Parse("#606060"));
+        Set("SidebarCount", dark ? palette.Subtle : Color.Parse("#858585"));
+        Set("SidebarSelected", dark ? palette.Hover : Color.Parse("#F3F4F5"));
         Set("Success", Color.Parse(dark ? "#9BC797" : "#2E754D"));
         Set("Warning", Color.Parse(dark ? "#E2C178" : "#8D6400"));
         Set("Danger", Color.Parse(dark ? "#EAA59B" : "#A7342F"));

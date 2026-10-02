@@ -35,9 +35,12 @@ public sealed class CalibreSetupService : IDisposable
     private readonly HttpClient _httpClient;
     private bool _disposed;
 
-    public CalibreSetupService(HttpMessageHandler? handler = null)
+    public CalibreSetupService(HttpMessageHandler? handler = null, string? proxyAddress = null)
     {
-        handler ??= new HttpClientHandler { AllowAutoRedirect = true };
+        var normalizedProxy = TranslationProxy.NormalizeAddress(proxyAddress);
+        handler ??= normalizedProxy.Length == 0
+            ? new HttpClientHandler { AllowAutoRedirect = true, UseProxy = false }
+            : TranslationProxy.CreateHandler(normalizedProxy);
         _httpClient = new HttpClient(handler, disposeHandler: true)
         {
             Timeout = Timeout.InfiniteTimeSpan
