@@ -130,7 +130,7 @@ internal static class WpdKindleAccess
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     dynamic child = children.Item(index);
-                    var name = Convert.ToString(child.Name) ?? string.Empty;
+                    var name = GetItemFileName(child);
                     var relativePath = string.IsNullOrEmpty(entry.RelativePath)
                         ? name
                         : $"{entry.RelativePath}\\{name}";
@@ -209,7 +209,7 @@ internal static class WpdKindleAccess
                         try
                         {
                             child = children.Item(index);
-                            var name = Convert.ToString(child.Name) ?? string.Empty;
+                            var name = GetItemFileName(child);
                             var relativePath = $"{entry.RelativePath}\\{name}";
                             if ((bool)child.IsFolder)
                             {
@@ -974,10 +974,23 @@ internal static class WpdKindleAccess
         for (var index = 0; index < (int)children.Count; index++)
         {
             dynamic child = children.Item(index);
-            if (string.Equals(Convert.ToString(child.Name), name, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(GetItemFileName(child), name, StringComparison.OrdinalIgnoreCase))
                 return child;
         }
         return null;
+    }
+
+    private static string GetItemFileName(dynamic item)
+    {
+        // Shell Name is a display label and can omit known file extensions.
+        // Use the actual filename for format detection and relative-path lookup.
+        try
+        {
+            string? fileName = Convert.ToString(item.ExtendedProperty("System.FileName"));
+            if (!string.IsNullOrWhiteSpace(fileName)) return fileName;
+        }
+        catch (COMException) { }
+        return Convert.ToString(item.Name) ?? string.Empty;
     }
 
     private static string GetUniqueLocalDestination(string directory, string fileName)

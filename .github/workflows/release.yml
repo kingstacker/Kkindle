@@ -2,13 +2,15 @@ name: Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "已存在的版本标签，例如 v1.2.0"
-        required: true
+        description: "留空根据所选分支的开发版本发布稳定版，也可填写已有标签"
+        required: false
         type: string
 
 permissions:
@@ -19,12 +21,80 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Resolve stable release version
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - name: Resolve release tag
+        id: version
+        uses: actions/github-script@v7
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        with:
+          script: |
+            let tag = process.env.REQUESTED_TAG?.trim();
+            const masterPush = context.eventName === 'push' && context.ref === 'refs/heads/master';
+            if (context.ref.startsWith('refs/tags/')) {
+              tag = context.ref.replace('refs/tags/', '');
+            } else if (!tag) {
+              const { data: file } = await github.rest.repos.getContent({
+                owner: context.repo.owner, repo: context.repo.repo,
+                path: 'Directory.Build.props', ref: context.sha
+              });
+              const props = Buffer.from(file.content, 'base64').toString('utf8');
+              const match = props.match(/<Version>(\d+\.\d+\.\d+)-dev\.\d+(?:\.\d+)?<\/Version>/);
+              if (!match) throw new Error('Selected branch must contain an X.Y.Z-dev.N version');
+              tag = `v${match[1]}`;
+              if (masterPush) {
+                const releases = await github.paginate(github.rest.repos.listReleases, {
+                  owner: context.repo.owner, repo: context.repo.repo, per_page: 100
+                });
+                const candidates = releases.filter(r => !r.draft && /^v?\d+\.\d+\.\d+-dev\.\d+(?:\.\d+)?$/.test(r.tag_name));
+                candidates.sort((a, b) => b.tag_name.replace(/^v/, '').localeCompare(a.tag_name.replace(/^v/, ''), 'en', { numeric: true }));
+                for (const candidate of candidates) {
+                  const candidateTag = `v${candidate.tag_name.replace(/^v/, '').split('-dev.')[0]}`;
+                  if (candidateTag.localeCompare(tag, 'en', { numeric: true }) < 0) continue;
+                  const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
+                    owner: context.repo.owner, repo: context.repo.repo,
+                    basehead: `${candidate.tag_name}...${context.sha}`
+                  });
+                  if (comparison.status === 'ahead' || comparison.status === 'identical') {
+                    tag = candidateTag;
+                    break;
+                  }
+                }
+              }
+              try {
+                await github.rest.git.getRef({owner: context.repo.owner, repo: context.repo.repo, ref: `tags/${tag}`});
+                if (masterPush) {
+                  core.info(`Stable tag ${tag} already exists; skipping duplicate release`);
+                  core.setOutput('publish', 'false');
+                  return;
+                }
+                throw new Error(`Stable tag ${tag} already exists; specify it explicitly to rebuild`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+              await github.rest.git.createRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `refs/tags/${tag}`, sha: context.sha
+              });
+            }
+            if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag || '')) throw new Error('Invalid release tag');
+            core.setOutput('tag', tag);
+            core.setOutput('publish', 'true');
+            core.info(`Release tag: ${tag}`);
   windows:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     name: Build and publish Avalonia Windows release
     runs-on: windows-2022
     timeout-minutes: 90
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       RELEASE_DIR: ${{ github.workspace }}\artifacts\github-release
 
     steps:
@@ -82,11 +152,13 @@ jobs:
           compression-level: 0
 
   linux:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     name: Build Linux packages
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -129,11 +201,13 @@ jobs:
           compression-level: 0
 
   macos:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     name: Build macOS packages
     runs-on: macos-15
     timeout-minutes: 45
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -241,10 +315,10 @@ jobs:
 
   github-release:
     name: Publish three-platform release
-    needs: [windows, linux, macos]
+    needs: [prepare, windows, linux, macos]
     runs-on: ubuntu-24.04
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       # Checkout must run BEFORE the artifact download: it cleans the

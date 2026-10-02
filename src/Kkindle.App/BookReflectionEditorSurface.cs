@@ -50,7 +50,7 @@ internal sealed class BookReflectionEditorSurface : Border
     // glyphs line up on the same optical centre.
     private const double ToolbarButtonWidth = 34;
     private const double ToolbarButtonHeight = 30;
-    private const double ToolbarIconSize = 18;
+    private const double ToolbarIconSize = 16;
     private const double ToolbarIconCanvas = 24;
     private const double ToolbarIconStroke = 1;
 
@@ -213,7 +213,7 @@ internal sealed class BookReflectionEditorSurface : Border
             "bold");
         AddToolbarAction(
             tools,
-            CreateToolbarIcon("M5.5 10.5V6.5C5.5 5.4 6.4 4.5 7.5 4.5H10V8H7.5C7.5 9.7 8.3 10.5 10 10.5M15.5 10.5V6.5C15.5 5.4 16.4 4.5 17.5 4.5H20V8H17.5C17.5 9.7 18.3 10.5 20 10.5"),
+            CreateToolbarIcon("M3 11V8C3 6.3 3.8 5 5.5 4M3 8H6V11H3ZM8 11V8C8 6.3 8.8 5 10.5 4M8 8H11V11H8ZM13 12H16V15H13ZM16 15C16 16.7 15.2 18 13.5 19M18 12H21V15H18ZM21 15C21 16.7 20.2 18 18.5 19"),
             "引用",
             "quote");
         if (_citations.Count > 0)
@@ -250,7 +250,7 @@ internal sealed class BookReflectionEditorSurface : Border
             Padding = new Thickness(5, 4),
             Background = AppAppearanceResources.GetBrush("PaperBrush"),
             BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(0),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,

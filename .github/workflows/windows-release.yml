@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要创建或重新发布的版本标签，例如 v0.6.0-dev.4"
-        required: true
+        description: "留空根据所选分支的开发版本发布稳定版，或指定版本标签"
+        required: false
         type: string
 
 permissions:
@@ -40,6 +40,16 @@ jobs:
         id: version
         shell: pwsh
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_TAG)) {
+            [xml]$props = Get-Content Directory.Build.props -Raw
+            $developmentVersion = [string]$props.Project.PropertyGroup.Version
+            if ($developmentVersion -notmatch '^(\d+\.\d+\.\d+)-dev\.\d+(?:\.\d+)?$') {
+              throw '所选分支必须包含 X.Y.Z-dev.N 开发版本'
+            }
+            $env:RELEASE_TAG = "v$($Matches[1])"
+            if (git tag --list $env:RELEASE_TAG) { throw '稳定版标签已存在；如需重建请显式指定标签' }
+          }
+          "RELEASE_TAG=$env:RELEASE_TAG" >> $env:GITHUB_ENV
           if ($env:RELEASE_TAG -notmatch '^v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$') {
             throw "版本标签必须符合 vX.Y.Z 或 vX.Y.Z-prerelease：$env:RELEASE_TAG"
           }

@@ -1,14 +1,14 @@
 name: Development Build
 
-run-name: Development build ${{ inputs.base_version || '1.0.6-dev' }}.${{ github.run_number }}.${{ github.run_attempt }}
+run-name: "Development build ${{ github.ref_name }} #${{ github.run_number }}"
 
 on:
   workflow_dispatch:
     inputs:
       base_version:
-        description: "开发版基础版本，例如 1.0.6-dev"
-        required: true
-        default: "1.0.6-dev"
+        description: "留空根据最新稳定版自动推算；也可指定基础版本，例如 1.0.7-dev"
+        required: false
+        default: ""
         type: string
   push:
     branches:
@@ -30,20 +30,42 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      - uses: actions/checkout@v7
       - name: Resolve version
         id: version
-        shell: bash
+        uses: actions/github-script@v7
         env:
-          BASE_VERSION: ${{ inputs.base_version || '1.0.6-dev' }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "base_version must look like 1.0.6-dev" >&2
-            exit 2
-          fi
-          version="${BASE_VERSION}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Development version: $version"
+          BASE_VERSION: ${{ inputs.base_version }}
+        with:
+          script: |
+            let base = process.env.BASE_VERSION?.trim();
+            if (!base) {
+              const { data: stable } = await github.rest.repos.getLatestRelease({
+                owner: context.repo.owner, repo: context.repo.repo
+              });
+              const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(stable.tag_name);
+              if (stable.draft || stable.prerelease || !match) {
+                throw new Error(`Invalid stable release: ${stable.tag_name}`);
+              }
+              base = `${match[1]}.${match[2]}.${BigInt(match[3]) + 1n}-dev`;
+              core.info(`Latest stable release: ${stable.tag_name}; development base: ${base}`);
+            }
+            if (!/^\d+\.\d+\.\d+-dev$/.test(base || '')) {
+              throw new Error('base_version must look like 1.0.7-dev');
+            }
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner, repo: context.repo.repo, per_page: 100
+            });
+            const prefix = `${base}.`;
+            const numbers = releases.map(r => r.tag_name.replace(/^v/, ''))
+              .filter(tag => tag.startsWith(prefix))
+              .map(tag => tag.slice(prefix.length))
+              .filter(n => /^\d+(?:\.\d+)?$/.test(n))
+              .map(n => Number(n.split('.')[0]));
+            const next = Math.max(0, ...numbers) + 1;
+            const version = `${base}.${next}`;
+            core.setOutput('version', version);
+            core.info(`Development version: ${version}`);
 
   validate:
     name: Run tests and dependency audit

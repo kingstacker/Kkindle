@@ -76,10 +76,10 @@ The Settings page also offers explicit user-initiated installation buttons.
 Windows downloads the official signed MSI and launches Windows Installer;
 Linux runs calibre's official isolated installer into `~/calibre-bin` without
 root; macOS verifies the official DMG and application signature before placing
-`calibre.app` in `~/Applications`. KFX Input is downloaded from calibre's
-official plugin index, validated as a plugin ZIP and installed with the
-detected `calibre-customize`. These downloads never become part of a Kkindle
-release artifact.
+`calibre.app` in `~/Applications`. KFX Input is downloaded from the project's
+mirror when available (calibre's official plugin index otherwise), validated
+as a plugin ZIP and installed with the detected `calibre-customize`. These
+downloads never become part of a Kkindle release artifact.
 
 Local macOS builds and GitHub Releases use ad-hoc signing when Apple
 distribution credentials are not configured. The archive includes

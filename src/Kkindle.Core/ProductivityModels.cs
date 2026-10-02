@@ -164,6 +164,10 @@ public sealed record McpServerSettings
     public bool AnnotationsEnabled { get; init; } = true;
     public bool BookmarksEnabled { get; init; } = true;
     public bool ReadingDashboardEnabled { get; init; } = true;
+    // The online Z-Library tools are opt-in. They remain absent from the MCP
+    // tool list until the user explicitly enables the advanced feature.
+    public bool ZLibrarySearchEnabled { get; init; }
+    public bool ZLibraryDownloadEnabled { get; init; }
 
     public static McpServerSettings Normalize(McpServerSettings? settings)
     {
@@ -197,7 +201,9 @@ public sealed record McpServerSettings
             SearchBookContentEnabled = settings.SearchBookContentEnabled,
             AnnotationsEnabled = settings.AnnotationsEnabled,
             BookmarksEnabled = settings.BookmarksEnabled,
-            ReadingDashboardEnabled = settings.ReadingDashboardEnabled
+            ReadingDashboardEnabled = settings.ReadingDashboardEnabled,
+            ZLibrarySearchEnabled = settings.ZLibrarySearchEnabled,
+            ZLibraryDownloadEnabled = settings.ZLibraryDownloadEnabled
         };
     }
 }

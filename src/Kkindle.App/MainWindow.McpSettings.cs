@@ -61,6 +61,8 @@ public partial class MainWindow
         McpAnnotationsEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
         McpBookmarksEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
         McpReadingDashboardEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpZLibrarySearchEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
+        McpZLibraryDownloadEnabledCheck.IsCheckedChanged += (_, _) => McpSettingsControlChanged();
         _mcpSettingsInitialized = true;
 
         if (McpSettingsHaveUnsavedChanges())
@@ -102,6 +104,8 @@ public partial class MainWindow
             McpAnnotationsEnabledCheck.IsChecked = settings.AnnotationsEnabled;
             McpBookmarksEnabledCheck.IsChecked = settings.BookmarksEnabled;
             McpReadingDashboardEnabledCheck.IsChecked = settings.ReadingDashboardEnabled;
+            McpZLibrarySearchEnabledCheck.IsChecked = settings.ZLibrarySearchEnabled;
+            McpZLibraryDownloadEnabledCheck.IsChecked = settings.ZLibraryDownloadEnabled;
             McpSettingsStatusText.Text = string.Empty;
             UpdateMcpTransportControls();
         }
@@ -184,7 +188,9 @@ public partial class MainWindow
         SearchBookContentEnabled = McpSearchBookContentEnabledCheck.IsChecked == true,
         AnnotationsEnabled = McpAnnotationsEnabledCheck.IsChecked == true,
         BookmarksEnabled = McpBookmarksEnabledCheck.IsChecked == true,
-        ReadingDashboardEnabled = McpReadingDashboardEnabledCheck.IsChecked == true
+        ReadingDashboardEnabled = McpReadingDashboardEnabledCheck.IsChecked == true,
+        ZLibrarySearchEnabled = McpZLibrarySearchEnabledCheck.IsChecked == true,
+        ZLibraryDownloadEnabled = McpZLibraryDownloadEnabledCheck.IsChecked == true
     });
 
     private void ScheduleMcpSettingsAutoSave()
@@ -457,6 +463,10 @@ public partial class MainWindow
             features.Add(("list_bookmarks", T("书签")));
         if (settings.ReadingDashboardEnabled)
             features.Add(("get_reading_dashboard", T("阅读统计面板")));
+        if (settings.ZLibrarySearchEnabled)
+            features.Add(("search_zlibrary", T("搜索 Z-Library")));
+        if (settings.ZLibraryDownloadEnabled)
+            features.Add(("download_zlibrary", T("下载 Z-Library 书籍")));
         return features;
     }
 

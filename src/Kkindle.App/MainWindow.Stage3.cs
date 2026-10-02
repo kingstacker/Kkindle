@@ -540,11 +540,19 @@ public partial class MainWindow
             _deviceStatusToastPosition = new Point(popupLeft, popupTop);
             DeviceStatusToast.RenderTransform = new TranslateTransform(popupLeft, popupTop);
         }
-        if (_deviceStatusToastPointerPosition != pointerLeft)
+        // Draw the rectangle and pointer as one contour, with no seam across the base.
+        var right = popupSize.Width - 0.5;
+        var bottom = popupSize.Height - 6.5;
+        var pointerTip = popupSize.Height - 0.5;
+        var pointerStart = Math.Clamp(pointerLeft, 1, Math.Max(1, right - pointerWidth - 1));
+        var outline = FormattableString.Invariant(
+            $"M 0.5,0.5 H {right} V {bottom} H {pointerStart + pointerWidth} L {pointerStart + pointerWidth / 2},{pointerTip} L {pointerStart},{bottom} H 0.5 Z");
+        if (!string.Equals(DeviceStatusToastOutline.Tag as string, outline, StringComparison.Ordinal))
         {
-            _deviceStatusToastPointerPosition = pointerLeft;
-            DeviceStatusToastPointer.RenderTransform = new TranslateTransform(pointerLeft, 0);
+            DeviceStatusToastOutline.Tag = outline;
+            DeviceStatusToastOutline.Data = Geometry.Parse(outline);
         }
+        _deviceStatusToastPointerPosition = pointerLeft;
     }
 
     // Re-anchor the bubble while it is visible so it follows the eject button
@@ -626,6 +634,7 @@ public partial class MainWindow
         SyncReaderAppearanceControls();
         if (Application.Current is App app)
             app.ApplyLanguage(_appSettings.UiLanguage);
+        _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
         RefreshLocalizedReadingMaterialsSourceFilter();
         LoadReaderVerticalDebugBoxesSetting();
         await DetectCalibreAtStartupAsync(cancellationToken);
@@ -669,6 +678,7 @@ public partial class MainWindow
         DeviceResourcePage.IsVisible = false;
         ReadingMaterialsPage.IsVisible = false;
         ReadingDashboardPage.IsVisible = false;
+        ZLibraryPage.IsVisible = false;
         SettingsPage.IsVisible = false;
     }
 
@@ -687,6 +697,7 @@ public partial class MainWindow
             _ when ReferenceEquals(page, ReadingMaterialsPage) =>
                 ReaderNotesNavigationButton,
             _ when ReferenceEquals(page, ReadingDashboardPage) => ReadingDashboardButton,
+            _ when ReferenceEquals(page, ZLibraryPage) => ZLibraryBooksButton,
             _ => SettingsNavigationButton
         };
         SetSidebarActive(activeButton);
@@ -699,6 +710,7 @@ public partial class MainWindow
         DeviceResourcePage.IsVisible = ReferenceEquals(page, DeviceResourcePage);
         ReadingMaterialsPage.IsVisible = ReferenceEquals(page, ReadingMaterialsPage);
         ReadingDashboardPage.IsVisible = ReferenceEquals(page, ReadingDashboardPage);
+        ZLibraryPage.IsVisible = ReferenceEquals(page, ZLibraryPage);
         SettingsPage.IsVisible = ReferenceEquals(page, SettingsPage);
     }
 
@@ -720,6 +732,7 @@ public partial class MainWindow
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
             ReadingDashboardButton,
+            ZLibraryBooksButton,
             SettingsNavigationButton
         ];
         foreach (var button in navigationButtons)
@@ -736,6 +749,7 @@ public partial class MainWindow
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
             ReadingDashboardButton,
+            ZLibraryBooksButton,
             SettingsNavigationButton
         ];
         foreach (var button in buttons)
@@ -1896,6 +1910,7 @@ public partial class MainWindow
             ShowDeviceModelInput();
             return Task.CompletedTask;
         }));
+        AttachInstantMenuHover(menu);
         menu.ShowAt(DeviceStatusBox);
     }
 
@@ -2791,7 +2806,7 @@ public partial class MainWindow
 
         if (pending.Any(card => BookFormatConversionPolicy.Normalize(card.Book.Format) == "kfx"))
         {
-            using var calibreSetup = new CalibreSetupService();
+            using var calibreSetup = new CalibreSetupService(proxyAddress: TranslationGoogleProxyBox.Text);
             if (string.IsNullOrWhiteSpace(calibreSetup.LocateCalibre(_appSettings.CalibrePath)))
             {
                 var message = T("未安装 Calibre，无法完成此导出。请先安装 Calibre，或在设置中指定 ebook-convert.exe 后重试。");
@@ -4809,6 +4824,8 @@ public partial class MainWindow
             {
                 PopulateKindleEmailControls();
             }
+            if (_zLibraryAdvancedUnlocked)
+                PopulateZLibraryControls();
             if (!preserveS3Draft) PopulateS3SyncControls();
         }
         finally
@@ -5664,7 +5681,7 @@ public partial class MainWindow
 
     private async Task DetectCalibreAtStartupAsync(CancellationToken cancellationToken)
     {
-        using var setup = new CalibreSetupService();
+        using var setup = new CalibreSetupService(proxyAddress: TranslationGoogleProxyBox.Text);
         var detectedPath = setup.LocateCalibre(_appSettings.CalibrePath);
         if (string.IsNullOrWhiteSpace(detectedPath))
         {
@@ -5727,7 +5744,7 @@ public partial class MainWindow
     {
         try
         {
-            using var setup = new CalibreSetupService();
+            using var setup = new CalibreSetupService(proxyAddress: TranslationGoogleProxyBox.Text);
             var installed = await setup.IsKfxInputInstalledAsync(calibrePath, detectionCancellation.Token);
             if (!ReferenceEquals(_calibreDetectionCancellation, detectionCancellation)) return;
 
@@ -5978,17 +5995,21 @@ public partial class MainWindow
         InstallKfxInputButton.IsEnabled = false;
         CalibreSetupProgressBar.IsVisible = true;
         CalibreSetupProgressBar.IsIndeterminate = true;
+        CalibreSetupProgressBar.Value = 0;
+        CalibreSetupPercentageText.Text = "—";
         var progress = new Progress<CalibreSetupProgress>(value =>
         {
             CalibreSetupStatusText.Text = UiText.Localize(value.Message);
             CalibreSetupProgressBar.IsIndeterminate = value.Percentage is null;
             if (value.Percentage is { } percentage) CalibreSetupProgressBar.Value = percentage;
+            CalibreSetupPercentageText.Text = value.Percentage is { } displayedPercentage
+                ? $"{displayedPercentage:0}%" : "—";
         });
 
         var setupFailed = false;
         try
         {
-            using var setup = new CalibreSetupService();
+            using var setup = new CalibreSetupService(proxyAddress: TranslationGoogleProxyBox.Text);
             if (installPlugin)
             {
                 var executable = await setup.InstallKfxInputAsync(
@@ -6134,7 +6155,7 @@ public partial class MainWindow
             foreach (var group in ReadingMaterialGroups)
                 group.IsExpanded = !settings.ReadingMaterialsCollapsedByDefault;
             UpdateLibraryUi();
-            SettingsStatusText.Text = T("常用偏好自动保存；服务配置展开后编辑。");
+            SettingsStatusText.Text = string.Empty;
             if (_appSettingsStartupSettled && !_s3SyncExitInProgress && _appSettingsAutoSaveShowStatus)
                 ShowSettingsSavedStatus();
             _appSettingsAutoSaveShowStatus = true;

@@ -28,12 +28,14 @@ public sealed class KkindleMcpTools
     private readonly IBookFormatConverter? _formatConverter;
     private readonly KindleEmailSettingsStore? _emailSettingsStore;
     private readonly KindleEmailSender? _emailSender;
+    private readonly IZLibraryService? _zLibraryService;
+    private readonly ZLibrarySettingsStore? _zLibrarySettingsStore;
 
     public KkindleMcpTools(
         IBookLibraryService library,
         ReaderDataService readerData,
         IKindleDeviceService devices)
-        : this(library, readerData, devices, null, null, null, null)
+        : this(library, readerData, devices, null, null, null, null, null, null)
     {
     }
 
@@ -44,7 +46,9 @@ public sealed class KkindleMcpTools
         IBookFormatConverter? formatConverter,
         KindleEmailSettingsStore? emailSettingsStore,
         KindleEmailSender? emailSender,
-        IKindleDeviceService? ejectDevices = null)
+        IKindleDeviceService? ejectDevices = null,
+        IZLibraryService? zLibraryService = null,
+        ZLibrarySettingsStore? zLibrarySettingsStore = null)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
         _readerData = readerData ?? throw new ArgumentNullException(nameof(readerData));
@@ -53,6 +57,8 @@ public sealed class KkindleMcpTools
         _formatConverter = formatConverter;
         _emailSettingsStore = emailSettingsStore;
         _emailSender = emailSender;
+        _zLibraryService = zLibraryService;
+        _zLibrarySettingsStore = zLibrarySettingsStore;
     }
 
     /// <summary>
@@ -1198,6 +1204,148 @@ public sealed class KkindleMcpTools
         await _devices.RemoveBookAsync(device, book, cancellationToken);
         return new DeleteDeviceBookResult(device.Identity, device.Name, book.RelativePath, book.Title, false, true, actions);
     }
+
+    /// <summary>Searches the optional Z-Library online catalog.</summary>
+    [McpServerTool(
+        Name = "search_zlibrary",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = true,
+        UseStructuredContent = true)]
+    [Description("Search the optional Z-Library online catalog. This tool is available only when enabled in Kkindle's advanced MCP settings.")]
+    public async Task<ZLibrarySearchResultOutput> SearchZLibraryAsync(
+        [Description("Book title, author, or ISBN; must not be empty and must be at most 200 characters.")] string query,
+        [Description("One-based result page. Defaults to 1.")] int page = 1,
+        [Description("Number of results per page, from 1 to 100. Defaults to 20.")] int limit = 20,
+        [Description("Optional file extension filter such as epub or pdf.")] string? extension = null,
+        [Description("Optional language filter such as Chinese or English.")] string? language = null,
+        CancellationToken cancellationToken = default)
+    {
+        var service = RequireZLibraryService();
+        var normalizedQuery = ValidateQuery(query);
+        if (page < 1 || page > 10_000)
+            throw new McpException($"page must be between 1 and 10000; received {page}.");
+        var normalizedLimit = ValidateZLibraryLimit(limit);
+        var settings = await LoadZLibrarySettingsAsync(cancellationToken);
+        if (settings.IsConfigured)
+            await EnsureZLibraryLoginAsync(settings, cancellationToken);
+
+        var result = await service.SearchAsync(
+            normalizedQuery,
+            page,
+            normalizedLimit,
+            ToOptionalFilter(extension),
+            ToOptionalFilter(language),
+            cancellationToken);
+        return new ZLibrarySearchResultOutput(
+            result.Total,
+            result.Page,
+            result.PageCount,
+            result.Books.Select(ToZLibraryBookOutput).ToArray());
+    }
+
+    /// <summary>
+    /// Downloads one result previously returned by search_zlibrary. The
+    /// default dry-run keeps an MCP client from spending an account quota or
+    /// writing a file until it explicitly opts in.
+    /// </summary>
+    [McpServerTool(
+        Name = "download_zlibrary",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = true,
+        UseStructuredContent = true)]
+    [Description("Download one Z-Library result, optionally import it into the Kkindle library, and report the resulting path. dryRun defaults to true; set dryRun=false to perform the network download.")]
+    public async Task<ZLibraryDownloadResult> DownloadZLibraryAsync(
+        [Description("Numeric Z-Library book id returned by search_zlibrary.")] long bookId,
+        [Description("Book hash returned by search_zlibrary.")] string hash,
+        [Description("Book title returned by search_zlibrary.")] string title,
+        [Description("Book author; optional metadata used when importing.")] string? author = null,
+        [Description("Book extension such as epub or pdf; defaults to epub when omitted.")] string? extension = null,
+        [Description("Destination directory for a downloaded file. When omitted, a temporary Kkindle MCP directory is used.")] string? destinationDirectory = null,
+        [Description("When true, import the downloaded file into the Kkindle library and remove the temporary copy. Defaults to true.")] bool importToLibrary = true,
+        [Description("When true, only report the planned action. Defaults to true; false performs the download.")] bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        if (bookId <= 0)
+            throw new McpException("bookId must be positive.");
+        var normalizedHash = ValidateZLibraryValue(hash, nameof(hash), 512);
+        var normalizedTitle = ValidateZLibraryValue(title, nameof(title), 500);
+        var normalizedAuthor = string.IsNullOrWhiteSpace(author)
+            ? string.Empty
+            : author.Trim()[..Math.Min(author.Trim().Length, 500)];
+        var normalizedExtension = BookFormatConversionPolicy.Normalize(extension);
+        if (normalizedExtension.Length == 0) normalizedExtension = "epub";
+        if (normalizedExtension.Length > 16 || normalizedExtension.Any(character => !char.IsLetterOrDigit(character)))
+            throw new McpException("extension must contain only letters and digits and must be at most 16 characters.");
+
+        var destination = string.IsNullOrWhiteSpace(destinationDirectory)
+            ? Path.Combine(Path.GetTempPath(), "KkindleMcpZLibrary")
+            : ValidatePath(destinationDirectory, nameof(destinationDirectory));
+        var actions = new[]
+        {
+            importToLibrary
+                ? $"Download '{normalizedTitle}' from Z-Library and import it into the Kkindle library."
+                : $"Download '{normalizedTitle}' from Z-Library to '{destination}'."
+        };
+        if (dryRun)
+            return new ZLibraryDownloadResult(bookId, normalizedTitle, dryRun, false, false, null, null, null, actions);
+
+        var service = RequireZLibraryService();
+        var settings = await LoadZLibrarySettingsAsync(cancellationToken);
+        await EnsureZLibraryLoginAsync(settings, cancellationToken);
+        var book = new ZLibraryBook
+        {
+            Id = bookId,
+            Hash = normalizedHash,
+            Title = normalizedTitle,
+            Author = normalizedAuthor,
+            Extension = normalizedExtension
+        };
+        var downloadedPath = await service.DownloadAsync(book, destination, cancellationToken: cancellationToken);
+        if (!importToLibrary)
+            return new ZLibraryDownloadResult(bookId, normalizedTitle, false, true, false, Path.GetFullPath(downloadedPath), null, null, actions);
+
+        try
+        {
+            var importResult = await _library.ImportAsync(
+                [downloadedPath],
+                cancellationToken: cancellationToken,
+                conflictResolver: conflict => throw new InvalidOperationException(
+                    $"A book with the same title and author already exists: '{conflict.ExistingBook.Title}'. Import was not performed."));
+            var item = importResult.Items.SingleOrDefault()
+                ?? throw new McpException("The Z-Library download completed but the library import returned no result.");
+            if (!item.Succeeded || !item.Added || item.BookId is not { } importedBookId)
+                throw new McpException(item.Message ?? "The Z-Library download completed but could not be imported.");
+
+            var importedBook = item.Book ?? await _library.GetBookAsync(importedBookId, cancellationToken);
+            var importedFile = importedBook?.Files.FirstOrDefault(file =>
+                string.Equals(
+                    BookFormatConversionPolicy.Normalize(file.Format),
+                    normalizedExtension,
+                    StringComparison.OrdinalIgnoreCase));
+            var importedFilePath = importedFile is null
+                ? null
+                : Path.GetFullPath(_library.GetAbsoluteFilePath(importedFile));
+            return new ZLibraryDownloadResult(
+                bookId,
+                normalizedTitle,
+                false,
+                true,
+                true,
+                null,
+                importedBookId,
+                importedFilePath,
+                actions);
+        }
+        finally
+        {
+            try { File.Delete(downloadedPath); } catch { }
+        }
+    }
+
 private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken cancellationToken)
     {
         return await _library.GetBookAsync(bookId, cancellationToken)
@@ -1316,6 +1464,27 @@ private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken canc
     private KindleEmailSender RequireEmailSender() =>
         _emailSender ?? throw new McpException("Kindle email sending is not registered in this MCP server.");
 
+    private IZLibraryService RequireZLibraryService() =>
+        _zLibraryService ?? throw new McpException("Z-Library tools are not configured in the MCP server.");
+
+    private async Task<ZLibrarySettings> LoadZLibrarySettingsAsync(CancellationToken cancellationToken)
+    {
+        if (_zLibrarySettingsStore is null)
+            throw new McpException("Z-Library settings are not configured in the MCP server.");
+        return await _zLibrarySettingsStore.LoadAsync(cancellationToken);
+    }
+
+    private async Task EnsureZLibraryLoginAsync(
+        ZLibrarySettings settings,
+        CancellationToken cancellationToken)
+    {
+        if (!settings.IsConfigured)
+            throw new McpException("Configure a Z-Library email, password, and service URL before downloading.");
+        var service = RequireZLibraryService();
+        if (!service.IsLoggedIn)
+            await service.LoginAsync(settings.Email, settings.Password, settings.BaseUrl, cancellationToken);
+    }
+
     private IBookFormatConverter RequireFormatConverter() =>
         _formatConverter ?? throw new McpException("Book format conversion is not registered in this MCP server.");
 
@@ -1366,6 +1535,52 @@ private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken canc
             throw new McpException($"limit must be between 1 and 100; received {value}.");
         return value;
     }
+
+    private static int ValidateZLibraryLimit(int value)
+    {
+        if (value is < 1 or > 100)
+            throw new McpException($"limit must be between 1 and 100; received {value}.");
+        return value;
+    }
+
+    private static IReadOnlyList<string>? ToOptionalFilter(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : [normalized];
+    }
+
+    private static string ValidateZLibraryValue(string? value, string parameterName, int maximumLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new McpException($"{parameterName} must not be blank.");
+        var normalized = value.Trim();
+        if (normalized.Length > maximumLength)
+            throw new McpException($"{parameterName} is too long.");
+        return normalized;
+    }
+
+    private static ZLibraryBookOutput ToZLibraryBookOutput(ZLibraryBook book) => new(
+        book.Id,
+        book.Title,
+        book.Author,
+        book.Extension,
+        book.Size,
+        book.Language,
+        book.CoverUrl,
+        book.Hash,
+        book.Year,
+        book.Publisher,
+        book.Series,
+        book.Edition,
+        book.Identifier,
+        book.Volume,
+        book.Description,
+        book.OfficialDetailUrl,
+        book.ReadOnlineUrl,
+        book.Pages,
+        book.ReadOnlineAvailable,
+        book.KindleAvailable,
+        book.SendToEmailAvailable);
 
     private static string ValidatePath(string? path, string parameterName)
     {
@@ -1661,6 +1876,49 @@ private async Task<Book> GetBookOrThrowAsync(Guid bookId, CancellationToken canc
         DateTimeOffset UpdatedAt,
         string Source);
 }
+
+/// <summary>Paginated results returned by the optional Z-Library search tool.</summary>
+public sealed record ZLibrarySearchResultOutput(
+    int TotalCount,
+    int Page,
+    int PageCount,
+    IReadOnlyList<ZLibraryBookOutput> Books);
+
+/// <summary>Book metadata needed to inspect or download a Z-Library result.</summary>
+public sealed record ZLibraryBookOutput(
+    long Id,
+    string Title,
+    string Author,
+    string Extension,
+    long Size,
+    string Language,
+    string? CoverUrl,
+    string Hash,
+    int? Year,
+    string? Publisher,
+    string? Series,
+    string? Edition,
+    string? Identifier,
+    string? Volume,
+    string? Description,
+    string? OfficialDetailUrl,
+    string? ReadOnlineUrl,
+    int? Pages,
+    bool ReadOnlineAvailable,
+    bool KindleAvailable,
+    bool SendToEmailAvailable);
+
+/// <summary>Outcome of a Z-Library download or dry-run plan.</summary>
+public sealed record ZLibraryDownloadResult(
+    long BookId,
+    string Title,
+    bool DryRun,
+    bool Downloaded,
+    bool Imported,
+    string? DownloadedPath,
+    Guid? LibraryBookId,
+    string? LibraryFilePath,
+    IReadOnlyList<string> Actions);
 
 /// <summary>Paginated library output returned by list_library and search_books.</summary>
 public sealed record BookListResult(int TotalCount, IReadOnlyList<BookSummary> Books);

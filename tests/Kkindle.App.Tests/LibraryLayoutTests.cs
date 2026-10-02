@@ -58,22 +58,21 @@ public sealed partial class SettingsTests
         await Render();
         var navigationNames = new[] { "AllBooksButton", "KindleBooksButton",
             "FontManagementButton", "DictionaryManagementButton", "ReaderNotesNavigationButton", "ReadingDashboardButton" };
-        double? iconCenter = null;
+        double? labelLeft = null;
         foreach (var navigationName in navigationNames)
         {
-            var glyph = scope.Get<Button>(navigationName).GetVisualDescendants()
-                .OfType<Avalonia.Controls.Shapes.Path>().Single(p => p.Classes.Contains("sidebarGlyph"));
-            // Check the painted geometry, not just identical control boxes: a
-            // narrow Path can sit left of centre inside a centred square slot.
-            // Pixel hinting may move an edge by half a physical pixel, while
-            // the layout slots must still share exactly the same column.
-            var paintedCenter = glyph.RenderedGeometry!.Bounds.Center;
-            var tolerance = 0.5 / scope.Window.RenderScaling + 0.01;
-            Assert.InRange(Math.Abs(paintedCenter.X - glyph.Bounds.Width / 2), 0, tolerance);
-            Assert.InRange(Math.Abs(paintedCenter.Y - glyph.Bounds.Height / 2), 0, tolerance);
-            var center = glyph.TranslatePoint(new Point(glyph.Bounds.Width / 2, glyph.Bounds.Height / 2), scope.Window)!.Value.X;
-            iconCenter ??= center;
-            Assert.Equal(iconCenter.Value, center, 2);
+            var button = scope.Get<Button>(navigationName);
+            var label = button.GetVisualDescendants().OfType<TextBlock>()
+                .Single(text => text.Classes.Contains("sidebarLabel"));
+            var left = label.TranslatePoint(default, scope.Window)!.Value.X;
+            labelLeft ??= left;
+            Assert.Equal(labelLeft.Value, left, 2);
+            AssertWithinWindow(button, scope.Window);
+            // Expanded navigation must fit above the persistent settings row.
+            var bottom = button.TranslatePoint(new Point(0, button.Bounds.Height), scope.Window)!.Value.Y;
+            var settingsTop = scope.Get<Button>("SettingsNavigationButton")
+                .TranslatePoint(default, scope.Window)!.Value.Y;
+            Assert.True(bottom <= settingsTop, "Expanded destinations must not be obscured by settings.");
         }
         Capture(scope.Window, $"{language}-{width}-sidebar-expanded");
 

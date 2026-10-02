@@ -153,6 +153,7 @@ public partial class MainWindow
             var channel = DevelopmentUpdateCheck.IsChecked == true
                 ? AppUpdateChannel.Development
                 : AppUpdateChannel.Stable;
+            _updateService.ConfigureProxy(TranslationGoogleProxyBox.Text);
             var update = await _updateService.CheckForUpdateAsync(
                 currentVersion,
                 channel,

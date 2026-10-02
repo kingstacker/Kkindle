@@ -27,8 +27,8 @@ public partial class MainWindow : Window
 {
     private const string MaximizeGlyphData = "M 0.5,0.5 H 9.5 V 9.5 H 0.5 Z";
     private const string RestoreGlyphData = "M 2.5,0.5 H 9.5 V 7.5 M 0.5,2.5 H 7.5 V 9.5 H 0.5 Z";
-    private const string SidebarChevronDownData = "M 1,2 L 5,6 L 9,2";
-    private const string SidebarChevronRightData = "M 3,1 L 7,5 L 3,9";
+    private const string SidebarChevronDownData = "M 4,6 L 8,10 L 12,6";
+    private const string SidebarChevronRightData = "M 6,4 L 10,8 L 6,12";
     private const string LibraryGridGlyphData = "M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z";
     private const string LibraryListGlyphData = "M 4,6 H 6 M 10,6 H 20 M 4,12 H 6 M 10,12 H 20 M 4,18 H 6 M 10,18 H 20";
     private const string LibraryCollectionsGlyphData = "M 3,7 H 9 L 11,9 H 21 V 20 H 3 Z";
@@ -102,6 +102,8 @@ public partial class MainWindow : Window
     private readonly TtsService _readerTts;
     private readonly EpubReaderPreparationService _epubReader;
     private readonly Func<IReaderHost> _readerHostFactory;
+    private readonly ZLibraryService _zLibraryService;
+    private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
     private readonly KindleEmailSender _kindleEmailSender;
     private readonly S3SyncService _s3SyncService;
@@ -112,6 +114,7 @@ public partial class MainWindow : Window
     private long _bookSyncStatusRefreshVersion;
     private readonly UpdateService? _updateService;
     private AppSettings _appSettings = new();
+    private ZLibrarySettings _zLibrarySettings = new();
     private KindleEmailSettings _kindleEmailSettings = new();
     private S3SyncStoredSettings _s3SyncStoredSettings = new(
         Guid.NewGuid().ToString("N"),
@@ -241,6 +244,8 @@ public partial class MainWindow : Window
         _epubReader = new EpubReaderPreparationService(paths);
         _readerHostFactory = services?.ReaderHostFactory ?? (() => new NativeWebViewReaderHost());
         _kindleWebFileInput = services?.KindleWebFileInput;
+        _zLibraryService = new ZLibraryService();
+        _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, _secretProtector);
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, _secretProtector);
         _kindleEmailSender = new KindleEmailSender();
         _s3SyncService = new S3SyncService(paths, _secretProtector);
@@ -610,6 +615,7 @@ public partial class MainWindow : Window
         RefreshOnboardingLocalizedChoices();
         if (_filterControlsReady)
             RefreshLocalizedFilterItems();
+        RefreshLocalizedZLibraryFilterItems();
         RefreshDeviceShelfLanguage();
         RefreshLocalizedReadingMaterialsSourceFilter();
         ViewModel.RefreshView();
@@ -630,6 +636,7 @@ public partial class MainWindow : Window
         _ = ObserveReaderTaskAsync(
             RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         UpdateCalibreDetectionStatus();
+        UpdateZLibraryAccountStatus();
         UpdateDiagnosticsTexts();
         foreach (var diagnostic in PlatformDiagnostics)
             diagnostic.RefreshLocalizedProperties();
@@ -1058,6 +1065,7 @@ public partial class MainWindow : Window
         _readerSessionCancellation?.Dispose();
         _readerActiveHost?.Dispose();
         _readerPreloadHost?.Dispose();
+        ShutdownZLibrary();
         foreach (var folder in CollectionFolders) folder.Dispose();
         foreach (var item in DoubanCandidates) item.Dispose();
         foreach (var item in _allStage3ReadingMaterials) item.Dispose();
@@ -5228,7 +5236,8 @@ public partial class MainWindow : Window
     }
 
     private void UpdateSidebarSectionVisuals()
-    {        BookManagementChevron.Data = Geometry.Parse(
+    {
+        BookManagementChevron.Data = Geometry.Parse(
             BookManagementChildren.IsVisible ? SidebarChevronDownData : SidebarChevronRightData);
         DeviceManagementChevron.Data = Geometry.Parse(
             DeviceManagementChildren.IsVisible ? SidebarChevronDownData : SidebarChevronRightData);

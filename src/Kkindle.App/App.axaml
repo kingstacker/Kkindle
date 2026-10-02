@@ -30,6 +30,10 @@
         <SolidColorBrush x:Key="SidebarIndicatorBrush" Color="{DynamicResource SidebarIndicatorColor}" />
         <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource SidebarIndicatorColor}" />
         <SolidColorBrush x:Key="SoftHoverBrush" Color="{DynamicResource SoftHoverColor}" />
+        <SolidColorBrush x:Key="SidebarIconBrush" Color="#404040" />
+        <SolidColorBrush x:Key="SidebarChevronBrush" Color="#606060" />
+        <SolidColorBrush x:Key="SidebarCountBrush" Color="#858585" />
+        <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#F3F4F5" />
 
         <!-- The original bundled font remains the default for all application
              chrome. Reader body text has its own setting and can override it. -->
@@ -682,19 +686,19 @@
              hover on the template's ContentPresenter, so these overrides keep
              the pair consistent there too. -->
         <Style Selector="Button.detailSave">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.detailSave:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource InkBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
-        <Style Selector="Button.detailSave:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        </Style>
         <Style Selector="Button.detailSave:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.detailDelete">
             <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
@@ -702,14 +706,14 @@
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.detailDelete:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="#C62828" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#C62828" />
         </Style>
         <Style Selector="Button.detailDelete:pressed /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="#A61F1F" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#A61F1F" />
         </Style>
 
         <Style Selector="Button.icon">
@@ -773,30 +777,29 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
 
-        <!-- Navigation uses a 15px label and a 24px icon canvas. Semibold
-             section labels preserve the hierarchy at the same readable size. -->
+        <!-- Primary navigation owns the icon and stronger type; children stay quiet. -->
         <Style Selector="Button.sidebarSection">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Height" Value="44" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="15" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Padding="12,6,0,6"
+                    <Border Padding="12,6,12,6"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="6">
+                            CornerRadius="{TemplateBinding CornerRadius}">
                         <Border.Transitions>
                             <Transitions>
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -822,31 +825,20 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
-        <Style Selector="Button.sidebarSection Path">
-            <Setter Property="Stroke" Value="{DynamicResource MutedInkBrush}" />
-        </Style>
-        <Style Selector="Button.sidebarSection:pointerover Path">
-            <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
-        </Style>
-        <Style Selector="Button.sidebarSection:pressed Path, Button.sidebarSection.active Path">
-            <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
-        </Style>
-
-        <!-- Settings shares the destination icon/label columns and keeps its
-             semibold top-level label and quiet gray active row. -->
+        <!-- Persistent utility entry uses the same quiet typography. -->
         <Style Selector="Button.sidebarPrimaryItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Height" Value="44" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="15" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
@@ -855,7 +847,7 @@
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="{TemplateBinding CornerRadius}"
-                            Padding="12,6,0,6">
+                            Padding="12,6,12,6">
                         <Border.Transitions>
                             <Transitions>
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -881,7 +873,7 @@
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
@@ -894,14 +886,12 @@
             <Setter Property="CornerRadius" Value="0" />
         </Style>
 
-        <!-- Sidebar entries share one selection language: a square light-gray
-             row with a restrained black leading bar. This also applies to
-             grouped child entries. -->
+        <!-- A quiet rectangular background is the only destination selection marker. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Height" Value="38" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -911,7 +901,7 @@
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
-            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Border Background="{TemplateBinding Background}"
@@ -921,17 +911,18 @@
                                 <BrushTransition Property="Background" Duration="0:0:0.12" />
                             </Transitions>
                         </Border.Transitions>
-                        <Grid ColumnDefinitions="3,21,*">
-                            <Border Width="3"
-                                    Height="24"
-                                    Background="{TemplateBinding BorderBrush}"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center" />
-                            <ContentPresenter Grid.Column="2"
-                                              Content="{TemplateBinding Content}"
-                                              Foreground="{TemplateBinding Foreground}"
-                                              HorizontalAlignment="Stretch"
-                                              VerticalAlignment="Center" />
+                        <Grid>
+                        <Ellipse Classes="sidebarSelectionDot"
+                                 Width="4" Height="4" Margin="30,0,0,0"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center"
+                                 Fill="{DynamicResource InkBrush}"
+                                 IsHitTestVisible="False" />
+                        <!-- Keep child labels aligned with the primary labels. -->
+                        <ContentPresenter Margin="44,0,12,0"
+                                          Content="{TemplateBinding Content}"
+                                          Foreground="{TemplateBinding Foreground}"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Center" />
                         </Grid>
                     </Border>
                 </ControlTemplate>
@@ -946,27 +937,77 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarItem.active">
-            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="FontWeight" Value="Normal" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
-        <!-- Keep the active row stable when the pointer remains over it. The
-             selected state should read as navigation, not as a rounded hover
-             capsule. -->
+        <Style Selector="Button.sidebarItem /template/ Ellipse.sidebarSelectionDot">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Button.sidebarItem.active /template/ Ellipse.sidebarSelectionDot">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
+        <!-- Selection remains stable while hovered or focused. -->
         <Style Selector="Button.sidebarItem.active:pointerover,
                          Button.sidebarItem.active:focus-visible">
-            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
 
+        <Style Selector="TextBlock.sidebarCount">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource SidebarCountBrush}" />
+            <Setter Property="TextAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- Lucide SVG paths keep their pen independent of label weight and state. -->
+        <Style Selector="Path.sidebarOutline, Path.sidebarChevron">
+            <Setter Property="Width" Value="20" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Stroke" Value="{DynamicResource SidebarIconBrush}" />
+            <Setter Property="StrokeThickness" Value="1.6" />
+            <Setter Property="StrokeLineCap" Value="Round" />
+            <Setter Property="StrokeJoin" Value="Round" />
+            <Setter Property="Fill" Value="{x:Null}" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+        </Style>
+        <Style Selector="Path.sidebarOutline">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Margin" Value="2,0,0,0" />
+            <Setter Property="StrokeThickness" Value="1.4" />
+        </Style>
+        <Style Selector="Path.sidebarChevron">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Stretch" Value="None" />
+            <Setter Property="Stroke" Value="{DynamicResource SidebarChevronBrush}" />
+            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+
+        <Style Selector="TextBlock.sidebarLabel, TextBlock.sidebarCount">
+            <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
+        </Style>
         <Style Selector="TextBlock.sidebarLabel">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Foreground" Value="{Binding $parent[Button].Foreground}" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="TextWrapping" Value="NoWrap" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style Selector="Button.sidebarSection TextBlock.sidebarLabel, Button.sidebarPrimaryItem TextBlock.sidebarLabel">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
         <!-- Settings use one row of categories and a bounded reading width. -->
@@ -1026,40 +1067,37 @@
         <Style Selector="Expander.settingsExpander">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="ContentTransition">
-                <Setter.Value>
-                    <CompositePageTransition>
-                        <PageSlide Duration="0:0:0.09"
-                                   Orientation="Vertical"
-                                   SlideInEasing="CubicEaseOut"
-                                   SlideOutEasing="CubicEaseIn" />
-                        <CrossFade Duration="0:0:0.09" />
-                    </CompositePageTransition>
-                </Setter.Value>
-            </Setter>
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="4"
+                    <Border x:Name="SettingsExpanderFrame" BorderThickness="0" CornerRadius="0"
                             ClipToBounds="True">
                         <StackPanel>
                             <ToggleButton x:Name="PART_HeaderSite" Classes="settingsExpanderHeader"
                                           Content="{TemplateBinding Header}" Tag="{TemplateBinding Tag}"
                                           AutomationProperties.Name="{TemplateBinding Header}"
                                           IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" />
-                            <Border x:Name="PART_ExpandSite" IsVisible="{TemplateBinding IsExpanded}" Padding="16,4,16,16"
+                            <local:SettingsExpanderContent x:Name="PART_ExpandSite" IsExpanded="{TemplateBinding IsExpanded}" Padding="16,4,16,16"
                                     ClipToBounds="True">
                                 <ContentPresenter x:Name="PART_ContentPresenter"
                                                   Content="{TemplateBinding Content}"
                                                   ContentTemplate="{TemplateBinding ContentTemplate}"
                                                   HorizontalContentAlignment="Stretch" />
-                            </Border>
+                            </local:SettingsExpanderContent>
                         </StackPanel>
                     </Border>
                 </ControlTemplate>
             </Setter>
         </Style>
+        <Style Selector="Expander.settingsExpander:not(:expanded):pointerover /template/ Border#SettingsExpanderFrame">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+        </Style>
         <Style Selector="ToggleButton.settingsExpanderHeader">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="RenderTransform" Value="none" />
@@ -1068,15 +1106,18 @@
             </Setter>
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{TemplateBinding Background}" Padding="16,12" MinHeight="60">
+                    <Border Background="{TemplateBinding Background}" Padding="0,12" MinHeight="44"
+                            VerticalAlignment="Stretch" HorizontalAlignment="Stretch">
+                        <ToolTip.Tip>
+                            <TextBlock Text="{TemplateBinding Tag}" MaxWidth="420" TextWrapping="Wrap" />
+                        </ToolTip.Tip>
                         <Grid ColumnDefinitions="*,20" ColumnSpacing="12">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{TemplateBinding Content}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                <TextBlock Text="{TemplateBinding Tag}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                             </StackPanel>
                             <Path x:Name="SettingsExpanderChevron" Grid.Column="1" Width="10" Height="10"
                                   Data="M 2,1 L 6,5 L 2,9" Stroke="{DynamicResource InkBrush}"
-                                  StrokeThickness="1.3" VerticalAlignment="Center" />
+                                  StrokeThickness="1.3" HorizontalAlignment="Right" VerticalAlignment="Center" />
                         </Grid>
                     </Border>
                 </ControlTemplate>
@@ -1584,35 +1625,23 @@
         </Style>
 
         <!-- The setting label already provides the meaning, so the switch stays
-             compact: a monochrome pill track with a circular thumb. Fluent's
+             compact: a thin monochrome line with a small circular thumb. Fluent's
              accent colour must not enter the control. -->
         <Style Selector="ToggleSwitch">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="#B0B0B0" />
             <Setter Property="IsThreeState" Value="False" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Grid ColumnDefinitions="36" MinHeight="20">
-                        <Border x:Name="SwitchTrack"
-                                Width="36"
-                                Height="20"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="10">
-                            <Grid x:Name="PART_MovingKnobs">
-                                <Border x:Name="SwitchThumb"
-                                        Width="14"
-                                        Height="14"
-                                        Margin="2"
-                                        Background="{DynamicResource InkBrush}"
-                                        CornerRadius="7"
-                                        HorizontalAlignment="Left"
-                                        VerticalAlignment="Center" />
-                            </Grid>
-                        </Border>
+                    <Grid ColumnDefinitions="24" MinHeight="24" Background="Transparent">
+                        <Border x:Name="SwitchTrack" Width="20" Height="1"
+                                Background="{TemplateBinding Background}" VerticalAlignment="Center" />
+                        <Grid x:Name="PART_MovingKnobs">
+                            <Border x:Name="SwitchThumb" Width="10" Height="10" Margin="0"
+                                    Background="#B0B0B0" CornerRadius="5"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        </Grid>
                     </Grid>
                 </ControlTemplate>
             </Setter>
@@ -1623,7 +1652,7 @@
         </Style>
         <Style Selector="ToggleSwitch:checked /template/ Border#SwitchThumb">
             <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />
@@ -1638,18 +1667,18 @@
                 <ControlTemplate>
                     <Border x:Name="SettingsToggleRow" Background="Transparent" Padding="0,6" CornerRadius="3"
                             BorderBrush="Transparent" BorderThickness="1" MinHeight="44">
-                        <Grid ColumnDefinitions="*,36" ColumnSpacing="24">
+                        <Grid ColumnDefinitions="*,24" ColumnSpacing="24">
                             <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
                                        FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
-                            <Border x:Name="SwitchTrack" Grid.Column="1" Width="36" Height="20"
-                                    Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="1" CornerRadius="10" VerticalAlignment="Center">
+                            <Grid Grid.Column="1" Width="24" Height="24" VerticalAlignment="Center" Background="Transparent">
+                                <Border x:Name="SwitchTrack" Width="20" Height="1"
+                                        Background="{TemplateBinding Background}" VerticalAlignment="Center" />
                                 <Grid x:Name="PART_MovingKnobs">
-                                    <Border x:Name="SwitchThumb" Width="14" Height="14" Margin="2"
-                                            Background="{DynamicResource InkBrush}" CornerRadius="7"
+                                    <Border x:Name="SwitchThumb" Width="10" Height="10"
+                                            Background="#B0B0B0" CornerRadius="5"
                                             HorizontalAlignment="Left" VerticalAlignment="Center" />
                                 </Grid>
-                            </Border>
+                            </Grid>
                         </Grid>
                     </Border>
                 </ControlTemplate>
@@ -1660,6 +1689,12 @@
         </Style>
         <Style Selector="ToggleSwitch.settingsToggle:focus-visible /template/ Border#SettingsToggleRow">
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ToggleSwitch.settingsToggle#AutoUpdateCheck:pointerover /template/ Border#SettingsToggleRow, ToggleSwitch.settingsToggle#DevelopmentUpdateCheck:pointerover /template/ Border#SettingsToggleRow">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="ToggleSwitch.settingsToggle#AutoUpdateCheck:focus-visible /template/ Border#SettingsToggleRow, ToggleSwitch.settingsToggle#DevelopmentUpdateCheck:focus-visible /template/ Border#SettingsToggleRow">
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
 
         <!-- The device card uses the same minimal vector eject mark as the
@@ -1710,10 +1745,10 @@
             <Setter Property="Fill" Value="Transparent" />
         </Style>
         <Style Selector="Button.eject:pointerover Polygon.ejectGlyph">
-            <Setter Property="RenderTransform" Value="scale(1.22)" />
+            <Setter Property="RenderTransform" Value="scale(1.08)" />
         </Style>
         <Style Selector="Border.ejectHoverArea:pointerover Polygon.ejectGlyph">
-            <Setter Property="RenderTransform" Value="scale(1.22)" />
+            <Setter Property="RenderTransform" Value="scale(1.08)" />
         </Style>
         <Style Selector="Button.eject:pressed Polygon.ejectGlyph">
             <Setter Property="RenderTransform" Value="scale(0.92)" />
@@ -2093,9 +2128,9 @@
                          Grid.readerShell Button.readerHeader > Grid > Path">
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Width" Value="24" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="Stretch" Value="None" />
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Stretch" Value="Uniform" />
             <Setter Property="UseLayoutRounding" Value="True" />
         </Style>
         <Style Selector="Button.readerHeader.ttsActive">
@@ -2396,15 +2431,15 @@
         </Style>
 
         <!-- Library actions and navigation share a stroke style. Toolbar
-             glyphs fill 18px; navigation has its own larger canvas below. -->
+             glyphs use compact sizes and rounded strokes across navigation and tools. -->
         <Style Selector="Path.libraryGlyph">
-            <Setter Property="Width" Value="18" />
-            <Setter Property="Height" Value="18" />
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
             <Setter Property="UseLayoutRounding" Value="True" />
             <Setter Property="Stretch" Value="Uniform" />
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="StrokeThickness" Value="1.4" />
             <Setter Property="StrokeLineCap" Value="Round" />
             <Setter Property="StrokeJoin" Value="Round" />
             <Setter Property="Fill" Value="Transparent" />
@@ -2425,16 +2460,16 @@
             <Setter Property="IsHitTestVisible" Value="False" />
         </Style>
         <Style Selector="Button Path.libraryGlyph">
-            <Setter Property="Stroke" Value="{Binding $parent[Button].Foreground}" />
+            <Setter Property="Stroke" Value="{DynamicResource SidebarIconBrush}" />
         </Style>
         <Style Selector="Button.icon:pointerover Path.libraryGlyph">
-            <Setter Property="RenderTransform" Value="scale(1.22)" />
+            <Setter Property="RenderTransform" Value="scale(1.08)" />
         </Style>
         <Style Selector="Button.icon:pressed Path.libraryGlyph">
             <Setter Property="RenderTransform" Value="scale(0.92)" />
         </Style>
         <Style Selector="Button.icon.active Path.libraryGlyph">
-            <Setter Property="RenderTransform" Value="scale(1.22)" />
+            <Setter Property="RenderTransform" Value="scale(1.08)" />
         </Style>
         <Style Selector="Button.icon.active:pressed Path.libraryGlyph">
             <Setter Property="RenderTransform" Value="scale(0.92)" />

@@ -17,7 +17,7 @@ internal static class TranslationProxy
             || string.IsNullOrWhiteSpace(uri.Host))
         {
             throw new ArgumentException(
-                "Google 翻译代理地址无效，请填写 http://127.0.0.1:7890 这样的 HTTP/HTTPS 地址。",
+                "软件代理地址无效，请填写 http://127.0.0.1:7890 这样的 HTTP/HTTPS 地址。",
                 nameof(address));
         }
 

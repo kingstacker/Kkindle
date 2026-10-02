@@ -231,9 +231,11 @@ public sealed class UpdateServiceTests
         var update = await service.CheckForUpdateAsync("1.1.0");
 
         Assert.NotNull(update);
-        Assert.Equal(2, requestedUris.Count);
-        Assert.Equal("github.com", requestedUris[0].Host);
+        Assert.Equal(3, requestedUris.Count);
+        Assert.Equal("https://kkindle.stacker.beauty/update-manifest.json", requestedUris[0].AbsoluteUri);
         Assert.Equal("github.com", requestedUris[1].Host);
+        Assert.EndsWith("/releases/latest/download/update-manifest.json", requestedUris[1].AbsolutePath);
+        Assert.Equal("https://github.com/kingstacker/Kkindle/releases/latest", requestedUris[2].AbsoluteUri);
         Assert.Equal("1.2.0", update.Version);
         Assert.Equal("Kkindle-1.2.0-win-x64-setup.exe", update.Package.Name);
     }
@@ -301,6 +303,67 @@ public sealed class UpdateServiceTests
         {
             TestHelpers.TryDelete(root);
         }
+    }
+
+    [Theory]
+    [InlineData("success")]
+    [InlineData("404")]
+    [InlineData("json")]
+    [InlineData("http")]
+    [InlineData("timeout")]
+    public async Task PrefersMirrorAndFallsBackToGitHubManifest(string scenario)
+    {
+        const string json = """
+            {"tag_name":"v1.2.0","html_url":"https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0",
+             "mirror_generated_at":"2026-10-02","assets":[
+             {"name":"Kkindle-1.2.0-win-x64-setup.exe","browser_download_url":"https://kkindle.stacker.beauty/dl/setup.exe","mirror":true},
+             {"name":"SHA256SUMS.txt","browser_download_url":"https://kkindle.stacker.beauty/dl/SHA256SUMS.txt"}]}
+            """;
+        var requests = new List<string>();
+        using var client = new HttpClient(new StubHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+            if (request.RequestUri.Host == "kkindle.stacker.beauty")
+                return scenario switch
+                {
+                    "404" => new HttpResponseMessage(HttpStatusCode.NotFound),
+                    "json" => JsonResponse("{broken"),
+                    "http" => throw new HttpRequestException("offline"),
+                    "timeout" => throw new TaskCanceledException("timeout"),
+                    _ => JsonResponse(json)
+                };
+            return JsonResponse(json);
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath());
+        var update = await service.CheckForUpdateAsync("1.0.0");
+        Assert.NotNull(update);
+        Assert.Equal("1.2.0", update.Version);
+        Assert.Equal("Kkindle-1.2.0-win-x64-setup.exe", update.Package.Name);
+        Assert.Equal("https://kkindle.stacker.beauty/dl/setup.exe", update.Package.DownloadUrl.AbsoluteUri);
+        Assert.Equal("https://kkindle.stacker.beauty/update-manifest.json", requests[0]);
+        if (scenario == "success")
+        {
+            Assert.Single(requests);
+            Assert.DoesNotContain(requests, value => new Uri(value).Host is "github.com" or "api.github.com");
+        }
+        else
+            Assert.Equal(new[] { requests[0], "https://github.com/kingstacker/Kkindle/releases/latest/download/update-manifest.json" }, requests);
+    }
+
+    [Fact]
+    public async Task MirrorCancellationDoesNotFallBack()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var requests = 0;
+        using var client = new HttpClient(new StubHandler(_ =>
+        {
+            requests++;
+            cancellation.Cancel();
+            throw new TaskCanceledException("user cancelled");
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckForUpdateAsync("1.0.0", cancellation.Token));
+        Assert.Equal(1, requests);
     }
 
     private static AppUpdateInfo CreateUpdate(long packageSize) => new(

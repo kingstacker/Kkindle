@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -214,9 +214,11 @@ internal sealed class BookReflectionEditorWindow : Window
         var content = new Grid
         {
             RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"),
-            RowSpacing = 10,
+            RowSpacing = 0,
             Children = { book, _editorSurface.FormattingToolbar, _editorSurface, footerBorder }
         };
+        book.Margin = new Thickness(0, 0, 0, 10);
+        footerBorder.Margin = new Thickness(0, 10, 0, 0);
         Grid.SetRow(_editorSurface.FormattingToolbar, 1);
         Grid.SetRow(_editorSurface, 2);
         Grid.SetRow(footerBorder, 3);
@@ -238,25 +240,22 @@ internal sealed class BookReflectionEditorWindow : Window
         var frameBorder = new Border
         {
             BorderBrush = AppAppearanceResources.GetBrush("InkBrush"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(1),
             Background = Background,
             Child = frame
         };
         _windowResizeLayer = CreateResizeLayer();
-        var frameBottomLine = new Border
+        var frameOutline = new PhysicalWindowOutline
         {
-            Background = AppAppearanceResources.GetBrush("InkBrush"),
-            Height = 1,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            IsHitTestVisible = false
+            IsHitTestVisible = false,
+            ZIndex = 20
         };
         Content = new Grid
         {
-            Children = { frameBorder, _windowResizeLayer, frameBottomLine }
+            Children = { frameBorder, _windowResizeLayer, frameOutline }
         };
         _windowResizeLayer.ZIndex = 10;
-        frameBottomLine.ZIndex = 20;
         UpdateWindowChrome();
 
         Opened += (_, _) => Dispatcher.UIThread.Post(() =>
@@ -419,5 +418,25 @@ internal sealed class BookReflectionEditorWindow : Window
 
         BeginResizeDrag(windowEdge, e);
         e.Handled = true;
+    }
+}
+
+// Paint inside the client bounds in physical pixels so fractional DPI scaling
+// cannot round the bottom edge into a thicker layout-sized strip.
+internal sealed class PhysicalWindowOutline : Control
+{
+    public override void Render(DrawingContext context)
+    {
+        base.Render(context);
+        var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        var pixel = 1 / scale;
+        var width = Math.Floor(Bounds.Width * scale) / scale;
+        var height = Math.Floor(Bounds.Height * scale) / scale;
+        if (width < pixel || height < pixel) return;
+        var ink = AppAppearanceResources.GetBrush("InkBrush");
+        context.FillRectangle(ink, new Rect(0, 0, width, pixel));
+        context.FillRectangle(ink, new Rect(0, height - pixel, width, pixel));
+        context.FillRectangle(ink, new Rect(0, pixel, pixel, Math.Max(0, height - 2 * pixel)));
+        context.FillRectangle(ink, new Rect(width - pixel, pixel, pixel, Math.Max(0, height - 2 * pixel)));
     }
 }
