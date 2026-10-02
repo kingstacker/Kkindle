@@ -60,7 +60,7 @@ public partial class MainWindow
         try
         {
             var appearance = _appSettings.ReaderAppearance;
-            foreach (var option in new[] { ReaderClassicThemeOption, ReaderNightThemeOption, ReaderGreenThemeOption, ReaderBrownThemeOption, ReaderIvoryThemeOption })
+            foreach (var option in new[] { ReaderClassicThemeOption, ReaderNightThemeOption, ReaderGreenThemeOption, ReaderMistBlueThemeOption, ReaderIvoryThemeOption })
                 option.IsChecked = Enum.TryParse<ReaderTheme>(option.Tag?.ToString(), out var theme) && theme == appearance.Theme;
             ReaderPaperEnabledCheck.IsChecked = appearance.PaperEnabled;
             ReaderPaperStrengthSlider.Value = appearance.PaperStrength * 100;

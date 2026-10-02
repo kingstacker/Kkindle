@@ -6,6 +6,7 @@
         xmlns:core="using:Kkindle.Core"
         xmlns:infra="using:Kkindle.Infrastructure"
         xmlns:converters="using:Avalonia.Data.Converters"
+        xmlns:chrome="using:Avalonia.Controls.Chrome"
         mc:Ignorable="d"
         d:DesignWidth="1294"
         d:DesignHeight="804"
@@ -28,6 +29,14 @@
         KeyDown="MainWindow_KeyDown">
 
     <Window.Resources>
+        <!-- Zen owns its caption controls; omit Fluent's fullscreen popover. -->
+        <ControlTheme x:Key="ReaderZenWindowDecorations" TargetType="chrome:WindowDrawnDecorations">
+            <Setter Property="Template">
+                <WindowDrawnDecorationsTemplate>
+                    <chrome:WindowDrawnDecorationsContent />
+                </WindowDrawnDecorationsTemplate>
+            </Setter>
+        </ControlTheme>
         <!-- Sidebar outlines adapted from Lucide (https://lucide.dev).
              License: Assets/Icons/Lucide-LICENSE.txt. Reader text and the Aa
              letterforms are adapted for this app. Small translations centre
@@ -693,7 +702,7 @@
             <Grid x:Name="LibraryWorkspace"
                   Grid.Column="1"
                   Margin="30,24,30,18"
-                  RowDefinitions="Auto,Auto,Auto,*,Auto">
+                  RowDefinitions="Auto,Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
                   <Grid.Transitions>
                       <Transitions>
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
@@ -1279,12 +1288,23 @@
                     </Grid>
                 </Grid>
 
-            <!-- Details share the book area so the header and toolbar remain
+
+            </Grid>
+
+                <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+                    <TextBlock x:Name="TaskStatusText"
+                               Text="{DynamicResource Ui.Auto.1BD1893C09003D8A}"
+                               FontSize="11"
+                               Foreground="{DynamicResource MutedInkBrush}"
+                               VerticalAlignment="Center"
+                               IsVisible="False" />
+                </Grid>
+            <!-- Details occupy an independent column aligned with the library title; controls remain
                  accessible. The auto column returns its width when closed. -->
             <Border x:Name="LibraryDetailPane"
-                    Grid.Column="1"
+                    Grid.Column="1" Grid.Row="0" Grid.RowSpan="5"
                     Width="320"
-                    Margin="24,0,0,0"
+                    Margin="24,14,0,0"
                     HorizontalAlignment="Right"
                     ZIndex="40"
                     Background="{DynamicResource PaperBrush}"
@@ -1292,11 +1312,14 @@
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
                 <Grid RowDefinitions="Auto,*">
-                    <Grid ColumnDefinitions="*,Auto" Margin="20,0,24,8">
-                        <TextBlock Text="{DynamicResource Ui.Auto.326DE7898C2A6278}"
+                    <Grid ColumnDefinitions="*,Auto" Margin="20,8,24,8">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" VerticalAlignment="Center">
+<TextBlock Text="{DynamicResource Ui.Auto.326DE7898C2A6278}"
                                    FontSize="13"
                                    Foreground="{DynamicResource MutedInkBrush}"
                                    VerticalAlignment="Center" />
+<TextBlock x:Name="DetailFormatText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+</Grid>
                         <Button x:Name="LibraryDetailCloseButton"
                                 Grid.Column="1"
                                 Classes="icon"
@@ -1388,8 +1411,6 @@
                                     </Button>
                                 </Grid>
                             </Grid>
-
-                            <TextBlock x:Name="DetailFormatText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                             <StackPanel Spacing="5">
                                 <TextBlock Text="{DynamicResource Ui.Auto.C3405F8C7D9D392A}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                 <TextBox x:Name="DetailTitleText" FontSize="16" FontWeight="SemiBold" />
@@ -1398,68 +1419,10 @@
                                 <TextBlock Text="{DynamicResource Ui.Auto.7D4146CA082798F0}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                 <TextBox x:Name="DetailAuthorsText" FontSize="13" />
                             </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.0213F653036C18BA}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailDoubanRatingBox" IsReadOnly="True" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.1D0FD5F9336D9103}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailTagsBox" PlaceholderText="{DynamicResource Ui.Auto.42F1A31C725F5D65}" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.515559957FD3ACBD}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailCategoryBox" PlaceholderText="{DynamicResource Ui.Auto.0C9D7F0CA37B2C93}" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.649F19CE8EB1CEE9}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailCollectionsText" IsReadOnly="True" TextWrapping="Wrap" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.8131EAFD02396E6A}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailDescriptionBox" MinHeight="100" AcceptsReturn="True" TextWrapping="Wrap" />
-                            </StackPanel>
-
-                            <Rectangle Height="1" Fill="{DynamicResource HairlineBrush}" Margin="0,4,0,2" />
-                            <TextBlock Text="{DynamicResource Ui.Auto.D0976E76BF2566C5}"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource MutedInkBrush}" />
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.232527192F3462A3}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailSeriesBox" />
-                            </StackPanel>
-                            <StackPanel Spacing="5">
-                                <TextBlock Text="{DynamicResource Ui.Auto.1107B9A98AD38DB6}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailPublisherBox" />
-                            </StackPanel>
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                                <StackPanel Spacing="5">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.D6D0F10A7D96A8D2}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                    <TextBox x:Name="DetailPublishDateBox" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="5">
-                                    <TextBlock Text="ISBN" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                    <TextBox x:Name="DetailIsbnBox" />
-                                </StackPanel>
-                            </Grid>
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                                <StackPanel Spacing="5">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.560630BA0C84322E}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                    <TextBox x:Name="DetailPageCountBox" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="5">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.5A0E877ACFB138E4}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                    <TextBox x:Name="DetailBindingBox" />
-                                </StackPanel>
-                            </Grid>
-
-                            <Rectangle x:Name="DetailReflectionSeparator"
-                                       Height="1"
-                                       Fill="{DynamicResource HairlineBrush}"
-                                       Margin="0,8,0,2" />
+                            
                             <Border x:Name="DetailReflectionPanel"
                                     Background="Transparent"
-                                    Classes="flatSubsection"
+                                    BorderThickness="0"
                                     Padding="0,14,0,2"
                                     Margin="0,0,0,4">
                                 <StackPanel Spacing="8">
@@ -1506,8 +1469,65 @@
                                     </Border>
                                 </StackPanel>
                             </Border>
+                            <Border Height="1" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1" Margin="0,4,0,2" UseLayoutRounding="True" />
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.0213F653036C18BA}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailDoubanRatingBox" IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.1D0FD5F9336D9103}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailTagsBox" PlaceholderText="{DynamicResource Ui.Auto.42F1A31C725F5D65}" />
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.515559957FD3ACBD}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailCategoryBox" PlaceholderText="{DynamicResource Ui.Auto.0C9D7F0CA37B2C93}" />
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.649F19CE8EB1CEE9}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailCollectionsText" IsReadOnly="True" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.8131EAFD02396E6A}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailDescriptionBox" MinHeight="100" AcceptsReturn="True" TextWrapping="Wrap" />
+                            </StackPanel>
 
-                            <Rectangle Height="1" Fill="{DynamicResource HairlineBrush}" Margin="0,8,0,2" />
+                            
+                            <TextBlock Text="{DynamicResource Ui.Auto.D0976E76BF2566C5}"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource MutedInkBrush}" />
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.232527192F3462A3}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailSeriesBox" />
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="{DynamicResource Ui.Auto.1107B9A98AD38DB6}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                <TextBox x:Name="DetailPublisherBox" />
+                            </StackPanel>
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="{DynamicResource Ui.Auto.D6D0F10A7D96A8D2}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                    <TextBox x:Name="DetailPublishDateBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="5">
+                                    <TextBlock Text="ISBN" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                    <TextBox x:Name="DetailIsbnBox" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="{DynamicResource Ui.Auto.560630BA0C84322E}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                    <TextBox x:Name="DetailPageCountBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="5">
+                                    <TextBlock Text="{DynamicResource Ui.Auto.5A0E877ACFB138E4}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                    <TextBox x:Name="DetailBindingBox" />
+                                </StackPanel>
+                            </Grid>
+
+
+
+                            
                             <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                                 <Button x:Name="SaveDetailsButton"
                                         Classes="detailSave"
@@ -1541,16 +1561,6 @@
 
                 </Grid>
             </Border>
-            </Grid>
-
-                <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
-                    <TextBlock x:Name="TaskStatusText"
-                               Text="{DynamicResource Ui.Auto.1BD1893C09003D8A}"
-                               FontSize="11"
-                               Foreground="{DynamicResource MutedInkBrush}"
-                               VerticalAlignment="Center"
-                               IsVisible="False" />
-                </Grid>
             </Grid>
 
             <!-- Hidden advanced online library restored from the optional
@@ -1663,7 +1673,7 @@
                   Grid.Column="1"
                   Margin="30,24,30,18"
                   IsVisible="False"
-                  RowDefinitions="Auto,Auto,Auto,*,Auto">
+                  RowDefinitions="Auto,Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
                   <Grid.Transitions>
                       <Transitions>
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
@@ -2445,11 +2455,36 @@
                                               VerticalAlignment="Center" FontSize="14"
                                               SelectionChanged="MainThemeBox_SelectionChanged"
                                               AutomationProperties.Name="{DynamicResource Ui.Appearance.MainTheme}">
-                                        <ComboBoxItem Content="{DynamicResource Ui.Appearance.Classic}" Tag="Classic" />
-                                        <ComboBoxItem Content="{DynamicResource Ui.Appearance.Night}" Tag="Night" />
-                                        <ComboBoxItem Content="{DynamicResource Ui.Appearance.Green}" Tag="Green" />
-                                        <ComboBoxItem Content="{DynamicResource Ui.Appearance.WarmBrown}" Tag="WarmBrown" />
-                                        <ComboBoxItem Content="{DynamicResource Ui.Appearance.Ivory}" Tag="Ivory" />
+                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Classic}" Tag="Classic">
+                                            <ComboBoxItem.Resources>
+                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#FFFFFF" />
+                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#000000" />
+                                            </ComboBoxItem.Resources>
+                                        </ComboBoxItem>
+                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Night}" Tag="Night">
+                                            <ComboBoxItem.Resources>
+                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#20231F" />
+                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#E5E5DB" />
+                                            </ComboBoxItem.Resources>
+                                        </ComboBoxItem>
+                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Green}" Tag="Green">
+                                            <ComboBoxItem.Resources>
+                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#EDF3EA" />
+                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#27392A" />
+                                            </ComboBoxItem.Resources>
+                                        </ComboBoxItem>
+                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.MistBlue}" Tag="MistBlue">
+                                            <ComboBoxItem.Resources>
+                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#E8EFF5" />
+                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#283746" />
+                                            </ComboBoxItem.Resources>
+                                        </ComboBoxItem>
+                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Ivory}" Tag="Ivory">
+                                            <ComboBoxItem.Resources>
+                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#F8F5EC" />
+                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#37342D" />
+                                            </ComboBoxItem.Resources>
+                                        </ComboBoxItem>
                                     </ComboBox>
                                 </Grid>
                                 <ToggleSwitch x:Name="NetworkEnabledCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D7842A57D154C697}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.098925F827B88E7A}" AutomationProperties.Name="{DynamicResource Ui.Auto.098925F827B88E7A}" />
@@ -4104,13 +4139,10 @@
                                 AutomationProperties.Name="{DynamicResource Ui.Auto.47C91FADCC3E4775}"
                                 ToolTip.Tip="{DynamicResource Ui.Auto.47C91FADCC3E4775}"
                                 Click="ReaderTocButton_Click">
-                            <Path Width="18"
-                                  Height="18"
-                                  HorizontalAlignment="Center"
+                            <Path StrokeThickness="1.5" Height="18" Width="18" HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
                                   Data="M7 4.5L13 9L7 13.5"
                                   Stroke="{DynamicResource ReaderInkBrush}"
-                                  StrokeThickness="1.5"
                                   StrokeLineCap="Round"
                                   StrokeJoin="Round"
                                   IsHitTestVisible="False" />
@@ -4152,12 +4184,8 @@
                                                         Focusable="False"
                                                         IsVisible="{Binding HasChildren}"
                                                         Click="ReaderTocToggle_Click">
-                                                    <Path Data="M 3,1.5 L 9,6 L 3,10.5"
-                                                          Width="12"
-                                                          Height="12"
-                                                          Stretch="None"
+                                                    <Path Stretch="None" StrokeThickness="0.85" Height="12" Width="12" Data="M 3,1.5 L 9,6 L 3,10.5"
                                                           Stroke="{DynamicResource ReaderMutedBrush}"
-                                                          StrokeThickness="0.85"
                                                           StrokeLineCap="Square"
                                                           StrokeJoin="Miter"
                                                           Fill="Transparent"
@@ -4349,13 +4377,10 @@
                                 AutomationProperties.Name="{DynamicResource Ui.Auto.EDCDBACEBE531DBF}"
                                 ToolTip.Tip="{DynamicResource Ui.Auto.EDCDBACEBE531DBF}"
                                 Click="ReaderTocCompactExpandButton_Click">
-                            <Path Stretch="Uniform" Width="18"
-                                  Height="18"
-                                  HorizontalAlignment="Center"
+                            <Path StrokeThickness="1.5" Height="24" Width="24" HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
                                   Data="M8 6H16 M8 12H16 M8 18H16"
                                   Stroke="{DynamicResource ReaderInkBrush}"
-                                  StrokeThickness="1.4"
                                   StrokeLineCap="Round"
                                   StrokeJoin="Round"
                                   IsHitTestVisible="False" />
@@ -4466,13 +4491,10 @@
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.ECDD3E4A16F4CD30}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.741925AF773FDAE3}"
                                     Click="ReaderTocButton_Click">
-                                <Path Stretch="Uniform" x:Name="ReaderTocToggleIcon"
-                                      Width="18"
-                                      Height="18"
+                                <Path StrokeThickness="1.5" Height="24" Width="24" x:Name="ReaderTocToggleIcon"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center"
                                       Stroke="{Binding $parent[Button].Foreground}"
-                                      StrokeThickness="1.4"
                                       StrokeLineCap="Round"
                                       StrokeJoin="Round"
                                       Data="M4.5 6h1.5 M9.5 6h10 M4.5 12h1.5 M9.5 12h10 M4.5 18h1.5 M9.5 18h10" />
@@ -4484,10 +4506,7 @@
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.D40E1B4E4A622EB2}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.43A641217D7F134F}"
                                     Click="ReaderSearchToolbarButton_Click">
-                                <Path Stretch="Uniform" Width="18"
-                                      Height="18"
-                                      Stroke="{Binding $parent[Button].Foreground}"
-                                      StrokeThickness="1.4"
+                                <Path StrokeThickness="1.5" Height="24" Width="24" Stroke="{Binding $parent[Button].Foreground}"
                                       StrokeLineCap="Round"
                                       StrokeJoin="Round"
                                       Data="M10 4.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 1 0 0-11Z M14.2 14.2L19.5 19.5" />
@@ -4503,13 +4522,10 @@
                                       Height="24"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center">
-                                    <Path Stretch="Uniform" x:Name="ReaderTtsButtonIcon"
-                                          Width="18"
-                                          Height="18"
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" x:Name="ReaderTtsButtonIcon"
                                           HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.4"
                                           StrokeLineCap="Round"
                                           StrokeJoin="Round"
                                           Data="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4Z M15 9.5a4 4 0 0 1 0 5 M17.5 7.5a7 7 0 0 1 0 9" />
@@ -4580,9 +4596,7 @@
                                         IsVisible="False"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.6EA534CB62BCA05C}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.6EA534CB62BCA05C}">
-                                    <Path Stretch="Uniform" Width="18" Height="18"
-                                          Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.4"
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeLineCap="Round" StrokeJoin="Round"
                                           Data="M4 5h16v14H4Z M7 12h10 M9 9.5L6.5 12L9 14.5 M15 9.5L17.5 12L15 14.5" />
                                     <Button.Flyout>
@@ -4604,9 +4618,7 @@
                                         ToolTip.Tip="{DynamicResource Ui.Auto.980EDB5BF6FDE833}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.980EDB5BF6FDE833}"
                                         Click="ReaderPdfRotateButton_Click">
-                                    <Path Stretch="Uniform" Width="18" Height="18"
-                                          Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.4"
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeLineCap="Round" StrokeJoin="Round"
                                           Data="M20 5v5h-5 M20 10a8 8 0 1 0-1 8" />
                                 </Button>
@@ -4618,11 +4630,8 @@
                                         ToolTip.Tip="在 PDF 任意位置添加页面批注"
                                         AutomationProperties.Name="在 PDF 任意位置添加页面批注"
                                         Click="ReaderPdfPointNoteButton_Click">
-                                    <Path Stretch="Uniform" x:Name="ReaderPdfPointNoteIcon"
-                                          Width="18"
-                                          Height="18"
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" x:Name="ReaderPdfPointNoteIcon"
                                           Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.4"
                                           StrokeLineCap="Round"
                                           StrokeJoin="Round"
                                           Data="M6 4.5h8.5l4.5 4.5v10.5H6Z M14.5 4.5V9H19 M9 13.5h7 M12.5 10v7" />
@@ -4633,11 +4642,8 @@
                                         MinWidth="38"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.12856C8BCE9C08EF}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.0498D4E5A749540F}">
-                                    <Path Stretch="Uniform" x:Name="ReaderFlowIcon"
-                                          Width="18"
-                                          Height="18"
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" x:Name="ReaderFlowIcon"
                                           Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.4"
                                           StrokeLineCap="Round"
                                           StrokeJoin="Round"
                                           Data="M5 4.5h14v15h-14Z M12 8.5v6.5 M9.3 12.3L12 15L14.7 12.3" />
@@ -4669,10 +4675,7 @@
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.3FF66E53453FEC82}"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.3FF66E53453FEC82}"
                                         Click="ReaderBookmarkButton_Click">
-                                    <Path Stretch="Uniform" Width="18"
-                                          Height="18"
-                                          Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.4"
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeLineCap="Round"
                                           StrokeJoin="Round"
                                           Data="M7 4.5h10v15l-5-4.2-5 4.2Z" />
@@ -4684,12 +4687,9 @@
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.11FB682BE0A0233D}"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.90298AE01BB88F61}"
                                         Click="ReaderAssistantToggleButton_Click">
-                                    <Path Stretch="Uniform" Width="18"
-                                          Height="18"
-                                          HorizontalAlignment="Center"
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" HorizontalAlignment="Center"
                                           VerticalAlignment="Center"
                                           Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="1.4"
                                           StrokeLineCap="Round"
                                           StrokeJoin="Round"
                                           Data="M12 3.5C12.7 7.9 16.1 11.3 20.5 12 16.1 12.7 12.7 16.1 12 20.5 11.3 16.1 7.9 12.7 3.5 12 7.9 11.3 11.3 7.9 12 3.5Z" />
@@ -4700,10 +4700,7 @@
                                         MinWidth="38"
                                         ToolTip.Tip="{DynamicResource Ui.Auto.863C2A1656503DF6}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.863C2A1656503DF6}">
-                                    <Path Stretch="Uniform" Width="18"
-                                          Height="18"
-                                          Stroke="{Binding $parent[Button].Foreground}"
-                                          StrokeThickness="2.4"
+                                    <Path StrokeThickness="2.4" Height="24" Width="24" Stroke="{Binding $parent[Button].Foreground}"
                                           StrokeLineCap="Round"
                                           Data="M5 12h.01 M12 12h.01 M19 12h.01" />
                                     <Button.Flyout>
@@ -4969,14 +4966,11 @@
                             Cursor="Hand"
                             IsVisible="False"
                             PointerPressed="ReaderBookmarkCornerButton_PointerPressed">
-                        <Path x:Name="ReaderBookmarkCornerMarker"
-                              Width="26"
-                              Height="26"
+                        <Path Stretch="None" Height="26" Width="26" x:Name="ReaderBookmarkCornerMarker"
                               HorizontalAlignment="Right"
                               VerticalAlignment="Top"
                               Data="M 0,0 L 26,0 L 26,26 Z"
                               Fill="{DynamicResource ReaderInkBrush}"
-                              Stretch="None"
                               IsHitTestVisible="False"
                               IsVisible="False" />
                     </Border>
@@ -5281,13 +5275,10 @@
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.2CCF650A61080689}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.2CCF650A61080689}"
                                     Click="ReaderAssistantToggleButton_Click">
-                                <Path Width="18"
-                                      Height="18"
-                                      HorizontalAlignment="Center"
+                                <Path StrokeThickness="1.5" Height="18" Width="18" HorizontalAlignment="Center"
                                       VerticalAlignment="Center"
                                       Data="M11 4.5L5 9L11 13.5"
                                       Stroke="{DynamicResource ReaderInkBrush}"
-                                      StrokeThickness="1.5"
                                       StrokeLineCap="Round"
                                       StrokeJoin="Round"
                                       IsHitTestVisible="False" />
@@ -5330,10 +5321,7 @@
                                                                        FontSize="11"
                                                                        Foreground="{DynamicResource ReaderMutedBrush}"
                                                                        VerticalAlignment="Center" />
-                                                            <Path Width="11"
-                                                                  Height="11"
-                                                                  Stretch="Uniform"
-                                                                  Fill="{DynamicResource ReaderMutedBrush}"
+                                                            <Path Stretch="Uniform" Height="11" Width="11" Fill="{DynamicResource ReaderMutedBrush}"
                                                                   Data="M 17.65,6.35 C 16.2,4.9 14.21,4 12,4 C 7.58,4 4.01,7.58 4.01,12 C 4.01,16.42 7.58,20 12,20 C 15.73,20 18.84,17.45 19.73,14 H 17.65 C 16.83,16.33 14.61,18 12,18 C 8.69,18 6,15.31 6,12 C 6,8.69 8.69,6 12,6 C 13.66,6 15.14,6.69 16.22,7.78 L 13,11 H 20 V 4 Z"
                                                                   IsVisible="{Binding IsThinking}"
                                                                   RenderTransformOrigin="50%,50%"
@@ -5459,10 +5447,7 @@
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
                                             Click="ReaderAiSendButton_Click">
-                                        <Path x:Name="ReaderAiSendGlyph" Width="16"
-                                              Height="16"
-                                              Stretch="Uniform"
-                                              Fill="{Binding $parent[Button].Foreground}"
+                                        <Path Stretch="Uniform" Height="16" Width="16" x:Name="ReaderAiSendGlyph" Fill="{Binding $parent[Button].Foreground}"
                                               Data="M 12,3 L 18.2,9.2 L 17.3,10.1 L 12.45,5.25 L 12.45,21 L 11.55,21 L 11.55,5.25 L 6.7,10.1 L 5.8,9.2 Z"
                                               IsHitTestVisible="False" />
                                     </Button>
@@ -5518,11 +5503,8 @@
                                                                 ToolTip.Tip="{DynamicResource Ui.Auto.E06985CB8EEAACEB}"
                                                                 Tag="{Binding}"
                                                                 Click="ReaderAnnotationItemDeleteButton_Click">
-                                                            <Path Width="10"
-                                                                  Height="10"
-                                                                  Data="M 1,1 L 9,9 M 9,1 L 1,9"
+                                                            <Path StrokeThickness="1.2" Height="10" Width="10" Data="M 1,1 L 9,9 M 9,1 L 1,9"
                                                                   Stroke="{DynamicResource ReaderInkBrush}"
-                                                                  StrokeThickness="1.2"
                                                                   StrokeLineCap="Square"
                                                                   IsHitTestVisible="False" />
                                                         </Button>
@@ -5885,6 +5867,20 @@
                         CornerRadius="0"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
+                    <Border.Resources>
+                        <CornerRadius x:Key="SliderThumbCornerRadius">999</CornerRadius>
+                    </Border.Resources>
+                    <Border.Styles>
+                        <Style Selector="Slider /template/ Thumb">
+                            <Setter Property="Width" Value="12" />
+                            <Setter Property="Height" Value="12" />
+                            <Setter Property="MinWidth" Value="12" />
+                            <Setter Property="MinHeight" Value="12" />
+                            <Setter Property="MaxWidth" Value="12" />
+                            <Setter Property="MaxHeight" Value="12" />
+                            <Setter Property="CornerRadius" Value="6" />
+                        </Style>
+                    </Border.Styles>
                     <Grid RowDefinitions="*,Auto">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="22,20" Spacing="12">
@@ -5918,13 +5914,13 @@
                                             <TextBlock Text="{DynamicResource Ui.Reader.Theme.Green}" HorizontalAlignment="Center" />
                                         </StackPanel>
                                     </RadioButton>
-                                    <RadioButton x:Name="ReaderBrownThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="WarmBrown"
+                                    <RadioButton x:Name="ReaderMistBlueThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="MistBlue"
                                                  IsCheckedChanged="ReaderThemeOption_IsCheckedChanged">
                                         <StackPanel Spacing="7">
-                                            <Border Background="#F7F0E4" Height="38">
-                                                <TextBlock Text="Aa" Foreground="#3E352A" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border Background="#E8EFF5" Height="38">
+                                                <TextBlock Text="Aa" Foreground="#283746" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <TextBlock Text="{DynamicResource Ui.Reader.Theme.Brown}" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{DynamicResource Ui.Reader.Theme.MistBlue}" HorizontalAlignment="Center" />
                                         </StackPanel>
                                     </RadioButton>
                                     <RadioButton x:Name="ReaderIvoryThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="Ivory"
@@ -6111,7 +6107,7 @@
                                                         Click="ReaderSelectionMarkerColorButton_Click">
                                                     <StackPanel Orientation="Horizontal" Spacing="5">
                                                         <Border x:Name="ReaderSelectionMarkerColorPreview" Width="14" Height="14" Background="#000000" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0.5" VerticalAlignment="Center" />
-                                                        <Path Width="8" Height="5" Data="M 0,0 L 4,4 L 8,0" Stroke="{DynamicResource ReaderInkBrush}" StrokeThickness="1" Fill="{x:Null}" VerticalAlignment="Center" />
+                                                        <Path StrokeThickness="1" Height="5" Width="8" Data="M 0,0 L 4,4 L 8,0" Stroke="{DynamicResource ReaderInkBrush}" Fill="{x:Null}" VerticalAlignment="Center" />
                                                     </StackPanel>
                                                     <FlyoutBase.AttachedFlyout>
                                                         <Flyout FlyoutPresenterClasses="readerMarkerPalette" Placement="Bottom" VerticalOffset="3" ShowMode="Standard">
@@ -6294,11 +6290,18 @@
                             </StackPanel>
                             <Button x:Name="ReaderDictionaryCloseButton"
                                     Grid.Column="1"
-                                    Classes="quiet"
-                                    Content="×"
+                                    Classes="icon"
+                                    Width="32" Height="32"
+                                    BorderThickness="0"
+                                    BorderBrush="Transparent"
+                                    Background="Transparent"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
-                                    Click="ReaderDictionaryCloseButton_Click" />
+                                    Click="ReaderDictionaryCloseButton_Click">
+                                <Path Width="16" Height="16" Stretch="Uniform"
+                                      Stroke="{DynamicResource ReaderInkBrush}" StrokeThickness="1.5"
+                                      Data="M 0,0 L 16,16 M 16,0 L 0,16" />
+                            </Button>
                         </Grid>
                         <ScrollViewer Grid.Row="1"
                                       MaxHeight="420"

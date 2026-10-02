@@ -20,7 +20,7 @@ public sealed partial class SettingsTests
     [InlineData(AppTheme.Classic, "#FFFFFF")]
     [InlineData(AppTheme.Night, "#20231F")]
     [InlineData(AppTheme.Green, "#EDF3EA")]
-    [InlineData(AppTheme.WarmBrown, "#F4EBDF")]
+    [InlineData(AppTheme.MistBlue, "#E8EFF5")]
     [InlineData(AppTheme.Ivory, "#F8F5EC")]
     public Task MainThemesUpdateExistingLibraryControlsAndPersist(AppTheme theme, string background) => Run(async () =>
     {
@@ -74,20 +74,20 @@ public sealed partial class SettingsTests
     {
         await using var scope = await TestWindow.Create();
         scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Night;
-        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.WarmBrown;
+        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.MistBlue;
         scope.Get<ToggleSwitch>("GridGalleryDisplayCheck").IsChecked = true;
         var reader = new ReaderAppearanceSettings { Theme = ReaderTheme.Green, PaperEnabled = true, FibersEnabled = true };
         scope.Call("ChangeReaderAppearance", reader);
         scope.Window.Close();
         await Until(() => !scope.Window.IsVisible);
         var saved = await new AppSettingsStore(scope.Paths).LoadAsync();
-        Assert.Equal(AppTheme.WarmBrown, saved.MainTheme);
+        Assert.Equal(AppTheme.MistBlue, saved.MainTheme);
         Assert.True(saved.GridGalleryDisplay);
         Assert.Equal(reader, saved.ReaderAppearance);
 
         await using var reopened = await TestWindow.Create(saved);
-        Assert.Equal((int)AppTheme.WarmBrown, reopened.Get<ComboBox>("MainThemeBox").SelectedIndex);
-        Assert.Equal(Color.Parse("#F4EBDF"), ColorOf(reopened.Get<Grid>("LibraryRoot").Background));
+        Assert.Equal((int)AppTheme.MistBlue, reopened.Get<ComboBox>("MainThemeBox").SelectedIndex);
+        Assert.Equal(Color.Parse("#E8EFF5"), ColorOf(reopened.Get<Grid>("LibraryRoot").Background));
         Assert.Equal(ReaderTheme.Green, reopened.Field<AppSettings>("_appSettings").ReaderAppearance.Theme);
     });
 

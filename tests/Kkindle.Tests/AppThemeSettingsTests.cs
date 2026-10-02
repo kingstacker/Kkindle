@@ -22,7 +22,7 @@ public sealed class AppThemeSettingsTests
     [InlineData(AppTheme.Classic)]
     [InlineData(AppTheme.Night)]
     [InlineData(AppTheme.Green)]
-    [InlineData(AppTheme.WarmBrown)]
+    [InlineData(AppTheme.MistBlue)]
     [InlineData(AppTheme.Ivory)]
     public async Task StartupAndAsyncLoadsPreserveMainAndReaderThemesIndependently(AppTheme theme)
     {

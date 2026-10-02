@@ -27,15 +27,15 @@ public sealed record ReaderPalette(
     private static readonly ReaderPalette Green = Palette(
         "#EEF3EC", "#EEF3EC", "#EEF3EC", "#29382D", "#59685D",
         "#C9D5C7", "#DCE6D7", "#D4E0CF", "#3F6B57", "#F5FAF2");
-    private static readonly ReaderPalette WarmBrown = Palette(
-        "#F7F0E4", "#F7F0E4", "#F7F0E4", "#3E352A", "#73624F",
-        "#DACBB5", "#EBDEC9", "#E5D4B8", "#8A6546", "#FFFAF2");
+    private static readonly ReaderPalette MistBlue = Palette(
+        "#E8EFF5", "#E8EFF5", "#E8EFF5", "#283746", "#536575",
+        "#CAD5DF", "#DBE5EE", "#CBD9E5", "#486B89", "#F7FAFD");
 
     public static ReaderPalette For(ReaderTheme theme) => theme switch
     {
         ReaderTheme.Night => Night,
         ReaderTheme.Green => Green,
-        ReaderTheme.WarmBrown => WarmBrown,
+        ReaderTheme.MistBlue => MistBlue,
         ReaderTheme.Ivory => Ivory,
         _ => Classic
     };

@@ -1900,12 +1900,12 @@
     <x:String x:Key="Ui.Appearance.Classic">黑白（默认）</x:String>
     <x:String x:Key="Ui.Appearance.Night">夜间</x:String>
     <x:String x:Key="Ui.Appearance.Green">绿色</x:String>
-    <x:String x:Key="Ui.Appearance.WarmBrown">暖棕色</x:String>
+    <x:String x:Key="Ui.Appearance.MistBlue">雾蓝</x:String>
     <x:String x:Key="Ui.Appearance.Ivory">米白</x:String>
     <x:String x:Key="Ui.Reader.Theme.Classic">黑白（默认）</x:String>
     <x:String x:Key="Ui.Reader.Theme.Night">夜晚</x:String>
     <x:String x:Key="Ui.Reader.Theme.Green">绿色</x:String>
-    <x:String x:Key="Ui.Reader.Theme.Brown">暖棕色</x:String>
+    <x:String x:Key="Ui.Reader.Theme.MistBlue">雾蓝</x:String>
     <x:String x:Key="Ui.Reader.Theme.Ivory">米白</x:String>
     <x:String x:Key="Ui.Reader.Paper">启用纸感</x:String>
     <x:String x:Key="Ui.Reader.PaperStrength">纸感强度</x:String>

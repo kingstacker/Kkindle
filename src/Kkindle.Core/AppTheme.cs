@@ -7,6 +7,6 @@ public enum AppTheme
     Classic = 0,
     Night = 1,
     Green = 2,
-    WarmBrown = 3,
+    MistBlue = 3,
     Ivory = 4
 }
