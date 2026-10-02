@@ -6,6 +6,25 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.7 (2026-10-02)
+
+### Added
+
+- Toggle developer mode with five clicks on the version number, with capsule notifications on entry and exit.
+- Added Z-Library library access, account settings, and corresponding MCP tools in developer mode.
+- Added a separate software proxy setting for Calibre/KFX Input downloads and app updates, with download percentages.
+
+### Improved
+
+- Unified sidebar and feature-page icon sizes and strokes; selected child navigation items now show a small dot.
+- Simplified settings and About sections by removing outer frames and aligning headings; help text and the donation QR code now appear on hover.
+- Improved reflection editor and expandable settings layouts.
+- Development builds derive their version from the latest stable release and increment their build number; master updates automatically tag and publish stable releases without duplicate releases.
+
+### Fixed
+
+- Removed the developer-mode click timeout and count every left mouse click.
+
 ## 1.0.6 (2026-09-29)
 
 ### Added

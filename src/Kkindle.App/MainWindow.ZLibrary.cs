@@ -18,9 +18,7 @@ namespace Kkindle;
 public partial class MainWindow
 {
     private const int ZLibraryAdvancedUnlockClickCount = 5;
-    private static readonly TimeSpan ZLibraryAdvancedUnlockWindow = TimeSpan.FromSeconds(2);
     private int _zLibraryVersionClickCount;
-    private DateTime _zLibraryLastVersionClickUtc;
     private bool _zLibraryAdvancedUnlocked;
     private CancellationTokenSource? _zLibrarySearchCancellation;
     private int _zLibraryPage = 1;
@@ -31,12 +29,9 @@ public partial class MainWindow
     private bool _zLibraryWebSending;
     public ObservableCollection<ZLibraryBookCardViewModel> ZLibraryBooks { get; } = [];
 
-    private void AboutVersionText_Tapped(object? sender, TappedEventArgs e)
+    private void AboutVersionText_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        var now = DateTime.UtcNow;
-        if (now - _zLibraryLastVersionClickUtc > ZLibraryAdvancedUnlockWindow)
-            _zLibraryVersionClickCount = 0;
-        _zLibraryLastVersionClickUtc = now;
+        if (sender is not Control control || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
         if (++_zLibraryVersionClickCount < ZLibraryAdvancedUnlockClickCount) return;
         _zLibraryVersionClickCount = 0;
         if (_zLibraryAdvancedUnlocked)

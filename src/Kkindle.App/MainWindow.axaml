@@ -3126,7 +3126,7 @@
                                 </Expander>
                             </StackPanel>
                             <StackPanel Spacing="12" x:Name="SettingsAboutSection" IsVisible="False">
-                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="0" Padding="16">
+                                <Border BorderThickness="0" Padding="0,12">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
                                             <StackPanel Spacing="4">
@@ -3183,7 +3183,7 @@
                                         </StackPanel>
                                     </Border>
                                 </Expander>
-                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="0" Padding="16">
+                                <Border BorderThickness="0" Padding="0,12">
                                     <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12">
                                         <StackPanel Grid.Column="0" VerticalAlignment="Center">
                                             <ToolTip.Tip>
@@ -3210,13 +3210,13 @@
                                                    FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                     </Grid>
                                 </Border>
-                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="0" Padding="16">
+                                <Border BorderThickness="0" Padding="0,12">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
                                             <StackPanel Spacing="4">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                 <WrapPanel Orientation="Horizontal">
-                                                    <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,0,18,0" Cursor="Hand" Tapped="AboutVersionText_Tapped" />
+                                                    <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,0,18,0" Cursor="Hand" PointerPressed="AboutVersionText_PointerPressed" />
                                                     <TextBlock Text="{DynamicResource Ui.About.UserGroup}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                                 </WrapPanel>
                                             </StackPanel>
@@ -3229,32 +3229,17 @@
                                         </Grid>
                                     </StackPanel>
                                 </Border>
-                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="0" Padding="14">
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
-                                        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                                            <Border Width="44" Height="44" Background="{DynamicResource SoftHoverBrush}" CornerRadius="22">
-                                                <Grid Width="32" Height="30">
-                                                    <Path Data="M 11,8 C 9,6 11,4 10,2" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
-                                                    <Path Data="M 18,8 C 16,6 18,4 17,2" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
-                                                    <Path Data="M 23,14 H 25 C 28,14 29,16 29,19 C 29,22 27,24 23,24" Fill="Transparent" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
-                                                    <Path Data="M 7,12 H 23 V 19 C 23,24 20,26 15,26 C 10,26 7,24 7,19 Z" Fill="{DynamicResource PaperBrush}" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" />
-                                                    <Path Data="M 8,14 C 12,15.5 18,15.5 22,14" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
-                                                    <Path Data="M 5,28 H 25" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5" StrokeLineCap="Round" />
-                                                </Grid>
-                                            </Border>
-                                            <StackPanel Spacing="3" VerticalAlignment="Center">
-                                                <TextBlock ToolTip.Tip="{DynamicResource Ui.Auto.2D1996A469BDAB92}" Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            </StackPanel>
-                                        </StackPanel>
-                                        <Border Grid.Column="1" Width="76" Height="76" Background="{DynamicResource SoftHoverBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1" CornerRadius="0" ClipToBounds="True">
-                                            <ToolTip.Tip>
+                                <Border BorderThickness="0" Padding="0,12">
+                                    <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" HorizontalAlignment="Left" VerticalAlignment="Center" MinHeight="38">
+                                        <ToolTip.Tip>
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" TextWrapping="Wrap" MaxWidth="236" />
                                                 <Border Background="#FFFFFFFF" Padding="8">
                                                     <Image Source="avares://Kkindle.App/Assets/Images/SupportWechatQr.png" Width="220" Height="220" Stretch="Uniform" />
                                                 </Border>
-                                            </ToolTip.Tip>
-                                            <Image Source="avares://Kkindle.App/Assets/Images/SupportWechatQr.png" Stretch="Uniform" />
-                                        </Border>
-                                    </Grid>
+                                            </StackPanel>
+                                        </ToolTip.Tip>
+                                    </TextBlock>
                                 </Border>
                             </StackPanel>
                         </StackPanel>
