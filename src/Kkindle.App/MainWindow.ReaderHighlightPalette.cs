@@ -29,7 +29,7 @@ public partial class MainWindow
         if (ReaderMarkerPaletteFlyout is { } flyout)
         {
             if (flyout.IsOpen) flyout.Hide();
-            else flyout.ShowAt(ReaderSelectionMarkerColorButton);
+            else flyout.ShowAt(ReaderSelectionMarkerItem);
         }
     }
 

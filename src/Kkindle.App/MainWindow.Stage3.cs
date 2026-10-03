@@ -4211,7 +4211,11 @@ public partial class MainWindow
                     BookTitle(item),
                     item.ProgressPercent,
                     item.CumulativeSeconds,
-                    item.UpdatedAt);
+                    item.UpdatedAt)
+                {
+                    BookId = item.BookId,
+                    BookFileId = item.BookFileId
+                };
                 _readingDashboardItems.Add(recent);
             }
             DashboardRecentEmptyText.IsVisible = _readingDashboardItems.Count == 0;
@@ -4252,6 +4256,38 @@ public partial class MainWindow
             DashboardStatusText.Text = T("阅读数据暂时不可用：{0}", UiText.Localize(exception.Message));
             DashboardStatusText.IsVisible = true;
         }
+    }
+
+    private async void DashboardRecentBook_DoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not Control { DataContext: Stage3DashboardRecentViewModel item }
+            || _bookOpenInProgress > 0) return;
+        e.Handled = true;
+        BookCardViewModel? temporaryCard = null;
+        try
+        {
+            var card = ViewModel.Books.FirstOrDefault(candidate => candidate.Book.Id == item.BookId);
+            if (card is null)
+            {
+                var book = await _library.GetBookAsync(item.BookId, _lifetimeCancellation.Token);
+                if (book is not null) card = temporaryCard = new BookCardViewModel(book, _paths.Data);
+            }
+            var file = card?.Book.Files.FirstOrDefault(candidate => candidate.Id == item.BookFileId);
+            if (card is null || file is null)
+            {
+                DashboardStatusText.Text = T("找不到对应的本地书籍文件。");
+                DashboardStatusText.IsVisible = true;
+                return;
+            }
+            await OpenBookAsync(card, file, restoreProgress: true);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            DashboardStatusText.Text = T("打开书籍失败：{0}", UiText.Localize(exception.Message));
+            DashboardStatusText.IsVisible = true;
+        }
+        finally { temporaryCard?.Dispose(); }
     }
 
     // Consecutive active days inside the 14-day window, ending today or
@@ -6467,6 +6503,8 @@ public sealed record Stage3DashboardRecentViewModel(
     long Seconds,
     DateTimeOffset UpdatedAt)
 {
+    public Guid BookId { get; init; }
+    public Guid BookFileId { get; init; }
     public string ProgressLabel => $"{ProgressPercent:0.#}%";
 
     public string DurationLabel => FormatTime(Seconds);

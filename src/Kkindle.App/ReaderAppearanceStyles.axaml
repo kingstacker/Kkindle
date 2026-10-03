@@ -117,6 +117,7 @@
         <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
     </Style>
     <Style Selector="FlyoutPresenter.readerMarkerPalette">
+        <Setter Property="Margin" Value="0" />
         <Setter Property="Background" Value="{DynamicResource ReaderPageBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />

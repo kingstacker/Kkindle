@@ -2325,22 +2325,27 @@
                                 <StackPanel Spacing="10">
                                     <TextBlock Text="{DynamicResource Ui.Auto.7644551F37492A5D}" FontSize="14" FontWeight="SemiBold" />
                                     <ItemsControl ItemsSource="{Binding DashboardDays}" AutomationProperties.Name="{DynamicResource Ui.Auto.83A25C492C9A33C4}">
+                                        <ItemsControl.Styles>
+                                            <Style Selector="ContentPresenter">
+                                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                            </Style>
+                                        </ItemsControl.Styles>
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch" />
+                                                <UniformGrid Rows="1" Columns="14" />
                                             </ItemsPanelTemplate>
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardDayViewModel">
-                                                <Grid Width="30" Height="170" RowDefinitions="*,Auto,Auto" Margin="0,0,4,0">
+                                                <Grid Height="170" RowDefinitions="*,Auto,Auto" Margin="2,0" ToolTip.Tip="{Binding TimeLabel}">
                                                     <Border VerticalAlignment="Bottom"
                                                             Height="{Binding BarHeight}"
                                                             CornerRadius="2"
                                                             Opacity="{Binding BarOpacity}"
                                                             Background="{DynamicResource InkBrush}"
                                                             ToolTip.Tip="{Binding TimeLabel}" />
-                                                    <TextBlock Grid.Row="1" Text="{Binding TimeLabel}" FontSize="9" HorizontalAlignment="Center" Margin="0,4,0,0" />
-                                                    <TextBlock Grid.Row="2" Text="{Binding DateLabel}" FontSize="9" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" />
+                                                    <TextBlock Grid.Row="1" Text="{Binding TimeLabel}" FontSize="9" TextAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+                                                    <TextBlock Grid.Row="2" Text="{Binding DateLabel}" FontSize="9" Foreground="{DynamicResource MutedInkBrush}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -2390,6 +2395,8 @@
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="local:Stage3DashboardRecentViewModel">
                                                     <Border Padding="0,8"
+                                                            Background="Transparent"
+                                                            DoubleTapped="DashboardRecentBook_DoubleTapped"
                                                             BorderBrush="{DynamicResource HairlineBrush}"
                                                             BorderThickness="0,0,0,1">
                                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
@@ -3257,6 +3264,16 @@
                                                 <WrapPanel Orientation="Horizontal">
                                                     <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,0,18,0" Cursor="Hand" PointerPressed="AboutVersionText_PointerPressed" />
                                                     <TextBlock Text="{DynamicResource Ui.About.UserGroup}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="18,0,0,0" Cursor="Hand">
+                                                        <ToolTip.Tip>
+                                                            <StackPanel Spacing="8">
+                                                                <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" TextWrapping="Wrap" MaxWidth="236" />
+                                                                <Border Background="#FFFFFFFF" Padding="8">
+                                                                    <Image Source="avares://Kkindle.App/Assets/Images/SupportWechatQr.png" Width="220" Height="220" Stretch="Uniform" />
+                                                                </Border>
+                                                            </StackPanel>
+                                                        </ToolTip.Tip>
+                                                    </TextBlock>
                                                 </WrapPanel>
                                             </StackPanel>
                                             <Border Grid.Column="1" Padding="10,7" Background="{DynamicResource SoftHoverBrush}" CornerRadius="0" VerticalAlignment="Center">
@@ -3268,18 +3285,7 @@
                                         </Grid>
                                     </StackPanel>
                                 </Border>
-                                <Border BorderThickness="0" Padding="0,12">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" HorizontalAlignment="Left" VerticalAlignment="Center" MinHeight="38">
-                                        <ToolTip.Tip>
-                                            <StackPanel Spacing="8">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" TextWrapping="Wrap" MaxWidth="236" />
-                                                <Border Background="#FFFFFFFF" Padding="8">
-                                                    <Image Source="avares://Kkindle.App/Assets/Images/SupportWechatQr.png" Width="220" Height="220" Stretch="Uniform" />
-                                                </Border>
-                                            </StackPanel>
-                                        </ToolTip.Tip>
-                                    </TextBlock>
-                                </Border>
+
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
@@ -6114,7 +6120,7 @@
                                                         <Path StrokeThickness="1" Height="5" Width="8" Data="M 0,0 L 4,4 L 8,0" Stroke="{DynamicResource ReaderInkBrush}" Fill="{x:Null}" VerticalAlignment="Center" />
                                                     </StackPanel>
                                                     <FlyoutBase.AttachedFlyout>
-                                                        <Flyout FlyoutPresenterClasses="readerMarkerPalette" Placement="Bottom" VerticalOffset="3" ShowMode="Standard">
+                                                        <Flyout FlyoutPresenterClasses="readerMarkerPalette" Placement="Bottom" VerticalOffset="0" ShowMode="Standard">
                                                             <StackPanel x:Name="ReaderSelectionMarkerPalette" Orientation="Horizontal" Spacing="3">
                                                                 <Button Classes="readerMarkerColorOption" Tag="#000000" Click="ReaderSelectionHighlightColorItem_Click"
                                                                         ToolTip.Tip="{DynamicResource Ui.Auto.078472BE6C94CB17}" AutomationProperties.Name="{DynamicResource Ui.Auto.078472BE6C94CB17}">
@@ -6159,15 +6165,6 @@
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionAnnotateButton_Click" />
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button Content="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
-                                Classes="readerSelectionAction"
-                                Click="ReaderSelectionAiButton_Click" />
-                        <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button x:Name="ReaderSelectionTranslationButton"
-                                Content="{DynamicResource Ui.Auto.A52A08335185F048}"
-                                Classes="readerSelectionAction"
-                                Click="ReaderSelectionTranslationButton_Click" />
-                        <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
                         <Button Content="{DynamicResource Ui.Auto.44CE7AE909BBB28B}"
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionSearchButton_Click" />
@@ -6176,6 +6173,15 @@
                                 Content="{DynamicResource Ui.Auto.5935BB8194ABA677}"
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionDictionaryButton_Click" />
+                        <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
+                        <Button Content="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
+                                Classes="readerSelectionAction"
+                                Click="ReaderSelectionAiButton_Click" />
+                        <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
+                        <Button x:Name="ReaderSelectionTranslationButton"
+                                Content="{DynamicResource Ui.Auto.A52A08335185F048}"
+                                Classes="readerSelectionAction"
+                                Click="ReaderSelectionTranslationButton_Click" />
                         <Rectangle x:Name="ReaderSelectionDeleteSeparator"
                                    Width="1"
                                    Height="18"

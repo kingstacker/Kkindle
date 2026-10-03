@@ -15,6 +15,7 @@ public partial class MainWindow
 
     private void InitializeReaderAppearance()
     {
+        ReaderBookInfoText.LayoutUpdated += (_, _) => UpdateReaderBookTitleToolTip();
         ApplyReaderAppearance();
         ReaderRoot.PropertyChanged += (_, e) =>
         {
@@ -26,6 +27,27 @@ public partial class MainWindow
         };
         UpdateReaderTitleAppearance();
         SyncReaderAppearanceControls();
+    }
+
+    private void UpdateReaderBookTitleToolTip()
+    {
+        var title = ReaderBookInfoText.Text;
+        var trimmed = !string.IsNullOrWhiteSpace(title)
+            && ReaderBookInfoText.TextLayout.TextLines.Any(line => line.HasCollapsed);
+        if (!trimmed)
+        {
+            ToolTip.SetIsOpen(ReaderBookInfoText, false);
+            ToolTip.SetTip(ReaderBookInfoText, null);
+            return;
+        }
+
+        if (ToolTip.GetTip(ReaderBookInfoText) is TextBlock tip && tip.Text == title) return;
+        ToolTip.SetTip(ReaderBookInfoText, new TextBlock
+        {
+            Text = title,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 480
+        });
     }
 
     private void ApplyReaderAppearance()
