@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
+using SkiaSharp;
 using Xunit;
 
 namespace Kkindle.Ui.Tests;
@@ -158,15 +159,13 @@ public sealed class ReaderTransitionTests(SettingsUiSession session)
     {
         1 => snapshot.Opacity is > 0 and < 1,
         2 => snapshot.RenderTransform is TranslateTransform slide && slide.X * direction < -1,
-        3 => snapshot.OpacityMask is LinearGradientBrush mask
-            && (direction > 0
-                ? mask.GradientStops[0].Color.A > mask.GradientStops[^1].Color.A
-                : mask.GradientStops[0].Color.A < mask.GradientStops[^1].Color.A),
+        3 => snapshot.Clip is RectangleGeometry clip && clip.Rect.Width < snapshot.Width
+            && (direction > 0 ? clip.Rect.X == 0 : clip.Rect.X > 0),
         _ => false
     };
 
     private static bool HasMotion(Image snapshot) => snapshot.RenderTransform is not null
-        || snapshot.OpacityMask is not null || snapshot.Opacity != 1;
+        || snapshot.OpacityMask is not null || snapshot.Clip is not null || snapshot.Opacity != 1;
 
     private static void AssertClean(ReaderTestWindow scope)
     {
@@ -191,7 +190,12 @@ public sealed class ReaderTransitionTests(SettingsUiSession session)
     {
         using var stream = new MemoryStream();
         bitmap.Save(stream, PngBitmapEncoderOptions.Default);
-        return SHA256.HashData(stream.ToArray());
+        using var pixels = SKBitmap.Decode(stream.ToArray());
+        // The live host is transparent; compare both captures as the reader
+        // displays them on the fixture's classic white paper.
+        using (var canvas = new SKCanvas(pixels))
+            canvas.DrawColor(SKColors.White, SKBlendMode.DstOver);
+        return SHA256.HashData(pixels.Bytes);
     }
 
     private static async Task Until(Func<bool> condition)
