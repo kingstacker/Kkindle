@@ -286,7 +286,7 @@ public partial class MainWindow
             BuildReaderTocRows();
             SetReaderCompactNavigationItems(_readerTocItems);
 
-            ReaderBookInfoText.Text = $"{card.Title} · PDF";
+            ReaderBookInfoText.Text = card.Title;
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
             ResetReaderStatusText();
             ReaderRoot.IsVisible = true;

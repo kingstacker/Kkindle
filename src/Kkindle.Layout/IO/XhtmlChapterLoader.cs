@@ -539,6 +539,16 @@ public sealed class XhtmlChapterLoader
 
         switch (local)
         {
+            case "ul":
+            case "ol":
+                // A TOC often nests the chapter list inside its volume's li.
+                // Preserve those block boundaries instead of flattening every
+                // descendant link into the parent list item's paragraph.
+                FlushParagraph(ctx);
+                TrackId(element);
+                WalkFlow(element, ctx);
+                FlushParagraph(ctx);
+                break;
             case "br":
                 TrackId(element);
                 _pending.Add(new InlineItem

@@ -102,7 +102,7 @@ public partial class MainWindow
                 _readerChapterIndex,
                 _readerCurrentFragment);
 
-            ReaderBookInfoText.Text = $"{card.Title} · {file.Format.ToUpperInvariant()}";
+            ReaderBookInfoText.Text = card.Title;
             ReaderChapterText.Text = GetReaderChapterPositionLabel();
             ReaderStatusText.Text = string.Empty;
             ReaderRoot.IsVisible = true;
