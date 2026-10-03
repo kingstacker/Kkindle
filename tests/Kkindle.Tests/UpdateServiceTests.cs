@@ -138,6 +138,204 @@ public sealed class UpdateServiceTests
         Assert.Equal("Kkindle-1.2.0-dev.10-win-x64-setup.exe", update.Package.Name);
     }
 
+    [Theory]
+    [InlineData("success")]
+    [InlineData("404")]
+    [InlineData("json")]
+    [InlineData("http")]
+    [InlineData("timeout")]
+    public async Task DevelopmentChannelPrefersMirrorAndFallsBackToGitHub(string scenario)
+    {
+        const string mirrorJson = """
+            {"tag_name":"v1.2.0-dev.4","html_url":"https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.4",
+             "body":"Mirrored development release","draft":false,"prerelease":true,
+             "mirror_generated_at":"2026-10-03","assets":[
+             {"name":"Kkindle-1.2.0-dev.4-win-x64-setup.exe","browser_download_url":"https://kkindle.stacker.beauty/dl/v1.2.0-dev.4/Kkindle-1.2.0-dev.4-win-x64-setup.exe","size":1234,"mirror":true},
+             {"name":"SHA256SUMS.txt","browser_download_url":"https://kkindle.stacker.beauty/dl/v1.2.0-dev.4/SHA256SUMS.txt","size":128,"mirror":true}]}
+            """;
+        const string githubJson = """
+            [
+              {
+                "tag_name": "v1.2.0-dev.4",
+                "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.4",
+                "body": "GitHub development release",
+                "draft": false,
+                "prerelease": true,
+                "assets": [
+                  {
+                    "name": "Kkindle-1.2.0-dev.4-win-x64-setup.exe",
+                    "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.2.0-dev.4/Kkindle-1.2.0-dev.4-win-x64-setup.exe",
+                    "size": 1234
+                  },
+                  {
+                    "name": "SHA256SUMS.txt",
+                    "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.2.0-dev.4/SHA256SUMS.txt",
+                    "size": 128
+                  }
+                ]
+              }
+            ]
+            """;
+        var requests = new List<string>();
+        using var client = new HttpClient(new StubHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+            if (request.RequestUri.Host == "kkindle.stacker.beauty")
+                return scenario switch
+                {
+                    "404" => new HttpResponseMessage(HttpStatusCode.NotFound),
+                    "json" => JsonResponse("{broken"),
+                    "http" => throw new HttpRequestException("offline"),
+                    "timeout" => throw new TaskCanceledException("timeout"),
+                    _ => JsonResponse(mirrorJson)
+                };
+            return JsonResponse(githubJson);
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath());
+
+        var update = await service.CheckForUpdateAsync(
+            "1.2.0-dev.1",
+            AppUpdateChannel.Development);
+
+        Assert.NotNull(update);
+        Assert.Equal("1.2.0-dev.4", update.Version);
+        Assert.Equal("https://kkindle.stacker.beauty/update-manifest-dev.json", requests[0]);
+        if (scenario == "success")
+        {
+            Assert.Single(requests);
+            Assert.Equal("Mirrored development release", update.ReleaseNotes);
+            Assert.Equal(
+                "https://kkindle.stacker.beauty/dl/v1.2.0-dev.4/Kkindle-1.2.0-dev.4-win-x64-setup.exe",
+                update.Package.DownloadUrl.AbsoluteUri);
+        }
+        else
+        {
+            Assert.Equal(
+                new[]
+                {
+                    requests[0],
+                    "https://api.github.com/repos/kingstacker/Kkindle/releases?per_page=100"
+                },
+                requests);
+            Assert.Equal("GitHub development release", update.ReleaseNotes);
+            Assert.Equal("github.com", update.Package.DownloadUrl.Host);
+        }
+    }
+
+    [Fact]
+    public async Task DevelopmentChannelFallsBackWhenMirrorManifestLacksPlatformPackage()
+    {
+        const string mirrorJson = """
+            {"tag_name":"v1.2.0-dev.4","html_url":"https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.4",
+             "body":"Mirrored development release","draft":false,"prerelease":true,"assets":[
+             {"name":"SHA256SUMS.txt","browser_download_url":"https://kkindle.stacker.beauty/dl/v1.2.0-dev.4/SHA256SUMS.txt","size":128}]}
+            """;
+        const string githubJson = """
+            [
+              {
+                "tag_name": "v1.2.0-dev.4",
+                "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.4",
+                "body": "GitHub development release",
+                "draft": false,
+                "prerelease": true,
+                "assets": [
+                  {
+                    "name": "Kkindle-1.2.0-dev.4-win-x64-setup.exe",
+                    "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.2.0-dev.4/Kkindle-1.2.0-dev.4-win-x64-setup.exe",
+                    "size": 1234
+                  },
+                  {
+                    "name": "SHA256SUMS.txt",
+                    "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.2.0-dev.4/SHA256SUMS.txt",
+                    "size": 128
+                  }
+                ]
+              }
+            ]
+            """;
+        var requests = new List<string>();
+        using var client = new HttpClient(new StubHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+            return request.RequestUri.Host == "kkindle.stacker.beauty"
+                ? JsonResponse(mirrorJson)
+                : JsonResponse(githubJson);
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath());
+
+        var update = await service.CheckForUpdateAsync(
+            "1.2.0-dev.1",
+            AppUpdateChannel.Development);
+
+        Assert.NotNull(update);
+        Assert.Equal("1.2.0-dev.4", update.Version);
+        Assert.Equal(
+            new[]
+            {
+                "https://kkindle.stacker.beauty/update-manifest-dev.json",
+                "https://api.github.com/repos/kingstacker/Kkindle/releases?per_page=100"
+            },
+            requests);
+    }
+
+    [Fact]
+    public async Task DevelopmentChannelFallsBackWhenMirroredReleaseIsNotNewerThanCurrent()
+    {
+        const string mirrorJson = """
+            {"tag_name":"v1.2.0-dev.4","html_url":"https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.4",
+             "body":"Mirrored development release","draft":false,"prerelease":true,"assets":[
+             {"name":"Kkindle-1.2.0-dev.4-win-x64-setup.exe","browser_download_url":"https://kkindle.stacker.beauty/dl/v1.2.0-dev.4/Kkindle-1.2.0-dev.4-win-x64-setup.exe","size":1234},
+             {"name":"SHA256SUMS.txt","browser_download_url":"https://kkindle.stacker.beauty/dl/v1.2.0-dev.4/SHA256SUMS.txt","size":128}]}
+            """;
+        const string githubJson = """
+            [
+              {
+                "tag_name": "v1.2.0-dev.9",
+                "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.2.0-dev.9",
+                "body": "Newer development release",
+                "draft": false,
+                "prerelease": true,
+                "assets": [
+                  {
+                    "name": "Kkindle-1.2.0-dev.9-win-x64-setup.exe",
+                    "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.2.0-dev.9/Kkindle-1.2.0-dev.9-win-x64-setup.exe",
+                    "size": 1234
+                  },
+                  {
+                    "name": "SHA256SUMS.txt",
+                    "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.2.0-dev.9/SHA256SUMS.txt",
+                    "size": 128
+                  }
+                ]
+              }
+            ]
+            """;
+        var requests = new List<string>();
+        using var client = new HttpClient(new StubHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+            return request.RequestUri.Host == "kkindle.stacker.beauty"
+                ? JsonResponse(mirrorJson)
+                : JsonResponse(githubJson);
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath());
+
+        // 本地版本比镜像清单里的更新（开发时自建版本往往领先镜像）→ 不能只认镜像，要回退看 GitHub
+        var update = await service.CheckForUpdateAsync(
+            "1.2.0-dev.6",
+            AppUpdateChannel.Development);
+
+        Assert.NotNull(update);
+        Assert.Equal("1.2.0-dev.9", update.Version);
+        Assert.Equal(
+            new[]
+            {
+                "https://kkindle.stacker.beauty/update-manifest-dev.json",
+                "https://api.github.com/repos/kingstacker/Kkindle/releases?per_page=100"
+            },
+            requests);
+    }
+
     [Fact]
     public async Task StableChannelDoesNotAcceptDevelopmentRelease()
     {
