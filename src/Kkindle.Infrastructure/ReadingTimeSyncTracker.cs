@@ -59,7 +59,6 @@ internal static class ReadingTimeSyncTracker
                 END;
             """, ("$device", Guid.NewGuid().ToString("N")));
         await schema.ExecuteNonQueryAsync(cancellationToken);
-        await ReadingLocalCalendar.EnsureAsync(connection, transaction, cancellationToken);
     }
 
     public static async Task ConfigureDeviceAsync(
@@ -139,13 +138,22 @@ internal static class ReadingTimeSyncTracker
         Guid fileId,
         DateTimeOffset recordedAt,
         long activeSeconds,
-        CancellationToken cancellationToken,
-        TimeZoneInfo? timeZone = null)
+        CancellationToken cancellationToken)
     {
         if (activeSeconds <= 0) return;
+        var date = recordedAt.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var deviceId = await GetLocalCounterIdAsync(connection, transaction, fileId, cancellationToken);
-        await ReadingLocalCalendar.RecordAsync(connection, transaction, fileId, deviceId, recordedAt,
-            activeSeconds, timeZone ?? TimeZoneInfo.Local, cancellationToken);
+        using var command = Command(connection, transaction, """
+            INSERT INTO S3SyncReadingDayCounters (BookFileId, ReadingDate, DeviceId, Seconds)
+            VALUES ($file, $date, $device, $seconds)
+            ON CONFLICT(BookFileId, ReadingDate, DeviceId) DO UPDATE SET
+                Seconds = S3SyncReadingDayCounters.Seconds + excluded.Seconds;
+            """,
+            ("$file", fileId.ToString()),
+            ("$date", date),
+            ("$device", deviceId),
+            ("$seconds", activeSeconds));
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public static async Task<Dictionary<string, Dictionary<string, long>>> CaptureReadingDaysAsync(
@@ -212,11 +220,6 @@ internal static class ReadingTimeSyncTracker
         Guid targetFileId,
         CancellationToken cancellationToken)
     {
-        var localDays = await ReadingLocalCalendar.CaptureAsync(connection, transaction, sourceFileId, cancellationToken);
-        await ReadingLocalCalendar.MergeAsync(connection, transaction, targetFileId, localDays, cancellationToken);
-        using (var deleteLocalDays = Command(connection, transaction,
-                   "DELETE FROM ReaderLocalDayCounters WHERE BookFileId = $file;", ("$file", sourceFileId.ToString())))
-            await deleteLocalDays.ExecuteNonQueryAsync(cancellationToken);
         await RecordCurrentTotalAsync(connection, transaction, sourceFileId, cancellationToken);
         await RecordCurrentTotalAsync(connection, transaction, targetFileId, cancellationToken);
         var source = await ReadAsync(connection, transaction, sourceFileId, cancellationToken);

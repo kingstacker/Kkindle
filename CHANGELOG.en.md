@@ -6,12 +6,6 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
-
-- Added 12 reading badges across four series, with an overview, progress, filters, earned details, and optional notifications.
-- Badges support historical awards, offline sync, and permanent retention. Resetting reading data can optionally clear badges and completion records as well.
-- A reading day requires five minutes; streaks use the full history. New entries retain the local date when recorded, while older UTC daily totals keep their original dates. Finished books are counted from the library's explicit finished status.
-
 ## 1.0.7 (2026-10-02)
 
 ### Added

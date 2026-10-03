@@ -43,7 +43,6 @@ public sealed record AppSettings
 
     public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
     public AppTheme MainTheme { get; init; } = AppTheme.Classic;
-    public bool ReadingAchievementNotificationsEnabled { get; init; } = true;
     public bool OnboardingCompleted { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultDeviceModel { get; init; }

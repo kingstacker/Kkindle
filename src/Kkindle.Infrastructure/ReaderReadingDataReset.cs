@@ -53,7 +53,6 @@ internal static class ReaderReadingDataReset
             DELETE FROM ReaderReadingHistory;
             DELETE FROM S3SyncReadingTimeCounters;
             DELETE FROM S3SyncReadingDayCounters;
-            DELETE FROM ReaderLocalDayCounters;
             INSERT INTO S3SyncLocalMetadata (Key, Value) VALUES ($key, $value)
                 ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;
             """;
@@ -84,10 +83,7 @@ public sealed partial class ReaderDataService
     /// identity.
     /// Call only after the reader has finished saving its current session.
     /// </summary>
-    public Task ResetReadingDataAsync(CancellationToken cancellationToken = default) =>
-        ResetReadingDataAsync(false, cancellationToken);
-
-    public async Task ResetReadingDataAsync(bool clearAchievements, CancellationToken cancellationToken = default)
+    public async Task ResetReadingDataAsync(CancellationToken cancellationToken = default)
     {
         await _databaseGate.WaitAsync(cancellationToken);
         try
@@ -97,8 +93,6 @@ public sealed partial class ReaderDataService
             var previous = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
             var reset = new ReadingDataReset(checked((previous?.Generation ?? 0) + 1), Guid.NewGuid());
             await ReaderReadingDataReset.ApplyAsync(connection, transaction, reset, cancellationToken);
-            if (clearAchievements)
-                await ReaderAchievementStore.ResetAsync(connection, transaction, _timeProvider.GetUtcNow(), cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             NotifyDataChanged(LocalDataChangeKind.ReadingDataReset);
         }

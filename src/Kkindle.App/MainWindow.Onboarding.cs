@@ -14,10 +14,61 @@ public partial class MainWindow
     private bool _onboardingDisclaimerAccepted;
     private int _onboardingStep;
     private string? _onboardingSelectedDeviceModel;
+    private (double Width, double Height, double MinWidth, double MinHeight,
+        bool CanResize)? _onboardingWindowLayout;
+
+    private void UseOnboardingWindowLayout()
+    {
+        if (_onboardingWindowLayout is not null) return;
+        _onboardingWindowLayout = (Width, Height, MinWidth, MinHeight, CanResize);
+        WindowState = WindowState.Normal;
+        MinWidth = 0;
+        MinHeight = 0;
+        CanResize = false;
+        var screen = Screens.ScreenFromWindow(this);
+        var scale = screen?.Scaling ?? 1;
+        Width = Math.Min(760, (screen?.WorkingArea.Width ?? 760 * scale) / scale);
+        Height = Math.Min(576, (screen?.WorkingArea.Height ?? 576 * scale) / scale);
+        if (screen is not null)
+            Position = new PixelPoint(
+                screen.WorkingArea.X + (int)((screen.WorkingArea.Width - Width * scale) / 2),
+                screen.WorkingArea.Y + (int)((screen.WorkingArea.Height - Height * scale) / 2));
+    }
+
+    private void RestoreMainWindowLayout()
+    {
+        if (_onboardingWindowLayout is not { } layout) return;
+        _onboardingWindowLayout = null;
+        var goldenRatio = (1 + Math.Sqrt(5)) / 2;
+        var screen = Screens.ScreenFromWindow(this);
+        var scale = screen?.Scaling ?? 1;
+        var width = Math.Max(layout.Width, Math.Max(layout.MinWidth, layout.MinHeight * goldenRatio));
+        if (screen is not null)
+            width = Math.Min(width, Math.Min(screen.WorkingArea.Width / scale,
+                screen.WorkingArea.Height / scale * goldenRatio));
+        var height = width / goldenRatio;
+        WindowState = WindowState.Normal;
+        CanResize = layout.CanResize;
+        MinWidth = Math.Min(layout.MinWidth, width);
+        MinHeight = Math.Min(layout.MinHeight, height);
+        Width = width;
+        Height = height;
+        if (screen is not null)
+            Position = new PixelPoint(
+                screen.WorkingArea.X + (int)Math.Round((screen.WorkingArea.Width - width * scale) / 2),
+                screen.WorkingArea.Y + (int)Math.Round((screen.WorkingArea.Height - height * scale) / 2));
+    }
+
+    private void OnboardingHeader_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            BeginMoveDrag(e);
+    }
 
     private void ShowOnboardingIfNeeded()
     {
         if (_appSettings.OnboardingCompleted) return;
+        UseOnboardingWindowLayout();
 
         _onboardingStep = 1;
         _onboardingDisclaimerAccepted = false;
@@ -350,6 +401,7 @@ public partial class MainWindow
             }
 
             OnboardingOverlay.IsVisible = false;
+            RestoreMainWindowLayout();
             LibraryRoot.IsVisible = true;
             UpdateLibraryUi();
             StartAutomaticUpdateCheck();

@@ -258,16 +258,12 @@ public sealed partial class S3SyncService
         CancellationToken cancellationToken)
     {
         var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
-        if (await ReaderAchievementStore.EnsureAsync(connection, transaction, cancellationToken))
-            await ReaderAchievementStore.EvaluateAsync(connection, transaction, DateTimeOffset.UtcNow, TimeZoneInfo.Local, true, cancellationToken);
-        var achievements = await ReaderAchievementStore.CaptureAsync(connection, transaction, cancellationToken);
         var snapshot = new S3SyncSnapshot
         {
-            // Additive fields remain compatible; clearing badges requires a
-            // reader that understands their independent reset generation.
-            Version = achievements.Reset is not null ? SnapshotVersion : readingReset is null ? 2 : 3,
+            // Older clients must not merge counters across a reset. Keep the
+            // existing format until the first reset, then require version 3.
+            Version = readingReset is null ? 2 : 3,
             ReadingDataReset = readingReset,
-            ReadingAchievements = achievements,
             DeviceId = deviceId,
             CreatedAt = DateTimeOffset.UtcNow,
             Tombstones = tombstones.ToList()
@@ -543,7 +539,6 @@ public sealed partial class S3SyncService
             stats.CumulativeSeconds = ReadingTimeSyncTracker.Total(stats.SecondsByDevice);
             stats.SecondsByDateByDevice = await ReadingTimeSyncTracker.CaptureReadingDaysAsync(
                 connection, transaction, stats.BookFileId, cancellationToken);
-            stats.LocalDaysByDevice = await ReadingLocalCalendar.CaptureAsync(connection, transaction, stats.BookFileId, cancellationToken);
             await ReadingTimeSyncTracker.UpdateTotalAsync(connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
         }
         var recorded = await ReadRecordedDeletionTimesInTransactionAsync(connection, transaction, cancellationToken);
@@ -1458,7 +1453,6 @@ public sealed partial class S3SyncService
                     connection, transaction, localFileId, mergedSeconds, cancellationToken) > 0;
                 await ReadingTimeSyncTracker.MergeReadingDaysAsync(
                     connection, transaction, localFileId, stats.SecondsByDateByDevice, cancellationToken);
-                await ReadingLocalCalendar.MergeAsync(connection, transaction, localFileId, stats.LocalDaysByDevice, cancellationToken);
             }
 
             changed |= await ApplyTombstonesAsync(
@@ -1501,9 +1495,6 @@ public sealed partial class S3SyncService
             changed |= booksMergedAfterRemoteApply > 0;
 
             changed |= await ConsolidateReadingHistoryRowsAsync(connection, transaction, commandCache, cancellationToken);
-            changed |= await ReaderAchievementStore.MergeAsync(connection, transaction,
-                snapshots.Select(s => s.ReadingAchievements), bookMap, cancellationToken);
-            await ReaderAchievementStore.EvaluateAsync(connection, transaction, DateTimeOffset.UtcNow, TimeZoneInfo.Local, true, cancellationToken);
             await RemoveReferencedScheduledPathsAsync(
                 connection,
                 transaction,
@@ -1740,7 +1731,6 @@ public sealed partial class S3SyncService
             FileSha256 = rows.Select(row => row.FileSha256).FirstOrDefault(IsSha256) ?? string.Empty,
             CumulativeSeconds = ReadingTimeSyncTracker.Total(counters), SecondsByDevice = counters,
             SecondsByDateByDevice = dailyCounters,
-            LocalDaysByDevice = ReadingLocalCalendar.Merge(rows.Select(r => r.LocalDaysByDevice)),
             ProgressPercent = latest.ProgressPercent, CompletedChapters = latest.CompletedChapters,
             TotalChapters = latest.TotalChapters, UpdatedAt = latest.UpdatedAt
         };

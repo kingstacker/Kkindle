@@ -541,7 +541,7 @@ public partial class MainWindow
 
     private Task ShowZLibraryAccountAsync(string? status = null)
     {
-        OpenSettingsExpander("Kindle", SettingsAccountExpander);
+        OpenSettingsExpander("Library", SettingsAccountExpander);
         if (status is not null) ZLibraryAccountStatusText.Text = status;
         FocusSettingsControl(ZLibraryEmailBox);
         return Task.CompletedTask;
