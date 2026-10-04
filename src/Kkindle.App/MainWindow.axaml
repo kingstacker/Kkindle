@@ -1312,14 +1312,12 @@
                     BorderThickness="1,0,0,0"
                     IsVisible="False">
                 <Grid RowDefinitions="Auto,*">
-                    <Grid ColumnDefinitions="*,Auto" Margin="20,8,24,8">
-                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" VerticalAlignment="Center">
+                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6" ColumnSpacing="12" Margin="20,8,24,8">
 <TextBlock Text="{DynamicResource Ui.Auto.326DE7898C2A6278}"
                                    FontSize="13"
                                    Foreground="{DynamicResource MutedInkBrush}"
                                    VerticalAlignment="Center" />
-<TextBlock x:Name="DetailFormatText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-</Grid>
+<TextBlock x:Name="DetailFormatText" Grid.Row="1" Grid.ColumnSpan="2" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                         <Button x:Name="LibraryDetailCloseButton"
                                 Grid.Column="1"
                                 Classes="icon"
@@ -1413,7 +1411,8 @@
                             </Grid>
                             <StackPanel Spacing="5">
                                 <TextBlock Text="{DynamicResource Ui.Auto.C3405F8C7D9D392A}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                <TextBox x:Name="DetailTitleText" FontSize="16" FontWeight="SemiBold" />
+                                <TextBox x:Name="DetailTitleText" FontSize="16" FontWeight="SemiBold"
+                                         ToolTip.Tip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                             </StackPanel>
                             <StackPanel Spacing="5">
                                 <TextBlock Text="{DynamicResource Ui.Auto.7D4146CA082798F0}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
@@ -3334,16 +3333,14 @@
                                        Foreground="{DynamicResource MutedInkBrush}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5">
-                            <Button x:Name="BookConversionBackgroundButton"
-                                    Classes="quiet"
-                                    Content="{DynamicResource Ui.Auto.F97DE1B381D60005}"
-                                    Padding="8,4"
-                                    Click="BookConversionBackgroundButton_Click" />
                             <Button x:Name="BookConversionCancelButton"
-                                    Classes="quiet"
-                                    Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}"
-                                    Padding="8,4"
-                                    Click="BookConversionCancelButton_Click" />
+                                    Classes="icon"
+                                    Width="32" Height="32" Padding="0"
+                                    ToolTip.Tip="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}"
+                                    AutomationProperties.Name="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}"
+                                    Click="BookConversionCancelButton_Click">
+                                <Path Classes="libraryGlyph" Width="16" Height="16" Data="M 4,4 L 20,20 M 20,4 L 4,20" />
+                            </Button>
                         </StackPanel>
                     </Grid>
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
