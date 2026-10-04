@@ -8,7 +8,7 @@
 
 Kkindle 是一款基于 Avalonia 的跨平台电子书与 Kindle 管理器。它将本地书库、阅读、批注、AI 助手、格式转换和 Kindle 传输集中在一个简洁的桌面应用中。
 
-![Kkindle 书库主界面](docs/images/主界面.png)
+![Kkindle 书库主界面](docs/images/主界面.png?v=20261004)
 
 ## 主要功能
 

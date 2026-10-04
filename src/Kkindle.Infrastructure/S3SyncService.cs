@@ -22,7 +22,9 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public sealed partial class S3SyncService
 {
-    private const int SnapshotVersion = 3;
+    // Version 4 added optional badge data. Continue accepting those snapshots
+    // so removing badges does not prevent existing devices from syncing.
+    private const int SnapshotVersion = 4;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
     private const int EncryptionNonceBytes = 12;

@@ -262,7 +262,7 @@ public sealed partial class S3SyncService
         {
             // Older clients must not merge counters across a reset. Keep the
             // existing format until the first reset, then require version 3.
-            Version = readingReset is null ? 2 : SnapshotVersion,
+            Version = readingReset is null ? 2 : 3,
             ReadingDataReset = readingReset,
             DeviceId = deviceId,
             CreatedAt = DateTimeOffset.UtcNow,

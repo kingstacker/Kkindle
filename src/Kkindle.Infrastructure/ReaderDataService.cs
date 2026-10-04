@@ -179,6 +179,17 @@ public sealed partial class ReaderDataService
                     ON ReaderReadingSessions(RecordedAt);
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
+            // Older builds installed these triggers for reading badges. Stop
+            // tracking completions while retaining existing stored data.
+            using (var retiredTriggers = connection.CreateCommand())
+            {
+                retiredTriggers.CommandText = """
+                    DROP TRIGGER IF EXISTS ReaderCompletions_Status;
+                    DROP TRIGGER IF EXISTS ReaderCompletions_Insert;
+                    DROP TRIGGER IF EXISTS ReaderCompletions_FileDelete;
+                    """;
+                await retiredTriggers.ExecuteNonQueryAsync(cancellationToken);
+            }
             await EnsureReaderLayoutTwoPageColumnAsync(connection, cancellationToken);
             await EnsureReaderLayoutParagraphIndentColumnAsync(connection, cancellationToken);
             await EnsureReaderAnnotationStyleColumnAsync(connection, cancellationToken);

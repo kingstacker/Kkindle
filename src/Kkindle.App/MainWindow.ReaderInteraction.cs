@@ -8591,7 +8591,7 @@ public partial class MainWindow
             ReaderNativeTransitionTrail,
             ReaderNativeTransitionFront,
             ReaderNativeTransitionEdge,
-            ReaderWebViewHost.Background);
+            ReaderRoot);
     }
 
     private ReaderTransitionSurface? BuildLinuxReaderFallbackTransitionSurface()
@@ -8607,7 +8607,7 @@ public partial class MainWindow
             ReaderLinuxTextFallbackTransitionTrail,
             ReaderLinuxTextFallbackTransitionFront,
             ReaderLinuxTextFallbackTransitionEdge,
-            ReaderLinuxTextFallbackOverlay.Background);
+            ReaderRoot);
     }
 
     private void ReaderTocButton_Click(object? sender, RoutedEventArgs e)

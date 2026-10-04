@@ -13,7 +13,7 @@ namespace Kkindle;
 
 public partial class MainWindow
 {
-    private string _activeSettingsCategory = "Library";
+    private string _activeSettingsCategory = "General";
     private bool _mainReaderAiSettingsLoaded;
     private Task? _mainReaderAiSettingsLoadTask;
     private readonly SemaphoreSlim _appSettingsSaveGate = new(1, 1);
@@ -86,16 +86,18 @@ public partial class MainWindow
     {
         var sections = new Dictionary<string, Control>(StringComparer.OrdinalIgnoreCase)
         {
+            ["General"] = SettingsGeneralSection,
             ["Library"] = SettingsLibrarySection,
             ["Reading"] = SettingsReadingSection,
             ["Kindle"] = SettingsKindleSection,
             ["Data"] = SettingsDataSection,
-            ["About"] = SettingsAboutSection
+            ["About"] = SettingsAboutSection,
+            ["Advanced"] = SettingsAdvancedSection
         };
         if (!sections.TryGetValue(tag, out var activeSection))
         {
-            tag = "Library";
-            activeSection = SettingsLibrarySection;
+            tag = "General";
+            activeSection = SettingsGeneralSection;
         }
 
         var focused = FocusManager?.GetFocusedElement() as Control;
@@ -107,7 +109,7 @@ public partial class MainWindow
             SettingsScrollViewer.Offset = default;
         _activeSettingsCategory = tag;
         UpdateS3SettingsActions();
-        Button[] buttons = [SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsAboutButton];
+        Button[] buttons = [SettingsGeneralButton, SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsAdvancedButton, SettingsAboutButton];
         foreach (var button in buttons)
         {
             var active = string.Equals(button.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase);

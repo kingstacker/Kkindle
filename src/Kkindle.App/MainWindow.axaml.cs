@@ -1490,6 +1490,9 @@ public partial class MainWindow : Window
         var version = ++_detailPaneAnimationVersion;
         if (!wasVisible)
         {
+            UpdateLibraryDetailColumnWidth(0);
+            LibraryToolbarActions.RenderTransform = new TranslateTransform(
+                LibraryDetailPane.Width + LibraryDetailPane.Margin.Left + LibraryDetailPane.Margin.Right, 0);
             var translate = new TranslateTransform(LibraryDetailWidth, 0);
             LibraryDetailPane.RenderTransform = translate;
             LibraryDetailPane.Opacity = 1;
@@ -1525,20 +1528,14 @@ public partial class MainWindow : Window
             // Give the newly visible pane one frame to finish measuring before
             // movement starts, so layout work cannot interrupt the first step.
             await Task.Delay(16, token);
-            await RunLibraryDetailPaneDoubleAnimationAsync(
-                translate,
-                TranslateTransform.XProperty,
-                fromX,
-                0,
-                LibraryDetailSlideDurationMs,
-                new CubicEaseInOut(),
-                token);
+            await SlideLibraryDetailPaneAsync(translate, fromX, 0, opening: true, token);
         }
         catch
         {
         }
         if (version != _detailPaneAnimationVersion) return;
         LibraryDetailPane.RenderTransform = new TranslateTransform(0, 0);
+        LibraryToolbarActions.RenderTransform = null;
         LibraryDetailPane.Opacity = 1;
     }
 
@@ -1574,20 +1571,46 @@ public partial class MainWindow : Window
         LibraryDetailPane.Opacity = 1;
         try
         {
-            await RunLibraryDetailPaneDoubleAnimationAsync(
-                translate,
-                TranslateTransform.XProperty,
-                currentX,
-                width,
-                LibraryDetailSlideDurationMs,
-                new CubicEaseInOut(),
-                token);
+            await SlideLibraryDetailPaneAsync(translate, currentX, width, opening: false, token);
         }
         catch
         {
         }
         if (version != _detailPaneAnimationVersion) return;
         CompleteClearSelectedBook();
+    }
+
+    private async Task SlideLibraryDetailPaneAsync(
+        TranslateTransform translate, double from, double to, bool opening, CancellationToken token)
+    {
+        // Keep shelf layout fixed throughout the slide; only render transforms
+        // move, avoiding repeated book-grid measurement and cover work.
+        var toolbarTranslate = LibraryToolbarActions.RenderTransform as TranslateTransform ?? new TranslateTransform();
+        LibraryToolbarActions.RenderTransform = toolbarTranslate;
+        var toolbarScale = (LibraryDetailPane.Width + LibraryDetailPane.Margin.Left
+            + LibraryDetailPane.Margin.Right) / LibraryDetailPane.Width;
+        var duration = opening ? 340d : 240d;
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        while (started.Elapsed.TotalMilliseconds < duration)
+        {
+            token.ThrowIfCancellationRequested();
+            var progress = Math.Clamp(started.Elapsed.TotalMilliseconds / duration, 0, 1);
+            var eased = opening ? 1 - Math.Pow(1 - progress, 3) : progress * progress;
+            translate.X = from + (to - from) * eased;
+            toolbarTranslate.X = translate.X * toolbarScale;
+            await Task.Delay(16, token);
+        }
+        token.ThrowIfCancellationRequested();
+        translate.X = to;
+        toolbarTranslate.X = to * toolbarScale;
+    }
+
+    private void UpdateLibraryDetailColumnWidth(double offset)
+    {
+        var width = LibraryDetailPane.Width;
+        var reservedWidth = width + LibraryDetailPane.Margin.Left + LibraryDetailPane.Margin.Right;
+        LibraryWorkspace.ColumnDefinitions[1].Width = new GridLength(
+            reservedWidth * (1 - Math.Clamp(offset / width, 0, 1)));
     }
 
     // Cancels any in-flight detail-pane animation and hands out a fresh token
@@ -1644,6 +1667,8 @@ public partial class MainWindow : Window
     {
         CancelDetailPaneAnimation();
         LibraryDetailPane.IsVisible = false;
+        LibraryWorkspace.ColumnDefinitions[1].Width = new GridLength(0);
+        LibraryToolbarActions.RenderTransform = null;
         LibraryDetailPane.RenderTransform = new TranslateTransform(0, 0);
         LibraryDetailPane.Opacity = 1;
         DetailCoverImage.Source = null;

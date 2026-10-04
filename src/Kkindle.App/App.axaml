@@ -778,6 +778,11 @@
         </Style>
 
         <!-- Primary navigation owns the icon and stronger type; children stay quiet. -->
+        <!-- Sidebar backgrounds switch directly between theme states, without
+             interpolating an opaque hover brush through transparent white. -->
+        <Style Selector="Button.sidebarSection, Button.sidebarPrimaryItem, Button.sidebarItem">
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
         <Style Selector="Button.sidebarSection">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Height" Value="44" />
@@ -800,11 +805,6 @@
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="{TemplateBinding CornerRadius}">
-                        <Border.Transitions>
-                            <Transitions>
-                                <BrushTransition Property="Background" Duration="0:0:0.12" />
-                            </Transitions>
-                        </Border.Transitions>
                         <ContentPresenter Content="{TemplateBinding Content}"
                                           Foreground="{TemplateBinding Foreground}"
                                           HorizontalAlignment="Stretch"
@@ -818,12 +818,18 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarSection:pressed">
-            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <Style Selector="Button.sidebarSection.active">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.sidebarSection.active:pointerover, Button.sidebarSection.active:pressed">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <!-- Persistent utility entry uses the same quiet typography. -->
         <Style Selector="Button.sidebarPrimaryItem">
@@ -848,11 +854,6 @@
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="{TemplateBinding CornerRadius}"
                             Padding="12,6,12,6">
-                        <Border.Transitions>
-                            <Transitions>
-                                <BrushTransition Property="Background" Duration="0:0:0.12" />
-                            </Transitions>
-                        </Border.Transitions>
                         <ContentPresenter Content="{TemplateBinding Content}"
                                           Foreground="{TemplateBinding Foreground}"
                                           HorizontalAlignment="Stretch"
@@ -866,8 +867,9 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarPrimaryItem:pressed">
-            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <Style Selector="Button.sidebarPrimaryItem.active">
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
@@ -886,7 +888,7 @@
             <Setter Property="CornerRadius" Value="0" />
         </Style>
 
-        <!-- A quiet rectangular background is the only destination selection marker. -->
+        <!-- The small dot identifies the current destination. -->
         <Style Selector="Button.sidebarItem">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Height" Value="38" />
@@ -906,11 +908,6 @@
                 <ControlTemplate>
                     <Border Background="{TemplateBinding Background}"
                             CornerRadius="{TemplateBinding CornerRadius}">
-                        <Border.Transitions>
-                            <Transitions>
-                                <BrushTransition Property="Background" Duration="0:0:0.12" />
-                            </Transitions>
-                        </Border.Transitions>
                         <Grid>
                         <Ellipse Classes="sidebarSelectionDot"
                                  Width="4" Height="4" Margin="30,0,0,0"
@@ -933,11 +930,12 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.sidebarItem:pressed">
-            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <Style Selector="Button.sidebarItem.active">
-            <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="BorderBrush" Value="Transparent" />
@@ -951,8 +949,9 @@
         </Style>
         <!-- Selection remains stable while hovered or focused. -->
         <Style Selector="Button.sidebarItem.active:pointerover,
+                         Button.sidebarItem.active:pressed,
                          Button.sidebarItem.active:focus-visible">
-            <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="CornerRadius" Value="0" />
@@ -1744,10 +1743,12 @@
             </Setter>
         </Style>
         <Style Selector="Button.eject:pointerover">
-            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <Style Selector="Button.eject:pressed">
-            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <Style Selector="Polygon.ejectGlyph">
             <Setter Property="Fill" Value="{DynamicResource InkBrush}" />

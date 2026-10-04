@@ -409,7 +409,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
             var focused = (Control)scope.Window.FocusManager.GetFocusedElement()!;
             Assert.True(focused.IsEffectivelyVisible, $"Hidden focus: {focused.Name}");
             Assert.DoesNotContain(focused.GetVisualAncestors().OfType<Control>(), c => c.Name is
-                "SettingsLibrarySection" or "SettingsReadingSection" or "SettingsKindleSection" or "SettingsAboutSection"
+                "SettingsGeneralSection" or "SettingsLibrarySection" or "SettingsReadingSection" or "SettingsKindleSection" or "SettingsAboutSection" or "SettingsAdvancedSection"
                 or "SettingsBackupSection");
         }
         Assert.False(scope.Get<Control>("S3EncryptionKeyBox").IsEffectivelyVisible);
@@ -591,11 +591,11 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task AboutExposesSoftwareLogExport() => Run(async () =>
+    public Task AdvancedExposesSoftwareLogExport() => Run(async () =>
     {
         await using var scope = await TestWindow.Create(new AppSettings { UiLanguage = "zh-CN" });
         scope.Call("SettingsButton_Click", null, new RoutedEventArgs());
-        scope.Call("ShowSettingsSection", "About");
+        scope.Call("ShowSettingsSection", "Advanced");
         await Render();
 
         var button = scope.Get<Button>("ExportSoftwareLogsButton");
@@ -623,6 +623,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     {
         await using var scope = await TestWindow.Create();
         scope.Call("SettingsButton_Click", null, new RoutedEventArgs());
+        scope.Call("ShowSettingsSection", "Library");
         await Render();
         var toggle = scope.Get<ToggleSwitch>("GridGalleryDisplayCheck");
         var labelPoint = toggle.TranslatePoint(new Point(24, toggle.Bounds.Height / 2), scope.Window)!.Value;
@@ -648,8 +649,8 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         ((Kkindle.App)Application.Current!).ApplyLanguage(language);
         scope.Call("SettingsButton_Click", null, new RoutedEventArgs());
         Assert.Null(scope.Window.FindControl<Control>("SystemChildren"));
-        Assert.Equal(5, scope.Get<WrapPanel>("SettingsCategoryButtons").Children.Count);
-        foreach (var category in new[] { "Library", "Reading", "Kindle", "Data", "About" })
+        Assert.Equal(7, scope.Get<WrapPanel>("SettingsCategoryButtons").Children.Count);
+        foreach (var category in new[] { "General", "Library", "Reading", "Kindle", "Data", "Advanced", "About" })
         {
             scope.Call("ShowSettingsSection", category);
             await Render();

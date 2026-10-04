@@ -516,8 +516,7 @@ public partial class MainWindow
 
     /// <summary>
     /// Starts the one-per-window dependency bootstrap. App startup calls this
-    /// in the background; opening a reader awaits the same task if it is still
-    /// running.
+    /// in the background; opening a reader continues without waiting for it.
     /// </summary>
     public Task InitializeTtsEnvironmentAsync()
     {
@@ -584,8 +583,9 @@ public partial class MainWindow
             ApplyReaderTtsSettingsToControls();
             if (!_readerTtsEnvironmentChecked)
             {
-                await InitializeTtsEnvironmentAsync()
-                    .WaitAsync(cancellationToken);
+                // Dependency downloads/checks must not delay the first page.
+                // The bootstrap handles failures and refreshes the TTS UI.
+                _ = InitializeTtsEnvironmentAsync();
             }
 
             UpdateReaderTtsUi();

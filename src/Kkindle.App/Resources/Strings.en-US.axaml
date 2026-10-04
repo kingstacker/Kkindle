@@ -2060,4 +2060,11 @@
     <x:String x:Key="Ui.ZLibrary.McpSearchDescription">Allow MCP clients to search the Z-Library online catalog.</x:String>
     <x:String x:Key="Ui.ZLibrary.McpDownload">download_zlibrary</x:String>
     <x:String x:Key="Ui.ZLibrary.McpDownloadDescription">Allow MCP clients to download and optionally import a book; an account and explicit execution parameters are still required.</x:String>
+    <x:String x:Key="Ui.Settings.Category.General">General</x:String>
+    <x:String x:Key="Ui.Settings.Category.Library">Library &amp; import</x:String>
+    <x:String x:Key="Ui.Settings.Category.Reading">Reading &amp; assistance</x:String>
+    <x:String x:Key="Ui.Settings.Category.Kindle">Devices &amp; transfer</x:String>
+    <x:String x:Key="Ui.Settings.Category.Data">Data &amp; sync</x:String>
+    <x:String x:Key="Ui.Settings.Category.Advanced">Advanced &amp; integrations</x:String>
+    <x:String x:Key="Ui.Settings.Category.About">About &amp; updates</x:String>
 </ResourceDictionary>

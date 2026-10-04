@@ -8,7 +8,7 @@
 
 Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia. It combines a local library, reading, annotations, AI assistance, format conversion, and Kindle transfer in one desktop app.
 
-![Kkindle library](docs/images/主界面.png)
+![Kkindle library](docs/images/主界面.png?v=20261004)
 
 ## Features
 

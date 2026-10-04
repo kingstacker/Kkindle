@@ -10,6 +10,7 @@ namespace Kkindle.Infrastructure;
 public sealed class UpdateService : IDisposable
 {
     private const string MirrorManifestUrl = "https://kkindle.stacker.beauty/update-manifest.json";
+    private const string MirrorDevelopmentManifestUrl = "https://kkindle.stacker.beauty/update-manifest-dev.json";
     private const string LatestManifestUrl = "https://github.com/kingstacker/Kkindle/releases/latest/download/update-manifest.json";
     private const string LatestReleasePageUrl = "https://github.com/kingstacker/Kkindle/releases/latest";
     private const string LatestReleaseUrl = "https://api.github.com/repos/kingstacker/Kkindle/releases/latest";
@@ -81,7 +82,7 @@ public sealed class UpdateService : IDisposable
         CancellationToken cancellationToken = default)
     {
         var current = SemanticVersion.Parse(currentVersion, "当前应用版本");
-        var release = await GetLatestReleaseAsync(channel, cancellationToken);
+        var release = await GetLatestReleaseAsync(channel, current, cancellationToken);
 
         if (release is null
             || release.Draft
@@ -216,12 +217,13 @@ public sealed class UpdateService : IDisposable
 
     private async Task<GitHubRelease?> GetLatestReleaseAsync(
         AppUpdateChannel channel,
+        SemanticVersion current,
         CancellationToken cancellationToken)
     {
         if (channel == AppUpdateChannel.Development)
-            return await GetLatestDevelopmentReleaseAsync(cancellationToken);
+            return await GetLatestDevelopmentReleaseAsync(current, cancellationToken);
 
-        if (await TryGetReleaseFromMirrorAsync(cancellationToken) is { } mirroredRelease)
+        if (await TryGetReleaseFromMirrorAsync(MirrorManifestUrl, cancellationToken) is { } mirroredRelease)
             return mirroredRelease;
 
         using (var manifestResponse = await _httpClient.GetAsync(LatestManifestUrl, cancellationToken))
@@ -245,11 +247,13 @@ public sealed class UpdateService : IDisposable
         return await DeserializeReleaseAsync(apiResponse, cancellationToken);
     }
 
-    private async Task<GitHubRelease?> TryGetReleaseFromMirrorAsync(CancellationToken cancellationToken)
+    private async Task<GitHubRelease?> TryGetReleaseFromMirrorAsync(
+        string manifestUrl,
+        CancellationToken cancellationToken)
     {
         try
         {
-            using var response = await _httpClient.GetAsync(MirrorManifestUrl, cancellationToken);
+            using var response = await _httpClient.GetAsync(manifestUrl, cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
             return await DeserializeReleaseAsync(response, cancellationToken);
         }
@@ -262,8 +266,17 @@ public sealed class UpdateService : IDisposable
     }
 
     private async Task<GitHubRelease?> GetLatestDevelopmentReleaseAsync(
+        SemanticVersion current,
         CancellationToken cancellationToken)
     {
+        // 墙内拉不到 api.github.com：开发版先读自建镜像清单
+        // （kkindle.stacker.beauty/update-manifest-dev.json，由 VPS 定时同步 GitHub 生成），
+        // 只有镜像不可用 / 清单里的版本不比当前新 / 清单里没有本平台安装包时才回退 GitHub API。
+        if (await TryGetReleaseFromMirrorAsync(MirrorDevelopmentManifestUrl, cancellationToken)
+                is { } mirroredRelease
+            && HasUsableDevelopmentPackage(mirroredRelease, current))
+            return mirroredRelease;
+
         using var response = await _httpClient.GetAsync(DevelopmentReleasesUrl, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -287,6 +300,25 @@ public sealed class UpdateService : IDisposable
 
     private static bool IsDevelopmentRelease(GitHubRelease release) =>
         TryParseDevelopmentVersion(release, out _);
+
+    // 自建镜像的开发版清单目前只镜像 Windows 安装包：其它平台、或清单缺件、或镜像落后于
+    // 当前版本时，回退 GitHub API 列表 —— 免得一次更新检查直接报错或漏掉更新的开发版。
+    private bool HasUsableDevelopmentPackage(GitHubRelease release, SemanticVersion current)
+    {
+        if (!IsDevelopmentRelease(release)) return false;
+        var tagName = (release.TagName ?? string.Empty).Trim();
+        try
+        {
+            if (SemanticVersion.Parse(tagName, "GitHub Release 版本").CompareTo(current) <= 0) return false;
+            var version = tagName.TrimStart('v', 'V');
+            return FindAsset(release.Assets, _installer.GetPackageAssetName(version)) is not null
+                && FindAsset(release.Assets, "SHA256SUMS.txt") is not null;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentException)
+        {
+            return false;
+        }
+    }
 
     private static bool TryParseDevelopmentVersion(
         GitHubRelease release,

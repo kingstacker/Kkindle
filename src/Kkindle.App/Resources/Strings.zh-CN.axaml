@@ -2060,4 +2060,11 @@
     <x:String x:Key="Ui.ZLibrary.McpSearchDescription">允许 MCP 客户端搜索 Z-Library 在线书库。</x:String>
     <x:String x:Key="Ui.ZLibrary.McpDownload">download_zlibrary</x:String>
     <x:String x:Key="Ui.ZLibrary.McpDownloadDescription">允许 MCP 客户端下载并可选导入书库；执行下载前仍需要账号和显式确认参数。</x:String>
+    <x:String x:Key="Ui.Settings.Category.General">通用</x:String>
+    <x:String x:Key="Ui.Settings.Category.Library">书库与导入</x:String>
+    <x:String x:Key="Ui.Settings.Category.Reading">阅读与辅助</x:String>
+    <x:String x:Key="Ui.Settings.Category.Kindle">设备与传输</x:String>
+    <x:String x:Key="Ui.Settings.Category.Data">数据与同步</x:String>
+    <x:String x:Key="Ui.Settings.Category.Advanced">高级与集成</x:String>
+    <x:String x:Key="Ui.Settings.Category.About">关于与更新</x:String>
 </ResourceDictionary>
