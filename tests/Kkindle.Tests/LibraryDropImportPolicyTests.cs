@@ -24,11 +24,14 @@ public sealed class LibraryDropImportPolicyTests
             var pdf = Path.Combine(nested, "two.PDF");
             File.WriteAllText(epub, "epub");
             File.WriteAllText(pdf, "pdf");
-            File.WriteAllText(Path.Combine(nested, "ignore.txt"), "text");
+            var txt = Path.Combine(nested, "three.TXT");
+            File.WriteAllText(txt, "text");
+            File.WriteAllText(Path.Combine(nested, "ignore.csv"), "text");
 
             var files = LibraryDropImportPolicy.ExpandImportableFiles([root]);
 
-            Assert.Equal(2, files.Length);
+            Assert.Equal(3, files.Length);
+            Assert.Contains(Path.GetFullPath(txt), files);
             Assert.Contains(Path.GetFullPath(epub), files);
             Assert.Contains(Path.GetFullPath(pdf), files);
         }

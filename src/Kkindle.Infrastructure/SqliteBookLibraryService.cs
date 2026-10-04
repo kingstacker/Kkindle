@@ -19,7 +19,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".epub", ".pdf", ".mobi", ".azw3"
+        ".epub", ".pdf", ".mobi", ".azw3", ".txt"
     };
 
     private readonly AppPaths _paths;
@@ -674,6 +674,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 cancellationToken.ThrowIfCancellationRequested();
                 string? createdFilePath = null;
                 string? createdCoverPath = null;
+                string? conversionDirectory = null;
                 var committed = false;
                 try
                 {
@@ -681,7 +682,16 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     if (!file.Exists)
                         throw new FileNotFoundException("文件不存在", sourcePath);
 
-                var hash = await Hashing.Sha256Async(sourcePath, cancellationToken);
+                var importPath = sourcePath;
+                if (Path.GetExtension(sourcePath).Equals(".txt", StringComparison.OrdinalIgnoreCase))
+                {
+                    conversionDirectory = Path.Combine(Path.GetTempPath(), "Kkindle-txt-" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(conversionDirectory);
+                    importPath = Path.Combine(conversionDirectory, Path.GetFileNameWithoutExtension(sourcePath) + ".epub");
+                    progress?.Report(new TransferProgress(completedBytes, totalBytes, $"正在识别 TXT 章节：{file.Name}"));
+                    await TxtToEpubService.ConvertAsync(sourcePath, importPath, cancellationToken);
+                }
+                var hash = await Hashing.Sha256Async(importPath, cancellationToken);
                 await using var connection = await OpenConnectionAsync(cancellationToken);
                 var duplicate = await FindBookByHashAsync(connection, hash, cancellationToken);
                 if (duplicate is not null)
@@ -697,7 +707,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     continue;
                 }
 
-                var metadata = await _metadata.ReadMetadataAsync(sourcePath, cancellationToken);
+                var metadata = await _metadata.ReadMetadataAsync(importPath, cancellationToken);
                 var title = string.IsNullOrWhiteSpace(metadata.Title) ? Path.GetFileNameWithoutExtension(sourcePath) : metadata.Title.Trim();
                 var authors = string.IsNullOrWhiteSpace(metadata.Authors) ? "未知作者" : metadata.Authors.Trim();
                 Book? book = await FindBookByTitleAuthorsAsync(connection, title, authors, cancellationToken);
@@ -709,7 +719,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                         book,
                         title,
                         authors,
-                        Path.GetExtension(sourcePath).TrimStart('.').ToLowerInvariant()));
+                        Path.GetExtension(importPath).TrimStart('.').ToLowerInvariant()));
                     if (resolution == ImportConflictResolution.Skip)
                     {
                         result.Items.Add(new ImportItemResult(
@@ -744,12 +754,12 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
                 var bookDirectory = Path.Combine(_paths.Library, book.Id.ToString("N"));
                 Directory.CreateDirectory(bookDirectory);
-                var targetName = GetUniqueFileName(bookDirectory, Path.GetFileName(sourcePath));
+                var targetName = GetUniqueFileName(bookDirectory, Path.GetFileName(importPath));
                 var targetPath = Path.Combine(bookDirectory, targetName);
                 var temporaryPath = targetPath + $".{Guid.NewGuid():N}.part";
                 try
                 {
-                    await CopyFileAsync(sourcePath, temporaryPath, file.Length, completedBytes, totalBytes, progress, cancellationToken);
+                    await CopyFileAsync(importPath, temporaryPath, new FileInfo(importPath).Length, completedBytes, totalBytes, conversionDirectory is null ? progress : null, cancellationToken);
                     File.Move(temporaryPath, targetPath, overwrite: false);
                     createdFilePath = targetPath;
                 }
@@ -798,9 +808,9 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 {
                     Id = Guid.NewGuid(),
                     BookId = book.Id,
-                    Format = Path.GetExtension(sourcePath).TrimStart('.').ToLowerInvariant(),
+                    Format = Path.GetExtension(importPath).TrimStart('.').ToLowerInvariant(),
                     RelativePath = relativePath,
-                    Size = file.Length,
+                    Size = new FileInfo(targetPath).Length,
                     Sha256 = hash
                 };
                 await InsertFileAsync(connection, bookFile, cancellationToken, transaction);
@@ -836,6 +846,14 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 }
                 finally
                 {
+                    if (conversionDirectory is not null)
+                        TryDeleteFile(Path.Combine(conversionDirectory, Path.GetFileNameWithoutExtension(sourcePath) + ".epub"));
+                    if (conversionDirectory is not null && Directory.Exists(conversionDirectory))
+                    {
+                        try { Directory.Delete(conversionDirectory); }
+                        catch (IOException) { }
+                        catch (UnauthorizedAccessException) { }
+                    }
                     if (!committed)
                     {
                         if (createdFilePath is not null) TryDeleteFile(createdFilePath);

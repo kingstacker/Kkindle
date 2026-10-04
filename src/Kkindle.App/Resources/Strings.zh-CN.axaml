@@ -456,7 +456,7 @@
     <x:String x:Key="Ui.Auto.64295B76D26336F3">搜索整本书…</x:String>
     <x:String x:Key="Ui.Auto.43A641217D7F134F">搜索整本书（Ctrl+F）</x:String>
     <x:String x:Key="Ui.Auto.168A769EBA62A8E8">搜索标题或作者</x:String>
-    <x:String x:Key="Ui.Auto.F7824158AAA04D87">支持 EPUB、PDF、MOBI、AZW3，并自动扫描子目录</x:String>
+    <x:String x:Key="Ui.Auto.F7824158AAA04D87">支持 EPUB、PDF、MOBI、AZW3、TXT；TXT 自动识别章节并转为 EPUB，自动扫描子目录</x:String>
     <x:String x:Key="Ui.Auto.7C456B8E16853FCF">支持 MDX、Kindle 词典（AZW/AZW3/MOBI/PRC/KFX）及 UTF-8 文本词典。Kindle 词典导入需要 Calibre，受 DRM 保护的词典无法导入。</x:String>
     <x:String x:Key="Ui.Auto.60A53514EB9228A2">收藏</x:String>
     <x:String x:Key="Ui.Auto.F6A273284E344858">收藏夹互斥</x:String>
@@ -2067,4 +2067,6 @@
     <x:String x:Key="Ui.Settings.Category.Data">数据与同步</x:String>
     <x:String x:Key="Ui.Settings.Category.Advanced">高级与集成</x:String>
     <x:String x:Key="Ui.Settings.Category.About">关于与更新</x:String>
+    <x:String x:Key="Ui.ReadingMedals.ShowUnearned">显示未获得勋章</x:String>
+    <x:String x:Key="Ui.ReadingMedals.Empty">还未获得勋章，继续阅读即可点亮。勾选“显示未获得勋章”可查看全部目标。</x:String>
 </ResourceDictionary>

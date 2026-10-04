@@ -646,6 +646,28 @@ public sealed partial class S3SyncIntegrationTests
     }
 
     [Fact]
+    public async Task ReadingMedalVisibility_SyncsBothDirectionsAndDefaultsToHidden()
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket);
+        await using var b = await Device.CreateAsync(bucket);
+        var aStore = new AppSettingsStore(a.Paths);
+        var bStore = new AppSettingsStore(b.Paths);
+        Assert.False((await bStore.LoadAsync()).ShowUnearnedReadingMedals);
+        await aStore.SaveAsync(new AppSettings { ShowUnearnedReadingMedals = true });
+        await a.SyncAsync();
+        await b.SyncAsync();
+        Assert.True((await bStore.LoadAsync()).ShowUnearnedReadingMedals);
+
+        await bStore.SaveAsync((await bStore.LoadAsync()) with { ShowUnearnedReadingMedals = false });
+        File.SetLastWriteTimeUtc(b.Paths.Settings, DateTime.UtcNow.AddSeconds(2));
+        await b.SyncAsync();
+        await a.SyncAsync();
+        Assert.False((await aStore.LoadAsync()).ShowUnearnedReadingMedals);
+        Assert.Equal(0, (await a.SyncAsync()).SettingsApplied);
+    }
+
+    [Fact]
     public async Task IndependentSettingsChanges_AreMergedPerSettingsFile()
     {
         var bucket = new MemoryBucket();

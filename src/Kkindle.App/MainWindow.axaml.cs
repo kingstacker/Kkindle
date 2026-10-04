@@ -2326,9 +2326,12 @@ public partial class MainWindow : Window
             try
             {
                 SetTaskStatus(T("正在准备《{0}》的阅读缓存…", card.Title));
+                var sourceHash = file.Sha256;
+                if (sourceHash.Length != 64)
+                    sourceHash = await Hashing.Sha256Async(path, _lifetimeCancellation.Token);
                 var cache = await _readerFormatCache.PrepareEpubAsync(
                     path,
-                    file.Sha256,
+                    sourceHash,
                     file.Format,
                     _lifetimeCancellation.Token);
                 await OpenEpubReaderAsync(card, file, cache.EpubPath, restoreProgress);
@@ -4166,7 +4169,7 @@ public partial class MainWindow : Window
             [
                 new FilePickerFileType(T("电子书"))
                 {
-                    Patterns = ["*.epub", "*.pdf", "*.mobi", "*.azw3"]
+                    Patterns = ["*.epub", "*.pdf", "*.mobi", "*.azw3", "*.txt"]
                 }
             ]
         });

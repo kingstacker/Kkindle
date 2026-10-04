@@ -225,6 +225,7 @@ internal sealed class S3SyncAppSettings
     public bool GridGalleryDisplay { get; set; }
     public bool ShowSyncStatusIcon { get; set; } = true;
     public bool ShowLibraryPresenceIcon { get; set; } = true;
+    public bool ShowUnearnedReadingMedals { get; set; }
     public bool ReadingMaterialsCollapsedByDefault { get; set; } = true;
     public bool PinyinContextMenuEnabled { get; set; }
     public bool PinyinLocalOnly { get; set; }

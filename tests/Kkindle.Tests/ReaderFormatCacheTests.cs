@@ -14,10 +14,10 @@ public sealed class ReaderFormatCacheTests
             var paths = new AppPaths(Path.Combine(root, "app"));
             paths.EnsureDirectories();
             var source = Path.Combine(root, "book.azw3");
-            await File.WriteAllTextAsync(source, "azw3");
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Azw3", "native-compressed.azw3"), source);
             var converter = new FakeConverter();
             var cache = new ReaderFormatCacheService(paths, converter);
-            var hash = new string('a', 64);
+            var hash = await Hashing.Sha256Async(source);
 
             var first = await cache.PrepareEpubAsync(source, hash, "azw3");
             var second = await cache.PrepareEpubAsync(source, hash, "azw3");
@@ -25,8 +25,14 @@ public sealed class ReaderFormatCacheTests
             Assert.False(first.CacheHit);
             Assert.True(second.CacheHit);
             Assert.Equal(first.EpubPath, second.EpubPath);
-            Assert.Equal(1, converter.CallCount);
+            Assert.Equal(0, converter.CallCount);
             Assert.True(new FileInfo(second.EpubPath).Length > 0);
+            await File.WriteAllTextAsync(second.EpubPath, "broken cache");
+            var repaired = await cache.PrepareEpubAsync(source, hash, "azw3");
+            Assert.False(repaired.CacheHit);
+            var document = await new EpubReaderPreparationService(paths).PrepareAsync(repaired.EpubPath, await Hashing.Sha256Async(repaired.EpubPath));
+            Assert.Equal(6, document.Chapters.Count);
+            Assert.Equal(0, converter.CallCount);
         }
         finally
         {
@@ -46,7 +52,7 @@ public sealed class ReaderFormatCacheTests
             FormatConversionMetadata? metadata = null)
         {
             CallCount++;
-            await File.WriteAllTextAsync(destinationPath, "epub", cancellationToken);
+            await TxtToEpubService.ConvertAsync(sourcePath, destinationPath, cancellationToken);
         }
     }
 }

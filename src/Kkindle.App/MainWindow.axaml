@@ -2422,6 +2422,19 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
+                        <Border Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16,24,16,16">
+                            <StackPanel Spacing="18">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock x:Name="DashboardMedalsTitle" FontSize="16" FontWeight="SemiBold" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                                        <CheckBox x:Name="ShowUnearnedReadingMedalsCheck" Content="{DynamicResource Ui.ReadingMedals.ShowUnearned}" FontSize="11" IsChecked="False" />
+                                        <TextBlock x:Name="DashboardMedalsSummary" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+                                <WrapPanel x:Name="DashboardMedalsPanel" />
+                                <TextBlock x:Name="DashboardMedalsEmptyText" Text="{DynamicResource Ui.ReadingMedals.Empty}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" IsVisible="False" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
