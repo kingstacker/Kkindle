@@ -96,22 +96,23 @@ public sealed class KindleDeviceTests
     {
         var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(root, "documents"));
-        var source = Path.Combine(root, "source.epub");
+        var source = Path.Combine(root, "source.azw3");
         await File.WriteAllTextAsync(source, "hello kindle");
         try
         {
             var hash = await ComputeHashAsync(source);
             var device = new KindleDevice { RootPath = root, Name = "Fake Kindle", IsReady = true };
-            var file = new BookFile { Format = "epub", Sha256 = hash, RelativePath = "source.epub" };
+            var file = new BookFile { Id = Guid.NewGuid(), Format = "azw3", Sha256 = hash, RelativePath = "source.azw3" };
             var service = new KindleDeviceService();
 
             await service.SendBookAsync(device, file, source);
             var books = await service.ScanBooksAsync(device);
 
             var book = Assert.Single(books);
-            Assert.Equal("source.epub", book.FileName);
+            var expectedFileName = KindleTransferPolicy.CreateSafeFileName("source", ".azw3", file.Id);
+            Assert.Equal(expectedFileName, book.FileName);
             Assert.Equal(hash, book.Sha256);
-            Assert.True(File.Exists(Path.Combine(root, "documents", "source.epub")));
+            Assert.True(File.Exists(Path.Combine(root, "documents", expectedFileName)));
         }
         finally
         {
@@ -176,24 +177,36 @@ public sealed class KindleDeviceTests
         Directory.CreateDirectory(Path.Combine(root, "documents"));
         Directory.CreateDirectory(firstDirectory);
         Directory.CreateDirectory(secondDirectory);
-        var firstSource = Path.Combine(firstDirectory, "book.epub");
-        var secondSource = Path.Combine(secondDirectory, "book.epub");
+        var firstSource = Path.Combine(firstDirectory, "book.azw3");
+        var secondSource = Path.Combine(secondDirectory, "book.azw3");
         await File.WriteAllTextAsync(firstSource, "first book");
         await File.WriteAllTextAsync(secondSource, "second book");
         try
         {
             var service = new KindleDeviceService();
             var device = new KindleDevice { RootPath = root, Name = "Fake Kindle", IsReady = true };
-            await service.SendBookAsync(device, new BookFile { Sha256 = await ComputeHashAsync(firstSource) }, firstSource);
-            await service.SendBookAsync(device, new BookFile { Sha256 = await ComputeHashAsync(secondSource) }, secondSource);
+            var fileId = Guid.NewGuid();
+            await service.SendBookAsync(device, new BookFile
+            {
+                Id = fileId,
+                Format = "azw3",
+                Sha256 = await ComputeHashAsync(firstSource)
+            }, firstSource);
+            await service.SendBookAsync(device, new BookFile
+            {
+                Id = fileId,
+                Format = "azw3",
+                Sha256 = await ComputeHashAsync(secondSource)
+            }, secondSource);
 
             var books = await service.ScanBooksAsync(device);
 
-            // Re-sending overwrites the device copy so updated covers and
-            // metadata reach the existing entry instead of a "(2)" duplicate.
+            // A stable file ID updates its existing entry without clashing
+            // with another book that happens to share the same title.
             var book = Assert.Single(books);
-            Assert.Equal("book.epub", book.FileName);
-            Assert.Equal("second book", await File.ReadAllTextAsync(Path.Combine(root, "documents", "book.epub")));
+            var expectedFileName = KindleTransferPolicy.CreateSafeFileName("book", ".azw3", fileId);
+            Assert.Equal(expectedFileName, book.FileName);
+            Assert.Equal("second book", await File.ReadAllTextAsync(Path.Combine(root, "documents", expectedFileName)));
         }
         finally
         {
