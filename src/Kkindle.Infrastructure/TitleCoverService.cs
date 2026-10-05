@@ -119,17 +119,5 @@ public static class TitleCoverService
             paint.Shader = wash;
             canvas.DrawPath(path, paint);
         }
-        paint.Shader = null;
-        paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = 0.8f;
-        paint.Color = ink.WithAlpha(28);
-        for (var i = 0; i < 4; i++)
-        {
-            using var water = new SKPath();
-            var y = 807 + i * 13;
-            water.MoveTo(90 + i * 17, y);
-            water.CubicTo(178, y - 5, 246, y + 5, 360 - i * 23, y);
-            canvas.DrawPath(water, paint);
-        }
     }
 }
