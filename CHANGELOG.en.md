@@ -6,6 +6,38 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.9 (2026-10-05)
+
+### Added
+
+- Import TXT files with automatic UTF-8, Unicode, and GB18030 detection, chapter and volume recognition, and EPUB conversion without Calibre.
+- Read DRM-free AZW3 files directly using the built-in AZW3/KF8 parser, without Calibre.
+- Automatically generate title covers for books without cover images.
+- Added reading medals with progress toward reading time, finished books, and annotation milestones.
+
+### Improved
+
+- Simplified book details and format conversion controls, and clarified file menu actions.
+- Updated Chinese and English documentation for TXT import and native AZW3 reading.
+
+### Fixed
+
+- Improved import, reading cache, and synchronization metadata handling for the new formats.
+
+## 1.0.8 (2026-10-04)
+
+### Improved
+
+- Refined reader menus, typography, zen window controls, and theme controls.
+- Improved reading dashboard navigation, book detail panel animation, onboarding, and reader startup.
+- Development updates prefer the self-hosted mirror.
+- Refreshed documentation and interface screenshots.
+
+### Fixed
+
+- Fixed overlapping text during page transitions.
+- Preserved nested table of contents entries and simplified book titles.
+
 ## 1.0.7 (2026-10-02)
 
 ### Added
