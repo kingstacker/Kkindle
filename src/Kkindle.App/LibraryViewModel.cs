@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.Core;
+using Kkindle.Infrastructure;
 
 namespace Kkindle;
 
@@ -323,7 +324,15 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     {
         if (_coverLoadAttempted) return;
         _coverLoadAttempted = true;
-        CoverImage = LoadCoverImage(DataRoot, Book.CoverPath, 320);
+        var storedCoverPath = string.IsNullOrWhiteSpace(Book.CoverPath) ? null : Path.Combine(DataRoot, Book.CoverPath);
+        var generatedTxtCover = Book.Files.Where(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase))
+            .Any(file => TitleCoverService.IsGeneratedTxtCover(Path.Combine(DataRoot, file.RelativePath), storedCoverPath));
+        CoverImage = generatedTxtCover ? null : LoadCoverImage(DataRoot, Book.CoverPath, 320);
+        if (CoverImage is null)
+        {
+            using var cover = new MemoryStream(TitleCoverService.CreatePng(Book.Title));
+            CoverImage = Bitmap.DecodeToWidth(cover, 320);
+        }
         OnPropertyChanged(nameof(CoverImage));
     }
 

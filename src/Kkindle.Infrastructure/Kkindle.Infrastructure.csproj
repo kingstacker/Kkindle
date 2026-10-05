@@ -6,6 +6,8 @@
     <NoWarn>$(NoWarn);CS0105;CS0108;CS0164;CS0169;CS0649;CS0600;CS0618;CS8618;CS8600;CS8603;CS8625;CS8765;SYSLIB0023</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="../Kkindle.App/Assets/Fonts/KingHwaOldSong-v3.0.ttf" Link="Assets/Fonts/KingHwaOldSong-v3.0.ttf" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Kkindle.App/Assets/Fonts/KingHwaOldSong-LICENSE.txt" Link="Assets/Fonts/KingHwaOldSong-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="..\Kkindle.Core\Kkindle.Core.csproj" />
     <PackageReference Include="AWSSDK.S3" Version="4.0.102.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
@@ -27,6 +29,8 @@
     <EmbeddedResource Include="ThirdParty/G2PW/bert-base-chinese_s2t_dict.txt" />
     <None Update="ThirdParty/G2PW/LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="ThirdParty/G2PW/NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="ThirdParty/KindleUnpack/NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="ThirdParty/KindleUnpack/LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="ThirdParty/PDFium/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

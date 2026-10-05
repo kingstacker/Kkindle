@@ -87,6 +87,7 @@ public sealed record AppSettings
     public bool GridGalleryDisplay { get; init; }
     public bool ShowSyncStatusIcon { get; init; } = true;
     public bool ShowLibraryPresenceIcon { get; init; } = true;
+    public bool ShowUnearnedReadingMedals { get; init; }
     public bool ReadingMaterialsCollapsedByDefault { get; init; } = true;
     public bool PinyinContextMenuEnabled { get; init; } = true;
     public bool PinyinLocalOnly { get; init; } = true;

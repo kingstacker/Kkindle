@@ -456,7 +456,7 @@
     <x:String x:Key="Ui.Auto.64295B76D26336F3">Search entire book…</x:String>
     <x:String x:Key="Ui.Auto.43A641217D7F134F">Search entire book (Ctrl+F)</x:String>
     <x:String x:Key="Ui.Auto.168A769EBA62A8E8">Search title or author</x:String>
-    <x:String x:Key="Ui.Auto.F7824158AAA04D87">Supports EPUB, PDF, MOBI, and AZW3; subdirectories are scanned automatically</x:String>
+    <x:String x:Key="Ui.Auto.F7824158AAA04D87">Supports EPUB, PDF, MOBI, AZW3, and TXT; TXT chapters are detected and converted to EPUB; subdirectories are scanned automatically</x:String>
     <x:String x:Key="Ui.Auto.7C456B8E16853FCF">Supports MDX, Kindle dictionaries (AZW/AZW3/MOBI/PRC/KFX), and UTF-8 text dictionaries. Kindle dictionary imports require Calibre; DRM-protected dictionaries cannot be imported.</x:String>
     <x:String x:Key="Ui.Auto.60A53514EB9228A2">Favorites</x:String>
     <x:String x:Key="Ui.Auto.F6A273284E344858">Favorites are mutually exclusive</x:String>
@@ -2067,4 +2067,6 @@
     <x:String x:Key="Ui.Settings.Category.Data">Data &amp; sync</x:String>
     <x:String x:Key="Ui.Settings.Category.Advanced">Advanced &amp; integrations</x:String>
     <x:String x:Key="Ui.Settings.Category.About">About &amp; updates</x:String>
+    <x:String x:Key="Ui.ReadingMedals.ShowUnearned">Show unearned medals</x:String>
+    <x:String x:Key="Ui.ReadingMedals.Empty">No medals earned yet. Keep reading to unlock them, or select “Show unearned medals” to see all goals.</x:String>
 </ResourceDictionary>

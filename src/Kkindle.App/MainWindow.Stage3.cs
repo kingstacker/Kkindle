@@ -4197,6 +4197,7 @@ public partial class MainWindow
                 ? T("近 7 天日均 —")
                 : T("近 7 天日均 {0}", FormatReadingTime((long)Math.Round(weekSeconds / 7d)));
             DashboardStreakText.Text = T("{0} 天", ComputeReadingStreakDays(dashboard.DailyReading));
+            PopulateReadingMedals(dashboard);
             DashboardStatusText.IsVisible = false;
 
             string BookTitle(ReadingDashboardBook item)
@@ -4843,6 +4844,7 @@ public partial class MainWindow
             GridGalleryDisplayCheck.IsChecked = _appSettings.GridGalleryDisplay;
             ShowSyncStatusIconCheck.IsChecked = _appSettings.ShowSyncStatusIcon;
             ShowLibraryPresenceIconCheck.IsChecked = _appSettings.ShowLibraryPresenceIcon;
+            ShowUnearnedReadingMedalsCheck.IsChecked = _appSettings.ShowUnearnedReadingMedals;
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
             PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
             PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
@@ -5682,6 +5684,11 @@ public partial class MainWindow
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowSyncStatusIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowLibraryPresenceIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        ShowUnearnedReadingMedalsCheck.IsCheckedChanged += (_, _) =>
+        {
+            if (_readingMedalsDashboard is { } dashboard) PopulateReadingMedals(dashboard);
+            ScheduleAppSettingsAutoSave();
+        };
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
         TranslationAiRpmBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -6141,6 +6148,7 @@ public partial class MainWindow
             LibraryViewMode = _libraryViewMode.ToString(),
             ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
+            ShowUnearnedReadingMedals = ShowUnearnedReadingMedalsCheck.IsChecked == true,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
             PinyinContextMenuEnabled = PinyinContextMenuEnabledCheck.IsChecked == true,
             PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,

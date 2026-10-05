@@ -7,7 +7,7 @@ namespace Kkindle;
 internal static class LibraryDropImportPolicy
 {
     private static readonly HashSet<string> SupportedExtensions =
-        new([".epub", ".pdf", ".mobi", ".azw3"], StringComparer.OrdinalIgnoreCase);
+        new([".epub", ".pdf", ".mobi", ".azw3", ".txt"], StringComparer.OrdinalIgnoreCase);
 
     public static bool CanAccept(IDataTransfer dataTransfer) =>
         dataTransfer.Contains(DataFormat.File)

@@ -1,16 +1,18 @@
 using Kkindle.Core;
+using System.IO.Compression;
+using System.Xml.Linq;
 
 namespace Kkindle.Infrastructure;
 
 public sealed record ReaderFormatCacheResult(string EpubPath, string CacheKey, bool CacheHit);
 
 /// <summary>
-/// Keeps the expensive Calibre reader conversion for a source file so opening
-/// the same AZW3/MOBI again does not start another conversion process.
+/// Keeps native AZW3 resources and Calibre MOBI conversions for repeated opens.
 /// </summary>
 public sealed class ReaderFormatCacheService
 {
-    private const string CacheVersion = "v2";
+    private const string CacheVersion = "v3";
+    private const string Azw3CacheVersion = "v4";
     private readonly string _cacheDirectory;
     private readonly IBookFormatConverter _converter;
     private readonly SemaphoreSlim _conversionGate = new(1, 1);
@@ -31,9 +33,10 @@ public sealed class ReaderFormatCacheService
         var format = sourceFormat.Trim().TrimStart('.').ToLowerInvariant();
         if (format is not ("azw3" or "mobi"))
             throw new NotSupportedException($"不支持为 {sourceFormat} 创建阅读缓存。");
+        var cacheVersion = format == "azw3" ? Azw3CacheVersion : CacheVersion;
 
         Directory.CreateDirectory(_cacheDirectory);
-        var destination = Path.GetFullPath(Path.Combine(_cacheDirectory, $"{CacheVersion}-{format}-{cacheKey}.epub"));
+        var destination = Path.GetFullPath(Path.Combine(_cacheDirectory, $"{cacheVersion}-{format}-{cacheKey}.epub"));
         EnsureContainedPath(destination);
         if (IsUsable(destination))
             return new ReaderFormatCacheResult(destination, cacheKey, CacheHit: true);
@@ -47,12 +50,17 @@ public sealed class ReaderFormatCacheService
             if (File.Exists(destination)) File.Delete(destination);
             var temporary = Path.Combine(
                 _cacheDirectory,
-                $".{CacheVersion}-{format}-{cacheKey}-{Guid.NewGuid():N}.tmp.epub");
+                $".{cacheVersion}-{format}-{cacheKey}-{Guid.NewGuid():N}.tmp.epub");
             EnsureContainedPath(temporary);
             try
             {
-                await _converter.ConvertAsync(sourcePath, temporary, cancellationToken: cancellationToken);
+                if (format == "azw3")
+                    await Azw3ReaderService.PrepareEpubAsync(sourcePath, temporary, cancellationToken);
+                else
+                    await _converter.ConvertAsync(sourcePath, temporary, cancellationToken: cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
+                if (!IsUsable(temporary))
+                    throw new InvalidDataException("AZW3/MOBI 转换未生成有效的 EPUB 阅读缓存，请重试。");
                 File.Move(temporary, destination, overwrite: false);
             }
             finally
@@ -79,7 +87,20 @@ public sealed class ReaderFormatCacheService
 
     private static bool IsUsable(string path)
     {
-        try { return new FileInfo(path) is { Exists: true, Length: > 0 }; }
+        try
+        {
+            if (new FileInfo(path) is not { Exists: true, Length: > 0 }) return false;
+            using var archive = ZipFile.OpenRead(path);
+            var container = archive.GetEntry("META-INF/container.xml");
+            if (container is null) return false;
+            using var stream = container.Open();
+            var packagePath = XDocument.Load(stream).Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "rootfile")?.Attribute("full-path")?.Value;
+            var package = string.IsNullOrWhiteSpace(packagePath) ? null : archive.GetEntry(packagePath);
+            if (package is null) return false;
+            using var packageStream = package.Open();
+            return XDocument.Load(packageStream).Descendants().Any(e => e.Name.LocalName == "itemref");
+        }
         catch { return false; }
     }
 

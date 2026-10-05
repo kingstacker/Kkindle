@@ -2326,9 +2326,12 @@ public partial class MainWindow : Window
             try
             {
                 SetTaskStatus(T("正在准备《{0}》的阅读缓存…", card.Title));
+                var sourceHash = file.Sha256;
+                if (sourceHash.Length != 64)
+                    sourceHash = await Hashing.Sha256Async(path, _lifetimeCancellation.Token);
                 var cache = await _readerFormatCache.PrepareEpubAsync(
                     path,
-                    file.Sha256,
+                    sourceHash,
                     file.Format,
                     _lifetimeCancellation.Token);
                 await OpenEpubReaderAsync(card, file, cache.EpubPath, restoreProgress);
@@ -2595,11 +2598,15 @@ public partial class MainWindow : Window
         foreach (var target in new[] { "epub", "azw3", "pdf" })
         {
             var sourceCandidates = BookFormatConversionPolicy.GetSourceCandidates(card.Book.Files, target);
-            convertMenu.Items.Add(CreateBookVariantMenuItem(
+            var targetMenu = CreateBookVariantMenuItem(
                 target.ToUpperInvariant(),
                 sourceCandidates,
                 sourceFile => ConvertBookAsync(card, target, sourceFile),
-                width: 80));
+                width: 80);
+            targetMenu.IsEnabled = sourceCandidates.Count > 0
+                && !card.Book.Files.Any(file => string.Equals(
+                    file.Format.Trim().TrimStart('.'), target, StringComparison.OrdinalIgnoreCase));
+            convertMenu.Items.Add(targetMenu);
         }
         menu.Items.Add(convertMenu);
         menu.Items.Add(new Separator());
@@ -2752,24 +2759,26 @@ public partial class MainWindow : Window
 
     private static string GetBookFileMenuLabel(BookFile file)
     {
-        var stem = Path.GetFileNameWithoutExtension(file.RelativePath).Trim();
-        if (PinyinBookPolicy.IsGeneratedPinyinVersion(file))
-            return PinyinBookPolicy.CreateGeneratedTitle(stem);
-        if (GetGeneratedTranslationKind(file.RelativePath) is not null)
-            return stem;
-        if (stem.Contains("-双语", StringComparison.OrdinalIgnoreCase)
-            || stem.Contains("_双语", StringComparison.OrdinalIgnoreCase))
-            return T("双语");
-        if (stem.Contains("-译文", StringComparison.OrdinalIgnoreCase)
-            || stem.Contains("_译文", StringComparison.OrdinalIgnoreCase))
-            return T("译文");
-        if (stem.Contains("-原文", StringComparison.OrdinalIgnoreCase)
-            || stem.Contains("_原文", StringComparison.OrdinalIgnoreCase))
-            return T("原文");
-
-        return string.IsNullOrWhiteSpace(stem)
-            ? file.Format.Trim().TrimStart('.').ToUpperInvariant()
-            : stem;
+        // File choices must expose the extension so different formats of the
+        // same book remain distinguishable in transfer and conversion menus.
+        var name = Path.GetFileName(file.RelativePath).Trim();
+        var extension = file.Format.Trim().TrimStart('.');
+        if (string.IsNullOrWhiteSpace(name))
+            return $".{extension}";
+        var suffix = $".{extension}";
+        var stem = name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? name[..^suffix.Length]
+            : name;
+        // Some imported files carry a 32-character identifier. Keep it on
+        // disk, but omit it from the menu so it cannot crowd out the format.
+        var identifierStart = stem.LastIndexOf('_');
+        if (identifierStart >= 0 && stem.Length - identifierStart - 1 == 32
+            && stem.AsSpan(identifierStart + 1).IndexOfAnyExcept(
+                "0123456789abcdefABCDEF".AsSpan()) < 0)
+            stem = stem[..identifierStart];
+        // Stored names may end in a dotted content hash rather than an actual
+        // extension. Only the recorded format identifies the file suffix.
+        return $"{stem}{suffix}";
     }
 
     private static MenuItem CreateBookVariantMenuItem(
@@ -3341,9 +3350,6 @@ public partial class MainWindow : Window
         e.Handled = true;
         MinimizeBookConversionPopup();
     }
-
-    private void BookConversionBackgroundButton_Click(object? sender, RoutedEventArgs e) =>
-        MinimizeBookConversionPopup();
 
     private void BookConversionProgressIndicator_Tapped(object? sender, TappedEventArgs e)
     {
@@ -4163,7 +4169,7 @@ public partial class MainWindow : Window
             [
                 new FilePickerFileType(T("电子书"))
                 {
-                    Patterns = ["*.epub", "*.pdf", "*.mobi", "*.azw3"]
+                    Patterns = ["*.epub", "*.pdf", "*.mobi", "*.azw3", "*.txt"]
                 }
             ]
         });
@@ -5348,6 +5354,10 @@ public partial class MainWindow : Window
         {
             ToggleSwitch toggleSwitch => DescribeField(accessibleName, T("切换开关")),
             CheckBox checkBox => DescribeField(accessibleName, T("切换选项")),
+            // Visible text already describes the action. Icon templates may
+            // still use a string as their content and need an explanation.
+            Button button when button.ContentTemplate is null
+                && !string.IsNullOrWhiteSpace(ReadContentText(button.Content)) => null,
             Button button => FirstNonEmpty(accessibleName, ReadContentText(button.Content)),
             ComboBox comboBox => DescribeField(accessibleName, T("选择选项")),
             NumericUpDown numberBox => DescribeField(accessibleName, T("输入或调整数值")),

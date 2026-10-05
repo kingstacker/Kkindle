@@ -64,7 +64,9 @@ public partial class MainWindow
         {
             SetTaskStatus(T("正在准备《{0}》的阅读缓存…", card.Title));
             var contentHash = file.Sha256;
-            if (contentHash.Length != 64)
+            // Converted AZW3/MOBI resources must follow the generated EPUB's
+            // content, so rebuilt conversion caches invalidate extracted pages.
+            if (contentHash.Length != 64 || !file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase))
                 contentHash = await Hashing.Sha256Async(epubPath, sessionToken);
 
             var document = await _epubReader.PrepareAsync(
