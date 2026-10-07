@@ -17,6 +17,9 @@ public static class TxtToEpubService
         @"^(?:序章|序言|序|楔子|前言|引子|尾声|终章|后记|结束语)(?:\s+.{1,30})?$",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     private static readonly Regex VolumeHeading = new(@"^第\s*[零〇一二三四五六七八九十百千万两\d]+\s*[卷部篇]", RegexOptions.CultureInvariant);
+    private static readonly Regex NumberedListPrefix = new(@"^(?<index>\d+)[.．、]\s*(?=第\s*(?<chapter>\d+)\s*章)", RegexOptions.CultureInvariant);
+    private static readonly Regex SpacedNumberedHeading = new(@"^第\s*[零〇一二三四五六七八九十百千万两\d]+\s*[章回节卷部篇]\s+", RegexOptions.CultureInvariant);
+    private static readonly Regex ArabicNumberedHeading = new(@"^第\s*\d+\s*[章回节卷部篇]", RegexOptions.CultureInvariant);
     private static readonly Regex AuthorPattern = new(
         @"(?:作者|著者|作\s*者)\s*[:：]\s*(?<author>[^\s,，;；。]+(?:\s*[/、&＆]\s*[^\s,，;；。]+)*)|(?:^|\s)Author\s*[:：]\s*(?<english>[^\s,，;；。]+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
@@ -125,10 +128,13 @@ public static class TxtToEpubService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var heading = line.Trim().TrimStart('\uFEFF');
+            var prefix = NumberedListPrefix.Match(heading);
+            if (prefix.Success && prefix.Groups["index"].Value == prefix.Groups["chapter"].Value)
+                heading = heading[prefix.Length..];
             var isHeading = heading.Length <= 60 && heading.Length > 0
                 // Questions and exclamations are common in novel chapter titles.
                 // Keep sentence separators as a conservative prose guard.
-                && !Regex.IsMatch(heading, @"[。；;，,]")
+                && (!Regex.IsMatch(heading, @"[。；;，,]") || SpacedNumberedHeading.IsMatch(heading) || ArabicNumberedHeading.IsMatch(heading))
                 && (NumberedHeading.IsMatch(heading) || SpecialHeading.IsMatch(heading));
             if (isHeading)
             {
