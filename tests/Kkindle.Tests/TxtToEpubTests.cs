@@ -120,6 +120,27 @@ public sealed class TxtToEpubTests
         finally { TestHelpers.TryDelete(root); }
     }
 
+    [Fact]
+    public async Task RecognizesNumberedListChapterPrefixesAndPunctuationInTitles()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "novel.txt");
+            await File.WriteAllTextAsync(source,
+                "第40章 本命灵庙\n正文。\n41.第41章 守岁人\n继续正文。\n第42章 红灯娘娘会\n再继续。\n第0100章姐，我想了\n正文。\n第101章 红灯照夜，相安无事\n结尾。\n第一章提到的人，后来又出现了。");
+            var output = Path.Combine(root, "novel.epub");
+            await TxtToEpubService.ConvertAsync(source, output);
+            using var zip = ZipFile.OpenRead(output);
+            XNamespace ns = "http://www.w3.org/1999/xhtml";
+            Assert.Equal(new[] { "第40章 本命灵庙", "第41章 守岁人", "第42章 红灯娘娘会", "第0100章姐，我想了", "第101章 红灯照夜，相安无事" },
+                ReadXml(zip, "OEBPS/nav.xhtml").Descendants(ns + "a").Select(a => a.Value));
+            Assert.Contains("第一章提到的人，后来又出现了。",
+                ReadXml(zip, "OEBPS/chapter-00005.xhtml").Descendants(ns + "p").Select(p => p.Value));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     private static XDocument ReadXml(ZipArchive zip, string path)
     {
         using var stream = zip.GetEntry(path)!.Open();
