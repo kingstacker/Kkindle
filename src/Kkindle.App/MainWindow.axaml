@@ -3642,6 +3642,7 @@
                         <TextBlock x:Name="ConfirmationMessageText" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="7" Margin="0,8,0,0">
                             <Button x:Name="ConfirmationCancelButton" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Padding="13,7" Click="ConfirmationCancelButton_Click" />
+                            <Button x:Name="ConfirmationKeepFilesButton" IsVisible="False" Padding="13,7" Click="ConfirmationKeepFilesButton_Click" />
                             <Button x:Name="ConfirmationOkButton" Content="{DynamicResource Ui.Auto.A3EA3C17B401BD2F}" Padding="13,7" Click="ConfirmationOkButton_Click" />
                         </StackPanel>
                     </StackPanel>
