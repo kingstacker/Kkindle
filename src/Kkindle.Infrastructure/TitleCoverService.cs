@@ -33,7 +33,7 @@ public static class TitleCoverService
             embedded.CopyTo(buffer);
             return buffer.ToArray().AsSpan().SequenceEqual(File.ReadAllBytes(storedCoverPath));
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Xml.XmlException or ArgumentException) { return false; }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or System.Xml.XmlException or ArgumentException) { return false; }
     }
 
     public static byte[] CreatePng(string title)
