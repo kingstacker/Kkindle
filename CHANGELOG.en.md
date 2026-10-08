@@ -6,6 +6,19 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.10 (2026-10-08)
+
+### Improved
+
+- Unified removal of individual books, selected books, and the last format file, with options to keep local files or move them to the trash.
+- Simplified generated title covers by removing the water ripple decoration.
+
+### Fixed
+
+- Improved TXT chapter detection for numbered prefixes and chapter titles containing commas.
+- Fixed exceptions when checking covers in damaged or invalid EPUB files.
+- Book removal can preserve local files, with clearer messages about their location and recovery from the trash.
+
 ## 1.0.9 (2026-10-05)
 
 ### Added
