@@ -11,13 +11,19 @@ public sealed class TitleCoverTests
     {
         using var bitmap = SKBitmap.Decode(TitleCoverService.CreatePng("黄昏分界"));
         var redPixels = 0;
-        foreach (var pixel in bitmap.Pixels)
+        var pixels = bitmap.Pixels;
+        for (var i = 0; i < pixels.Length; i++)
         {
+            var pixel = pixels[i];
             if (pixel.Red == pixel.Green && pixel.Green == pixel.Blue) continue;
             Assert.True(pixel.Red > pixel.Green && pixel.Green >= pixel.Blue);
+            // Font rasterization varies by platform; colored pixels must stay
+            // inside the seal, including its stroke and antialiasing fringe.
+            Assert.InRange(i % bitmap.Width, 80, 142);
+            Assert.InRange(i / bitmap.Width, 738, 800);
             redPixels++;
         }
-        Assert.InRange(redPixels, 100, 2000);
+        Assert.InRange(redPixels, 100, 63 * 63);
     }
 
     [Fact]
