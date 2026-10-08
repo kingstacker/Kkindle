@@ -2069,4 +2069,12 @@
     <x:String x:Key="Ui.Settings.Category.About">About &amp; updates</x:String>
     <x:String x:Key="Ui.ReadingMedals.ShowUnearned">Show unearned medals</x:String>
     <x:String x:Key="Ui.ReadingMedals.Empty">No medals earned yet. Keep reading to unlock them, or select “Show unearned medals” to see all goals.</x:String>
+    <x:String x:Key="Ui.Auto.670E5DE451163A3C">“{0}” will be removed from the library. “Keep files” leaves local files in place; “Delete file” moves them to the trash, where they can be restored.</x:String>
+    <x:String x:Key="Ui.Auto.8D76748B35593384">The selected {0} books will be removed from the library. “Keep files” leaves local files in place; “Delete file” moves them to the trash, where they can be restored.</x:String>
+    <x:String x:Key="Ui.Auto.BC5F375BD6CE4A7F">Remove from library</x:String>
+    <x:String x:Key="Ui.Auto.1807F00B562BD56D">Keep files</x:String>
+    <x:String x:Key="Ui.Auto.361BDF3F36E3030D">Move to trash</x:String>
+    <x:String x:Key="Ui.Auto.49192FE845989F01">Removed “{0}” from the library. Its files remain in Kkindle's data/library folder.</x:String>
+    <x:String x:Key="Ui.Auto.3FEDF2EA54D1FE5B">Removed {0} books from the library. Their files remain in Kkindle's data/library folder.</x:String>
+    <x:String x:Key="Ui.Auto.46A3EADB229733A1">Move the {1} file of “{0}” to the trash? It can be restored from the trash. Other formats will be kept.</x:String>
 </ResourceDictionary>

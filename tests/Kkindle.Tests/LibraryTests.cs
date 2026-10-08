@@ -8,6 +8,33 @@ namespace Kkindle.Tests;
 public sealed class LibraryTests
 {
     [Fact]
+    public async Task RemovingBookFromLibraryKeepsImportedFilesOnDisk()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "keep.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            await library.ImportAsync([source]);
+            var book = Assert.Single(await library.SearchAsync());
+            var imported = library.GetAbsoluteFilePath(Assert.Single(book.Files));
+            var cover = book.CoverPath is null ? null : Path.Combine(paths.Data, book.CoverPath);
+
+            await library.RemoveFromLibraryKeepFilesAsync(book.Id);
+
+            Assert.Empty(await library.SearchAsync());
+            Assert.Empty(await library.GetTrashItemsAsync());
+            Assert.True(File.Exists(source));
+            Assert.True(File.Exists(imported));
+            if (cover is not null) Assert.True(File.Exists(cover));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task CreatesCollectionsAndPersistsDraggedBookMembership()
     {
         var root = TestHelpers.CreateTempDirectory();

@@ -2069,4 +2069,12 @@
     <x:String x:Key="Ui.Settings.Category.About">关于与更新</x:String>
     <x:String x:Key="Ui.ReadingMedals.ShowUnearned">显示未获得勋章</x:String>
     <x:String x:Key="Ui.ReadingMedals.Empty">还未获得勋章，继续阅读即可点亮。勾选“显示未获得勋章”可查看全部目标。</x:String>
+    <x:String x:Key="Ui.Auto.670E5DE451163A3C">《{0}》将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。</x:String>
+    <x:String x:Key="Ui.Auto.8D76748B35593384">选中的 {0} 本书将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。</x:String>
+    <x:String x:Key="Ui.Auto.BC5F375BD6CE4A7F">从书库移除书籍</x:String>
+    <x:String x:Key="Ui.Auto.1807F00B562BD56D">保留文件</x:String>
+    <x:String x:Key="Ui.Auto.361BDF3F36E3030D">移入回收站</x:String>
+    <x:String x:Key="Ui.Auto.49192FE845989F01">已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。</x:String>
+    <x:String x:Key="Ui.Auto.3FEDF2EA54D1FE5B">已从书库移除 {0} 本书，文件保留在 Kkindle 的 data/library 目录。</x:String>
+    <x:String x:Key="Ui.Auto.46A3EADB229733A1">确定将《{0}》的 {1} 文件移入回收站吗？可在回收站恢复，其他格式不受影响。</x:String>
 </ResourceDictionary>

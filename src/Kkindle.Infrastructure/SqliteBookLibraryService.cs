@@ -1116,6 +1116,23 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         finally { _databaseGate.Release(); }
     }
 
+    public async Task RemoveFromLibraryKeepFilesAsync(Guid bookId, CancellationToken cancellationToken = default)
+    {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+        await _databaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            var delete = connection.CreateCommand();
+            delete.CommandText = "DELETE FROM Books WHERE Id = $id;";
+            delete.Parameters.AddWithValue("$id", bookId.ToString());
+            if (await delete.ExecuteNonQueryAsync(cancellationToken) > 0)
+                NotifyDataChanged();
+            // The library directory and saved cover are deliberately left on disk.
+        }
+        finally { _databaseGate.Release(); }
+    }
+
     public async Task<IReadOnlyList<LibraryTrashItem>> GetTrashItemsAsync(
         CancellationToken cancellationToken = default)
     {

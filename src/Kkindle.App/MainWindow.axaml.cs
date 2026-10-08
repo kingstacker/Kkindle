@@ -142,6 +142,8 @@ public partial class MainWindow : Window
     private readonly HashSet<BookCardViewModel> _visibleBookCards = [];
     private readonly HashSet<BookCardViewModel> _pdfCoverRequests = [];
     private TaskCompletionSource<bool>? _confirmationCompletion;
+    private TaskCompletionSource<BookRemovalChoice>? _bookRemovalCompletion;
+    private enum BookRemovalChoice { Cancel, KeepFiles, MoveToTrash }
     private TaskCompletionSource<string?>? _collectionNameCompletion;
     private TaskCompletionSource<bool>? _messageCompletion;
     private bool _conversionInProgress;
@@ -1008,6 +1010,8 @@ public partial class MainWindow : Window
         _messageCompletion = null;
         _confirmationCompletion?.TrySetResult(false);
         _confirmationCompletion = null;
+        _bookRemovalCompletion?.TrySetResult(BookRemovalChoice.Cancel);
+        _bookRemovalCompletion = null;
         _importFormatSelectionCompletion?.TrySetResult(null);
         _importFormatSelectionCompletion = null;
         _importConflictCompletion?.TrySetResult(ImportConflictResolution.Skip);
@@ -2368,16 +2372,27 @@ public partial class MainWindow : Window
             await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync(T("删除书籍"), T("确定删除《{0}》及其全部文件吗？", card.Title))) return;
+        var choice = await ConfirmBookRemovalAsync(T("《{0}》将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。", card.Title));
+        if (choice == BookRemovalChoice.Cancel) return;
 
         try
         {
-            await ViewModel.DeleteBookAsync(card.Book, _lifetimeCancellation.Token);
+            if (choice == BookRemovalChoice.KeepFiles)
+            {
+                await _library.RemoveFromLibraryKeepFilesAsync(card.Book.Id, _lifetimeCancellation.Token);
+                await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+            }
+            else
+            {
+                await ViewModel.DeleteBookAsync(card.Book, _lifetimeCancellation.Token);
+            }
             await RefreshLibraryMatchRecordsAsync(_lifetimeCancellation.Token);
             ClearSelectedBook();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
-            SetTaskStatus(ViewModel.StatusText);
+            SetTaskStatus(choice == BookRemovalChoice.KeepFiles
+                ? T("已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。", card.Title)
+                : ViewModel.StatusText);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -2468,12 +2483,17 @@ public partial class MainWindow : Window
     {
         if (_selectedCard is null) return;
         var card = _selectedCard;
+        if (card.Book.Files.Count == 1 && card.Book.Files[0].Id == file.Id)
+        {
+            await DeleteBookFromContextAsync(card);
+            return;
+        }
         if (_readerDocument is not null || _readerIsPdf)
         {
             await ShowMessageAsync(T("无法删除格式"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync(T("删除文件"), T("确定从《{0}》中删除 {1} 文件吗？", card.Title, file.Format.ToUpperInvariant()))) return;
+        if (!await ConfirmAsync(T("删除文件"), T("确定将《{0}》的 {1} 文件移入回收站吗？可在回收站恢复，其他格式不受影响。", card.Title, file.Format.ToUpperInvariant()), T("删除文件"))) return;
 
         try
         {
@@ -2983,16 +3003,24 @@ public partial class MainWindow : Window
             await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读其中一本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync(T("删除所选书籍"), T("确定删除选中的 {0} 本书及其文件吗？", cards.Count))) return;
+        var choice = await ConfirmBookRemovalAsync(T("选中的 {0} 本书将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。", cards.Count));
+        if (choice == BookRemovalChoice.Cancel) return;
 
         try
         {
             foreach (var card in cards)
-                await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
+            {
+                if (choice == BookRemovalChoice.KeepFiles)
+                    await _library.RemoveFromLibraryKeepFilesAsync(card.Book.Id, _lifetimeCancellation.Token);
+                else
+                    await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
+            }
             _selectedBookIds.Clear();
             ClearSelectedBook();
             await RefreshLibraryAsync();
-            SetTaskStatus(T("已将 {0} 本书移入回收站。", cards.Count));
+            SetTaskStatus(choice == BookRemovalChoice.KeepFiles
+                ? T("已从书库移除 {0} 本书，文件保留在 Kkindle 的 data/library 目录。", cards.Count)
+                : T("已将 {0} 本书移入回收站。", cards.Count));
         }
         catch (Exception exception)
         {
@@ -3008,14 +3036,20 @@ public partial class MainWindow : Window
             await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        if (!await ConfirmAsync(T("删除书籍"), T("确定删除《{0}》及其全部文件吗？", card.Title))) return;
+        var choice = await ConfirmBookRemovalAsync(T("《{0}》将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。", card.Title));
+        if (choice == BookRemovalChoice.Cancel) return;
         try
         {
-            await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
+            if (choice == BookRemovalChoice.KeepFiles)
+                await _library.RemoveFromLibraryKeepFilesAsync(card.Book.Id, _lifetimeCancellation.Token);
+            else
+                await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
             _selectedBookIds.Remove(card.Book.Id);
             if (_selectedCard?.Book.Id == card.Book.Id) ClearSelectedBook();
             await RefreshLibraryAsync();
-            SetTaskStatus(T("已将《{0}》移入回收站。", card.Title));
+            SetTaskStatus(choice == BookRemovalChoice.KeepFiles
+                ? T("已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。", card.Title)
+                : T("已将《{0}》移入回收站。", card.Title));
         }
         catch (Exception exception)
         {
@@ -3815,7 +3849,8 @@ public partial class MainWindow : Window
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (allowDiagnosticAutoConfirm && Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
-        if (_confirmationCompletion is not null) return false;
+        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null) return false;
+        ConfirmationKeepFilesButton.IsVisible = false;
         ConfirmationTitleText.Text = title;
         ConfirmationMessageText.Text = message;
         ConfirmationOkButton.Content = primaryText
@@ -3833,6 +3868,33 @@ public partial class MainWindow : Window
             if (ReferenceEquals(_confirmationCompletion, completion))
             {
                 _confirmationCompletion = null;
+                ConfirmationOverlay.IsVisible = false;
+            }
+        }
+    }
+
+    private async Task<BookRemovalChoice> ConfirmBookRemovalAsync(string message)
+    {
+        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null)
+            return BookRemovalChoice.Cancel;
+        ConfirmationTitleText.Text = T("从书库移除书籍");
+        ConfirmationMessageText.Text = message;
+        ConfirmationKeepFilesButton.Content = T("保留文件");
+        ConfirmationKeepFilesButton.IsVisible = true;
+        ConfirmationOkButton.Content = T("删除文件");
+        ShowOverlay(ConfirmationOverlay);
+        _bookRemovalCompletion = new TaskCompletionSource<BookRemovalChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = _bookRemovalCompletion;
+        try
+        {
+            return await completion.Task.WaitAsync(_lifetimeCancellation.Token);
+        }
+        finally
+        {
+            if (ReferenceEquals(_bookRemovalCompletion, completion))
+            {
+                _bookRemovalCompletion = null;
+                ConfirmationKeepFilesButton.IsVisible = false;
                 ConfirmationOverlay.IsVisible = false;
             }
         }
@@ -3905,6 +3967,11 @@ public partial class MainWindow : Window
     private void CompleteConfirmation(bool confirmed)
     {
         ConfirmationOverlay.IsVisible = false;
+        if (_bookRemovalCompletion is { } bookRemoval)
+        {
+            bookRemoval.TrySetResult(confirmed ? BookRemovalChoice.MoveToTrash : BookRemovalChoice.Cancel);
+            return;
+        }
         _confirmationCompletion?.TrySetResult(confirmed);
     }
 
@@ -4967,6 +5034,12 @@ public partial class MainWindow : Window
 
     private void ConfirmationOkButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => CompleteConfirmation(true);
+
+    private void ConfirmationKeepFilesButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        ConfirmationOverlay.IsVisible = false;
+        _bookRemovalCompletion?.TrySetResult(BookRemovalChoice.KeepFiles);
+    }
 
     private void CollectionNameCancelButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => CompleteCollectionName(null);

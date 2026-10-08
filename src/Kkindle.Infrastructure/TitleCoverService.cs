@@ -33,7 +33,7 @@ public static class TitleCoverService
             embedded.CopyTo(buffer);
             return buffer.ToArray().AsSpan().SequenceEqual(File.ReadAllBytes(storedCoverPath));
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Xml.XmlException or ArgumentException) { return false; }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or System.Xml.XmlException or ArgumentException) { return false; }
     }
 
     public static byte[] CreatePng(string title)
@@ -118,18 +118,6 @@ public static class TitleCoverService
                 new[] { ink.WithAlpha((byte)(24 + layer * 13)), ink.WithAlpha(0) }, null, SKShaderTileMode.Clamp);
             paint.Shader = wash;
             canvas.DrawPath(path, paint);
-        }
-        paint.Shader = null;
-        paint.Style = SKPaintStyle.Stroke;
-        paint.StrokeWidth = 0.8f;
-        paint.Color = ink.WithAlpha(28);
-        for (var i = 0; i < 4; i++)
-        {
-            using var water = new SKPath();
-            var y = 807 + i * 13;
-            water.MoveTo(90 + i * 17, y);
-            water.CubicTo(178, y - 5, 246, y + 5, 360 - i * 23, y);
-            canvas.DrawPath(water, paint);
         }
     }
 }
