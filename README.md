@@ -2,7 +2,7 @@
 
 [![Release](https://github.com/kingstacker/Kkindle/actions/workflows/release.yml/badge.svg)](https://github.com/kingstacker/Kkindle/actions/workflows/release.yml) [![Latest release](https://img.shields.io/github/v/release/kingstacker/Kkindle)](https://github.com/kingstacker/Kkindle/releases/latest)
 
-[Official website](https://kkindle.stacker.beauty)
+[Official website](https://kkindle.stacker.beauty) · [Chinese user manual](https://kkindle.stacker.beauty/manual/)
 
 [简体中文](README.zh-CN.md) · **English**
 

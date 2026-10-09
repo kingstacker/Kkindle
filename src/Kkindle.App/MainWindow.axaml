@@ -3289,6 +3289,7 @@
                                                 <WrapPanel Orientation="Horizontal">
                                                     <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,0,18,0" Cursor="Hand" PointerPressed="AboutVersionText_PointerPressed" />
                                                     <TextBlock Text="{DynamicResource Ui.About.UserGroup}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                    <Button Content="{DynamicResource Ui.About.UserManual}" Classes="quiet libraryToolbar" Margin="18,0,0,0" Click="OpenUserManualButton_Click" />
                                                     <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="18,0,0,0" Cursor="Hand">
                                                         <ToolTip.Tip>
                                                             <StackPanel Spacing="8">

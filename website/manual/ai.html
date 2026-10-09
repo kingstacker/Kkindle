@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Kkindle 软件使用手册：AI 阅读助手。" />
+    <meta name="theme-color" content="#fbfbfa" />
+    <link rel="canonical" href="https://kkindle.stacker.beauty/manual/ai.html" />
+    <link rel="stylesheet" href="manual.css" />
+    <title>AI 阅读助手 · Kkindle 使用手册</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到正文</a>
+    <header class="manual-header">
+      <a class="brand" href="index.html"><span class="brand-mark">K</span><span>Kkindle 使用手册</span></a>
+      <a class="home-link" href="../index.html">返回官网 ↗</a>
+    </header>
+    <div class="manual-layout">
+      <aside class="manual-sidebar" aria-label="手册目录">
+        <p class="sidebar-kicker">USER GUIDE · 简体中文</p>
+        <h2>按任务查阅</h2>
+        <nav><a href="index.html">开始使用</a>
+<a href="install.html">安装与初次启动</a>
+<a href="library.html">书库与导入</a>
+<a href="reader.html">阅读与批注</a>
+<a href="kindle.html">Kindle 与传书</a>
+<a href="ai.html" aria-current="page">AI 阅读助手</a>
+<a href="data.html">备份与同步</a>
+<a href="settings.html">设置与词典</a>
+<a href="help.html">常见问题</a></nav>
+        <p class="sidebar-note">按钮名称以你安装的 Kkindle 版本为准。</p>
+      </aside>
+      <main class="manual-content" id="content">
+        <p class="eyebrow">KKINDLE · 使用手册</p>
+        <article><h1>AI 阅读助手</h1>
+<p>AI 助手可以围绕当前书籍回答问题、解释选文、总结章节和生成全书概览。先配置服务商，再打开书籍右侧的 AI 对话面板。</p>
+<p><img src="images/ai.webp" alt="阅读器中的 AI 对话面板" loading="lazy" /></p>
+<h2>第一次配置</h2>
+<ol>
+<li>打开“设置 → 阅读与辅助”，找到 AI 阅读助手区域。</li>
+<li>开启“启用 AI 阅读助手”。</li>
+<li>选择服务商，填写 API 地址、API Key 和模型名称。使用 OpenAI 兼容接口时，按服务商要求填写完整 API 地址。</li>
+<li>点击保存；若服务提供模型列表，可先自动获取，再选择实际可用模型。</li>
+<li>点击“测试连接”或连通性检测。通过后打开一本书，在阅读器中展开 AI 面板。</li>
+</ol>
+<p>Kkindle 支持 DeepSeek、OpenAI 兼容接口等配置。接口路径、模型名、兼容方式和计费规则由服务商决定；连接失败时先核对地址、模型、网络、账号权限和余额。</p>
+<h2>在阅读时使用</h2>
+<ul>
+<li><strong>自由提问</strong>：在面板输入与当前书籍相关的问题，发送后查看回答。</li>
+<li><strong>解释选文</strong>：先在正文选择一段文字，再调用解释操作。问题会带上当前选文作为上下文。</li>
+<li><strong>总结章节</strong>：从总结操作指定章节范围。发送前确认选中的章节和文本范围。</li>
+<li><strong>全书概览</strong>：适合询问主题、人物关系或整体结构。篇幅较长时等待索引/摘要准备完成。</li>
+<li><strong>继续追问</strong>：在当前对话中补充条件或要求引用对应段落。</li>
+</ul>
+<p>“清空”会清除当前对话内容；书签和阅读批注在阅读器中单独管理。</p>
+<h2>数据范围与隐私</h2>
+<p>书籍文件和阅读记录默认保存在本机。使用在线 AI 时，Kkindle 会把回答所需的相关本地书籍片段发送到你配置的服务；服务商如何保存和使用这些数据，请以其政策为准。不要发送你无权披露的书籍或个人信息。</p>
+<p>API Key 通过系统安全存储管理，不会写进 <code>.kkindle</code> 本地书库备份。若更换电脑，需要在新设备重新配置凭据。关闭 Kkindle 的网络功能后，AI 与其他联网功能不可用，本地阅读和已安装的词典仍可使用。</p></article>
+        <nav class="page-steps" aria-label="手册分页"><a class="page-step" rel="prev" href="kindle.html">← Kindle 与传书</a><a class="page-step next" rel="next" href="data.html">备份与同步 →</a></nav>
+        <footer class="manual-footer">
+          <span>手册内容随软件功能更新。</span>
+          <a href="https://github.com/kingstacker/Kkindle/tree/master/docs/manual/zh-CN" target="_blank" rel="noreferrer">查看 Markdown 源文件 ↗</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

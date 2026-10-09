@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Kkindle 软件使用手册：安装与初次启动。" />
+    <meta name="theme-color" content="#fbfbfa" />
+    <link rel="canonical" href="https://kkindle.stacker.beauty/manual/install.html" />
+    <link rel="stylesheet" href="manual.css" />
+    <title>安装与初次启动 · Kkindle 使用手册</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到正文</a>
+    <header class="manual-header">
+      <a class="brand" href="index.html"><span class="brand-mark">K</span><span>Kkindle 使用手册</span></a>
+      <a class="home-link" href="../index.html">返回官网 ↗</a>
+    </header>
+    <div class="manual-layout">
+      <aside class="manual-sidebar" aria-label="手册目录">
+        <p class="sidebar-kicker">USER GUIDE · 简体中文</p>
+        <h2>按任务查阅</h2>
+        <nav><a href="index.html">开始使用</a>
+<a href="install.html" aria-current="page">安装与初次启动</a>
+<a href="library.html">书库与导入</a>
+<a href="reader.html">阅读与批注</a>
+<a href="kindle.html">Kindle 与传书</a>
+<a href="ai.html">AI 阅读助手</a>
+<a href="data.html">备份与同步</a>
+<a href="settings.html">设置与词典</a>
+<a href="help.html">常见问题</a></nav>
+        <p class="sidebar-note">按钮名称以你安装的 Kkindle 版本为准。</p>
+      </aside>
+      <main class="manual-content" id="content">
+        <p class="eyebrow">KKINDLE · 使用手册</p>
+        <article><h1>安装与初次启动</h1>
+<h2>下载正确的版本</h2>
+<ol>
+<li>打开<a href="https://kkindle.stacker.beauty/#downloads" target="_blank" rel="noreferrer">官网下载页</a>，下载前先确认系统和处理器架构。</li>
+<li>Windows 用户可选安装版（按安装向导完成）或便携版（解压后运行 Kkindle）。两种方式都使用本机的数据目录。</li>
+<li>Linux 用户按发行版选择 <code>.deb</code> 或 <code>tar.gz</code>，并查看<a href="https://github.com/kingstacker/Kkindle/blob/master/docs/cross-platform.md" target="_blank" rel="noreferrer">跨平台说明</a>中的系统依赖。</li>
+<li>macOS 提供 Intel 与 Apple Silicon 版本。按下载页和对应版本发布说明完成首次打开。</li>
+</ol>
+<p>也可以从 <a href="https://github.com/kingstacker/Kkindle/releases" target="_blank" rel="noreferrer">GitHub Releases</a> 下载。请优先查看目标版本的发布说明，再运行安装包。</p>
+<h2>首次运行向导</h2>
+<p>首次运行时先选择界面语言，然后决定是否安装格式转换相关组件。</p>
+<p><img src="images/first-run.png" alt="首次启动的语言与组件选择" loading="lazy" /></p>
+<p>Calibre 是可选项。选择“暂不安装”也可以继续建立书库、导入 TXT、阅读 EPUB/PDF 和无 DRM 的 AZW3。以后需要格式转换或 Kindle 词典导入时，再打开“设置 → 书库与导入”配置即可。</p>
+<h2>检查数据目录与依赖</h2>
+<p>启动后进入“设置 → 关于与更新”，查看版本号和诊断结果。诊断区域可检查数据目录可写状态、PDF 解析器、WebView、Calibre、TTS 和 Kindle 服务。若某项显示未就绪，按该项提示安装依赖或检查权限，再重启 Kkindle。</p>
+<h2>更新软件</h2>
+<p>在“设置 → 关于与更新”点击“检查更新”。稳定版检查默认开启；若主动启用开发版更新，软件也会检查开发构建。更新后若功能仍显示旧状态，完全退出并重新启动应用。</p>
+<h2>Calibre 什么时候需要安装</h2>
+<p>Calibre 用于电子书格式转换、部分 Kindle 传书格式转换以及 Kindle 词典导入。内置支持的阅读格式和 TXT 导入不要求 Calibre。需要转换时先安装 Calibre，再在“设置 → 书库与导入”确认 <code>ebook-convert</code> 路径可用；路径留空时 Kkindle 会尝试自动查找系统安装位置。</p></article>
+        <nav class="page-steps" aria-label="手册分页"><a class="page-step" rel="prev" href="index.html">← 开始使用</a><a class="page-step next" rel="next" href="library.html">书库与导入 →</a></nav>
+        <footer class="manual-footer">
+          <span>手册内容随软件功能更新。</span>
+          <a href="https://github.com/kingstacker/Kkindle/tree/master/docs/manual/zh-CN" target="_blank" rel="noreferrer">查看 Markdown 源文件 ↗</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

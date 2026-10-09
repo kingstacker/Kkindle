@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Kkindle 软件使用手册：Kindle 与传书。" />
+    <meta name="theme-color" content="#fbfbfa" />
+    <link rel="canonical" href="https://kkindle.stacker.beauty/manual/kindle.html" />
+    <link rel="stylesheet" href="manual.css" />
+    <title>Kindle 与传书 · Kkindle 使用手册</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到正文</a>
+    <header class="manual-header">
+      <a class="brand" href="index.html"><span class="brand-mark">K</span><span>Kkindle 使用手册</span></a>
+      <a class="home-link" href="../index.html">返回官网 ↗</a>
+    </header>
+    <div class="manual-layout">
+      <aside class="manual-sidebar" aria-label="手册目录">
+        <p class="sidebar-kicker">USER GUIDE · 简体中文</p>
+        <h2>按任务查阅</h2>
+        <nav><a href="index.html">开始使用</a>
+<a href="install.html">安装与初次启动</a>
+<a href="library.html">书库与导入</a>
+<a href="reader.html">阅读与批注</a>
+<a href="kindle.html" aria-current="page">Kindle 与传书</a>
+<a href="ai.html">AI 阅读助手</a>
+<a href="data.html">备份与同步</a>
+<a href="settings.html">设置与词典</a>
+<a href="help.html">常见问题</a></nav>
+        <p class="sidebar-note">按钮名称以你安装的 Kkindle 版本为准。</p>
+      </aside>
+      <main class="manual-content" id="content">
+        <p class="eyebrow">KKINDLE · 使用手册</p>
+        <article><h1>Kindle 与传书</h1>
+<h2>先连接设备</h2>
+<ol>
+<li>用支持数据传输的 USB 线连接 Kindle，并解锁设备。</li>
+<li>在 Kindle 上选择文件传输/USB 模式；只充电模式不能传书。</li>
+<li>等待 Kkindle 检测设备。左下角设备卡片会显示设备名称和连接状态。</li>
+<li>打开“书籍管理 → 设备书库”确认书籍和容量信息已加载。</li>
+</ol>
+<p><img src="images/kindle.webp" alt="设备书库和已连接 Kindle 的状态" loading="lazy" /></p>
+<p>软件会通过系统的 USB/WPD/MTP 能力连接设备。若没有设备卡片，先换数据线或 USB 端口、确认设备没有锁屏，再检查“设置 → 关于与更新”中的 Kindle 服务诊断。</p>
+<h2>从电脑书库发送到 Kindle</h2>
+<ol>
+<li>在“电脑书库”选择一到多本书。</li>
+<li>点击“发送到设备”，确认目标设备和书籍列表。</li>
+<li>如果某种格式需要转换，Kkindle 会提示或使用已配置的转换工具；EPUB/MOBI 发送到 Kindle 时会转换为兼容的 AZW3。</li>
+<li>等待任务完成，不要在传输过程中拔掉设备。</li>
+<li>完成后点击“安全弹出设备”，再拔线。之后在 Kindle 书库中刷新或重启设备即可查看新书。</li>
+</ol>
+<p>如果目标设备不支持选中的格式，先将书籍转换为受支持格式。格式转换需要 Calibre；转换过程会生成目标格式，不会替换原书。</p>
+<h2>管理设备中的书籍和资源</h2>
+<p>在设备书库中查看设备书目和可用空间。设备管理区域还可以管理字体、词典等资源。词典会写入 Kindle 的 <code>documents/dictionaries</code> 目录；删除前检查 Kindle 当前使用的主词典，避免设备失去默认释义来源。</p>
+<p>部分设备只允许读取或导出笔记，不支持从 Kkindle 写回设备。具体能力以连接后识别到的设备为准。</p>
+<h2>两种在线发送入口</h2>
+<p><strong>Send to Kindle</strong> 使用 Amazon 在线服务，不需要 USB 连接。首次使用时按提示登录 Amazon，确认文件与账号后发送；Kindle 联网后同步接收。登录和传输都发生在该在线服务中，使用前先核对目标账号。</p>
+<p>如果配置了“发送到 Kindle 邮箱”，则走邮件方式。需要在设置中填写发件邮箱及 SMTP/应用专用密码，并核对 Kindle 的收件邮箱和允许的发件地址。密码或应用专用密码只填入 Kkindle 设置，不要写进本地书库或截图。</p>
+<h2>导入 Kindle 摘录</h2>
+<ol>
+<li>将 Kindle 导出的 <code>My Clippings.txt</code> 放到电脑可访问的位置。</li>
+<li>在 Kkindle 打开“阅读资料”中的摘录导入功能，选择该文件。</li>
+<li>导入后到笔记管理或阅读资料中查找摘录。</li>
+</ol>
+<p>导入摘录不会从 Kindle 删除原文件。更换电脑前可将摘录数据包含在本地 <code>.kkindle</code> 备份中。</p></article>
+        <nav class="page-steps" aria-label="手册分页"><a class="page-step" rel="prev" href="reader.html">← 阅读与批注</a><a class="page-step next" rel="next" href="ai.html">AI 阅读助手 →</a></nav>
+        <footer class="manual-footer">
+          <span>手册内容随软件功能更新。</span>
+          <a href="https://github.com/kingstacker/Kkindle/tree/master/docs/manual/zh-CN" target="_blank" rel="noreferrer">查看 Markdown 源文件 ↗</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

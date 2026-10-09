@@ -6105,6 +6105,18 @@ public partial class MainWindow
         }
     }
 
+    private void OpenUserManualButton_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://kkindle.stacker.beauty/manual/") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            ShowSettingsCapsule(T("无法打开使用手册：{0}", UiText.Localize(exception.Message)), 4000);
+        }
+    }
+
     private void KindleEmailCalibreGuideLink_Click(object? sender, RoutedEventArgs e)
     {
         try
