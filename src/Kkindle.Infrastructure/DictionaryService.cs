@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 using Kkindle.Core;
 using MdxParser;
@@ -226,6 +227,39 @@ public sealed class DictionaryService
             if (!string.IsNullOrWhiteSpace(term))
                 AddEntry(result, term, RemoveTermPrefix(ToReadableText(node.InnerHtml), term));
         }
+
+        ExtractSeparatedKindleEntries(html, result);
+    }
+
+    // Older MOBI dictionaries lose their index markup during EPUB conversion,
+    // but retain a bold headword followed by a definition and an <hr> boundary.
+    private static void ExtractSeparatedKindleEntries(string html, IDictionary<string, string> result)
+    {
+        var sections = Regex.Split(html, @"<hr\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (sections.Length < 3) return;
+        foreach (var section in sections)
+        {
+            var fragment = new HtmlDocument();
+            fragment.LoadHtml(section);
+            var headword = fragment.DocumentNode.Descendants().FirstOrDefault(node =>
+                node.Name is "b" or "strong"
+                || (node.Name == "span" && node.GetAttributeValue("class", "")
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("bold", StringComparer.OrdinalIgnoreCase)));
+            if (headword is null) continue;
+
+            // Text before a headword is a continuation or front matter, not a new entry.
+            var firstText = fragment.DocumentNode.Descendants().FirstOrDefault(node =>
+                node.NodeType == HtmlNodeType.Text && !string.IsNullOrWhiteSpace(WebUtility.HtmlDecode(node.InnerText))
+                && !node.Ancestors().Any(parent => parent.Name is "head" or "style" or "script"));
+            if (firstText is null || !firstText.Ancestors().Contains(headword)) continue;
+
+            // Pronunciation lives in a nested span; it is not part of the lookup key.
+            var term = ToReadableText(string.Concat(headword.ChildNodes
+                .Where(node => node.Name is not "span").Select(node => node.OuterHtml)));
+            if (term.Length == 0 || term.Length > 128 || !term.Any(char.IsLetter)) continue;
+            headword.Remove();
+            AddEntry(result, term, ToReadableText(fragment.DocumentNode.InnerHtml));
+        }
     }
 
 
@@ -272,7 +306,8 @@ public sealed class DictionaryService
     private static void AppendReadableText(HtmlNode node, StringBuilder builder)
     {
         var name = LocalName(node.Name);
-        if (name.Equals("script", StringComparison.OrdinalIgnoreCase)
+        if (name.Equals("head", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("script", StringComparison.OrdinalIgnoreCase)
             || name.Equals("style", StringComparison.OrdinalIgnoreCase))
             return;
         if (name.Equals("br", StringComparison.OrdinalIgnoreCase))

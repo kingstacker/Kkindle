@@ -196,6 +196,28 @@ public sealed class ProductivityFeatureTests
     }
 
     [Fact]
+    public void KindleDictionaryReadsBoldHeadwordsSeparatedByRules()
+    {
+        var entries = new Dictionary<string, string>();
+        DictionaryService.ExtractKindleEntries("""
+            <html><head><title>现代汉英词典</title></head><body>
+            <p>版权说明</p><hr/>
+            <span class="bold"><a id="filepos593"></a>阿<span> [ā]</span></span><br/>
+            <span class="italic">助</span><br/><span class="bold">1. </span>a prefix<hr/>
+            <span class="bold">阿富汗</span><br/>Afghanistan<hr/>
+            <span class="bold">阿拉伯语</span><br/>Arabic (language)<hr/>
+            continuation <span class="bold">2. </span>another sense<hr/>
+            </body></html>
+            """, entries);
+
+        Assert.Equal(3, entries.Count);
+        Assert.Contains("a prefix", entries["阿"]);
+        Assert.Equal("Afghanistan", entries["阿富汗"]);
+        Assert.Equal("Arabic (language)", entries["阿拉伯语"]);
+        Assert.DoesNotContain("阿 [ā]", entries.Keys);
+    }
+
+    [Fact]
     public async Task FontLibraryCopiesListsAndRemovesManagedFont()
     {
         var root = TestHelpers.CreateTempDirectory();

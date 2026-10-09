@@ -137,8 +137,11 @@ public sealed class EpubReaderTests
         finally { TestHelpers.TryDelete(root); }
     }
 
-    [Fact]
-    public async Task DoesNotTreatFootnoteLinksAsNavigationEntries()
+    [Theory]
+    [InlineData("[1]", "note1", "note1n")]
+    [InlineData("［1］", "note1", "note1n")]
+    [InlineData("〔1〕", "id1", "id1a")]
+    public async Task DoesNotTreatFootnoteLinksAsNavigationEntries(string marker, string reference, string note)
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -156,18 +159,19 @@ public sealed class EpubReaderTests
                     </manifest>
                     <spine toc="ncx"><itemref idref="chapter" /></spine></package>
                     """);
-                TestHelpers.AddZipEntry(archive, "toc.ncx", """
+                TestHelpers.AddZipEntry(archive, "toc.ncx", $$"""
                     <ncx><navMap>
                       <navPoint><navLabel><text>第一章</text></navLabel><content src="chapter.xhtml" /></navPoint>
+                      <navPoint><navLabel><text>{{marker}}</text></navLabel><content src="chapter.xhtml#{{note}}" /></navPoint>
                     </navMap></ncx>
                     """);
-                TestHelpers.AddZipEntry(archive, "chapter.xhtml", """
+                TestHelpers.AddZipEntry(archive, "chapter.xhtml", $$"""
                     <html xmlns="http://www.w3.org/1999/xhtml"><body>
                       <h2 id="sigil_toc_id_1">第一章</h2>
-                      <p>正文<sup><a href="#note1n" id="note1">[1]</a></sup>继续。</p>
+                      <p>正文<sup><a href="#{{note}}" id="{{reference}}">{{marker}}</a></sup>继续。</p>
                       <p>更多正文<sup><a href="#note2n" id="note2">［2］</a></sup>。</p>
                       <div class="fnote">
-                        <p><a href="#note1" id="note1n">[1]</a>第一条脚注</p>
+                        <p><a href="#{{reference}}" id="{{note}}">{{marker}}</a>第一条脚注</p>
                         <p><a href="#note2" id="note2n">［2］</a>第二条脚注</p>
                       </div>
                     </body></html>
@@ -180,6 +184,7 @@ public sealed class EpubReaderTests
                 .PrepareAsync(epub, new string('f', 64));
 
             Assert.Equal(["第一章"], document.Navigation.Select(item => item.Title));
+            Assert.Contains($"id=\"{note}\"", await File.ReadAllTextAsync(document.Chapters[0]));
             Assert.DoesNotContain(document.Navigation, item => item.Title is "[1]" or "［2］");
         }
         finally { TestHelpers.TryDelete(root); }
