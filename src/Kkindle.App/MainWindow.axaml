@@ -4298,6 +4298,7 @@
                         <Grid x:Name="ReaderSearchPanel" IsVisible="False">
                             <Grid RowDefinitions="Auto,Auto,*">
                                 <TextBox x:Name="ReaderTocSearchBox"
+                                         Classes="readerMinimalField"
                                          Margin="14,4,14,10"
                                          Height="34"
                                          Padding="10,5"

@@ -1235,6 +1235,14 @@ public sealed class XhtmlChapterLoader
             }
 
             FlushPlainFootnote(currentKey, currentText, notes);
+            // Linked note definitions already have explicit body references.
+            // Do not also infer references from unrelated numbered prose.
+            foreach (var anchor in noteBlocks.SelectMany(block => block.Descendants())
+                         .Where(node => node.Name.LocalName == "a" && GetHrefFragment((string?)node.Attribute("href")) is not null))
+            {
+                if (TryReadPlainFootnoteMarkerAtStart(anchor.Value, out var linkedKey, out _))
+                    notes.Remove(linkedKey);
+            }
             if (notes.Count == 0)
             {
                 continue;
