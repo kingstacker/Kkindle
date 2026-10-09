@@ -5451,6 +5451,7 @@ public partial class MainWindow
         // can yield to the dispatcher; without claiming it here, a manual
         // click and an automatic tick could both start an S3 operation.
         _s3SyncBusy = true;
+        _crossProcessDataRefreshTimer?.Stop();
         _s3TestConnectionCancellation?.Cancel();
         _s3SyncCancellation = cancellation;
         if (!silent) _s3SyncCancelledByUser = false;
@@ -5597,6 +5598,9 @@ public partial class MainWindow
                 catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
                 catch (Exception exception) { Debug.WriteLine($"S3 library refresh failed: {exception.Message}"); }
             }
+            // Cover delayed WAL/checkpoint notifications from our own sync.
+            // Real service DataChanged events still advance the pending version.
+            _lastInProcessDataChangeUtc = DateTime.UtcNow;
             _s3SyncBusy = false;
             _s3SyncCancellation = null;
             _s3SyncCompletion?.TrySetResult(succeeded);

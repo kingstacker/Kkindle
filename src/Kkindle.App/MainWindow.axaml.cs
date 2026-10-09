@@ -1108,10 +1108,13 @@ public partial class MainWindow : Window
 
     private void ScheduleCrossProcessDatabaseRefresh()
     {
-        if (_lifetimeCancellation.IsCancellationRequested) return;
+        // Sync writes the database directly, without service DataChanged events.
+        // Capture this before posting: the sync may finish before dispatch.
+        if (_lifetimeCancellation.IsCancellationRequested || _s3SyncBusy) return;
         Dispatcher.UIThread.Post(() =>
         {
             if (_lifetimeCancellation.IsCancellationRequested
+                || _s3SyncBusy
                 || DateTime.UtcNow - _lastInProcessDataChangeUtc < TimeSpan.FromSeconds(2))
                 return;
             _crossProcessDataRefreshTimer?.Stop();
@@ -1122,7 +1125,7 @@ public partial class MainWindow : Window
     private async void CrossProcessDataRefreshTimer_Tick(object? sender, EventArgs e)
     {
         _crossProcessDataRefreshTimer?.Stop();
-        if (_crossProcessRefreshBusy || _lifetimeCancellation.IsCancellationRequested) return;
+        if (_crossProcessRefreshBusy || _s3SyncBusy || _lifetimeCancellation.IsCancellationRequested) return;
         _crossProcessRefreshBusy = true;
         try
         {
