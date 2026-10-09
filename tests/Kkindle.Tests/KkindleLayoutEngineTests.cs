@@ -1333,6 +1333,20 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         Assert.True(layout.GetPageIndexOfFragment("footnote-1") >= 0);
     }
 
+    [Fact]
+    public void Loader_RendersTheTargetedFootnoteWithoutChangingItsTextOffset()
+    {
+        var path = WriteChapter("<p>正文。</p>"
+            + "<aside id='footnote-1'><p>第一条脚注。</p></aside>"
+            + "<aside id='footnote-2'><p>第二条脚注。</p></aside>");
+        var hidden = new XhtmlChapterLoader().Load(path);
+        var revealed = new XhtmlChapterLoader(visibleFootnoteFragment: "footnote-1").Load(path);
+        Assert.Equal(hidden.BodyText, revealed.BodyText);
+        Assert.Equal(hidden.FragmentTextOffsets["footnote-1"], revealed.FragmentTextOffsets["footnote-1"]);
+        Assert.Contains(revealed.Blocks.SelectMany(block => block.Items), item => item.Text.Contains("第一条脚注"));
+        Assert.DoesNotContain(revealed.Blocks.SelectMany(block => block.Items), item => item.Text.Contains("第二条脚注"));
+    }
+
     [Theory]
     [InlineData(TypesetWritingMode.HorizontalTb)]
     [InlineData(TypesetWritingMode.VerticalRl)]

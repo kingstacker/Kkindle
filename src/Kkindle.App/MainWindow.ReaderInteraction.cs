@@ -6026,6 +6026,10 @@ public partial class MainWindow
             // selection changes while the old page remains visible.
             nativeReader.SeekToBoundary(toEnd: false);
         }
+        else if (intent == ReaderNavigationIntent.Footnote && !string.IsNullOrWhiteSpace(nativeFragment))
+        {
+            await nativeReader.RevealFootnoteAsync(nativeFragment);
+        }
         else if (!string.IsNullOrWhiteSpace(nativeFragment))
         {
             nativeReader.ScrollToFragment(nativeFragment);
@@ -7302,7 +7306,14 @@ public partial class MainWindow
                         var showFootnote = root.TryGetProperty("footnote", out var footnote)
                             && footnote.ValueKind == JsonValueKind.True;
                         var hrefText = href.GetString() ?? string.Empty;
-                        if (showFootnote && CurrentReaderHost is NativeReaderHost)
+                        var navigateFootnote = showFootnote
+                            && root.TryGetProperty("navigate", out var navigate)
+                            && navigate.ValueKind == JsonValueKind.True;
+                        if (navigateFootnote)
+                        {
+                            _ = ObserveReaderTaskAsync(HandleReaderLinkAsync(hrefText, true));
+                        }
+                        else if (showFootnote && CurrentReaderHost is NativeReaderHost)
                         {
                             Point? placementPoint = null;
                             if (root.TryGetProperty("x", out var linkX)

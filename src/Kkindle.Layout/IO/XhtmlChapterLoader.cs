@@ -56,9 +56,12 @@ public sealed class XhtmlChapterLoader
     private string _resourceRoot = string.Empty;
     private CancellationToken _cancellationToken;
 
-    public XhtmlChapterLoader(bool paragraphIndent = true)
+    private readonly string? _visibleFootnoteFragment;
+
+    public XhtmlChapterLoader(bool paragraphIndent = true, string? visibleFootnoteFragment = null)
     {
         _paragraphIndent = paragraphIndent;
+        _visibleFootnoteFragment = visibleFootnoteFragment;
     }
 
     public ChapterContent Load(string chapterPath, CancellationToken cancellationToken = default)
@@ -340,7 +343,7 @@ public sealed class XhtmlChapterLoader
     private void HandleFlowElement(XElement element, FlowContext ctx)
     {
         var local = element.Name.LocalName.ToLowerInvariant();
-        if (IsFootnoteDefinition(element))
+        if (IsFootnoteDefinition(element) && !ContainsVisibleFootnoteTarget(element))
         {
             FlushParagraph(ctx);
             PreserveFootnoteDefinition(element);
@@ -530,7 +533,7 @@ public sealed class XhtmlChapterLoader
     private void WalkInlineElement(XElement element, FlowContext ctx)
     {
         var local = element.Name.LocalName.ToLowerInvariant();
-        if (IsFootnoteDefinition(element))
+        if (IsFootnoteDefinition(element) && !ContainsVisibleFootnoteTarget(element))
         {
             FlushParagraph(ctx);
             PreserveFootnoteDefinition(element);
@@ -762,6 +765,10 @@ public sealed class XhtmlChapterLoader
             }
         }
     }
+
+    private bool ContainsVisibleFootnoteTarget(XElement element) =>
+        !string.IsNullOrEmpty(_visibleFootnoteFragment)
+        && element.DescendantsAndSelf().Any(node => Id(node) == _visibleFootnoteFragment);
 
     private void PreserveFootnoteDefinition(XElement element)
     {
@@ -2035,6 +2042,14 @@ public sealed class XhtmlChapterLoader
     private static bool IsLegacyFootnoteReference(string? href, XElement element)
     {
         var targetFragment = GetHrefFragment(href);
+        var referenceId = Id(element);
+        if (referenceId is not null
+            && Regex.IsMatch(referenceId, @"^id\d+$", RegexOptions.CultureInvariant)
+            && targetFragment == referenceId + "a"
+            && Regex.IsMatch(element.Value.Trim(), @"^[\[［〔]\s*\d+\s*[\]］〕]$", RegexOptions.CultureInvariant))
+        {
+            return true;
+        }
         if (!HasNumericIdPrefix(targetFragment, 'm'))
         {
             return false;

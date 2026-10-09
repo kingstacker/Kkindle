@@ -249,6 +249,62 @@ public sealed class ReaderTests(SettingsUiSession session)
         scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
     });
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task DoubleClickingFootnoteRequestsNavigationAndRendersTheDefinition(bool vertical) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var host = new NativeReaderHost();
+        var path = Path.Combine(scope.Paths.ReaderCache, "footnote.xhtml");
+        await File.WriteAllTextAsync(path,
+            "<html><body><p>正文<a class='zy' href='#id2a' id='id2'>〔2〕</a>。</p>"
+            + string.Concat(Enumerable.Repeat("<p>填充正文，确保脚注需要跳转到后续页面。</p>", 80))
+            + "<p class='zs'><a href='#id2' id='id2a'>〔2〕</a>双击跳转后显示的脚注正文。</p></body></html>");
+        scope.Get<ContentControl>("ReaderActiveHostSlot").Content = host;
+        scope.Get<Control>("LibraryRoot").IsVisible = false;
+        scope.Get<Control>("ReaderRoot").IsVisible = true;
+        await Render();
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.NavigationCompleted += (_, args) => { if (args.IsSuccess) ready.TrySetResult(); };
+        var settings = new ReaderLayoutSettings(VerticalWriting: vertical);
+        host.Navigate(new Uri(path), settings, false);
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Render();
+        var layout = NativeField<ChapterLayout>(host, "_layout");
+        var zone = Assert.Single(layout.Pages[0].HotZones);
+        Assert.Equal(HotZoneKind.FootnoteMarker, zone.Kind);
+        var point = host.TranslatePoint(new Point(zone.Rect.MidX, zone.Rect.MidY), scope.Window)!.Value;
+        var links = new List<string>();
+        host.WebMessageReceived += (_, args) =>
+        {
+            using var message = System.Text.Json.JsonDocument.Parse(args.Body!);
+            if (message.RootElement.GetProperty("type").GetString() == "link") links.Add(args.Body!);
+        };
+        scope.Window.MouseDown(point, Avalonia.Input.MouseButton.Left);
+        scope.Window.MouseUp(point, Avalonia.Input.MouseButton.Left);
+        scope.Window.MouseDown(point, Avalonia.Input.MouseButton.Left);
+        scope.Window.MouseUp(point, Avalonia.Input.MouseButton.Left);
+        Assert.Equal(2, links.Count);
+        using var first = System.Text.Json.JsonDocument.Parse(links[0]);
+        using var second = System.Text.Json.JsonDocument.Parse(links[1]);
+        Assert.False(first.RootElement.GetProperty("navigate").GetBoolean());
+        Assert.True(second.RootElement.GetProperty("navigate").GetBoolean());
+        ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        scope.Set("_readerActiveHost", host);
+        scope.Set("_readerDocument", new EpubReaderDocument(scope.Paths.ReaderCache, [path], [], []));
+        await scope.Call<Task>("ApplyReaderLocationAsync", host, new Uri(zone.Href), CancellationToken.None,
+            ReaderNavigationIntent.Footnote, false);
+        await Render();
+        Assert.True(host.CurrentPage > 0);
+        Assert.Equal(NativeField<ChapterLayout>(host, "_layout").GetPageIndexOfFragment("id2a"), host.CurrentPage);
+        Assert.Contains(NativeField<ChapterContent>(host, "_content").Blocks.SelectMany(block => block.Items),
+            item => item.Text.Contains("双击跳转后显示"));
+        Capture(scope.Window, vertical ? "footnote-double-click-vertical" : "footnote-double-click");
+        scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
+        scope.Set("_readerActiveHost", null);
+    });
+
     private static T NativeField<T>(NativeReaderHost host, string name) =>
         (T)typeof(NativeReaderHost).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(host)!;
 
