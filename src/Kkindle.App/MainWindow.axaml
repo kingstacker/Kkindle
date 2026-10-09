@@ -231,6 +231,17 @@
         <Style Selector="ContextMenu.shelfViewMenu MenuItem:pointerover /template/ TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
+        <Style Selector="Button.medalCount">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="MinWidth" Value="24" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.medalCount.active">
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
     </Window.Styles>
 
     <!-- The content reaches the client-area edges. Resize handles are layered
@@ -2427,8 +2438,10 @@
                                 <Grid ColumnDefinitions="*,Auto">
                                     <TextBlock x:Name="DashboardMedalsTitle" FontSize="16" FontWeight="SemiBold" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                                        <CheckBox x:Name="ShowUnearnedReadingMedalsCheck" Content="{DynamicResource Ui.ReadingMedals.ShowUnearned}" FontSize="11" IsChecked="False" />
                                         <TextBlock x:Name="DashboardMedalsSummary" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
+                                        <Button x:Name="DashboardUnlockedMedalsButton" Classes="quiet medalCount" Click="DashboardUnlockedMedalsButton_Click" />
+                                        <TextBlock Text="/" FontSize="11" VerticalAlignment="Center" />
+                                        <Button x:Name="DashboardAllMedalsButton" Classes="quiet medalCount" Click="DashboardAllMedalsButton_Click" />
                                     </StackPanel>
                                 </Grid>
                                 <WrapPanel x:Name="DashboardMedalsPanel" />
@@ -2523,7 +2536,7 @@
                                 <ToggleSwitch x:Name="GridGalleryDisplayCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.694BA13A98D0252A}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.DA96E037499D9296}" AutomationProperties.Name="{DynamicResource Ui.Auto.DA96E037499D9296}" />
                                 <ToggleSwitch x:Name="ShowSyncStatusIconCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.ShowSyncStatusIconHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Library.ShowSyncStatusIcon}" AutomationProperties.Name="{DynamicResource Ui.Library.ShowSyncStatusIcon}" />
                                 <ToggleSwitch x:Name="ShowLibraryPresenceIconCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.ShowPresenceIconHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Library.ShowPresenceIcon}" AutomationProperties.Name="{DynamicResource Ui.Library.ShowPresenceIcon}" />
-                                <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.F6A273284E344858}" AutomationProperties.Name="{DynamicResource Ui.Auto.F6A273284E344858}" />
+                                <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.CollectionsMutuallyExclusiveHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.F6A273284E344858}" AutomationProperties.Name="{DynamicResource Ui.Auto.F6A273284E344858}" />
                                 <ToggleSwitch x:Name="AutoDoubanMatchCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.4799DAF25FD6C6CC}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" AutomationProperties.Name="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" />
                                 <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.8B0CC19DB0791E72}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.55A2226420BCBF78}" AutomationProperties.Name="{DynamicResource Ui.Auto.55A2226420BCBF78}" />
                                 <Expander x:Name="SettingsCalibreExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.39F073ED740B19B8}" Tag="{DynamicResource Ui.Auto.76B87E0C608BEE4A}" AutomationProperties.Name="{DynamicResource Ui.Auto.39F073ED740B19B8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
@@ -6381,9 +6394,22 @@
                                                            TextWrapping="Wrap" />
                                                 <Button x:Name="ReaderDictionaryWikipediaOpenButton"
                                                         Grid.Column="1"
-                                                        Classes="quiet"
+                                                        Classes="quiet icon"
+                                                        Width="32" MinWidth="32" Height="32" Padding="0"
+                                                        Background="Transparent" BorderThickness="0"
+                                                        ToolTip.Tip="{DynamicResource Ui.Auto.3665885A4FDCEC0A}"
+                                                        AutomationProperties.Name="{DynamicResource Ui.Auto.3665885A4FDCEC0A}"
                                                         Content="{DynamicResource Ui.Auto.3665885A4FDCEC0A}"
-                                                        Click="ReaderDictionaryWikipediaOpenButton_Click" />
+                                                        Click="ReaderDictionaryWikipediaOpenButton_Click">
+                                                    <Button.ContentTemplate>
+                                                        <DataTemplate>
+                                                            <Path Width="18" Height="18" Stretch="Uniform"
+                                                                  Stroke="{DynamicResource ReaderInkBrush}" StrokeThickness="1.4"
+                                                                  StrokeLineCap="Round" StrokeJoin="Round"
+                                                                  Data="M 14,3 H 21 V 10 M 21,3 L 11,13 M 10,4 H 4 V 21 H 21 V 14" />
+                                                        </DataTemplate>
+                                                    </Button.ContentTemplate>
+                                                </Button>
                                             </Grid>
                                         </StackPanel>
                                     </StackPanel>
@@ -6600,11 +6626,11 @@
                         <Grid Margin="28,28,28,24"
                               MinHeight="360">
                             <Grid x:Name="OnboardingWelcomePage"
-                                  RowDefinitions="Auto,Auto,Auto,Auto"
-                                  RowSpacing="18"
+                                  RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                                  RowSpacing="10"
                                   HorizontalAlignment="Stretch">
                                 <TextBlock Text="{DynamicResource Ui.Onboarding.WelcomeTitle}"
-                                           FontSize="34"
+                                           FontSize="30"
                                            FontWeight="Bold"
                                            HorizontalAlignment="Stretch"
                                            TextAlignment="Left" />
@@ -6623,8 +6649,8 @@
                                            TextAlignment="Left"
                                            TextWrapping="Wrap" />
                                 <Border Grid.Row="3"
-                                        Margin="0,12,0,0"
-                                        Padding="16"
+                                        Margin="0,0,0,0"
+                                        Padding="12"
                                         Background="{DynamicResource SoftHoverBrush}"
                                         BorderBrush="{DynamicResource HairlineBrush}"
                                         BorderThickness="1">
@@ -6654,6 +6680,16 @@
                                                    TextWrapping="Wrap" />
                                     </Grid>
                                 </Border>
+                                <StackPanel Grid.Row="4" Spacing="8">
+                                    <TextBlock Text="{DynamicResource Ui.Onboarding.CalibrePrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{DynamicResource Ui.Onboarding.CalibreHelp}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button x:Name="OnboardingInstallCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreYes}" Click="OnboardingInstallCalibreButton_Click" />
+                                        <Button x:Name="OnboardingSkipCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreNo}" Classes="quiet" Click="OnboardingSkipCalibreButton_Click" />
+                                    </StackPanel>
+                                    <ProgressBar x:Name="OnboardingCalibreProgress" Height="3" IsVisible="False" />
+                                    <TextBlock x:Name="OnboardingCalibreStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
+                                </StackPanel>
                             </Grid>
 
                             <Grid x:Name="OnboardingDisclaimerPage"

@@ -115,7 +115,7 @@
     <x:String x:Key="Ui.KindleWeb.Home">Send page</x:String>
     <x:String x:Key="Ui.KindleWeb.Refresh">Refresh</x:String>
     <x:String x:Key="Ui.KindleWeb.OpenInBrowser">Open in browser</x:String>
-    <x:String x:Key="Ui.KindleWeb.BrowserSessionHint">Your system browser uses a separate Amazon session.</x:String>
+    <x:String x:Key="Ui.KindleWeb.BrowserSessionHint">Your system browser uses a separate Amazon session</x:String>
     <x:String x:Key="Ui.KindleWeb.Unavailable">The page could not be opened</x:String>
     <x:String x:Key="Ui.KindleWeb.Retry">Retry</x:String>
     <x:String x:Key="Ui.KindleWeb.FileHint">EPUB, PDF &amp; more · Up to 200 MB per file</x:String>
@@ -165,7 +165,7 @@
     <x:String x:Key="Ui.Auto.2C97F5ECD0B7DBC0">AI translation RPM (requests per minute)</x:String>
     <x:String x:Key="Ui.Auto.2A33E57EC21CE3BA">0 means unlimited; maximum 65,536. Applies only to AI translation.</x:String>
     <x:String x:Key="Ui.Auto.4D6C4A7B0E6E3A11">Software proxy</x:String>
-    <x:String x:Key="Ui.Auto.8B7B5D7E5F3A1C20">Used for Google Translate, pinyin models, Calibre downloads and software updates. Leave empty for a direct connection, e.g. http://127.0.0.1:7890.</x:String>
+    <x:String x:Key="Ui.Auto.8B7B5D7E5F3A1C20">Used for Google Translate, pinyin models, Calibre downloads and software updates. Leave empty for a direct connection, e.g. http://127.0.0.1:7890</x:String>
     <x:String x:Key="Ui.Auto.966A23E84AEDEEA5">Target language</x:String>
     <x:String x:Key="Ui.Auto.354B28C853334568">Original</x:String>
     <x:String x:Key="Ui.Auto.80461C2DECC549DC">Translation</x:String>
@@ -202,7 +202,7 @@
     <x:String x:Key="KindleEmail.Provider.Custom">Other (custom SMTP)</x:String>
     <x:String x:Key="KindleEmail.CustomSmtpTitle">Custom SMTP settings</x:String>
     <x:String x:Key="KindleEmail.TestSend">Test send</x:String>
-    <x:String x:Key="KindleEmail.TestSendHint">Send a no-attachment test email to the Kindle recipient; current settings are not saved.</x:String>
+    <x:String x:Key="KindleEmail.TestSendHint">Send a no-attachment test email to the Kindle recipient; current settings are not saved</x:String>
     <x:String x:Key="Ui.Auto.EC63017A628AB5D9">Device library</x:String>
     <x:String x:Key="Ui.Auto.F117607AC0E397F4">MOBI (convert to EPUB)</x:String>
     <x:String x:Key="Ui.Auto.0F02DA7B32BA56DE">Markdown preserves heading levels; plain text works on any device.</x:String>
@@ -703,7 +703,7 @@
     <x:String x:Key="Ui.Auto.E25D380A21D9203A">AI is not configured. Open Settings and enter an API key.</x:String>
     <x:String x:Key="Ui.Auto.5C42B15DDFBCBA2B">AI is disabled in app settings.</x:String>
     <x:String x:Key="Ui.Auto.F4C32FF8B31F6D3F">AI is ready; answers use only local text from the current book.</x:String>
-    <x:String x:Key="Ui.Auto.8372A76EAD8077A9">Vector search has not been used yet.</x:String>
+    <x:String x:Key="Ui.Auto.8372A76EAD8077A9">Vector search has not been used yet</x:String>
     <x:String x:Key="Ui.Auto.5C5C97257F7FAAC6">The local semantic model is ready; normal book questions will use vector search.</x:String>
     <x:String x:Key="Ui.Auto.6FD9B40B727C8659">This question used the local {0} model for semantic search.</x:String>
     <x:String x:Key="Ui.Auto.2F9F8479C2887BF4">This question did not use the vector model; keyword search was used.</x:String>
@@ -1737,7 +1737,7 @@
     <x:String x:Key="Ui.Auto.A183CEACD829707F">Library &amp; import</x:String>
     <x:String x:Key="Ui.Auto.494315CA7A0FAD60">Reading preferences</x:String>
     <x:String x:Key="Ui.Auto.A43615418478EEAC">Device connection</x:String>
-    <x:String x:Key="Ui.Auto.709BDE6F962E3F2A">Preferences save automatically. Expand a service to edit its configuration.</x:String>
+    <x:String x:Key="Ui.Auto.709BDE6F962E3F2A">Preferences save automatically. Expand a service to edit its configuration</x:String>
     <x:String x:Key="Ui.Auto.39F073ED740B19B8">Calibre conversion</x:String>
     <x:String x:Key="Ui.Auto.76B87E0C608BEE4A">Converter location and KFX plugin</x:String>
     <x:String x:Key="Ui.Auto.CB3794787648BF83">Local fonts &amp; dictionaries</x:String>
@@ -1777,7 +1777,7 @@
     <x:String x:Key="Ui.Auto.02E88CFF84A6ED14">Saving settings…</x:String>
     <x:String x:Key="Ui.Auto.047FD23D813F5592">Sync subdirectory</x:String>
     <x:String x:Key="Ui.Auto.068D72BC52483764">The WebDAV URL cannot contain credentials, query parameters, or fragments. Enter credentials in the fields below.</x:String>
-    <x:String x:Key="Ui.Auto.08E9893FADDB6B0C">sync is not configured. Click to open settings.</x:String>
+    <x:String x:Key="Ui.Auto.08E9893FADDB6B0C">sync is not configured. Click to open settings</x:String>
     <x:String x:Key="Ui.Auto.09A01DC6FBE5BF26">WebDAV {0} failed (HTTP {1}). {2}</x:String>
     <x:String x:Key="Ui.Auto.0E691B9CD05217D5">The sync object has an invalid chunk size.</x:String>
     <x:String x:Key="Ui.Auto.0F02AFE9F0DB63DF">Check read and write permissions for the WebDAV directory.</x:String>
@@ -1852,15 +1852,15 @@
     <x:String x:Key="Ui.Auto.FF91E8BCEE1273B2">A backup task is in progress. Wait for it to finish before syncing with S3.</x:String>
     <x:String x:Key="Sync.ProviderLabel">Sync method</x:String>
     <x:String x:Key="Sync.DownloadBookFilesOnSync">Download full books during sync</x:String>
-    <x:String x:Key="Sync.DownloadBookFilesOnSyncHelp">When off, sync only book metadata and covers; book files download when opened or when you click the download icon.</x:String>
+    <x:String x:Key="Sync.DownloadBookFilesOnSyncHelp">When off, sync only book metadata and covers; book files download when opened or when you click the download icon</x:String>
     <x:String x:Key="Sync.WebDavEndpointLabel">Server URL</x:String>
     <x:String x:Key="Sync.WebDavUsernameLabel">Username</x:String>
     <x:String x:Key="Sync.WebDavPasswordLabel">Password / app password</x:String>
     <x:String x:Key="Sync.WebDavHelp">Enter the URL of an existing WebDAV directory. Sync files will be stored in a subdirectory created automatically. Enter credentials if required; some services use an app password.</x:String>
     <x:String x:Key="Ui.Library.ShowSyncStatusIcon">Show book sync status icons</x:String>
-    <x:String x:Key="Ui.Library.ShowSyncStatusIconHelp">Show unsynced, synced, and not-downloaded icons on library cards.</x:String>
+    <x:String x:Key="Ui.Library.ShowSyncStatusIconHelp">Show unsynced, synced, and not-downloaded icons on library cards</x:String>
     <x:String x:Key="Ui.Library.ShowPresenceIcon">Show library location icons</x:String>
-    <x:String x:Key="Ui.Library.ShowPresenceIconHelp">Show whether each book is in the computer library, the current device, or both.</x:String>
+    <x:String x:Key="Ui.Library.ShowPresenceIconHelp">Show whether each book is in the computer library, the current device, or both</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">The sync subdirectory cannot contain control characters.</x:String>
     <x:String x:Key="Ui.Library.ImportBooks">Import books</x:String>
     <x:String x:Key="Ui.Shelf.Eject">Eject device</x:String>
@@ -1896,7 +1896,7 @@
     <x:String x:Key="Ui.Reader.Settings">Reading settings</x:String>
     <x:String x:Key="Ui.Reader.Appearance">Theme and paper</x:String>
     <x:String x:Key="Ui.Appearance.MainTheme">Main interface theme</x:String>
-    <x:String x:Key="Ui.Appearance.MainThemeHint">Colors for the library, sidebar and settings. Reader themes are set separately.</x:String>
+    <x:String x:Key="Ui.Appearance.MainThemeHint">Colors for the library, sidebar and settings. Reader themes are set separately</x:String>
     <x:String x:Key="Ui.Appearance.Classic">Black &amp; white (default)</x:String>
     <x:String x:Key="Ui.Appearance.Night">Night</x:String>
     <x:String x:Key="Ui.Appearance.Green">Green</x:String>
@@ -2068,7 +2068,7 @@
     <x:String x:Key="Ui.Settings.Category.Advanced">Advanced &amp; integrations</x:String>
     <x:String x:Key="Ui.Settings.Category.About">About &amp; updates</x:String>
     <x:String x:Key="Ui.ReadingMedals.ShowUnearned">Show unearned medals</x:String>
-    <x:String x:Key="Ui.ReadingMedals.Empty">No medals earned yet. Keep reading to unlock them, or select “Show unearned medals” to see all goals.</x:String>
+    <x:String x:Key="Ui.ReadingMedals.Empty">Keep reading to unlock your first medal; click the total count to see all goals</x:String>
     <x:String x:Key="Ui.Auto.670E5DE451163A3C">“{0}” will be removed from the library. “Keep files” leaves local files in place; “Delete file” moves them to the trash, where they can be restored.</x:String>
     <x:String x:Key="Ui.Auto.8D76748B35593384">The selected {0} books will be removed from the library. “Keep files” leaves local files in place; “Delete file” moves them to the trash, where they can be restored.</x:String>
     <x:String x:Key="Ui.Auto.BC5F375BD6CE4A7F">Remove from library</x:String>
@@ -2077,4 +2077,12 @@
     <x:String x:Key="Ui.Auto.49192FE845989F01">Removed “{0}” from the library. Its files remain in Kkindle's data/library folder.</x:String>
     <x:String x:Key="Ui.Auto.3FEDF2EA54D1FE5B">Removed {0} books from the library. Their files remain in Kkindle's data/library folder.</x:String>
     <x:String x:Key="Ui.Auto.46A3EADB229733A1">Move the {1} file of “{0}” to the trash? It can be restored from the trash. Other formats will be kept.</x:String>
+    <x:String x:Key="Ui.Library.CollectionsMutuallyExclusiveHelp">When enabled, each book can belong to only one collection</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibrePrompt">Install Calibre and the KFX Input plugin automatically?</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreHelp">Used for ebook conversion; existing components are skipped. System permission may be required during installation</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreYes">Yes, install automatically</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreNo">No, not now</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreSkipped">Skipped; you can install them later in Settings</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreDone">Calibre and KFX Input are installed and verified</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreFailed">Installation failed; select Yes to retry: {0}</x:String>
 </ResourceDictionary>

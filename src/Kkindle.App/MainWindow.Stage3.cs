@@ -4844,7 +4844,7 @@ public partial class MainWindow
             GridGalleryDisplayCheck.IsChecked = _appSettings.GridGalleryDisplay;
             ShowSyncStatusIconCheck.IsChecked = _appSettings.ShowSyncStatusIcon;
             ShowLibraryPresenceIconCheck.IsChecked = _appSettings.ShowLibraryPresenceIcon;
-            ShowUnearnedReadingMedalsCheck.IsChecked = _appSettings.ShowUnearnedReadingMedals;
+            _showUnearnedReadingMedals = _appSettings.ShowUnearnedReadingMedals;
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
             PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
             PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
@@ -5684,11 +5684,6 @@ public partial class MainWindow
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowSyncStatusIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowLibraryPresenceIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        ShowUnearnedReadingMedalsCheck.IsCheckedChanged += (_, _) =>
-        {
-            if (_readingMedalsDashboard is { } dashboard) PopulateReadingMedals(dashboard);
-            ScheduleAppSettingsAutoSave();
-        };
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
         TranslationAiRpmBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -6148,7 +6143,7 @@ public partial class MainWindow
             LibraryViewMode = _libraryViewMode.ToString(),
             ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
-            ShowUnearnedReadingMedals = ShowUnearnedReadingMedalsCheck.IsChecked == true,
+            ShowUnearnedReadingMedals = _showUnearnedReadingMedals,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
             PinyinContextMenuEnabled = PinyinContextMenuEnabledCheck.IsChecked == true,
             PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,

@@ -115,7 +115,7 @@
     <x:String x:Key="Ui.KindleWeb.Home">发送页面</x:String>
     <x:String x:Key="Ui.KindleWeb.Refresh">刷新</x:String>
     <x:String x:Key="Ui.KindleWeb.OpenInBrowser">在浏览器中打开</x:String>
-    <x:String x:Key="Ui.KindleWeb.BrowserSessionHint">系统浏览器需要单独登录亚马逊账号。</x:String>
+    <x:String x:Key="Ui.KindleWeb.BrowserSessionHint">系统浏览器需要单独登录亚马逊账号</x:String>
     <x:String x:Key="Ui.KindleWeb.Unavailable">暂时无法打开网页</x:String>
     <x:String x:Key="Ui.KindleWeb.Retry">重试</x:String>
     <x:String x:Key="Ui.KindleWeb.FileHint">EPUB、PDF 等 · 单文件最高 200 MB</x:String>
@@ -165,7 +165,7 @@
     <x:String x:Key="Ui.Auto.2C97F5ECD0B7DBC0">AI 翻译 RPM（每分钟请求数）</x:String>
     <x:String x:Key="Ui.Auto.2A33E57EC21CE3BA">0 表示不限制，最大 65536。仅 AI 翻译生效。</x:String>
     <x:String x:Key="Ui.Auto.4D6C4A7B0E6E3A11">软件代理</x:String>
-    <x:String x:Key="Ui.Auto.8B7B5D7E5F3A1C20">用于 Google 翻译、拼音模型、Calibre 下载和软件更新；留空表示直连，例如 http://127.0.0.1:7890。</x:String>
+    <x:String x:Key="Ui.Auto.8B7B5D7E5F3A1C20">用于 Google 翻译、拼音模型、Calibre 下载和软件更新；留空表示直连，例如 http://127.0.0.1:7890</x:String>
     <x:String x:Key="Ui.Auto.966A23E84AEDEEA5">目标语言</x:String>
     <x:String x:Key="Ui.Auto.354B28C853334568">原文</x:String>
     <x:String x:Key="Ui.Auto.80461C2DECC549DC">译文</x:String>
@@ -202,7 +202,7 @@
     <x:String x:Key="KindleEmail.Provider.Custom">其他邮箱（自定义 SMTP）</x:String>
     <x:String x:Key="KindleEmail.CustomSmtpTitle">自定义 SMTP 设置</x:String>
     <x:String x:Key="KindleEmail.TestSend">测试发信</x:String>
-    <x:String x:Key="KindleEmail.TestSendHint">发送一封无附件测试邮件到 Kindle 收件邮箱；不会保存当前设置。</x:String>
+    <x:String x:Key="KindleEmail.TestSendHint">发送一封无附件测试邮件到 Kindle 收件邮箱；不会保存当前设置</x:String>
     <x:String x:Key="Ui.Auto.EC63017A628AB5D9">设备书库</x:String>
     <x:String x:Key="Ui.Auto.F117607AC0E397F4">MOBI（转换为 EPUB）</x:String>
     <x:String x:Key="Ui.Auto.0F02DA7B32BA56DE">Markdown 适合保留标题层级；纯文本适合在任意设备上阅读。</x:String>
@@ -703,7 +703,7 @@
     <x:String x:Key="Ui.Auto.E25D380A21D9203A">AI 尚未配置，请打开设置填写 API Key。</x:String>
     <x:String x:Key="Ui.Auto.5C42B15DDFBCBA2B">AI 已在应用设置中关闭。</x:String>
     <x:String x:Key="Ui.Auto.F4C32FF8B31F6D3F">AI 已就绪；回答只会使用当前书籍的本地文本片段。</x:String>
-    <x:String x:Key="Ui.Auto.8372A76EAD8077A9">尚未进行向量检索。</x:String>
+    <x:String x:Key="Ui.Auto.8372A76EAD8077A9">尚未进行向量检索</x:String>
     <x:String x:Key="Ui.Auto.5C5C97257F7FAAC6">本地语义模型已就绪，普通书籍问答会使用向量检索。</x:String>
     <x:String x:Key="Ui.Auto.6FD9B40B727C8659">本次问答使用了本地 {0} 进行语义检索。</x:String>
     <x:String x:Key="Ui.Auto.2F9F8479C2887BF4">本次问答未使用向量模型，使用关键词检索。</x:String>
@@ -1737,7 +1737,7 @@
     <x:String x:Key="Ui.Auto.A183CEACD829707F">书库与导入</x:String>
     <x:String x:Key="Ui.Auto.494315CA7A0FAD60">阅读偏好</x:String>
     <x:String x:Key="Ui.Auto.A43615418478EEAC">设备连接</x:String>
-    <x:String x:Key="Ui.Auto.709BDE6F962E3F2A">常用偏好自动保存；服务配置展开后编辑。</x:String>
+    <x:String x:Key="Ui.Auto.709BDE6F962E3F2A">常用偏好自动保存；服务配置展开后编辑</x:String>
     <x:String x:Key="Ui.Auto.39F073ED740B19B8">Calibre 格式转换</x:String>
     <x:String x:Key="Ui.Auto.76B87E0C608BEE4A">转换工具路径与 KFX 插件</x:String>
     <x:String x:Key="Ui.Auto.CB3794787648BF83">本地字体与字典</x:String>
@@ -1852,15 +1852,15 @@
     <x:String x:Key="Ui.Auto.FF91E8BCEE1273B2">备份任务正在进行，请完成后再执行 云端同步。</x:String>
     <x:String x:Key="Sync.ProviderLabel">同步方式</x:String>
     <x:String x:Key="Sync.DownloadBookFilesOnSync">同步时下载完整书籍</x:String>
-    <x:String x:Key="Sync.DownloadBookFilesOnSyncHelp">关闭时仅同步书籍元数据和封面；打开书籍或点击下载图标时再下载书籍文件。</x:String>
+    <x:String x:Key="Sync.DownloadBookFilesOnSyncHelp">关闭时仅同步书籍元数据和封面；打开书籍或点击下载图标时再下载书籍文件</x:String>
     <x:String x:Key="Sync.WebDavEndpointLabel">服务地址</x:String>
     <x:String x:Key="Sync.WebDavUsernameLabel">用户名</x:String>
     <x:String x:Key="Sync.WebDavPasswordLabel">密码 / 应用密码</x:String>
     <x:String x:Key="Sync.WebDavHelp">填写已存在的 WebDAV 目录地址；同步文件会自动保存到其下的同步子目录。需要认证时填写用户名和密码，部分服务使用应用密码。</x:String>
     <x:String x:Key="Ui.Library.ShowSyncStatusIcon">显示书籍同步状态图标</x:String>
-    <x:String x:Key="Ui.Library.ShowSyncStatusIconHelp">在书库卡片上显示未同步、已同步和待下载图标。</x:String>
+    <x:String x:Key="Ui.Library.ShowSyncStatusIconHelp">在书库卡片上显示未同步、已同步和待下载图标</x:String>
     <x:String x:Key="Ui.Library.ShowPresenceIcon">显示书库位置图标</x:String>
-    <x:String x:Key="Ui.Library.ShowPresenceIconHelp">在书库卡片上显示电脑书库与当前设备的对应关系。</x:String>
+    <x:String x:Key="Ui.Library.ShowPresenceIconHelp">在书库卡片上显示电脑书库与当前设备的对应关系</x:String>
     <x:String x:Key="Ui.Auto.D71332CE411F5E30">同步子目录不能包含控制字符。</x:String>
     <x:String x:Key="Ui.Library.ImportBooks">导入书籍</x:String>
     <x:String x:Key="Ui.Shelf.Eject">弹出设备</x:String>
@@ -1896,7 +1896,7 @@
     <x:String x:Key="Ui.Reader.Settings">阅读设置</x:String>
     <x:String x:Key="Ui.Reader.Appearance">主题与纸感</x:String>
     <x:String x:Key="Ui.Appearance.MainTheme">主界面主题</x:String>
-    <x:String x:Key="Ui.Appearance.MainThemeHint">书库、侧栏与设置的配色；阅读器主题可单独设置。</x:String>
+    <x:String x:Key="Ui.Appearance.MainThemeHint">书库、侧栏与设置的配色；阅读器主题可单独设置</x:String>
     <x:String x:Key="Ui.Appearance.Classic">黑白（默认）</x:String>
     <x:String x:Key="Ui.Appearance.Night">夜间</x:String>
     <x:String x:Key="Ui.Appearance.Green">绿色</x:String>
@@ -2068,7 +2068,7 @@
     <x:String x:Key="Ui.Settings.Category.Advanced">高级与集成</x:String>
     <x:String x:Key="Ui.Settings.Category.About">关于与更新</x:String>
     <x:String x:Key="Ui.ReadingMedals.ShowUnearned">显示未获得勋章</x:String>
-    <x:String x:Key="Ui.ReadingMedals.Empty">还未获得勋章，继续阅读即可点亮。勾选“显示未获得勋章”可查看全部目标。</x:String>
+    <x:String x:Key="Ui.ReadingMedals.Empty">还未获得勋章，继续阅读即可点亮；点击总数量可查看全部目标</x:String>
     <x:String x:Key="Ui.Auto.670E5DE451163A3C">《{0}》将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。</x:String>
     <x:String x:Key="Ui.Auto.8D76748B35593384">选中的 {0} 本书将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。</x:String>
     <x:String x:Key="Ui.Auto.BC5F375BD6CE4A7F">从书库移除书籍</x:String>
@@ -2077,4 +2077,12 @@
     <x:String x:Key="Ui.Auto.49192FE845989F01">已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。</x:String>
     <x:String x:Key="Ui.Auto.3FEDF2EA54D1FE5B">已从书库移除 {0} 本书，文件保留在 Kkindle 的 data/library 目录。</x:String>
     <x:String x:Key="Ui.Auto.46A3EADB229733A1">确定将《{0}》的 {1} 文件移入回收站吗？可在回收站恢复，其他格式不受影响。</x:String>
+    <x:String x:Key="Ui.Library.CollectionsMutuallyExclusiveHelp">开启后，每本书只能属于一个收藏夹</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibrePrompt">是否自动安装 Calibre 和 KFX Input 插件</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreHelp">用于电子书格式转换；已安装的组件会自动跳过，安装过程中可能需要系统授权</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreYes">是，自动安装</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreNo">否，暂不安装</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreSkipped">暂不安装，可稍后在设置中安装</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreDone">Calibre 和 KFX Input 插件均已安装并验证</x:String>
+    <x:String x:Key="Ui.Onboarding.CalibreFailed">安装失败，可点击“是，自动安装”重试：{0}</x:String>
 </ResourceDictionary>
