@@ -9,6 +9,21 @@ namespace Kkindle;
 public partial class MainWindow
 {
     private ReadingDashboard? _readingMedalsDashboard;
+    private bool _showUnearnedReadingMedals;
+
+    private void DashboardUnlockedMedalsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => SetReadingMedalsVisibility(false);
+
+    private void DashboardAllMedalsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => SetReadingMedalsVisibility(true);
+
+    private void SetReadingMedalsVisibility(bool showAll)
+    {
+        if (_showUnearnedReadingMedals == showAll) return;
+        _showUnearnedReadingMedals = showAll;
+        if (_readingMedalsDashboard is { } dashboard) PopulateReadingMedals(dashboard);
+        ScheduleAppSettingsAutoSave(showSavedStatus: false);
+    }
 
     private void PopulateReadingMedals(ReadingDashboard dashboard)
     {
@@ -87,11 +102,20 @@ public partial class MainWindow
             "留下 {0} 条批注", "Write {0} annotations", 1,
             "M3,4 L21,4 L21,17 L15,17 L12,21 L9,17 L3,17 Z M7,8 L17,8 M7,12 L14,12");
         DashboardMedalsTitle.Text = L("阅读勋章", "Reading medals");
-        DashboardMedalsSummary.Text = L($"已解锁 {medals.Count(m => m.Value >= m.Target)} / {medals.Count}",
-            $"{medals.Count(m => m.Value >= m.Target)} / {medals.Count} unlocked");
+        DashboardMedalsSummary.Text = L("已解锁", "Unlocked");
+        DashboardUnlockedMedalsButton.Content = medals.Count(m => m.Value >= m.Target).ToString();
+        DashboardAllMedalsButton.Content = medals.Count.ToString();
+        DashboardUnlockedMedalsButton.Classes.Set("active", !_showUnearnedReadingMedals);
+        DashboardAllMedalsButton.Classes.Set("active", _showUnearnedReadingMedals);
+        ToolTip.SetTip(DashboardUnlockedMedalsButton, L("只显示已解锁勋章", "Show unlocked medals only"));
+        ToolTip.SetTip(DashboardAllMedalsButton, L("显示全部勋章", "Show all medals"));
+        Avalonia.Automation.AutomationProperties.SetName(DashboardUnlockedMedalsButton,
+            L($"显示 {DashboardUnlockedMedalsButton.Content} 枚已解锁勋章", $"Show {DashboardUnlockedMedalsButton.Content} unlocked medals"));
+        Avalonia.Automation.AutomationProperties.SetName(DashboardAllMedalsButton,
+            L($"显示全部 {medals.Count} 枚勋章", $"Show all {medals.Count} medals"));
         DashboardMedalsPanel.Children.Clear();
         var visibleMedals = medals
-            .Where(m => m.Value >= m.Target || ShowUnearnedReadingMedalsCheck.IsChecked == true)
+            .Where(m => m.Value >= m.Target || _showUnearnedReadingMedals)
             .OrderByDescending(m => m.Value >= m.Target)
             .ToArray();
         DashboardMedalsEmptyText.IsVisible = visibleMedals.Length == 0;

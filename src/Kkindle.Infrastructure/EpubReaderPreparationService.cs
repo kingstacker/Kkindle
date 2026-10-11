@@ -33,7 +33,7 @@ public sealed class EpubReaderPreparationService
     private const int MaximumEpubEntries = 100_000;
     private const string ExtractionReadyFileName = ".kkindle-extracted";
     private const string ReaderIndexFileName = ".kkindle-reader-index.json";
-    private const string ReaderIndexFormatVersion = "2";
+    private const string ReaderIndexFormatVersion = "3";
     private const int PhysicalTocFullScanChapterLimit = 256;
     // Bump whenever sanitization changes. Existing reader caches otherwise
     // keep stale sanitized markup indefinitely.
@@ -847,7 +847,8 @@ public sealed class EpubReaderPreparationService
         var href = GetAttributeValue(element, "href");
         var fragment = href?.Split('#', 2).ElementAtOrDefault(1);
         return IsFootnoteMarker(element.Value)
-            && (LooksLikeFootnoteIdentifier(id) || LooksLikeFootnoteIdentifier(fragment));
+            && (LooksLikeFootnoteIdentifier(id) || LooksLikeFootnoteIdentifier(fragment)
+                || LooksLikeNumberedNoteIdentifier(id) || LooksLikeNumberedNoteIdentifier(fragment));
     }
 
     private static bool IsFootnoteNavigationEntry(string title, string href)
@@ -855,16 +856,23 @@ public sealed class EpubReaderPreparationService
         var fragment = href.Split('#', 2).ElementAtOrDefault(1);
         return LooksLikeFootnoteIdentifier(fragment)
             || (IsFootnoteMarker(title)
-                && LooksLikeFootnoteIdentifier(Path.GetFileNameWithoutExtension(
-                    href.Split('#', 2)[0].Split('?', 2)[0])));
+                && (LooksLikeNumberedNoteIdentifier(fragment)
+                    || LooksLikeFootnoteIdentifier(Path.GetFileNameWithoutExtension(
+                        href.Split('#', 2)[0].Split('?', 2)[0]))));
     }
 
     private static bool IsFootnoteMarker(string? value) =>
         !string.IsNullOrWhiteSpace(value)
         && Regex.IsMatch(
             value.Trim(),
-            @"^(?:\[\s*\d+\s*\]|［\s*\d+\s*］)$",
+            @"^(?:\[\s*\d+\s*\]|［\s*\d+\s*］|〔\s*\d+\s*〕)$",
             RegexOptions.CultureInvariant);
+
+    // Generic id1/id1a anchors are notes only when paired with a note marker.
+    private static bool LooksLikeNumberedNoteIdentifier(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && Regex.IsMatch(value.Trim(), @"^id\d+[a-z]?$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static bool LooksLikeFootnoteIdentifier(string? value) =>
         !string.IsNullOrWhiteSpace(value)

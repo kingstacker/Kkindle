@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Kkindle.Core;
+using Kkindle.Infrastructure;
 
 namespace Kkindle;
 
@@ -11,6 +12,71 @@ public partial class MainWindow
     private bool _onboardingUpdatingLanguage;
     private bool _onboardingUpdatingChoices;
     private bool _onboardingSaving;
+    private bool _onboardingInstallingCalibre;
+
+    private void OnboardingSkipCalibreButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_onboardingInstallingCalibre) return;
+        OnboardingCalibreStatus.Text = GetOnboardingResource("Ui.Onboarding.CalibreSkipped", "暂不安装，可稍后在设置中安装");
+        OnboardingCalibreStatus.IsVisible = true;
+    }
+
+    private async void OnboardingInstallCalibreButton_Click(object? sender, RoutedEventArgs e)
+        => await InstallOnboardingCalibreAsync();
+
+    private async Task InstallOnboardingCalibreAsync()
+    {
+        if (_onboardingInstallingCalibre || _calibreSetupBusy) return;
+        _onboardingInstallingCalibre = true;
+        _calibreSetupBusy = true;
+        OnboardingInstallCalibreButton.IsEnabled = false;
+        OnboardingSkipCalibreButton.IsEnabled = false;
+        OnboardingNextButton.IsEnabled = false;
+        OnboardingLanguageBox.IsEnabled = false;
+        OnboardingCalibreProgress.IsVisible = true;
+        OnboardingCalibreProgress.IsIndeterminate = true;
+        OnboardingCalibreStatus.IsVisible = true;
+        OnboardingCalibreStatus.Text = UiText.IsEnglish ? "Checking Calibre and KFX Input" : "正在检查 Calibre 和 KFX Input";
+        var progress = new Progress<CalibreSetupProgress>(value =>
+        {
+            if (!_onboardingInstallingCalibre) return;
+            OnboardingCalibreStatus.Text = UiText.Localize(value.Message);
+            OnboardingCalibreProgress.IsIndeterminate = value.Percentage is null;
+            if (value.Percentage is { } percentage) OnboardingCalibreProgress.Value = percentage;
+        });
+        try
+        {
+            using var setup = new CalibreSetupService(proxyAddress: TranslationGoogleProxyBox.Text);
+            var executable = setup.LocateCalibre(CalibrePathBox.Text);
+            if (executable is null)
+                executable = (await setup.InstallCalibreAsync(progress, _lifetimeCancellation.Token)).ExecutablePath;
+            if (!await setup.IsKfxInputInstalledAsync(executable, _lifetimeCancellation.Token))
+                executable = await setup.InstallKfxInputAsync(executable, progress, _lifetimeCancellation.Token);
+            if (setup.LocateCalibre(executable) is null ||
+                !await setup.IsKfxInputInstalledAsync(executable, _lifetimeCancellation.Token))
+                throw new InvalidOperationException(UiText.IsEnglish ? "Component verification failed" : "组件验证失败");
+            CalibrePathBox.Text = executable;
+            _appSettings = _appSettings with { CalibrePath = executable };
+            await _appSettingsStore.SaveAsync(_appSettings, _lifetimeCancellation.Token);
+            OnboardingCalibreStatus.Text = GetOnboardingResource("Ui.Onboarding.CalibreDone", "Calibre 和 KFX Input 插件均已安装并验证");
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            OnboardingCalibreStatus.Text = string.Format(GetOnboardingResource("Ui.Onboarding.CalibreFailed", "安装失败，可点击自动安装重试：{0}"), UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            _onboardingInstallingCalibre = false;
+            _calibreSetupBusy = false;
+            OnboardingInstallCalibreButton.IsEnabled = true;
+            OnboardingSkipCalibreButton.IsEnabled = true;
+            OnboardingNextButton.IsEnabled = !_onboardingSaving;
+            OnboardingLanguageBox.IsEnabled = true;
+            OnboardingCalibreProgress.IsVisible = false;
+            UpdateCalibreDetectionStatus();
+        }
+    }
     private bool _onboardingDisclaimerAccepted;
     private int _onboardingStep;
     private string? _onboardingSelectedDeviceModel;
@@ -310,6 +376,7 @@ public partial class MainWindow
 
     private void OnboardingNextButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (_onboardingInstallingCalibre) return;
         if (_onboardingStep == 1)
         {
             _onboardingStep = 2;
@@ -358,7 +425,7 @@ public partial class MainWindow
 
     private async Task CompleteOnboardingAsync(string? selectedModel)
     {
-        if (_onboardingSaving) return;
+        if (_onboardingSaving || _onboardingInstallingCalibre) return;
         _onboardingSaving = true;
         OnboardingBackButton.IsEnabled = false;
         OnboardingSkipButton.IsEnabled = false;
@@ -425,6 +492,7 @@ public partial class MainWindow
 
     private void OnboardingOverlay_KeyDown(object? sender, KeyEventArgs e)
     {
+        if (_onboardingInstallingCalibre) { e.Handled = true; return; }
         if (e.Key == Key.Escape && _onboardingStep > 1)
         {
             e.Handled = true;

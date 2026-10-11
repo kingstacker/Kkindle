@@ -135,6 +135,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private int _pointerDownOffset = -1;
     private PlacedHotZone? _pointerHotZone;
     private string? _hoveredFootnoteHref;
+    private int _pointerClickCount;
+    private string? _loadedFootnoteFragment;
 
     public NativeReaderHost()
     {
@@ -467,6 +469,15 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             InvalidateVisual();
             EmitScroll();
         }
+    }
+
+    public async Task RevealFootnoteAsync(string fragmentId)
+    {
+        if (Source is not { IsFile: true } source || _disposed) return;
+        fragmentId = NormalizeFragment(fragmentId);
+        if (fragmentId != _loadedFootnoteFragment
+            && !await NavigateCore(source.LocalPath, fragmentId)) return;
+        ScrollToFragment(fragmentId);
     }
 
     public void ScrollToFragment(string fragmentId)
@@ -1243,7 +1254,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 var composed = await Task.Run(() =>
                 {
                     navigationToken.ThrowIfCancellationRequested();
-                    var loader = new XhtmlChapterLoader(settings.ParagraphIndent);
+                    var loader = new XhtmlChapterLoader(settings.ParagraphIndent,
+                        string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment));
                     var content = loader.Load(chapterPath, navigationToken);
                     var options = BuildOptions(settings, width, height);
                     SelectReaderMainFont(settings.FontFamily);
@@ -1258,6 +1270,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 }
 
                 _content = composed.content;
+                _loadedFootnoteFragment = string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment);
                 _options = composed.options;
                 _layout = composed.layout;
                 InvalidateSpeechTextSnapshot();
@@ -1635,7 +1648,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
         var uri = Source;
         var path = uri.IsFile ? uri.LocalPath : uri.AbsolutePath;
-        return NavigateCore(path, fragment: null, readingAnchor);
+        return NavigateCore(path, _loadedFootnoteFragment, readingAnchor);
     }
 
     // ---- rendering --------------------------------------------------------
@@ -2323,6 +2336,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
         var position = point.Position;
         _pointerDown = true;
+        _pointerClickCount = e.ClickCount;
         _selecting = false;
         _pointerDragStarted = false;
         _pointerDownPosition = position;
@@ -2460,6 +2474,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                     type = "link",
                     href = hotZone.Href,
                     footnote = hotZone.Kind == HotZoneKind.FootnoteMarker,
+                    navigate = hotZone.Kind == HotZoneKind.FootnoteMarker && _pointerClickCount >= 2,
                     footnoteText = hotZone.FootnoteText,
                     x = position.X,
                     y = position.Y,

@@ -1333,6 +1333,35 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         Assert.True(layout.GetPageIndexOfFragment("footnote-1") >= 0);
     }
 
+    [Fact]
+    public void Loader_RendersTheTargetedFootnoteWithoutChangingItsTextOffset()
+    {
+        var path = WriteChapter("<p>正文。</p>"
+            + "<aside id='footnote-1'><p>第一条脚注。</p></aside>"
+            + "<aside id='footnote-2'><p>第二条脚注。</p></aside>");
+        var hidden = new XhtmlChapterLoader().Load(path);
+        var revealed = new XhtmlChapterLoader(visibleFootnoteFragment: "footnote-1").Load(path);
+        Assert.Equal(hidden.BodyText, revealed.BodyText);
+        Assert.Equal(hidden.FragmentTextOffsets["footnote-1"], revealed.FragmentTextOffsets["footnote-1"]);
+        Assert.Contains(revealed.Blocks.SelectMany(block => block.Items), item => item.Text.Contains("第一条脚注"));
+        Assert.DoesNotContain(revealed.Blocks.SelectMany(block => block.Items), item => item.Text.Contains("第二条脚注"));
+    }
+
+    [Fact]
+    public void Loader_DoesNotInferListNumbersWhenNotesHaveExplicitLinks()
+    {
+        var path = WriteChapter("<p>条件：(1) 有很好的群众；(2) 有很好的党；(3) 有相当力量的红军。</p>"
+            + "<p>真正脚注<a id='id1' href='#id1a'>〔1〕</a>和<a id='id2' href='#id2a'>〔2〕</a>。</p>"
+            + "<h3>注释</h3><p><a id='id1a' href='#id1'>〔1〕</a>第一条说明。</p>"
+            + "<p><a id='id2a' href='#id2'>〔2〕</a>第二条说明。</p>");
+        var content = new XhtmlChapterLoader().Load(path);
+        var markers = content.Blocks.SelectMany(block => block.Items)
+            .Where(item => item.Kind == InlineKind.FootnoteMarker).ToArray();
+        Assert.Equal(new[] { "〔1〕", "〔2〕" }, markers.Select(item => item.Text));
+        Assert.Contains(content.Blocks.SelectMany(block => block.Items),
+            item => item.Text.Contains("(1)") && item.FootnoteHref is null && !item.Style.Superscript);
+    }
+
     [Theory]
     [InlineData(TypesetWritingMode.HorizontalTb)]
     [InlineData(TypesetWritingMode.VerticalRl)]

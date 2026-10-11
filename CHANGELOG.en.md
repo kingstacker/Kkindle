@@ -6,6 +6,25 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.11 (2026-10-11)
+
+### Added
+
+- Added first-run onboarding to configure runtime dependencies and install or skip optional components.
+- Added reading medal progress for time spent reading, books finished, and annotations.
+- Added a Simplified Chinese user guide covering installation, the library, reading, Kindle, backup and sync, settings, and troubleshooting, with key screenshots.
+
+### Improved
+
+- Refined Reading Materials search, source filters, and book alignment, and removed the redundant “Open Douban Source” button from the candidate picker.
+- Refined the About & Updates layout, placed the update check action on the right, and improved version and developer information spacing.
+- Improved reader heading detection and search underline presentation, and clarified sync status feedback.
+
+### Fixed
+
+- Prevented Chinese footnotes from appearing in EPUB tables of contents and enabled double-click navigation to footnote definitions.
+- Restored import compatibility for older MOBI/PRC Kindle dictionaries.
+
 ## 1.0.10 (2026-10-08)
 
 ### Improved

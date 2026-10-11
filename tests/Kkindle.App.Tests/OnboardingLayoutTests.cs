@@ -31,6 +31,18 @@ public sealed partial class SettingsTests
             scope.Call("UpdateOnboardingPage");
             await Render();
             AssertWithinWindow(scope.Get<Button>(step == 3 ? "OnboardingFinishButton" : "OnboardingNextButton"), scope.Window);
+            if (step == 1)
+            {
+                var install = scope.Get<Button>("OnboardingInstallCalibreButton");
+                var skip = scope.Get<Button>("OnboardingSkipCalibreButton");
+                Assert.True(install.IsEffectivelyVisible);
+                Assert.True(skip.IsEffectivelyVisible);
+                skip.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                Assert.True(scope.Get<TextBlock>("OnboardingCalibreStatus").IsVisible);
+                Assert.Contains(language == "en-US" ? "Skipped" : "暂不安装", scope.Get<TextBlock>("OnboardingCalibreStatus").Text!);
+                Assert.False(scope.Field<bool>("_onboardingInstallingCalibre"));
+                Assert.True(scope.Get<Button>("OnboardingNextButton").IsEnabled);
+            }
             Capture(scope.Window, $"{language}-onboarding-{step}");
         }
 

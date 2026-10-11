@@ -4844,7 +4844,7 @@ public partial class MainWindow
             GridGalleryDisplayCheck.IsChecked = _appSettings.GridGalleryDisplay;
             ShowSyncStatusIconCheck.IsChecked = _appSettings.ShowSyncStatusIcon;
             ShowLibraryPresenceIconCheck.IsChecked = _appSettings.ShowLibraryPresenceIcon;
-            ShowUnearnedReadingMedalsCheck.IsChecked = _appSettings.ShowUnearnedReadingMedals;
+            _showUnearnedReadingMedals = _appSettings.ShowUnearnedReadingMedals;
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
             PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
             PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
@@ -5451,6 +5451,7 @@ public partial class MainWindow
         // can yield to the dispatcher; without claiming it here, a manual
         // click and an automatic tick could both start an S3 operation.
         _s3SyncBusy = true;
+        _crossProcessDataRefreshTimer?.Stop();
         _s3TestConnectionCancellation?.Cancel();
         _s3SyncCancellation = cancellation;
         if (!silent) _s3SyncCancelledByUser = false;
@@ -5597,6 +5598,9 @@ public partial class MainWindow
                 catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
                 catch (Exception exception) { Debug.WriteLine($"S3 library refresh failed: {exception.Message}"); }
             }
+            // Cover delayed WAL/checkpoint notifications from our own sync.
+            // Real service DataChanged events still advance the pending version.
+            _lastInProcessDataChangeUtc = DateTime.UtcNow;
             _s3SyncBusy = false;
             _s3SyncCancellation = null;
             _s3SyncCompletion?.TrySetResult(succeeded);
@@ -5684,11 +5688,6 @@ public partial class MainWindow
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowSyncStatusIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowLibraryPresenceIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        ShowUnearnedReadingMedalsCheck.IsCheckedChanged += (_, _) =>
-        {
-            if (_readingMedalsDashboard is { } dashboard) PopulateReadingMedals(dashboard);
-            ScheduleAppSettingsAutoSave();
-        };
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
         TranslationAiRpmBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -6110,6 +6109,18 @@ public partial class MainWindow
         }
     }
 
+    private void OpenUserManualButton_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://kkindle.stacker.beauty/manual/") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            ShowSettingsCapsule(T("无法打开使用手册：{0}", UiText.Localize(exception.Message)), 4000);
+        }
+    }
+
     private void KindleEmailCalibreGuideLink_Click(object? sender, RoutedEventArgs e)
     {
         try
@@ -6148,7 +6159,7 @@ public partial class MainWindow
             LibraryViewMode = _libraryViewMode.ToString(),
             ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
-            ShowUnearnedReadingMedals = ShowUnearnedReadingMedalsCheck.IsChecked == true,
+            ShowUnearnedReadingMedals = _showUnearnedReadingMedals,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
             PinyinContextMenuEnabled = PinyinContextMenuEnabledCheck.IsChecked == true,
             PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,
