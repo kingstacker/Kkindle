@@ -3749,19 +3749,12 @@ public partial class MainWindow : Window
     private void SetDoubanCandidateButtonsEnabled(bool enabled)
     {
         DoubanCandidateApplyButton.IsEnabled = enabled;
-        DoubanCandidateSourceButton.IsEnabled = enabled;
     }
 
     private void DoubanCandidateList_DoubleTapped(object? sender, TappedEventArgs e)
     {
         if (DoubanCandidateList.SelectedItem is DoubanCandidateViewModel)
             DoubanCandidateApplyButton_Click(sender, new RoutedEventArgs());
-    }
-
-    private void DoubanCandidateSourceButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DoubanCandidateList.SelectedItem is not DoubanCandidateViewModel item) return;
-        OpenDoubanUrl(item.Candidate.Url);
     }
 
     private void DoubanPreviewSourceButton_Click(object? sender, RoutedEventArgs e)

@@ -17,7 +17,7 @@ TXT 导入会识别常见编码、章节标题和分卷标题。若目录未正�
 1. 解锁 Kindle，并在设备上选择 USB 文件传输模式。
 2. 确认数据线支持传输数据，不只是充电；换一个 USB 端口再试。
 3. 暂时只连接一台阅读设备，再等待 Kkindle 检测。
-4. 查看“设置 → 关于与更新”里的 Kindle 服务诊断，以及 Windows 是否能看到设备存储。
+4. 查看“设置 → 高级与集成”里的 Kindle 平台诊断，以及 Windows 是否能看到设备存储。
 
 设备识别后再进入“设备书库”。如果系统和 Kkindle 都看不到设备，先解决 USB/MTP 连接问题。
 
@@ -51,4 +51,4 @@ USB 传输需要设备物理连接，文件直接写入设备；Send to Kindle �
 
 ## 仍然无法解决
 
-在“设置 → 关于与更新”查看诊断并导出日志。向 [GitHub Issues](https://github.com/kingstacker/Kkindle/issues) 反馈时，附上 Kkindle 版本、操作系统、问题步骤和预期结果。不要公开 API Key、账号密码或未授权的书籍文件。
+在“设置 → 高级与集成”查看平台诊断并导出软件日志。向 [GitHub Issues](https://github.com/kingstacker/Kkindle/issues) 反馈时，附上 Kkindle 版本、操作系统、问题步骤和预期结果。不要公开 API Key、账号密码或未授权的书籍文件。

@@ -178,7 +178,6 @@ def render_page(slug: str, title: str, source_file: str, index: int) -> str:
         <p class="sidebar-kicker">USER GUIDE · 简体中文</p>
         <h2>按任务查阅</h2>
         <nav>{nav}</nav>
-        <p class="sidebar-note">按钮名称以你安装的 Kkindle 版本为准。</p>
       </aside>
       <main class="manual-content" id="content">
         <p class="eyebrow">KKINDLE · 使用手册</p>
