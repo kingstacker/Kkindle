@@ -58,12 +58,54 @@ public sealed class DictionaryService
                 ? "转换后的 Kindle 词典中没有识别到词条。请确认文件是未受 DRM 保护的 Kindle 词典。"
                 : "词典中没有识别到可用词条。");
         _paths.EnsureDirectories();
+        var displayName = string.IsNullOrWhiteSpace(name) ? Path.GetFileNameWithoutExtension(sourcePath) : name.Trim();
+        var manifest = (await ListAsync(cancellationToken)).ToList();
+        var sameName = manifest
+            .Where(item => string.Equals(item.Name.Trim(), displayName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (sameName.Length > 0)
+        {
+            var exactDuplicates = new List<DictionaryDefinition>();
+            foreach (var existing in sameName)
+            {
+                var existingPath = ResolveSafePath(existing.RelativePath);
+                if (!File.Exists(existingPath)) continue;
+                await using var existingStream = File.OpenRead(existingPath);
+                var existingEntries = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(
+                    existingStream, JsonOptions, cancellationToken);
+                if (existingEntries is not null && DictionaryEntriesEqual(entries, existingEntries))
+                    exactDuplicates.Add(existing);
+            }
+
+            if (exactDuplicates.Count == sameName.Length)
+            {
+                // Older versions allowed repeated imports. Keep the first
+                // matching entry in the manifest and drop exact duplicates.
+                var existing = exactDuplicates[0];
+                if (exactDuplicates.Count > 1)
+                {
+                    var duplicateIds = exactDuplicates.Skip(1).Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+                    manifest.RemoveAll(item => duplicateIds.Contains(item.Id));
+                    await SaveManifestAsync(manifest, cancellationToken);
+                    foreach (var duplicate in exactDuplicates.Skip(1))
+                    {
+                        var duplicatePath = ResolveSafePath(duplicate.RelativePath);
+                        try { if (File.Exists(duplicatePath)) File.Delete(duplicatePath); }
+                        catch (IOException) { }
+                        catch (UnauthorizedAccessException) { }
+                    }
+                }
+                return existing;
+            }
+
+            throw new InvalidDataException("已存在同名词典，请先移除旧词典后再导入。");
+        }
+
         var id = Guid.NewGuid().ToString("N");
         var relativePath = $"{id}.json";
         await using (var stream = File.Create(Path.Combine(_paths.Dictionaries, relativePath)))
             await JsonSerializer.SerializeAsync(stream, entries, JsonOptions, cancellationToken);
-        var manifest = (await ListAsync(cancellationToken)).ToList();
-        var definition = new DictionaryDefinition(id, string.IsNullOrWhiteSpace(name) ? Path.GetFileNameWithoutExtension(sourcePath) : name.Trim(), relativePath, entries.Count, DateTimeOffset.UtcNow);
+        var definition = new DictionaryDefinition(id, displayName, relativePath, entries.Count, DateTimeOffset.UtcNow);
         manifest.Add(definition);
         await SaveManifestAsync(manifest, cancellationToken);
         return definition;
@@ -273,6 +315,15 @@ public sealed class DictionaryService
             entries[term] = existing + Environment.NewLine + Environment.NewLine + definition;
         else
             entries[term] = definition;
+    }
+
+    private static bool DictionaryEntriesEqual(
+        IReadOnlyDictionary<string, string> left,
+        IReadOnlyDictionary<string, string> right)
+    {
+        if (left.Count != right.Count) return false;
+        return left.All(pair => right.TryGetValue(pair.Key, out var definition)
+            && string.Equals(pair.Value, definition, StringComparison.Ordinal));
     }
 
     private static string RemoveTermPrefix(string definition, string? term)
