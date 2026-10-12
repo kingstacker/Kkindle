@@ -7638,7 +7638,8 @@ public partial class MainWindow
         double fallbackWidth,
         double fallbackHeight,
         Point? placementPoint,
-        double? selectionBottom)
+        double? selectionBottom,
+        bool preferBelow = false)
     {
         var hostWidth = Math.Max(1, ReaderWebViewHost.Bounds.Width);
         var hostHeight = Math.Max(1, ReaderWebViewHost.Bounds.Height);
@@ -7670,7 +7671,9 @@ public partial class MainWindow
             : anchor.Y;
         var roomAbove = anchor.Y - barHeight - aboveGap >= bodyInset;
         var roomBelow = bottom + belowGap + barHeight <= hostHeight - bodyInset;
-        var placeAbove = roomAbove || !roomBelow;
+        var placeAbove = preferBelow
+            ? !roomBelow && roomAbove
+            : roomAbove || !roomBelow;
         var anchorY = placeAbove
             ? Math.Clamp(
                 anchor.Y,

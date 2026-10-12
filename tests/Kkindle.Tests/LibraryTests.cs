@@ -513,7 +513,7 @@ public sealed class LibraryTests
     }
 
     [Fact]
-    public async Task ReinitializingReaderDataRemovesHistoricalOrphanAnnotations()
+    public async Task ReinitializingReaderDataPreservesAnnotationsForRemovedBooks()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -535,6 +535,36 @@ public sealed class LibraryTests
 
             await reader.InitializeAsync();
 
+            Assert.Single(await reader.GetAllAnnotationsAsync());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task ReinitializingReaderDataRemovesAnnotationsForMissingFilesOfExistingBooks()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "existing.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            await library.ImportAsync([source]);
+            var book = Assert.Single(await library.SearchAsync());
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            await reader.SaveAnnotationAsync(new ReaderAnnotation
+            {
+                BookId = book.Id,
+                BookFileId = Guid.NewGuid(),
+                ChapterPath = "missing.xhtml",
+                SelectedText = "失效格式批注",
+                EndOffset = 6
+            });
+            Assert.Single(await reader.GetAllAnnotationsAsync());
+            await reader.InitializeAsync();
             Assert.Empty(await reader.GetAllAnnotationsAsync());
         }
         finally { TestHelpers.TryDelete(root); }

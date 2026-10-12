@@ -24,27 +24,27 @@ public partial class MainWindow
         ReaderDictionaryTermText.Text = term;
         ReaderDictionaryLocalStatusText.Text = T("正在查本地词典…");
         ReaderDictionaryLocalResultText.Text = string.Empty;
-        ReaderDictionaryWikipediaTitleText.Text = string.Empty;
         ReaderDictionaryWikipediaExtractText.Text = string.Empty;
         ReaderDictionaryWikipediaResultPanel.IsVisible = false;
         ReaderDictionaryWikipediaOpenButton.IsEnabled = false;
 
         var canSearchWikipedia = _appSettings.NetworkEnabled
             && term.Length <= MaximumWikipediaSelectionLength;
-        ReaderDictionaryWikipediaPrivacyText.IsVisible = canSearchWikipedia;
         ReaderDictionaryWikipediaStatusText.Text = !_appSettings.NetworkEnabled
             ? T("网络功能已关闭；本地词典仍可用。")
             : !canSearchWikipedia
                 ? T("选中的内容太长，请只选一个词或短语查询维基百科。")
                 : T("正在查询维基百科…");
 
+        ReaderDictionaryPopup.MaxHeight = Math.Min(500, Math.Max(1, ReaderWebViewHost.Bounds.Height - 16));
         ShowReaderPopupNearSelection(
             ReaderDictionaryHostPopup,
             ReaderDictionaryPopup,
             fallbackWidth: 440,
-            fallbackHeight: 430,
+            fallbackHeight: 140,
             _readerLastSelectionPopupAnchor,
-            _readerLastSelectionPopupBottom);
+            _readerLastSelectionPopupBottom,
+            preferBelow: true);
 
         var requestSequence = ++_readerDictionaryRequestSequence;
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ReaderToken);
@@ -91,7 +91,6 @@ public partial class MainWindow
                 }
 
                 _readerDictionaryWikipediaArticle = article;
-                ReaderDictionaryWikipediaTitleText.Text = article.Title;
                 ReaderDictionaryWikipediaExtractText.Text = article.Extract;
                 ReaderDictionaryWikipediaStatusText.Text = string.Empty;
                 ReaderDictionaryWikipediaOpenButton.IsEnabled = true;
@@ -122,6 +121,16 @@ public partial class MainWindow
         requestSequence == _readerDictionaryRequestSequence
         && ReferenceEquals(_readerDictionaryCancellation, cancellation)
         && !cancellation.IsCancellationRequested;
+
+    private void ReaderDictionaryPopup_SizeChanged(object? sender, Avalonia.Controls.SizeChangedEventArgs e)
+    {
+        if (!ReaderDictionaryHostPopup.IsOpen) return;
+        // Re-anchor after async results or a tab switch changes the actual height.
+        ShowReaderPopupNearSelection(
+            ReaderDictionaryHostPopup, ReaderDictionaryPopup, 440, 140,
+            _readerLastSelectionPopupAnchor, _readerLastSelectionPopupBottom,
+            preferBelow: true);
+    }
 
     private void ReaderDictionaryCloseButton_Click(object? sender, RoutedEventArgs e)
         => HideReaderDictionaryPopup(clearSelection: true);

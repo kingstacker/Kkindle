@@ -7,20 +7,18 @@ namespace Kkindle.Infrastructure;
 public sealed record ReaderFormatCacheResult(string EpubPath, string CacheKey, bool CacheHit);
 
 /// <summary>
-/// Keeps native AZW3 resources and Calibre MOBI conversions for repeated opens.
+/// Keeps native AZW3/MOBI resources for repeated opens.
 /// </summary>
 public sealed class ReaderFormatCacheService
 {
-    private const string CacheVersion = "v3";
+    private const string CacheVersion = "v6";
     private const string Azw3CacheVersion = "v4";
     private readonly string _cacheDirectory;
-    private readonly IBookFormatConverter _converter;
     private readonly SemaphoreSlim _conversionGate = new(1, 1);
 
     public ReaderFormatCacheService(AppPaths paths, IBookFormatConverter converter)
     {
         _cacheDirectory = Path.Combine(paths.ReaderCache, "format-conversions");
-        _converter = converter;
     }
 
     public async Task<ReaderFormatCacheResult> PrepareEpubAsync(
@@ -54,10 +52,7 @@ public sealed class ReaderFormatCacheService
             EnsureContainedPath(temporary);
             try
             {
-                if (format == "azw3")
-                    await Azw3ReaderService.PrepareEpubAsync(sourcePath, temporary, cancellationToken);
-                else
-                    await _converter.ConvertAsync(sourcePath, temporary, cancellationToken: cancellationToken);
+                await Azw3ReaderService.PrepareEpubAsync(sourcePath, temporary, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!IsUsable(temporary))
                     throw new InvalidDataException("AZW3/MOBI 转换未生成有效的 EPUB 阅读缓存，请重试。");

@@ -23,6 +23,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     };
 
     private readonly AppPaths _paths;
+    private readonly AppSettingsStore _appSettingsStore;
     private readonly IMetadataService _metadata;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
     private readonly SemaphoreSlim _pdfCoverGate = new(1, 1);
@@ -32,6 +33,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     public SqliteBookLibraryService(AppPaths paths, IMetadataService metadata)
     {
         _paths = paths;
+        _appSettingsStore = new AppSettingsStore(paths);
         _metadata = metadata;
     }
 
@@ -49,6 +51,9 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             // failed library operation while the UI is shutting down.
         }
     }
+
+    private bool ShouldDeleteAnnotationsWhenDeletingBook() =>
+        AppSettings.Normalize(_appSettingsStore.LoadSynchronously()).DeleteAnnotationsWhenDeletingBook;
 
     private string ConnectionString => new SqliteConnectionStringBuilder
     {
@@ -1123,10 +1128,33 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
-            var delete = connection.CreateCommand();
-            delete.CommandText = "DELETE FROM Books WHERE Id = $id;";
-            delete.Parameters.AddWithValue("$id", bookId.ToString());
-            if (await delete.ExecuteNonQueryAsync(cancellationToken) > 0)
+            var deleted = false;
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                if (ShouldDeleteAnnotationsWhenDeletingBook()
+                    && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                {
+                    var annotations = connection.CreateCommand();
+                    annotations.Transaction = transaction;
+                    annotations.CommandText = "DELETE FROM ReaderAnnotations WHERE BookId = $id;";
+                    annotations.Parameters.AddWithValue("$id", bookId.ToString());
+                    deleted |= await annotations.ExecuteNonQueryAsync(cancellationToken) > 0;
+                }
+
+                var delete = connection.CreateCommand();
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM Books WHERE Id = $id;";
+                delete.Parameters.AddWithValue("$id", bookId.ToString());
+                deleted |= await delete.ExecuteNonQueryAsync(cancellationToken) > 0;
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+            if (deleted)
                 NotifyDataChanged();
             // The library directory and saved cover are deliberately left on disk.
         }
@@ -1308,6 +1336,16 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             try
             {
                 await InsertTrashEntryAsync(connection, transaction, entry, cancellationToken);
+                if (ShouldDeleteAnnotationsWhenDeletingBook()
+                    && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                {
+                    var annotations = connection.CreateCommand();
+                    annotations.Transaction = transaction;
+                    annotations.CommandText = "DELETE FROM ReaderAnnotations WHERE BookId = $id;";
+                    annotations.Parameters.AddWithValue("$id", book.Id.ToString());
+                    await annotations.ExecuteNonQueryAsync(cancellationToken);
+                }
+
                 var delete = connection.CreateCommand();
                 delete.Transaction = transaction;
                 delete.CommandText = "DELETE FROM Books WHERE Id = $id;";

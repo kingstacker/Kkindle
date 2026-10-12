@@ -49,6 +49,7 @@ public sealed record AppSettings
     public string PreferredOpenFormat { get; init; } = "epub";
     public string CalibrePath { get; init; } = string.Empty;
     public bool AutoBackupEnabled { get; init; }
+    public bool DeleteAnnotationsWhenDeletingBook { get; init; }
     public bool AutoGenerateEpubAndAzw3OnImport { get; init; }
     public bool CollectionsMutuallyExclusive { get; init; } = true;
     // The library surface is restored before the first window is shown so a
@@ -210,7 +211,7 @@ public sealed record McpServerSettings
 }
 
 public sealed record ManagedFont(string Id, string DisplayName, string CssFamily, string RelativePath, DateTimeOffset ImportedAt);
-public sealed record DictionaryDefinition(string Id, string Name, string RelativePath, int EntryCount, DateTimeOffset ImportedAt, bool Enabled = true);
+public sealed record DictionaryDefinition(string Id, string Name, string RelativePath, int EntryCount, DateTimeOffset ImportedAt, bool Enabled = true, string? SourceFormat = null);
 public sealed record DictionaryEntry(string Term, string Definition, string DictionaryName);
 public sealed record PdfPageText(int PageNumber, string Text);
 public sealed record PdfSearchResult(int PageNumber, string Excerpt, int MatchIndex);

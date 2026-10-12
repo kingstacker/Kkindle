@@ -797,10 +797,7 @@ public sealed partial class S3SyncService
             .SelectMany(snapshot => snapshot.Annotations)
             .GroupBy(annotation => annotation.Id)
             .Select(group => group.OrderByDescending(annotation => annotation.UpdatedAt).First())
-            .Where(annotation => !tombstonedBooks.Contains(annotation.BookId)
-                && !IsTombstoned(tombstoneIndex, "book", annotation.BookId, annotation.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "annotation", annotation.Id, annotation.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "file", annotation.BookFileId, annotation.UpdatedAt))
+            .Where(annotation => !IsTombstoned(tombstoneIndex, "annotation", annotation.Id, annotation.UpdatedAt))
             .ToArray();
         var remoteBookReflections = snapshots
             .SelectMany(snapshot => snapshot.BookReflections)
@@ -1228,8 +1225,7 @@ public sealed partial class S3SyncService
 
             foreach (var annotation in remoteAnnotations)
             {
-                if (!TryMapReaderRow(annotation.BookFileId, fileMap, locallyKnownFiles, out var localBookId, out var localFileId))
-                    continue;
+                TryMapAnnotationRow(annotation, bookMap, fileMap, locallyKnownFiles, out var localBookId, out var localFileId);
                 var command = commandCache.Get(
                     """
                     INSERT INTO ReaderAnnotations (
@@ -1773,8 +1769,11 @@ public sealed partial class S3SyncService
             && !IsTombstoned(tombstones, "collection-item", CompositeKey(
                 collectionMap.GetValueOrDefault(row.CollectionId, row.CollectionId),
                 bookMap.GetValueOrDefault(row.BookId, row.BookId)), row.AddedAt)).ToList();
-        view.Annotations = view.Annotations.Where(row => LiveReader(row.BookId, row.BookFileId, row.UpdatedAt)
-            && !IsTombstoned(tombstones, "annotation", row.Id, row.UpdatedAt)).ToList();
+        // Annotations have their own tombstones and intentionally outlive a
+        // deleted book when the user keeps them. Book/file tombstones must not
+        // suppress these sync rows.
+        view.Annotations = view.Annotations.Where(row =>
+            !IsTombstoned(tombstones, "annotation", row.Id, row.UpdatedAt)).ToList();
         view.BookReflections = view.BookReflections.Where(row =>
             !deletedBooks.Contains(row.BookId)
             && !Deleted("book", row.BookId, row.UpdatedAt, bookMap)
@@ -2986,6 +2985,24 @@ public sealed partial class S3SyncService
             && locallyKnownFiles.TryGetValue(localFileId, out localBookId);
     }
 
+    private static void TryMapAnnotationRow(
+        S3SyncAnnotation annotation,
+        IReadOnlyDictionary<Guid, Guid> bookMap,
+        IReadOnlyDictionary<Guid, Guid> fileMap,
+        IReadOnlyDictionary<Guid, Guid> locallyKnownFiles,
+        out Guid localBookId,
+        out Guid localFileId)
+    {
+        if (TryMapReaderRow(annotation.BookFileId, fileMap, locallyKnownFiles, out localBookId, out localFileId))
+            return;
+
+        // Annotation rows intentionally survive book/file tombstones. On a
+        // device that has never had that book, keep their stable remote IDs so
+        // the orphaned annotations still replicate and can be restored later.
+        localBookId = bookMap.GetValueOrDefault(annotation.BookId, annotation.BookId);
+        localFileId = fileMap.GetValueOrDefault(annotation.BookFileId, annotation.BookFileId);
+    }
+
     private static bool TryMapTombstoneId(
         string entityType,
         Guid remoteId,
@@ -3137,7 +3154,11 @@ public sealed partial class S3SyncService
         var changed = false;
         foreach (var tombstone in tombstones
                      .Where(item => !string.IsNullOrWhiteSpace(item.EntityType) && !string.IsNullOrWhiteSpace(item.Key))
-                     .OrderBy(item => item.DeletedAt))
+                     // Apply a book tombstone before its cascade-generated
+                     // file tombstones so those files cannot be mistaken for
+                     // independent deletions that should also remove notes.
+                     .OrderBy(item => NormalizeTombstoneEntityType(item.EntityType) == "book" ? 0 : 1)
+                     .ThenBy(item => item.DeletedAt))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var entityType = NormalizeTombstoneEntityType(tombstone.EntityType);
@@ -3338,14 +3359,12 @@ public sealed partial class S3SyncService
         var changed = false;
         foreach (var statement in new[]
         {
-            "DELETE FROM ReaderAnnotations WHERE BookId = $bookId;",
             "DELETE FROM ReaderBookReflections WHERE BookId = $bookId;",
             "DELETE FROM ReaderProgress WHERE BookId = $bookId;",
             "DELETE FROM ReaderBookmarks WHERE BookId = $bookId;",
             "DELETE FROM ReaderLayoutSettings WHERE BookId = $bookId;",
             "DELETE FROM BookContentChunks WHERE BookId = $bookId;",
             "DELETE FROM BookCollectionItems WHERE BookId = $bookId;",
-            "DELETE FROM BookFiles WHERE BookId = $bookId;",
             "DELETE FROM Books WHERE Id = $bookId;"
         })
         {
@@ -3376,7 +3395,6 @@ public sealed partial class S3SyncService
         var changed = false;
         foreach (var statement in new[]
         {
-            "DELETE FROM ReaderAnnotations WHERE BookFileId = $fileId;",
             "DELETE FROM ReaderProgress WHERE BookFileId = $fileId;",
             "DELETE FROM ReaderBookmarks WHERE BookFileId = $fileId;",
             "DELETE FROM ReaderLayoutSettings WHERE BookFileId = $fileId;",

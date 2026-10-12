@@ -6,6 +6,25 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.12 (2026-10-12)
+
+### Added
+
+- Open DRM-free legacy MOBI/PRC books directly without Calibre conversion.
+- Improve Kindle dictionary import with progress, results, and reimport after removal.
+- Optionally synchronize annotation deletion when removing books; annotations are preserved by default.
+
+### Improved
+
+- Use compact local dictionary and Wikipedia tabs, with lookup popups positioned relative to selected text.
+- Unify icon buttons for reading materials, trash, format conversion, and model management; refine font import and reading data reset layouts.
+- Keep settings descriptions visible below headings and refine synchronization feedback and reading material filters.
+
+### Fixed
+
+- Prevent footnote anchors inside headings from forcing premature page breaks and leaving large blank areas.
+- Update annotation retention and missing-format cleanup tests to cover the current deletion behavior.
+
 ## 1.0.11 (2026-10-11)
 
 ### Added

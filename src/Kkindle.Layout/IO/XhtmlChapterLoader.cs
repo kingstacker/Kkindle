@@ -47,6 +47,7 @@ public sealed class XhtmlChapterLoader
     private readonly HashSet<string> _fragmentIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _fragmentTextOffsets = new(StringComparer.Ordinal);
     private readonly List<string> _pendingFragmentIds = new();
+    private readonly HashSet<string> _footnoteReferenceFragmentIds = new(StringComparer.Ordinal);
     private readonly List<InlineItem> _pending = new();
     private readonly List<(int Start, int Length)> _rubyAnnotationRanges = new();
     private readonly List<PlainFootnoteSection> _plainFootnoteSections = new();
@@ -73,6 +74,7 @@ public sealed class XhtmlChapterLoader
         _fragmentIds.Clear();
         _fragmentTextOffsets.Clear();
         _pendingFragmentIds.Clear();
+        _footnoteReferenceFragmentIds.Clear();
         _pending.Clear();
         _plainFootnoteSections.Clear();
         _rubyAnnotationRanges.Clear();
@@ -612,6 +614,8 @@ public sealed class XhtmlChapterLoader
                 TrackId(element);
                 var href = ResolveHref((string?)element.Attribute("href"));
                 var inner = ctx.ForLink(href, element);
+                if (inner.FootnoteHref is not null && Id(element) is { } referenceId)
+                    _footnoteReferenceFragmentIds.Add(referenceId);
                 WalkInlineContent(element, inner);
                 break;
             }
@@ -842,6 +846,7 @@ public sealed class XhtmlChapterLoader
             TextIndentEm = ctx.TextIndentEm,
             SpaceBeforeLines = ctx.SpaceBeforeLines,
             SpaceAfterLines = ctx.SpaceAfterLines,
+            FootnoteReferenceFragmentIds = _pendingFragmentIds.Where(_footnoteReferenceFragmentIds.Contains).ToArray(),
             FragmentIds = TakePendingFragmentIds(),
             Items = items,
         });
@@ -1849,6 +1854,8 @@ public sealed class XhtmlChapterLoader
                 Kind = BlockKind.Heading,
                 ElementId = first.ElementId ?? second.ElementId,
                 FragmentIds = fragmentIds,
+                FootnoteReferenceFragmentIds = first.FootnoteReferenceFragmentIds
+                    .Concat(second.FootnoteReferenceFragmentIds).Distinct(StringComparer.Ordinal).ToArray(),
                 Style = first.Style,
                 Center = first.Center || second.Center,
                 AlignRight = first.AlignRight || second.AlignRight,
@@ -1904,6 +1911,7 @@ public sealed class XhtmlChapterLoader
             SpaceBeforeLines = 1.15f,
             SpaceAfterLines = 1.25f,
             FragmentIds = first.FragmentIds,
+            FootnoteReferenceFragmentIds = first.FootnoteReferenceFragmentIds,
             Items = first.Items,
         };
     }
