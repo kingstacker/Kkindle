@@ -66,18 +66,30 @@ public sealed class DictionaryService
         if (sameName.Length > 0)
         {
             var exactDuplicates = new List<DictionaryDefinition>();
+            var staleEntries = new List<DictionaryDefinition>();
             foreach (var existing in sameName)
             {
-                var existingPath = ResolveSafePath(existing.RelativePath);
-                if (!File.Exists(existingPath)) continue;
-                await using var existingStream = File.OpenRead(existingPath);
-                var existingEntries = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(
-                    existingStream, JsonOptions, cancellationToken);
-                if (existingEntries is not null && DictionaryEntriesEqual(entries, existingEntries))
+                var existingEntries = await ReadEntriesAsync(existing, cancellationToken);
+                if (existingEntries is null)
+                {
+                    // A removed or damaged data file must not leave a manifest
+                    // row that permanently blocks importing this dictionary again.
+                    staleEntries.Add(existing);
+                    continue;
+                }
+                if (DictionaryEntriesEqual(entries, existingEntries))
                     exactDuplicates.Add(existing);
             }
 
-            if (exactDuplicates.Count == sameName.Length)
+            if (staleEntries.Count > 0)
+            {
+                var staleIds = staleEntries.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+                manifest.RemoveAll(item => staleIds.Contains(item.Id));
+                await SaveManifestAsync(manifest, cancellationToken);
+            }
+
+            var activeSameName = sameName.Except(staleEntries).ToArray();
+            if (activeSameName.Length > 0 && exactDuplicates.Count == activeSameName.Length)
             {
                 // Older versions allowed repeated imports. Keep the first
                 // matching entry in the manifest and drop exact duplicates.
@@ -116,10 +128,53 @@ public sealed class DictionaryService
         var manifest = (await ListAsync(cancellationToken)).ToList();
         var item = manifest.FirstOrDefault(entry => entry.Id == id);
         if (item is null) return;
-        var path = ResolveSafePath(item.RelativePath);
-        if (File.Exists(path)) File.Delete(path);
-        manifest.Remove(item);
+        var selectedEntries = await ReadEntriesAsync(item, cancellationToken);
+        var toRemove = new List<DictionaryDefinition> { item };
+        foreach (var candidate in manifest)
+        {
+            if (candidate.Id == item.Id
+                || !string.Equals(candidate.Name.Trim(), item.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var candidateEntries = await ReadEntriesAsync(candidate, cancellationToken);
+            if (candidateEntries is null
+                || (selectedEntries is not null && DictionaryEntriesEqual(selectedEntries, candidateEntries)))
+                toRemove.Add(candidate);
+        }
+
+        var removedIds = toRemove.Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal);
+        var paths = toRemove.Select(entry => ResolveSafePath(entry.RelativePath))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        manifest.RemoveAll(entry => removedIds.Contains(entry.Id));
         await SaveManifestAsync(manifest, cancellationToken);
+
+        // The manifest is authoritative. A locked orphaned file should not
+        // prevent the removed dictionary from being imported again.
+        foreach (var path in paths)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private async Task<Dictionary<string, string>?> ReadEntriesAsync(
+        DictionaryDefinition definition,
+        CancellationToken cancellationToken)
+    {
+        var path = ResolveSafePath(definition.RelativePath);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            return await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(
+                stream, JsonOptions, cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public async Task<IReadOnlyList<DictionaryEntry>> LookupAsync(string term, CancellationToken cancellationToken = default)
