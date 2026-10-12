@@ -192,6 +192,9 @@
             <Setter Property="ToolTip.Tip" Value="{ReflectionBinding Content, RelativeSource={RelativeSource Self}}" />
             <Setter Property="AutomationProperties.Name" Value="{ReflectionBinding Content, RelativeSource={RelativeSource Self}}" />
         </Style>
+        <Style Selector="Button.libraryToolbar Path.libraryGlyph">
+            <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
+        </Style>
         <Style Selector="Button.libraryToolbar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
@@ -202,6 +205,14 @@
         </Style>
         <Style Selector="Button.libraryToolbar.active /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="Button.libraryToolbar:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+        </Style>
+        <Style Selector="Button.libraryToolbar:disabled Path.libraryGlyph">
+            <Setter Property="Stroke" Value="{DynamicResource MutedInkBrush}" />
         </Style>
         <Style Selector="Button.readingExportToggle">
             <Setter Property="ContentTemplate" Value="{StaticResource LibraryExportActionContent}" />
@@ -2093,24 +2104,21 @@
                         <Button x:Name="RefreshReadingMaterialsButton" Content="{DynamicResource Ui.Auto.AEE88743413144A2}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingMaterialsButton_Click" />
                     </StackPanel>
                 </Grid>
-                <Grid Grid.Row="1" Margin="6,14,6,14" ColumnDefinitions="*,Auto" ColumnSpacing="14">
-                    <Grid ColumnDefinitions="*,170" ColumnSpacing="10">
-                        <StackPanel Spacing="11">
-                            <TextBox x:Name="ReadingMaterialsSearchBox"
-                                     Width="420"
-                                     HorizontalAlignment="Left"
-                                     PlaceholderText="{DynamicResource Ui.Auto.C813DF885BD71685}"
-                                     TextChanged="ReadingMaterialsSearchBox_TextChanged" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Spacing="11">
-                            <ComboBox x:Name="ReadingMaterialsSourceBox" SelectedIndex="0" SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
-                                <ComboBoxItem Content="Any source" Tag="all" />
-                                <ComboBoxItem Content="Local library" Tag="local" />
-                                <ComboBoxItem Content="{DynamicResource Ui.Device.Current}" Tag="device" />
-                            </ComboBox>
-                        </StackPanel>
-                    </Grid>
-                </Grid>
+                <StackPanel Grid.Row="1" Margin="6,14,6,14" Orientation="Horizontal" Spacing="10">
+                    <TextBox x:Name="ReadingMaterialsSearchBox"
+                             Width="420"
+                             HorizontalAlignment="Left"
+                             PlaceholderText="{DynamicResource Ui.Auto.C813DF885BD71685}"
+                             TextChanged="ReadingMaterialsSearchBox_TextChanged" />
+                    <ComboBox x:Name="ReadingMaterialsSourceBox"
+                              Width="170"
+                              SelectedIndex="0"
+                              SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
+                        <ComboBoxItem Content="Any source" Tag="all" />
+                        <ComboBoxItem Content="Local library" Tag="local" />
+                        <ComboBoxItem Content="{DynamicResource Ui.Device.Current}" Tag="device" />
+                    </ComboBox>
+                </StackPanel>
                 <Border x:Name="ReadingMaterialsSummaryBorder"
                         Classes="flatPanel"
                         Grid.Row="2"
