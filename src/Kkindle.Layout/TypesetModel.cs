@@ -101,6 +101,8 @@ public sealed class ContentBlock
     public string? ElementId { get; init; }
     /// <summary>All fragment ids contained by this block, including inline anchors.</summary>
     public IReadOnlyList<string> FragmentIds { get; init; } = Array.Empty<string>();
+    /// <summary>Reference anchors remain navigable but must not force a new page.</summary>
+    public IReadOnlyList<string> FootnoteReferenceFragmentIds { get; init; } = Array.Empty<string>();
     public TypesetInlineStyle Style { get; init; }
     public bool Center { get; init; }
     public bool AlignRight { get; init; }

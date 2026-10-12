@@ -458,7 +458,7 @@
     <x:String x:Key="Ui.Auto.43A641217D7F134F">Search entire book (Ctrl+F)</x:String>
     <x:String x:Key="Ui.Auto.168A769EBA62A8E8">Search title or author</x:String>
     <x:String x:Key="Ui.Auto.F7824158AAA04D87">Supports EPUB, PDF, MOBI, AZW3, and TXT; TXT chapters are detected and converted to EPUB; subdirectories are scanned automatically</x:String>
-    <x:String x:Key="Ui.Auto.7C456B8E16853FCF">Supports MDX, Kindle dictionaries (AZW/AZW3/MOBI/PRC/KFX), and UTF-8 text dictionaries. Kindle dictionary imports require Calibre; DRM-protected dictionaries cannot be imported.</x:String>
+    <x:String x:Key="Ui.Auto.7C456B8E16853FCF">Supports MDX, Kindle dictionaries (AZW/MOBI/PRC), and UTF-8 text dictionaries. Kindle dictionaries are parsed directly where supported, with Calibre as a fallback. DRM-protected dictionaries cannot be imported.</x:String>
     <x:String x:Key="Ui.Auto.60A53514EB9228A2">Favorites</x:String>
     <x:String x:Key="Ui.Auto.F6A273284E344858">Favorites are mutually exclusive</x:String>
     <x:String x:Key="Ui.Auto.B161B3F76A603FB9">Favorite name</x:String>
@@ -2101,4 +2101,20 @@
     <x:String x:Key="Ui.Onboarding.CalibreSkipped">Skipped; you can install them later in Settings</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreDone">Calibre and KFX Input are installed and verified</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreFailed">Installation failed; select Yes to retry: {0}</x:String>
+    <x:String x:Key="Ui.Auto.51F1A930F65EE718">Reading dictionary</x:String>
+    <x:String x:Key="Ui.Auto.3B13646ECB15D60F">Checking duplicate dictionaries</x:String>
+    <x:String x:Key="Ui.Auto.4CE429F60D8BC556">Saving entries</x:String>
+    <x:String x:Key="Ui.Auto.D58EE02E8BE72B31">Saving dictionary catalog</x:String>
+    <x:String x:Key="Ui.Auto.D613FEFAE3003D3D">Import complete</x:String>
+    <x:String x:Key="Ui.Auto.7AF49D1506ADE3B4">Parsing entries</x:String>
+    <x:String x:Key="Ui.Auto.8874421A77D7FA26">Reading MDX index</x:String>
+    <x:String x:Key="Ui.Auto.CEE3EB87448B491F">Parsing MDX entries</x:String>
+    <x:String x:Key="Ui.Auto.8AB2BBA99B3FDA98">Converting Kindle dictionary</x:String>
+    <x:String x:Key="Ui.Auto.DD2E412A34376554">Parsing Kindle entries</x:String>
+    <x:String x:Key="Ui.Auto.AAD9C1AD8A3124C6">entries</x:String>
+    <x:String x:Key="Ui.Auto.76602003C3224089">Elapsed: {0}</x:String>
+    <x:String x:Key="Ui.Dictionary.SupportedFormats">Supported formats</x:String>
+    <x:String x:Key="Ui.Dictionary.Enable">Enable dictionary</x:String>
+    <x:String x:Key="Ui.Dictionary.Entries">entries</x:String>
+    <x:String x:Key="Ui.Dictionary.Remove">Remove</x:String>
 </ResourceDictionary>

@@ -65,7 +65,8 @@ internal sealed class HorizontalComposer
         var isHeading = block.Kind == BlockKind.Heading;
         var startsAtPageTop = isHeading
             && !followsHeading
-            && (!string.IsNullOrWhiteSpace(block.ElementId) || block.FragmentIds.Count > 0);
+            && (!string.IsNullOrWhiteSpace(block.ElementId)
+                || block.FragmentIds.Any(id => !block.FootnoteReferenceFragmentIds.Contains(id)));
         float leftInset = 0f;
         float rightInset = 0f;
         if (block.Kind == BlockKind.Blockquote)

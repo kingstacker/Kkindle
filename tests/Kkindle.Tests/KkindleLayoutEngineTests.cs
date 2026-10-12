@@ -1064,6 +1064,24 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     }
 
     [Fact]
+    public void HeadingFootnoteReferenceDoesNotForceANewPage()
+    {
+        var path = WriteChapter("<p>前面的正文需要继续排版，不能因为下一节标题中的脚注标记就提前结束这一页并留下大片空白。</p>"
+            + "<h4>第二节<a class=\"zy\" href=\"#id6a\" id=\"id6\">〔6〕</a></h4>"
+            + "<p>后面的正文。</p>");
+        var content = new XhtmlChapterLoader().Load(path);
+        var heading = Assert.Single(content.Blocks, block => block.Kind == BlockKind.Heading);
+        Assert.Contains("id6", heading.FootnoteReferenceFragmentIds);
+        using var engine = CreateEngine();
+        foreach (var mode in new[] { TypesetWritingMode.HorizontalTb, TypesetWritingMode.VerticalRl })
+        {
+            var layout = engine.Compose(content, Options(mode));
+            Assert.Single(layout.Pages);
+            Assert.Equal(0, layout.GetPageIndexOfFragment("id6"));
+        }
+    }
+
+    [Fact]
     public void AdjacentFragmentHeadingStaysWithThePreviousHeading()
     {
         var path = WriteChapter(

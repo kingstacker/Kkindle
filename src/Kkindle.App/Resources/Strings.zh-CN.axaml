@@ -458,7 +458,7 @@
     <x:String x:Key="Ui.Auto.43A641217D7F134F">搜索整本书（Ctrl+F）</x:String>
     <x:String x:Key="Ui.Auto.168A769EBA62A8E8">搜索标题或作者</x:String>
     <x:String x:Key="Ui.Auto.F7824158AAA04D87">支持 EPUB、PDF、MOBI、AZW3、TXT；TXT 自动识别章节并转为 EPUB，自动扫描子目录</x:String>
-    <x:String x:Key="Ui.Auto.7C456B8E16853FCF">支持 MDX、Kindle 词典（AZW/AZW3/MOBI/PRC/KFX）及 UTF-8 文本词典。Kindle 词典导入需要 Calibre，受 DRM 保护的词典无法导入。</x:String>
+    <x:String x:Key="Ui.Auto.7C456B8E16853FCF">支持 MDX、Kindle 词典（AZW/MOBI/PRC）及 UTF-8 文本词典。优先直接解析 Kindle 词典，必要时使用 Calibre。受 DRM 保护的词典无法导入。</x:String>
     <x:String x:Key="Ui.Auto.60A53514EB9228A2">收藏</x:String>
     <x:String x:Key="Ui.Auto.F6A273284E344858">收藏夹互斥</x:String>
     <x:String x:Key="Ui.Auto.B161B3F76A603FB9">收藏夹名称</x:String>
@@ -2101,4 +2101,20 @@
     <x:String x:Key="Ui.Onboarding.CalibreSkipped">暂不安装，可稍后在设置中安装</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreDone">Calibre 和 KFX Input 插件均已安装并验证</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreFailed">安装失败，可点击“是，自动安装”重试：{0}</x:String>
+    <x:String x:Key="Ui.Auto.51F1A930F65EE718">读取词典</x:String>
+    <x:String x:Key="Ui.Auto.3B13646ECB15D60F">检查重复词典</x:String>
+    <x:String x:Key="Ui.Auto.4CE429F60D8BC556">保存词条</x:String>
+    <x:String x:Key="Ui.Auto.D58EE02E8BE72B31">保存词典目录</x:String>
+    <x:String x:Key="Ui.Auto.D613FEFAE3003D3D">导入完成</x:String>
+    <x:String x:Key="Ui.Auto.7AF49D1506ADE3B4">解析词条</x:String>
+    <x:String x:Key="Ui.Auto.8874421A77D7FA26">读取 MDX 索引</x:String>
+    <x:String x:Key="Ui.Auto.CEE3EB87448B491F">解析 MDX 词条</x:String>
+    <x:String x:Key="Ui.Auto.8AB2BBA99B3FDA98">转换 Kindle 词典</x:String>
+    <x:String x:Key="Ui.Auto.DD2E412A34376554">解析 Kindle 词条</x:String>
+    <x:String x:Key="Ui.Auto.AAD9C1AD8A3124C6">词条</x:String>
+    <x:String x:Key="Ui.Auto.76602003C3224089">已用时间：{0}</x:String>
+    <x:String x:Key="Ui.Dictionary.SupportedFormats">支持格式</x:String>
+    <x:String x:Key="Ui.Dictionary.Enable">启用词典</x:String>
+    <x:String x:Key="Ui.Dictionary.Entries">个词条</x:String>
+    <x:String x:Key="Ui.Dictionary.Remove">移除</x:String>
 </ResourceDictionary>

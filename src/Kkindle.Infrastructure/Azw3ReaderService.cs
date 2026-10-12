@@ -9,8 +9,8 @@ using static Kkindle.Infrastructure.Azw3Binary;
 
 namespace Kkindle.Infrastructure;
 
-/// <summary>Builds Kreader resources from unencrypted KF8 without an external runtime.</summary>
-public static class Azw3ReaderService
+/// <summary>Builds Kreader resources from unencrypted MOBI/KF8 without an external runtime.</summary>
+public static partial class Azw3ReaderService
 {
     private sealed record Part(byte[] Data, int Start, int End);
     private sealed record Fragment(int Insert, int File, int Length);
@@ -23,7 +23,7 @@ public static class Azw3ReaderService
 
     public static async Task PrepareEpubAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default)
     {
-        if (new FileInfo(sourcePath).Length > 512L * 1024 * 1024) throw new InvalidDataException("AZW3 文件过大，无法创建阅读缓存。");
+        if (new FileInfo(sourcePath).Length > 512L * 1024 * 1024) throw new InvalidDataException("AZW3/MOBI 文件过大，无法创建阅读缓存。");
         var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken);
         try
         {
@@ -31,7 +31,7 @@ public static class Azw3ReaderService
         }
         catch (Exception exception) when (exception is OverflowException or IndexOutOfRangeException or ArgumentException or FormatException)
         {
-            throw new InvalidDataException("AZW3 文件结构损坏或超出阅读器支持的范围。", exception);
+            throw new InvalidDataException("AZW3/MOBI 文件结构损坏或超出阅读器支持的范围。", exception);
         }
     }
 
@@ -39,6 +39,7 @@ public static class Azw3ReaderService
     {
         if (data.Length < 78 || Encoding.ASCII.GetString(Slice(data, 60, 8)) != "BOOKMOBI") throw Invalid();
         var recordCount = U16(data, 76);
+        if (recordCount < 2 || 78L + recordCount * 8L > data.Length) throw Invalid();
         var offsets = new int[recordCount + 1];
         for (var i = 0; i < recordCount; i++)
         {
@@ -61,7 +62,7 @@ public static class Azw3ReaderService
             start = -1;
             for (var i = 1; i < recordCount - 1; i++)
                 if (Magic(Record(i), "BOUNDARY") && IsKf8(Record(i + 1))) { start = i + 1; break; }
-            if (start < 0) throw new NotSupportedException("此文件不是支持的 KF8/AZW3 书籍。");
+            if (start < 0) { PrepareLegacyMobi(firstHeader, Record, recordCount, fallbackTitle, destination, token); return; }
             header = Record(start);
         }
         if (U16(header, 12) != 0) throw new NotSupportedException("此 AZW3 受 DRM 保护，无法在 Kreader 中打开。");

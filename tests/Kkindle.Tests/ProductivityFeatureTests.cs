@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Text.Json;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
@@ -140,11 +140,22 @@ public sealed class ProductivityFeatureTests
             var paths = new AppPaths(Path.Combine(root, "app"));
             var service = new DictionaryService(paths);
 
-            var imported = await service.ImportAsync(source, "测试词典");
+            var updates = new List<DictionaryImportProgress>();
+            var imported = await service.ImportAsync(source, "测试词典", progress: new InlineDictionaryProgress(updates));
+            Assert.Equal("读取词典", updates[0].Stage);
+            Assert.Equal(100, updates[^1].Percent);
+            Assert.Equal(2, updates[^1].EntryCount);
+            Assert.Contains(updates, update => update.Stage == "保存词条");
             Assert.Equal(2, imported.EntryCount);
             var match = Assert.Single(await service.LookupAsync("kindle"));
             Assert.Equal("电子阅读器", match.Definition);
             Assert.Equal("测试词典", match.DictionaryName);
+            Assert.Equal("TXT", imported.SourceFormat);
+            await service.SetEnabledAsync(imported.Id, false);
+            Assert.False(Assert.Single(await service.ListAsync()).Enabled);
+            Assert.Empty(await service.LookupAsync("book"));
+            await service.SetEnabledAsync(imported.Id, true);
+            Assert.Single(await service.LookupAsync("book"));
 
             await service.RemoveAsync(imported.Id);
             Assert.Empty(await service.ListAsync());
@@ -164,7 +175,11 @@ public sealed class ProductivityFeatureTests
             var paths = new AppPaths(Path.Combine(root, "app"));
             var service = new DictionaryService(paths, new FakeKindleDictionaryConverter());
 
-            var imported = await service.ImportAsync(source, "Kindle 测试词典");
+            var updates = new List<DictionaryImportProgress>();
+            var imported = await service.ImportAsync(source, "Kindle 测试词典", progress: new InlineDictionaryProgress(updates));
+            Assert.Contains(updates, update => update.Stage == "转换 Kindle 词典"
+                && update.Percent == 47 && update.Detail == "Parsing input");
+            Assert.Contains(updates, update => update.Stage == "解析 Kindle 词条" && update.EntryCount == 2);
 
             Assert.Equal(2, imported.EntryCount);
             var kindle = Assert.Single(await service.LookupAsync("kindle"));
@@ -193,6 +208,34 @@ public sealed class ProductivityFeatureTests
             Assert.Equal("电子阅读器", Assert.Single(await service.LookupAsync("KINDLE")).Definition.Replace(Environment.NewLine, string.Empty));
         }
         finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task MobiDictionaryImportsDirectlyWithoutCalibre()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var html = System.Text.Encoding.UTF8.GetBytes("<idx:entry><idx:orth value='book'>book</idx:orth><p>书</p></idx:entry>");
+            var data = new byte[96 + 244 + html.Length];
+            void U16(int offset, ushort value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(offset), value);
+            void U32(int offset, uint value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan(offset), value);
+            System.Text.Encoding.ASCII.GetBytes("BOOKMOBI").CopyTo(data, 60);
+            U16(76, 2); U32(78, 96); U32(86, 340);
+            U16(96, 1); U32(100, (uint)html.Length); U16(104, 1);
+            System.Text.Encoding.ASCII.GetBytes("MOBI").CopyTo(data, 112);
+            U32(116, 228); U32(124, 65001); U32(132, 7);
+            html.CopyTo(data, 340);
+            var source = Path.Combine(root, "dictionary.mobi");
+            await File.WriteAllBytesAsync(source, data);
+            var service = new DictionaryService(new AppPaths(Path.Combine(root, "app")));
+            Assert.Equal(1, (await service.ImportAsync(source)).EntryCount);
+            Assert.Contains("书", (await service.LookupAsync("book"))[0].Definition);
+            U16(108, 1);
+            await File.WriteAllBytesAsync(source, data);
+            await Assert.ThrowsAsync<NotSupportedException>(() => service.ImportAsync(source));
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     [Fact]
@@ -526,6 +569,11 @@ public sealed class ProductivityFeatureTests
         finally { TestHelpers.TryDelete(root); }
     }
 
+    private sealed class InlineDictionaryProgress(List<DictionaryImportProgress> updates) : IProgress<DictionaryImportProgress>
+    {
+        public void Report(DictionaryImportProgress value) => updates.Add(value);
+    }
+
     private sealed class FakeKindleDictionaryConverter : IBookFormatConverter
     {
         public Task ConvertAsync(
@@ -535,6 +583,7 @@ public sealed class ProductivityFeatureTests
             CancellationToken cancellationToken = default,
             FormatConversionMetadata? metadata = null)
         {
+            progress?.Report(new FormatConversionProgress(47, "Parsing input"));
             using var archive = ZipFile.Open(destinationPath, ZipArchiveMode.Create);
             TestHelpers.AddZipEntry(archive, "OEBPS/dictionary.xhtml", """
                 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:idx="https://kindlegen.s3.amazonaws.com/AmazonKindlePublishingGuidelines.pdf">

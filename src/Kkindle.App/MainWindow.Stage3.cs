@@ -67,7 +67,7 @@ public partial class MainWindow
     private bool _deviceResourceBusy;
     private KindleResourceKind _deviceResourceKind = KindleResourceKind.Font;
     private static readonly HashSet<string> LocalDictionaryExtensions =
-        new([".mdx", ".azw", ".azw3", ".mobi", ".prc", ".kfx", ".txt", ".tsv", ".csv"], StringComparer.OrdinalIgnoreCase);
+        new([".mdx", ".azw", ".mobi", ".prc", ".txt", ".tsv", ".csv"], StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string DeviceKey, KindleResourceKind Kind), IReadOnlyList<KindleDeviceResource>> _deviceResourceCache = [];
     private readonly Dictionary<string, IReadOnlyList<KindleClipping>> _deviceClippingCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _backupBusy;
@@ -4013,7 +4013,7 @@ public partial class MainWindow
             }
             else if (draggedPaths.Length > 0)
             {
-                var message = T("拖入的文件中没有可用的词典文件。支持 MDX、AZW、AZW3、MOBI、PRC、KFX、TXT、TSV 和 CSV。");
+                var message = T("拖入的文件中没有可用的词典文件。支持 MDX、AZW、MOBI、PRC、TXT、TSV 和 CSV。");
                 DictionaryResultText.Text = message;
                 await ShowMessageAsync(T("无法导入词典"), message);
             }
@@ -4031,6 +4031,8 @@ public partial class MainWindow
     private static bool IsSupportedLocalDictionaryPath(string path) =>
         LocalDictionaryExtensions.Contains(Path.GetExtension(path));
 
+    private bool _dictionaryImportBusy;
+
     private async Task ImportLocalDictionaryPathsAsync(IEnumerable<string> sourcePaths)
     {
         var paths = sourcePaths
@@ -4046,59 +4048,91 @@ public partial class MainWindow
             return;
         }
 
-        var knownIds = (await _dictionaryService.ListAsync(_lifetimeCancellation.Token))
-            .Select(dictionary => dictionary.Id)
-            .ToHashSet(StringComparer.Ordinal);
-        var importedCount = 0;
-        var skippedDuplicateCount = 0;
-        var failures = new List<string>();
-        foreach (var path in paths)
+        if (_dictionaryImportBusy) return;
+        _dictionaryImportBusy = true;
+        ImportDictionaryButton.IsEnabled = false;
+        DictionaryImportProgressPanel.IsVisible = true;
+        DictionaryImportProgressBar.IsIndeterminate = true;
+        DictionaryImportStatusText.Text = T("读取词典");
+        var importClock = System.Diagnostics.Stopwatch.StartNew();
+        var status = T("读取词典");
+        var statusTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        statusTimer.Tick += (_, _) => DictionaryImportStatusText.Text = status + "\n" + T("已用时间：{0}", importClock.Elapsed.ToString(@"hh\:mm\:ss"));
+        statusTimer.Start();
+        try
         {
-            try
+            var knownIds = (await _dictionaryService.ListAsync(_lifetimeCancellation.Token))
+                .Select(dictionary => dictionary.Id)
+                .ToHashSet(StringComparer.Ordinal);
+            var importedCount = 0;
+            var skippedDuplicateCount = 0;
+            var failures = new List<string>();
+            foreach (var path in paths)
             {
-                var imported = await _dictionaryService.ImportAsync(path, cancellationToken: _lifetimeCancellation.Token);
-                if (knownIds.Add(imported.Id)) importedCount++;
-                else skippedDuplicateCount++;
+                try
+                {
+                    var fileIndex = Array.IndexOf(paths, path) + 1;
+                    var progress = new Progress<DictionaryImportProgress>(update =>
+                    {
+                        status = $"{fileIndex}/{paths.Length} · {Path.GetFileName(path)}\n{T(update.Stage)} · {update.EntryCount:N0} " + T("词条")
+                            + (update.Percent is { } percent ? $" · {percent:F0}%" : "")
+                            + (string.IsNullOrWhiteSpace(update.Detail) ? "" : "\n" + UiText.Localize(update.Detail));
+                        DictionaryImportStatusText.Text = status + "\n" + T("已用时间：{0}", importClock.Elapsed.ToString(@"hh\:mm\:ss"));
+                        DictionaryImportProgressBar.IsIndeterminate = update.Percent is null;
+                        DictionaryImportProgressBar.Value = update.Percent ?? 0;
+                    });
+                    var imported = await Task.Run(() => _dictionaryService.ImportAsync(path,
+                        cancellationToken: _lifetimeCancellation.Token, progress: progress), _lifetimeCancellation.Token);
+                    if (knownIds.Add(imported.Id)) importedCount++;
+                    else skippedDuplicateCount++;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    failures.Add(T("{0}：{1}", Path.GetFileName(path), UiText.Localize(exception.Message)));
+                }
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                failures.Add(T("{0}：{1}", Path.GetFileName(path), UiText.Localize(exception.Message)));
-            }
-        }
 
-        await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
-        var resultLines = new List<string>();
-        if (importedCount > 0)
-            resultLines.Add(T("成功导入 {0} 个词典。", importedCount));
-        if (skippedDuplicateCount > 0)
-            resultLines.Add(T("跳过 {0} 个重复词典。", skippedDuplicateCount));
-        if (failures.Count > 0)
-        {
-            resultLines.Add(T("有 {0} 个词典导入失败：", failures.Count));
-            resultLines.AddRange(failures);
-        }
+            await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
+            var resultLines = new List<string>();
+            if (importedCount > 0)
+                resultLines.Add(T("成功导入 {0} 个词典。", importedCount));
+            if (skippedDuplicateCount > 0)
+                resultLines.Add(T("跳过 {0} 个重复词典。", skippedDuplicateCount));
+            if (failures.Count > 0)
+            {
+                resultLines.Add(T("有 {0} 个词典导入失败：", failures.Count));
+                resultLines.AddRange(failures);
+            }
 
-        var resultMessage = string.Join(Environment.NewLine, resultLines);
-        var resultTitle = T("词典导入完成");
-        if (failures.Count > 0)
-        {
-            if (importedCount + skippedDuplicateCount == 0)
-                resultTitle = T("词典导入失败");
+            var resultMessage = string.Join(Environment.NewLine, resultLines);
+            var resultTitle = T("词典导入完成");
+            if (failures.Count > 0)
+            {
+                if (importedCount + skippedDuplicateCount == 0)
+                    resultTitle = T("词典导入失败");
+            }
+            else if (skippedDuplicateCount > 0 && importedCount == 0)
+            {
+                resultTitle = T("已跳过重复词典");
+            }
+            else if (importedCount > 0 && skippedDuplicateCount == 0)
+            {
+                resultTitle = T("词典导入成功");
+            }
+            DictionaryResultText.Text = resultMessage;
+            await ShowMessageAsync(resultTitle, resultMessage);
         }
-        else if (skippedDuplicateCount > 0 && importedCount == 0)
+        finally
         {
-            resultTitle = T("已跳过重复词典");
+            statusTimer.Stop();
+            _dictionaryImportBusy = false;
+            ImportDictionaryButton.IsEnabled = true;
+            DictionaryImportProgressPanel.IsVisible = false;
         }
-        else if (importedCount > 0 && skippedDuplicateCount == 0)
-        {
-            resultTitle = T("词典导入成功");
-        }
-        DictionaryResultText.Text = resultMessage;
-        await ShowMessageAsync(resultTitle, resultMessage);
     }
 
     private async Task ImportDeviceResourcePathsAsync(IEnumerable<string> sourcePaths) =>
@@ -5999,7 +6033,7 @@ public partial class MainWindow
                 [
                     new FilePickerFileType(T("支持的词典"))
                     {
-                        Patterns = ["*.mdx", "*.azw", "*.azw3", "*.mobi", "*.prc", "*.kfx", "*.txt", "*.tsv", "*.csv"]
+                        Patterns = ["*.mdx", "*.azw", "*.mobi", "*.prc", "*.txt", "*.tsv", "*.csv"]
                     }
                 ]
             });
@@ -6019,7 +6053,7 @@ public partial class MainWindow
 
     private async void RemoveDictionaryButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (ManagedDictionaryList.SelectedItem is not DictionaryDefinition dictionary) return;
+        if (sender is not Control { DataContext: DictionaryDefinition dictionary }) return;
         try
         {
             await _dictionaryService.RemoveAsync(dictionary.Id, _lifetimeCancellation.Token);
@@ -6030,6 +6064,23 @@ public partial class MainWindow
         {
             DictionaryResultText.Text = T("词典移除失败：{0}", UiText.Localize(exception.Message));
         }
+    }
+
+    private async void DictionaryEnabled_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { DataContext: DictionaryDefinition dictionary } check) return;
+        check.IsEnabled = false;
+        try
+        {
+            await _dictionaryService.SetEnabledAsync(dictionary.Id, check.IsChecked == true, _lifetimeCancellation.Token);
+            await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
+        }
+        catch (Exception exception)
+        {
+            check.IsChecked = dictionary.Enabled;
+            DictionaryResultText.Text = UiText.Localize(exception.Message);
+        }
+        finally { check.IsEnabled = true; }
     }
 
     private async Task LookupSettingsDictionaryAsync()

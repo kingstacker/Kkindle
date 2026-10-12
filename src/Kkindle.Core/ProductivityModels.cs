@@ -211,7 +211,7 @@ public sealed record McpServerSettings
 }
 
 public sealed record ManagedFont(string Id, string DisplayName, string CssFamily, string RelativePath, DateTimeOffset ImportedAt);
-public sealed record DictionaryDefinition(string Id, string Name, string RelativePath, int EntryCount, DateTimeOffset ImportedAt, bool Enabled = true);
+public sealed record DictionaryDefinition(string Id, string Name, string RelativePath, int EntryCount, DateTimeOffset ImportedAt, bool Enabled = true, string? SourceFormat = null);
 public sealed record DictionaryEntry(string Term, string Definition, string DictionaryName);
 public sealed record PdfPageText(int PageNumber, string Text);
 public sealed record PdfSearchResult(int PageNumber, string Excerpt, int MatchIndex);

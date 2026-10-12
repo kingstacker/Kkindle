@@ -9,6 +9,8 @@ using MdxParser;
 
 namespace Kkindle.Infrastructure;
 
+public sealed record DictionaryImportProgress(string Stage, int EntryCount = 0, double? Percent = null, string? Detail = null);
+
 public sealed class DictionaryService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -42,23 +44,25 @@ public sealed class DictionaryService
         catch (JsonException) { return []; }
     }
 
-    public async Task<DictionaryDefinition> ImportAsync(string sourcePath, string? name = null, CancellationToken cancellationToken = default)
+    public async Task<DictionaryDefinition> ImportAsync(string sourcePath, string? name = null, CancellationToken cancellationToken = default, IProgress<DictionaryImportProgress>? progress = null)
     {
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("词典文件不存在。", sourcePath);
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
+        progress?.Report(new("读取词典"));
         var entries = extension switch
         {
-            ".mdx" => await ParseMdxAsync(sourcePath, cancellationToken),
-            ".azw" or ".azw3" or ".mobi" or ".prc" or ".kfx" => await ParseKindleDictionaryAsync(sourcePath, cancellationToken),
-            ".txt" or ".tsv" or ".csv" => await ParseAsync(sourcePath, cancellationToken),
+            ".mdx" => await ParseMdxAsync(sourcePath, cancellationToken, progress),
+            ".azw" or ".mobi" or ".prc" => await ParseKindleDictionaryAsync(sourcePath, cancellationToken, progress),
+            ".txt" or ".tsv" or ".csv" => await ParseAsync(sourcePath, cancellationToken, progress),
             _ => throw new NotSupportedException("支持 MDX、AZW、AZW3、MOBI、PRC、KFX、TXT、TSV 和 CSV 词典。")
         };
         if (entries.Count == 0)
-            throw new InvalidDataException(extension is ".azw" or ".azw3" or ".mobi" or ".prc" or ".kfx"
+            throw new InvalidDataException(extension is ".azw" or ".mobi" or ".prc"
                 ? "转换后的 Kindle 词典中没有识别到词条。请确认文件是未受 DRM 保护的 Kindle 词典。"
                 : "词典中没有识别到可用词条。");
         _paths.EnsureDirectories();
         var displayName = string.IsNullOrWhiteSpace(name) ? Path.GetFileNameWithoutExtension(sourcePath) : name.Trim();
+        progress?.Report(new("检查重复词典", entries.Count));
         var manifest = (await ListAsync(cancellationToken)).ToList();
         var sameName = manifest
             .Where(item => string.Equals(item.Name.Trim(), displayName, StringComparison.OrdinalIgnoreCase))
@@ -107,20 +111,33 @@ public sealed class DictionaryService
                         catch (UnauthorizedAccessException) { }
                     }
                 }
+                progress?.Report(new("导入完成", entries.Count, 100));
                 return existing;
             }
 
             throw new InvalidDataException("已存在同名词典，请先移除旧词典后再导入。");
         }
 
+        progress?.Report(new("保存词条", entries.Count));
         var id = Guid.NewGuid().ToString("N");
         var relativePath = $"{id}.json";
         await using (var stream = File.Create(Path.Combine(_paths.Dictionaries, relativePath)))
             await JsonSerializer.SerializeAsync(stream, entries, JsonOptions, cancellationToken);
-        var definition = new DictionaryDefinition(id, displayName, relativePath, entries.Count, DateTimeOffset.UtcNow);
+        var definition = new DictionaryDefinition(id, displayName, relativePath, entries.Count, DateTimeOffset.UtcNow, SourceFormat: extension.TrimStart('.').ToUpperInvariant());
+        progress?.Report(new("保存词典目录", entries.Count));
         manifest.Add(definition);
         await SaveManifestAsync(manifest, cancellationToken);
+        progress?.Report(new("导入完成", entries.Count, 100));
         return definition;
+    }
+
+    public async Task SetEnabledAsync(string id, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var manifest = (await ListAsync(cancellationToken)).ToList();
+        var index = manifest.FindIndex(item => item.Id == id);
+        if (index < 0) return;
+        manifest[index] = manifest[index] with { Enabled = enabled };
+        await SaveManifestAsync(manifest, cancellationToken);
     }
 
     public async Task RemoveAsync(string id, CancellationToken cancellationToken = default)
@@ -196,12 +213,14 @@ public sealed class DictionaryService
         return result;
     }
 
-    internal static async Task<Dictionary<string, string>> ParseAsync(string path, CancellationToken cancellationToken = default)
+    internal static async Task<Dictionary<string, string>> ParseAsync(string path, CancellationToken cancellationToken = default, IProgress<DictionaryImportProgress>? progress = null)
     {
         var result = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
         using var reader = new StreamReader(path, Encoding.UTF8, true);
+        var lines = 0;
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
+            if (++lines % 512 == 0) progress?.Report(new("解析词条", result.Count, Math.Min(99, reader.BaseStream.Position * 100.0 / Math.Max(1, reader.BaseStream.Length))));
             if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#')) continue;
             var separator = line.IndexOf('\t');
             if (separator <= 0) separator = line.IndexOf('=');
@@ -215,7 +234,8 @@ public sealed class DictionaryService
 
     internal static async Task<Dictionary<string, string>> ParseMdxAsync(
         string path,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<DictionaryImportProgress>? progress = null)
     {
         try
         {
@@ -224,10 +244,13 @@ public sealed class DictionaryService
                 cancellationToken.ThrowIfCancellationRequested();
                 var result = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
                 using var stream = File.OpenRead(path);
+                progress?.Report(new("读取 MDX 索引"));
                 var document = new MdxDocument(stream, Encoding.Unicode);
+                var records = 0;
                 foreach (var record in document.RecordDatas)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (++records % 256 == 0) progress?.Report(new("解析 MDX 词条", result.Count));
                     if (!record.IsBinary)
                         AddEntry(result, record.Key, ToReadableText(record.Text));
                 }
@@ -246,8 +269,23 @@ public sealed class DictionaryService
 
     private async Task<Dictionary<string, string>> ParseKindleDictionaryAsync(
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<DictionaryImportProgress>? progress)
     {
+        var nativeHtml = new FileInfo(path).Length <= 512L * 1024 * 1024
+            ? await Task.Run(() => MobiDictionaryReader.Read(File.ReadAllBytes(path), cancellationToken, progress), cancellationToken)
+            : null;
+        if (nativeHtml is not null)
+        {
+            var nativeEntries = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
+            progress?.Report(new("解析 Kindle 词条"));
+            ExtractKindleEntries(nativeHtml, nativeEntries);
+            if (nativeEntries.Count > 0)
+            {
+                progress?.Report(new("解析 Kindle 词条", nativeEntries.Count, 100));
+                return nativeEntries;
+            }
+        }
         if (_formatConverter is null)
             throw new InvalidOperationException("导入 Kindle 词典需要 Calibre。请先在设置中配置 ebook-convert 路径。");
 
@@ -260,8 +298,10 @@ public sealed class DictionaryService
         var epubPath = Path.Combine(workDirectory, "dictionary.epub");
         try
         {
-            await _formatConverter.ConvertAsync(path, epubPath, cancellationToken: cancellationToken);
-            return await ParseKindleEpubAsync(epubPath, cancellationToken);
+            progress?.Report(new("转换 Kindle 词典"));
+            await _formatConverter.ConvertAsync(path, epubPath,
+                progress: new ConversionProgressAdapter(progress), cancellationToken: cancellationToken);
+            return await ParseKindleEpubAsync(epubPath, cancellationToken, progress);
         }
         finally
         {
@@ -271,7 +311,8 @@ public sealed class DictionaryService
 
     internal static async Task<Dictionary<string, string>> ParseKindleEpubAsync(
         string path,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<DictionaryImportProgress>? progress = null)
     {
         var result = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
         using var archive = ZipFile.OpenRead(path);
@@ -282,6 +323,7 @@ public sealed class DictionaryService
         if (htmlEntries.Length > 10000)
             throw new InvalidDataException("转换后的 Kindle 词典包含过多内容文件。");
 
+        var completed = 0;
         foreach (var entry in htmlEntries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -290,6 +332,7 @@ public sealed class DictionaryService
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             var html = await reader.ReadToEndAsync(cancellationToken);
             ExtractKindleEntries(html, result);
+            progress?.Report(new("解析 Kindle 词条", result.Count, ++completed * 100.0 / htmlEntries.Length));
         }
         return result;
     }
@@ -332,7 +375,7 @@ public sealed class DictionaryService
     // but retain a bold headword followed by a definition and an <hr> boundary.
     private static void ExtractSeparatedKindleEntries(string html, IDictionary<string, string> result)
     {
-        var sections = Regex.Split(html, @"<hr\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var sections = Regex.Split(html, @"<(?:hr|mbp:frameset)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         if (sections.Length < 3) return;
         foreach (var section in sections)
         {
@@ -434,6 +477,13 @@ public sealed class DictionaryService
     {
         var separator = name.LastIndexOf(':');
         return separator >= 0 ? name[(separator + 1)..] : name;
+    }
+
+    private sealed class ConversionProgressAdapter(IProgress<DictionaryImportProgress>? progress)
+        : IProgress<FormatConversionProgress>
+    {
+        public void Report(FormatConversionProgress value) =>
+            progress?.Report(new("转换 Kindle 词典", Percent: value.Percentage, Detail: value.Message));
     }
 
     private static void TryDeleteDirectory(string path)
