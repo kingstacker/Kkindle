@@ -2391,6 +2391,7 @@ public partial class MainWindow : Window
             }
             await RefreshLibraryMatchRecordsAsync(_lifetimeCancellation.Token);
             ClearSelectedBook();
+            ClearBookMultiSelection();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
             SetTaskStatus(choice == BookRemovalChoice.KeepFiles
@@ -3018,8 +3019,8 @@ public partial class MainWindow : Window
                 else
                     await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
             }
-            _selectedBookIds.Clear();
             ClearSelectedBook();
+            ClearBookMultiSelection();
             await RefreshLibraryAsync();
             SetTaskStatus(choice == BookRemovalChoice.KeepFiles
                 ? T("已从书库移除 {0} 本书，文件保留在 Kkindle 的 data/library 目录。", cards.Count)
@@ -3049,6 +3050,7 @@ public partial class MainWindow : Window
                 await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
             _selectedBookIds.Remove(card.Book.Id);
             if (_selectedCard?.Book.Id == card.Book.Id) ClearSelectedBook();
+            ClearBookMultiSelection();
             await RefreshLibraryAsync();
             SetTaskStatus(choice == BookRemovalChoice.KeepFiles
                 ? T("已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。", card.Title)

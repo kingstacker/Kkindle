@@ -32,18 +32,10 @@ internal static class ReaderAnnotationCascade
             DROP TRIGGER IF EXISTS Kkindle_DeleteReaderAnnotationsAfterFileDelete;
             DROP TRIGGER IF EXISTS Kkindle_DeleteReaderBookReflectionAfterBookDelete;
 
-            CREATE TRIGGER Kkindle_DeleteReaderAnnotationsAfterBookDelete
-            AFTER DELETE ON Books
-            WHEN NOT EXISTS (
-                SELECT 1 FROM LibraryTrash
-                WHERE Kind = 0 AND BookId = OLD.Id)
-            BEGIN
-                DELETE FROM ReaderAnnotations WHERE BookId = OLD.Id;
-            END;
-
             CREATE TRIGGER Kkindle_DeleteReaderAnnotationsAfterFileDelete
             AFTER DELETE ON BookFiles
-            WHEN NOT EXISTS (
+            WHEN EXISTS (SELECT 1 FROM Books WHERE Books.Id = OLD.BookId)
+             AND NOT EXISTS (
                 SELECT 1 FROM LibraryTrash
                 WHERE (Kind = 0 AND BookId = OLD.BookId)
                    OR (Kind = 1 AND BookId = OLD.BookId AND BookFileId = OLD.Id))
@@ -61,18 +53,13 @@ internal static class ReaderAnnotationCascade
             END;
 
             DELETE FROM ReaderAnnotations
-            WHERE NOT EXISTS (
-                SELECT 1 FROM LibraryTrash
-                WHERE Kind = 0 AND BookId = ReaderAnnotations.BookId)
-              AND (
-                NOT EXISTS (SELECT 1 FROM Books WHERE Books.Id = ReaderAnnotations.BookId)
-                OR (
-                    NOT EXISTS (SELECT 1 FROM BookFiles WHERE BookFiles.Id = ReaderAnnotations.BookFileId)
-                    AND NOT EXISTS (
-                        SELECT 1 FROM LibraryTrash
-                        WHERE Kind = 1
-                          AND BookId = ReaderAnnotations.BookId
-                          AND BookFileId = ReaderAnnotations.BookFileId)));
+            WHERE EXISTS (SELECT 1 FROM Books WHERE Books.Id = ReaderAnnotations.BookId)
+              AND NOT EXISTS (SELECT 1 FROM BookFiles WHERE BookFiles.Id = ReaderAnnotations.BookFileId)
+              AND NOT EXISTS (
+                  SELECT 1 FROM LibraryTrash
+                  WHERE Kind = 1
+                    AND BookId = ReaderAnnotations.BookId
+                    AND BookFileId = ReaderAnnotations.BookFileId);
 
             DELETE FROM ReaderBookReflections
             WHERE NOT EXISTS (SELECT 1 FROM Books WHERE Books.Id = ReaderBookReflections.BookId)

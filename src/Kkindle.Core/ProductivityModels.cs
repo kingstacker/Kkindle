@@ -49,6 +49,7 @@ public sealed record AppSettings
     public string PreferredOpenFormat { get; init; } = "epub";
     public string CalibrePath { get; init; } = string.Empty;
     public bool AutoBackupEnabled { get; init; }
+    public bool DeleteAnnotationsWhenDeletingBook { get; init; }
     public bool AutoGenerateEpubAndAzw3OnImport { get; init; }
     public bool CollectionsMutuallyExclusive { get; init; } = true;
     // The library surface is restored before the first window is shown so a

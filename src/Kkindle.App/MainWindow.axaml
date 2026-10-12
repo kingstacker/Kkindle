@@ -3069,6 +3069,10 @@
                                                 </StackPanel>
                                                 <Button x:Name="RefreshTrashButton" Grid.Column="1" Content="刷新" Classes="quiet" Click="RefreshTrashButton_Click" />
                                             </Grid>
+                                            <StackPanel Spacing="3">
+                                                <ToggleSwitch x:Name="DeleteBookAnnotationsCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Library.DeleteAnnotationsWhenDeletingBook}" AutomationProperties.Name="{DynamicResource Ui.Library.DeleteAnnotationsWhenDeletingBook}" />
+                                                <TextBlock Text="{DynamicResource Ui.Library.DeleteAnnotationsWhenDeletingBookHelp}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            </StackPanel>
                                             <ListBox x:Name="LibraryTrashList" ItemsSource="{Binding LibraryTrashItems}" MaxHeight="220" SelectionMode="Single" AutomationProperties.Name="回收站为空。" FontSize="14">
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate x:DataType="local:LibraryTrashItemViewModel">

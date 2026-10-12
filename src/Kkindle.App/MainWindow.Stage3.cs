@@ -4830,6 +4830,7 @@ public partial class MainWindow
             CalibrePathBox.Text = _appSettings.CalibrePath;
             UpdateCalibreDetectionStatus();
             AiEnabledCheck.IsChecked = _appSettings.AiEnabled;
+            DeleteBookAnnotationsCheck.IsChecked = _appSettings.DeleteAnnotationsWhenDeletingBook;
             AutoBackupCheck.IsChecked = _appSettings.AutoBackupEnabled;
             AutoBackupRetentionBox.Value = _appSettings.AutoBackupRetention;
             AutoGenerateReaderFormatsCheck.IsChecked = _appSettings.AutoGenerateEpubAndAzw3OnImport;
@@ -5686,6 +5687,7 @@ public partial class MainWindow
         PinyinLocalOnlyCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoConnectDeviceCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        DeleteBookAnnotationsCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowSyncStatusIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ShowLibraryPresenceIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -6144,6 +6146,7 @@ public partial class MainWindow
             PreferredOpenFormat = (PreferredOpenFormatBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "epub",
             CalibrePath = CalibrePathBox.Text ?? string.Empty,
             AutoBackupEnabled = AutoBackupCheck.IsChecked == true,
+            DeleteAnnotationsWhenDeletingBook = DeleteBookAnnotationsCheck.IsChecked == true,
             AutoBackupRetention = AutoBackupRetentionBox.Value is { } retention ? (int)retention : 5,
             AutoGenerateEpubAndAzw3OnImport = AutoGenerateReaderFormatsCheck.IsChecked == true,
             CollectionsMutuallyExclusive = CollectionsMutuallyExclusiveCheck.IsChecked != false,

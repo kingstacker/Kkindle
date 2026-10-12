@@ -2078,6 +2078,8 @@
     <x:String x:Key="Ui.Auto.49192FE845989F01">已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。</x:String>
     <x:String x:Key="Ui.Auto.3FEDF2EA54D1FE5B">已从书库移除 {0} 本书，文件保留在 Kkindle 的 data/library 目录。</x:String>
     <x:String x:Key="Ui.Auto.46A3EADB229733A1">确定将《{0}》的 {1} 文件移入回收站吗？可在回收站恢复，其他格式不受影响。</x:String>
+    <x:String x:Key="Ui.Library.DeleteAnnotationsWhenDeletingBook">删除书籍时自动清理对应批注</x:String>
+    <x:String x:Key="Ui.Library.DeleteAnnotationsWhenDeletingBookHelp">默认关闭。关闭时保留批注并继续多端同步；开启后，删除书籍时会一并删除批注，并同步删除操作。</x:String>
     <x:String x:Key="Ui.Library.CollectionsMutuallyExclusiveHelp">开启后，每本书只能属于一个收藏夹</x:String>
     <x:String x:Key="Ui.Onboarding.CalibrePrompt">是否自动安装 Calibre 和 KFX Input 插件</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreHelp">用于电子书格式转换；已安装的组件会自动跳过，安装过程中可能需要系统授权</x:String>
