@@ -252,10 +252,7 @@ public sealed class ZLibraryService : IZLibraryService, IDisposable
                 form.Add($"languages[{index++}]", language.Trim().ToLowerInvariant());
         }
 
-        using var request = CreateFormRequest(_baseUrl, "/eapi/book/search", form);
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        using var document = ParseApiResponse(response, body);
+        using var document = await SendSearchRequestAsync(form, cancellationToken);
         var root = document.RootElement;
 
         var books = new List<ZLibraryBook>();
@@ -312,6 +309,37 @@ public sealed class ZLibraryService : IZLibraryService, IDisposable
             ? (int)Math.Min(pageCountValue, int.MaxValue)
             : limit <= 0 ? 0 : (int)Math.Ceiling(total / (double)limit);
         return new ZLibrarySearchResult(books, total, actualPage, pageCount);
+    }
+
+    private async Task<JsonDocument> SendSearchRequestAsync(
+        IReadOnlyDictionary<string, string> form, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                // Search is read-only. Recreate the POST (including its body) on
+                // retry; HttpRequestMessage cannot be sent a second time.
+                using var request = CreateFormRequest(_baseUrl, "/eapi/book/search", form);
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if ((int)response.StatusCode is 408 or 429 or >= 500)
+                    throw new HttpRequestException($"Z-Library 服务返回 HTTP {(int)response.StatusCode}。", null, response.StatusCode);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                return ParseApiResponse(response, body);
+            }
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                && (exception is HttpRequestException { StatusCode: null }
+                    or HttpRequestException { StatusCode: System.Net.HttpStatusCode.RequestTimeout }
+                    or HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
+                    or IOException or TaskCanceledException
+                    || exception is HttpRequestException { StatusCode: { } status } && (int)status >= 500))
+            {
+                if (attempt >= 2)
+                    throw new IOException("无法连接 Z-Library 搜索服务，请稍后重试。", exception);
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * (attempt + 1)), cancellationToken);
+            }
+        }
     }
 
     public async Task<string?> GetDownloadUrlAsync(

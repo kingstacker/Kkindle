@@ -8,6 +8,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.Core;
@@ -24,6 +25,9 @@ public partial class MainWindow
     private int _zLibraryPage = 1;
     private int _zLibraryPageCount;
     private int _zLibrarySearchGeneration;
+    private string _zLibrarySearchQuery = string.Empty;
+    private string? _zLibrarySearchExtension;
+    private string? _zLibrarySearchLanguage;
     private ZLibraryBookCardViewModel? _selectedZLibraryBook;
     private bool _zLibraryEmailSending;
     private bool _zLibraryWebSending;
@@ -98,6 +102,7 @@ public partial class MainWindow
     }
     private void UpdateZLibraryAccountStatus()
     {
+        ZLibraryAccountButton.IsVisible = !_zLibrarySettings.IsConfigured;
         ZLibraryStatusText.Text = _zLibrarySettings.IsConfigured
             ? T("已配置账号：{0}", _zLibrarySettings.Email)
             : T("未配置账号，可搜索书籍；下载前需要登录。");
@@ -132,11 +137,10 @@ public partial class MainWindow
             ZLibraryResultText.Text = T("请输入书名或作者。");
             return;
         }
-        _zLibraryPage = 1;
-        await PerformZLibrarySearchAsync(query, _zLibraryPage);
+        await PerformZLibrarySearchAsync(query, 1);
     }
 
-    private async Task PerformZLibrarySearchAsync(string query, int page)
+    private async Task PerformZLibrarySearchAsync(string query, int page, bool usePreviousFilters = false)
     {
         // A new search supersedes the previous one (WinUI reference): the old
         // request is cancelled so a slow query never blocks a newer keyword.
@@ -155,17 +159,21 @@ public partial class MainWindow
         {
             if (_zLibrarySettings.IsConfigured && !_zLibraryService.IsLoggedIn)
                 await _zLibraryService.LoginAsync(_zLibrarySettings.Email, _zLibrarySettings.Password, _zLibrarySettings.BaseUrl, cancellationToken);
-            var extension = (ZLibraryExtensionBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
-            var language = (ZLibraryLanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            var extension = usePreviousFilters ? _zLibrarySearchExtension : (ZLibraryExtensionBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            var language = usePreviousFilters ? _zLibrarySearchLanguage : (ZLibraryLanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
             var result = await _zLibraryService.SearchAsync(
                 query,
                 page,
                 extensions: string.IsNullOrWhiteSpace(extension) ? null : [extension],
                 languages: string.IsNullOrWhiteSpace(language) ? null : [language],
                 cancellationToken: cancellationToken);
+            if (generation != _zLibrarySearchGeneration || cancellationToken.IsCancellationRequested) return;
+            _zLibrarySearchQuery = query;
+            _zLibrarySearchExtension = extension;
+            _zLibrarySearchLanguage = language;
+            ResetZLibraryDetailPanel();
             foreach (var old in ZLibraryBooks) old.Dispose();
             ZLibraryBooks.Clear();
-            CloseZLibraryDetailPanel();
             foreach (var book in result.Books)
             {
                 var item = new ZLibraryBookCardViewModel(book);
@@ -174,6 +182,7 @@ public partial class MainWindow
             }
             _zLibraryPage = result.Page;
             _zLibraryPageCount = result.PageCount;
+            ZLibraryResultsScrollViewer.Offset = default;
             ZLibraryPageText.Text = T("第 {0} / {1} 页", _zLibraryPage, Math.Max(1, _zLibraryPageCount));
             ZLibraryResultText.Text = result.Books.Count == 0 ? T("没有找到匹配书籍。") : T("共找到 {0} 本相关书籍", result.Total);
         }
@@ -183,8 +192,8 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
+            if (generation != _zLibrarySearchGeneration) return;
             ZLibraryResultText.Text = T("搜索失败：{0}", UiText.Localize(exception.Message));
-            ZLibraryPageText.Text = string.Empty;
             await ShowMessageAsync(T("搜索失败"), UiText.Localize(exception.Message));
         }
         finally
@@ -197,18 +206,19 @@ public partial class MainWindow
             }
             if (ReferenceEquals(_zLibrarySearchCancellation, cancellation))
                 _zLibrarySearchCancellation = null;
+            cancellation.Dispose();
         }
     }
 
     private async void ZLibraryPrevPageButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (_zLibraryPage > 1) await PerformZLibrarySearchAsync(ZLibrarySearchBox.Text?.Trim() ?? string.Empty, _zLibraryPage - 1);
+        if (_zLibraryPage > 1) await PerformZLibrarySearchAsync(_zLibrarySearchQuery, _zLibraryPage - 1, usePreviousFilters: true);
     }
 
     private async void ZLibraryNextPageButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_zLibraryPageCount > 0 && _zLibraryPage < _zLibraryPageCount)
-            await PerformZLibrarySearchAsync(ZLibrarySearchBox.Text?.Trim() ?? string.Empty, _zLibraryPage + 1);
+            await PerformZLibrarySearchAsync(_zLibrarySearchQuery, _zLibraryPage + 1, usePreviousFilters: true);
     }
 
     private void ZLibraryDetailsButton_Click(object? sender, RoutedEventArgs e)
@@ -217,7 +227,7 @@ public partial class MainWindow
         {
             _selectedZLibraryBook = item;
             ZLibraryDetailPanel.DataContext = item;
-            ZLibraryDetailPanel.IsVisible = true;
+            ShowZLibraryDetailPanel();
         }
     }
 
@@ -228,18 +238,107 @@ public partial class MainWindow
         if (sender is not Control { DataContext: ZLibraryBookCardViewModel item }) return;
         if (IsButtonSource(e.Source)) return;
         e.Handled = true;
+        if (ReferenceEquals(_selectedZLibraryBook, item))
+        {
+            CloseZLibraryDetailPanel();
+            return;
+        }
         _selectedZLibraryBook = item;
         ZLibraryDetailPanel.DataContext = item;
-        ZLibraryDetailPanel.IsVisible = true;
+        ShowZLibraryDetailPanel();
+    }
+
+    private void ZLibraryPage_Tapped(object? sender, TappedEventArgs e)
+    {
+        if (!ZLibraryDetailPanel.IsVisible || e.Source is not Control source) return;
+        // Child controls and book rows keep their own interactions. Only the
+        // page/results background dismisses the selected book.
+        for (var current = source; current is not null; current = current.GetVisualParent() as Control)
+        {
+            if (current == ZLibraryDetailPanel || current is Button or TextBox or ComboBox or ScrollBar
+                || current.DataContext is ZLibraryBookCardViewModel) return;
+            if (current == ZLibraryPage) break;
+        }
+        CloseZLibraryDetailPanel();
     }
 
     private void ZLibraryDetailCloseButton_Click(object? sender, RoutedEventArgs e) => CloseZLibraryDetailPanel();
 
+    private CancellationTokenSource? _zLibraryDetailAnimation;
+    private int _zLibraryDetailAnimationVersion;
+
+    private void ResetZLibraryDetailPanel()
+    {
+        _zLibraryDetailAnimation?.Cancel();
+        ++_zLibraryDetailAnimationVersion;
+        _selectedZLibraryBook = null;
+        ZLibraryDetailPanel.IsVisible = false;
+        ZLibraryDetailPanel.DataContext = null;
+        ZLibraryDetailPanel.RenderTransform = null;
+        ZLibraryPage.ColumnDefinitions[1].Width = new GridLength(0);
+        _zLibraryDetailAnimation = null;
+    }
+
+    private void ShowZLibraryDetailPanel()
+    {
+        var offset = ZLibraryDetailPanel.IsVisible
+            ? (ZLibraryDetailPanel.RenderTransform as TranslateTransform)?.X ?? 0
+            : ZLibraryDetailPanel.Width;
+        ZLibraryDetailPanel.IsVisible = true;
+        _ = AnimateZLibraryDetailPanelAsync(offset, opening: true);
+    }
+
     private void CloseZLibraryDetailPanel()
     {
         _selectedZLibraryBook = null;
-        ZLibraryDetailPanel.DataContext = null;
-        ZLibraryDetailPanel.IsVisible = false;
+        if (!ZLibraryDetailPanel.IsVisible) return;
+        var offset = (ZLibraryDetailPanel.RenderTransform as TranslateTransform)?.X ?? 0;
+        _ = AnimateZLibraryDetailPanelAsync(offset, opening: false);
+    }
+
+    private async Task AnimateZLibraryDetailPanelAsync(double from, bool opening)
+    {
+        _zLibraryDetailAnimation?.Cancel();
+        _zLibraryDetailAnimation?.Dispose();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        _zLibraryDetailAnimation = cancellation;
+        var version = ++_zLibraryDetailAnimationVersion;
+        var width = ZLibraryDetailPanel.Width;
+        var reserved = width + ZLibraryDetailPanel.Margin.Left;
+        var to = opening ? 0 : width;
+        var translate = new TranslateTransform(from, 0);
+        ZLibraryDetailPanel.RenderTransform = translate;
+        void Position(double offset)
+        {
+            translate.X = offset;
+            ZLibraryPage.ColumnDefinitions[1].Width = new Avalonia.Controls.GridLength(reserved * (1 - Math.Clamp(offset / width, 0, 1)));
+        }
+        Position(from);
+        try
+        {
+            var timer = Stopwatch.StartNew();
+            var duration = opening ? 340d : 240d;
+            while (timer.Elapsed.TotalMilliseconds < duration)
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                var progress = Math.Clamp(timer.Elapsed.TotalMilliseconds / duration, 0, 1);
+                var eased = opening ? 1 - Math.Pow(1 - progress, 3) : progress * progress;
+                Position(from + (to - from) * eased);
+                await Task.Delay(16, cancellation.Token);
+            }
+            if (version != _zLibraryDetailAnimationVersion) return;
+            Position(to);
+            if (!opening)
+            {
+                ZLibraryDetailPanel.IsVisible = false;
+                ZLibraryDetailPanel.DataContext = null;
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (version == _zLibraryDetailAnimationVersion) _zLibraryDetailAnimation = null;
+        }
     }
 
     private async void ZLibraryOfficialDetailButton_Click(object? sender, RoutedEventArgs e) =>
@@ -488,6 +587,24 @@ public partial class MainWindow
     private async void ZLibraryDownloadButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: ZLibraryBookCardViewModel item } || item.IsDownloading) return;
+        item.IsDownloading = true;
+        try
+        {
+            var existing = (await _library.GetLibraryMatchRecordsAsync(_lifetimeCancellation.Token))
+                .FirstOrDefault(book => ZLibraryMetadata.Matches(book, item.Book));
+            if (existing is not null)
+            {
+                item.SetStatus(T("电脑书库中已存在此书，未重复下载。"));
+                await ShowMessageAsync(T("书籍已存在"), T("电脑书库中已有《{0}》，无需重复下载。", existing.Title));
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            await ShowMessageAsync(T("下载失败"), UiText.Localize(exception.Message));
+            return;
+        }
+        finally { item.IsDownloading = false; }
         if (!_appSettings.NetworkEnabled)
         {
             item.SetStatus(T("网络功能已关闭"));
@@ -513,6 +630,19 @@ public partial class MainWindow
             var downloaded = await _zLibraryService.DownloadAsync(item.Book, downloadDirectory, new Progress<TransferProgress>(item.SetDownloadProgress), _lifetimeCancellation.Token);
             var result = await _library.ImportAsync([downloaded], cancellationToken: _lifetimeCancellation.Token);
             if (result.FailureCount > 0) throw new IOException(result.Items.FirstOrDefault()?.Message ?? T("导入书库失败。"));
+            foreach (var imported in result.Items.Where(entry => entry.Succeeded && entry.Book is not null))
+            {
+                var book = imported.Book!;
+                ZLibraryMetadata.Apply(book, item.Book, replaceExisting: imported.Added && book.Files.Count <= 1);
+                if (string.IsNullOrWhiteSpace(book.CoverPath) && item.CoverImage is not null)
+                {
+                    var coverPath = Path.Combine(_paths.Covers, $"{book.Id:N}-zlibrary.png");
+                    Directory.CreateDirectory(_paths.Covers);
+                    item.CoverImage.Save(coverPath, PngBitmapEncoderOptions.Default);
+                    book.CoverPath = Path.GetRelativePath(_paths.Data, coverPath);
+                }
+                await _library.UpdateMetadataAsync(book, _lifetimeCancellation.Token);
+            }
             var automaticFormats = await AutoGenerateReaderFormatsForImportsAsync(result, _lifetimeCancellation.Token);
             item.MarkDownloadCompleted();
             item.SetStatus(automaticFormats.Failures.Count == 0
@@ -607,6 +737,15 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject, IDisposable
     public string Authors => UiText.Localize(Book.Author);
     public string InfoLabel => Book.InfoLabel;
     public string YearLabel => Book.Year is > 0 ? Book.Year.Value.ToString(CultureInfo.InvariantCulture) : string.Empty;
+    public string Publisher => Book.Publisher ?? string.Empty;
+    public string Series => Book.Series ?? string.Empty;
+    public string Isbn => Book.Identifier ?? string.Empty;
+    public string Pages => Book.Pages is > 0 ? Book.Pages.Value.ToString(CultureInfo.InvariantCulture) : string.Empty;
+    public string EditionAndVolume => string.Join(" · ", new[]
+    {
+        string.IsNullOrWhiteSpace(Book.Edition) ? string.Empty : UiText.Get("版本：{0}", Book.Edition),
+        string.IsNullOrWhiteSpace(Book.Volume) ? string.Empty : UiText.Get("卷：{0}", Book.Volume)
+    }.Where(value => value.Length > 0));
     public string PublicationLabel => string.Join(" · ", new[]
     {
         Book.Publisher ?? string.Empty,
@@ -643,6 +782,8 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject, IDisposable
             || Book.Extension.Equals("pdf", StringComparison.OrdinalIgnoreCase));
     public bool CanSendToKindleWeb => !IsDownloading && KindleWebFilePolicy.IsSupportedFormat(Book.Extension);
     public Bitmap? CoverImage => _coverImage;
+    public bool HasNoCover => _coverImage is null;
+    public string NoCoverLabel => UiText.Get("暂无封面");
     public bool IsDownloading
     {
         get => _isDownloading;
@@ -702,6 +843,8 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(VolumeLabel));
         OnPropertyChanged(nameof(DetailDescription));
         OnPropertyChanged(nameof(DetailMetadataLabel));
+        OnPropertyChanged(nameof(EditionAndVolume));
+        OnPropertyChanged(nameof(NoCoverLabel));
     }
 
     public void Dispose()
@@ -737,6 +880,7 @@ public sealed class ZLibraryBookCardViewModel : ObservableObject, IDisposable
                 await using var stream = new MemoryStream(bytes, writable: false);
                 _coverImage = new Bitmap(stream);
                 OnPropertyChanged(nameof(CoverImage));
+                OnPropertyChanged(nameof(HasNoCover));
                 return;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

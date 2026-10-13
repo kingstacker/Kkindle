@@ -494,13 +494,16 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var books = new Dictionary<Guid, LibraryBookMatch>();
         var bookCommand = connection.CreateCommand();
-        bookCommand.CommandText = "SELECT Id, Title, Authors FROM Books ORDER BY Id;";
+        bookCommand.CommandText = "SELECT Id, Title, Authors, Isbn FROM Books ORDER BY Id;";
         await using (var reader = await bookCommand.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
                 var id = Guid.Parse(reader.GetString(0));
-                books[id] = new LibraryBookMatch(id, reader.GetString(1), reader.GetString(2), []);
+                books[id] = new LibraryBookMatch(id, reader.GetString(1), reader.GetString(2), [])
+                {
+                    Isbn = reader.IsDBNull(3) ? null : reader.GetString(3)
+                };
             }
         }
 

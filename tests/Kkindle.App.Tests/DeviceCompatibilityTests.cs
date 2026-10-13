@@ -198,6 +198,53 @@ public sealed partial class SettingsTests
         Assert.All(scope.Window.ReadingMaterials, item => Assert.False(item.IsSelected));
     });
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task DeviceDeletionOnFirstConnectionWaitsForInitialSnapshot(bool singleButton) => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var device = Reader(scope, "KINDLE", ReaderDeviceProfiles.Kindle);
+        var book = new KindleBook { RelativePath = "documents/first.azw3", Title = "首次连接删除", Format = "azw3" };
+        var pending = new TaskCompletionSource<IReadOnlyList<KindleBook>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        IProgress<KindleScanProgress>? scanProgress = null;
+        var service = new ReaderService
+        {
+            Devices = [device],
+            ProgressiveBooksReader = progress =>
+            {
+                scanProgress = progress;
+                return pending.Task;
+            }
+        };
+        await UseReaderServiceAsync(scope, service);
+        await scope.Call<Task>("RefreshDevicesAsync", false, CancellationToken.None);
+        await Until(() => scanProgress is not null);
+        scope.Call("ReplaceDeviceBookCards", new KindleBook[] { book }, true);
+        scope.Call("ShowStage3Page", scope.Get<Grid>("DevicePage"), null);
+        var card = Assert.Single(scope.Window.DeviceBooks);
+        card.IsSelected = true;
+        Task? deletion = null;
+        if (singleButton)
+            scope.Call("DeleteDeviceBookButton_Click", new Button { Tag = card }, new RoutedEventArgs());
+        else
+            deletion = scope.Call<Task>("DeleteSelectedDeviceBooksAsync");
+        await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        scope.Get<Button>("ConfirmationOkButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Render();
+        Assert.Equal(0, service.RemovedBooks);
+        Assert.Single(scope.Window.DeviceBooks);
+
+        // This stale final snapshot used to race the deletion and resurrect the card.
+        pending.SetResult([book]);
+        if (deletion is not null) await deletion;
+        await Until(() => service.RemovedBooks == 1 && scope.Window.DeviceBooks.Count == 0);
+        await Render();
+        Assert.Empty(scope.Window.VisibleDeviceBooks);
+        Assert.Equal("0", scope.Get<TextBlock>("DeviceBookCountText").Text);
+        Capture(scope.Window, singleButton ? "device-first-delete-single" : "device-first-delete-selected");
+    });
+
     private static KindleDevice Reader(TestWindow scope, string identity, ReaderDeviceProfile profile) => new()
     {
         RootPath = Path.Combine(scope.Paths.Data, identity), VolumeSerial = identity, Name = profile.DisplayName,
@@ -217,18 +264,21 @@ public sealed partial class SettingsTests
         public IReadOnlyList<KindleDevice> Devices { get; set; } = [];
         public IReadOnlyList<KindleClipping> Notes { get; init; } = [];
         public Func<KindleDevice, Task<IReadOnlyList<KindleBook>>>? BooksReader { get; init; }
+        public Func<IProgress<KindleScanProgress>?, Task<IReadOnlyList<KindleBook>>>? ProgressiveBooksReader { get; init; }
+        public int RemovedBooks { get; private set; }
         public int ContentRequests { get; private set; }
         public int ResourceRequests { get; private set; }
         public Task<IReadOnlyList<KindleDevice>> DetectDevicesAsync(CancellationToken cancellationToken = default) => Task.FromResult(Devices);
         public Task<IReadOnlyList<KindleBook>> ScanBooksAsync(KindleDevice device, CancellationToken cancellationToken = default)
         { ContentRequests++; return BooksReader?.Invoke(device) ?? Task.FromResult<IReadOnlyList<KindleBook>>([]); }
-        public Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(KindleDevice device, IProgress<KindleScanProgress>? progress = null, CancellationToken cancellationToken = default) => ScanBooksAsync(device, cancellationToken);
+        public Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(KindleDevice device, IProgress<KindleScanProgress>? progress = null, CancellationToken cancellationToken = default) => ProgressiveBooksReader?.Invoke(progress) ?? ScanBooksAsync(device, cancellationToken);
         public Task<IReadOnlyList<KindleDeviceResource>> ScanResourcesAsync(KindleDevice device, KindleResourceKind kind, CancellationToken cancellationToken = default)
         { ContentRequests++; ResourceRequests++; return Task.FromResult<IReadOnlyList<KindleDeviceResource>>([]); }
         public Task<IReadOnlyList<KindleClipping>> ReadClippingsAsync(KindleDevice device, CancellationToken cancellationToken = default, int maxItems = int.MaxValue)
         { ContentRequests++; return Task.FromResult(Notes); }
         public Task SendBookAsync(KindleDevice device, BookFile bookFile, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default, string? coverOverridePath = null) => throw new NotSupportedException();
-        public Task RemoveBookAsync(KindleDevice device, KindleBook book, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RemoveBookAsync(KindleDevice device, KindleBook book, CancellationToken cancellationToken = default)
+        { RemovedBooks++; return Task.CompletedTask; }
         public Task<string> ExportBookAsync(KindleDevice device, KindleBook book, string destinationDirectory, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task SendResourceAsync(KindleDevice device, KindleResourceKind kind, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task ExportResourceAsync(KindleDevice device, KindleDeviceResource resource, string destinationPath, CancellationToken cancellationToken = default) => throw new NotSupportedException();

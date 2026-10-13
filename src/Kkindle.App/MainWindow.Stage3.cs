@@ -2982,6 +2982,16 @@ public partial class MainWindow
     private async Task DeleteSelectedDeviceBooksAsync() =>
         await TrackDeviceOperationAsync(DeleteSelectedDeviceBooksCoreAsync);
 
+    private async Task WaitForDeviceBookReadsAsync(KindleDevice device)
+    {
+        // Initial connection publishes cards before metadata enrichment finishes.
+        // Drain those reads before deleting so their final snapshot cannot put a
+        // deleted card back, and MTP does not read and delete simultaneously.
+        if (_deviceWarmTask is { IsCompleted: false } warm) await warm;
+        if (_deviceBookScanTask is { IsCompleted: false } scan) await scan;
+        await EnsureCurrentDeviceAsync(device);
+    }
+
     private async Task DeleteSelectedDeviceBooksCoreAsync()
     {
         var selected = GetSelectedDeviceBooks();
@@ -2996,7 +3006,7 @@ public partial class MainWindow
             var card = selected[index];
             try
             {
-                await EnsureCurrentDeviceAsync(device);
+                await WaitForDeviceBookReadsAsync(device);
                 await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
                 _libraryPresenceComparison = null;
@@ -3032,7 +3042,7 @@ public partial class MainWindow
             ShowTransferToast(T("从设备删除书籍"), T("正在删除（{0}/{1}）…", 1, 1), progress: 0);
             try
             {
-                await EnsureCurrentDeviceAsync(device);
+                await WaitForDeviceBookReadsAsync(device);
                 await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
                 _libraryPresenceComparison = null;
