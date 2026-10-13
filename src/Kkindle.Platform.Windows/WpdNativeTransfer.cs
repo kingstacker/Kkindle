@@ -97,6 +97,52 @@ internal static class WpdNativeTransfer
         }
     }
 
+    public static void DeleteObject(string shellPath, string objectId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        IPortableDevice? device = null;
+        IPortableDeviceValues? client = null;
+        IPortableDeviceContent? content = null;
+        IPortableDevicePropVariantCollection? ids = null;
+        IPortableDevicePropVariantCollection? results = null;
+        var value = Marshal.AllocCoTaskMem(24);
+        var text = Marshal.StringToCoTaskMemUni(objectId);
+        try
+        {
+            for (var i = 0; i < 24; i++) Marshal.WriteByte(value, i, 0);
+            Marshal.WriteInt16(value, 31); // VT_LPWSTR
+            Marshal.WriteIntPtr(value, 8, text);
+            device = CreateComObject<IPortableDevice>(PortableDeviceClassId);
+            client = CreateComObject<IPortableDeviceValues>(PortableDeviceValuesClassId);
+            ThrowIfFailed(device.Open(GetPortableDevicePath(shellPath), client), "打开设备");
+            ThrowIfFailed(device.Content(out content), "获取设备内容");
+            ids = CreateComObject<IPortableDevicePropVariantCollection>(new Guid("08a99e2f-6d6d-4b80-af5a-baf2bcbe4cb9"));
+            ThrowIfFailed(ids.Add(value), "添加待删除阅读记录");
+            ThrowIfFailed(content.Delete(1, ids, out results), "删除设备阅读记录");
+            if (results is not null)
+            {
+                for (var i = 0; i < 24; i++) Marshal.WriteByte(value, i, 0);
+                ThrowIfFailed(results.GetAt(0, value), "读取设备删除结果");
+                if (Marshal.ReadInt16(value) == 10)
+                    ThrowIfFailed(Marshal.ReadInt32(value, 8), "删除设备对象");
+            }
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(text);
+            Marshal.FreeCoTaskMem(value);
+            Release(results); Release(ids); Release(content); Release(client); Release(device);
+        }
+    }
+
+    [ComImport, Guid("89B2E422-4F1B-4316-BCEF-A44AFEA83EB3"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPortableDevicePropVariantCollection
+    {
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int GetAt(uint index, IntPtr value);
+        [PreserveSig] int Add(IntPtr value);
+    }
+
     public static void SendFile(
         string shellPath,
         string parentObjectId,
@@ -394,7 +440,7 @@ internal static class WpdNativeTransfer
             ref uint optimalWriteBufferSize,
             IntPtr cookie);
 
-        [PreserveSig] int Delete(uint options, IntPtr objectIds, out IntPtr results);
+        [PreserveSig] int Delete(uint options, [MarshalAs(UnmanagedType.Interface)] IPortableDevicePropVariantCollection objectIds, [MarshalAs(UnmanagedType.Interface)] out IPortableDevicePropVariantCollection results);
         [PreserveSig] int GetObjectIDsFromPersistentUniqueIDs(IntPtr ids, out IntPtr objectIds);
         [PreserveSig] int Cancel();
         [PreserveSig] int Move(IntPtr ids, [MarshalAs(UnmanagedType.LPWStr)] string destinationId, out IntPtr results);

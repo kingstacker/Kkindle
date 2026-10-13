@@ -34,7 +34,8 @@ public sealed class MassStorageKindleDeviceServiceTests
             await File.WriteAllBytesAsync(source, bytes);
             var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
-            await service.SendBookAsync(device, new BookFile { Sha256 = hash }, source);
+            var sourceFile = new BookFile { Sha256 = hash };
+            await service.SendBookAsync(device, sourceFile, source);
             var book = Assert.Single(await service.ScanBooksAsync(device));
             Assert.Equal("测试书籍", book.Title);
             Assert.Equal(hash, book.Sha256);
@@ -43,8 +44,21 @@ public sealed class MassStorageKindleDeviceServiceTests
             var exported = await service.ExportBookAsync(device, book, exportDirectory);
             Assert.Equal(bytes, await File.ReadAllBytesAsync(exported));
 
+            var readingState = Path.ChangeExtension(Path.Combine(device.RootPath, book.RelativePath), ".sdr");
+            Directory.CreateDirectory(readingState);
+            await File.WriteAllTextAsync(Path.Combine(readingState, "notes"), "saved annotation");
+            await service.SendBookAsync(device, sourceFile, source);
+            Assert.True(Directory.Exists(readingState));
             await service.RemoveBookAsync(device, book);
             Assert.Empty(await service.ScanBooksAsync(device));
+            Assert.False(Directory.Exists(readingState));
+            Assert.Empty(Directory.GetDirectories(Path.GetDirectoryName(readingState)!, "kkindle-reading-backup-*"));
+            Directory.CreateDirectory(readingState);
+            await File.WriteAllTextAsync(Path.Combine(readingState, "stale"), "old edition");
+            await service.SendBookAsync(device, sourceFile, source);
+            Assert.False(Directory.Exists(readingState));
+            Assert.Single(await service.ScanBooksAsync(device));
+            Assert.Empty(Directory.GetDirectories(Path.GetDirectoryName(readingState)!, "kkindle-reading-backup-*"));
         }
         finally
         {

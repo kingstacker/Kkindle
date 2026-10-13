@@ -2121,4 +2121,17 @@
     <x:String x:Key="Ui.Dictionary.Enable">启用词典</x:String>
     <x:String x:Key="Ui.Dictionary.Entries">个词条</x:String>
     <x:String x:Key="Ui.Dictionary.Remove">移除</x:String>
+    <x:String x:Key="Ui.Auto.EF2A6ECB0395493A">更新成功，当前版本 {0}</x:String>
+    <x:String x:Key="Ui.Auto.7C0D2664869C1939">更新成功</x:String>
+    <x:String x:Key="Ui.Auto.B7096CAB43D6869A">已更新至 {0}。可在“关于”中检查是否有更新版本。</x:String>
+    <x:String x:Key="Ui.Auto.D87165FB1BC4EFBB">上次安装未完成，点击更新按钮重试 {0}</x:String>
+    <x:String x:Key="Ui.Auto.F1CD77F5CE7D7AF7">更新包已下载，点击更新按钮安装 {0}</x:String>
+    <x:String x:Key="Ui.Auto.C86B00EB77A51C06">当前版本：{0}&#xA;目标版本：{1}&#xA;&#xA;更新包已下载并校验。点击后将退出 Kkindle，显示安装进度，完成后自动打开新版本。&#xA;如安装失败，可重新打开 Kkindle 重试。&#xA;&#xA;现在安装吗？</x:String>
+    <x:String x:Key="Ui.Auto.BA897FD9581067BC">正在启动安装程序…</x:String>
+    <x:String x:Key="Ui.Auto.A9D5C8C47B0FEDF1">安装未启动，更新包已保留，可点击更新按钮重试</x:String>
+    <x:String x:Key="Ui.Auto.898E7A2BDB45F967">{0}&#xA;&#xA;更新包已保留，可重试安装。安装日志：{1}</x:String>
+    <x:String x:Key="Ui.Auto.F1664AD5102F73BE">更新包已下载，点击此处安装；完成后自动打开新版本</x:String>
+    <x:String x:Key="Ui.Auto.7A6BAFC9C85304A1">安装更新</x:String>
+    <x:String x:Key="Ui.Auto.55808DA23C4DC7A2">稍后安装</x:String>
+    <x:String x:Key="Ui.Auto.ADC3A0A970A8255F">稍后安装并退出</x:String>
 </ResourceDictionary>

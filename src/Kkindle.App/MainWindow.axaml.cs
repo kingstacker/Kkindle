@@ -940,10 +940,10 @@ public partial class MainWindow : Window
             _ = CloseReaderAsync();
             return;
         }
-        if (TryGetPendingUpdatePackage(out var packagePath, out var version))
+        if (!_s3SyncExitInProgress && TryGetPendingUpdatePackage(out var packagePath, out var version))
         {
             e.Cancel = true;
-            _ = PromptPendingUpdateInstallAsync(packagePath, version);
+            _ = PromptPendingUpdateInstallAsync(packagePath, version, exitRequested: true);
             return;
         }
 
@@ -3843,7 +3843,8 @@ public partial class MainWindow : Window
         bool UpdatePublication);
 
     private async Task<bool> ConfirmAsync(string title, string message, string? primaryText = null,
-        CancellationToken cancellationToken = default, bool allowDiagnosticAutoConfirm = true)
+        CancellationToken cancellationToken = default, bool allowDiagnosticAutoConfirm = true,
+        string? cancelText = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (allowDiagnosticAutoConfirm && Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
@@ -3851,6 +3852,8 @@ public partial class MainWindow : Window
         ConfirmationKeepFilesButton.IsVisible = false;
         ConfirmationTitleText.Text = title;
         ConfirmationMessageText.Text = message;
+        var previousCancelText = ConfirmationCancelButton.Content;
+        if (cancelText is not null) ConfirmationCancelButton.Content = cancelText;
         ConfirmationOkButton.Content = primaryText
             ?? (title.Contains(T("删除"), StringComparison.Ordinal) ? T("确认删除") : T("应用"));
         ShowOverlay(ConfirmationOverlay);
@@ -3867,6 +3870,7 @@ public partial class MainWindow : Window
             {
                 _confirmationCompletion = null;
                 ConfirmationOverlay.IsVisible = false;
+                ConfirmationCancelButton.Content = previousCancelText;
             }
         }
     }

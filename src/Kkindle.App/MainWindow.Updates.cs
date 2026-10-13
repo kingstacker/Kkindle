@@ -54,7 +54,11 @@ public partial class MainWindow
             var currentVersion = ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly);
             if (UpdateService.CompareVersions(storedVersion, currentVersion) <= 0)
             {
-                // The stored release is already installed (or older): drop it quietly.
+                if (_appSettings.PendingUpdateDownloadedAt is not null)
+                {
+                    AboutUpdateStatusText.Text = T("更新成功，当前版本 {0}", currentVersion);
+                    _ = ShowMessageAsync(T("更新成功"), T("已更新至 {0}。可在“关于”中检查是否有更新版本。", currentVersion));
+                }
                 _pendingUpdateVersion = null;
                 _ = ClearPendingUpdateStateAsync();
                 return;
@@ -73,7 +77,9 @@ public partial class MainWindow
                 _appSettings.PendingUpdateReleaseNotes,
                 _appSettings.PendingUpdateReleaseNotesEnglish,
                 packageReady: true);
-            AboutUpdateStatusText.Text = T("更新包已下载，退出应用后安装 {0}", storedVersion);
+            AboutUpdateStatusText.Text = _appSettings.PendingUpdateInstallStartedAt is not null
+                ? T("上次安装未完成，点击更新按钮重试 {0}", storedVersion)
+                : T("更新包已下载，点击更新按钮安装 {0}", storedVersion);
             return;
         }
 
@@ -101,8 +107,14 @@ public partial class MainWindow
         }
     }
 
-    private async void CheckForUpdatesButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
-        await CheckForUpdatesAsync(userInitiated: true);
+    private async void CheckForUpdatesButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_updateCheckInProgress) return;
+        if (TryGetPendingUpdatePackage(out var packagePath, out var version))
+            await PromptPendingUpdateInstallAsync(packagePath, version);
+        else
+            await CheckForUpdatesAsync(userInitiated: true);
+    }
 
     private async void UpdateBadgeButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -174,6 +186,11 @@ public partial class MainWindow
 
             AboutUpdateStatusText.Text = T("发现新版本 {0}", update.Version);
             if (!userInitiated) return;
+            if (TryGetPendingUpdatePackage(out var readyPath, out var readyVersion))
+            {
+                await PromptPendingUpdateInstallAsync(readyPath, readyVersion);
+                return;
+            }
 
             // On install-capable platforms, clicking update starts the download
             // immediately. The install confirmation is shown after the package
@@ -291,6 +308,9 @@ public partial class MainWindow
                     : null,
                 PendingUpdateDownloadedAt = samePendingPackage
                     ? _appSettings.PendingUpdateDownloadedAt
+                    : null,
+                PendingUpdateInstallStartedAt = samePendingPackage
+                    ? _appSettings.PendingUpdateInstallStartedAt
                     : null
             });
             await _appSettingsStore.SaveAsync(_appSettings);
@@ -313,7 +333,8 @@ public partial class MainWindow
                 PendingUpdateReleaseNotes = null,
                 PendingUpdateReleaseNotesEnglish = null,
                 PendingUpdatePackagePath = null,
-                PendingUpdateDownloadedAt = null
+                PendingUpdateDownloadedAt = null,
+                PendingUpdateInstallStartedAt = null
             });
             await _appSettingsStore.SaveAsync(_appSettings);
         }
@@ -337,14 +358,15 @@ public partial class MainWindow
                 ? null
                 : TruncateNotes(update.ReleaseNotesEnglish, 2000),
             PendingUpdatePackagePath = fullPackagePath,
-            PendingUpdateDownloadedAt = DateTimeOffset.Now
+            PendingUpdateDownloadedAt = DateTimeOffset.Now,
+            PendingUpdateInstallStartedAt = null
         });
         ShowUpdateBadge(
             update.Version,
             update.ReleaseNotes,
             update.ReleaseNotesEnglish,
             packageReady: true);
-        AboutUpdateStatusText.Text = T("更新包已下载，退出应用后安装 {0}", update.Version);
+        AboutUpdateStatusText.Text = T("更新包已下载，点击更新按钮安装 {0}", update.Version);
         try
         {
             await _appSettingsStore.SaveAsync(_appSettings);
@@ -367,7 +389,7 @@ public partial class MainWindow
             && File.Exists(packagePath);
     }
 
-    private async Task PromptPendingUpdateInstallAsync(string packagePath, string version)
+    private async Task PromptPendingUpdateInstallAsync(string packagePath, string version, bool exitRequested = false)
     {
         if (_pendingUpdatePromptInProgress) return;
         _pendingUpdatePromptInProgress = true;
@@ -383,17 +405,27 @@ public partial class MainWindow
 
             if (!await ConfirmAsync(
                     T("更新已就绪"),
-                    T("Kkindle {0} 更新包已下载完成。退出应用后将启动安装程序并完成更新。\n\n现在退出并安装吗？", version),
-                    T("退出并安装")))
+                    T("当前版本：{0}\n目标版本：{1}\n\n更新包已下载并校验。点击后将退出 Kkindle，显示安装进度，完成后自动打开新版本。\n如安装失败，可重新打开 Kkindle 重试。\n\n现在安装吗？", ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly), version),
+                    T("退出并安装"), allowDiagnosticAutoConfirm: false,
+                    cancelText: exitRequested ? T("稍后安装并退出") : T("稍后安装")))
             {
+                if (exitRequested && !_s3SyncExitInProgress)
+                {
+                    _skipS3SyncOnExit = false;
+                    _s3SyncExitInProgress = true;
+                    await CompleteWindowCloseAfterS3SyncAsync();
+                }
                 return;
             }
 
             try
             {
                 if (!await PrepareSettingsForExitAsync()) return;
-                _allowWindowCloseForPendingUpdate = true;
+                _appSettings = _appSettings with { PendingUpdateInstallStartedAt = DateTimeOffset.Now };
+                await _appSettingsStore.SaveAsync(_appSettings);
+                AboutUpdateStatusText.Text = T("正在启动安装程序…");
                 _updateService!.LaunchInstaller(packagePath);
+                _allowWindowCloseForPendingUpdate = true;
                 if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                     desktop.Shutdown();
                 else
@@ -402,7 +434,8 @@ public partial class MainWindow
             catch (Exception exception)
             {
                 _allowWindowCloseForPendingUpdate = false;
-                await ShowMessageAsync(T("更新失败"), UiText.Localize(exception.Message));
+                AboutUpdateStatusText.Text = T("安装未启动，更新包已保留，可点击更新按钮重试");
+                await ShowMessageAsync(T("更新失败"), T("{0}\n\n更新包已保留，可重试安装。安装日志：{1}", UiText.Localize(exception.Message), packagePath + ".install.log"));
             }
         }
         finally
@@ -418,6 +451,7 @@ public partial class MainWindow
         bool packageReady = false)
     {
         UpdateBadgeButton.IsVisible = true;
+        CheckForUpdatesButton.Content = packageReady ? T("安装更新") : T("检查更新");
         var tip = new StackPanel { Spacing = 6, MaxWidth = 380 };
         tip.Children.Add(new TextBlock
         {
@@ -436,7 +470,7 @@ public partial class MainWindow
         tip.Children.Add(new TextBlock
         {
             Text = packageReady
-                ? T("更新包已下载，点击此处或退出应用即可完成安装")
+                ? T("更新包已下载，点击此处安装；完成后自动打开新版本")
                 : T("点击黄点即可下载并安装最新版"),
             FontSize = 11,
             Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
@@ -448,6 +482,7 @@ public partial class MainWindow
     private void HideUpdateBadge()
     {
         UpdateBadgeButton.IsVisible = false;
+        CheckForUpdatesButton.Content = T("检查更新");
         ToolTip.SetTip(UpdateBadgeButton, null);
     }
 

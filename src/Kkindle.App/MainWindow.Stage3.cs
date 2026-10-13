@@ -1559,6 +1559,9 @@ public partial class MainWindow
 
     private void DeviceBookGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        // Context requests select the target before right-button release.
+        // Only finish an actual left-button selection gesture here.
+        if (e.InitialPressMouseButton != MouseButton.Left) return;
         if (_deviceRubberBandPointerSequenceHandled) return;
         _deviceRubberBandPointerSequenceHandled = true;
         if (!_deviceRubberBandSelecting)
@@ -1739,14 +1742,15 @@ public partial class MainWindow
             UpdateDeviceBookSelectionUi();
         }
 
-        var selectedCount = GetSelectedDeviceBooks().Count;
+        var selectedBooks = GetSelectedDeviceBooks().ToArray();
+        var selectedCount = selectedBooks.Length;
         var menu = new ContextMenu();
         menu.Items.Add(CreateMenuItem(
             selectedCount > 1 ? T("导出到电脑书库（{0}）", selectedCount) : T("导出到电脑书库"),
             selectedCount > 1 ? ExportSelectedDeviceBooksAsync : () => ExportDeviceBookAsync(card)));
         menu.Items.Add(CreateMenuItem(
             selectedCount > 1 ? T("从设备删除所选（{0}）", selectedCount) : T("从设备删除"),
-            DeleteSelectedDeviceBooksAsync));
+            () => TrackDeviceOperationAsync(() => DeleteSelectedDeviceBooksCoreAsync(selectedBooks))));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem(T("取消选择"), () =>
         {
@@ -2994,7 +2998,11 @@ public partial class MainWindow
 
     private async Task DeleteSelectedDeviceBooksCoreAsync()
     {
-        var selected = GetSelectedDeviceBooks();
+        await DeleteSelectedDeviceBooksCoreAsync(GetSelectedDeviceBooks());
+    }
+
+    private async Task DeleteSelectedDeviceBooksCoreAsync(IReadOnlyList<KindleBookCardViewModel> selected)
+    {
         if (selected.Count == 0 || _kindle is null || CurrentDevice is not { } device) return;
         if (!await ConfirmAsync(T("从设备删除书籍"), T("确定从 {0} 删除选中的 {1} 本书吗？电脑书库不受影响。", device.Name, selected.Count))) return;
 
@@ -6313,7 +6321,8 @@ public partial class MainWindow
                     PendingUpdateReleaseNotes = null,
                     PendingUpdateReleaseNotesEnglish = null,
                     PendingUpdatePackagePath = null,
-                    PendingUpdateDownloadedAt = null
+                    PendingUpdateDownloadedAt = null,
+                    PendingUpdateInstallStartedAt = null
                 });
                 _pendingUpdateVersion = null;
                 HideUpdateBadge();

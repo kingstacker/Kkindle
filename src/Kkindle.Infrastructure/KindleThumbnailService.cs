@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using Kkindle.Core;
+using SkiaSharp;
 
 namespace Kkindle.Infrastructure;
 
@@ -32,8 +33,8 @@ public static class KindleThumbnailService
             try
             {
                 var overrideBytes = await File.ReadAllBytesAsync(coverOverridePath, cancellationToken);
-                if (overrideBytes.Length > 0)
-                    return new KindleThumbnail(fileName, overrideBytes);
+                if (EncodeJpeg(overrideBytes) is { } jpeg)
+                    return new KindleThumbnail(fileName, jpeg);
             }
             catch (IOException)
             {
@@ -44,9 +45,26 @@ public static class KindleThumbnailService
         }
 
         var metadata = await metadataService.ReadMetadataAsync(bookPath, cancellationToken);
-        return metadata.CoverBytes is { Length: > 0 } cover
-            ? new KindleThumbnail(fileName, cover)
+        return metadata.CoverBytes is { Length: > 0 } cover && EncodeJpeg(cover) is { } coverJpeg
+            ? new KindleThumbnail(fileName, coverJpeg)
             : null;
+    }
+
+    internal static byte[]? EncodeJpeg(byte[] bytes)
+    {
+        using var data = SKData.CreateCopy(bytes);
+        using var codec = SKCodec.Create(data);
+        if (codec is null) return null;
+        using var image = SKBitmap.Decode(codec);
+        if (image is null) return null;
+        using var opaque = new SKBitmap(image.Width, image.Height, SKColorType.Bgra8888, SKAlphaType.Opaque);
+        using (var canvas = new SKCanvas(opaque))
+        {
+            canvas.Clear(SKColors.White);
+            canvas.DrawBitmap(image, 0, 0);
+        }
+        using var encoded = opaque.Encode(SKEncodedImageFormat.Jpeg, 90);
+        return encoded?.ToArray();
     }
 
     public static async Task<string?> ReadThumbnailFileNameAsync(

@@ -2121,4 +2121,17 @@
     <x:String x:Key="Ui.Dictionary.Enable">Enable dictionary</x:String>
     <x:String x:Key="Ui.Dictionary.Entries">entries</x:String>
     <x:String x:Key="Ui.Dictionary.Remove">Remove</x:String>
+    <x:String x:Key="Ui.Auto.EF2A6ECB0395493A">Update completed. Current version: {0}</x:String>
+    <x:String x:Key="Ui.Auto.7C0D2664869C1939">Update completed</x:String>
+    <x:String x:Key="Ui.Auto.B7096CAB43D6869A">Updated to {0}. Check About for newer releases.</x:String>
+    <x:String x:Key="Ui.Auto.D87165FB1BC4EFBB">The last installation did not complete. Click Update to retry {0}.</x:String>
+    <x:String x:Key="Ui.Auto.F1CD77F5CE7D7AF7">Update downloaded. Click Update to install {0}.</x:String>
+    <x:String x:Key="Ui.Auto.C86B00EB77A51C06">Current version: {0}&#xA;Target version: {1}&#xA;&#xA;The update is downloaded and verified. Kkindle will close, show installation progress, and reopen the new version when finished.&#xA;If installation fails, reopen Kkindle to retry.&#xA;&#xA;Install now?</x:String>
+    <x:String x:Key="Ui.Auto.BA897FD9581067BC">Starting the installer…</x:String>
+    <x:String x:Key="Ui.Auto.A9D5C8C47B0FEDF1">Installation did not start. The package is saved; click Update to retry.</x:String>
+    <x:String x:Key="Ui.Auto.898E7A2BDB45F967">{0}&#xA;&#xA;The update package is saved. Retry installation. Installer log: {1}</x:String>
+    <x:String x:Key="Ui.Auto.F1664AD5102F73BE">Update downloaded. Click here to install and reopen the new version.</x:String>
+    <x:String x:Key="Ui.Auto.7A6BAFC9C85304A1">Install update</x:String>
+    <x:String x:Key="Ui.Auto.55808DA23C4DC7A2">Install later</x:String>
+    <x:String x:Key="Ui.Auto.ADC3A0A970A8255F">Exit and install later</x:String>
 </ResourceDictionary>

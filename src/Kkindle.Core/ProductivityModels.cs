@@ -84,6 +84,8 @@ public sealed record AppSettings
     public string? PendingUpdatePackagePath { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public DateTimeOffset? PendingUpdateDownloadedAt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DateTimeOffset? PendingUpdateInstallStartedAt { get; init; }
 
     public bool AutoDoubanMatchOnImport { get; init; }
     public bool AutoConnectDevice { get; init; } = true;

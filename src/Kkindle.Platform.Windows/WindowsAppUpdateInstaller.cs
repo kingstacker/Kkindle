@@ -28,13 +28,24 @@ public sealed class WindowsAppUpdateInstaller : IAppUpdateInstaller
             throw new FileNotFoundException("找不到已下载的 Kkindle 安装程序。", fullPath);
         if (!CanInstall) throw new InvalidOperationException(UnavailableReason);
 
-        var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = fullPath,
-            Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS",
-            WorkingDirectory = Path.GetDirectoryName(fullPath)!,
-            UseShellExecute = true
-        });
+        using var process = Process.Start(CreateInstallerStartInfo(fullPath, AppContext.BaseDirectory));
         if (process is null) throw new InvalidOperationException("无法启动 Kkindle 安装程序。");
+    }
+
+    internal static ProcessStartInfo CreateInstallerStartInfo(string packagePath, string installDirectory)
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = packagePath,
+            WorkingDirectory = Path.GetDirectoryName(packagePath)!,
+            UseShellExecute = true
+        };
+        // SILENT keeps the progress window and installation errors visible.
+        // Pin the destination to this installation, even when multiple copies exist.
+        foreach (var argument in new[] { "/SILENT", "/NORESTART", "/CLOSEAPPLICATIONS",
+                     $"/DIR={Path.GetFullPath(installDirectory).TrimEnd(Path.DirectorySeparatorChar)}",
+                     $"/LOG={packagePath}.install.log" })
+            info.ArgumentList.Add(argument);
+        return info;
     }
 }

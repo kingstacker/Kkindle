@@ -683,6 +683,13 @@ internal static class WpdKindleAccess
             if ((bool)item.IsFolder) throw new InvalidOperationException("不能删除设备文件夹。");
 
             cancellationToken.ThrowIfCancellationRequested();
+            dynamic? readingState = FindItemByRelativePath(documents, Path.ChangeExtension(book.RelativePath, ".sdr"));
+            try
+            {
+                if (readingState is not null && (bool)readingState.IsFolder)
+                    WpdNativeTransfer.DeleteObject(device.RootPath, GetWpdObjectId(readingState), cancellationToken);
+            }
+            finally { Release(readingState); }
             ShellFileOperation.DeletePermanently((object)item);
             var startedAt = DateTime.UtcNow;
             while (DateTime.UtcNow - startedAt < TimeSpan.FromSeconds(20))
@@ -783,6 +790,16 @@ internal static class WpdKindleAccess
             }
 
             var existing = FindChild(documents, finalName);
+            if (existing is null)
+            {
+                dynamic? orphanState = FindChild(documents, Path.ChangeExtension(finalName, ".sdr"));
+                try
+                {
+                    if (orphanState is not null && (bool)orphanState.IsFolder)
+                        WpdNativeTransfer.DeleteObject(device.RootPath, GetWpdObjectId(orphanState), cancellationToken);
+                }
+                finally { Release(orphanState); }
+            }
             if (existing is not null)
             {
                 try

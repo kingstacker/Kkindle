@@ -486,6 +486,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
             var hash = await Hashing.Sha256Async(temporary, cancellationToken);
             if (!string.Equals(hash, bookFile.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("传输校验失败，设备上的文件未被替换。");
+            if (!File.Exists(destination)) KindleReadingState.DeleteForRemovedBook(destination);
             File.Move(temporary, destination, true);
             if (thumbnail is not null)
             {
@@ -594,6 +595,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("不能删除链接形式的设备文件。");
 
+        KindleReadingState.DeleteForRemovedBook(path);
         File.Delete(path);
     }
 

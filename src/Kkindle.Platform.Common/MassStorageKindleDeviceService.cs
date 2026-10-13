@@ -183,6 +183,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
             if (!string.IsNullOrWhiteSpace(bookFile.Sha256)
                 && !hash.Equals(bookFile.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("传输校验失败，设备上的文件未被替换。");
+            if (!File.Exists(destination)) KindleReadingState.DeleteForRemovedBook(destination);
             await MoveFileAsync(temporary, destination, overwrite: true, cancellationToken);
 
             var thumbnail = device.Profile.UsesKindleThumbnails
@@ -215,6 +216,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         var path = ResolveWithinRoot(device.RootPath, book.RelativePath, GetDocumentsRoot(device));
         RejectLink(path);
         if (!File.Exists(path)) throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
+        KindleReadingState.DeleteForRemovedBook(path);
         File.Delete(path);
         await Task.CompletedTask;
     }
