@@ -1427,6 +1427,7 @@ public partial class MainWindow
         _readerPendingSearchContext = null;
         _readerSearchSequence++;
         _readerWholeSearchSequence++;
+        _readerWholeSearchCancellation?.Cancel();
         _readerSearchVisible = false;
         _readerSearchLayoutCaptured = false;
         _readerSearchQuery = string.Empty;
@@ -6464,16 +6465,18 @@ public partial class MainWindow
         var script = $$"""
             (() => {
               const oldMarks = Array.from(document.querySelectorAll('mark.kkindle-page-find-hit'));
+              const normalizedParents = new Set();
               const unwrap = mark => {
                 const parent = mark.parentNode;
                 if (!parent) return;
                 while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
                 parent.removeChild(mark);
-                parent.normalize?.();
+                normalizedParents.add(parent);
               };
               for (let index = oldMarks.length - 1; index >= 0; index--) {
                 unwrap(oldMarks[index]);
               }
+              for (const parent of normalizedParents) parent.normalize?.();
               const query = ({{serializedQuery}} || '').trim();
               if (!query || !document.body) return 0;
               const folded = query.toLocaleLowerCase();
@@ -6488,6 +6491,12 @@ public partial class MainWindow
               while (walker.nextNode()) {
                 if (!ignored(walker.currentNode)) nodes.push(walker.currentNode);
               }
+              const nodeOffsets = [];
+              let totalLength = 0;
+              for (const node of nodes) {
+                nodeOffsets.push(totalLength);
+                totalLength += (node.data || '').length;
+              }
               const text = nodes.map(node => node.data || '').join('');
               const foldedText = text.toLocaleLowerCase();
               const matches = [];
@@ -6499,8 +6508,15 @@ public partial class MainWindow
               }
               const segmentsFor = (start, end) => {
                 const segments = [];
-                let cursor = 0;
-                for (const node of nodes) {
+                let low = 0, high = nodes.length;
+                while (low < high) {
+                  const mid = (low + high) >>> 1;
+                  if ((nodeOffsets[mid + 1] ?? totalLength) <= start) low = mid + 1;
+                  else high = mid;
+                }
+                let cursor = nodeOffsets[low] || 0;
+                for (let nodeIndex = low; nodeIndex < nodes.length; nodeIndex++) {
+                  const node = nodes[nodeIndex];
                   const length = (node.data || '').length;
                   const nodeStart = cursor;
                   const nodeEnd = cursor + length;

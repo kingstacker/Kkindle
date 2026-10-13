@@ -7,6 +7,50 @@ namespace Kkindle.Tests;
 
 public sealed class LibraryTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeletedBookDisplayInfoRetainsTitleAndCoverAfterRestart(bool keepFiles)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "retained.epub");
+            CreateEpub(source);
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            await library.ImportAsync([source]);
+            var book = Assert.Single(await library.SearchAsync());
+            var cover = Path.Combine(paths.Data, "retained-cover.png");
+            byte[] bytes = [1, 2, 3, 4];
+            await File.WriteAllBytesAsync(cover, bytes);
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var update = connection.CreateCommand();
+                update.CommandText = "UPDATE Books SET CoverPath='retained-cover.png' WHERE Id=$id;";
+                update.Parameters.AddWithValue("$id", book.Id.ToString());
+                await update.ExecuteNonQueryAsync();
+            }
+            if (keepFiles) await library.RemoveFromLibraryKeepFilesAsync(book.Id);
+            else await library.DeleteAsync(book.Id);
+            library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            var info = (await library.GetBookDisplayInfosAsync([book.Id]))[book.Id];
+            Assert.Equal(book.Title, info.Title);
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(paths.Data, info.CoverPath!)));
+            if (!keepFiles)
+            {
+                await library.PurgeTrashItemAsync(Assert.Single(await library.GetTrashItemsAsync()).Id);
+                info = (await library.GetBookDisplayInfosAsync([book.Id]))[book.Id];
+                Assert.Equal(book.Title, info.Title);
+                Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(paths.Data, info.CoverPath!)));
+            }
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     [Fact]
     public async Task RemovingBookFromLibraryKeepsImportedFilesOnDisk()
     {

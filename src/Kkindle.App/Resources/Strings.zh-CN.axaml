@@ -269,6 +269,10 @@
     <x:String x:Key="Ui.Auto.B25B2E4E11693509">全部语言</x:String>
     <x:String x:Key="Ui.Auto.52D25A9E30BA94F1">关于</x:String>
     <x:String x:Key="Ui.About.UserGroup">QQ交流群：1109898894</x:String>
+    <x:String x:Key="Ui.About.CopyUserGroup">点击复制群号</x:String>
+    <x:String x:Key="Ui.Diagnostics.Description">检测目录读写、阅读器、PDF、Calibre 和 TTS；缺少可安装依赖时可一键修复。</x:String>
+    <x:String x:Key="Ui.About.UserGroupCopied">群号已复制到剪贴板。</x:String>
+    <x:String x:Key="Ui.About.UserGroupCopyFailed">复制群号失败。</x:String>
     <x:String x:Key="Ui.About.UserManual">使用手册</x:String>
     <x:String x:Key="Ui.About.LogExportTitle">软件日志</x:String>
     <x:String x:Key="Ui.About.LogExportDescription">导出运行日志和环境诊断信息，方便反馈问题；不会打包邮箱密码、API Key 或书籍文件。</x:String>

@@ -27,7 +27,7 @@ public sealed class PdfTextService
             return pages;
         }, cancellationToken);
 
-    public static IReadOnlyList<PdfSearchResult> Search(IReadOnlyList<PdfPageText> pages, string query, int limit = 100)
+    public static IReadOnlyList<PdfSearchResult> Search(IReadOnlyList<PdfPageText> pages, string query, int limit = 100, CancellationToken cancellationToken = default)
     {
         var term = query.Trim();
         if (term.Length == 0) return [];
@@ -35,9 +35,11 @@ public sealed class PdfTextService
         var result = new List<PdfSearchResult>();
         foreach (var page in pages)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var offset = 0;
             while (offset < page.Text.Length)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var index = page.Text.IndexOf(term, offset, StringComparison.CurrentCultureIgnoreCase);
                 if (index < 0) break;
                 var start = Math.Max(0, index - 45);

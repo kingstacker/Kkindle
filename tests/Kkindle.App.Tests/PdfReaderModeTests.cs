@@ -20,6 +20,27 @@ namespace Kkindle.Ui.Tests;
 public sealed class PdfReaderModeTests(SettingsUiSession session)
 {
     [Fact]
+    public Task ClearingSearchCancelsPendingIndexWaitAndNewQueryWins() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Set("_readerIsPdf", true);
+        scope.Set("_readerPdfIndexReady", false);
+        var pendingIndex = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        scope.Set("_readerPdfIndexTask", pendingIndex.Task);
+        var obsolete = scope.Call<Task>("RefreshReaderWholeSearchAsync", "obsolete", null);
+        Assert.False(obsolete.IsCompleted);
+        await scope.Call<Task>("RefreshReaderWholeSearchAsync", "", null);
+        await obsolete.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Empty(scope.Window.ReaderSearchResults);
+        scope.Set("_readerPdfIndexReady", true);
+        pendingIndex.SetResult();
+        scope.Set("_readerPdfPages", new PdfPageText[] { new(1, "obsolete"), new(2, "latest query") });
+        await scope.Call<Task>("RefreshReaderWholeSearchAsync", "latest", null);
+        Assert.Equal(2, Assert.Single(scope.Window.ReaderSearchResults).PageNumber);
+        await ReaderTests.Render();
+    });
+
+    [Fact]
     public Task ContinuousPagesFollowTheViewportAndDefaultToReadableWidth() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();

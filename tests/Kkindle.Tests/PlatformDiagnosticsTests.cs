@@ -13,12 +13,12 @@ public sealed class PlatformDiagnosticsTests
         {
             var paths = new AppPaths(Path.Combine(root, "app"));
             var diagnostics = await new PlatformDiagnosticsService(paths)
-                .CollectAsync(null, kindleAvailable: false);
+                .CollectAsync(null);
 
             Assert.Contains(diagnostics, item => item.Name == "数据目录" && item.Status == PlatformDiagnosticStatus.Ready);
             Assert.Contains(diagnostics, item => item.Name == "回收站目录" && item.Status == PlatformDiagnosticStatus.Ready);
             Assert.Contains(diagnostics, item => item.Name == "PDF 渲染与文本" && item.Status == PlatformDiagnosticStatus.Ready);
-            Assert.Contains(diagnostics, item => item.Name == "阅读设备" && item.Status == PlatformDiagnosticStatus.Warning);
+            Assert.DoesNotContain(diagnostics, item => item.Name is "操作系统" or "运行时" or "阅读设备");
             var calibre = Assert.Single(diagnostics, item => item.Name == "Calibre");
             Assert.Equal(
                 calibre.Status == PlatformDiagnosticStatus.Ready

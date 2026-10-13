@@ -37,7 +37,7 @@ public sealed record LibraryBookMatch(
     public string? Isbn { get; init; }
 }
 
-public sealed record LibraryBookDisplayInfo(Guid Id, string Title, string? CoverPath);
+public sealed record LibraryBookDisplayInfo(Guid Id, string Title, string? CoverPath, bool IsDeleted = false);
 
 public sealed record AppSettings
 {

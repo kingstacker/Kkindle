@@ -20,6 +20,8 @@ public partial class MainWindow
     private const int MaxReaderAnnotations = 5_000;
     private const int MaxReaderBookmarks = 5_000;
     private int _readerWholeSearchSequence;
+    private CancellationTokenSource? _readerWholeSearchCancellation;
+    private readonly SemaphoreSlim _readerWholeSearchGate = new(1, 1);
     private int _readerPdfSearchSequence;
     private bool _readerSearchVisible;
     private bool _readerSearchLayoutCaptured;
@@ -564,6 +566,7 @@ public partial class MainWindow
             _readerSearchQuery = ReaderTocSearchBox.Text?.Trim() ?? string.Empty;
         _readerSearchVisible = false;
         _readerWholeSearchSequence++;
+        _readerWholeSearchCancellation?.Cancel();
         ReaderSearchPanel.IsVisible = false;
         ReaderTocSearchBox.Text = string.Empty;
         if (_readerSearchPreviousBookmarkTabActive && restorePreviousLayout)
@@ -1102,6 +1105,7 @@ public partial class MainWindow
     {
         if (!_readerSearchVisible) return;
         var sequence = ++_readerWholeSearchSequence;
+        _readerWholeSearchCancellation?.Cancel();
         var query = ReaderTocSearchBox.Text?.Trim() ?? string.Empty;
         _readerSearchQuery = query;
         if (query.Length == 0)
@@ -1118,12 +1122,18 @@ public partial class MainWindow
     private async Task RefreshReaderWholeSearchAsync(string query, int? sequence = null)
     {
         if (sequence is not null && sequence.Value != _readerWholeSearchSequence) return;
+        _readerWholeSearchCancellation?.Cancel();
+        using var searchCancellation = CancellationTokenSource.CreateLinkedTokenSource(ReaderToken);
+        _readerWholeSearchCancellation = searchCancellation;
+        var searchToken = searchCancellation.Token;
         if (query.Length == 0)
         {
             ClearReaderSearchResultSelection();
             ReaderSearchResults.Clear();
             ReaderWholeSearchCountText.Text = string.Empty;
             ShowReaderSearchStatus(T("输入关键词，实时搜索整本书。"));
+            if (ReferenceEquals(_readerWholeSearchCancellation, searchCancellation))
+                _readerWholeSearchCancellation = null;
             return;
         }
 
@@ -1137,9 +1147,10 @@ public partial class MainWindow
             if (_readerIsPdf)
             {
                 var fileId = _readerBookFile?.Id;
-                await EnsureReaderPdfTextIndexAsync(ReaderToken);
+                await EnsureReaderPdfTextIndexAsync(searchToken);
                 if (!_readerIsPdf || _readerBookFile?.Id != fileId) return;
-                var results = PdfTextService.Search(_readerPdfPages, query, MaxWholeBookSearchResults);
+                var pages = _readerPdfPages;
+                var results = await Task.Run(() => PdfTextService.Search(pages, query, MaxWholeBookSearchResults, searchToken), searchToken);
                 foreach (var result in results)
                     pendingResults.Add(new ReaderSearchResultViewModel(
                         T("第 {0} 页", result.PageNumber),
@@ -1152,20 +1163,28 @@ public partial class MainWindow
             }
             else if (_readerBookCard is not null && _readerBookFile is not null && _readerDocument is not null)
             {
-                await _bookContent.EnsureIndexedAsync(_readerBookCard.Book, _readerBookFile, _readerDocument, ReaderToken);
-                var results = await _readerData.SearchBookAsync(
-                    _readerBookCard.Book.Id,
-                    query,
-                    MaxWholeBookSearchResults,
-                    ReaderToken,
-                    exactPhraseOnly: true,
-                    bookFileId: _readerBookFile.Id);
+                var book = _readerBookCard.Book;
+                var file = _readerBookFile;
+                var document = _readerDocument;
+                var indexToken = ReaderToken;
+                var results = await Task.Run(async () =>
+                {
+                    await _readerWholeSearchGate.WaitAsync(searchToken);
+                    try
+                    {
+                        await _bookContent.EnsureIndexedAsync(book, file, document, indexToken);
+                        return await _readerData.SearchBookAsync(book.Id, query,
+                            MaxWholeBookSearchResults, searchToken,
+                            exactPhraseOnly: true, bookFileId: file.Id);
+                    }
+                    finally { _readerWholeSearchGate.Release(); }
+                }, searchToken);
                 // The same visible excerpt can come from duplicate EPUB spine
                 // entries or legacy chunks with different paths/offsets. At this
                 // final presentation boundary, identical title + snippet means an
                 // identical user-facing result and must only be shown once.
                 var distinct = EpubReaderSearchPolicy
-                    .FilterAndOrder(_readerDocument, results)
+                    .FilterAndOrder(document, results)
                     .Select(result => new ReaderSearchResultViewModel(result, query))
                     .DistinctBy(
                         item => $"{item.Title}\u001f{item.Excerpt}",
@@ -1186,7 +1205,7 @@ public partial class MainWindow
                     ? (_readerIsPdf ? T("没有找到匹配的内容。") : T("没有找到匹配的片段。"))
                     : null);
         }
-        catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (searchToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
@@ -1194,6 +1213,11 @@ public partial class MainWindow
             if (sequence is not null && sequence.Value != _readerWholeSearchSequence) return;
             ReaderWholeSearchCountText.Text = string.Empty;
             ShowReaderSearchStatus(T("搜索失败：{0}", UiText.Localize(exception.Message)));
+        }
+        finally
+        {
+            if (ReferenceEquals(_readerWholeSearchCancellation, searchCancellation))
+                _readerWholeSearchCancellation = null;
         }
     }
 

@@ -132,6 +132,16 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 OriginalCoverPath TEXT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_LibraryTrash_DeletedAt ON LibraryTrash(DeletedAt DESC);
+            CREATE TABLE IF NOT EXISTS ReadingMaterialBooks (
+                Id TEXT PRIMARY KEY,
+                Title TEXT NOT NULL,
+                CoverPath TEXT NULL
+            );
+            CREATE TRIGGER IF NOT EXISTS PreserveReadingMaterialBook BEFORE DELETE ON Books
+            BEGIN
+                INSERT OR REPLACE INTO ReadingMaterialBooks(Id, Title, CoverPath)
+                VALUES(OLD.Id, OLD.Title, OLD.CoverPath);
+            END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureLibraryTrashBookFileIdColumnAsync(connection, cancellationToken);
@@ -140,6 +150,42 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await EnsureDefaultCollectionAsync(connection, cancellationToken);
         await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
+        await PreserveTrashDisplayInfosAsync(connection, cancellationToken);
+    }
+
+    private async Task PreserveTrashDisplayInfosAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var entries = new List<(Guid Id, string Title, string? Cover)>();
+        using (var query = connection.CreateCommand())
+        {
+            query.CommandText = "SELECT BookId, Title, TrashCoverPath FROM LibraryTrash WHERE Kind = 0;";
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                if (Guid.TryParse(reader.GetString(0), out var id))
+                    entries.Add((id, reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2)));
+        }
+        foreach (var entry in entries)
+        {
+            var cover = PreserveReadingMaterialCover(entry.Id, entry.Cover);
+            using var save = connection.CreateCommand();
+            save.CommandText = "INSERT INTO ReadingMaterialBooks(Id, Title, CoverPath) VALUES($id,$title,$cover) ON CONFLICT(Id) DO UPDATE SET CoverPath=COALESCE(excluded.CoverPath,ReadingMaterialBooks.CoverPath);";
+            save.Parameters.AddWithValue("$id", entry.Id.ToString());
+            save.Parameters.AddWithValue("$title", entry.Title);
+            save.Parameters.AddWithValue("$cover", (object?)cover ?? DBNull.Value);
+            await save.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private string? PreserveReadingMaterialCover(Guid bookId, string? coverPath)
+    {
+        if (string.IsNullOrWhiteSpace(coverPath)) return null;
+        var source = ResolveDataPath(coverPath);
+        if (!File.Exists(source)) return null;
+        var destination = Path.Combine(_paths.Data, "reading-material-covers", bookId.ToString("N") + Path.GetExtension(source));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (!string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
+            File.Copy(source, destination, true);
+        return Path.GetRelativePath(_paths.Data, destination);
     }
 
     private static async Task EnsureLibraryTrashBookFileIdColumnAsync(
@@ -565,7 +611,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         {
             var command = connection.CreateCommand();
             var parameters = batch.Select((_, index) => $"$book{index}").ToArray();
-            command.CommandText = $"SELECT Id, Title, CoverPath FROM Books WHERE Id IN ({string.Join(", ", parameters)});";
+            command.CommandText = $"SELECT Id, Title, CoverPath, 1 FROM ReadingMaterialBooks WHERE Id IN ({string.Join(", ", parameters)}) AND Id NOT IN (SELECT Id FROM Books) UNION ALL SELECT Id, Title, CoverPath, 0 FROM Books WHERE Id IN ({string.Join(", ", parameters)});";
             for (var index = 0; index < batch.Length; index++)
                 command.Parameters.AddWithValue(parameters[index], batch[index].ToString());
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -575,7 +621,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 result[id] = new LibraryBookDisplayInfo(
                     id,
                     reader.GetString(1),
-                    reader.IsDBNull(2) ? null : reader.GetString(2));
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.GetInt32(3) != 0);
             }
         }
         return result;
@@ -1288,6 +1335,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         CancellationToken cancellationToken)
     {
         var trashId = Guid.NewGuid();
+        var retainedCoverPath = PreserveReadingMaterialCover(book.Id, book.CoverPath);
         var trashDirectory = Path.Combine(_paths.Trash, "books", trashId.ToString("N"));
         var originalDirectory = Path.Combine(_paths.Library, book.Id.ToString("N"));
         var trashPath = Path.GetRelativePath(_paths.Data, trashDirectory);
@@ -1354,6 +1402,12 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 delete.CommandText = "DELETE FROM Books WHERE Id = $id;";
                 delete.Parameters.AddWithValue("$id", book.Id.ToString());
                 await delete.ExecuteNonQueryAsync(cancellationToken);
+                using var retainedCover = connection.CreateCommand();
+                retainedCover.Transaction = transaction;
+                retainedCover.CommandText = "UPDATE ReadingMaterialBooks SET CoverPath=$cover WHERE Id=$id;";
+                retainedCover.Parameters.AddWithValue("$id", book.Id.ToString());
+                retainedCover.Parameters.AddWithValue("$cover", (object?)retainedCoverPath ?? DBNull.Value);
+                await retainedCover.ExecuteNonQueryAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
             }
             catch

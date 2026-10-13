@@ -2234,6 +2234,7 @@
                                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                                         <TextBlock Text="{Binding SourceLabel}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                                         <TextBlock Text="{Binding CountLabel}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                                        <TextBlock Text="{Binding DeletedLabel}" IsVisible="{Binding HasDeletedBook}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                                     </StackPanel>
                                                 </StackPanel>
                                                 <Button Grid.Column="3"
@@ -3182,14 +3183,16 @@
                                         </StackPanel>
                                     </Border>
                                 </Expander>
-                                <Expander x:Name="SettingsReadingDataExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.440C143379A34160}" Tag="{DynamicResource Ui.Auto.2DFB956FAF03E30A}" AutomationProperties.Name="{DynamicResource Ui.Auto.440C143379A34160}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
-                                    <Border Padding="0" Margin="-16,0,0,0">
-                                        <StackPanel Spacing="10">
-                                            <Button x:Name="ResetReadingDataButton" Content="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" AutomationProperties.Name="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" ToolTip.Tip="{DynamicResource Ui.Auto.C9FD4D3CBC6F284A}" Classes="quiet" HorizontalAlignment="Left" Click="ResetReadingDataButton_Click" />
-                                            <TextBlock x:Name="SettingsReadingDataStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                <Border x:Name="SettingsReadingDataSection" Padding="0,12">
+                                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12">
+                                        <StackPanel Spacing="4" VerticalAlignment="Center">
+                                            <TextBlock Text="{DynamicResource Ui.Auto.440C143379A34160}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="{DynamicResource Ui.Auto.C9FD4D3CBC6F284A}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         </StackPanel>
-                                    </Border>
-                                </Expander>
+                                        <Button x:Name="ResetReadingDataButton" Grid.Column="1" Content="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" AutomationProperties.Name="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" ToolTip.Tip="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" Classes="quiet libraryToolbar" VerticalAlignment="Center" Click="ResetReadingDataButton_Click" />
+                                        <TextBlock x:Name="SettingsReadingDataStatusText" Grid.Row="1" Grid.ColumnSpan="2" IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" Margin="0,8,0,0" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                    </Grid>
+                                </Border>
                             </StackPanel>
                             <StackPanel Spacing="16" x:Name="SettingsAdvancedSection" IsVisible="False">
                                 <Expander x:Name="SettingsMcpExpander" IsExpanded="False" Classes="settingsExpander" Header="{DynamicResource Ui.Mcp.Title}" Tag="{DynamicResource Ui.Mcp.Description}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Title}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
@@ -3305,8 +3308,7 @@
                                 <Expander x:Name="SettingsDiagnosticsExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Tag="{DynamicResource Ui.Auto.B66D6EE56E8CAEDF}" AutomationProperties.Name="{DynamicResource Ui.Auto.F8DF8F45B414ECA8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsDiagnosticsSection" Padding="0">
                                         <StackPanel Spacing="13">
-                                            <TextBlock x:Name="SettingsDiagnosticsTitleText" Text="跨平台诊断" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                            <TextBlock x:Name="SettingsDiagnosticsDescriptionText" Text="检测数据目录、阅读器、PDF、Calibre 和设备能力；缺少可安装依赖时可在这里一键修复。" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="SettingsDiagnosticsDescriptionText" Text="{DynamicResource Ui.Diagnostics.Description}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <Button x:Name="RepairDiagnosticsButton" Content="一键修复" IsEnabled="False" Classes="quiet" Click="RepairDiagnosticsButton_Click" />
                                                 <Button x:Name="RefreshDiagnosticsButton" Content="重新检测" Classes="quiet" Click="RefreshDiagnosticsButton_Click" />
@@ -3401,7 +3403,7 @@
                                         <StackPanel Spacing="10">
                                             <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
                                             <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Cursor="Hand" PointerPressed="AboutVersionText_PointerPressed" />
-                                            <TextBlock Text="{DynamicResource Ui.About.UserGroup}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <Button x:Name="AboutUserGroupButton" Content="{DynamicResource Ui.About.UserGroup}" Classes="quiet" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Left" MinWidth="0" MinHeight="0" Padding="0" BorderThickness="0" Cursor="Hand" ToolTip.Tip="{DynamicResource Ui.About.CopyUserGroup}" Click="AboutUserGroupButton_Click" />
                                             <StackPanel Orientation="Horizontal" Spacing="20" Margin="0,4,0,0">
                                                 <Button x:Name="AboutUserManualButton" Content="{DynamicResource Ui.About.UserManual}" Classes="quiet" FontSize="12" MinWidth="0" MinHeight="0" Padding="0" BorderThickness="0" VerticalAlignment="Center" Click="OpenUserManualButton_Click" />
                                                 <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" HorizontalAlignment="Left" VerticalAlignment="Center" Cursor="Hand">

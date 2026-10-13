@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
@@ -19,22 +18,11 @@ public sealed class PlatformDiagnosticsService
 
     public Task<IReadOnlyList<PlatformDiagnostic>> CollectAsync(
         string? calibrePath,
-        bool kindleAvailable,
         CancellationToken cancellationToken = default) =>
         Task.Run<IReadOnlyList<PlatformDiagnostic>>(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var diagnostics = new List<PlatformDiagnostic>
-            {
-                new(
-                    "操作系统",
-                    PlatformDiagnosticStatus.Ready,
-                    $"{RuntimeInformation.OSDescription.Trim()} · {RuntimeInformation.ProcessArchitecture}"),
-                new(
-                    "运行时",
-                    PlatformDiagnosticStatus.Ready,
-                    $".NET {Environment.Version} · {RuntimeInformation.FrameworkDescription}")
-            };
+            var diagnostics = new List<PlatformDiagnostic>();
 
             diagnostics.Add(CheckWritable("数据目录", _paths.Data));
             diagnostics.Add(CheckWritable("书库目录", _paths.Library));
@@ -42,9 +30,6 @@ public sealed class PlatformDiagnosticsService
             diagnostics.Add(CheckWebView());
             diagnostics.Add(CheckPdfParser());
             diagnostics.Add(CheckCalibre(calibrePath));
-            diagnostics.Add(kindleAvailable
-                ? new PlatformDiagnostic("阅读设备", PlatformDiagnosticStatus.Ready, "已加载当前平台阅读设备服务。")
-                : new PlatformDiagnostic("阅读设备", PlatformDiagnosticStatus.Warning, "当前平台没有可用的阅读设备服务；书库和阅读功能仍可使用。"));
             return diagnostics;
         }, cancellationToken);
 

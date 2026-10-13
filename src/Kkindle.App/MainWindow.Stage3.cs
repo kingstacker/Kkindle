@@ -3164,7 +3164,10 @@ public partial class MainWindow
                     annotation.Note,
                     annotation.UpdatedAt,
                     annotation,
-                    null));
+                    null)
+                {
+                    IsDeletedBook = !displayInfos.TryGetValue(annotation.BookId, out var info) || info.IsDeleted
+                });
             }
             foreach (var reflection in reflections)
             {
@@ -3179,7 +3182,10 @@ public partial class MainWindow
                     reflection.UpdatedAt,
                     null,
                     null,
-                    localReflection: reflection));
+                    localReflection: reflection)
+                {
+                    IsDeletedBook = !displayInfos.TryGetValue(reflection.BookId, out var info) || info.IsDeleted
+                });
             }
 
             if (CurrentDevice is { CanReadNotes: true } device && _kindle is not null)
@@ -4457,8 +4463,6 @@ public partial class MainWindow
 
     private void UpdateDiagnosticsTexts()
     {
-        SettingsDiagnosticsTitleText.Text = T("跨平台诊断");
-        SettingsDiagnosticsDescriptionText.Text = T("检测数据目录、阅读器、PDF、Calibre 和设备能力；缺少可安装依赖时可在这里一键修复。");
         RepairDiagnosticsButton.Content = T("一键修复");
         RefreshDiagnosticsButton.Content = T("重新检测");
     }
@@ -4482,7 +4486,6 @@ public partial class MainWindow
         {
             var diagnostics = (await _platformDiagnostics.CollectAsync(
                 _appSettings.CalibrePath,
-                _kindle is not null,
                 _lifetimeCancellation.Token)).ToList();
             try
             {
@@ -6700,6 +6703,8 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
 
     public ReadingMaterialSource Source { get; }
     public bool IsMixedSource { get; }
+    public bool HasDeletedBook => Items.Any(item => item.IsDeletedBook);
+    public string DeletedLabel => UiText.IsEnglish ? "Deleted" : "已删除";
     public bool IsExportMode { get; }
     public string SourceLabel => string.Join(" + ", Items.Select(item => item.Source == ReadingMaterialSource.Local
         ? UiText.Get("本地书籍") : item.SourceLabel).Distinct(StringComparer.Ordinal));
@@ -6746,6 +6751,7 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(BookTitle));
         OnPropertyChanged(nameof(SourceLabel));
         OnPropertyChanged(nameof(CountLabel));
+        OnPropertyChanged(nameof(DeletedLabel));
         OnPropertyChanged(nameof(ExpandLabel));
     }
 
@@ -6857,6 +6863,7 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
     public bool HasNote => !IsBookReflection && !string.IsNullOrWhiteSpace(Note);
     public string DateLabel => UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? UiText.Get("时间未知");
     public string SearchText => string.Join('\n', SourceLabel, BookTitle, TypeLabel, ChapterLabel, Location, Quote, Note);
+    public bool IsDeletedBook { get; init; }
     public bool IsSelected
     {
         get => _isSelected;

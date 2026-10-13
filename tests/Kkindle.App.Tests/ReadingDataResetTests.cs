@@ -23,7 +23,8 @@ public sealed partial class SettingsTests
         Assert.Single(scope.Window.DashboardRecentItems);
         scope.Window.Width = 1024;
         scope.Window.Height = 768;
-        scope.Call("OpenSettingsExpander", "Data", scope.Get<Expander>("SettingsReadingDataExpander"));
+        scope.Call("SettingsButton_Click", null, new RoutedEventArgs());
+        scope.Call("ShowSettingsSection", "Data");
         await Render();
         var resetButton = scope.Get<Button>("ResetReadingDataButton");
         Assert.Equal(language == "en-US" ? "Reset reading data" : "重置阅读数据", resetButton.Content);

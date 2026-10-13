@@ -12,6 +12,7 @@ public sealed partial class ReaderDataService
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
     private bool _ftsAvailable;
+    private bool _ftsUsesTrigram;
 
     public event EventHandler<LocalDataChangedEventArgs>? DataChanged;
 
@@ -1436,7 +1437,10 @@ public sealed partial class ReaderDataService
         bool exactPhraseOnly = false,
         Guid? bookFileId = null)
     {
-        var terms = BuildSearchTerms(query);
+        var directPhrase = exactPhraseOnly && !query.Trim().Any(char.IsWhiteSpace);
+        IReadOnlyList<string> terms = directPhrase
+            ? (string.IsNullOrWhiteSpace(query) ? [] : [query.Trim()])
+            : BuildSearchTerms(query);
         if (terms.Count == 0) return [];
         // int.MaxValue is the explicit "whole book" mode used by the reader
         // search UI. Small bounded callers (for example AI context retrieval)
@@ -1454,6 +1458,8 @@ public sealed partial class ReaderDataService
             try
             {
                 var ftsResults = await SearchFullTextAsync(bookId, bookFileId, terms, candidateLimit, cancellationToken);
+                if (_ftsUsesTrigram && directPhrase)
+                    return DeduplicateSearchResults(FilterExactPhraseMatches(ftsResults, query), query, terms, requestedLimit);
                 if (ftsResults.Count > 0)
                 {
                     var matches = exactPhraseOnly
@@ -1683,8 +1689,8 @@ public sealed partial class ReaderDataService
             // ChapterTitle is duplicated on every chunk. Only the chapter's
             // opening chunk represents a title-only match; content matches
             // still return every relevant chunk.
-            predicates.Add($"(Content LIKE $term{index} OR (ChunkIndex = 0 AND ChapterTitle LIKE $term{index}))");
-            command.Parameters.AddWithValue($"$term{index}", $"%{selectedTerms[index]}%");
+            predicates.Add($"(Content LIKE $term{index} ESCAPE '\\' OR (ChunkIndex = 0 AND ChapterTitle LIKE $term{index} ESCAPE '\\'))");
+            command.Parameters.AddWithValue($"$term{index}", $"%{selectedTerms[index].Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_")}%");
         }
         command.CommandText = $"""
             SELECT Id, BookId, BookFileId, SourceHash, ChapterIndex, ChunkIndex, ChapterTitle,
@@ -1864,6 +1870,10 @@ public sealed partial class ReaderDataService
             }
         }
 
+        using var definition = connection.CreateCommand();
+        definition.CommandText = "SELECT sql FROM sqlite_master WHERE name = 'BookContentFts';";
+        _ftsUsesTrigram = (await definition.ExecuteScalarAsync(cancellationToken))?.ToString()
+            ?.Contains("trigram", StringComparison.OrdinalIgnoreCase) == true;
         using var triggers = connection.CreateCommand();
         triggers.CommandText = """
             CREATE TRIGGER IF NOT EXISTS BookContentChunks_ai AFTER INSERT ON BookContentChunks BEGIN
