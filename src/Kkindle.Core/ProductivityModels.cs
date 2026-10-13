@@ -32,7 +32,10 @@ public sealed record LibraryBookMatch(
     Guid Id,
     string Title,
     string Authors,
-    IReadOnlyList<LibraryFileMatch> Files);
+    IReadOnlyList<LibraryFileMatch> Files)
+{
+    public string? Isbn { get; init; }
+}
 
 public sealed record LibraryBookDisplayInfo(Guid Id, string Title, string? CoverPath);
 

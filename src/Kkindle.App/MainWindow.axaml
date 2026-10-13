@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -1600,7 +1600,29 @@
                   Grid.Column="1"
                   Margin="30,24,30,18"
                   IsVisible="False"
-                  RowDefinitions="Auto,Auto,*,Auto">
+                  RowDefinitions="Auto,Auto,*,Auto" ColumnDefinitions="*,0" ClipToBounds="True" Background="Transparent" Tapped="ZLibraryPage_Tapped">
+                <Grid.Styles>
+                    <Style Selector="TextBlock.zLibrarySendLabel">
+                        <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+                    </Style>
+                    <Style Selector="Button.zLibrarySend:disabled TextBlock">
+                        <Setter Property="Foreground" Value="#999999" />
+                    </Style>
+                    <Style Selector="Button.zLibraryPagination">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="FontSize" Value="22" />
+                    </Style>
+                    <Style Selector="Button.zLibraryPagination:disabled">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="Foreground" Value="#999999" />
+                    </Style>
+                    <Style Selector="Button.zLibraryPagination:disabled /template/ ContentPresenter">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Foreground" Value="#999999" />
+                    </Style>
+                </Grid.Styles>
                 <StackPanel Grid.Row="0" Spacing="3" Margin="6,14,0,0">
                     <TextBlock Text="{DynamicResource Ui.ZLibrary.Title}" FontSize="28" FontWeight="Bold" />
                     <TextBlock x:Name="ZLibraryStatusText" Text="{DynamicResource Ui.ZLibrary.AccountDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
@@ -1611,28 +1633,31 @@
                              Padding="13,7"
                              PlaceholderText="{DynamicResource Ui.ZLibrary.SearchPlaceholder}"
                              KeyDown="ZLibrarySearchBox_KeyDown" />
-                    <ComboBox x:Name="ZLibraryExtensionBox" Grid.Column="1" Width="126" SelectedIndex="0" AutomationProperties.Name="{DynamicResource Ui.ZLibrary.AnyFormat}">
+                    <ComboBox x:Name="ZLibraryExtensionBox" Grid.Column="1" Width="126" Height="38" VerticalAlignment="Bottom" SelectedIndex="0" AutomationProperties.Name="{DynamicResource Ui.ZLibrary.AnyFormat}">
                         <ComboBoxItem Content="{DynamicResource Ui.ZLibrary.AnyFormat}" Tag="" />
                         <ComboBoxItem Content="EPUB" Tag="epub" />
                         <ComboBoxItem Content="PDF" Tag="pdf" />
                         <ComboBoxItem Content="MOBI" Tag="mobi" />
                         <ComboBoxItem Content="AZW3" Tag="azw3" />
                     </ComboBox>
-                    <ComboBox x:Name="ZLibraryLanguageBox" Grid.Column="2" Width="126" SelectedIndex="0" AutomationProperties.Name="{DynamicResource Ui.ZLibrary.AnyLanguage}">
+                    <ComboBox x:Name="ZLibraryLanguageBox" Grid.Column="2" Width="126" Height="38" VerticalAlignment="Bottom" SelectedIndex="0" AutomationProperties.Name="{DynamicResource Ui.ZLibrary.AnyLanguage}">
                         <ComboBoxItem Content="{DynamicResource Ui.ZLibrary.AnyLanguage}" Tag="" />
                         <ComboBoxItem Content="中文" Tag="Chinese" />
                         <ComboBoxItem Content="English" Tag="English" />
                         <ComboBoxItem Content="日本語" Tag="Japanese" />
                     </ComboBox>
-                    <Button x:Name="ZLibrarySearchButton" Grid.Column="3" Content="{DynamicResource Ui.ZLibrary.Search}" Click="ZLibrarySearchButton_Click" />
-                    <Button Grid.Column="4" Content="{DynamicResource Ui.ZLibrary.AccountTitle}" Classes="quiet" Click="ZLibraryAccountButton_Click" />
+                    <Button x:Name="ZLibrarySearchButton" Grid.Column="3" Classes="icon" Width="38" Height="38" VerticalAlignment="Bottom"
+                            ToolTip.Tip="{DynamicResource Ui.ZLibrary.Search}" AutomationProperties.Name="{DynamicResource Ui.ZLibrary.Search}" Click="ZLibrarySearchButton_Click">
+                        <Path Classes="libraryGlyph" Width="20" Height="20" Data="M 10,3 A 7,7 0 1,0 10,17 A 7,7 0 1,0 10,3 M 15,15 L 21,21" />
+                    </Button>
+                    <Button x:Name="ZLibraryAccountButton" Grid.Column="4" Content="{DynamicResource Ui.ZLibrary.AccountTitle}" Classes="quiet" Height="38" VerticalAlignment="Bottom" Click="ZLibraryAccountButton_Click" />
                 </Grid>
-                <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid Grid.Row="2">
+                    <ScrollViewer x:Name="ZLibraryResultsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <ItemsControl ItemsSource="{Binding ZLibraryBooks}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:ZLibraryBookCardViewModel">
-                                    <Border Classes="flatSubsection" Padding="12" Margin="0,0,0,8" Tapped="ZLibraryBookRow_Tapped">
+                                    <Border Classes="flatSubsection" Padding="12" Margin="0,0,0,8" Tapped="ZLibraryBookRow_Tapped" DoubleTapped="ZLibraryBookRow_Tapped">
                                         <Grid ColumnDefinitions="72,*,Auto" ColumnSpacing="12">
                                             <Border Width="68" Height="92" Background="{DynamicResource SoftHoverBrush}" ClipToBounds="True">
                                                 <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
@@ -1656,44 +1681,80 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
-                    <Border x:Name="ZLibraryDetailPanel"
-                            Grid.Column="1"
-                            Width="390"
-                            Margin="0,0,0,8"
-                            Padding="16"
-                            Background="{DynamicResource PaperBrush}"
-                            BorderBrush="{DynamicResource HairlineBrush}"
-                            BorderThickness="1"
-                            IsVisible="False"
-                            x:DataType="local:ZLibraryBookCardViewModel">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel Spacing="9">
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <TextBlock Text="{DynamicResource Ui.ZLibrary.Detail}" FontSize="16" FontWeight="SemiBold" />
-                                    <Button Grid.Column="1" Content="×" Classes="quiet" Click="ZLibraryDetailCloseButton_Click" />
-                                </Grid>
-                                <Image Source="{Binding CoverImage}" Height="180" Stretch="Uniform" />
-                                <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding Authors}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding DetailMetadataLabel}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding VolumeLabel}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding DetailDescription}" FontSize="12" TextWrapping="Wrap" />
-                                <WrapPanel Orientation="Horizontal">
-                                    <Button Content="{DynamicResource Ui.ZLibrary.OfficialDetail}" Classes="quiet" Margin="0,0,8,8" IsEnabled="{Binding CanOpenOfficialDetail}" Click="ZLibraryOfficialDetailButton_Click" />
-                                    <Button Content="{DynamicResource Ui.ZLibrary.ReadOnline}" Classes="quiet" Margin="0,0,8,8" IsEnabled="{Binding CanReadOnline}" Click="ZLibraryReadOnlineButton_Click" />
-                                    <Button Content="{DynamicResource Ui.ZLibrary.SendToKindleWeb}" Margin="0,0,8,8" IsEnabled="{Binding CanSendToKindleWeb}" Click="ZLibrarySendKindleWebButton_Click" />
-                                    <Button Content="{DynamicResource Ui.ZLibrary.SendToKindleEmail}" Margin="0,0,8,8" IsEnabled="{Binding CanSendToEmail}" Click="ZLibrarySendEmailButton_Click" />
-                                </WrapPanel>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </Border>
+
                 </Grid>
                 <Grid Grid.Row="3" Margin="0,10,0,0" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
                     <TextBlock x:Name="ZLibraryResultText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                    <Button x:Name="ZLibraryPrevPageButton" Grid.Column="1" Content="‹" Classes="quiet" IsEnabled="False" Click="ZLibraryPrevPageButton_Click" />
+                    <Button x:Name="ZLibraryPrevPageButton" Grid.Column="1" Content="‹" Classes="icon zLibraryPagination" AutomationProperties.Name="{DynamicResource Ui.Auto.C9B9AE7A61444AB7}" IsEnabled="False" Click="ZLibraryPrevPageButton_Click" />
                     <TextBlock x:Name="ZLibraryPageText" Grid.Column="2" FontSize="12" VerticalAlignment="Center" />
-                    <Button x:Name="ZLibraryNextPageButton" Grid.Column="3" Content="›" Classes="quiet" IsEnabled="False" Click="ZLibraryNextPageButton_Click" />
+                    <Button x:Name="ZLibraryNextPageButton" Grid.Column="3" Content="›" Classes="icon zLibraryPagination" AutomationProperties.Name="{DynamicResource Ui.Auto.8A8542F6964852DC}" IsEnabled="False" Click="ZLibraryNextPageButton_Click" />
                 </Grid>
+                    <Border x:Name="ZLibraryDetailPanel" Grid.Column="1" Grid.Row="0" Grid.RowSpan="4" Width="320" Margin="24,14,0,0" HorizontalAlignment="Right" ZIndex="40"
+                            Background="{DynamicResource PaperBrush}" BorderBrush="{DynamicResource HairlineBrush}"
+                            BorderThickness="1,0,0,0" IsVisible="False" x:DataType="local:ZLibraryBookCardViewModel">
+                        <Grid RowDefinitions="Auto,*">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6" Margin="20,8,24,8">
+                                <TextBlock Text="{DynamicResource Ui.ZLibrary.Detail}" FontSize="13" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding InfoLabel}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                <Button Grid.Column="1" Classes="icon" AutomationProperties.Name="{DynamicResource Ui.Auto.D7B60ECE792129FF}" Click="ZLibraryDetailCloseButton_Click">
+                                    <Path Classes="libraryGlyph" Width="13" Height="13" Data="M4,4 L20,20 M20,4 L4,20" />
+                                </Button>
+                            </Grid>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel Margin="24,0,24,24" Spacing="13">
+                                    <Border Width="180" Height="250" HorizontalAlignment="Left" Background="{DynamicResource PaperBrush}">
+                                        <Grid>
+                                            <Image Source="{Binding CoverImage}" Stretch="Uniform" />
+                                            <TextBlock Text="{Binding NoCoverLabel}" IsVisible="{Binding HasNoCover}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}" />
+                                        </Grid>
+                                    </Border>
+                                    <Button Tag="{Binding}" Content="{DynamicResource Ui.ZLibrary.Download}" IsEnabled="{Binding IsNotDownloading}" Click="ZLibraryDownloadButton_Click" />
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.C3405F8C7D9D392A}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding Title, Mode=OneWay}" IsReadOnly="True" FontSize="16" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.7D4146CA082798F0}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding Authors, Mode=OneWay}" IsReadOnly="True" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.8131EAFD02396E6A}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding DetailDescription, Mode=OneWay}" IsReadOnly="True" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.232527192F3462A3}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding Series, Mode=OneWay}" IsReadOnly="True" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.1107B9A98AD38DB6}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding Publisher, Mode=OneWay}" IsReadOnly="True" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.D6D0F10A7D96A8D2}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding YearLabel, Mode=OneWay}" IsReadOnly="True" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="ISBN" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding Isbn, Mode=OneWay}" IsReadOnly="True" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="{DynamicResource Ui.Auto.560630BA0C84322E}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                        <TextBox Text="{Binding Pages, Mode=OneWay}" IsReadOnly="True" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding EditionAndVolume}" IsVisible="{Binding EditionAndVolume, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+                                    <TextBlock Text="{Binding StatusMessage}" IsVisible="{Binding StatusMessage, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+                                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                        <Button Classes="zLibrarySend" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="35" MinHeight="35" Padding="6,4" IsEnabled="{Binding CanSendToKindleWeb}" Click="ZLibrarySendKindleWebButton_Click">
+                                            <TextBlock Classes="zLibrarySendLabel" Text="{DynamicResource Ui.ZLibrary.SendToKindleWeb}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center" />
+                                        </Button>
+                                        <Button Classes="zLibrarySend" Grid.Column="1" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="35" MinHeight="35" Padding="6,4" IsEnabled="{Binding CanSendToEmail}" Click="ZLibrarySendEmailButton_Click">
+                                            <TextBlock Classes="zLibrarySendLabel" Text="{DynamicResource Ui.ZLibrary.SendToKindleEmail}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center" />
+                                        </Button>
+                                    </Grid>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
             </Grid>
 
             <!-- Stage 3: Kindle book library. The page stays deliberately

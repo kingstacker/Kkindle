@@ -6,6 +6,18 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.13 (2026-10-13)
+
+### Improved
+
+- Use an animated Z-Library details sidebar that closes when clicking the selected book again or a blank area; refine search, pagination, and sending buttons.
+- Check the computer library before downloading duplicate books and enrich imported books with online metadata and covers while preserving existing manual edits.
+
+### Fixed
+
+- Fix the first book deletion after connecting a device requiring a second attempt.
+- Preserve pagination state and search criteria after Z-Library request failures, with retries for temporary network errors.
+
 ## 1.0.12 (2026-10-12)
 
 ### Added
