@@ -9,6 +9,46 @@ namespace Kkindle.Platform.Common.Tests;
 public sealed class MassStorageKindleDeviceServiceTests
 {
     [Fact]
+    public async Task LargeLibraryRescanReusesCoverlessMetadataAndRechecksChangedFiles()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var kindle = Path.Combine(root, "Kindle");
+            var documents = Path.Combine(kindle, "documents");
+            Directory.CreateDirectory(documents);
+            for (var i = 0; i < 1000; i++) await File.WriteAllTextAsync(Path.Combine(documents, $"book-{i}.epub"), $"payload {i}");
+            var metadata = new CountingMetadataService();
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new MassStorageKindleDeviceService(paths, metadata, [root]);
+            var device = new KindleDevice { RootPath = kindle, Transport = KindleTransport.MassStorage };
+            var first = await service.ScanBooksAsync(device);
+            Assert.Equal(1000, first.Count);
+            Assert.Equal(1000, metadata.Reads);
+            // A fresh service must reuse the persisted cache, including missing covers.
+            service = new MassStorageKindleDeviceService(paths, metadata, [root]);
+            Assert.Equal(1000, (await service.ScanBooksAsync(device)).Count);
+            Assert.Equal(1000, metadata.Reads);
+            await File.AppendAllTextAsync(Path.Combine(documents, "book-0.epub"), "new edition");
+            var third = await service.ScanBooksAsync(device);
+            Assert.Equal(1001, metadata.Reads);
+            Assert.NotEqual(first.Single(book => book.RelativePath.EndsWith("book-0.epub")).Sha256,
+                third.Single(book => book.RelativePath.EndsWith("book-0.epub")).Sha256);
+        }
+        finally { TryDelete(root); }
+    }
+
+    private sealed class CountingMetadataService : IMetadataService
+    {
+        public int Reads;
+        public Task<BookMetadata> ReadMetadataAsync(string path, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref Reads);
+            return Task.FromResult(new BookMetadata { Title = "Coverless", Authors = "Author" });
+        }
+    }
+
+    [Fact]
     public async Task DetectSendScanExportAndRemove_RoundTripsMountedKindle()
     {
         var root = CreateTempDirectory();

@@ -7,6 +7,41 @@ namespace Kkindle.Tests;
 
 public sealed class LibraryTests
 {
+    [Fact]
+    public async Task SummaryCachesReuseStatusOnlyChangesAndInvalidateExternalMetadataWrites()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            var source = Path.Combine(root, "cache.epub");
+            CreateEpub(source);
+            await service.ImportAsync([source]);
+            var filters = await service.GetFilterOptionsAsync();
+            var matches = await service.GetLibraryMatchRecordsAsync();
+            await using var connection = new SqliteConnection($"Data Source={paths.Database}");
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE Books SET UpdatedAt='2026-10-14T12:00:00Z';";
+            await command.ExecuteNonQueryAsync();
+            Assert.Same(filters, await service.GetFilterOptionsAsync());
+            Assert.Same(matches, await service.GetLibraryMatchRecordsAsync());
+            command.CommandText = "UPDATE Books SET Authors='External author', Title='External title';";
+            await command.ExecuteNonQueryAsync();
+            Assert.Contains("External author", (await service.GetFilterOptionsAsync()).Authors);
+            Assert.Equal("External title", Assert.Single(await service.GetLibraryMatchRecordsAsync()).Title);
+            command.CommandText = "UPDATE BookFiles SET Sha256='changed';";
+            await command.ExecuteNonQueryAsync();
+            Assert.Equal("changed", Assert.Single(Assert.Single(await service.GetLibraryMatchRecordsAsync()).Files).Sha256);
+            command.CommandText = "DELETE FROM Books;";
+            await command.ExecuteNonQueryAsync();
+            Assert.Empty(await service.GetLibraryMatchRecordsAsync());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

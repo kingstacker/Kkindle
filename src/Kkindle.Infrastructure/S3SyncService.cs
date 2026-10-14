@@ -245,26 +245,23 @@ public sealed partial class S3SyncService
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
-            var state = await LoadStateAsync(
+            var state = await LoadBadgeStateAsync(
                 NormalizeDeviceId(deviceId),
                 BuildStorageIdentity(normalized),
                 cancellationToken);
             var baseline = state.LastUploadedSnapshot;
             if (baseline is null) return statuses;
 
-            var remoteBookIds = (state.RemoteBookIds ?? [])
-                .Select(id => Guid.TryParse(id, out var parsed) ? parsed : (Guid?)null)
-                .Where(id => id is not null)
-                .Select(id => id!.Value)
-                .ToHashSet();
-            var remoteOnlyFileHashes = (state.RemoteOnlyFileHashes ?? [])
-                .Where(IsSha256)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
+            if (_badgeIndex is null || !ReferenceEquals(_badgeIndex.State, state))
+                _badgeIndex = new BadgeIndex(state);
+            var remoteBookIds = _badgeIndex.RemoteBooks;
+            var remoteOnlyFileHashes = _badgeIndex.RemoteHashes;
+            var booksById = _badgeIndex.Books;
+            var filesByBook = _badgeIndex.Files;
             foreach (var book in books)
             {
-                var baselineBook = baseline.Books.FirstOrDefault(item => item.Id == book.Id);
-                var baselineFiles = baseline.Files.Where(item => item.BookId == book.Id).ToArray();
+                var baselineBook = booksById.GetValueOrDefault(book.Id);
+                var baselineFiles = filesByBook[book.Id];
                 if (baselineBook is null
                     || book.UpdatedAt != baselineBook.UpdatedAt
                     || !BookFilesMatchBaseline(book.Files, baselineFiles))
@@ -717,6 +714,8 @@ public sealed partial class S3SyncService
         var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var updatedBookVersions = new Dictionary<Guid, DateTimeOffset>();
 
+        var localBooksById = local.Books.ToDictionary(item => item.Id);
+        var localFilesByBook = local.Files.ToLookup(item => item.BookId);
         foreach (var book in local.Books)
         {
             var bookKey = VersionKey("book", book.Id);
@@ -728,7 +727,7 @@ public sealed partial class S3SyncService
 
             resolved.Add(bookKey);
             var restoreVersion = bookDeletedAt;
-            foreach (var file in local.Files.Where(item => item.BookId == book.Id))
+            foreach (var file in localFilesByBook[book.Id])
             {
                 var fileKey = VersionKey("file", file.Id);
                 if (deletionVersions.TryGetValue(fileKey, out var fileDeletedAt))
@@ -753,7 +752,7 @@ public sealed partial class S3SyncService
 
             resolved.Add(fileKey);
             if (updatedBookVersions.ContainsKey(file.BookId)) continue;
-            var book = local.Books.FirstOrDefault(item => item.Id == file.BookId);
+            var book = localBooksById.GetValueOrDefault(file.BookId);
             if (book is null) continue;
             var restoreVersion = GetVersionAfter(book.UpdatedAt, deletedAt);
             book.UpdatedAt = restoreVersion;
@@ -950,6 +949,33 @@ public sealed partial class S3SyncService
 
     private string StatePath => Path.Combine(_paths.Data, "s3-sync-state.json");
 
+    private sealed class BadgeIndex(S3SyncState state)
+    {
+        public S3SyncState State { get; } = state;
+        public Dictionary<Guid, S3SyncBook> Books { get; } = state.LastUploadedSnapshot!.Books.ToDictionary(book => book.Id);
+        public ILookup<Guid, S3SyncBookFile> Files { get; } = state.LastUploadedSnapshot!.Files.ToLookup(file => file.BookId);
+        public HashSet<Guid> RemoteBooks { get; } = (state.RemoteBookIds ?? [])
+            .Select(id => Guid.TryParse(id, out var parsed) ? parsed : (Guid?)null)
+            .Where(id => id is not null).Select(id => id!.Value).ToHashSet();
+        public HashSet<string> RemoteHashes { get; } = (state.RemoteOnlyFileHashes ?? [])
+            .Where(IsSha256).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+    private BadgeIndex? _badgeIndex;
+
+    private (string Device, string Storage, long Length, long Modified, S3SyncState State)? _badgeState;
+
+    private async Task<S3SyncState> LoadBadgeStateAsync(string deviceId, string storageIdentity, CancellationToken token)
+    {
+        var info = new FileInfo(StatePath);
+        var length = info.Exists ? info.Length : -1;
+        var modified = info.Exists ? info.LastWriteTimeUtc.Ticks : 0;
+        if (_badgeState is { } cache && cache.Device == deviceId && cache.Storage == storageIdentity
+            && cache.Length == length && cache.Modified == modified) return cache.State;
+        var state = await LoadStateAsync(deviceId, storageIdentity, token);
+        _badgeState = (deviceId, storageIdentity, length, modified, state);
+        return state;
+    }
+
     private async Task<S3SyncState> LoadStateAsync(
         string deviceId,
         string storageIdentity,
@@ -1002,6 +1028,8 @@ public sealed partial class S3SyncService
         }
 
         File.Move(temporaryPath, StatePath, overwrite: true);
+        _badgeState = null;
+        _badgeIndex = null;
     }
 
     private static string SnapshotKey(S3SyncSettings settings, string deviceId) =>

@@ -83,8 +83,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
             ? await Task.Run(
                 () => WpdKindleAccess.ScanBooks(device,
                     device.Profile.BookFormats.Select(format => "." + format).ToHashSet(StringComparer.OrdinalIgnoreCase), cancellationToken),
-                cancellationToken)
-            : await Task.Run(() => EnumerateMassStorageBooks(device, cancellationToken), cancellationToken);
+                cancellationToken).ConfigureAwait(false)
+            : await Task.Run(() => EnumerateMassStorageBooks(device, cancellationToken), cancellationToken).ConfigureAwait(false);
         foreach (var book in enumerated) SetFallbackMetadata(book);
 
         var cachedEntries = _scanCache is null
@@ -101,12 +101,9 @@ public sealed class KindleDeviceService : IKindleDeviceService
             var key = NormalizeDevicePath(book.RelativePath);
             if (cachedEntries.TryGetValue(key, out var cached)
                 && cached.Matches(book.Size, book.ModifiedAt)
-                // A cache entry without a cover is incomplete. Re-enrich it so
-                // Kindle's system thumbnail can be copied when the book itself
-                // does not contain an embedded cover.
-                && (device.Transport != KindleTransport.Wpd
-                    ? cached.CoverPath is null || File.Exists(cached.CoverPath)
-                    : cached.CoverPath is not null && File.Exists(cached.CoverPath)))
+                // A successful scan may legitimately find no cover. Cache that
+                // outcome too, rather than copying the entire MTP book again.
+                && (cached.CoverPath is null || File.Exists(cached.CoverPath)))
             {
                 ApplyCachedBook(book, cached);
                 currentEntries.Add(cached);

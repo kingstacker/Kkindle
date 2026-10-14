@@ -5,7 +5,7 @@ using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
 
-public sealed class SqliteBookLibraryService : IBookLibraryService
+public sealed partial class SqliteBookLibraryService : IBookLibraryService
 {
     // Import results are only used for the small post-import workflows (format
     // generation and optional metadata matching). Do not retain a full Book
@@ -147,6 +147,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         await EnsureLibraryTrashBookFileIdColumnAsync(connection, cancellationToken);
         await EnsureBookCollectionUpdatedAtColumnAsync(connection, cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
+        await EnsureSummaryCacheVersionsAsync(connection, cancellationToken);
         await EnsureDefaultCollectionAsync(connection, cancellationToken);
         await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
@@ -374,7 +375,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         return await ReadBookByIdAsync(connection, bookId, cancellationToken);
     }
 
-    public async Task<LibraryFilterOptions> GetFilterOptionsAsync(CancellationToken cancellationToken = default)
+    private async Task<LibraryFilterOptions> GetFilterOptionsCoreAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var authors = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
@@ -506,11 +507,13 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         var coverPathsByCollection = new Dictionary<Guid, List<string>>();
         var covers = connection.CreateCommand();
         covers.CommandText = """
-            SELECT i.CollectionId, b.CoverPath
-            FROM BookCollectionItems i
-            INNER JOIN Books b ON b.Id = i.BookId
-            WHERE b.CoverPath IS NOT NULL AND trim(b.CoverPath) <> ''
-            ORDER BY i.CollectionId, b.UpdatedAt DESC, b.Id;
+            SELECT CollectionId, CoverPath FROM (
+                SELECT i.CollectionId, b.CoverPath,
+                       ROW_NUMBER() OVER (PARTITION BY i.CollectionId ORDER BY b.UpdatedAt DESC, b.Id) AS Position
+                FROM BookCollectionItems i
+                INNER JOIN Books b ON b.Id = i.BookId
+                WHERE b.CoverPath IS NOT NULL AND trim(b.CoverPath) <> ''
+            ) WHERE Position <= 3 ORDER BY CollectionId, Position;
             """;
         await using (var reader = await covers.ExecuteReaderAsync(cancellationToken))
         {
@@ -534,7 +537,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             .ToArray();
     }
 
-    public async Task<IReadOnlyList<LibraryBookMatch>> GetLibraryMatchRecordsAsync(
+    private async Task<IReadOnlyList<LibraryBookMatch>> GetLibraryMatchRecordsCoreAsync(
         CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);

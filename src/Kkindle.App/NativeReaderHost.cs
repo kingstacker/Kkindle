@@ -35,6 +35,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private TypesetEngine? _engine;
     private readonly object _engineGate = new();
+    private CancellationTokenSource? _relayoutCts;
+    internal Task RelayoutTask { get; private set; } = Task.CompletedTask;
     private ChapterContent? _content;
     private ChapterLayout? _layout;
     private TypesetLayoutOptions? _options;
@@ -206,12 +208,14 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     public void Stop()
     {
         ++_configurationVersion;
+        _relayoutCts?.Cancel();
         _navigationCts?.Cancel();
     }
 
     public void Dispose()
     {
         _disposed = true;
+        _relayoutCts?.Cancel();
         _navigationCts?.Cancel();
         _navigationCts?.Dispose();
         _navigationCts = null;
@@ -340,7 +344,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
         else if (_content is not null && (settingsChanged || _layout is null))
         {
-            Recompose(readingAnchor);
+            _relayoutTimer?.Stop();
+            await (RelayoutTask = RecomposeAsync(readingAnchor));
+            await RelayoutTask;
+            if (_disposed || configurationVersion != _configurationVersion) return;
         }
 
         // A saved progress position is authoritative when it exists. The
@@ -1203,6 +1210,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _viewportReadingAnchor = null;
         _viewportReadingState = null;
         _preserveViewportPosition = false;
+        _relayoutCts?.Cancel();
         _navigationCts?.Cancel();
         _navigationCts?.Dispose();
         var navigationCts = new CancellationTokenSource();
@@ -1249,6 +1257,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _navigationTask = completion.Task;
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
         {
+            TypesetEngine? navigationEngine = null;
             try
             {
                 var composed = await Task.Run(() =>
@@ -1258,8 +1267,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                         string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment));
                     var content = loader.Load(chapterPath, navigationToken);
                     var options = BuildOptions(settings, width, height);
-                    SelectReaderMainFont(settings.FontFamily);
-                    var layout = Compose(content, options, navigationToken);
+                    navigationEngine = new TypesetEngine(CreateFontLibrary());
+                    SelectReaderMainFont(navigationEngine, settings.FontFamily);
+                    var layout = navigationEngine.Compose(content, options, navigationToken);
                     return (content, options, layout);
                 }, navigationToken);
 
@@ -1269,6 +1279,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                     return;
                 }
 
+                lock (_engineGate)
+                {
+                    var previous = _engine;
+                    _engine = navigationEngine;
+                    navigationEngine = null;
+                    previous?.Dispose();
+                }
                 _content = composed.content;
                 _loadedFootnoteFragment = string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment);
                 _options = composed.options;
@@ -1280,7 +1297,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 _pageIndex = 0;
                 if (Math.Abs(width - ComposePageWidth(Bounds.Width)) > 0.01
                     || Math.Abs(height - Math.Max(1, Bounds.Height)) > 0.01)
-                    Recompose();
+                    await (RelayoutTask = RecomposeAsync());
+                navigationToken.ThrowIfCancellationRequested();
+                if (_disposed || version != Volatile.Read(ref _navigationVersion)) return;
                 ApplyPendingPosition();
                 InvalidateVisual();
                 EmitScroll();
@@ -1304,6 +1323,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             }
             finally
             {
+                navigationEngine?.Dispose();
                 completion.TrySetResult(false);
             }
         });
@@ -1764,12 +1784,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         PreservePositionForViewportChange();
-        _relayoutTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(70), DispatcherPriority.Background, (_, _) =>
+        _relayoutTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(70), DispatcherPriority.Background, async (_, _) =>
         {
             _relayoutTimer!.Stop();
             if (!_disposed && _content is not null && !_composePending)
             {
-                Recompose();
+                await (RelayoutTask = RecomposeAsync());
+                if (_disposed || _composePending) return;
                 ApplyPendingPosition();
                 _pageIndex = Math.Clamp(_pageIndex, 0, Math.Max(0, PageCount - 1));
                 _bitmapDirty = true;
@@ -1781,7 +1802,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _relayoutTimer.Start();
     }
 
-    private void Recompose(ViewportReadingAnchor? readingAnchor = null)
+    private async Task RecomposeAsync(ViewportReadingAnchor? readingAnchor = null)
     {
         if (_disposed || _content is null)
         {
@@ -1798,10 +1819,40 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             ? _layout.Pages[_pageIndex].TextStartOffset
             : -1;
 
-        SelectReaderMainFont(_settings.FontFamily);
-        var options = BuildOptions(_settings, width, height);
-        _options = options;
-        _layout = Compose(_content, options);
+        var content = _content;
+        var settings = _settings;
+        var options = BuildOptions(settings, width, height);
+        _relayoutCts?.Cancel();
+        using var request = new CancellationTokenSource();
+        _relayoutCts = request;
+        var token = request.Token;
+        TypesetEngine? workerEngine = null;
+        try
+        {
+            var result = await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                workerEngine = new TypesetEngine(CreateFontLibrary());
+                SelectReaderMainFont(workerEngine, settings.FontFamily);
+                return workerEngine.Compose(content, options, token);
+            }, token);
+            if (_disposed || token.IsCancellationRequested || !ReferenceEquals(content, _content)) return;
+            lock (_engineGate)
+            {
+                var previous = _engine;
+                _engine = workerEngine;
+                workerEngine = null;
+                _options = options;
+                _layout = result;
+                previous?.Dispose();
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+        finally
+        {
+            workerEngine?.Dispose();
+            if (ReferenceEquals(_relayoutCts, request)) _relayoutCts = null;
+        }
         InvalidateSpeechTextSnapshot();
         _composePending = false;
 

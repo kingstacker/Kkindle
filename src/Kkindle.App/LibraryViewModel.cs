@@ -19,10 +19,11 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         UiText.LanguageChanged += OnLanguageChanged;
         Book = book;
         DataRoot = dataRoot;
+        _coverFileStamp = CoverFileStamp(book);
         Refresh();
     }
 
-    public Book Book { get; }
+    public Book Book { get; private set; }
     public string DataRoot { get; }
     public string Title => UiText.Localize(Book.Title);
     public string Authors => UiText.Localize(Book.Authors);
@@ -108,6 +109,10 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     private bool _isMultiSelected;
     private bool _isHovered;
     private bool _coverLoadAttempted;
+    private bool _disposed;
+    private int _coverVersion;
+    private CancellationTokenSource? _coverCancellation;
+    public Task CoverLoadingTask { get; private set; } = Task.CompletedTask;
 
     // Any selection (single click or multi-select) turns the card outline
     // black; the check badge below is reserved for genuine multi-selection.
@@ -299,9 +304,30 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         ConversionProgressMessage = UiText.Get("正在转换…");
     }
 
-    public void Refresh()
+    private string _coverFileStamp = "";
+    private string CoverFileStamp(Book book)
     {
-        UnloadCover();
+        if (string.IsNullOrWhiteSpace(book.CoverPath)) return "";
+        var info = new FileInfo(Path.Combine(DataRoot, book.CoverPath));
+        return info.Exists ? $"{info.Length}:{info.LastWriteTimeUtc.Ticks}" : "";
+    }
+
+    public void UpdateBook(Book book)
+    {
+        var stamp = CoverFileStamp(book);
+        var coverChanged = stamp != _coverFileStamp || Book.Title != book.Title || Book.CoverPath != book.CoverPath
+            || !Book.Files.Select(file => (file.Id, file.Sha256, file.RelativePath))
+                .SequenceEqual(book.Files.Select(file => (file.Id, file.Sha256, file.RelativePath)));
+        var wasLoaded = _coverLoadAttempted;
+        _coverFileStamp = stamp;
+        Book = book;
+        Refresh(coverChanged);
+        if (coverChanged && wasLoaded) LoadCover();
+    }
+
+    public void Refresh(bool unloadCover = true)
+    {
+        if (unloadCover) UnloadCover();
 
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Authors));
@@ -322,18 +348,39 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 
     public void LoadCover()
     {
-        if (_coverLoadAttempted) return;
+        if (_disposed || _coverLoadAttempted) return;
         _coverLoadAttempted = true;
-        var storedCoverPath = string.IsNullOrWhiteSpace(Book.CoverPath) ? null : Path.Combine(DataRoot, Book.CoverPath);
-        var generatedTxtCover = Book.Files.Where(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase))
-            .Any(file => TitleCoverService.IsGeneratedTxtCover(Path.Combine(DataRoot, file.RelativePath), storedCoverPath));
-        CoverImage = generatedTxtCover ? null : LoadCoverImage(DataRoot, Book.CoverPath, 320);
-        if (CoverImage is null)
+        var version = ++_coverVersion;
+        var cancellation = new CancellationTokenSource();
+        _coverCancellation = cancellation;
+        CoverLoadingTask = LoadCoverAsync(Book, version, cancellation);
+    }
+
+    private async Task LoadCoverAsync(Book book, int version, CancellationTokenSource cancellation)
+    {
+        Bitmap? image = null;
+        try
         {
-            using var cover = new MemoryStream(TitleCoverService.CreatePng(Book.Title));
-            CoverImage = Bitmap.DecodeToWidth(cover, 320);
+            image = await CoverThumbnailCache.LoadAsync(book, DataRoot, cancellation.Token);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_disposed || version != _coverVersion) return;
+                CoverImage = image;
+                image = null;
+                OnPropertyChanged(nameof(CoverImage));
+            });
         }
-        OnPropertyChanged(nameof(CoverImage));
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            if (version == _coverVersion) _coverLoadAttempted = false;
+        }
+        finally
+        {
+            image?.Dispose();
+            if (ReferenceEquals(_coverCancellation, cancellation)) _coverCancellation = null;
+            cancellation.Dispose();
+        }
     }
 
     /// <summary>
@@ -343,6 +390,8 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     /// </summary>
     public void UnloadCover()
     {
+        ++_coverVersion;
+        _coverCancellation?.Cancel();
         if (CoverImage is null && !_coverLoadAttempted) return;
         CoverImage?.Dispose();
         CoverImage = null;
@@ -372,6 +421,7 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         UiText.LanguageChanged -= OnLanguageChanged;
         UnloadCover();
     }
@@ -407,6 +457,11 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposable
 {
     private readonly Bitmap?[] _covers = new Bitmap?[3];
+    private static readonly SemaphoreSlim CoverGate = new(2, 2);
+    private string _coverStamp = string.Empty;
+    private int _coverVersion;
+    private bool _disposed;
+    public Task CoverLoadingTask { get; private set; } = Task.CompletedTask;
 
     public BookCollectionFolderViewModel(
         BookCollection collection,
@@ -415,23 +470,62 @@ public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposabl
         IReadOnlyList<string?> coverPaths)
     {
         UiText.LanguageChanged += OnLanguageChanged;
+        Update(collection, bookCount, dataRoot, coverPaths);
+    }
+
+    public BookCollection Collection { get; private set; } = null!;
+    public void Update(BookCollection collection, int count, string root, IReadOnlyList<string?> paths)
+    {
         Collection = collection;
-        BookCount = bookCount;
-        for (var index = 0; index < _covers.Length; index++)
+        BookCount = count;
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(BookCountLabel));
+        var stamp = string.Join("|", paths.Select(path =>
         {
-            var path = index < coverPaths.Count ? coverPaths[index] : null;
-            _covers[index] = LoadCoverImage(dataRoot, path, 96);
+            var file = new FileInfo(Path.Combine(root, path ?? "__missing__"));
+            return file.Exists ? $"{file.FullName}:{file.Length}:{file.LastWriteTimeUtc.Ticks}" : path;
+        }));
+        if (stamp == _coverStamp) return;
+        _coverStamp = stamp;
+        var version = ++_coverVersion;
+        CoverLoadingTask = LoadCoversAsync(root, paths.ToArray(), version);
+    }
+
+    private async Task LoadCoversAsync(string root, IReadOnlyList<string?> paths, int version)
+    {
+        await CoverGate.WaitAsync();
+        Bitmap?[]? loaded = null;
+        try
+        {
+            if (_disposed || version != _coverVersion) return;
+            loaded = await Task.Run(() => Enumerable.Range(0, 3)
+                .Select(index => LoadCoverImage(root, index < paths.Count ? paths[index] : null, 96)).ToArray());
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_disposed || version != _coverVersion) return;
+                for (var i = 0; i < 3; i++)
+                {
+                    _covers[i]?.Dispose();
+                    _covers[i] = loaded[i];
+                    loaded[i] = null;
+                    OnPropertyChanged($"Cover{i + 1}");
+                }
+            });
+        }
+        finally
+        {
+            if (loaded is not null) foreach (var image in loaded) image?.Dispose();
+            CoverGate.Release();
         }
     }
 
-    public BookCollection Collection { get; }
     public string Name => string.Equals(
         Collection.Name,
         BookLibraryDefaults.UncollectedCollectionName,
         StringComparison.Ordinal)
         ? UiText.Get("未收藏")
         : UiText.Localize(Collection.Name);
-    public int BookCount { get; }
+    public int BookCount { get; private set; }
     public string BookCountLabel => UiText.Get("{0} 本书", BookCount);
     public Bitmap? Cover1 => _covers[0];
     public Bitmap? Cover2 => _covers[1];
@@ -445,6 +539,8 @@ public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposabl
 
     public void Dispose()
     {
+        _disposed = true;
+        ++_coverVersion;
         UiText.LanguageChanged -= OnLanguageChanged;
         foreach (var cover in _covers) cover?.Dispose();
     }
@@ -762,14 +858,28 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CanGoToNextPage));
             OnPropertyChanged(nameof(PageStatusText));
 
-            foreach (var card in _bookCards.Values) card.Dispose();
-            _bookCards.Clear();
-            Books.Clear();
-            foreach (var book in page.Books)
+            var incomingIds = page.Books.Select(book => book.Id).ToHashSet();
+            foreach (var id in _bookCards.Keys.Where(id => !incomingIds.Contains(id)).ToArray())
             {
-                var card = new BookCardViewModel(book, _dataRoot);
-                _bookCards[book.Id] = card;
-                Books.Add(card);
+                var old = _bookCards[id];
+                Books.Remove(old);
+                old.Dispose();
+                _bookCards.Remove(id);
+            }
+            for (var index = 0; index < page.Books.Count; index++)
+            {
+                var book = page.Books[index];
+                if (!_bookCards.TryGetValue(book.Id, out var card))
+                {
+                    card = new BookCardViewModel(book, _dataRoot);
+                    _bookCards.Add(book.Id, card);
+                    Books.Insert(index, card);
+                }
+                else
+                {
+                    card.UpdateBook(book);
+                    if (!ReferenceEquals(Books[index], card)) Books.Move(Books.IndexOf(card), index);
+                }
             }
 
             var baseStatus = page.TotalCount == 0

@@ -1426,9 +1426,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SelectedCard_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(BookCardViewModel.CoverImage) || _selectedCard is null) return;
+        DetailCoverImage.Source = _selectedCard.CoverImage;
+        DetailCoverPlaceholder.IsVisible = _selectedCard.CoverImage is null;
+    }
+
     private void SelectBook(BookCardViewModel card)
     {
+        if (_selectedCard is not null) _selectedCard.PropertyChanged -= SelectedCard_PropertyChanged;
         _selectedCard = card;
+        card.PropertyChanged += SelectedCard_PropertyChanged;
         card.LoadCover();
         DetailCoverImage.Source = card.CoverImage;
         DetailCoverPlaceholder.IsVisible = card.CoverImage is null;
@@ -1549,6 +1558,7 @@ public partial class MainWindow : Window
     private void ClearSelectedBook()
     {
         CancelPendingBookDetailClick();
+        if (_selectedCard is not null) _selectedCard.PropertyChanged -= SelectedCard_PropertyChanged;
         _selectedCard = null;
         var token = BeginDetailPaneAnimation();
         var version = ++_detailPaneAnimationVersion;
@@ -1808,17 +1818,24 @@ public partial class MainWindow : Window
     {
         var collections = await _library.GetCollectionSummariesAsync(_lifetimeCancellation.Token);
 
-        foreach (var folder in CollectionFolders) folder.Dispose();
-        CollectionFolders.Clear();
-        FilteredCollectionFolders.Clear();
-
-        foreach (var summary in collections)
+        var existing = CollectionFolders.ToDictionary(folder => folder.Collection.Id);
+        var ids = collections.Select(summary => summary.Collection.Id).ToHashSet();
+        foreach (var folder in CollectionFolders.Where(folder => !ids.Contains(folder.Collection.Id)).ToArray())
         {
-            CollectionFolders.Add(new BookCollectionFolderViewModel(
-                summary.Collection,
-                summary.BookCount,
-                _paths.Data,
-                summary.CoverPaths));
+            CollectionFolders.Remove(folder);
+            folder.Dispose();
+        }
+        for (var index = 0; index < collections.Count; index++)
+        {
+            var summary = collections[index];
+            if (existing.TryGetValue(summary.Collection.Id, out var folder))
+            {
+                folder.Update(summary.Collection, summary.BookCount, _paths.Data, summary.CoverPaths);
+                var currentIndex = CollectionFolders.IndexOf(folder);
+                if (currentIndex != index) CollectionFolders.Move(currentIndex, index);
+            }
+            else CollectionFolders.Insert(index, new BookCollectionFolderViewModel(
+                summary.Collection, summary.BookCount, _paths.Data, summary.CoverPaths));
         }
         ApplyCollectionSearchFilter();
 

@@ -212,6 +212,7 @@ public partial class MainWindow
     private bool _diagnosticsRefreshing;
 
     public ObservableCollection<KindleBookCardViewModel> DeviceBooks { get; } = [];
+    private readonly Dictionary<string, KindleBookCardViewModel> _deviceCardsByPath = new(StringComparer.OrdinalIgnoreCase);
     public ObservableCollection<KindleBookCardViewModel> VisibleDeviceBooks { get; } = [];
     private IReadOnlyList<KindleBookCardViewModel> _filteredDeviceBooks = [];
     private int _devicePageIndex;
@@ -904,6 +905,7 @@ public partial class MainWindow
         _deviceBookScanTask = null;
         foreach (var book in DeviceBooks) book.Dispose();
         DeviceBooks.Clear();
+        _deviceCardsByPath.Clear();
         _libraryPresenceComparison = null;
         _filteredDeviceBooks = [];
         VisibleDeviceBooks.Clear();
@@ -1075,7 +1077,7 @@ public partial class MainWindow
             var card = FindDeviceBookCard(book.RelativePath);
             if (card is null)
             {
-                DeviceBooks.Add(new KindleBookCardViewModel(book));
+                AddDeviceBookCard(book);
                 added = true;
             }
             else
@@ -1090,12 +1092,13 @@ public partial class MainWindow
             var card = FindDeviceBookCard(path);
             if (card is null) continue;
             DeviceBooks.Remove(card);
+            _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
             card.Dispose();
             removed = true;
         }
 
         DeviceBookCountText.Text = DeviceBooks.Count.ToString();
-        UpdateDeviceBookSelectionUi();
+        if (removed) UpdateDeviceBookSelectionUi();
         if (added || removed)
             ApplyDeviceBookFilter(resetPage: false);
         if (DeviceBooks.Count == 0)
@@ -1105,11 +1108,23 @@ public partial class MainWindow
         }
     }
 
-    private KindleBookCardViewModel? FindDeviceBookCard(string relativePath) =>
-        DeviceBooks.FirstOrDefault(card => string.Equals(
-            NormalizeDeviceBookPath(card.Book.RelativePath),
-            NormalizeDeviceBookPath(relativePath),
-            StringComparison.OrdinalIgnoreCase));
+    private KindleBookCardViewModel? FindDeviceBookCard(string relativePath)
+    {
+        if (_deviceCardsByPath.Count != DeviceBooks.Count)
+        {
+            _deviceCardsByPath.Clear();
+            foreach (var card in DeviceBooks)
+                _deviceCardsByPath[NormalizeDeviceBookPath(card.Book.RelativePath)] = card;
+        }
+        return _deviceCardsByPath.GetValueOrDefault(NormalizeDeviceBookPath(relativePath));
+    }
+
+    private void AddDeviceBookCard(KindleBook book)
+    {
+        var card = new KindleBookCardViewModel(book);
+        _deviceCardsByPath[NormalizeDeviceBookPath(book.RelativePath)] = card;
+        DeviceBooks.Add(card);
+    }
 
     private void ReplaceDeviceBookCards(IReadOnlyList<KindleBook> books, bool resetPage)
     {
@@ -1122,6 +1137,7 @@ public partial class MainWindow
         {
             if (incoming.ContainsKey(NormalizeDeviceBookPath(old.Book.RelativePath))) continue;
             DeviceBooks.Remove(old);
+            _deviceCardsByPath.Remove(NormalizeDeviceBookPath(old.Book.RelativePath));
             old.Dispose();
         }
 
@@ -1129,7 +1145,7 @@ public partial class MainWindow
         {
             var card = FindDeviceBookCard(book.RelativePath);
             if (card is null)
-                DeviceBooks.Add(new KindleBookCardViewModel(book));
+                AddDeviceBookCard(book);
             else
                 card.UpdateBook(book);
         }
@@ -1325,11 +1341,10 @@ public partial class MainWindow
     private void UpdateDeviceBookSelectionUi()
     {
         // 与电脑书库一致：只有真正多选（≥2 本）时卡片才显示 ✓ 徽标。
-        var multi = DeviceBooks.Count(book => book.IsSelected) > 1;
+        var selected = GetSelectedDeviceBooks();
+        var multi = selected.Count > 1;
         foreach (var book in DeviceBooks)
             book.IsMultiSelected = book.IsSelected && multi;
-
-        var selected = GetSelectedDeviceBooks();
         DeviceBookSelectionBar.IsVisible = selected.Count > 1;
         DeviceBookSelectionText.Text = selected.Count == 0 ? string.Empty : T("已选择 {0} 本书", selected.Count);
     }
@@ -1822,6 +1837,7 @@ public partial class MainWindow
             await _kindle.EjectAsync(device, _lifetimeCancellation.Token);
             foreach (var book in DeviceBooks) book.Dispose();
             DeviceBooks.Clear();
+            _deviceCardsByPath.Clear();
             _libraryPresenceComparison = null;
             VisibleDeviceBooks.Clear();
             _filteredDeviceBooks = [];
@@ -3017,6 +3033,7 @@ public partial class MainWindow
                 await WaitForDeviceBookReadsAsync(device);
                 await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
+                _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
                 _libraryPresenceComparison = null;
                 card.Dispose();
                 removed++;
@@ -3053,6 +3070,7 @@ public partial class MainWindow
                 await WaitForDeviceBookReadsAsync(device);
                 await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
+                _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
                 _libraryPresenceComparison = null;
                 card.Dispose();
                 DeviceBookCountText.Text = DeviceBooks.Count.ToString();
@@ -6235,6 +6253,18 @@ public partial class MainWindow
         }
     }
 
+    private void AboutDeveloperButton_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://github.com/kingstacker") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            ShowSettingsCapsule(UiText.Localize(exception.Message), 4000);
+        }
+    }
+
     private void OpenUserManualButton_Click(object? sender, RoutedEventArgs e)
     {
         try
@@ -6714,6 +6744,9 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
     public bool IsMixedSource { get; }
     public bool HasDeletedBook => Items.Any(item => item.IsDeletedBook);
     public string DeletedLabel => UiText.IsEnglish ? "Deleted" : "已删除";
+    public string DisplayBookTitle => HasDeletedBook
+        ? UiText.IsEnglish ? $"{BookTitle} ({DeletedLabel})" : $"{BookTitle}（{DeletedLabel}）"
+        : BookTitle;
     public bool IsExportMode { get; }
     public string SourceLabel => string.Join(" + ", Items.Select(item => item.Source == ReadingMaterialSource.Local
         ? UiText.Get("本地书籍") : item.SourceLabel).Distinct(StringComparer.Ordinal));
@@ -6761,6 +6794,7 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(SourceLabel));
         OnPropertyChanged(nameof(CountLabel));
         OnPropertyChanged(nameof(DeletedLabel));
+        OnPropertyChanged(nameof(DisplayBookTitle));
         OnPropertyChanged(nameof(ExpandLabel));
     }
 

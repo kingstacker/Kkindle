@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -144,6 +144,9 @@
         </DataTemplate>
         <DataTemplate x:Key="LibraryRefreshActionContent" x:CompileBindings="False">
             <Path Classes="libraryGlyph" Data="M 20,8 A 9,9 0 1,0 20,16 M 20,8 V 3 M 20,8 H 15" />
+        </DataTemplate>
+        <DataTemplate x:Key="ReadingDataResetActionContent" x:CompileBindings="False">
+            <Path Classes="libraryGlyph" Data="M 16,3 L 21,8 Q 22,9 21,10 L 11,20 H 6 L 2,16 Q 1,15 2,14 L 13,3 Q 14.5,1.5 16,3 Z M 8,8 L 16,16 M 11,20 H 22" />
         </DataTemplate>
         <DataTemplate x:Key="TrashRestoreActionContent" x:CompileBindings="False">
             <Path Classes="libraryGlyph" Data="M 4,9 H 13 A 7,7 0 0,1 13,23 M 4,9 L 9,4 M 4,9 L 9,14" />
@@ -2230,11 +2233,10 @@
                                                     </Grid>
                                                 </Border>
                                                 <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center" Margin="12,0,0,0">
-                                                    <TextBlock Text="{Binding BookTitle}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding DisplayBookTitle}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                                         <TextBlock Text="{Binding SourceLabel}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                                         <TextBlock Text="{Binding CountLabel}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
-                                                        <TextBlock Text="{Binding DeletedLabel}" IsVisible="{Binding HasDeletedBook}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                                     </StackPanel>
                                                 </StackPanel>
                                                 <Button Grid.Column="3"
@@ -3189,7 +3191,7 @@
                                             <TextBlock Text="{DynamicResource Ui.Auto.440C143379A34160}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
                                             <TextBlock Text="{DynamicResource Ui.Auto.C9FD4D3CBC6F284A}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                         </StackPanel>
-                                        <Button x:Name="ResetReadingDataButton" Grid.Column="1" Content="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" AutomationProperties.Name="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" ToolTip.Tip="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" Classes="quiet libraryToolbar" VerticalAlignment="Center" Click="ResetReadingDataButton_Click" />
+                                        <Button x:Name="ResetReadingDataButton" Grid.Column="1" Content="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" ContentTemplate="{StaticResource ReadingDataResetActionContent}" AutomationProperties.Name="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" ToolTip.Tip="{DynamicResource Ui.Auto.41CC8F6D59CFD788}" Classes="quiet libraryToolbar" VerticalAlignment="Center" Click="ResetReadingDataButton_Click" />
                                         <TextBlock x:Name="SettingsReadingDataStatusText" Grid.Row="1" Grid.ColumnSpan="2" IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" Margin="0,8,0,0" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                     </Grid>
                                 </Border>
@@ -3418,12 +3420,12 @@
                                                 </TextBlock>
                                             </StackPanel>
                                         </StackPanel>
-                                        <Border Grid.Column="1" Padding="12,9" Background="{DynamicResource SoftHoverBrush}" CornerRadius="0" VerticalAlignment="Top" Margin="0,26,0,0">
+                                        <Button x:Name="AboutDeveloperButton" Grid.Column="1" Classes="quiet" Padding="12,9" MinWidth="0" MinHeight="0" BorderThickness="0" Background="{DynamicResource SoftHoverBrush}" CornerRadius="0" VerticalAlignment="Top" Margin="0,26,0,0" Cursor="Hand" ToolTip.Tip="https://github.com/kingstacker" AutomationProperties.Name="kingstacker GitHub" Click="AboutDeveloperButton_Click">
                                             <StackPanel Spacing="4">
                                                     <TextBlock Text="{DynamicResource Ui.Auto.38084D301E3F1A31}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                                     <TextBlock Text="kingstacker" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
                                             </StackPanel>
-                                        </Border>
+                                        </Button>
                                     </Grid>
                                 </Border>
 

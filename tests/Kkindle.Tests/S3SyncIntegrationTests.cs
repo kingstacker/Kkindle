@@ -17,6 +17,29 @@ namespace Kkindle.Tests;
 public sealed partial class S3SyncIntegrationTests
 {
     [Fact]
+    public async Task ManyBookBadgesStayCorrectAcrossCachedReadsAndResync()
+    {
+        var bucket = new MemoryBucket();
+        await using var device = await Device.CreateAsync(bucket);
+        for (var i = 0; i < 250; i++) await device.AddBookAsync();
+        await device.SyncAsync();
+        var books = await device.Library.SearchAsync();
+        Assert.Equal(250, books.Count);
+        for (var i = 0; i < 3; i++)
+        {
+            var statuses = await device.Service.GetBookSyncStatusesAsync(device.Id, device.Settings, books);
+            Assert.All(statuses.Values, status => Assert.Equal(BookSyncStatus.Synced, status));
+        }
+        var added = await device.AddBookAsync();
+        books = await device.Library.SearchAsync();
+        Assert.Equal(BookSyncStatus.NotSynced,
+            (await device.Service.GetBookSyncStatusesAsync(device.Id, device.Settings, books))[added.BookId]);
+        await device.SyncAsync();
+        Assert.All((await device.Service.GetBookSyncStatusesAsync(device.Id, device.Settings,
+            await device.Library.SearchAsync())).Values, status => Assert.Equal(BookSyncStatus.Synced, status));
+    }
+
+    [Fact]
     public async Task MissingEncryptionKey_IsRejectedBeforeAnyUpload()
     {
         var bucket = new MemoryBucket();

@@ -7,6 +7,31 @@ namespace Kkindle.Tests;
 public sealed class ReaderFeatureTests
 {
     [Fact]
+    public void MillionCharacterChunksPreserveOffsetsAndCancelBetweenChunks()
+    {
+        var text = string.Concat(Enumerable.Repeat("这是长篇书籍性能测试，分块必须保留文字位置。", 50000));
+        using var cancellation = new CancellationTokenSource();
+        using var chunks = EpubBookContentService.EnumerateChunks(text, 3, "长章", "long.xhtml", cancellation.Token).GetEnumerator();
+        var count = 0;
+        var previousEnd = 0;
+        while (chunks.MoveNext())
+        {
+            var chunk = chunks.Current;
+            Assert.Equal(text[chunk.StartOffset..chunk.EndOffset].Trim(), chunk.Content);
+            Assert.InRange(chunk.StartOffset, 0, previousEnd);
+            Assert.True(chunk.EndOffset > previousEnd);
+            previousEnd = chunk.EndOffset;
+            count++;
+        }
+        Assert.Equal(text.Length, previousEnd);
+        Assert.True(count > 1000);
+        using var cancelled = EpubBookContentService.EnumerateChunks(text, 0, "", "", cancellation.Token).GetEnumerator();
+        Assert.True(cancelled.MoveNext());
+        cancellation.Cancel();
+        Assert.Throws<OperationCanceledException>(() => cancelled.MoveNext());
+    }
+
+    [Fact]
     public async Task BuildsCachedChineseBookIndexAndFindsRelevantChunks()
     {
         var root = TestHelpers.CreateTempDirectory();

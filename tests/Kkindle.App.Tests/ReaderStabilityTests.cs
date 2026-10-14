@@ -17,6 +17,25 @@ public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposabl
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "kkindle-reader-stability", Guid.NewGuid().ToString("N"));
 
+    [Fact]
+    public Task LongChapterSettingsRemainResponsiveAndLatestRequestWins() => Run(async () =>
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "large.xhtml");
+        await File.WriteAllTextAsync(path, "<html><body>" + string.Concat(Enumerable.Repeat(
+            "<p>长篇章节后台排版测试，阅读位置不能随着设置变化丢失。</p>", 3000)) + "</body></html>");
+        using var host = await LoadNativeChapter(path, new());
+        var offset = MoveToMiddle(host);
+        var first = host.Configure(new ReaderLayoutSettings(FontScale: 1.6), 0, null, false, false);
+        Assert.False(first.IsCompleted);
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => Assert.False(first.IsCompleted));
+        var latest = new ReaderLayoutSettings(FontScale: 1.2);
+        var second = host.Configure(latest, 0, null, false, false);
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(16f * (float)latest.FontScale, Layout(host).Options.BaseFontSize);
+        AssertTextIsVisible(host, offset);
+    });
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -58,6 +77,7 @@ public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposabl
         host.Measure(new Size(660, 510));
         host.Arrange(new Rect(0, 0, 660, 510));
         await ReaderTests.Render();
+        await host.RelayoutTask;
         AssertTextIsVisible(host, offset);
         if (spread) Assert.Equal(0, host.CurrentPage % 2);
     });
@@ -163,20 +183,26 @@ public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposabl
     });
 
     [Fact]
-    public Task CancellingReaderSetupStopsInitializationBeforeStartingSessionTimers() => Run(async () =>
+    public Task CancelledReaderSetupStopsBeforeStartingSessionTimers() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
         using var cancellation = new CancellationTokenSource();
-        scope.Set("_readerTtsEnvironmentChecked", false);
-        scope.Set("_readerTtsEnvironmentTask", new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task);
+        cancellation.Cancel();
         var initializing = scope.Call<Task>("InitializeReaderInteractionAsync",
             new EpubReaderDocument(scope.Paths.ReaderCache, [], [], []), cancellation.Token);
-        Assert.False(initializing.IsCompleted);
-
-        cancellation.Cancel();
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => initializing.WaitAsync(TimeSpan.FromSeconds(5)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => initializing);
         Assert.False(scope.Field<Avalonia.Threading.DispatcherTimer?>("_readerStatsTimer")?.IsEnabled ?? false);
+    });
+
+    [Fact]
+    public Task ReaderSetupDoesNotWaitForOptionalTtsEnvironment() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Set("_readerTtsEnvironmentChecked", false);
+        scope.Set("_readerTtsEnvironmentTask", new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task);
+        await scope.Call<Task>("InitializeReaderInteractionAsync",
+            new EpubReaderDocument(scope.Paths.ReaderCache, [], [], []), CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
     });
 
     [Theory]
@@ -218,6 +244,7 @@ public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposabl
         reopened.Measure(new Size(680, 570));
         reopened.Arrange(new Rect(0, 0, 680, 570));
         await ReaderTests.Render();
+        await reopened.RelayoutTask;
         AssertTextIsVisible(reopened, anchor.TextOffset);
     });
 
