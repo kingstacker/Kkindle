@@ -536,10 +536,10 @@ public sealed partial class S3SyncService
             {
                 cleanupWarning = UiText.Get("远端清理未完成：{0}", UiText.Localize(exception.Message));
             }
-            state.LastUploadedSnapshot = finalSnapshot;
-            state.Tombstones = finalSnapshot.Tombstones;
-            await SaveStateAsync(state, cancellationToken);
 
+            // Cleanup only mutates the persisted state in its rare snapshot
+            // compaction path, which saves on its own. Re-saving the whole
+            // snapshot here doubled the state write for every normal sync.
             var warning = string.Join(
                 " ",
                 new[] { uploadWarning, databaseResult.Warning, cleanupWarning }
@@ -683,8 +683,16 @@ public sealed partial class S3SyncService
         }
     }
 
-    private static void AddUnchangedKeys<T>(
-        IEnumerable<T> currentRows,
+    /// <summary>
+    /// Structural row equality without materializing two UTF-16 JSON strings.
+    /// Called for every row in large annotation/bookmark sets.
+    /// </summary>
+    private static bool SnapshotRowsEqual<T>(T left, T right) =>
+        JsonSerializer.SerializeToUtf8Bytes(left, JsonOptions)
+            .AsSpan()
+            .SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(right, JsonOptions));
+
+    private static void AddUnchangedKeys<T>(        IEnumerable<T> currentRows,
         IEnumerable<T> previousRows,
         Func<T, string> id,
         string entityType,
@@ -695,10 +703,7 @@ public sealed partial class S3SyncService
         {
             var entityId = id(current);
             if (previous.TryGetValue(entityId, out var old)
-                && string.Equals(
-                    JsonSerializer.Serialize(current, JsonOptions),
-                    JsonSerializer.Serialize(old, JsonOptions),
-                    StringComparison.Ordinal))
+                && SnapshotRowsEqual(current, old))
                 output.Add(VersionKey(entityType, entityId));
         }
     }
@@ -728,8 +733,7 @@ public sealed partial class S3SyncService
         {
             var bookKey = VersionKey("book", book.Id);
             var changedSinceBaseline = !previousBooks.TryGetValue(book.Id, out var previous)
-                || !JsonSerializer.Serialize(book, JsonOptions)
-                    .Equals(JsonSerializer.Serialize(previous, JsonOptions), StringComparison.Ordinal);
+                || !SnapshotRowsEqual(book, previous);
             if (!changedSinceBaseline || !deletionVersions.TryGetValue(bookKey, out var bookDeletedAt))
                 continue;
 
@@ -753,8 +757,7 @@ public sealed partial class S3SyncService
         {
             var fileKey = VersionKey("file", file.Id);
             var changedSinceBaseline = !previousFiles.TryGetValue(file.Id, out var previous)
-                || !JsonSerializer.Serialize(file, JsonOptions)
-                    .Equals(JsonSerializer.Serialize(previous, JsonOptions), StringComparison.Ordinal);
+                || !SnapshotRowsEqual(file, previous);
             if (!changedSinceBaseline || !deletionVersions.TryGetValue(fileKey, out var deletedAt))
                 continue;
 
@@ -1468,8 +1471,7 @@ public sealed partial class S3SyncService
                 var sourceVersion = version(source);
                 if (byKey.TryGetValue(sourceKey, out var alternatives)
                     && alternatives.Any(target => version(target) >= sourceVersion
-                        && JsonSerializer.Serialize(target, JsonOptions)
-                            .Equals(JsonSerializer.Serialize(source, JsonOptions), StringComparison.Ordinal)))
+                        && SnapshotRowsEqual(target, source)))
                     continue;
 
                 var covered = fallbackTombstones(source).Any(tombstoneKey =>

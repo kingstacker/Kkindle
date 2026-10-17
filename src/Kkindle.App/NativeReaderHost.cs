@@ -913,6 +913,72 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     public IReadOnlyList<(int Start, int Length)> RubyAnnotationRanges =>
         _content?.RubyAnnotationRanges ?? [];
 
+    private ReaderSearchTextPolicy.PreparedSearchText? _preparedSearchText;
+    private ChapterContent? _preparedSearchContent;
+
+    /// <summary>
+    /// Search over the current chapter. The normalized text and its raw-offset
+    /// table are built once per loaded chapter; each keystroke only normalizes
+    /// the query. Previously every search rebuilt a multi-megabyte string on
+    /// the UI thread.
+    /// </summary>
+    /// <summary>
+    /// Page count of the chapter currently composed in this host, used by the
+    /// book-wide estimate so the visible chapter is not parsed and laid out
+    /// a second time.
+    /// </summary>
+    internal (string ChapterPath, int PageCount)? CurrentChapterPageCount
+    {
+        get
+        {
+            var layout = _layout;
+            var content = _content;
+            return layout is null || content is null
+                ? null
+                : (content.ChapterPath, layout.Pages.Count);
+        }
+    }
+
+    /// <summary>
+    /// Returns the current chapter's page count only when the live layout was
+    /// composed with the same settings and viewport as the requested estimate.
+    /// Otherwise a settings change could report a stale count.
+    /// </summary>
+    internal (string ChapterPath, int PageCount)? GetCurrentChapterPageCountFor(
+        ReaderLayoutSettings settings,
+        double width,
+        double height)
+    {
+        var layout = _layout;
+        var content = _content;
+        var options = _options;
+        if (layout is null || content is null || options is null) return null;
+        var expected = BuildOptions(settings, width, height);
+        return options.WritingMode == expected.WritingMode
+            && Math.Abs(options.BaseFontSize - expected.BaseFontSize) < 0.01f
+            && Math.Abs(options.LineHeight - expected.LineHeight) < 0.001f
+            && options.ParagraphIndent == expected.ParagraphIndent
+            && Math.Abs(options.ViewportWidth - expected.ViewportWidth) < 0.5f
+            && Math.Abs(options.ViewportHeight - expected.ViewportHeight) < 0.5f
+            && Math.Abs(options.InsetHorizontal - expected.InsetHorizontal) < 0.5f
+            && Math.Abs(options.InsetVertical - expected.InsetVertical) < 0.5f
+                ? (content.ChapterPath, layout.Pages.Count)
+                : null;
+    }
+
+    internal IReadOnlyList<ReaderSearchMatch> FindSearchMatches(string query)
+    {
+        var content = _content;
+        if (_preparedSearchText is null || !ReferenceEquals(_preparedSearchContent, content))
+        {
+            _preparedSearchText = ReaderSearchTextPolicy.Prepare(
+                content?.BodyText ?? string.Empty,
+                content?.RubyAnnotationRanges);
+            _preparedSearchContent = content;
+        }
+        return ReaderSearchTextPolicy.FindMatches(_preparedSearchText, query);
+    }
+
     /// <summary>
     /// Returns the text that is actually represented by visible content
     /// blocks. The raw chapter stream also contains ruby/footnote text that
@@ -1622,7 +1688,85 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         double width,
         double height,
         CancellationToken cancellationToken,
-        TypesetFontLibrary? sharedFonts = null)
+        TypesetFontLibrary? sharedFonts = null,
+        (string ChapterPath, int PageCount)? knownChapter = null)
+    {
+        var cacheKey = BuildPageCountCacheKey(
+            chapterPaths, settings, width, height, knownChapter);
+        lock (PageCountCacheLock)
+        {
+            if (PageCountCache.TryGetValue(cacheKey, out var cached))
+            {
+                cached.LastUse = ++_pageCountCacheTick;
+                return cached.Counts.ToArray();
+            }
+        }
+
+        var counts = EstimatePageCountsCore(
+            chapterPaths, settings, width, height, cancellationToken, sharedFonts, knownChapter);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (PageCountCacheLock)
+        {
+            PageCountCache[cacheKey] = (counts.ToArray(), ++_pageCountCacheTick);
+            while (PageCountCache.Count > 4)
+            {
+                long oldestUse = long.MaxValue;
+                long? oldestKey = null;
+                foreach (var entry in PageCountCache)
+                {
+                    if (entry.Value.LastUse >= oldestUse) continue;
+                    oldestUse = entry.Value.LastUse;
+                    oldestKey = entry.Key;
+                }
+                if (oldestKey is not { } key) break;
+                PageCountCache.Remove(key);
+            }
+        }
+        return counts;
+    }
+
+    private static readonly object PageCountCacheLock = new();
+    private static readonly Dictionary<long, (int[] Counts, long LastUse)> PageCountCache = [];
+    private static long _pageCountCacheTick;
+
+    private static long BuildPageCountCacheKey(
+        IReadOnlyList<string> chapterPaths,
+        ReaderLayoutSettings settings,
+        double width,
+        double height,
+        (string ChapterPath, int PageCount)? knownChapter)
+    {
+        var hash = new HashCode();
+        hash.Add(width);
+        hash.Add(height);
+        hash.Add(settings.VerticalWriting);
+        hash.Add(settings.ParagraphIndent);
+        hash.Add(settings.FontScale);
+        hash.Add(settings.LineHeight);
+        hash.Add(settings.MaxWidth);
+        hash.Add(settings.BodyPadding);
+        hash.Add(settings.FontFamily, StringComparer.Ordinal);
+        hash.Add(knownChapter?.ChapterPath, StringComparer.Ordinal);
+        hash.Add(knownChapter?.PageCount ?? -1);
+        foreach (var path in chapterPaths)
+        {
+            var info = new FileInfo(path);
+            hash.Add(path, StringComparer.Ordinal);
+            hash.Add(info.Exists ? info.Length : -1);
+            hash.Add(info.Exists ? info.LastWriteTimeUtc.Ticks : 0);
+        }
+        return hash.ToHashCode();
+    }
+
+    private static int[] EstimatePageCountsCore(
+        IReadOnlyList<string> chapterPaths,
+        ReaderLayoutSettings settings,
+        double width,
+        double height,
+        CancellationToken cancellationToken,
+        TypesetFontLibrary? sharedFonts,
+        (string ChapterPath, int PageCount)? knownChapter)
     {
         // Reuse the live reader's font library when available: opening a book
         // must not decode every candidate CJK face a second time just to
@@ -1637,6 +1781,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         for (var index = 0; index < chapterPaths.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (knownChapter is { } known
+                && string.Equals(known.ChapterPath, chapterPaths[index], StringComparison.Ordinal))
+            {
+                counts[index] = Math.Max(1, known.PageCount);
+                continue;
+            }
             try
             {
                 var content = new XhtmlChapterLoader(settings.ParagraphIndent).Load(chapterPaths[index], cancellationToken);
@@ -1665,7 +1815,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         {
             // Fall back to a private library so closing a book cannot turn a
             // background page-count estimate into an unobserved exception.
-            return EstimatePageCounts(chapterPaths, settings, width, height, cancellationToken);
+            return EstimatePageCounts(
+                chapterPaths, settings, width, height, cancellationToken, null, knownChapter);
         }
     }
 

@@ -15,9 +15,23 @@ public static class ReaderSearchTextPolicy
     public static IReadOnlyList<ReaderSearchMatch> FindMatches(
         string? text,
         string? query,
-        IReadOnlyList<(int Start, int Length)>? excludedRanges = null)
+        IReadOnlyList<(int Start, int Length)>? excludedRanges = null) =>
+        FindMatches(Prepare(text, excludedRanges), query);
+
+    /// <summary>
+    /// Normalizes a chapter once so repeated queries only normalize the query.
+    /// The native reader reuses this for every keystroke instead of rebuilding
+    /// a multi-megabyte string and offset table.
+    /// </summary>
+    public static PreparedSearchText Prepare(
+        string? text,
+        IReadOnlyList<(int Start, int Length)>? excludedRanges = null) =>
+        Normalize(text, excludedRanges);
+
+    public static IReadOnlyList<ReaderSearchMatch> FindMatches(
+        PreparedSearchText normalizedText,
+        string? query)
     {
-        var normalizedText = Normalize(text, excludedRanges);
         var normalizedQuery = Normalize(query).Text;
         if (normalizedText.Text.Length == 0 || normalizedQuery.Length == 0)
             return [];
@@ -100,7 +114,7 @@ public static class ReaderSearchTextPolicy
                 .First();
     }
 
-    private static NormalizedText Normalize(
+    private static PreparedSearchText Normalize(
         string? value,
         IReadOnlyList<(int Start, int Length)>? excludedRanges = null)
     {
@@ -147,8 +161,18 @@ public static class ReaderSearchTextPolicy
             rawOffsets.Add(index);
         }
 
-        return new NormalizedText(builder.ToString(), rawOffsets);
+        return new PreparedSearchText(builder.ToString(), rawOffsets);
     }
 
-    private sealed record NormalizedText(string Text, IReadOnlyList<int> RawOffsets);
+    public sealed class PreparedSearchText
+    {
+        internal PreparedSearchText(string text, IReadOnlyList<int> rawOffsets)
+        {
+            Text = text;
+            RawOffsets = rawOffsets;
+        }
+
+        public string Text { get; }
+        public IReadOnlyList<int> RawOffsets { get; }
+    }
 }

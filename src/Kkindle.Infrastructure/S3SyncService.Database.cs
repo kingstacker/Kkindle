@@ -538,15 +538,8 @@ public sealed partial class S3SyncService
                 });
         }
 
-        foreach (var stats in snapshot.ReadingStats)
-        {
-            stats.SecondsByDevice = await ReadingTimeSyncTracker.CaptureAsync(
-                connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
-            stats.CumulativeSeconds = ReadingTimeSyncTracker.Total(stats.SecondsByDevice);
-            stats.SecondsByDateByDevice = await ReadingTimeSyncTracker.CaptureReadingDaysAsync(
-                connection, transaction, stats.BookFileId, cancellationToken);
-            await ReadingTimeSyncTracker.UpdateTotalAsync(connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
-        }
+        await ReadingTimeSyncTracker.CaptureAllAsync(
+            connection, transaction, snapshot.ReadingStats, cancellationToken);
         var recorded = await ReadRecordedDeletionTimesInTransactionAsync(connection, transaction, cancellationToken);
         snapshot.LocalDeletionTimes = recorded;
         snapshot.Tombstones = MergeTombstones(

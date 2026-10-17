@@ -709,7 +709,7 @@ public partial class MainWindow : Window
     }
 
     public ObservableCollection<BookCollectionFolderViewModel> CollectionFolders { get; } = [];
-    public ObservableCollection<BookCollectionFolderViewModel> FilteredCollectionFolders { get; } = [];
+    public BulkObservableCollection<BookCollectionFolderViewModel> FilteredCollectionFolders { get; } = [];
     public ObservableCollection<DoubanCandidateViewModel> DoubanCandidates { get; } = [];
 
     private enum LibraryViewMode
@@ -1248,15 +1248,16 @@ public partial class MainWindow : Window
                 .ToHashSet()
             : null;
 
-        FilteredCollectionFolders.Clear();
+        var visible = new List<BookCollectionFolderViewModel>(CollectionFolders.Count);
         foreach (var folder in CollectionFolders)
         {
             var nameMatches = query.Length > 0
                 && folder.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase);
             var booksMatch = matchingBookCollectionIds?.Contains(folder.Collection.Id) == true;
             if (!hasSearchScope || nameMatches || booksMatch)
-                FilteredCollectionFolders.Add(folder);
+                visible.Add(folder);
         }
+        FilteredCollectionFolders.ReplaceAll(visible);
     }
 
     private void UpdateLibraryUi()

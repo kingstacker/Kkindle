@@ -213,7 +213,7 @@ public partial class MainWindow
 
     public ObservableCollection<KindleBookCardViewModel> DeviceBooks { get; } = [];
     private readonly Dictionary<string, KindleBookCardViewModel> _deviceCardsByPath = new(StringComparer.OrdinalIgnoreCase);
-    public ObservableCollection<KindleBookCardViewModel> VisibleDeviceBooks { get; } = [];
+    public BulkObservableCollection<KindleBookCardViewModel> VisibleDeviceBooks { get; } = [];
     private IReadOnlyList<KindleBookCardViewModel> _filteredDeviceBooks = [];
     private int _devicePageIndex;
     private int _devicePageCount = 1;
@@ -1450,11 +1450,9 @@ public partial class MainWindow
         if (resetPage) _devicePageIndex = 0;
         _devicePageCount = Math.Max(1, (int)Math.Ceiling(_filteredDeviceBooks.Count / (double)DevicePageSize));
         if (_devicePageIndex >= _devicePageCount) _devicePageIndex = _devicePageCount - 1;
-        VisibleDeviceBooks.Clear();
-        foreach (var card in _filteredDeviceBooks
+        VisibleDeviceBooks.ReplaceAll(_filteredDeviceBooks
             .Skip(_devicePageIndex * DevicePageSize)
-            .Take(DevicePageSize))
-            VisibleDeviceBooks.Add(card);
+            .Take(DevicePageSize));
         UpdateDeviceBookPaginationUi();
         UpdateDeviceBookEmptyState();
     }

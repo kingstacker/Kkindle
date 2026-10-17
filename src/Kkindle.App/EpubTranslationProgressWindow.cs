@@ -47,6 +47,10 @@ internal sealed class EpubTranslationProgressWindow : Window
     private bool _scrollQueued;
     private int? _currentSegmentIndex;
     private int? _pendingCenterSegmentIndex;
+    private BookTranslationProgress? _pendingProgress;
+    private readonly Dictionary<int, BookTranslationSegmentProgress> _pendingSegments = [];
+    private readonly DispatcherTimer _progressCoalesceTimer =
+        new() { Interval = TimeSpan.FromMilliseconds(100) };
 
     public EpubTranslationProgressWindow(
         string bookTitle,
@@ -238,7 +242,16 @@ internal sealed class EpubTranslationProgressWindow : Window
         Grid.SetRow(_resultText, 8);
         Grid.SetRow(buttons, 9);
 
-        Closed += (_, _) => RequestCancel();
+        Closed += (_, _) =>
+        {
+            _progressCoalesceTimer.Stop();
+            RequestCancel();
+        };
+        _progressCoalesceTimer.Tick += (_, _) =>
+        {
+            _progressCoalesceTimer.Stop();
+            FlushProgress();
+        };
     }
 
     public string OutputDirectory { get; }
@@ -307,19 +320,80 @@ internal sealed class EpubTranslationProgressWindow : Window
         }
         if (_finished || !_progressUpdatesEnabled) return;
 
-        _stageText.Text = progress.Stage;
-        _currentText.Text = progress.CurrentItem;
-        _progressBar.Value = Math.Clamp(progress.Percentage, 0, 100);
-        _percentageText.Text = $"{progress.Percentage:0}%";
-        _detailsText.Text = progress.TotalSegments > 0
-            ? $"已处理 {progress.ProcessedSegments:N0} / {progress.TotalSegments:N0} 段"
-                + (progress.TotalCharacters > 0
-                    ? $"  ·  {progress.ProcessedCharacters:N0} / {progress.TotalCharacters:N0} 字"
-                    : string.Empty)
-            : "正在准备…";
-
+        // Translation reports one event per segment; rebuilding the whole
+        // waterfall for each event made large books unresponsive. Keep the
+        // newest header and each segment's newest state, then apply them at
+        // most ten times per second.
+        _pendingProgress = progress;
         if (progress.Segment is { } segment)
-            UpdateSegment(segment);
+            _pendingSegments[segment.Index] = segment;
+        if (!_progressCoalesceTimer.IsEnabled)
+            _progressCoalesceTimer.Start();
+    }
+
+    private void FlushProgress()
+    {
+        if (_finished || !_progressUpdatesEnabled)
+        {
+            _pendingProgress = null;
+            _pendingSegments.Clear();
+            return;
+        }
+
+        if (_pendingProgress is { } progress)
+        {
+            _stageText.Text = progress.Stage;
+            _currentText.Text = progress.CurrentItem;
+            _progressBar.Value = Math.Clamp(progress.Percentage, 0, 100);
+            _percentageText.Text = $"{progress.Percentage:0}%";
+            _detailsText.Text = progress.TotalSegments > 0
+                ? $"已处理 {progress.ProcessedSegments:N0} / {progress.TotalSegments:N0} 段"
+                    + (progress.TotalCharacters > 0
+                        ? $"  ·  {progress.ProcessedCharacters:N0} / {progress.TotalCharacters:N0} 字"
+                        : string.Empty)
+                : "正在准备…";
+            _pendingProgress = null;
+        }
+
+        if (_pendingSegments.Count == 0) return;
+        foreach (var segment in _pendingSegments.Values)
+            ApplySegment(segment);
+        _pendingSegments.Clear();
+        FinishSegmentBatch();
+    }
+
+    private void ApplySegment(BookTranslationSegmentProgress segment)
+    {
+        if (!_segmentRows.TryGetValue(segment.Index, out var row))
+        {
+            if (_emptySegmentText.Parent is Panel parent)
+                parent.Children.Remove(_emptySegmentText);
+
+            row = new SegmentRowView(segment);
+            _segmentRows[segment.Index] = row;
+            _segmentPanel.Children.Add(row.Control);
+        }
+
+        row.Update(segment);
+    }
+
+    private void FinishSegmentBatch()
+    {
+        _currentSegmentIndex = _segmentRows.Values
+            .Where(item => item.IsProcessing)
+            .OrderBy(item => item.Index)
+            .Select(item => (int?)item.Index)
+            .FirstOrDefault();
+
+        ReorderSegmentRows();
+        var completedCount = _segmentRows.Values.Count(item => item.IsCompleted);
+        _segmentSummaryText.Text = $"已完成 {completedCount:N0} / {_segmentRows.Count:N0} 段";
+        if (_currentSegmentIndex is { } currentIndex
+            && _segmentRows.TryGetValue(currentIndex, out var currentRow)
+            && currentRow.IsProcessing)
+        {
+            QueueScrollToSegment(currentIndex);
+        }
     }
 
     public void MarkAddingToLibrary(int fileCount)
@@ -330,6 +404,7 @@ internal sealed class EpubTranslationProgressWindow : Window
             return;
         }
 
+        FlushProgress();
         _stageText.Text = "正在加入书库";
         _currentText.Text = $"正在登记 {fileCount:N0} 个翻译文件，自动合并为同一本书的不同格式。";
         _progressUpdatesEnabled = false;
@@ -347,6 +422,7 @@ internal sealed class EpubTranslationProgressWindow : Window
             return;
         }
 
+        FlushProgress();
         _finished = true;
         _progressUpdatesEnabled = false;
         _currentSegmentIndex = null;
@@ -495,36 +571,6 @@ internal sealed class EpubTranslationProgressWindow : Window
         _segmentSummaryText.Text = _segmentRows.Count > 0
             ? $"已完成 {completedCount:N0} / {_segmentRows.Count:N0} 段"
             : "等待重试…";
-    }
-
-    private void UpdateSegment(BookTranslationSegmentProgress segment)
-    {
-        if (!_segmentRows.TryGetValue(segment.Index, out var row))
-        {
-            if (_emptySegmentText.Parent is Panel parent)
-                parent.Children.Remove(_emptySegmentText);
-
-            row = new SegmentRowView(segment);
-            _segmentRows[segment.Index] = row;
-            _segmentPanel.Children.Add(row.Control);
-        }
-
-        row.Update(segment);
-        _currentSegmentIndex = _segmentRows.Values
-            .Where(item => item.IsProcessing)
-            .OrderBy(item => item.Index)
-            .Select(item => (int?)item.Index)
-            .FirstOrDefault();
-
-        ReorderSegmentRows();
-        var completedCount = _segmentRows.Values.Count(item => item.IsCompleted);
-        _segmentSummaryText.Text = $"已完成 {completedCount:N0} / {_segmentRows.Count:N0} 段";
-        if (_currentSegmentIndex is { } currentIndex
-            && _segmentRows.TryGetValue(currentIndex, out var currentRow)
-            && currentRow.IsProcessing)
-        {
-            QueueScrollToSegment(currentIndex);
-        }
     }
 
     private void ReorderSegmentRows()

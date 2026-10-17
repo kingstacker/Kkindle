@@ -6442,9 +6442,8 @@ public partial class MainWindow
                 // Case-folded search over the same body-text stream the
                 // WebKit walker saw; highlights paint per page.
                 var nativeQuery = query.Trim();
-                var nativeBody = nativeReader.BodyText ?? string.Empty;
-                var nativeHits = ReaderSearchTextPolicy
-                    .FindMatches(nativeBody, nativeQuery, nativeReader.RubyAnnotationRanges)
+                var nativeHits = nativeReader
+                    .FindSearchMatches(nativeQuery)
                     .Select(match => (match.Start, match.Length))
                     .ToList();
 
@@ -9626,6 +9625,8 @@ public partial class MainWindow
         {
             var nativeHost = CurrentReaderHost as NativeReaderHost;
             var useNativeLayout = nativeHost is not null;
+            var knownChapter = nativeHost?.GetCurrentChapterPageCountFor(
+                layout, viewportWidth, viewportHeight);
             var counts = await Task.Run(
                 () => useNativeLayout
                     ? NativeReaderHost.EstimatePageCounts(
@@ -9634,7 +9635,8 @@ public partial class MainWindow
                         viewportWidth,
                         viewportHeight,
                         cancellation.Token,
-                        nativeHost!.FontLibrary)
+                        nativeHost!.FontLibrary,
+                        knownChapter)
                     : document.Chapters
                         .Select(path => EstimateReaderChapterPageCount(
                             path,
