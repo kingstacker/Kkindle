@@ -137,15 +137,6 @@ public sealed record S3SyncStatusSummary(
     int TombstoneCount,
     DateTimeOffset? SnapshotCreatedAt);
 
-public sealed record DuplicateBookInfo(
-    Guid Id,
-    string Title,
-    string Authors,
-    int FileCount,
-    DateTimeOffset UpdatedAt);
-
-public sealed record DuplicateBookGroup(IReadOnlyList<DuplicateBookInfo> Books);
-
 public sealed record S3SyncOptions
 {
     public string? ConfirmedDeletionFingerprint { get; init; }

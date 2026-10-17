@@ -18,20 +18,6 @@ public partial class MainWindow
 {
     private EpubReaderDocument? _readerDocument;
     private BookCardViewModel? _readerBookCard;
-    private BookCardViewModel? _temporaryReaderCard;
-
-    private void SetReaderBookCard(BookCardViewModel card)
-    {
-        // Cards created by the notes window for books outside the current page
-        // are not owned by the library view; release them when the reader
-        // switches books or closes.
-        if (_temporaryReaderCard is not null && !ReferenceEquals(_temporaryReaderCard, card))
-        {
-            _temporaryReaderCard.Dispose();
-            _temporaryReaderCard = null;
-        }
-        _readerBookCard = card;
-    }
     private BookFile? _readerBookFile;
     private int _readerChapterIndex;
     private bool _readerShowingPreload;
@@ -90,7 +76,7 @@ public partial class MainWindow
             sessionToken.ThrowIfCancellationRequested();
 
             _readerDocument = document;
-            SetReaderBookCard(card);
+            _readerBookCard = card;
             _readerBookFile = file;
             _readerChapterIndex = 0;
             _readerShowingPreload = false;
@@ -1057,11 +1043,6 @@ public partial class MainWindow
         _readerPendingSelectionSuffix = string.Empty;
         await RefreshReadingMaterialsIfDirtyAsync();
         _readerDocument = null;
-        if (_temporaryReaderCard is not null)
-        {
-            _temporaryReaderCard.Dispose();
-            _temporaryReaderCard = null;
-        }
         _readerBookCard = null;
         _readerBookFile = null;
         await Task.CompletedTask;

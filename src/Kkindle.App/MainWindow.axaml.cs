@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Text;
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
@@ -135,7 +134,6 @@ public partial class MainWindow : Window
     private IReaderHost? _readerPreloadHost;
     private bool _filterControlsReady;
     private bool _updatingFilterControls;
-    private bool _updatingSmartShelves;
     private bool _updatingDetails;
     private LibraryViewMode _libraryViewMode = LibraryViewMode.Grid;
     private VirtualizingWrapPanel? _bookGridPanel;
@@ -1191,96 +1189,11 @@ public partial class MainWindow : Window
             ReadingStatusFilterBox.SelectedIndex = ViewModel.ReadingStatusFilter is { } readingStatus ? (int)readingStatus : -1;
             LibrarySortBox.SelectedIndex = (int)ViewModel.SortMode;
             FavoritesOnlyCheckBox.IsChecked = ViewModel.FavoritesOnly;
-            RefreshSmartShelfBox();
         }
         finally
         {
             _updatingFilterControls = false;
         }
-    }
-
-    private void RefreshSmartShelfBox()
-    {
-        _updatingSmartShelves = true;
-        try
-        {
-            var selected = (SmartShelfBox.SelectedItem as SmartShelf)?.Id;
-            SmartShelfBox.ItemsSource = _appSettings.SmartShelves;
-            SmartShelfBox.SelectedItem = selected is { } id
-                ? _appSettings.SmartShelves.FirstOrDefault(shelf => shelf.Id == id)
-                : null;
-            DeleteSmartShelfButton.IsVisible = SmartShelfBox.SelectedItem is SmartShelf;
-        }
-        finally
-        {
-            _updatingSmartShelves = false;
-        }
-    }
-
-    private void SmartShelfBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (_updatingSmartShelves || SmartShelfBox.SelectedItem is not SmartShelf shelf) return;
-        ApplySmartShelf(shelf);
-        DeleteSmartShelfButton.IsVisible = true;
-    }
-
-    private void ApplySmartShelf(SmartShelf shelf)
-    {
-        ViewModel.SearchText = shelf.Query;
-        SearchBox.Text = shelf.Query;
-        ViewModel.AuthorFilter = EmptyToNull(shelf.Author);
-        ViewModel.TagFilter = EmptyToNull(shelf.Tag);
-        ViewModel.FormatFilter = EmptyToNull(shelf.Format);
-        ViewModel.CategoryFilter = EmptyToNull(shelf.Category);
-        ViewModel.ReadingStatusFilter = shelf.ReadingStatus;
-        ViewModel.FavoritesOnly = shelf.FavoritesOnly;
-        ViewModel.SortMode = shelf.SortMode;
-        SetupFilterControls();
-        ViewModel.RefreshView();
-        UpdateLibraryUi();
-    }
-
-    private static string? EmptyToNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value;
-
-    private async void SaveSmartShelfButton_Click(object? sender, RoutedEventArgs e)
-    {
-        var name = await TextPromptWindow.ShowAsync(
-            this, T("保存智能书架"), T("筛选名称"));
-        if (string.IsNullOrWhiteSpace(name)) return;
-        var shelf = new SmartShelf(
-            Guid.NewGuid(),
-            name.Trim(),
-            ViewModel.SearchText,
-            ViewModel.AuthorFilter ?? string.Empty,
-            ViewModel.TagFilter ?? string.Empty,
-            ViewModel.FormatFilter ?? string.Empty,
-            ViewModel.CategoryFilter ?? string.Empty,
-            ViewModel.ReadingStatusFilter,
-            ViewModel.FavoritesOnly,
-            ViewModel.SortMode);
-        _appSettings = AppSettings.Normalize(_appSettings with
-        {
-            SmartShelves = _appSettings.SmartShelves.Concat([shelf]).ToArray()
-        });
-        await _appSettingsStore.SaveAsync(_appSettings);
-        RefreshSmartShelfBox();
-        SmartShelfBox.SelectedItem = _appSettings.SmartShelves.FirstOrDefault(item => item.Id == shelf.Id);
-        SetTaskStatus(T("已保存智能书架“{0}”。", shelf.Name));
-    }
-
-    private async void DeleteSmartShelfButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (SmartShelfBox.SelectedItem is not SmartShelf shelf) return;
-        _appSettings = AppSettings.Normalize(_appSettings with
-        {
-            SmartShelves = _appSettings.SmartShelves
-                .Where(item => item.Id != shelf.Id)
-                .ToArray()
-        });
-        await _appSettingsStore.SaveAsync(_appSettings);
-        RefreshSmartShelfBox();
-        SetTaskStatus(T("已删除智能书架“{0}”。", shelf.Name));
     }
 
     private static string[] IncludeActiveFilter(IEnumerable<string> choices, string? active) =>
@@ -4281,211 +4194,6 @@ public partial class MainWindow : Window
         ViewModel.CollectionFilterName = null;
         ViewModel.RefreshView();
         SetLibraryViewMode(LibraryViewMode.Grid);
-    }
-
-    private async void BatchConvertSelectedBooksButton_Click(object? sender, RoutedEventArgs e)
-    {
-        var cards = ViewModel.Books
-            .Where(card => _selectedBookIds.Contains(card.Book.Id))
-            .ToArray();
-        if (cards.Length == 0) return;
-        var window = new BatchConvertWindow(cards.Length, async target =>
-        {
-            var converted = 0;
-            var skipped = 0;
-            var failed = 0;
-            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                _lifetimeCancellation.Token);
-            foreach (var card in cards)
-            {
-                cancellation.Token.ThrowIfCancellationRequested();
-                if (card.Book.Files.Any(file => string.Equals(
-                        BookFormatConversionPolicy.Normalize(file.Format),
-                        target,
-                        StringComparison.OrdinalIgnoreCase)))
-                {
-                    skipped++;
-                    continue;
-                }
-                var sourceFile = BookFormatConversionPolicy
-                    .GetSourceCandidates(card.Book.Files, target)
-                    .FirstOrDefault();
-                if (sourceFile is null)
-                {
-                    skipped++;
-                    continue;
-                }
-                var sourcePath = ViewModel.GetAbsoluteFilePath(sourceFile);
-                if (!File.Exists(sourcePath))
-                {
-                    try
-                    {
-                        sourcePath = await EnsureBookFileAvailableAsync(sourceFile, cancellation.Token)
-                            ?? sourcePath;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
-                    catch
-                    {
-                        failed++;
-                        continue;
-                    }
-                }
-                if (!File.Exists(sourcePath))
-                {
-                    failed++;
-                    continue;
-                }
-
-                var directory = Path.Combine(
-                    Path.GetTempPath(), "KkindleBatchConversions", Guid.NewGuid().ToString("N"));
-                var output = Path.Combine(
-                    directory,
-                    KindleTransferPolicy.CreateSafeFileName(card.Title, "." + target));
-                try
-                {
-                    Directory.CreateDirectory(directory);
-                    var progress = new Progress<FormatConversionProgress>(value =>
-                        SetTaskStatus(T("正在转换《{0}》… {1}%", card.Title, value.Percentage)));
-                    await _formatConverter.ConvertAsync(
-                        sourcePath,
-                        output,
-                        progress,
-                        cancellation.Token,
-                        new FormatConversionMetadata(card.Book.Title, card.Book.Authors));
-                    await _library.AddFileToBookAsync(card.Book.Id, output, cancellation.Token);
-                    converted++;
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch
-                {
-                    failed++;
-                }
-                finally
-                {
-                    try
-                    {
-                        if (File.Exists(output)) File.Delete(output);
-                        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            await RefreshLibraryAsync();
-            await ShowMessageAsync(
-                T("批量转换完成"),
-                T("已转换 {0} 本，跳过 {1} 本，失败 {2} 本。", converted, skipped, failed));
-        });
-        await window.ShowDialog(this);
-    }
-
-    private async void BatchEditSelectedBooksButton_Click(object? sender, RoutedEventArgs e)
-    {
-        var ids = _selectedBookIds.ToArray();
-        if (ids.Length == 0) return;
-        var window = new BatchEditWindow(ids.Length, async options =>
-        {
-            SetTaskStatus(T("正在批量更新 {0} 本书…", ids.Length));
-            var updated = 0;
-            foreach (var id in ids)
-            {
-                var book = await _library.GetBookAsync(id, _lifetimeCancellation.Token);
-                if (book is null) continue;
-                if (options.Tags is { } tags) book.Tags = tags;
-                if (options.Category is { } category) book.Category = category;
-                if (options.ReadingStatus is { } status) book.ReadingStatus = status;
-                if (options.Favorite is { } favorite) book.IsFavorite = favorite;
-                book.UpdatedAt = DateTimeOffset.UtcNow;
-                await _library.UpdateMetadataAsync(book, _lifetimeCancellation.Token);
-                updated++;
-            }
-            await RefreshLibraryAsync();
-            SetTaskStatus(T("已更新 {0} 本书。", updated));
-        });
-        await window.ShowDialog(this);
-    }
-
-    private async void FindDuplicateBooksButton_Click(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            SetTaskStatus(T("正在查找重复书…"));
-            var groups = await _s3SyncService.FindLocalDuplicateBooksAsync(_lifetimeCancellation.Token);
-            if (groups.Count == 0)
-            {
-                await ShowMessageAsync(T("重复书"), T("没有发现重复书。"));
-                SetTaskStatus(ViewModel.StatusText);
-                return;
-            }
-
-            var builder = new StringBuilder();
-            builder.AppendLine(T("发现 {0} 组重复书，共 {1} 本：",
-                groups.Count, groups.Sum(group => group.Books.Count)));
-            foreach (var group in groups.Take(20))
-                builder.AppendLine("· " + string.Join(" / ", group.Books.Select(book => book.Title)));
-            if (groups.Count > 20)
-                builder.AppendLine(T("…以及另外 {0} 组", groups.Count - 20));
-            builder.AppendLine();
-            builder.AppendLine(T("合并会保留每组文件最多的版本，并把批注、进度、书签、阅读统计和收藏夹成员迁移过去。"));
-
-            if (!await ConfirmAsync(
-                    T("合并重复书"), builder.ToString(), T("合并"), _lifetimeCancellation.Token))
-                return;
-            var merged = await _s3SyncService.MergeLocalDuplicateBooksAsync(_lifetimeCancellation.Token);
-            await RefreshLibraryAsync();
-            await ShowMessageAsync(T("合并完成"), T("已合并 {0} 本重复书。", merged));
-        }
-        catch (Exception exception)
-        {
-            await ShowMessageAsync(T("合并重复书失败"), UiText.Localize(exception.Message));
-        }
-    }
-
-    private void OpenReaderNotesButton_Click(object? sender, RoutedEventArgs e)
-    {
-        var window = new ReaderNotesWindow(_readerData, OpenReaderAnnotationFromNotesAsync);
-        window.Show(this);
-    }
-
-    private async Task OpenReaderAnnotationFromNotesAsync(ReaderAnnotation annotation)
-    {
-        var card = ViewModel.Books.FirstOrDefault(item => item.Book.Id == annotation.BookId);
-        BookCardViewModel? temporary = null;
-        if (card is null)
-        {
-            var book = await _library.GetBookAsync(annotation.BookId, _lifetimeCancellation.Token);
-            if (book is null)
-            {
-                await ShowMessageAsync(T("无法打开批注"), T("批注对应的书籍已不在书库中。"));
-                return;
-            }
-            temporary = new BookCardViewModel(book, _paths.Data);
-            card = temporary;
-        }
-
-        var file = card.Book.Files.FirstOrDefault(item => item.Id == annotation.BookFileId);
-        if (file is null)
-        {
-            temporary?.Dispose();
-            await ShowMessageAsync(T("无法打开批注"), T("批注对应的文件已不在书库中。"));
-            return;
-        }
-
-        if (temporary is not null)
-        {
-            _temporaryReaderCard?.Dispose();
-            _temporaryReaderCard = temporary;
-        }
-        await OpenBookAsync(card, file, restoreProgress: true);
-        if (ReferenceEquals(_readerBookCard, card))
-            await NavigateToReaderAnnotationAsync(annotation);
     }
 
     private async void SearchBox_TextChanged(object? sender, TextChangedEventArgs e)

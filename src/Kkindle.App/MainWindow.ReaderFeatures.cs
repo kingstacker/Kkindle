@@ -246,7 +246,7 @@ public partial class MainWindow
         try
         {
             SetTaskStatus(T("正在准备《{0}》的 PDF 阅读器…", card.Title));
-            SetReaderBookCard(card);
+            _readerBookCard = card;
             _readerBookFile = file;
             _readerDocument = null;
             _readerIsPdf = true;
