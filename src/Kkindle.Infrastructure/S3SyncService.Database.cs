@@ -564,7 +564,10 @@ public sealed partial class S3SyncService
         S3SyncSnapshot baseline,
         DateTimeOffset since,
         DateTimeOffset captureStartedAt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool fullScanNonAnnotationTables = false,
+        IReadOnlyCollection<Guid>? annotationIds = null,
+        bool fullScanAnnotations = false)
     {
         var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
         var snapshot = new S3SyncSnapshot
@@ -581,33 +584,56 @@ public sealed partial class S3SyncService
         var sinceText = since.ToUniversalTime().ToString("O");
         var deletedBookIds = new HashSet<Guid>();
 
-        // Books: reuse the baseline, drop deleted rows, then overlay rows that
-        // changed after the watermark.
-        var books = new List<S3SyncBook>(baseline.Books.Count);
-        var bookIndex = new Dictionary<Guid, int>();
-        foreach (var source in baseline.Books)
+        // Cover paths are local-only and are persisted in the state file, not
+        // in the baseline JSON. Seed them before the changed-book overlay.
+        if (!fullScanNonAnnotationTables)
         {
-            if (recorded.ContainsKey(VersionKey("book", source.Id)))
-            {
-                deletedBookIds.Add(source.Id);
-                continue;
-            }
-            var book = CloneBook(source);
-            bookIndex[book.Id] = books.Count;
-            books.Add(book);
-            if (!string.IsNullOrWhiteSpace(book.LocalCoverPath))
-                snapshot.LocalCoverPaths[book.Id] = book.LocalCoverPath;
+            foreach (var (id, path) in baseline.LocalCoverPaths)
+                snapshot.LocalCoverPaths[id] = path;
         }
 
-        using (var command = CreateCommand(connection, transaction, """
-            SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
-                   PublishDate, Isbn, PageCount, Binding, DoubanRating,
-                   DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
-                   CreatedAt, UpdatedAt, CoverPath
-            FROM Books WHERE UpdatedAt > $since;
-            """))
+        // Books: reuse the baseline, drop deleted rows, then overlay rows that
+        // changed after the watermark. The converged post-merge capture scans
+        // this small table in full because merged remote rows can carry an
+        // older UpdatedAt.
+        var books = new List<S3SyncBook>(fullScanNonAnnotationTables ? 0 : baseline.Books.Count);
+        var bookIndex = new Dictionary<Guid, int>();
+        if (!fullScanNonAnnotationTables)
         {
-            AddParameter(command, "$since", sinceText);
+            foreach (var source in baseline.Books)
+            {
+                if (recorded.ContainsKey(VersionKey("book", source.Id)))
+                {
+                    deletedBookIds.Add(source.Id);
+                    snapshot.LocalCoverPaths.Remove(source.Id);
+                    continue;
+                }
+                var book = CloneBook(source);
+                bookIndex[book.Id] = books.Count;
+                books.Add(book);
+                if (!string.IsNullOrWhiteSpace(book.LocalCoverPath))
+                    snapshot.LocalCoverPaths[book.Id] = book.LocalCoverPath;
+            }
+        }
+
+        var booksSql = fullScanNonAnnotationTables
+            ? """
+              SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
+                     PublishDate, Isbn, PageCount, Binding, DoubanRating,
+                     DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                     CreatedAt, UpdatedAt, CoverPath
+              FROM Books;
+              """
+            : """
+              SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
+                     PublishDate, Isbn, PageCount, Binding, DoubanRating,
+                     DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                     CreatedAt, UpdatedAt, CoverPath
+              FROM Books WHERE UpdatedAt > $since;
+              """;
+        using (var command = CreateCommand(connection, transaction, booksSql))
+        {
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -656,20 +682,24 @@ public sealed partial class S3SyncService
             }
         }
 
-        var collections = new List<S3SyncCollection>(baseline.Collections.Count);
+        var collections = new List<S3SyncCollection>(
+            fullScanNonAnnotationTables ? 0 : baseline.Collections.Count);
         var collectionIndex = new Dictionary<Guid, int>();
-        foreach (var source in baseline.Collections)
+        if (!fullScanNonAnnotationTables)
         {
-            if (recorded.ContainsKey(VersionKey("collection", source.Id))) continue;
-            collectionIndex[source.Id] = collections.Count;
-            collections.Add(source);
+            foreach (var source in baseline.Collections)
+            {
+                if (recorded.ContainsKey(VersionKey("collection", source.Id))) continue;
+                collectionIndex[source.Id] = collections.Count;
+                collections.Add(source);
+            }
         }
-        using (var command = CreateCommand(connection, transaction, """
-            SELECT Id, Name, CreatedAt, UpdatedAt
-            FROM BookCollections WHERE UpdatedAt > $since;
-            """))
+        var collectionsSql = fullScanNonAnnotationTables
+            ? "SELECT Id, Name, CreatedAt, UpdatedAt FROM BookCollections;"
+            : "SELECT Id, Name, CreatedAt, UpdatedAt FROM BookCollections WHERE UpdatedAt > $since;";
+        using (var command = CreateCommand(connection, transaction, collectionsSql))
         {
-            AddParameter(command, "$since", sinceText);
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -708,67 +738,78 @@ public sealed partial class S3SyncService
                 });
         }
 
-        var annotations = new List<S3SyncAnnotation>(baseline.Annotations.Count);
+        var annotations = new List<S3SyncAnnotation>(
+            fullScanAnnotations ? 0 : baseline.Annotations.Count);
         var annotationIndex = new Dictionary<Guid, int>();
-        foreach (var source in baseline.Annotations)
+        if (!fullScanAnnotations)
         {
-            if (recorded.ContainsKey(VersionKey("annotation", source.Id))) continue;
-            annotationIndex[source.Id] = annotations.Count;
-            annotations.Add(source);
+            foreach (var source in baseline.Annotations)
+            {
+                if (recorded.ContainsKey(VersionKey("annotation", source.Id))) continue;
+                annotationIndex[source.Id] = annotations.Count;
+                annotations.Add(source);
+            }
         }
-        using (var command = CreateCommand(connection, transaction, """
-            SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
-                   SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
-            FROM ReaderAnnotations WHERE UpdatedAt > $since;
-            """))
+        var annotationsSql = fullScanAnnotations
+            ? """
+              SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
+                     SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
+              FROM ReaderAnnotations;
+              """
+            : """
+              SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
+                     SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
+              FROM ReaderAnnotations WHERE UpdatedAt > $since;
+              """;
+        using (var command = CreateCommand(connection, transaction, annotationsSql))
         {
-            AddParameter(command, "$since", sinceText);
+            if (!fullScanAnnotations) AddParameter(command, "$since", sinceText);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
+                OverlayAnnotation(ReadAnnotationRow(reader), annotations, annotationIndex);
+        }
+
+        // The converged capture must include remote annotations whose
+        // timestamps are older than the transaction start. Re-read exactly the
+        // IDs that were present in the downloaded snapshots.
+        if (!fullScanAnnotations && annotationIds is { Count: > 0 })
+        {
+            foreach (var chunk in annotationIds.Distinct().Chunk(500))
             {
-                var annotation = new S3SyncAnnotation
-                {
-                    Id = ParseGuid(reader.GetString(0), "ReaderAnnotations.Id"),
-                    BookId = ParseGuid(reader.GetString(1), "ReaderAnnotations.BookId"),
-                    BookFileId = ParseGuid(reader.GetString(2), "ReaderAnnotations.BookFileId"),
-                    ChapterPath = reader.GetString(3),
-                    Fragment = NullableString(reader, 4),
-                    StartOffset = reader.GetInt32(5),
-                    EndOffset = reader.GetInt32(6),
-                    SelectedText = reader.GetString(7),
-                    Prefix = reader.GetString(8),
-                    Suffix = reader.GetString(9),
-                    Color = reader.GetString(10),
-                    UnderlineStyle = reader.GetString(11),
-                    Note = reader.GetString(12),
-                    CreatedAt = ParseTimestamp(reader.GetString(13)),
-                    UpdatedAt = ParseTimestamp(reader.GetString(14))
-                };
-                if (annotationIndex.TryGetValue(annotation.Id, out var index))
-                    annotations[index] = annotation;
-                else
-                {
-                    annotationIndex[annotation.Id] = annotations.Count;
-                    annotations.Add(annotation);
-                }
+                var names = chunk.Select((_, index) => $"$id{index}").ToArray();
+                var sql = $"""
+                    SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
+                           SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
+                    FROM ReaderAnnotations WHERE Id IN ({string.Join(", ", names)});
+                    """;
+                using var command = CreateCommand(connection, transaction, sql);
+                for (var index = 0; index < chunk.Length; index++)
+                    AddParameter(command, names[index], chunk[index].ToString());
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                    OverlayAnnotation(ReadAnnotationRow(reader), annotations, annotationIndex);
             }
         }
         snapshot.Annotations = annotations;
 
-        var reflections = new List<S3SyncBookReflection>(baseline.BookReflections.Count);
+        var reflections = new List<S3SyncBookReflection>(
+            fullScanNonAnnotationTables ? 0 : baseline.BookReflections.Count);
         var reflectionIndex = new Dictionary<Guid, int>();
-        foreach (var source in baseline.BookReflections)
+        if (!fullScanNonAnnotationTables)
         {
-            if (recorded.ContainsKey(VersionKey("reflection", source.BookId.ToString("N")))) continue;
-            reflectionIndex[source.BookId] = reflections.Count;
-            reflections.Add(source);
+            foreach (var source in baseline.BookReflections)
+            {
+                if (recorded.ContainsKey(VersionKey("reflection", source.BookId.ToString("N")))) continue;
+                reflectionIndex[source.BookId] = reflections.Count;
+                reflections.Add(source);
+            }
         }
-        using (var command = CreateCommand(connection, transaction, """
-            SELECT BookId, Content, CreatedAt, UpdatedAt
-            FROM ReaderBookReflections WHERE UpdatedAt > $since;
-            """))
+        var reflectionsSql = fullScanNonAnnotationTables
+            ? "SELECT BookId, Content, CreatedAt, UpdatedAt FROM ReaderBookReflections;"
+            : "SELECT BookId, Content, CreatedAt, UpdatedAt FROM ReaderBookReflections WHERE UpdatedAt > $since;";
+        using (var command = CreateCommand(connection, transaction, reflectionsSql))
         {
-            AddParameter(command, "$since", sinceText);
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -790,21 +831,32 @@ public sealed partial class S3SyncService
         }
         snapshot.BookReflections = reflections;
 
-        var progress = new List<S3SyncProgress>(baseline.Progress.Count);
+        var progress = new List<S3SyncProgress>(
+            fullScanNonAnnotationTables ? 0 : baseline.Progress.Count);
         var progressIndex = new Dictionary<Guid, int>();
-        foreach (var source in baseline.Progress)
+        if (!fullScanNonAnnotationTables)
         {
-            if (recorded.ContainsKey(VersionKey("progress", source.BookFileId.ToString("N")))) continue;
-            progressIndex[source.BookFileId] = progress.Count;
-            progress.Add(source);
+            foreach (var source in baseline.Progress)
+            {
+                if (recorded.ContainsKey(VersionKey("progress", source.BookFileId.ToString("N")))) continue;
+                progressIndex[source.BookFileId] = progress.Count;
+                progress.Add(source);
+            }
         }
-        using (var command = CreateCommand(connection, transaction, """
-            SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
-                   ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
-            FROM ReaderProgress WHERE UpdatedAt > $since;
-            """))
+        var progressSql = fullScanNonAnnotationTables
+            ? """
+              SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
+                     ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
+              FROM ReaderProgress;
+              """
+            : """
+              SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
+                     ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
+              FROM ReaderProgress WHERE UpdatedAt > $since;
+              """;
+        using (var command = CreateCommand(connection, transaction, progressSql))
         {
-            AddParameter(command, "$since", sinceText);
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -859,21 +911,32 @@ public sealed partial class S3SyncService
                 });
         }
 
-        var layouts = new List<S3SyncLayout>(baseline.Layouts.Count);
+        var layouts = new List<S3SyncLayout>(
+            fullScanNonAnnotationTables ? 0 : baseline.Layouts.Count);
         var layoutIndex = new Dictionary<Guid, int>();
-        foreach (var source in baseline.Layouts)
+        if (!fullScanNonAnnotationTables)
         {
-            if (recorded.ContainsKey(VersionKey("layout", source.BookFileId.ToString("N")))) continue;
-            layoutIndex[source.BookFileId] = layouts.Count;
-            layouts.Add(source);
+            foreach (var source in baseline.Layouts)
+            {
+                if (recorded.ContainsKey(VersionKey("layout", source.BookFileId.ToString("N")))) continue;
+                layoutIndex[source.BookFileId] = layouts.Count;
+                layouts.Add(source);
+            }
         }
-        using (var command = CreateCommand(connection, transaction, """
-            SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                   FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt
-            FROM ReaderLayoutSettings WHERE UpdatedAt > $since;
-            """))
+        var layoutsSql = fullScanNonAnnotationTables
+            ? """
+              SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
+                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt
+              FROM ReaderLayoutSettings;
+              """
+            : """
+              SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
+                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt
+              FROM ReaderLayoutSettings WHERE UpdatedAt > $since;
+              """;
+        using (var command = CreateCommand(connection, transaction, layoutsSql))
         {
-            AddParameter(command, "$since", sinceText);
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -936,6 +999,39 @@ public sealed partial class S3SyncService
             FilterReadingTombstones(snapshot.Tombstones, readingReset),
             GetRecordedTombstones(recorded, snapshot));
         return snapshot;
+    }
+
+    private static S3SyncAnnotation ReadAnnotationRow(SqliteDataReader reader) => new()
+    {
+        Id = ParseGuid(reader.GetString(0), "ReaderAnnotations.Id"),
+        BookId = ParseGuid(reader.GetString(1), "ReaderAnnotations.BookId"),
+        BookFileId = ParseGuid(reader.GetString(2), "ReaderAnnotations.BookFileId"),
+        ChapterPath = reader.GetString(3),
+        Fragment = NullableString(reader, 4),
+        StartOffset = reader.GetInt32(5),
+        EndOffset = reader.GetInt32(6),
+        SelectedText = reader.GetString(7),
+        Prefix = reader.GetString(8),
+        Suffix = reader.GetString(9),
+        Color = reader.GetString(10),
+        UnderlineStyle = reader.GetString(11),
+        Note = reader.GetString(12),
+        CreatedAt = ParseTimestamp(reader.GetString(13)),
+        UpdatedAt = ParseTimestamp(reader.GetString(14))
+    };
+
+    private static void OverlayAnnotation(
+        S3SyncAnnotation annotation,
+        List<S3SyncAnnotation> annotations,
+        Dictionary<Guid, int> annotationIndex)
+    {
+        if (annotationIndex.TryGetValue(annotation.Id, out var index))
+            annotations[index] = annotation;
+        else
+        {
+            annotationIndex[annotation.Id] = annotations.Count;
+            annotations.Add(annotation);
+        }
     }
 
     private static S3SyncBook ReadBookRow(SqliteDataReader reader) => new()
@@ -1024,6 +1120,42 @@ public sealed partial class S3SyncService
                     cancellationToken, captureStartedAt);
         await transaction.CommitAsync(cancellationToken);
 
+        return await FinishSnapshotAsync(snapshot, cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the post-merge converged view from the in-transaction baseline.
+    /// The per-book tables are small and scanned in full (merged rows can carry
+    /// old timestamps); annotations, the large table, are overlaid by the local
+    /// changes since the transaction start plus the remote IDs that were
+    /// actually downloaded.
+    /// </summary>
+    private async Task<S3SyncSnapshot> CaptureConvergedSnapshotAsync(
+        string deviceId,
+        IReadOnlyCollection<S3SyncTombstone> tombstones,
+        S3SyncSnapshot baseline,
+        IReadOnlyCollection<Guid> annotationIds,
+        bool fullScanAnnotations,
+        CancellationToken cancellationToken)
+    {
+        var captureStartedAt = DateTimeOffset.UtcNow;
+        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var snapshot = await CaptureIncrementalDatabaseSnapshotAsync(
+            connection, transaction, deviceId, tombstones, baseline,
+            baseline.CreatedAt, captureStartedAt, cancellationToken,
+            fullScanNonAnnotationTables: true,
+            annotationIds: annotationIds,
+            fullScanAnnotations: fullScanAnnotations);
+        await transaction.CommitAsync(cancellationToken);
+        return await FinishSnapshotAsync(snapshot, cancellationToken);
+    }
+
+    private async Task<S3SyncSnapshot> FinishSnapshotAsync(
+        S3SyncSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
         foreach (var book in snapshot.Books)
         {
             var coverPath = book.LocalCoverPath;
@@ -1562,6 +1694,7 @@ public sealed partial class S3SyncService
         var booksAdded = 0;
         var addedBookIds = new HashSet<Guid>();
         var annotationsApplied = 0;
+        S3SyncSnapshot? mergedBaseline = null;
         try
         {
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
@@ -1574,6 +1707,7 @@ public sealed partial class S3SyncService
             var currentLocal = await CaptureIncrementalDatabaseSnapshotAsync(
                 connection, transaction, localSnapshot.DeviceId, localSnapshot.Tombstones,
                 localSnapshot, localSnapshot.CreatedAt, DateTimeOffset.UtcNow, cancellationToken);
+            mergedBaseline = currentLocal;
             var currentReset = ReaderReadingDataReset.Latest(
                 snapshots.Select(snapshot => snapshot.ReadingDataReset).Prepend(currentLocal.ReadingDataReset));
             if (currentReset != readingReset)
@@ -2051,7 +2185,9 @@ public sealed partial class S3SyncService
         {
             IsPartial = isPartial,
             RemoteBookIds = remoteBookIds,
-            RemoteOnlyFileHashes = remoteOnlyFileHashes
+            RemoteOnlyFileHashes = remoteOnlyFileHashes,
+            LocalBaseline = mergedBaseline,
+            ConsolidatedDuplicates = duplicateBooksMerged > 0 || readingHistoryMerged
         };
     }
 
@@ -4388,6 +4524,13 @@ public sealed partial class S3SyncService
         public IReadOnlySet<Guid> RemoteBookIds { get; init; } = new HashSet<Guid>();
         public IReadOnlySet<string> RemoteOnlyFileHashes { get; init; } =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // The pre-merge snapshot captured inside the write transaction. The
+        // caller derives the converged upload view from this instead of
+        // re-reading every table after the commit.
+        public S3SyncSnapshot? LocalBaseline { get; init; }
+        // Duplicate consolidation re-points annotations/files without touching
+        // UpdatedAt, so the converged capture must scan annotations in full.
+        public bool ConsolidatedDuplicates { get; init; }
     }
 
     private static SqliteCommand CreateCommand(

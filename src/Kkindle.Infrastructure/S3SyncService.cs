@@ -479,7 +479,16 @@ public sealed partial class S3SyncService
             // Capture again after the merge. This makes this device's snapshot
             // a complete converged view, so a third device can catch up from it
             // without having to contact every previous device forever.
-            var finalSnapshot = await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
+            var remoteAnnotationIds = remoteSnapshots
+                .SelectMany(snapshot => snapshot.Annotations)
+                .Select(annotation => annotation.Id)
+                .Distinct()
+                .ToArray();
+            var finalSnapshot = databaseResult.LocalBaseline is { } convergedBase
+                ? await CaptureConvergedSnapshotAsync(
+                    deviceId, local.Tombstones, convergedBase, remoteAnnotationIds,
+                    databaseResult.ConsolidatedDuplicates, cancellationToken)
+                : await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
             finalSnapshot.TombstonesPrunedBefore = local.TombstonesPrunedBefore;
             var finalDeletions = finalSnapshot.LocalDeletionTimes
                 .Where(entry => finalSnapshot.TombstonesPrunedBefore is not { } watermark
@@ -972,6 +981,8 @@ public sealed partial class S3SyncService
                 : "plain");
 
     private string StatePath => Path.Combine(_paths.Data, "s3-sync-state.json");
+    private string BaselinePath => Path.Combine(_paths.Data, "s3-sync-baseline.json.gz");
+    private string? _baselineHash;
 
     private sealed class BadgeIndex(S3SyncState state)
     {
@@ -986,17 +997,24 @@ public sealed partial class S3SyncService
     }
     private BadgeIndex? _badgeIndex;
 
-    private (string Device, string Storage, long Length, long Modified, S3SyncState State)? _badgeState;
+    private (string Device, string Storage, long StateLength, long StateModified,
+        long BaselineLength, long BaselineModified, S3SyncState State)? _badgeState;
 
     private async Task<S3SyncState> LoadBadgeStateAsync(string deviceId, string storageIdentity, CancellationToken token)
     {
-        var info = new FileInfo(StatePath);
-        var length = info.Exists ? info.Length : -1;
-        var modified = info.Exists ? info.LastWriteTimeUtc.Ticks : 0;
+        var stateInfo = new FileInfo(StatePath);
+        var baselineInfo = new FileInfo(BaselinePath);
+        var stateLength = stateInfo.Exists ? stateInfo.Length : -1;
+        var stateModified = stateInfo.Exists ? stateInfo.LastWriteTimeUtc.Ticks : 0;
+        var baselineLength = baselineInfo.Exists ? baselineInfo.Length : -1;
+        var baselineModified = baselineInfo.Exists ? baselineInfo.LastWriteTimeUtc.Ticks : 0;
         if (_badgeState is { } cache && cache.Device == deviceId && cache.Storage == storageIdentity
-            && cache.Length == length && cache.Modified == modified) return cache.State;
+            && cache.StateLength == stateLength && cache.StateModified == stateModified
+            && cache.BaselineLength == baselineLength && cache.BaselineModified == baselineModified)
+            return cache.State;
         var state = await LoadStateAsync(deviceId, storageIdentity, token);
-        _badgeState = (deviceId, storageIdentity, length, modified, state);
+        _badgeState = (deviceId, storageIdentity,
+            stateLength, stateModified, baselineLength, baselineModified, state);
         return state;
     }
 
@@ -1032,6 +1050,14 @@ public sealed partial class S3SyncService
             state.LocalFilePaths ??= [];
             state.LocalCoverPaths ??= [];
             state.LocalDeletionTimes ??= [];
+            _baselineHash = state.BaselineHash;
+            // The baseline is stored separately so the frequently rewritten
+            // state file stays small. Older state files still carry the
+            // snapshot inline; keep that as a fallback.
+            if (state.LastUploadedSnapshot is null)
+                state.LastUploadedSnapshot = await LoadBaselineAsync(cancellationToken);
+            if (state.LastUploadedSnapshot is null)
+                state.SnapshotWatermark = null;
             if (state.LastUploadedSnapshot is { } previous)
             {
                 previous.LocalFilePaths.Clear();
@@ -1051,30 +1077,117 @@ public sealed partial class S3SyncService
         }
     }
 
+    private async Task<S3SyncSnapshot?> LoadBaselineAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(BaselinePath)) return null;
+        try
+        {
+            await using var file = new FileStream(
+                BaselinePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read | FileShare.Delete,
+                81920,
+                useAsync: true);
+            await using var gzip = new GZipStream(file, CompressionMode.Decompress);
+            return await JsonSerializer.DeserializeAsync<S3SyncSnapshot>(
+                gzip, JsonOptions, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or JsonException or InvalidDataException)
+        {
+            return null;
+        }
+    }
+
     private async Task SaveStateAsync(S3SyncState state, CancellationToken cancellationToken)
     {
         _paths.EnsureDirectories();
-        var temporaryPath = StatePath + ".tmp";
-        await using (var stream = new FileStream(
+        var snapshot = state.LastUploadedSnapshot;
+        state.BaselineHash = await SaveBaselineAsync(snapshot, cancellationToken);
+
+        // Keep the frequently rewritten state file small; the full baseline
+        // lives in its own gzipped file and is restored by LoadStateAsync.
+        state.LastUploadedSnapshot = null;
+        try
+        {
+            var temporaryPath = StatePath + ".tmp";
+            await using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                81920,
+                useAsync: true))
+            {
+                await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+            }
+            await MoveFileWithRetryAsync(temporaryPath, StatePath, cancellationToken);
+        }
+        finally
+        {
+            state.LastUploadedSnapshot = snapshot;
+        }
+        _badgeState = null;
+        _badgeIndex = null;
+    }
+
+    private async Task<string?> SaveBaselineAsync(
+        S3SyncSnapshot? snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (snapshot is null)
+        {
+            TryDeleteBaseline();
+            _baselineHash = null;
+            return null;
+        }
+
+        var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions);
+        var hash = Convert.ToHexString(SHA256.HashData(json));
+        if (string.Equals(_baselineHash, hash, StringComparison.Ordinal) && File.Exists(BaselinePath))
+            return hash;
+
+        var temporaryPath = BaselinePath + ".tmp";
+        await using (var file = new FileStream(
             temporaryPath,
             FileMode.Create,
             FileAccess.Write,
             FileShare.None,
             81920,
             useAsync: true))
+        await using (var gzip = new GZipStream(file, CompressionLevel.Optimal, leaveOpen: true))
         {
-            await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+            await gzip.WriteAsync(json, cancellationToken);
         }
+        await MoveFileWithRetryAsync(temporaryPath, BaselinePath, cancellationToken);
+        _baselineHash = hash;
+        return hash;
+    }
 
-        // Antivirus/indexers can briefly hold the state file on Windows. A
-        // short retry keeps a successful sync from failing on a transient
-        // sharing violation.
+    private void TryDeleteBaseline()
+    {
+        try
+        {
+            if (File.Exists(BaselinePath)) File.Delete(BaselinePath);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static async Task MoveFileWithRetryAsync(
+        string source,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        // Antivirus/indexers can briefly hold files on Windows. A short retry
+        // keeps a successful sync from failing on a transient sharing
+        // violation.
         for (var attempt = 0; ; attempt++)
         {
             try
             {
-                File.Move(temporaryPath, StatePath, overwrite: true);
-                break;
+                File.Move(source, destination, overwrite: true);
+                return;
             }
             catch (Exception exception) when (attempt < 3
                 && exception is IOException or UnauthorizedAccessException)
@@ -1082,8 +1195,6 @@ public sealed partial class S3SyncService
                 await Task.Delay(25 * (attempt + 1), cancellationToken);
             }
         }
-        _badgeState = null;
-        _badgeIndex = null;
     }
 
     private static string SnapshotKey(S3SyncSettings settings, string deviceId) =>

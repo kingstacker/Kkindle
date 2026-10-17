@@ -266,6 +266,9 @@ internal sealed class S3SyncState
     // LastUploadedSnapshot. Rows updated after this instant are re-read next
     // time; older rows are reused from the baseline.
     public DateTimeOffset? SnapshotWatermark { get; set; }
+    // SHA-256 of the compressed baseline file. The baseline itself lives in a
+    // separate gzipped file and is skipped when unchanged.
+    public string? BaselineHash { get; set; }
     public Dictionary<Guid, string> LocalFilePaths { get; set; } = [];
     public Dictionary<Guid, string> LocalCoverPaths { get; set; } = [];
     public Dictionary<string, DateTimeOffset> LocalDeletionTimes { get; set; } = [];

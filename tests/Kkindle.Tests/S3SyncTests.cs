@@ -886,6 +886,82 @@ public sealed class S3SyncTests
                 CanonicalSnapshot(incremental));
             Assert.Equal(expected.LocalFilePaths, incremental.LocalFilePaths);
             Assert.Equal(expected.LocalDeletionTimes.Count, incremental.LocalDeletionTimes.Count);
+
+            // A merged remote row can carry an UpdatedAt older than the
+            // transaction start. The converged capture must still include it,
+            // which is why it re-reads the IDs present in the remote snapshots.
+            var remoteAnnotationId = Guid.NewGuid();
+            await data.SaveAnnotationAsync(new ReaderAnnotation
+            {
+                Id = remoteAnnotationId,
+                BookId = bookId,
+                BookFileId = fileId,
+                ChapterPath = "chapter.xhtml",
+                StartOffset = 30,
+                EndOffset = 34,
+                SelectedText = "remote",
+                CreatedAt = time,
+                UpdatedAt = time
+            });
+            var convergedMethod = typeof(S3SyncService).GetMethod(
+                "CaptureConvergedSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var converged = await (Task<S3SyncSnapshot>)convergedMethod.Invoke(
+                service,
+                [
+                    "incremental-device",
+                    Array.Empty<S3SyncTombstone>(),
+                    baseline,
+                    new[] { remoteAnnotationId },
+                    false,
+                    CancellationToken.None
+                ])!;
+            var convergedExpected = await CaptureFull();
+            Assert.Equal(
+                CanonicalSnapshot(convergedExpected),
+                CanonicalSnapshot(converged));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task StateFileKeepsTheBaselineInASeparateGzippedFile()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            await new ReaderDataService(paths).InitializeAsync();
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var capture = typeof(S3SyncService).GetMethod(
+                "CaptureSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var snapshot = await (Task<S3SyncSnapshot>)capture.Invoke(
+                service, ["state-device", Array.Empty<S3SyncTombstone>(), CancellationToken.None])!;
+
+            var save = typeof(S3SyncService).GetMethod(
+                "SaveStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var state = new S3SyncState
+            {
+                DeviceId = "state-device",
+                StorageIdentity = "storage",
+                LastUploadedSnapshot = snapshot,
+                SnapshotWatermark = snapshot.CreatedAt
+            };
+            await (Task)save.Invoke(service, [state, CancellationToken.None])!;
+
+            var stateJson = await File.ReadAllTextAsync(Path.Combine(paths.Data, "s3-sync-state.json"));
+            Assert.Contains("\"LastUploadedSnapshot\":null", stateJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"LastUploadedSnapshot\":{", stateJson, StringComparison.Ordinal);
+            var baselinePath = Path.Combine(paths.Data, "s3-sync-baseline.json.gz");
+            Assert.True(File.Exists(baselinePath));
+
+            var load = typeof(S3SyncService).GetMethod(
+                "LoadStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var loaded = await (Task<S3SyncState>)load.Invoke(
+                service, ["state-device", "storage", CancellationToken.None])!;
+            Assert.NotNull(loaded.LastUploadedSnapshot);
+            Assert.Equal(snapshot.Books.Count, loaded.LastUploadedSnapshot!.Books.Count);
+            Assert.Equal(snapshot.CreatedAt, loaded.SnapshotWatermark);
         }
         finally { TestHelpers.TryDelete(root); }
     }
