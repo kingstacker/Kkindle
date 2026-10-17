@@ -270,6 +270,79 @@ public sealed partial class ReaderDataService
         return result;
     }
 
+    /// <summary>
+    /// Cross-book highlight/note search. Only annotation text and notes are
+    /// searched; this is intentionally not a full-text book index.
+    /// </summary>
+    public async Task<IReadOnlyList<ReaderAnnotationWithBook>> SearchAnnotationsAsync(
+        string? query = null,
+        Guid? bookId = null,
+        string? color = null,
+        DateTimeOffset? updatedAfter = null,
+        int limit = 500,
+        CancellationToken cancellationToken = default)
+    {
+        var text = query?.Trim() ?? string.Empty;
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT a.Id, a.BookId, a.BookFileId, a.ChapterPath, a.Fragment, a.StartOffset, a.EndOffset,
+                   a.SelectedText, a.Prefix, a.Suffix, a.Color, a.UnderlineStyle, a.Note, a.CreatedAt, a.UpdatedAt,
+                   COALESCE(b.Title, ''), COALESCE(b.Authors, ''),
+                   COALESCE((SELECT f.Format FROM BookFiles f WHERE f.Id = a.BookFileId), '')
+            FROM ReaderAnnotations a
+            LEFT JOIN Books b ON b.Id = a.BookId
+            WHERE ($query = ''
+                   OR instr(lower(a.SelectedText), lower($query)) > 0
+                   OR instr(lower(a.Note), lower($query)) > 0
+                   OR instr(lower(COALESCE(b.Title, '')), lower($query)) > 0)
+              AND ($bookId = '' OR a.BookId = $bookId)
+              AND ($color = '' OR a.Color = $color COLLATE NOCASE)
+              AND ($after = '' OR a.UpdatedAt >= $after)
+            ORDER BY a.UpdatedAt DESC, a.Id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$query", text);
+        command.Parameters.AddWithValue("$bookId", bookId?.ToString() ?? string.Empty);
+        command.Parameters.AddWithValue("$color", color?.Trim() ?? string.Empty);
+        command.Parameters.AddWithValue(
+            "$after", updatedAfter?.ToUniversalTime().ToString("O") ?? string.Empty);
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 5000));
+
+        var result = new List<ReaderAnnotationWithBook>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new ReaderAnnotationWithBook(
+                ReadAnnotation(reader),
+                reader.GetString(15),
+                reader.GetString(16),
+                reader.GetString(17)));
+        }
+        return result;
+    }
+
+    public async Task<IReadOnlyList<ReaderAnnotationBookOption>> GetAnnotationBookOptionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT DISTINCT a.BookId, COALESCE(b.Title, '')
+            FROM ReaderAnnotations a
+            LEFT JOIN Books b ON b.Id = a.BookId
+            ORDER BY COALESCE(b.Title, '') COLLATE NOCASE, a.BookId;
+            """;
+        var result = new List<ReaderAnnotationBookOption>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (Guid.TryParse(reader.GetString(0), out var id))
+                result.Add(new ReaderAnnotationBookOption(id, reader.GetString(1)));
+        }
+        return result;
+    }
+
     private static ReaderAnnotation ReadAnnotation(SqliteDataReader reader) => new()
     {
         Id = Guid.Parse(reader.GetString(0)),
@@ -927,8 +1000,10 @@ public sealed partial class ReaderDataService
 
     public async Task<ReadingDashboard> GetReadingDashboardAsync(
         int recentLimit = 12,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int dayCount = 14)
     {
+        dayCount = Math.Clamp(dayCount, 1, 90);
         await using var connection = await OpenConnectionAsync(cancellationToken);
         using var librarySchema = connection.CreateCommand();
         librarySchema.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Books');";
@@ -992,7 +1067,7 @@ public sealed partial class ReaderDataService
 
         var recentBooks = books.Take(Math.Clamp(recentLimit, 1, 100)).ToArray();
 
-        var firstDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-13));
+        var firstDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-(dayCount - 1)));
         var dailyCommand = connection.CreateCommand();
         dailyCommand.CommandText = """
             SELECT ReadingDate, COALESCE(SUM(Seconds), 0)
@@ -1011,7 +1086,7 @@ public sealed partial class ReaderDataService
                     dailyValues[day] = reader.GetInt64(1);
             }
         }
-        var dailyReading = Enumerable.Range(0, 14)
+        var dailyReading = Enumerable.Range(0, dayCount)
             .Select(offset => firstDay.AddDays(offset))
             .Select(day => new ReadingDashboardDay(day, dailyValues.GetValueOrDefault(day)))
             .ToArray();

@@ -171,6 +171,139 @@ public sealed partial class S3SyncService
     }
 
     /// <summary>
+    /// Local-only duplicate scan: books that share at least one file content
+    /// hash are considered the same work. No network access is involved.
+    /// </summary>
+    public async Task<IReadOnlyList<DuplicateBookGroup>> FindLocalDuplicateBooksAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        var books = new List<(Guid Id, string Title, string Authors, DateTimeOffset UpdatedAt, int FileCount)>();
+        using (var command = CreateCommand(connection, null, """
+            SELECT b.Id, b.Title, b.Authors, b.UpdatedAt,
+                   (SELECT COUNT(*) FROM BookFiles f WHERE f.BookId = b.Id)
+            FROM Books b;
+            """))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                books.Add((
+                    ParseGuid(reader.GetString(0), "Books.Id"),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    ParseTimestamp(reader.GetString(3)),
+                    reader.GetInt32(4)));
+            }
+        }
+
+        var hashesByBook = new Dictionary<Guid, HashSet<string>>();
+        using (var command = CreateCommand(connection, null, "SELECT BookId, Sha256 FROM BookFiles;"))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (!Guid.TryParse(reader.GetString(0), out var bookId)) continue;
+                var hash = reader.GetString(1);
+                if (!IsSha256(hash)) continue;
+                if (!hashesByBook.TryGetValue(bookId, out var hashes))
+                    hashesByBook[bookId] = hashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                hashes.Add(hash);
+            }
+        }
+
+        var parent = books.ToDictionary(book => book.Id, book => book.Id);
+        Guid FindRoot(Guid id)
+        {
+            var value = parent[id];
+            if (value != id) parent[id] = FindRoot(value);
+            return parent[id];
+        }
+        void Union(Guid left, Guid right)
+        {
+            var leftRoot = FindRoot(left);
+            var rightRoot = FindRoot(right);
+            if (leftRoot != rightRoot) parent[rightRoot] = leftRoot;
+        }
+        foreach (var group in hashesByBook
+                     .SelectMany(entry => entry.Value.Select(hash => (Hash: hash, BookId: entry.Key)))
+                     .GroupBy(entry => entry.Hash, StringComparer.OrdinalIgnoreCase))
+        {
+            var ids = group.Select(entry => entry.BookId).Distinct().ToArray();
+            for (var index = 1; index < ids.Length; index++) Union(ids[0], ids[index]);
+        }
+
+        return books
+            .GroupBy(book => FindRoot(book.Id))
+            .Where(group => group.Count() > 1)
+            .Select(group => new DuplicateBookGroup(
+                group.OrderByDescending(book => book.FileCount)
+                    .ThenByDescending(book => book.UpdatedAt)
+                    .Select(book => new DuplicateBookInfo(
+                        book.Id, book.Title, book.Authors, book.FileCount, book.UpdatedAt))
+                    .ToArray()))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Merges every locally detected duplicate group using the same rules as
+    /// the sync consolidation pass. The duplicate rows are removed; files are
+    /// either moved to the canonical book or deleted when their content
+    /// already exists there.
+    /// </summary>
+    public async Task<int> MergeLocalDuplicateBooksAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _syncGate.WaitAsync(cancellationToken);
+        try
+        {
+            using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+            var pathsToDelete = new List<string>();
+            var warnings = new List<string>();
+            var merged = await ConsolidateLocalDuplicateBooksAsync(pathsToDelete, cancellationToken);
+            DeleteScheduledPaths(pathsToDelete, warnings);
+            return merged;
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Local-only summary for the sync details dialog. It reads the persisted
+    /// baseline state and never contacts the remote object store.
+    /// </summary>
+    public async Task<S3SyncStatusSummary> GetStatusAsync(
+        string deviceId,
+        S3SyncSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = S3SyncSettings.Normalize(settings);
+        deviceId = NormalizeDeviceId(deviceId);
+        var storageIdentity = BuildStorageIdentity(normalized);
+        await _syncGate.WaitAsync(cancellationToken);
+        try
+        {
+            var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
+            var snapshot = state.LastUploadedSnapshot;
+            return new S3SyncStatusSummary(
+                state.LastSyncAt,
+                state.RemoteBookIds?.Count ?? 0,
+                state.RemoteOnlyFileHashes?.Count ?? 0,
+                snapshot?.Books.Count ?? 0,
+                snapshot?.Files.Count ?? 0,
+                snapshot?.Annotations.Count ?? 0,
+                snapshot?.Tombstones.Count ?? 0,
+                snapshot?.CreatedAt);
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    /// <summary>
     /// Downloads one book file on demand. A normal sync only writes the file's
     /// metadata to SQLite; opening the book is the explicit user action that
     /// fetches the content-addressed object.

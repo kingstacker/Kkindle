@@ -771,6 +771,20 @@
                                 Orientation="Horizontal"
                                 Spacing="8"
                                 SizeChanged="LibraryToolbar_SizeChanged">
+                        <Button x:Name="ReaderNotesButton" Classes="quiet libraryToolbar"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.82D9D8D2F3EB8B8F}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.82D9D8D2F3EB8B8F}"
+                                Click="OpenReaderNotesButton_Click">
+                            <Path Classes="libraryGlyph" Width="17" Height="17"
+                                  Data="M 5,3 H 19 V 21 H 5 Z M 8,7 H 16 M 8,11 H 16 M 8,15 H 13" />
+                        </Button>
+                        <Button x:Name="DuplicateBooksButton" Classes="quiet libraryToolbar"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.37DF7CB24D71A675}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.37DF7CB24D71A675}"
+                                Click="FindDuplicateBooksButton_Click">
+                            <Path Classes="libraryGlyph" Width="17" Height="17"
+                                  Data="M 4,4 H 14 V 14 H 4 Z M 10,10 H 20 V 20 H 10 Z" />
+                        </Button>
                         <Button x:Name="FilterButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.0289E5BA6BFEA5E2}" Click="FilterButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.B5F15473FDC0FEFE}">
                             <Path Classes="libraryGlyph"
                                   Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
@@ -877,6 +891,29 @@
                                   Margin="0,0,12,6"
                                   VerticalAlignment="Center"
                                   Click="FavoritesOnlyCheckBox_Click" />
+                        <ComboBox x:Name="SmartShelfBox"
+                                  Classes="filterCombo"
+                                  Width="160"
+                                  Margin="0,0,6,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.F41FAEBAB8942C7D}"
+                                  SelectionChanged="SmartShelfBox_SelectionChanged">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="core:SmartShelf">
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Button x:Name="SaveSmartShelfButton"
+                                Classes="quiet"
+                                Content="{DynamicResource Ui.Auto.E49E085528FE44CD}"
+                                Margin="0,0,6,6"
+                                Click="SaveSmartShelfButton_Click" />
+                        <Button x:Name="DeleteSmartShelfButton"
+                                Classes="quiet"
+                                Content="{DynamicResource Ui.Auto.B26113D486805057}"
+                                Margin="0,0,12,6"
+                                IsVisible="False"
+                                Click="DeleteSmartShelfButton_Click" />
                         <Button Classes="quiet"
                                 Content="{DynamicResource Ui.Auto.657D9CBF45EC9E6A}"
                                 Margin="0,0,0,6"
@@ -1310,6 +1347,8 @@
                                 ZIndex="20">
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <TextBlock x:Name="MultiSelectionText" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <Button Content="{DynamicResource Ui.Auto.F54195CF117F956C}" Padding="12,6" Click="BatchEditSelectedBooksButton_Click" />
+                                <Button Content="{DynamicResource Ui.Auto.0C2201B46A9E8562}" Padding="12,6" Click="BatchConvertSelectedBooksButton_Click" />
                                 <Button Content="{DynamicResource Ui.Auto.4528DB10180F641B}" Padding="12,6" Click="SendSelectedBooksToKindleBatchButton_Click" />
                                 <Button Content="{DynamicResource Ui.Auto.1579F7B476E86BFF}" Padding="12,6" Click="SendSelectedBooksByEmailBatchButton_Click" />
                                 <Button x:Name="DeleteSelectedBooksButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" Padding="12,6" Click="DeleteSelectedBooksButton_Click" />
@@ -2396,6 +2435,16 @@
                                    IsVisible="False" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+                        <ComboBox x:Name="DashboardRangeBox"
+                                  Width="118"
+                                  Height="32"
+                                  VerticalAlignment="Center"
+                                  SelectedIndex="1"
+                                  SelectionChanged="DashboardRangeBox_SelectionChanged">
+                            <ComboBoxItem Content="{DynamicResource Ui.Auto.2261B06712A3C505}" Tag="7" />
+                            <ComboBoxItem Content="{DynamicResource Ui.Auto.0188E32B20BCE1BC}" Tag="14" />
+                            <ComboBoxItem Content="{DynamicResource Ui.Auto.F729BB3D3F7EF33C}" Tag="30" />
+                        </ComboBox>
                         <Button x:Name="RefreshReadingDashboardButton" Content="{DynamicResource Ui.Auto.BC87A4121A0873B3}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingDashboardButton_Click" />
                         <Button x:Name="ExportReadingDashboardButton" Content="{DynamicResource Ui.Auto.E40A628FFEC72072}" ContentTemplate="{StaticResource LibraryExportActionContent}" Classes="quiet libraryToolbar" Click="ExportReadingDashboardButton_Click" />
                     </StackPanel>
@@ -2450,12 +2499,12 @@
                                         </ItemsControl.Styles>
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <UniformGrid Rows="1" Columns="14" />
+                                                <WrapPanel Orientation="Horizontal" />
                                             </ItemsPanelTemplate>
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardDayViewModel">
-                                                <Grid Height="170" RowDefinitions="*,Auto,Auto" Margin="2,0" ToolTip.Tip="{Binding TimeLabel}">
+                                                <Grid Width="44" Height="170" RowDefinitions="*,Auto,Auto" Margin="2,0" ToolTip.Tip="{Binding TimeLabel}">
                                                     <Border VerticalAlignment="Bottom"
                                                             Height="{Binding BarHeight}"
                                                             CornerRadius="2"
@@ -3461,6 +3510,7 @@
                                 <Button x:Name="S3DiscardSettingsButton" Content="{DynamicResource Ui.Auto.9B7824CEFA1E8B16}" Classes="quiet" Margin="0,0,8,8" Click="S3DiscardSettingsButton_Click" />
                                 <Button x:Name="S3TestConnectionButton" Content="{DynamicResource Ui.Auto.0A98A48EAAAC4175}" Margin="0,0,8,8" Classes="quiet" Click="S3TestConnectionButton_Click" />
                                 <Button x:Name="S3SyncNowButton" Content="{DynamicResource Ui.Auto.36E7A43A1C674E50}" Margin="0,0,8,8" Classes="quiet" Click="S3SyncNowButton_Click" />
+                                <Button x:Name="S3DetailsButton" Content="{DynamicResource Ui.Auto.CEC0DB6C1E4D2837}" Margin="0,0,8,8" Classes="quiet" Click="S3DetailsButton_Click" />
                                 <Button x:Name="S3CancelSyncButton" Content="{DynamicResource Ui.Auto.5034DDC8102C5DF8}" Margin="0,0,0,8" Classes="quiet" IsVisible="False" Click="S3CancelSyncButton_Click" />
                             </WrapPanel>
                             <TextBlock x:Name="S3SyncStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />

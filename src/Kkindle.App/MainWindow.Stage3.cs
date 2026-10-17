@@ -86,6 +86,8 @@ public partial class MainWindow
     private int _s3LocalChangeRetryAttempt;
     private bool _suppressS3SettingsDraftTracking;
     private DateTimeOffset? _lastS3SyncAt;
+    private S3SyncResult? _lastS3SyncResult;
+    private int _readingDashboardDayCount = 14;
     private bool _readingMaterialsExportMode;
     private Popup? _readingMaterialPreviewPopup;
     private Border? _readingMaterialPreviewTarget;
@@ -4319,18 +4321,32 @@ public partial class MainWindow
         await RefreshReadingDashboardAsync();
     }
 
+    private async void DashboardRangeBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // The ComboBox raises SelectionChanged while XAML is still loading;
+        // the dashboard service and the rest of the page are not ready yet.
+        if (!_stage3Ready) return;
+        if (DashboardRangeBox.SelectedItem is not ComboBoxItem { Tag: string tag }
+            || !int.TryParse(tag, out var days))
+            return;
+        _readingDashboardDayCount = Math.Clamp(days, 1, 90);
+        await RefreshReadingDashboardAsync();
+    }
+
     private async Task RefreshReadingDashboardAsync()
     {
         try
         {
-            var dashboard = await _readerData.GetReadingDashboardAsync(100, _lifetimeCancellation.Token);
+            var dashboard = await _readerData.GetReadingDashboardAsync(
+                100, _lifetimeCancellation.Token, _readingDashboardDayCount);
             DashboardBooksStartedText.Text = T("{0} 本", dashboard.BooksStarted);
             DashboardBooksFinishedText.Text = T("{0} 本", dashboard.BooksFinished);
             DashboardTotalTimeText.Text = FormatReadingTime(dashboard.TotalSeconds);
             DashboardAverageProgressText.Text = T("平均进度 {0:0.#}%", dashboard.AverageProgress);
             DashboardBookmarksText.Text = $"{dashboard.BookmarkCount.ToString(CultureInfo.InvariantCulture)} / {dashboard.AnnotationCount.ToString(CultureInfo.InvariantCulture)}";
 
-            var weekSeconds = dashboard.DailyReading.Skip(7).Sum(day => day.ActiveSeconds);
+            var lastSevenDays = dashboard.DailyReading.TakeLast(7).ToArray();
+            var weekSeconds = lastSevenDays.Sum(day => day.ActiveSeconds);
             DashboardDailyAverageText.Text = weekSeconds == 0
                 ? T("近 7 天日均 —")
                 : T("近 7 天日均 {0}", FormatReadingTime((long)Math.Round(weekSeconds / 7d)));
@@ -5257,6 +5273,41 @@ public partial class MainWindow
 
     private async void S3SyncNowButton_Click(object? sender, RoutedEventArgs e) => await RunS3SyncAsync(silent: false);
 
+    private async void S3DetailsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var summary = await _s3SyncService.GetStatusAsync(
+                _s3SyncStoredSettings.DeviceId,
+                _s3SyncStoredSettings.Settings,
+                _lifetimeCancellation.Token);
+            var lines = new List<string>
+            {
+                T("上次同步：{0}", summary.LastSyncAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? T("尚未同步")),
+                T("云端快照：{0} 本书 · {1} 个文件 · {2} 条批注",
+                    summary.SnapshotBookCount, summary.SnapshotFileCount, summary.SnapshotAnnotationCount),
+                T("已登记远端书籍：{0} 本", summary.RemoteBookCount),
+                T("待按需下载文件：{0} 个", summary.PendingFileDownloadCount),
+                T("删除墓碑：{0} 条", summary.TombstoneCount)
+            };
+            if (summary.SnapshotCreatedAt is { } created)
+                lines.Add(T("快照时间：{0}", created.ToLocalTime().ToString("yyyy-MM-dd HH:mm")));
+            if (_lastS3SyncResult is { } result)
+            {
+                lines.Add(string.Empty);
+                lines.Add(T("本次同步：新增 {0} 本，下载 {1} 个文件，应用 {2} 条批注，设置 {3} 项",
+                    result.BooksAdded, result.FilesDownloaded, result.AnnotationsApplied, result.SettingsApplied));
+                if (result.IsPartial) lines.Add(T("本次同步部分完成，稍后会自动重试。"));
+                if (!string.IsNullOrWhiteSpace(result.Warning)) lines.Add(result.Warning);
+            }
+            await ShowMessageAsync(T("同步详情"), string.Join("\n", lines));
+        }
+        catch (Exception exception)
+        {
+            await ShowMessageAsync(T("无法读取同步详情"), UiText.Localize(exception.Message));
+        }
+    }
+
     private void S3RemoteSettingsApplied(object? sender, EventArgs e) => _s3RemoteSettingsChanged = true;
 
     private void S3CancelSyncButton_Click(object? sender, RoutedEventArgs e)
@@ -5665,6 +5716,7 @@ public partial class MainWindow
             }
             _s3DeletionConfirmationPending = false;
             _lastS3SyncAt = DateTimeOffset.UtcNow;
+            _lastS3SyncResult = result;
 
             if (result.SettingsApplied > 0 || _s3RemoteSettingsChanged)
                 await RefreshSettingsAfterS3SyncAsync(token);

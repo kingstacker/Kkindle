@@ -44,8 +44,7 @@ public sealed record AppSettings
     public const string DefaultEmbeddingModelId = "BAAI/bge-small-zh-v1.5";
     public const string DefaultPinyinEngineId = PinyinBookEngineCatalog.DotNetG2PId;
 
-    public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
-    public AppTheme MainTheme { get; init; } = AppTheme.Classic;
+    public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();    public AppTheme MainTheme { get; init; } = AppTheme.Classic;
     public bool OnboardingCompleted { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultDeviceModel { get; init; }
@@ -103,6 +102,8 @@ public sealed record AppSettings
     public bool? ReaderVerticalDebugBoxesEnabled { get; init; }
     public ReaderLayoutSettings DefaultReaderLayout { get; init; } = new();
     public ReaderAppearanceSettings ReaderAppearance { get; init; } = new();
+    // Local filter presets; not part of the cloud settings snapshot.
+    public IReadOnlyList<SmartShelf> SmartShelves { get; init; } = [];
 
     public static AppSettings Normalize(AppSettings? settings)
     {
@@ -138,10 +139,36 @@ public sealed record AppSettings
             DefaultReaderLayout = ReaderLayoutDefaults.Normalize(settings.DefaultReaderLayout ?? new ReaderLayoutSettings()),
             ReaderAppearance = ReaderAppearanceSettings.Normalize(settings.ReaderAppearance),
             Translation = BookTranslationSettings.Normalize(settings.Translation),
-            McpServer = McpServerSettings.Normalize(settings.McpServer)
+            McpServer = McpServerSettings.Normalize(settings.McpServer),
+            SmartShelves = (settings.SmartShelves ?? [])
+                .Where(shelf => shelf is not null && !string.IsNullOrWhiteSpace(shelf.Name))
+                .Take(40)
+                .Select(shelf => shelf with
+                {
+                    Id = shelf.Id == Guid.Empty ? Guid.NewGuid() : shelf.Id,
+                    Name = shelf.Name.Trim(),
+                    Query = shelf.Query?.Trim() ?? string.Empty,
+                    Author = shelf.Author?.Trim() ?? string.Empty,
+                    Tag = shelf.Tag?.Trim() ?? string.Empty,
+                    Format = shelf.Format?.Trim() ?? string.Empty,
+                    Category = shelf.Category?.Trim() ?? string.Empty
+                })
+                .ToArray()
         };
     }
 }
+
+public sealed record SmartShelf(
+    Guid Id,
+    string Name,
+    string Query = "",
+    string Author = "",
+    string Tag = "",
+    string Format = "",
+    string Category = "",
+    LibraryReadingStatus? ReadingStatus = null,
+    bool FavoritesOnly = false,
+    LibrarySortMode SortMode = LibrarySortMode.UpdatedDescending);
 
 public sealed record McpServerSettings
 {

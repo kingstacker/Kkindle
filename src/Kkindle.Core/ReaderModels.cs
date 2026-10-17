@@ -1,5 +1,18 @@
 namespace Kkindle.Core;
 
+/// <summary>
+/// A cross-book annotation search hit. The book fields are read from the
+/// library tables in the same query so the notes window can render and export
+/// without a second round trip.
+/// </summary>
+public sealed record ReaderAnnotationWithBook(
+    ReaderAnnotation Annotation,
+    string BookTitle,
+    string BookAuthors,
+    string BookFormat);
+
+public sealed record ReaderAnnotationBookOption(Guid BookId, string Title);
+
 public sealed class ReaderAnnotation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
