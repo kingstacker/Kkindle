@@ -115,6 +115,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS IX_BookCollections_UpdatedAt ON BookCollections(UpdatedAt DESC);
             CREATE TABLE IF NOT EXISTS BookCollectionItems (
                 CollectionId TEXT NOT NULL REFERENCES BookCollections(Id) ON DELETE CASCADE,
                 BookId TEXT NOT NULL REFERENCES Books(Id) ON DELETE CASCADE,

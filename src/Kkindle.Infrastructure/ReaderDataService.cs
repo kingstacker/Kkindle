@@ -127,6 +127,8 @@ public sealed partial class ReaderDataService
                     ContentPositionJson TEXT NULL,
                     UpdatedAt TEXT NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS IX_ReaderProgress_UpdatedAt
+                    ON ReaderProgress(UpdatedAt DESC);
 
                 CREATE TABLE IF NOT EXISTS ReaderBookmarks (
                     Id TEXT PRIMARY KEY,
@@ -159,6 +161,8 @@ public sealed partial class ReaderDataService
                     ParagraphIndent INTEGER NOT NULL DEFAULT 1,
                     UpdatedAt TEXT NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS IX_ReaderLayoutSettings_UpdatedAt
+                    ON ReaderLayoutSettings(UpdatedAt DESC);
 
                 CREATE TABLE IF NOT EXISTS ReaderReadingStats (
                     BookFileId TEXT PRIMARY KEY,

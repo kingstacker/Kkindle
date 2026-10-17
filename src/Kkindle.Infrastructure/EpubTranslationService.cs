@@ -439,6 +439,57 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 errorMessage,
                 cacheWriter);
 
+        var batchLimit = GetBatchCharacterLimit(settings.Provider);
+        // One request is prefetched while the current batch is applied. Free
+        // endpoints rate-limit aggressively, so this stays at two in-flight
+        // requests and any prefetch failure simply falls back to the existing
+        // serial path.
+        var prefetchConcurrency = GetTranslationConcurrency(settings.Provider);
+        var prefetched = new Dictionary<int, (List<TranslationSegment> Batch, Task<string?> Translation)>();
+
+        List<TranslationSegment> BuildBatch(int start)
+        {
+            var batch = new List<TranslationSegment>();
+            var batchLength = 0;
+            while (batchingEnabled && start + batch.Count < segments.Count)
+            {
+                var candidate = segments[start + batch.Count];
+                var candidateCacheKey = CreateTranslationCacheKey(settings, candidate.Markup.RequestText);
+                if (cache.ContainsKey(candidateCacheKey)) break;
+                if (TryGetResumed(candidate, out _)) break;
+                if (candidate.Markup.RequestText.Contains("__KKINDLE_SEG_", StringComparison.Ordinal)) break;
+                var candidateLength = candidate.Markup.RequestText.Length + 2 * CreateMarker(batch.Count).Length;
+                var separatorLength = batch.Count == 0 ? 0 : Environment.NewLine.Length;
+                if (batchLength + separatorLength + candidateLength > batchLimit)
+                    break;
+                batch.Add(candidate);
+                batchLength += separatorLength + candidateLength;
+            }
+            return batch;
+        }
+
+        static string BuildMarkerPayload(List<TranslationSegment> batch) => string.Join(
+            Environment.NewLine,
+            batch.Select((segment, offset) =>
+                $"{CreateMarker(offset)}{segment.Markup.RequestText}{CreateMarker(offset)}"));
+
+        async Task<string?> PrefetchBatchAsync(string payload)
+        {
+            try
+            {
+                return await TranslateTextWithRetryAsync(
+                    payload, requestContext, cancellationToken, cacheParts: false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         while (index < segments.Count)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -503,23 +554,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 continue;
             }
 
-            var batchLimit = GetBatchCharacterLimit(settings.Provider);
-            var batch = new List<TranslationSegment>();
-            var batchLength = 0;
-            while (batchingEnabled && index + batch.Count < segments.Count)
-            {
-                var candidate = segments[index + batch.Count];
-                var candidateCacheKey = CreateTranslationCacheKey(settings, candidate.Markup.RequestText);
-                if (cache.ContainsKey(candidateCacheKey)) break;
-                if (TryGetResumed(candidate, out _)) break;
-                if (candidate.Markup.RequestText.Contains("__KKINDLE_SEG_", StringComparison.Ordinal)) break;
-                var candidateLength = candidate.Markup.RequestText.Length + 2 * CreateMarker(batch.Count).Length;
-                var separatorLength = batch.Count == 0 ? 0 : Environment.NewLine.Length;
-                if (batchLength + separatorLength + candidateLength > batchLimit)
-                    break;
-                batch.Add(candidate);
-                batchLength += separatorLength + candidateLength;
-            }
+            var batch = BuildBatch(index);
 
             if (batch.Count > 1)
             {
@@ -537,18 +572,40 @@ public sealed class EpubTranslationService : IEpubTranslationService
                         "读取原文 → 批量请求翻译");
                 }
 
-                var markerPayload = string.Join(
-                    Environment.NewLine,
-                    batch.Select((segment, offset) =>
-                        $"{CreateMarker(offset)}{segment.Markup.RequestText}{CreateMarker(offset)}"));
-                string batchResult;
+                var markerPayload = BuildMarkerPayload(batch);
+
+                // Start the next batch now so its network wait overlaps this
+                // batch's request and result application.
+                if (prefetchConcurrency > 1 && batchingEnabled)
+                {
+                    var nextIndex = index + batch.Count;
+                    var nextBatch = BuildBatch(nextIndex);
+                    if (nextBatch.Count > 1 && !prefetched.ContainsKey(nextIndex))
+                    {
+                        prefetched[nextIndex] =
+                            (nextBatch, PrefetchBatchAsync(BuildMarkerPayload(nextBatch)));
+                    }
+                }
+
+                string? batchResult;
                 try
                 {
-                    batchResult = await TranslateTextWithRetryAsync(
-                        markerPayload,
-                        requestContext,
-                        cancellationToken,
-                        cacheParts: false);
+                    if (prefetched.TryGetValue(index, out var prefetchedEntry)
+                        && prefetchedEntry.Batch.Count == batch.Count
+                        && prefetchedEntry.Batch.Select(segment => segment.Key)
+                            .SequenceEqual(batch.Select(segment => segment.Key)))
+                    {
+                        prefetched.Remove(index);
+                        batchResult = await prefetchedEntry.Translation;
+                    }
+                    else
+                    {
+                        batchResult = await TranslateTextWithRetryAsync(
+                            markerPayload,
+                            requestContext,
+                            cancellationToken,
+                            cacheParts: false);
+                    }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -574,7 +631,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
                     throw;
                 }
 
-                if (TryReadMarkedTranslations(batchResult, batch.Count, out var markedTranslations)
+                if (batchResult is not null
+                    && TryReadMarkedTranslations(batchResult, batch.Count, out var markedTranslations)
                     && batch.Select((segment, offset) => segment.Markup.IsValidTranslation(markedTranslations[offset])).All(valid => valid))
                 {
                     for (var offset = 0; offset < batch.Count; offset++)
@@ -603,6 +661,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 }
 
                 batchingEnabled = false;
+                prefetched.Clear();
                 foreach (var segment in batch)
                 {
                     ReportSegmentState(
@@ -1496,6 +1555,19 @@ public sealed class EpubTranslationService : IEpubTranslationService
         BookTranslationProvider.GoogleFree => GoogleRequestCharacterLimit,
         BookTranslationProvider.BingFree => BingRequestCharacterLimit,
         _ => AiRequestCharacterLimit
+    };
+
+    /// <summary>
+    /// In-flight request budget per provider. The pipeline only prefetches one
+    /// batch ahead, so two is the effective ceiling; free web endpoints are
+    /// kept at the same conservative value and any failed prefetch is replayed
+    /// through the serial fallback.
+    /// </summary>
+    private static int GetTranslationConcurrency(BookTranslationProvider provider) => provider switch
+    {
+        BookTranslationProvider.GoogleFree => 2,
+        BookTranslationProvider.BingFree => 2,
+        _ => 2
     };
 
     private static int GetSingleRequestCharacterLimit(BookTranslationProvider provider) => provider switch

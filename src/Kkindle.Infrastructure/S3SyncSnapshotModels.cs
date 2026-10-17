@@ -262,4 +262,11 @@ internal sealed class S3SyncState
     // remains a portable metadata view and the download state is device-local.
     public List<string> RemoteBookIds { get; set; } = [];
     public List<string> RemoteOnlyFileHashes { get; set; } = [];
+    // Incremental capture watermark: the start time of the capture that produced
+    // LastUploadedSnapshot. Rows updated after this instant are re-read next
+    // time; older rows are reused from the baseline.
+    public DateTimeOffset? SnapshotWatermark { get; set; }
+    public Dictionary<Guid, string> LocalFilePaths { get; set; } = [];
+    public Dictionary<Guid, string> LocalCoverPaths { get; set; } = [];
+    public Dictionary<string, DateTimeOffset> LocalDeletionTimes { get; set; } = [];
 }

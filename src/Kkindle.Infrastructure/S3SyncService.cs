@@ -345,7 +345,12 @@ public sealed partial class S3SyncService
             }
             var storageIdentity = BuildStorageIdentity(normalized);
             var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
-            var local = await CaptureSnapshotAsync(deviceId, state.Tombstones, cancellationToken);
+            var local = await CaptureSnapshotWithBaselineAsync(
+                deviceId,
+                state.Tombstones,
+                cancellationToken,
+                state.LastUploadedSnapshot,
+                state.SnapshotWatermark);
             local.TombstonesPrunedBefore = state.LastUploadedSnapshot?.TombstonesPrunedBefore;
             PreserveSettingsTimestampsForUnchangedValues(
                 local.Settings,
@@ -500,6 +505,14 @@ public sealed partial class S3SyncService
             state.LastSyncAt = DateTimeOffset.UtcNow;
             state.LastUploadedSnapshot = finalSnapshot;
             state.Tombstones = finalSnapshot.Tombstones;
+            // Persist the local maps needed by the next incremental capture.
+            // They are state-file only; S3SyncSnapshot keeps them [JsonIgnore]
+            // so relative paths never reach the cloud.
+            state.SnapshotWatermark = finalSnapshot.CreatedAt;
+            state.LocalFilePaths = new Dictionary<Guid, string>(finalSnapshot.LocalFilePaths);
+            state.LocalCoverPaths = new Dictionary<Guid, string>(finalSnapshot.LocalCoverPaths);
+            state.LocalDeletionTimes = new Dictionary<string, DateTimeOffset>(
+                finalSnapshot.LocalDeletionTimes, StringComparer.OrdinalIgnoreCase);
             var finalBookIds = finalSnapshot.Books.Select(book => book.Id).ToHashSet();
             state.RemoteBookIds = state.RemoteBookIds
                 .Where(id => Guid.TryParse(id, out var parsed) && finalBookIds.Contains(parsed))
@@ -1016,6 +1029,20 @@ public sealed partial class S3SyncService
             state.Tombstones ??= [];
             state.RemoteBookIds ??= [];
             state.RemoteOnlyFileHashes ??= [];
+            state.LocalFilePaths ??= [];
+            state.LocalCoverPaths ??= [];
+            state.LocalDeletionTimes ??= [];
+            if (state.LastUploadedSnapshot is { } previous)
+            {
+                previous.LocalFilePaths.Clear();
+                foreach (var (id, path) in state.LocalFilePaths)
+                    previous.LocalFilePaths[id] = path;
+                previous.LocalCoverPaths.Clear();
+                foreach (var (id, path) in state.LocalCoverPaths)
+                    previous.LocalCoverPaths[id] = path;
+                previous.LocalDeletionTimes = new Dictionary<string, DateTimeOffset>(
+                    state.LocalDeletionTimes, StringComparer.OrdinalIgnoreCase);
+            }
             return state;
         }
         catch (Exception exception) when (exception is IOException or JsonException)
