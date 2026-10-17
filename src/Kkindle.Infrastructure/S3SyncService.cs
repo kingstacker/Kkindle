@@ -157,8 +157,16 @@ public sealed partial class S3SyncService
         ThrowIfInvalid(normalized);
 
         using var client = _clientFactory(normalized);
+        // Listing proves the credentials and bucket are usable, and decoding a
+        // single snapshot validates the encryption key. Downloading every
+        // device snapshot here made a connectivity test pull the whole cloud
+        // library before it could report success.
         var keys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
-        await DownloadRemoteSnapshotsAsync(client, normalized, keys, string.Empty, false, null, cancellationToken);
+        if (keys.Count > 0)
+        {
+            var payload = await DownloadObjectBytesAsync(client, keys[0], cancellationToken);
+            _ = await DecodeSnapshotAsync(payload, normalized.EncryptionKey, cancellationToken);
+        }
         await client.TestWriteAsync(normalized.Prefix, cancellationToken);
     }
 
@@ -990,7 +998,8 @@ public sealed partial class S3SyncService
                 StatePath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.Read,
+                // Allow an in-flight SaveStateAsync replacement on Windows.
+                FileShare.Read | FileShare.Delete,
                 81920,
                 useAsync: true);
             var state = await JsonSerializer.DeserializeAsync<S3SyncState>(stream, JsonOptions, cancellationToken)
@@ -1027,7 +1036,22 @@ public sealed partial class S3SyncService
             await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
         }
 
-        File.Move(temporaryPath, StatePath, overwrite: true);
+        // Antivirus/indexers can briefly hold the state file on Windows. A
+        // short retry keeps a successful sync from failing on a transient
+        // sharing violation.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(temporaryPath, StatePath, overwrite: true);
+                break;
+            }
+            catch (Exception exception) when (attempt < 3
+                && exception is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(25 * (attempt + 1), cancellationToken);
+            }
+        }
         _badgeState = null;
         _badgeIndex = null;
     }
@@ -1182,7 +1206,7 @@ public sealed partial class S3SyncService
         {
             if (settings.EncryptionKey.Length == 0)
             {
-                await client.PutAsync(key, input, item.ContentType, cancellationToken);
+                await client.PutAsync(key, input, item.ContentType, cancellationToken, actualHash);
             }
             else
             {
@@ -1600,27 +1624,36 @@ public sealed partial class S3SyncService
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        var snapshots = new List<S3SyncSnapshot>();
-        var processed = 0;
         var keysToRead = snapshotKeys
             .Where(key => !skipOwnSnapshot || !IsSnapshotKeyForDevice(key, settings, localDeviceId))
             .ToArray();
-        foreach (var key in keysToRead)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var payload = await DownloadObjectBytesAsync(client, key, cancellationToken);
-            var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, cancellationToken);
-            if (snapshot.Version > SnapshotVersion)
-                throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
-            ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
-            if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
-                throw new InvalidDataException("同步快照缺少有效的设备 ID。");
-            snapshot.DeviceId = parsedDeviceId.ToString("N");
-            snapshot.Tombstones ??= [];
-            snapshots.Add(snapshot);
-            progress?.Report(UiText.Get("已读取 {0}/{1} 台设备的快照…", ++processed, keysToRead.Length));
-        }
-        return snapshots;
+        var results = new S3SyncSnapshot?[keysToRead.Length];
+        var processed = 0;
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, keysToRead.Length),
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Max(1, settings.ConcurrentRequests),
+                CancellationToken = cancellationToken
+            },
+            async (index, token) =>
+            {
+                var payload = await DownloadObjectBytesAsync(client, keysToRead[index], token);
+                var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, token);
+                if (snapshot.Version > SnapshotVersion)
+                    throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
+                ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
+                if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
+                    throw new InvalidDataException("同步快照缺少有效的设备 ID。");
+                snapshot.DeviceId = parsedDeviceId.ToString("N");
+                snapshot.Tombstones ??= [];
+                results[index] = snapshot;
+                progress?.Report(UiText.Get("已读取 {0}/{1} 台设备的快照…",
+                    Interlocked.Increment(ref processed), keysToRead.Length));
+            });
+        return results.Where(snapshot => snapshot is not null)
+            .Select(snapshot => snapshot!)
+            .ToList();
     }
 
     private static bool IsSnapshotKeyForDevice(

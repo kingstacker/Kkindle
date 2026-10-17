@@ -9624,7 +9624,8 @@ public partial class MainWindow
     {
         try
         {
-            var useNativeLayout = CurrentReaderHost is NativeReaderHost;
+            var nativeHost = CurrentReaderHost as NativeReaderHost;
+            var useNativeLayout = nativeHost is not null;
             var counts = await Task.Run(
                 () => useNativeLayout
                     ? NativeReaderHost.EstimatePageCounts(
@@ -9632,7 +9633,8 @@ public partial class MainWindow
                         layout,
                         viewportWidth,
                         viewportHeight,
-                        cancellation.Token)
+                        cancellation.Token,
+                        nativeHost!.FontLibrary)
                     : document.Chapters
                         .Select(path => EstimateReaderChapterPageCount(
                             path,

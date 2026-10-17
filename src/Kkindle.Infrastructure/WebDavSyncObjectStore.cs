@@ -193,7 +193,12 @@ internal sealed class WebDavSyncObjectStore : ISyncObjectStore
         }
     }
 
-    public async Task PutAsync(string key, Stream input, string contentType, CancellationToken cancellationToken)
+    public async Task PutAsync(
+        string key,
+        Stream input,
+        string contentType,
+        CancellationToken cancellationToken,
+        string? knownSha256 = null)
     {
         await EnsureParentAsync(key, cancellationToken);
         var slash = key.LastIndexOf('/');

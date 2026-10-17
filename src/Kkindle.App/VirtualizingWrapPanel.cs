@@ -258,9 +258,10 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel
         IReadOnlyList<object?> items,
         NotifyCollectionChangedEventArgs e)
     {
-        // Library refreshes replace the current page in one batch. Resetting
-        // the small realized set is cheap and avoids stale index bookkeeping
-        // for inserts, removes, replaces and moves alike.
+        // The library now publishes one Reset per refresh instead of one event
+        // per card. Clear once here: keeping containers across a generator
+        // Reset is not guaranteed to stay in sync with Avalonia's container
+        // generator, and the previous per-item churn is what made this costly.
         ClearRealized();
         _pendingBringIntoViewIndex = -1;
         InvalidateMeasure();
@@ -364,6 +365,17 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel
             Unrealize(index);
         _indices.Clear();
         _generatedContainers.Clear();
+    }
+
+    /// <summary>
+    /// The containers currently attached to the visual tree. Callers that test
+    /// every card against a viewport rectangle can walk this instead of asking
+    /// the ListBox for each item's container (an O(n) lookup per item).
+    /// </summary>
+    public IEnumerable<(int Index, Control Container)> EnumerateRealizedContainers()
+    {
+        foreach (var entry in _realized)
+            yield return (entry.Key, entry.Value);
     }
 
     private int FindIndex(IInputElement? element)

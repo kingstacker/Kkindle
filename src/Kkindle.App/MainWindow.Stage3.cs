@@ -235,6 +235,7 @@ public partial class MainWindow
         new(new ReadingMaterialGroupKeyComparer());
     private ObservableCollection<Stage3DashboardRecentViewModel> _readingDashboardItems => DashboardRecentItems;
     private bool _readingMaterialsDirty;
+    private int _stage3IdleTicks;
 
     private KindleDevice? CurrentDevice => _devices.FirstOrDefault();
 
@@ -243,6 +244,18 @@ public partial class MainWindow
         _stage3Timer.Tick += async (_, _) =>
         {
             if (!_stage3Ready || _kindle is null || _deviceEjectInProgress) return;
+            // When the device shelf is hidden and nothing is attached, polling
+            // every 3 seconds only burns COM/disk enumeration. Check every
+            // fifth tick (15s) instead; opening the shelf still refreshes
+            // immediately through the explicit navigation path.
+            if (!DevicePage.IsVisible && _devices.Count == 0)
+            {
+                if (++_stage3IdleTicks % 5 != 0) return;
+            }
+            else
+            {
+                _stage3IdleTicks = 0;
+            }
             await RefreshDevicesAsync(scanBooks: DevicePage.IsVisible);
         };
         _stage3Timer.Start();

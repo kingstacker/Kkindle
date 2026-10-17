@@ -11,7 +11,7 @@ public sealed partial class S3SyncService
     {
         DataSource = _paths.Database,
         Mode = SqliteOpenMode.ReadWriteCreate,
-        Cache = SqliteCacheMode.Shared,
+        Cache = SqliteCacheMode.Private,
         DefaultTimeout = 30
     }.ToString();
 
@@ -19,9 +19,15 @@ public sealed partial class S3SyncService
     {
         var connection = new SqliteConnection(DatabaseConnectionString);
         await connection.OpenAsync(cancellationToken);
-        using var foreignKeys = connection.CreateCommand();
-        foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
-        await foreignKeys.ExecuteNonQueryAsync(cancellationToken);
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = """
+            PRAGMA foreign_keys = ON;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA cache_size = -65536;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA busy_timeout = 5000;
+            """;
+        await pragma.ExecuteNonQueryAsync(cancellationToken);
         return connection;
     }
 
@@ -883,6 +889,7 @@ public sealed partial class S3SyncService
         progress?.Report(settings.DownloadBookFilesOnSync
             ? UiText.Get("正在准备书籍文件…")
             : UiText.Get("正在登记书籍文件元数据…"));
+        var fileDownloadRequests = new List<(string Hash, string AbsolutePath, string FileName)>();
         foreach (var remoteFile in remoteFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -941,32 +948,59 @@ public sealed partial class S3SyncService
             plannedRelativePaths.Add(prepared.RelativePath);
 
             if (settings.DownloadBookFilesOnSync)
-            {
-                try
-                {
-                    if (await EnsureLocalBlobAsync(
-                            client,
-                            settings,
-                            remoteFile.Sha256,
-                            absolutePath,
-                            progress,
-                            cancellationToken))
-                        filesDownloaded++;
-                }
-                catch (SyncObjectNotFoundException)
-                {
-                    warnings.Add(UiText.Get("《{0}》的 S3 文件对象不存在，已跳过。", remoteFile.FileName));
-                    isPartial = true;
-                }
-                catch (InvalidDataException exception)
-                {
-                    warnings.Add(UiText.Get("《{0}》校验失败：{1}", remoteFile.FileName, UiText.Localize(exception.Message)));
-                    isPartial = true;
-                }
-            }
+                fileDownloadRequests.Add((remoteFile.Sha256, absolutePath, remoteFile.FileName));
+        }
 
-            if (!File.Exists(absolutePath))
-                remoteOnlyFileHashes.Add(remoteFile.Sha256);
+        // Path planning above is cheap and order-sensitive; the network part is
+        // neither. Run the downloads with the same concurrency as the upload
+        // path instead of paying one round trip per book.
+        if (fileDownloadRequests.Count > 0)
+        {
+            var warningLock = new object();
+            await Parallel.ForEachAsync(
+                fileDownloadRequests,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Math.Max(1, settings.ConcurrentRequests),
+                    CancellationToken = cancellationToken
+                },
+                async (request, token) =>
+                {
+                    try
+                    {
+                        if (await EnsureLocalBlobAsync(
+                                client,
+                                settings,
+                                request.Hash,
+                                request.AbsolutePath,
+                                progress,
+                                token))
+                            Interlocked.Increment(ref filesDownloaded);
+                    }
+                    catch (SyncObjectNotFoundException)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("《{0}》的 S3 文件对象不存在，已跳过。", request.FileName));
+                            isPartial = true;
+                        }
+                    }
+                    catch (InvalidDataException exception)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("《{0}》校验失败：{1}", request.FileName, UiText.Localize(exception.Message)));
+                            isPartial = true;
+                        }
+                    }
+                });
+        }
+
+        foreach (var prepared in preparedFilesByLocalId.Values)
+        {
+            var absolutePath = ResolveDataPath(prepared.RelativePath);
+            if (absolutePath is null || !File.Exists(absolutePath))
+                remoteOnlyFileHashes.Add(prepared.Source.Sha256);
         }
 
         // A retry can see the database row created by an earlier merge, so it
@@ -977,6 +1011,7 @@ public sealed partial class S3SyncService
                      .Select(prepared => prepared.LocalBookId))
             remoteBookIds.Add(localBookId);
 
+        var coverRequests = new Dictionary<Guid, (string RelativePath, string AbsolutePath, string Hash, DateTimeOffset UpdatedAt)>();
         foreach (var remoteBook in remoteBooks)
         {
             if (!IsSha256(remoteBook.CoverHash)
@@ -988,7 +1023,8 @@ public sealed partial class S3SyncService
             var localCoverPath = existing?.CoverPath;
             var remoteWins = existing is null || remoteBook.UpdatedAt >= existing.UpdatedAt;
             if (!remoteWins && !string.IsNullOrWhiteSpace(localCoverPath)) continue;
-            if (coverUpdates.TryGetValue(localBookId, out var previousCover) && previousCover.UpdatedAt > remoteBook.UpdatedAt)
+            if (coverRequests.TryGetValue(localBookId, out var previousCover)
+                && previousCover.UpdatedAt > remoteBook.UpdatedAt)
                 continue;
 
             // Never replace the currently displayed cover during network I/O.
@@ -997,31 +1033,65 @@ public sealed partial class S3SyncService
                 $"{localBookId:N}-{remoteBook.CoverHash!.ToLowerInvariant()}{NormalizeCoverExtension(remoteBook.CoverFileName)}");
             var absolutePath = ResolveDataPath(relativePath);
             if (absolutePath is null) continue;
-            try
-            {
-                coversDownloaded |= await EnsureLocalBlobAsync(
-                    client,
-                    settings,
-                    remoteBook.CoverHash!,
-                    absolutePath,
-                    progress,
-                    cancellationToken);
-                if (coverUpdates.TryGetValue(localBookId, out previousCover))
+            coverRequests[localBookId] =
+                (Path.GetRelativePath(_paths.Data, absolutePath), absolutePath, remoteBook.CoverHash!, remoteBook.UpdatedAt);
+        }
+
+        if (coverRequests.Count > 0)
+        {
+            var failedCovers = new HashSet<Guid>();
+            var warningLock = new object();
+            await Parallel.ForEachAsync(
+                coverRequests,
+                new ParallelOptions
                 {
-                    var previousPath = ResolveDataPath(previousCover.RelativePath);
-                    if (previousPath is not null) pathsToDelete.Add(previousPath);
+                    MaxDegreeOfParallelism = Math.Max(1, settings.ConcurrentRequests),
+                    CancellationToken = cancellationToken
+                },
+                async (entry, token) =>
+                {
+                    var (localBookId, request) = entry;
+                    try
+                    {
+                        if (await EnsureLocalBlobAsync(
+                                client,
+                                settings,
+                                request.Hash,
+                                request.AbsolutePath,
+                                progress,
+                                token))
+                            coversDownloaded = true;
+                    }
+                    catch (SyncObjectNotFoundException)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("有封面对象不存在，已跳过封面同步。"));
+                            isPartial = true;
+                            failedCovers.Add(localBookId);
+                        }
+                    }
+                    catch (InvalidDataException exception)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("有封面校验失败：{0}", UiText.Localize(exception.Message)));
+                            isPartial = true;
+                            failedCovers.Add(localBookId);
+                        }
+                    }
+                });
+
+            foreach (var (localBookId, request) in coverRequests)
+            {
+                if (failedCovers.Contains(localBookId)) continue;
+                if (coverUpdates.TryGetValue(localBookId, out var earlier)
+                    && !string.Equals(earlier.RelativePath, request.RelativePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var earlierPath = ResolveDataPath(earlier.RelativePath);
+                    if (earlierPath is not null) pathsToDelete.Add(earlierPath);
                 }
-                coverUpdates[localBookId] = (Path.GetRelativePath(_paths.Data, absolutePath), remoteBook.UpdatedAt);
-            }
-            catch (SyncObjectNotFoundException)
-            {
-                warnings.Add(UiText.Get("有封面对象不存在，已跳过封面同步。"));
-                isPartial = true;
-            }
-            catch (InvalidDataException exception)
-            {
-                warnings.Add(UiText.Get("有封面校验失败：{0}", UiText.Localize(exception.Message)));
-                isPartial = true;
+                coverUpdates[localBookId] = (request.RelativePath, request.UpdatedAt);
             }
         }
 

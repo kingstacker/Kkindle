@@ -9,7 +9,7 @@ namespace Kkindle;
 internal static class CoverThumbnailCache
 {
     private const int Budget = 8 * 1024 * 1024;
-    private static readonly SemaphoreSlim Gate = new(2, 2);
+    private static readonly SemaphoreSlim Gate = new(4, 4);
     private static readonly object CacheLock = new();
     private static readonly Dictionary<string, byte[]> Entries = [];
     private static readonly Queue<string> Order = new();

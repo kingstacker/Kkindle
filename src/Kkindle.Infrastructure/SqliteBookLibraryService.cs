@@ -59,7 +59,10 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
     {
         DataSource = _paths.Database,
         Mode = SqliteOpenMode.ReadWriteCreate,
-        Cache = SqliteCacheMode.Shared
+        // WAL already allows one writer with many readers; a shared cache adds
+        // table-level locking on top and makes concurrent readers contend.
+        Cache = SqliteCacheMode.Private,
+        DefaultTimeout = 30
     }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -101,7 +104,11 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
                 Sha256 TEXT NOT NULL UNIQUE
             );
             CREATE INDEX IF NOT EXISTS IX_Books_TitleAuthors ON Books(Title, Authors);
+            CREATE INDEX IF NOT EXISTS IX_Books_TitleAuthors_NoCase ON Books(Title COLLATE NOCASE, Authors COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS IX_Books_UpdatedAt ON Books(UpdatedAt DESC);
+            CREATE INDEX IF NOT EXISTS IX_Books_CreatedAt ON Books(CreatedAt DESC);
             CREATE INDEX IF NOT EXISTS IX_BookFiles_BookId ON BookFiles(BookId);
+            CREATE INDEX IF NOT EXISTS IX_BookFiles_BookId_Format ON BookFiles(BookId, Format);
             CREATE TABLE IF NOT EXISTS BookCollections (
                 Id TEXT PRIMARY KEY,
                 Name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -147,6 +154,17 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         await EnsureLibraryTrashBookFileIdColumnAsync(connection, cancellationToken);
         await EnsureBookCollectionUpdatedAtColumnAsync(connection, cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
+        // These columns are added by the migration above, so their indexes
+        // must be created afterwards: a legacy database does not have them
+        // when the initial schema script runs.
+        using (var productivityIndexes = connection.CreateCommand())
+        {
+            productivityIndexes.CommandText = """
+                CREATE INDEX IF NOT EXISTS IX_Books_ReadingStatus ON Books(ReadingStatus, UpdatedAt DESC);
+                CREATE INDEX IF NOT EXISTS IX_Books_IsFavorite ON Books(IsFavorite, UpdatedAt DESC);
+                """;
+            await productivityIndexes.ExecuteNonQueryAsync(cancellationToken);
+        }
         await EnsureSummaryCacheVersionsAsync(connection, cancellationToken);
         await EnsureDefaultCollectionAsync(connection, cancellationToken);
         await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
@@ -724,6 +742,10 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         var totalBytes = files.Sum(GetFileLengthSafe);
         long completedBytes = 0;
         var changed = false;
+        // The uncollected collection id is stable for the whole import; query
+        // it once instead of per imported book.
+        Guid? defaultCollectionId = null;
+        var defaultCollectionResolved = false;
 
         try
         {
@@ -826,6 +848,18 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
                     if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
                 }
 
+                // Resolve the uncollected collection before the write
+                // transaction starts: a command executed on a connection with
+                // a pending local transaction must carry that transaction.
+                if (newBook && !defaultCollectionResolved)
+                {
+                    defaultCollectionId = await GetCollectionIdByNameAsync(
+                        connection,
+                        BookLibraryDefaults.UncollectedCollectionName,
+                        cancellationToken);
+                    defaultCollectionResolved = true;
+                }
+
                 // Publish the file, book row and collection membership together.
                 // A failed insert must not leave an empty book in the library.
                 using var transaction = connection.BeginTransaction();
@@ -840,11 +874,6 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
 
                 if (newBook)
                 {
-                    var defaultCollectionId = await GetCollectionIdByNameAsync(
-                        connection,
-                        BookLibraryDefaults.UncollectedCollectionName,
-                        cancellationToken,
-                        transaction);
                     if (defaultCollectionId is not null)
                     {
                         var membership = connection.CreateCommand();
@@ -2265,9 +2294,19 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             "unicode_lower",
             static value => value?.ToLowerInvariant(),
             isDeterministic: true);
-        var foreignKeys = connection.CreateCommand();
-        foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
-        await foreignKeys.ExecuteNonQueryAsync(cancellationToken);
+        using var pragma = connection.CreateCommand();
+        // synchronous=NORMAL is the recommended WAL pairing: it keeps commits
+        // durable across application crashes while removing an fsync per write.
+        // The page cache and in-memory temp store keep large library scans and
+        // sorts off the disk.
+        pragma.CommandText = """
+            PRAGMA foreign_keys = ON;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA cache_size = -65536;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA busy_timeout = 5000;
+            """;
+        await pragma.ExecuteNonQueryAsync(cancellationToken);
         return connection;
     }
 
@@ -2521,7 +2560,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         command.CommandText = """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
                    Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
-            FROM Books WHERE lower(Title) = lower($title) AND lower(Authors) = lower($authors) LIMIT 1;
+            FROM Books WHERE Title = $title COLLATE NOCASE AND Authors = $authors COLLATE NOCASE LIMIT 1;
             """;
         command.Parameters.AddWithValue("$title", title);
         command.Parameters.AddWithValue("$authors", authors);

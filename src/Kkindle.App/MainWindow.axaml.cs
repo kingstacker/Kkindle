@@ -50,6 +50,7 @@ public partial class MainWindow : Window
     private double _authorPopupWidth = double.NaN;
     private DispatcherTimer? _dropOverlayHideTimer;
     private DispatcherTimer? _bookDetailClickTimer;
+    private CancellationTokenSource? _librarySearchDebounce;
     private BookCardViewModel? _pendingBookDetailCard;
     private BookCollectionFolderViewModel? _pendingCollectionDragFolder;
     private Control? _pendingCollectionDragControl;
@@ -751,16 +752,28 @@ public partial class MainWindow : Window
         {
             SetTaskStatus(T("正在准备本地书库…"));
             await _library.InitializeAsync(_lifetimeCancellation.Token);
-            await InitializeStage3Async(_lifetimeCancellation.Token);
-            await RefreshLibraryDataAsync(_lifetimeCancellation.Token);
+
+            // Publish the first page of books as soon as the database is ready.
+            // Stage 3 startup (S3 settings, Calibre detection, managed resource
+            // lists, automatic backup and device enumeration) does not affect
+            // the shelf and used to delay it by seconds.
+            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
             SetupFilterControls();
             await RefreshCollectionsAsync();
-            InitializeCrossProcessDatabaseWatcher();
             _filterControlsReady = true;
             UpdateLibraryUi();
             SetTaskStatus(ViewModel.StatusText);
             ShowOnboardingIfNeeded();
             StartAutomaticUpdateCheck();
+
+            await InitializeStage3Async(_lifetimeCancellation.Token);
+            // The shelf is already populated; only the data that depends on
+            // Stage 3 settings (match records and sync badges) needs a pass.
+            await RefreshLibraryMatchRecordsAsync(_lifetimeCancellation.Token);
+            await RefreshBookSyncStatusesAsync(_lifetimeCancellation.Token);
+            InitializeCrossProcessDatabaseWatcher();
+            UpdateLibraryUi();
+            SetTaskStatus(ViewModel.StatusText);
             if (Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1" && ViewModel.Books.Count > 0)
             {
                 _selectedCard = ViewModel.Books[0];
@@ -1052,6 +1065,9 @@ public partial class MainWindow : Window
                 // Closing the window must not be held up by a slow model download.
             }
         }
+        _librarySearchDebounce?.Cancel();
+        _librarySearchDebounce?.Dispose();
+        _librarySearchDebounce = null;
         _lifetimeCancellation.Dispose();
         _douban.Dispose();
         _doubanBatchService?.Dispose();
@@ -1767,10 +1783,12 @@ public partial class MainWindow : Window
         var refreshVersion = Interlocked.Increment(ref _bookSyncStatusRefreshVersion);
         try
         {
-            var statuses = await _s3SyncService.GetBookSyncStatusesAsync(
-                _s3SyncStoredSettings.DeviceId,
-                _s3SyncStoredSettings.Settings,
-                cards.Select(card => card.Book).ToArray(),
+            var statuses = await Task.Run(
+                () => _s3SyncService.GetBookSyncStatusesAsync(
+                    _s3SyncStoredSettings.DeviceId,
+                    _s3SyncStoredSettings.Settings,
+                    cards.Select(card => card.Book).ToArray(),
+                    cancellationToken),
                 cancellationToken);
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -4176,11 +4194,27 @@ public partial class MainWindow : Window
         SetLibraryViewMode(LibraryViewMode.Grid);
     }
 
-    private void SearchBox_TextChanged(object? sender, TextChangedEventArgs e)
+    private async void SearchBox_TextChanged(object? sender, TextChangedEventArgs e)
     {
         ViewModel.SearchText = SearchBox.Text ?? string.Empty;
+
+        // Typing used to run a full COUNT + page query and rebuild every card
+        // per keystroke. Coalesce bursts of input into one query; ViewChanged
+        // already calls UpdateLibraryUi, so no explicit UI pass is needed here.
+        var cancellation = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _librarySearchDebounce, cancellation);
+        previous?.Cancel();
+        previous?.Dispose();
+        try
+        {
+            await Task.Delay(250, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (cancellation.IsCancellationRequested) return;
         ViewModel.RefreshView();
-        UpdateLibraryUi();
     }
 
     private void FilterButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -4570,20 +4604,24 @@ public partial class MainWindow : Window
         RubberBandRectangle.Width = contentWidth;
         RubberBandRectangle.Height = Math.Abs(visibleBottom - visibleTop);
 
-        foreach (var card in ViewModel.Books)
+        if (_bookGridPanel is not null)
         {
-            if (BookGrid.ContainerFromItem(card) is not Control container) continue;
-            var origin = container.TranslatePoint(default, BookGrid);
-            if (origin is not { } point) continue;
-            var bounds = new Rect(
-                point.X,
-                point.Y + scrollOffsetY,
-                container.Bounds.Width,
-                container.Bounds.Height);
-            if (bounds.Intersects(selection))
-                _selectedBookIds.Add(card.Book.Id);
-            else
-                _selectedBookIds.Remove(card.Book.Id);
+            foreach (var (index, container) in _bookGridPanel.EnumerateRealizedContainers())
+            {
+                if (index < 0 || index >= ViewModel.Books.Count) continue;
+                var card = ViewModel.Books[index];
+                var origin = container.TranslatePoint(default, BookGrid);
+                if (origin is not { } point) continue;
+                var bounds = new Rect(
+                    point.X,
+                    point.Y + scrollOffsetY,
+                    container.Bounds.Width,
+                    container.Bounds.Height);
+                if (bounds.Intersects(selection))
+                    _selectedBookIds.Add(card.Book.Id);
+                else
+                    _selectedBookIds.Remove(card.Book.Id);
+            }
         }
         _multiSelectAnchor = ViewModel.Books.FirstOrDefault(card => _selectedBookIds.Contains(card.Book.Id));
         UpdateMultiSelectionUi();

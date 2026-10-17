@@ -38,7 +38,8 @@ public sealed partial class ReaderDataService
     {
         DataSource = _paths.Database,
         Mode = SqliteOpenMode.ReadWriteCreate,
-        Cache = SqliteCacheMode.Shared
+        Cache = SqliteCacheMode.Private,
+        DefaultTimeout = 30
     }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -70,6 +71,8 @@ public sealed partial class ReaderDataService
                 );
                 CREATE INDEX IF NOT EXISTS IX_ReaderAnnotations_BookFile
                     ON ReaderAnnotations(BookFileId, ChapterPath, StartOffset);
+                CREATE INDEX IF NOT EXISTS IX_ReaderAnnotations_UpdatedAt
+                    ON ReaderAnnotations(UpdatedAt DESC);
 
                 CREATE TABLE IF NOT EXISTS ReaderBookReflections (
                     BookId TEXT PRIMARY KEY,
@@ -1924,7 +1927,13 @@ public sealed partial class ReaderDataService
         var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         using var pragma = connection.CreateCommand();
-        pragma.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
+        pragma.CommandText = """
+            PRAGMA foreign_keys = ON;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA cache_size = -65536;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA busy_timeout = 5000;
+            """;
         await pragma.ExecuteNonQueryAsync(cancellationToken);
         return connection;
     }

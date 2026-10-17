@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia;
 using Avalonia.VisualTree;
+using System.Runtime.CompilerServices;
 
 namespace Kkindle;
 
@@ -70,16 +71,39 @@ public partial class MainWindow
         AlignLibraryListRightEdge(LibraryToolbar, BookList);
     }
 
+    // LayoutUpdated fires on every layout pass (scrolling, animations, detail
+    // pane motion). The sort-chrome children are template parts that never
+    // change after the first lookup, so cache them instead of walking the
+    // visual tree each time.
+    private sealed class SortChrome
+    {
+        public Grid? Grid { get; init; }
+        public Border? Background { get; init; }
+    }
+
+    private static readonly ConditionalWeakTable<ComboBox, SortChrome> SortChromeCache = new();
+
     private static void NormalizeLibrarySortChrome(ComboBox sortBox)
     {
-        // The Fluent template reserves a fixed column even when its arrow is hidden.
-        var sortGrid = sortBox.GetVisualDescendants().OfType<Grid>()
-            .FirstOrDefault(grid => grid.Children.Any(child => child.Name == "DropDownGlyph"));
-        if (sortGrid is { ColumnDefinitions.Count: 2 } && sortGrid.ColumnDefinitions[1].Width != new GridLength(0))
+        if (!SortChromeCache.TryGetValue(sortBox, out var chrome)
+            || (TopLevel.GetTopLevel(chrome.Grid) is null && TopLevel.GetTopLevel(chrome.Background) is null))
+        {
+            chrome = new SortChrome
+            {
+                // The Fluent template reserves a fixed column even when its arrow is hidden.
+                Grid = sortBox.GetVisualDescendants().OfType<Grid>()
+                    .FirstOrDefault(grid => grid.Children.Any(child => child.Name == "DropDownGlyph")),
+                Background = sortBox.GetVisualDescendants().OfType<Border>()
+                    .FirstOrDefault(border => border.Name == "Background")
+            };
+            if (chrome.Grid is not null || chrome.Background is not null)
+                SortChromeCache.AddOrUpdate(sortBox, chrome);
+        }
+
+        if (chrome.Grid is { ColumnDefinitions.Count: 2 } sortGrid
+            && sortGrid.ColumnDefinitions[1].Width != new GridLength(0))
             sortGrid.ColumnDefinitions[1].Width = new GridLength(0);
-        var sortBackground = sortBox.GetVisualDescendants().OfType<Border>()
-            .FirstOrDefault(border => border.Name == "Background");
-        if (sortBackground is not null && sortBackground.MinWidth != 0)
+        if (chrome.Background is { } sortBackground && sortBackground.MinWidth != 0)
             sortBackground.MinWidth = 0;
     }
 

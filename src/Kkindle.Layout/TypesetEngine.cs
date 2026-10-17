@@ -12,18 +12,28 @@ public sealed class TypesetEngine : IDisposable
 {
     private readonly TypesetFontLibrary _fonts;
     private readonly GlyphShaper _shaper;
+    private readonly bool _ownsFonts;
 
-    public TypesetEngine(TypesetFontLibrary fonts)
+    /// <param name="ownsFonts">
+    /// False when the caller keeps one font library alive across engines
+    /// (reader recompose/resize). Loading CJK faces is expensive, so the host
+    /// shares them instead of rebuilding the library on every relayout.
+    /// </param>
+    public TypesetEngine(TypesetFontLibrary fonts, bool ownsFonts = true)
     {
         _fonts = fonts;
         _shaper = new GlyphShaper(fonts);
+        _ownsFonts = ownsFonts;
     }
 
     /// <summary>The font library backing this engine (shared with the painter).</summary>
     public TypesetFontLibrary Fonts => _fonts;
 
     /// <summary>The engine takes ownership of the font library it was built with.</summary>
-    public void Dispose() => _fonts.Dispose();
+    public void Dispose()
+    {
+        if (_ownsFonts) _fonts.Dispose();
+    }
 
     public ChapterLayout Compose(
         ChapterContent content,
