@@ -1017,20 +1017,42 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
 
-                        <ScrollViewer x:Name="CollectionScroll"
-                                      IsVisible="False"
-                                      VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled"
-                                      Background="Transparent"
-                                      ContextRequested="CollectionScroll_ContextRequested">
-                            <ItemsControl x:Name="CollectionList" ItemsSource="{Binding FilteredCollectionFolders}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Orientation="Horizontal" ItemWidth="210" ItemHeight="142" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="local:BookCollectionFolderViewModel">
+                        <ListBox x:Name="CollectionList"
+                                 ItemsSource="{Binding FilteredCollectionFolders}"
+                                 IsVisible="False"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 SelectionMode="Single"
+                                 ContextRequested="CollectionScroll_ContextRequested"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.Styles>
+                                <Style Selector="ListBoxItem">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                    <Setter Property="VerticalContentAlignment" Value="Top" />
+                                </Style>
+                                <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                    <Setter Property="Background" Value="Transparent" />
+                                </Style>
+                                <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                    <Setter Property="Background" Value="Transparent" />
+                                </Style>
+                            </ListBox.Styles>
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <local:VirtualizingWrapPanel Orientation="Horizontal"
+                                                                 ItemWidth="210"
+                                                                 ItemHeight="142"
+                                                                 CacheLength="0.5" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="local:BookCollectionFolderViewModel">
                                         <Grid Width="210"
                                               Height="142"
                                               Classes="collectionFolder"
@@ -1119,9 +1141,8 @@
                                             </StackPanel>
                                         </Grid>
                                     </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
 
                         <Canvas x:Name="CollectionDragOverlay"
                                 HorizontalAlignment="Stretch"

@@ -9627,6 +9627,22 @@ public partial class MainWindow
             var useNativeLayout = nativeHost is not null;
             var knownChapter = nativeHost?.GetCurrentChapterPageCountFor(
                 layout, viewportWidth, viewportHeight);
+
+            // Show a usable total immediately from chapter byte sizes. Exact
+            // pagination waits until the user has actually started reading, so
+            // opening a 500-chapter book no longer competes with the first
+            // page turn.
+            var cheapCounts = BuildCheapReaderPageCounts(document, knownChapter);
+            if (sequence == _readerBookPageCountSequence
+                && !cancellation.IsCancellationRequested
+                && ReferenceEquals(document, _readerDocument))
+            {
+                _readerBookPageCounts = cheapCounts;
+                UpdateReaderToolbar();
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellation.Token);
+
             var counts = await Task.Run(
                 () => useNativeLayout
                     ? NativeReaderHost.EstimatePageCounts(
@@ -9666,6 +9682,39 @@ public partial class MainWindow
                 cancellation.Dispose();
             }
         }
+    }
+
+    private static int[] BuildCheapReaderPageCounts(
+        EpubReaderDocument document,
+        (string ChapterPath, int PageCount)? knownChapter)
+    {
+        var counts = new int[document.Chapters.Count];
+        var bytesPerPage = 4096d;
+        if (knownChapter is { PageCount: > 0 } known)
+        {
+            try
+            {
+                var knownLength = new FileInfo(known.ChapterPath).Length;
+                if (knownLength > 0)
+                    bytesPerPage = Math.Max(512d, knownLength / (double)known.PageCount);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        for (var index = 0; index < counts.Length; index++)
+        {
+            try
+            {
+                var length = new FileInfo(document.Chapters[index]).Length;
+                counts[index] = Math.Max(1, (int)Math.Round(length / bytesPerPage));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                counts[index] = 1;
+            }
+        }
+        return counts;
     }
 
     private static int EstimateReaderChapterPageCount(

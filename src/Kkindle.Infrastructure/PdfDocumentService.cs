@@ -191,6 +191,10 @@ public sealed class PdfDocumentService : IDisposable
         if (textPage == IntPtr.Zero) return new(width, height, string.Empty, []);
         try
         {
+            // Derive the page→device transform once. The old code called
+            // FPDF_PageToDevice four times per character, which dominated text
+            // extraction on text-heavy pages.
+            var transform = includeGeometry ? CreatePageTransform(page) : default;
             var text = new StringBuilder();
             var glyphs = new List<PdfTextGlyph>();
             var count = Native.FPDFText_CountChars(textPage);
@@ -207,14 +211,15 @@ public sealed class PdfDocumentService : IDisposable
                 if (!includeGeometry || string.IsNullOrWhiteSpace(value)) continue;
                 if (Native.FPDFText_GetCharBox(textPage, index, out var left, out var right, out var bottom, out var top) == 0)
                     continue;
-                var bounds = TransformBounds(page, left, right, bottom, top);
+                var bounds = TransformBounds(transform, left, right, bottom, top);
                 if (bounds.Width > 0 && bounds.Height > 0)
                 {
                     var angle = Native.FPDFText_GetCharAngle(textPage, index);
-                    Native.FPDF_PageToDevice(page, 0, 0, 100_000, 100_000, 0, left, bottom, out var x1, out var y1);
-                    Native.FPDF_PageToDevice(page, 0, 0, 100_000, 100_000, 0,
-                        left + Math.Cos(angle), bottom + Math.Sin(angle), out var x2, out var y2);
-                    glyphs.Add(new PdfTextGlyph(offset, value.Length, bounds, (x2 - x1) / 100_000d, (y2 - y1) / 100_000d));
+                    var cos = Math.Cos(angle);
+                    var sin = Math.Sin(angle);
+                    glyphs.Add(new PdfTextGlyph(offset, value.Length, bounds,
+                        (cos * transform.XX + sin * transform.YX) / DeviceUnits,
+                        (cos * transform.XY + sin * transform.YY) / DeviceUnits));
                 }
             }
             return new(width, height, text.ToString(), glyphs);
@@ -222,13 +227,56 @@ public sealed class PdfDocumentService : IDisposable
         finally { Native.FPDFText_ClosePage(textPage); }
     }
 
-    private static PdfTextBounds TransformBounds(IntPtr page, double left, double right, double bottom, double top)
+    private const double DeviceUnits = 100_000d;
+
+    private readonly record struct PageTransform(
+        double OffsetX,
+        double OffsetY,
+        double XX,
+        double XY,
+        double YX,
+        double YY)
     {
-        const int units = 100_000;
-        Native.FPDF_PageToDevice(page, 0, 0, units, units, 0, left, top, out var x1, out var y1);
-        Native.FPDF_PageToDevice(page, 0, 0, units, units, 0, right, bottom, out var x2, out var y2);
-        return new(Math.Min(x1, x2) / (double)units, Math.Min(y1, y2) / (double)units,
-            Math.Abs(x2 - x1) / (double)units, Math.Abs(y2 - y1) / (double)units);
+        public (double X, double Y) ToDevice(double x, double y) =>
+            (OffsetX + x * XX + y * YX, OffsetY + x * XY + y * YY);
+    }
+
+    private static PageTransform CreatePageTransform(IntPtr page)
+    {
+        // Probe three page-space points instead of trusting GetPageWidth/Height:
+        // crop boxes and page rotation make the mapping a full affine
+        // transform, including off-diagonal terms. Two points would miss the
+        // rotation component and put bounds outside the page.
+        const double probe = 1000d;
+        Native.FPDF_PageToDevice(page, 0, 0, 100_000, 100_000, 0, 0, 0,
+            out var originX, out var originY);
+        Native.FPDF_PageToDevice(page, 0, 0, 100_000, 100_000, 0, probe, 0,
+            out var xAxisX, out var xAxisY);
+        Native.FPDF_PageToDevice(page, 0, 0, 100_000, 100_000, 0, 0, probe,
+            out var yAxisX, out var yAxisY);
+        return new PageTransform(
+            originX,
+            originY,
+            (xAxisX - originX) / probe,
+            (xAxisY - originY) / probe,
+            (yAxisX - originX) / probe,
+            (yAxisY - originY) / probe);
+    }
+
+    private static PdfTextBounds TransformBounds(
+        PageTransform transform,
+        double left,
+        double right,
+        double bottom,
+        double top)
+    {
+        var (x1, y1) = transform.ToDevice(left, top);
+        var (x2, y2) = transform.ToDevice(right, bottom);
+        return new(
+            Math.Min(x1, x2) / DeviceUnits,
+            Math.Min(y1, y2) / DeviceUnits,
+            Math.Abs(x2 - x1) / DeviceUnits,
+            Math.Abs(y2 - y1) / DeviceUnits);
     }
 
     private string ReadMetadata(string tag)
@@ -290,8 +338,14 @@ public sealed class PdfDocumentService : IDisposable
                         {
                             try
                             {
-                                var bounds = TransformBounds(page, 0, 0, y, y);
-                                top = Math.Clamp(bounds.Y, 0, 1);
+                                var pageWidth = Native.FPDF_GetPageWidth(page);
+                                var pageHeight = Native.FPDF_GetPageHeight(page);
+                                if (pageWidth > 0 && pageHeight > 0)
+                                {
+                                    var transform = CreatePageTransform(page);
+                                    var bounds = TransformBounds(transform, 0, 0, y, y);
+                                    top = Math.Clamp(bounds.Y, 0, 1);
+                                }
                             }
                             finally { Native.FPDF_ClosePage(page); }
                         }

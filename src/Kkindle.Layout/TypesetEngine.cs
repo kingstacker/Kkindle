@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using SkiaSharp;
 
 namespace Kkindle.Layout;
@@ -261,37 +262,28 @@ public static class ChapterLayoutInteraction
         var bestDistance = float.MaxValue;
         var bestAfterMidpoint = false;
         var page = layout.Pages[pageIndex];
+        var index = HitIndexes.GetValue(page, static candidate => new PageHitIndex(candidate));
 
-        foreach (var run in layout.Pages[pageIndex].Runs)
+        foreach (var (run, glyphIndex, rect) in index.Near(point, 128f))
         {
-            var glyphCount = Math.Min(run.Glyphs.Length, run.X.Length);
-            if (glyphCount == 0 || run.TextStart < 0)
+            var size = run.FontSize * run.Scale;
+            var distance = DistanceToRect(point, rect);
+            var tolerance = Math.Max(6f, size * 1.25f);
+            if (distance > tolerance)
             {
                 continue;
             }
 
-            for (var i = 0; i < glyphCount; i++)
+            var cx = (rect.Left + rect.Right) / 2f;
+            var cy = (rect.Top + rect.Bottom) / 2f;
+            if (distance < bestDistance)
             {
-                var size = run.FontSize * run.Scale;
-                var rect = GetGlyphRect(page, run, i);
-                var distance = DistanceToRect(point, rect);
-                var tolerance = Math.Max(6f, size * 1.25f);
-                if (distance > tolerance)
-                {
-                    continue;
-                }
-
-                var cx = (rect.Left + rect.Right) / 2f;
-                var cy = (rect.Top + rect.Bottom) / 2f;
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    var local = i < run.Clusters.Length ? run.Clusters[i] : 0;
-                    best = run.TextStart + local;
-                    bestAfterMidpoint = page.WritingMode == TypesetWritingMode.VerticalRl
-                        ? point.Y > cy
-                        : point.X > cx;
-                }
+                bestDistance = distance;
+                var local = glyphIndex < run.Clusters.Length ? run.Clusters[glyphIndex] : 0;
+                best = run.TextStart + local;
+                bestAfterMidpoint = page.WritingMode == TypesetWritingMode.VerticalRl
+                    ? point.Y > cy
+                    : point.X > cx;
             }
         }
 
@@ -303,6 +295,61 @@ public static class ChapterLayoutInteraction
         return best < 0
             ? -1
             : Math.Clamp(best, 0, Math.Max(0, layout.BodyTextLength));
+    }
+
+    private static readonly ConditionalWeakTable<LayoutPage, PageHitIndex> HitIndexes = new();
+
+    /// <summary>
+    /// Uniform grid over one page's glyph rectangles. Selection dragging used
+    /// to test every glyph on every pointer move; now only the cells around
+    /// the pointer are visited.
+    /// </summary>
+    private sealed class PageHitIndex
+    {
+        private const float CellSize = 32f;
+        private readonly Dictionary<(int X, int Y), List<(PlacedRun Run, int Glyph, SKRect Rect)>> _cells = [];
+
+        public PageHitIndex(LayoutPage page)
+        {
+            foreach (var run in page.Runs)
+            {
+                var glyphCount = Math.Min(run.Glyphs.Length, run.X.Length);
+                if (glyphCount == 0 || run.TextStart < 0) continue;
+                for (var glyphIndex = 0; glyphIndex < glyphCount; glyphIndex++)
+                {
+                    var rect = GetGlyphRect(page, run, glyphIndex);
+                    if (rect.Width <= 0 || rect.Height <= 0) continue;
+                    var minX = (int)MathF.Floor(rect.Left / CellSize);
+                    var maxX = (int)MathF.Floor(rect.Right / CellSize);
+                    var minY = (int)MathF.Floor(rect.Top / CellSize);
+                    var maxY = (int)MathF.Floor(rect.Bottom / CellSize);
+                    for (var x = minX; x <= maxX; x++)
+                    for (var y = minY; y <= maxY; y++)
+                    {
+                        if (!_cells.TryGetValue((x, y), out var entries))
+                        {
+                            entries = [];
+                            _cells[(x, y)] = entries;
+                        }
+                        entries.Add((run, glyphIndex, rect));
+                    }
+                }
+            }
+        }
+
+        public IEnumerable<(PlacedRun Run, int Glyph, SKRect Rect)> Near(SKPoint point, float tolerance)
+        {
+            var minX = (int)MathF.Floor((point.X - tolerance) / CellSize);
+            var maxX = (int)MathF.Floor((point.X + tolerance) / CellSize);
+            var minY = (int)MathF.Floor((point.Y - tolerance) / CellSize);
+            var maxY = (int)MathF.Floor((point.Y + tolerance) / CellSize);
+            for (var x = minX; x <= maxX; x++)
+            for (var y = minY; y <= maxY; y++)
+            {
+                if (!_cells.TryGetValue((x, y), out var entries)) continue;
+                foreach (var entry in entries) yield return entry;
+            }
+        }
     }
 
     /// <summary>

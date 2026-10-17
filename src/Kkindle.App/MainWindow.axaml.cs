@@ -1257,7 +1257,7 @@ public partial class MainWindow : Window
             if (!hasSearchScope || nameMatches || booksMatch)
                 visible.Add(folder);
         }
-        FilteredCollectionFolders.ReplaceAll(visible);
+        FilteredCollectionFolders.ReplaceAllIfChanged(visible);
     }
 
     private void UpdateLibraryUi()
@@ -1351,7 +1351,7 @@ public partial class MainWindow : Window
         _libraryViewMode = mode;
         BookGrid.IsVisible = mode == LibraryViewMode.Grid;
         BookList.IsVisible = mode == LibraryViewMode.List;
-        CollectionScroll.IsVisible = mode == LibraryViewMode.Collections;
+        CollectionList.IsVisible = mode == LibraryViewMode.Collections;
         CollectionHeader.IsVisible = mode is LibraryViewMode.Grid or LibraryViewMode.List
             && ViewModel.CollectionFilterId is not null;
         CreateCollectionButton.IsVisible = mode == LibraryViewMode.Collections;
