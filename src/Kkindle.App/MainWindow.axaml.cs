@@ -980,6 +980,10 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _backgroundTaskFlyout?.Hide();
+        _settingsSearchCancellation?.Cancel();
+        _txtImportRulesCompletion?.TrySetResult(null);
+        CancelTxtImportPreview();
         _bookReflectionFlyout?.Hide();
         _sendToKindleWindow?.CloseForShutdown();
         _readerToolbarHideTimer?.Stop();
@@ -1263,7 +1267,6 @@ public partial class MainWindow : Window
 
     private void UpdateLibraryUi()
     {
-        SendToKindleWebButton.IsVisible = IsSendToKindleWebEnabled();
         var viewDescription = $"{T("切换视图")} · {DescribeLibraryViewMode(_libraryViewMode)}";
         ToolTip.SetTip(LibraryViewToggleButton, viewDescription);
         LibraryGridViewMenuItem.IsChecked = _libraryViewMode == LibraryViewMode.Grid;
@@ -1888,11 +1891,25 @@ public partial class MainWindow : Window
                 SetTaskStatus(T("已取消导入。"));
                 return;
             }
+            var txtFiles = inputPaths
+                .Where(path => Path.GetExtension(path).Equals(".txt", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var txtImportRules = await ChooseTxtImportRulesAsync(
+                txtFiles,
+                _lifetimeCancellation.Token);
+            if (txtImportRules is null)
+            {
+                SetTaskStatus(T("已取消导入。"));
+                return;
+            }
             SetTaskStatus(T("正在导入 {0} 个位置…", inputPaths.Length));
             ShowTaskProgressPopup();
             TaskProgressPopupText.Text = T("正在导入 {0} 个位置…", inputPaths.Length);
+            var importOutcome = await RunTrackedTaskAsync(T("书库导入"), BackgroundTaskKind.Import, async (context, token) =>
+            {
             using var progress = new CoalescingUiProgress<TransferProgress>(value =>
             {
+                context.ReportProgress(T("正在导入书籍"), (int)value.Percentage, 100);
                 var message = string.IsNullOrWhiteSpace(value.Message)
                     ? T("正在导入：{0:0}%", value.Percentage)
                     : UiText.Localize(value.Message);
@@ -1900,16 +1917,22 @@ public partial class MainWindow : Window
                 TaskProgressPopupBar.Value = value.Percentage;
                 TaskProgressPopupText.Text = message;
             });
-            var result = await ViewModel.ImportAsync(
+            var imported = await ViewModel.ImportAsync(
                 inputPaths,
                 progress,
-                _lifetimeCancellation.Token,
-                ResolveImportConflictAsync);
-            var automaticFormats = await AutoGenerateReaderFormatsForImportsAsync(
-                result,
-                _lifetimeCancellation.Token,
-                requestedFormats);
-            await RefreshLibraryMatchRecordsAsync(_lifetimeCancellation.Token);
+                token,
+                ResolveImportConflictAsync,
+                txtImportRules);
+            context.ReportProgress(T("正在补齐阅读格式"));
+            var generated = await AutoGenerateReaderFormatsForImportsAsync(imported, token, requestedFormats);
+            await RefreshLibraryMatchRecordsAsync(token);
+            await RefreshCollectionsAsync();
+            UpdateLibraryUi();
+            await RefreshBookSyncStatusesAsync(token);
+            return (Result: imported, AutomaticFormats: generated);
+            }, _lifetimeCancellation.Token);
+            var result = importOutcome.Result;
+            var automaticFormats = importOutcome.AutomaticFormats;
             HideTaskProgressPopup();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
@@ -1939,9 +1962,11 @@ public partial class MainWindow : Window
                     : string.Empty;
             SetTaskStatus(BuildImportSummary(result, automaticSuffix));
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             HideTaskProgressPopup();
+            SetTaskStatus(T("已取消导入。"));
+            if (!_lifetimeCancellation.IsCancellationRequested) await RefreshLibraryAsync();
         }
         catch (Exception exception)
         {
@@ -3217,21 +3242,38 @@ public partial class MainWindow : Window
             KindleTransferPolicy.CreateSafeFileName(card.Title, "." + target));
         try
         {
+            await RunTrackedTaskAsync(T("格式转换"), BackgroundTaskKind.FormatConversion, async (context, token) =>
+            {
             Directory.CreateDirectory(temporaryDirectory);
-            var progress = new Progress<FormatConversionProgress>(ApplyBookConversionProgress);
+            try
+            {
+            var progress = new Progress<FormatConversionProgress>(value =>
+            {
+                context.ReportProgress(T("正在转换格式"), value.RoundedPercentage, 100);
+                ApplyBookConversionProgress(value);
+            });
             await _formatConverter.ConvertAsync(
                 sourcePath,
                 temporaryOutput,
                 progress,
-                _conversionCancellation.Token,
+                token,
                 new FormatConversionMetadata(card.Book.Title, card.Book.Authors));
             ApplyBookConversionProgress(new FormatConversionProgress(100, T("正在写入书库…")));
-            await _library.AddFileToBookAsync(card.Book.Id, temporaryOutput, _conversionCancellation.Token);
+            await _library.AddFileToBookAsync(card.Book.Id, temporaryOutput, token);
             await RefreshLibraryAsync();
+            return true;
+            }
+            finally
+            {
+                try { if (Directory.Exists(temporaryDirectory)) Directory.Delete(temporaryDirectory, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            }, _conversionCancellation.Token);
             ApplyBookConversionProgress(new FormatConversionProgress(100, T("转换完成。")));
             SetTaskStatus(T("已为《{0}》添加 {1} 格式。", card.Title, target.ToUpperInvariant()));
         }
-        catch (OperationCanceledException) when (_conversionCancellation?.IsCancellationRequested == true)
+        catch (OperationCanceledException)
         {
             SetTaskStatus(T("格式转换已取消。"));
         }
@@ -4226,7 +4268,21 @@ public partial class MainWindow : Window
     }
 
     private void LibraryViewToggleButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-        => LibraryViewToggleButton.ContextMenu?.Open(LibraryViewToggleButton);
+    {
+        var next = _libraryViewMode switch
+        {
+            LibraryViewMode.Grid => LibraryViewMode.List,
+            LibraryViewMode.List => LibraryViewMode.Collections,
+            _ => LibraryViewMode.Grid
+        };
+        if (next == LibraryViewMode.Collections && ViewModel.CollectionFilterId is not null)
+        {
+            ViewModel.CollectionFilterId = null;
+            ViewModel.CollectionFilterName = null;
+            ViewModel.RefreshView();
+        }
+        SetLibraryViewMode(next);
+    }
 
     private void LibraryViewMenuItem_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -4266,6 +4322,12 @@ public partial class MainWindow : Window
 
     private async void MainWindow_GlobalKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Handled || OnboardingOverlay.IsVisible || MessageOverlay.IsVisible
+            || ConfirmationOverlay.IsVisible || CollectionNameOverlay.IsVisible
+            || DevicePromptOverlay.IsVisible || DeviceModelInputOverlay.IsVisible
+            || DoubanCandidateOverlay.IsVisible || DoubanPreviewOverlay.IsVisible
+            || ImportFormatSelectionOverlay.IsVisible || ImportConflictOverlay.IsVisible)
+            return;
         if (e.Key == Key.F1)
         {
             e.Handled = true;
@@ -4273,7 +4335,8 @@ public partial class MainWindow : Window
             return;
         }
         if (_readerDocument is not null || _readerIsPdf) return;
-        if (e.Source is TextBox or ComboBox) return;
+        if (e.Source is Control source && (source is TextBox or ComboBox or Button
+            || source.GetVisualAncestors().Any(parent => parent is TextBox or ComboBox or Button))) return;
 
         var control = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         if (control && e.Key == Key.F)
@@ -4290,6 +4353,7 @@ public partial class MainWindow : Window
             ImportFilesButton_Click(this, new RoutedEventArgs());
             return;
         }
+        if (!LibraryWorkspace.IsVisible) return;
         if (control && e.Key == Key.A)
         {
             e.Handled = true;

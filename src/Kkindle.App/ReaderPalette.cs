@@ -18,25 +18,17 @@ public sealed record ReaderPalette(
     private static readonly ReaderPalette Classic = Palette(
         "#FFFFFF", "#FFFFFF", "#FFFFFF", "#111111", "#5A5A5A",
         "#E2E2E2", "#ECECEA", "#E6E6E6", "#242424", "#FFFFFF");
-    private static readonly ReaderPalette Ivory = Palette(
-        "#F8F5EC", "#F8F5EC", "#F8F5EC", "#37342D", "#6D675B",
-        "#D2CBBC", "#E8E1D3", "#DED4C2", "#756049", "#FFFAF1");
-    private static readonly ReaderPalette Night = Palette(
-        "#242623", "#242623", "#242623", "#DDDACE", "#A8AD9F",
-        "#42483F", "#343B31", "#414C3C", "#B8C8A5", "#20271E");
+    private static readonly ReaderPalette Beige = Palette(
+        "#F4F2EC", "#F4F2EC", "#ECE9E2", "#303030", "#5B5B58",
+        "#DCD9D1", "#E8E5DD", "#DAD6CC", "#56544E", "#FAF9F5");
     private static readonly ReaderPalette Green = Palette(
         "#EEF3EC", "#EEF3EC", "#EEF3EC", "#29382D", "#59685D",
         "#C9D5C7", "#DCE6D7", "#D4E0CF", "#3F6B57", "#F5FAF2");
-    private static readonly ReaderPalette MistBlue = Palette(
-        "#E8EFF5", "#E8EFF5", "#E8EFF5", "#283746", "#536575",
-        "#CAD5DF", "#DBE5EE", "#CBD9E5", "#486B89", "#F7FAFD");
 
     public static ReaderPalette For(ReaderTheme theme) => theme switch
     {
-        ReaderTheme.Night => Night,
+        ReaderTheme.Beige => Beige,
         ReaderTheme.Green => Green,
-        ReaderTheme.MistBlue => MistBlue,
-        ReaderTheme.Ivory => Ivory,
         _ => Classic
     };
 

@@ -128,20 +128,18 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task SendToKindleToggleControlsLibraryToolbarAndPersists() => Run(async () =>
+    public Task SendToKindleTogglePersistsWithoutToolbarButton() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
         var toggle = scope.Get<ToggleSwitch>("SendToKindleWebEnabledCheck");
-        var toolbarButton = scope.Get<Button>("SendToKindleWebButton");
+        Assert.Null(scope.Window.FindControl<Button>("SendToKindleWebButton"));
         var expander = scope.Get<Expander>("SettingsSendToKindleExpander");
         Assert.False(expander.IsExpanded);
         Assert.Contains("邮箱", expander.Tag?.ToString());
         Assert.True(toggle.IsChecked);
-        Assert.True(toolbarButton.IsVisible);
 
         toggle.IsChecked = false;
         await Render();
-        Assert.False(toolbarButton.IsVisible);
 
         scope.Window.Close();
         await Until(() => !scope.Window.IsVisible);
@@ -718,7 +716,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.True(position.Y + control.Bounds.Height <= window.Bounds.Height + 1, control.Name);
     }
 
-    private static void Capture(MainWindow window, string name)
+    private static void Capture(Window window, string name)
     {
         var output = Environment.GetEnvironmentVariable("KKINDLE_SETTINGS_ARTIFACTS");
         if (string.IsNullOrWhiteSpace(output)) return;

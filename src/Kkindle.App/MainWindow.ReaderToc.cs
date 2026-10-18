@@ -544,7 +544,7 @@ public partial class MainWindow
         }
 
         if (hoveredMarker is not null)
-            hoveredMarker.Background = ReaderPalette.For(_appSettings.ReaderAppearance.Theme).AccentBrush;
+            hoveredMarker.Background = ReaderPalette.For(CurrentReaderAppearance.Theme).AccentBrush;
         if (!_readerSliderPreviewVisible)
         {
             if (_readerCompactPointerActive)
@@ -790,7 +790,7 @@ public partial class MainWindow
                     && item.Target.Equals(
                         _readerCompactSelectedTarget,
                         StringComparison.OrdinalIgnoreCase))
-            { Palette = ReaderPalette.For(_appSettings.ReaderAppearance.Theme) })
+            { Palette = ReaderPalette.For(CurrentReaderAppearance.Theme) })
             .ToArray();
     }
 

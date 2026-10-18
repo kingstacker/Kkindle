@@ -191,6 +191,8 @@ public partial class MainWindow
 
     private void LibraryDetailCloseButton_Click(object? sender, RoutedEventArgs e)
     {
+        BookGrid.SelectedItems?.Clear();
+        BookList.SelectedItems?.Clear();
         ClearSelectedBook();
         if (BookList.IsVisible)
             BookList.Focus();

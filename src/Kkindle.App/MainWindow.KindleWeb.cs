@@ -1,5 +1,4 @@
 using Avalonia.Controls;
-using Avalonia.Interactivity;
 using Kkindle.Core;
 
 namespace Kkindle;
@@ -8,17 +7,6 @@ public partial class MainWindow
 {
     private readonly IKindleWebFileInput? _kindleWebFileInput;
     private SendToKindleWindow? _sendToKindleWindow;
-
-    private async void OpenSendToKindleWebButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (!IsSendToKindleWebEnabled()) return;
-        var cards = GetSelectedCards();
-        var files = cards.Select(card => KindleWebFilePolicy.GetCandidates(card.Book.Files).FirstOrDefault())
-            .Where(file => file is not null).Cast<BookFile>().ToArray();
-        await AddLibraryFilesToKindleWebAsync(files);
-        if (cards.Count > files.Length)
-            _sendToKindleWindow?.ShowNotice(T("部分书籍没有可发送的格式，请先转换为 EPUB 或 PDF。"));
-    }
 
     private async Task AddLibraryFilesToKindleWebAsync(IReadOnlyList<BookFile> files)
     {

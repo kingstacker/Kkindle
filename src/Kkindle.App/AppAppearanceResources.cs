@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Kkindle.Core;
 
 namespace Kkindle;
 
@@ -22,6 +23,7 @@ internal static class AppAppearanceResources
         Set("Hairline", palette.Hairline);
         Set("SidebarIndicator", palette.StrongBorder);
         Set("CardBorder", palette.StrongBorder);
+        Set("StrongBorder", palette.StrongBorder);
         Set("SoftHover", palette.Hover);
         Set("Pressed", palette.Pressed);
         Set("Cover", palette.Cover);
@@ -29,11 +31,13 @@ internal static class AppAppearanceResources
         Set("AccentHover", palette.AccentHover);
         Set("AccentPressed", palette.AccentPressed);
         Set("OnAccent", palette.OnAccent);
+        Set("FocusRing", palette.Focus);
         var dark = palette.Paper.R < 90;
         Set("SidebarIcon", dark ? palette.Muted : Color.Parse("#404040"));
         Set("SidebarChevron", dark ? palette.Muted : Color.Parse("#606060"));
         Set("SidebarCount", dark ? palette.Subtle : Color.Parse("#858585"));
         Set("SidebarSelected", dark ? palette.Hover : Color.Parse("#F3F4F5"));
+        Set("SidebarSelectedForeground", palette.Ink);
         Set("Success", Color.Parse(dark ? "#9BC797" : "#2E754D"));
         Set("Warning", Color.Parse(dark ? "#E2C178" : "#8D6400"));
         Set("Danger", Color.Parse(dark ? "#EAA59B" : "#A7342F"));
@@ -70,6 +74,8 @@ internal static class AppAppearanceResources
             "KkindleScrollBarButtonPointerOverBorderBrush", "KkindleScrollBarButtonPressedBorderBrush",
             "SliderTrackValueFill", "SliderTrackValueFillPointerOver", "SliderTrackValueFillPressed",
             "SliderThumbBackground", "SliderThumbBackgroundPointerOver", "SliderThumbBackgroundPressed");
+        Brushes(palette.Focus,
+            "TextControlBorderBrushFocused", "ComboBoxBackgroundBorderBrushFocused", "FocusVisualPrimaryBrush");
         Brushes(palette.OnAccent,
             "MenuFlyoutItemForegroundPointerOver", "MenuFlyoutSubItemChevronPointerOver",
             "MenuFlyoutItemKeyboardAcceleratorTextForegroundPointerOver", "ComboBoxItemForegroundPointerOver",

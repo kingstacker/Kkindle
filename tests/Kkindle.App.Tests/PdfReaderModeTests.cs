@@ -156,7 +156,7 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
         await pdf.SetZoomAsync(1.4);
         pdf.ScrollBy(120);
-        foreach (var theme in new[] { ReaderTheme.Green, ReaderTheme.Night })
+        foreach (var theme in new[] { ReaderTheme.Green, ReaderTheme.Beige })
         {
             scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { Theme = theme });
             await scope.Field<Task>("_readerAppearanceSaveTask");
@@ -256,7 +256,7 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         var point = pdf.PageBounds.TopLeft + new Vector(10, 10);
         using var original = SKBitmap.Decode(await pdf.CaptureVisiblePageAsync(CancellationToken.None));
         var color = original.GetPixel((int)point.X, (int)point.Y);
-        foreach (var theme in new[] { ReaderTheme.Green, ReaderTheme.Night, ReaderTheme.Ivory, ReaderTheme.MistBlue, ReaderTheme.Classic })
+        foreach (var theme in new[] { ReaderTheme.Green, ReaderTheme.Beige, ReaderTheme.Green, ReaderTheme.Green, ReaderTheme.Classic })
         {
             scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { Theme = theme });
             await scope.Field<Task>("_readerAppearanceSaveTask");

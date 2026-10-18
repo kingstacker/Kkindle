@@ -1605,9 +1605,10 @@ public partial class MainWindow
     private void ReaderLayoutSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
         SyncReaderAppearanceControls();
+        SyncReaderBookScopeControls();
         ReaderVerticalWritingCheck.Content = OperatingSystem.IsLinux()
-            ? T("竖排排版（全局，自绘单页）")
-            : T("竖排排版（全局，仅支持单页）");
+            ? T("竖排排版（自绘单页）")
+            : T("竖排排版（仅支持单页）");
         _suppressReaderLayoutChange = true;
         try
         {
@@ -1679,7 +1680,7 @@ public partial class MainWindow
         {
             UpdateReaderZoomLabel();
             await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-            await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+            await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
         {
@@ -1714,7 +1715,7 @@ public partial class MainWindow
                     _readerPageAnimation = GetSelectedReaderPageAnimation();
                     UpdateReaderZoomLabel();
                     await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-                    await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+                    await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
                 }
                 catch
                 {
@@ -1741,6 +1742,53 @@ public partial class MainWindow
 
     private async void ReaderLayoutResetButton_Click(object? sender, RoutedEventArgs e)
     {
+        _readerLayoutApplyCancellation?.Cancel();
+        _readerLayoutApplyCancellation?.Dispose();
+        _readerLayoutApplyCancellation = null;
+
+        if (CanUseReaderBookProfile && ReaderUsesBookOverride)
+        {
+            var globalLayout = NormalizeReaderLayoutForPlatform(
+                _appSettings.DefaultReaderLayout);
+            _readerBookLayoutProfile = ReaderBookLayoutProfile.Normalize(
+                _readerBookLayoutProfile! with
+                {
+                    UseBookOverride = false,
+                    Layout = globalLayout,
+                    Appearance = ReaderAppearanceSettings.Normalize(
+                        _appSettings.ReaderAppearance)
+                });
+            _readerLayout = globalLayout;
+            _suppressReaderLayoutChange = true;
+            try
+            {
+                ReaderFontScaleSlider.Value = _readerLayout.FontScale;
+                ReaderLineHeightSlider.Value = _readerLayout.LineHeight;
+                ReaderMaxWidthSlider.Value = _readerLayout.MaxWidth;
+                ReaderBodyPaddingSlider.Value = _readerLayout.BodyPadding;
+                ReaderVerticalWritingCheck.IsChecked = _readerLayout.VerticalWriting;
+                ReaderParagraphIndentCheck.IsChecked = _readerLayout.ParagraphIndent;
+                SelectReaderFontFamily(_readerLayout.FontFamily);
+                SelectReaderFlowMode(_readerLayout.FlowMode, _readerLayout.TwoPageMode);
+            }
+            finally
+            {
+                _suppressReaderLayoutChange = false;
+            }
+            UpdateReaderLayoutSliderLabels();
+            ApplyReaderAppearance();
+            SyncReaderAppearanceControls();
+            SyncReaderBookScopeControls();
+            await ApplyReaderLayoutToHostsAsync(ReaderToken);
+            // Turning the override off makes SaveCurrentReaderPreferencesAsync
+            // enter the global-settings branch. Persist the disabled per-book
+            // profile explicitly so reopening the book does not restore it.
+            await _readerData.SaveBookLayoutProfileAsync(
+                _readerBookLayoutProfile!,
+                CancellationToken.None);
+            return;
+        }
+
         _suppressReaderLayoutChange = true;
         try
         {
@@ -1763,7 +1811,7 @@ public partial class MainWindow
         _readerPageAnimation = ReaderAnimationFade;
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
-        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+        await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
     }
 
     private void UpdateReaderLayoutSliderLabels()

@@ -45,7 +45,7 @@ public partial class App : Application
     public void ApplyTheme(AppTheme theme)
     {
         AppAppearanceResources.Populate(Resources, AppPalette.For(theme));
-        RequestedThemeVariant = theme == AppTheme.Night ? ThemeVariant.Dark : ThemeVariant.Light;
+        RequestedThemeVariant = ThemeVariant.Light;
     }
 
     public override void OnFrameworkInitializationCompleted()

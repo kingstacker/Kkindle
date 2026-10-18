@@ -24,7 +24,7 @@ public sealed partial class S3SyncService
 {
     // Version 4 added optional badge data. Continue accepting those snapshots
     // so removing badges does not prevent existing devices from syncing.
-    private const int SnapshotVersion = 4;
+    private const int SnapshotVersion = 5;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
     private const int EncryptionNonceBytes = 12;
@@ -685,17 +685,13 @@ public sealed partial class S3SyncService
     {
         if (previousLocal is null || remoteSnapshots.Count == 0) return;
         var unchangedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddUnchangedKeys(local.Books, previousLocal.Books, item => item.Id.ToString("N"), "book", unchangedKeys);
-        AddUnchangedKeys(local.Files, previousLocal.Files, item => item.Id.ToString("N"), "file", unchangedKeys);
-        AddUnchangedKeys(local.Collections, previousLocal.Collections, item => item.Id.ToString("N"), "collection", unchangedKeys);
-        AddUnchangedKeys(local.CollectionItems, previousLocal.CollectionItems,
-            item => CompositeKey(item.CollectionId, item.BookId), "collection-item", unchangedKeys);
-        AddUnchangedKeys(local.Annotations, previousLocal.Annotations, item => item.Id.ToString("N"), "annotation", unchangedKeys);
-        AddUnchangedKeys(local.BookReflections, previousLocal.BookReflections, item => item.BookId.ToString("N"), "reflection", unchangedKeys);
-        AddUnchangedKeys(local.Progress, previousLocal.Progress, item => item.BookFileId.ToString("N"), "progress", unchangedKeys);
-        AddUnchangedKeys(local.Bookmarks, previousLocal.Bookmarks, item => item.Id.ToString("N"), "bookmark", unchangedKeys);
-        AddUnchangedKeys(local.Layouts, previousLocal.Layouts, item => item.BookFileId.ToString("N"), "layout", unchangedKeys);
-        AddUnchangedKeys(local.ReadingStats, previousLocal.ReadingStats, item => item.BookFileId.ToString("N"), "stats", unchangedKeys);
+        foreach (var entity in SyncEntities.Where(entity => entity.TrackDeletion))
+        {
+            var previous = entity.Rows(previousLocal).ToDictionary(row => row.Key, StringComparer.OrdinalIgnoreCase);
+            foreach (var row in entity.Rows(local))
+                if (previous.TryGetValue(row.Key, out var old) && SnapshotRowsEqual(row.Value, old.Value))
+                    unchangedKeys.Add(VersionKey(entity.Type, row.Key));
+        }
         if (unchangedKeys.Count == 0) return;
 
         var remoteVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
@@ -745,22 +741,6 @@ public sealed partial class S3SyncService
         JsonSerializer.SerializeToUtf8Bytes(left, JsonOptions)
             .AsSpan()
             .SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(right, JsonOptions));
-
-    private static void AddUnchangedKeys<T>(        IEnumerable<T> currentRows,
-        IEnumerable<T> previousRows,
-        Func<T, string> id,
-        string entityType,
-        ISet<string> output)
-    {
-        var previous = previousRows.ToDictionary(id, StringComparer.OrdinalIgnoreCase);
-        foreach (var current in currentRows)
-        {
-            var entityId = id(current);
-            if (previous.TryGetValue(entityId, out var old)
-                && SnapshotRowsEqual(current, old))
-                output.Add(VersionKey(entityType, entityId));
-        }
-    }
 
     private async Task<HashSet<string>> ResolveLocalRestorationsAsync(
         S3SyncSnapshot local,
@@ -1082,12 +1062,12 @@ public sealed partial class S3SyncService
             state.LocalFilePaths ??= [];
             state.LocalCoverPaths ??= [];
             state.LocalDeletionTimes ??= [];
-            _baselineHash = state.BaselineHash;
+            _baselineHash = null;
             // The baseline is stored separately so the frequently rewritten
             // state file stays small. Older state files still carry the
             // snapshot inline; keep that as a fallback.
             if (state.LastUploadedSnapshot is null)
-                state.LastUploadedSnapshot = await LoadBaselineAsync(cancellationToken);
+                state.LastUploadedSnapshot = await LoadBaselineAsync(state.BaselineHash, cancellationToken);
             if (state.LastUploadedSnapshot is null)
                 state.SnapshotWatermark = null;
             if (state.LastUploadedSnapshot is { } previous)
@@ -1109,7 +1089,7 @@ public sealed partial class S3SyncService
         }
     }
 
-    private async Task<S3SyncSnapshot?> LoadBaselineAsync(CancellationToken cancellationToken)
+    private async Task<S3SyncSnapshot?> LoadBaselineAsync(string? expectedHash, CancellationToken cancellationToken)
     {
         if (!File.Exists(BaselinePath)) return null;
         try
@@ -1122,8 +1102,16 @@ public sealed partial class S3SyncService
                 81920,
                 useAsync: true);
             await using var gzip = new GZipStream(file, CompressionMode.Decompress);
-            return await JsonSerializer.DeserializeAsync<S3SyncSnapshot>(
-                gzip, JsonOptions, cancellationToken);
+            using var buffer = new MemoryStream();
+            await gzip.CopyToAsync(buffer, cancellationToken);
+            var json = buffer.ToArray();
+            var hash = Convert.ToHexString(SHA256.HashData(json));
+            // The baseline and state are replaced separately. A crash between
+            // those writes must not pair a new baseline with an old watermark.
+            if (!string.Equals(hash, expectedHash, StringComparison.Ordinal)) return null;
+            var snapshot = JsonSerializer.Deserialize<S3SyncSnapshot>(json, JsonOptions);
+            if (snapshot is not null) _baselineHash = hash;
+            return snapshot;
         }
         catch (Exception exception) when (exception is IOException or JsonException or InvalidDataException)
         {
@@ -1294,7 +1282,7 @@ public sealed partial class S3SyncService
                 objects.Add(new LocalSyncObject(file.Sha256, path, "application/octet-stream"));
         }
 
-        foreach (var book in snapshot.Books)
+        foreach (var book in snapshot.Books.Concat(snapshot.ReadingMaterialBooks))
         {
             if (!IsSha256(book.CoverHash) || string.IsNullOrWhiteSpace(book.CoverFileName)) continue;
             var relativePath = book.LocalCoverPath
@@ -1530,10 +1518,9 @@ public sealed partial class S3SyncService
         var referencedBlobKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var snapshot in retainedSnapshots)
         {
-            foreach (var file in snapshot.Files)
-                if (IsSha256(file.Sha256)) referencedBlobKeys.Add(BlobKey(settings, file.Sha256));
-            foreach (var book in snapshot.Books)
-                if (IsSha256(book.CoverHash)) referencedBlobKeys.Add(BlobKey(settings, book.CoverHash!));
+            foreach (var hash in SyncEntities.SelectMany(entity => entity.Rows(snapshot))
+                         .Select(row => row.BlobHash).Where(IsSha256))
+                referencedBlobKeys.Add(BlobKey(settings, hash!));
         }
 
         IReadOnlyList<SyncObjectMetadata> blobObjects;
@@ -1624,79 +1611,20 @@ public sealed partial class S3SyncService
             }
         }
 
-        var targetSnapshots = targets.ToArray();
-        bool RowsCovered<T>(
-            IEnumerable<T> sourceRows,
-            IEnumerable<T> targetRows,
-            Func<T, string> key,
-            Func<T, DateTimeOffset> version,
-            Func<T, IEnumerable<string>> fallbackTombstones)
+        foreach (var entity in SyncEntities)
         {
-            var byKey = targetRows
-                .GroupBy(key, StringComparer.OrdinalIgnoreCase)
+            var byKey = targets.SelectMany(entity.Rows)
+                .GroupBy(row => row.Key, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
-            foreach (var source in sourceRows)
+            foreach (var source in entity.Rows(candidate))
             {
-                var sourceKey = key(source);
-                var sourceVersion = version(source);
-                if (byKey.TryGetValue(sourceKey, out var alternatives)
-                    && alternatives.Any(target => version(target) >= sourceVersion
-                        && SnapshotRowsEqual(target, source)))
-                    continue;
-
-                var covered = fallbackTombstones(source).Any(tombstoneKey =>
-                    tombstoneVersions.TryGetValue(tombstoneKey, out var deletedAt)
-                    && deletedAt >= sourceVersion);
-                if (!covered) return false;
+                if (byKey.TryGetValue(source.Key, out var alternatives)
+                    && alternatives.Any(target => target.Version >= source.Version
+                        && SnapshotRowsEqual(target.Value, source.Value))) continue;
+                if (!source.DeletionKeys.Any(key => tombstoneVersions.TryGetValue(key, out var deletedAt)
+                    && deletedAt >= source.Version)) return false;
             }
-            return true;
         }
-
-        var targetBooks = targetSnapshots.SelectMany(snapshot => snapshot.Books);
-        var targetFiles = targetSnapshots.SelectMany(snapshot => snapshot.Files);
-        var targetCollections = targetSnapshots.SelectMany(snapshot => snapshot.Collections);
-        var targetItems = targetSnapshots.SelectMany(snapshot => snapshot.CollectionItems);
-        var targetAnnotations = targetSnapshots.SelectMany(snapshot => snapshot.Annotations);
-        var targetReflections = targetSnapshots.SelectMany(snapshot => snapshot.BookReflections);
-        var targetProgress = targetSnapshots.SelectMany(snapshot => snapshot.Progress);
-        var targetBookmarks = targetSnapshots.SelectMany(snapshot => snapshot.Bookmarks);
-        var targetLayouts = targetSnapshots.SelectMany(snapshot => snapshot.Layouts);
-        var targetStats = targetSnapshots.SelectMany(snapshot => snapshot.ReadingStats);
-
-        if (!RowsCovered(candidate.Books, targetBooks,
-                item => item.Id.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("book", item.Id)])) return false;
-        if (!RowsCovered(candidate.Files, targetFiles,
-                item => item.Id.ToString("N"), item => item.ModifiedAt,
-                item => [VersionKey("file", item.Id), VersionKey("book", item.BookId)])) return false;
-        if (!RowsCovered(candidate.Collections, targetCollections,
-                item => item.Id.ToString("N"), CollectionUpdatedAt,
-                item => [VersionKey("collection", item.Id)])) return false;
-        if (!RowsCovered(candidate.CollectionItems, targetItems,
-                item => CompositeKey(item.CollectionId, item.BookId), item => item.AddedAt,
-                item => [
-                    VersionKey("collection-item", CompositeKey(item.CollectionId, item.BookId)),
-                    VersionKey("collection", item.CollectionId),
-                    VersionKey("book", item.BookId)
-                ])) return false;
-        if (!RowsCovered(candidate.Annotations, targetAnnotations,
-                item => item.Id.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("annotation", item.Id), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.BookReflections, targetReflections,
-                item => item.BookId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("reflection", item.BookId), VersionKey("book", item.BookId)])) return false;
-        if (!RowsCovered(candidate.Progress, targetProgress,
-                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("progress", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.Bookmarks, targetBookmarks,
-                item => item.Id.ToString("N"), item => item.CreatedAt,
-                item => [VersionKey("bookmark", item.Id), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.Layouts, targetLayouts,
-                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("layout", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.ReadingStats, targetStats,
-                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("stats", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
 
         foreach (var tombstone in candidate.Tombstones ?? [])
         {
@@ -1769,7 +1697,7 @@ public sealed partial class S3SyncService
                 || snapshot.BookReflections.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
                 || snapshot.Progress.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
                 || snapshot.Bookmarks.Any(row => row.BookId == bookId && row.CreatedAt <= deletedAt)
-                || snapshot.Layouts.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.Layouts.Any(row => row.BookId == bookId && LayoutSyncVersion(row) <= deletedAt)
                 || snapshot.ReadingStats.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
                 || snapshot.CollectionItems.Any(row => row.BookId == bookId && row.AddedAt <= deletedAt);
         }
@@ -1779,7 +1707,7 @@ public sealed partial class S3SyncService
                 || snapshot.Annotations.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
                 || snapshot.Progress.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
                 || snapshot.Bookmarks.Any(row => row.BookFileId == fileId && row.CreatedAt <= deletedAt)
-                || snapshot.Layouts.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
+                || snapshot.Layouts.Any(row => row.BookFileId == fileId && LayoutSyncVersion(row) <= deletedAt)
                 || snapshot.ReadingStats.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt);
         }
 

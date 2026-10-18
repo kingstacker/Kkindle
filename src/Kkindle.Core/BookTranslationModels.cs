@@ -21,8 +21,10 @@ public enum BookTranslationOutputMode
 public sealed record BookTranslationSettings
 {
     public const int MaxAiRequestsPerMinute = 65_536;
+    public const string DefaultAiServiceProfileId = "default";
 
     public BookTranslationProvider Provider { get; init; } = BookTranslationProvider.Ai;
+    public string AiServiceProfileId { get; init; } = DefaultAiServiceProfileId;
     public string SourceLanguage { get; init; } = "auto";
     public string TargetLanguage { get; init; } = "zh-CN";
     public BookTranslationOutputMode OutputMode { get; init; } = BookTranslationOutputMode.Translated;
@@ -48,6 +50,9 @@ public sealed record BookTranslationSettings
         return settings with
         {
             Provider = provider,
+            AiServiceProfileId = string.IsNullOrWhiteSpace(settings.AiServiceProfileId)
+                ? DefaultAiServiceProfileId
+                : settings.AiServiceProfileId.Trim(),
             SourceLanguage = source,
             TargetLanguage = target,
             OutputMode = output,

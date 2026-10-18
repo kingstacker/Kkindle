@@ -15,10 +15,10 @@ public sealed partial class SettingsTests
     [InlineData("BookManagementSectionButton")]
     [InlineData("SettingsNavigationButton")]
     [InlineData("AllBooksButton")]
-    public Task NightSidebarKeepsOneBackgroundThroughoutClick(string name) => Run(async () =>
+    public Task BeigeSidebarKeepsOneBackgroundThroughoutClick(string name) => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
-        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Night;
+        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Beige;
         await Render();
         var button = scope.Get<Button>(name);
         var point = button.TranslatePoint(new Point(button.Bounds.Width / 2, button.Bounds.Height / 2), scope.Window)!.Value;
@@ -46,10 +46,8 @@ public sealed partial class SettingsTests
 
     [Theory]
     [InlineData(AppTheme.Classic)]
-    [InlineData(AppTheme.Night)]
+    [InlineData(AppTheme.Beige)]
     [InlineData(AppTheme.Green)]
-    [InlineData(AppTheme.MistBlue)]
-    [InlineData(AppTheme.Ivory)]
     public Task SidebarPointerExitImmediatelyRestoresThemeBackground(AppTheme theme) => Run(async () =>
     {
         await using var scope = await TestWindow.Create();

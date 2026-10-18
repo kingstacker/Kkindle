@@ -8,6 +8,34 @@ namespace Kkindle.Tests;
 public sealed class LibraryTests
 {
     [Fact]
+    public async Task GeneratedPdfCoverUpdatesSyncVersion()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+            await library.ImportAsync([Kkindle.TestFixtures.PdfFixture.Write(root)]);
+            var book = Assert.Single(await library.SearchAsync());
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = "UPDATE Books SET CoverPath=NULL, UpdatedAt='2020-01-01T00:00:00.0000000+00:00';";
+                await command.ExecuteNonQueryAsync();
+            }
+            var before = await library.GetBookAsync(book.Id);
+            var cover = await library.EnsurePdfCoverAsync(book.Id);
+            Assert.NotNull(cover);
+            var after = await library.GetBookAsync(book.Id);
+            Assert.Equal(cover, after!.CoverPath);
+            Assert.True(after.UpdatedAt > before!.UpdatedAt);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task SummaryCachesReuseStatusOnlyChangesAndInvalidateExternalMetadataWrites()
     {
         var root = TestHelpers.CreateTempDirectory();
@@ -549,7 +577,7 @@ public sealed class LibraryTests
     }
 
     [Fact]
-    public async Task BookAnnotationsRemainRecoverableUntilTrashIsPurged()
+    public async Task BookAnnotationsRemainRecoverableAfterTrashIsPurgedByDefault()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -569,8 +597,8 @@ public sealed class LibraryTests
                 BookId = book.Id,
                 BookFileId = book.Files[0].Id,
                 ChapterPath = "chapter.xhtml",
-                SelectedText = "要随书删除的内容",
-                Note = "这条笔记不应成为孤儿记录。",
+                SelectedText = "删除书籍后保留的内容",
+                Note = "保留批注供笔记管理继续使用。",
                 EndOffset = 8
             };
             await reader.SaveAnnotationAsync(annotation);
@@ -586,7 +614,7 @@ public sealed class LibraryTests
             await library.DeleteAsync(book.Id);
             trash = Assert.Single(await library.GetTrashItemsAsync());
             await library.PurgeTrashItemAsync(trash.Id);
-            Assert.Empty(await reader.GetAllAnnotationsAsync());
+            Assert.Equal(annotation.Id, Assert.Single(await reader.GetAllAnnotationsAsync()).Id);
         }
         finally { TestHelpers.TryDelete(root); }
     }

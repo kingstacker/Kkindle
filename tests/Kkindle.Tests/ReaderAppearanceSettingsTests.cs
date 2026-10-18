@@ -9,6 +9,8 @@ public sealed class ReaderAppearanceSettingsTests
     [Theory]
     [InlineData("{}")]
     [InlineData("{\"ReaderAppearance\":null}")]
+    [InlineData("{\"ReaderAppearance\":{\"Theme\":3}}")]
+    [InlineData("{\"ReaderAppearance\":{\"Theme\":4}}")]
     public void LegacySettingsKeepTheOriginalBlackAndWhiteDefault(string json)
     {
         var settings = AppSettings.Normalize(JsonSerializer.Deserialize<AppSettings>(json));
@@ -39,21 +41,19 @@ public sealed class ReaderAppearanceSettingsTests
     {
         var enabled = new ReaderAppearanceSettings
         {
-            Theme = ReaderTheme.MistBlue, PaperEnabled = true, PaperStrength = 0.8, FibersEnabled = true
+            Theme = ReaderTheme.Green, PaperEnabled = true, PaperStrength = 0.8, FibersEnabled = true
         };
         var disabled = ReaderAppearanceSettings.Normalize(enabled with { PaperEnabled = false });
         Assert.Equal(0, disabled.EffectivePaperStrength);
         Assert.Equal(enabled, disabled with { PaperEnabled = true });
-        Assert.InRange((enabled with { Theme = ReaderTheme.Night }).EffectivePaperStrength, 0.1, 0.4);
+        Assert.Equal(0.8, (enabled with { Theme = ReaderTheme.Beige }).EffectivePaperStrength);
         Assert.DoesNotContain(nameof(ReaderAppearanceSettings.EffectivePaperStrength), JsonSerializer.Serialize(enabled));
     }
 
     [Theory]
     [InlineData(ReaderTheme.Classic)]
-    [InlineData(ReaderTheme.Night)]
+    [InlineData(ReaderTheme.Beige)]
     [InlineData(ReaderTheme.Green)]
-    [InlineData(ReaderTheme.MistBlue)]
-    [InlineData(ReaderTheme.Ivory)]
     public async Task AppearancePersistsAlongsideLayoutWithoutReplacingIt(ReaderTheme theme)
     {
         var root = TestHelpers.CreateTempDirectory();

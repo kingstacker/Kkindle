@@ -152,6 +152,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await ReadingMaterialBookSchema.EnsureAsync(connection, cancellationToken);
         await EnsureLibraryTrashBookFileIdColumnAsync(connection, cancellationToken);
         await EnsureBookCollectionUpdatedAtColumnAsync(connection, cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
@@ -734,7 +735,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null)
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null,
+        IReadOnlyDictionary<string, TxtImportRules>? txtImportRules = null)
     {
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         var files = ExpandInputFiles(paths).ToList();
@@ -770,7 +772,11 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
                     Directory.CreateDirectory(conversionDirectory);
                     importPath = Path.Combine(conversionDirectory, Path.GetFileNameWithoutExtension(sourcePath) + ".epub");
                     progress?.Report(new TransferProgress(completedBytes, totalBytes, $"正在识别 TXT 章节：{file.Name}"));
-                    await TxtToEpubService.ConvertAsync(sourcePath, importPath, cancellationToken);
+                    var rules = txtImportRules is not null
+                                && txtImportRules.TryGetValue(sourcePath, out var selectedRules)
+                        ? selectedRules
+                        : TxtImportRules.Default;
+                    await TxtToEpubService.ConvertWithRulesAsync(sourcePath, importPath, rules, cancellationToken);
                 }
                 var hash = await Hashing.Sha256Async(importPath, cancellationToken);
                 await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -1066,8 +1072,9 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             using var update = connection.CreateCommand();
             // Do not overwrite a cover chosen while the first page rendered,
             // or rewrite other metadata from an old UI snapshot.
-            update.CommandText = "UPDATE Books SET CoverPath=$cover WHERE Id=$id AND CoverPath IS $previous;";
+            update.CommandText = "UPDATE Books SET CoverPath=$cover, UpdatedAt=$updatedAt WHERE Id=$id AND CoverPath IS $previous;";
             update.Parameters.AddWithValue("$cover", relative);
+            update.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
             update.Parameters.AddWithValue("$id", bookId.ToString());
             update.Parameters.AddWithValue("$previous", (object?)book.CoverPath ?? DBNull.Value);
             return await update.ExecuteNonQueryAsync(cancellationToken) > 0 ? relative : null;
@@ -1316,7 +1323,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             {
                 if (entry.Kind == LibraryTrashItemKind.Book)
                 {
-                    if (await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                    if (ShouldDeleteAnnotationsWhenDeletingBook()
+                        && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
                         await DeletePurgeReaderRowsAsync(
                             connection,
                             transaction,

@@ -205,7 +205,7 @@ public sealed class PdfReaderTests(SettingsUiSession session)
 
     [Theory]
     [InlineData(ReaderTheme.Classic)]
-    [InlineData(ReaderTheme.Night)]
+    [InlineData(ReaderTheme.Beige)]
     public Task ColoredMarkersRenderAndKeepTheirNotesAndColorsWhenReopened(ReaderTheme theme) => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
@@ -242,7 +242,9 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         var stylesButton = scope.Get<Button>("ReaderSelectionHighlightMenuButton");
         stylesButton.Flyout!.ShowAt(stylesButton);
         await ReaderTests.Render();
-        Assert.Equal(UiText.Get("黄色"), scope.Get<TextBlock>("ReaderSelectionMarkerColorText").Text);
+        Assert.Equal(Avalonia.Media.Color.Parse("#FFD54F"),
+            Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(
+                scope.Get<Border>("ReaderSelectionMarkerColorPreview").Background).Color);
         var picker = scope.Get<Button>("ReaderSelectionMarkerColorButton");
         ReaderHighlightColorTests.Click(picker);
         await ReaderTests.Render();

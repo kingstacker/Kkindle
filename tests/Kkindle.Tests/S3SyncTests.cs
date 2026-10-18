@@ -966,6 +966,47 @@ public sealed class S3SyncTests
         finally { TestHelpers.TryDelete(root); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvalidSplitBaselineDisablesIncrementalCaptureAndCanBeRepaired(bool validButMismatched)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var snapshot = new S3SyncSnapshot { DeviceId = "state-device" };
+            var state = new S3SyncState
+            {
+                DeviceId = "state-device", StorageIdentity = "storage",
+                LastUploadedSnapshot = snapshot, SnapshotWatermark = snapshot.CreatedAt
+            };
+            var save = typeof(S3SyncService).GetMethod("SaveStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var load = typeof(S3SyncService).GetMethod("LoadStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            await (Task)save.Invoke(service, [state, CancellationToken.None])!;
+            var baselinePath = Path.Combine(paths.Data, "s3-sync-baseline.json.gz");
+            if (validButMismatched)
+            {
+                await using var file = File.Create(baselinePath);
+                await using var gzip = new System.IO.Compression.GZipStream(file, System.IO.Compression.CompressionMode.Compress);
+                await JsonSerializer.SerializeAsync(gzip, new S3SyncSnapshot { DeviceId = "interrupted-write" });
+            }
+            else await File.WriteAllTextAsync(baselinePath, "corrupt gzip");
+
+            var loaded = await (Task<S3SyncState>)load.Invoke(service, ["state-device", "storage", CancellationToken.None])!;
+            Assert.Null(loaded.LastUploadedSnapshot);
+            Assert.Null(loaded.SnapshotWatermark);
+
+            // Re-saving the original snapshot must repair the file even when
+            // its hash still matches the hash in the old state document.
+            await (Task)save.Invoke(service, [state, CancellationToken.None])!;
+            loaded = await (Task<S3SyncState>)load.Invoke(service, ["state-device", "storage", CancellationToken.None])!;
+            Assert.Equal("state-device", loaded.LastUploadedSnapshot!.DeviceId);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     private static string CanonicalSnapshot(S3SyncSnapshot snapshot)
     {
         snapshot.CreatedAt = DateTimeOffset.UnixEpoch;

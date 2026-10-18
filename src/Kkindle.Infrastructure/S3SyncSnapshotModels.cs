@@ -8,13 +8,14 @@ namespace Kkindle.Infrastructure;
 // identified by their content hash and reader rows refer to portable IDs.
 internal sealed class S3SyncSnapshot
 {
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 5;
     public string DeviceId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public S3SyncSettingsSnapshot? Settings { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ReadingDataReset? ReadingDataReset { get; set; }
     public List<S3SyncBook> Books { get; set; } = [];
+    public List<S3SyncBook> ReadingMaterialBooks { get; set; } = [];
     public List<S3SyncBookFile> Files { get; set; } = [];
     public List<S3SyncCollection> Collections { get; set; } = [];
     public List<S3SyncCollectionItem> CollectionItems { get; set; } = [];
@@ -170,6 +171,13 @@ internal sealed class S3SyncLayout
     public bool VerticalWriting { get; set; }
     public bool TwoPageMode { get; set; }
     public bool ParagraphIndent { get; set; }
+    public bool UseBookOverride { get; set; }
+    public ReaderTheme AppearanceTheme { get; set; } = ReaderTheme.Classic;
+    public bool AppearancePaperEnabled { get; set; }
+    public double AppearancePaperStrength { get; set; } = ReaderAppearanceSettings.DefaultPaperStrength;
+    public bool AppearanceFibersEnabled { get; set; }
+    public DateTimeOffset? ProfileUpdatedAt { get; set; }
+    public DateTimeOffset? LayoutUpdatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

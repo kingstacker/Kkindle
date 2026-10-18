@@ -771,6 +771,13 @@
                                 Orientation="Horizontal"
                                 Spacing="8"
                                 SizeChanged="LibraryToolbar_SizeChanged">
+                        <Button x:Name="BackgroundTaskHistoryButton" Classes="quiet libraryToolbar"
+                                ToolTip.Tip="{DynamicResource Ui.Tasks.History}"
+                                AutomationProperties.Name="{DynamicResource Ui.Tasks.History}"
+                                Click="BackgroundTasksButton_Click">
+                            <Path Classes="libraryGlyph"
+                                  Data="M 9,5 H 21 M 9,12 H 21 M 9,19 H 21 M 2,5 L 4,7 L 7,3 M 2,12 L 4,14 L 7,10 M 2,19 L 4,21 L 7,17" />
+                        </Button>
                         <Button x:Name="FilterButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.0289E5BA6BFEA5E2}" Click="FilterButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.B5F15473FDC0FEFE}">
                             <Path Classes="libraryGlyph"
                                   Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
@@ -810,18 +817,8 @@
                                   Classes="libraryGlyph"
                                   Data="M 3,3 H 9 V 9 H 3 Z M 15,3 H 21 V 9 H 15 Z M 3,15 H 9 V 21 H 3 Z M 15,15 H 21 V 21 H 15 Z" />
                         </Button>
-                        <Button x:Name="SendToKindleWebButton"
-                                Classes="quiet libraryToolbar"
-                                ToolTip.Tip="{DynamicResource Ui.KindleWeb.Title}"
-                                AutomationProperties.Name="{DynamicResource Ui.KindleWeb.Title}"
-                                Click="OpenSendToKindleWebButton_Click">
-                            <Path Classes="libraryGlyph" Width="17" Height="17"
-                                  Data="M 22,2 L 15,22 L 11,13 L 2,9 Z M 22,2 L 11,13" />
-                        </Button>
-                        <Button x:Name="ImportButton"
-                                Classes="quiet libraryToolbar"
-                                Height="38"
-                                VerticalAlignment="Center"
+                        <Button x:Name="ImportButton" Classes="quiet libraryToolbar"
+                                Height="38" VerticalAlignment="Center"
                                 ToolTip.Tip="{DynamicResource Ui.Auto.A76D4E4052F3FA6F}"
                                 Click="ImportButton_Click"
                                 AutomationProperties.Name="{DynamicResource Ui.Library.ImportBooks}">
@@ -1347,6 +1344,8 @@
             </Grid>
 
                 <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+                    <Button x:Name="BackgroundTaskStatusButton" Grid.Column="1" IsVisible="False"
+                            Classes="quiet" Click="BackgroundTasksButton_Click" />
                     <TextBlock x:Name="TaskStatusText"
                                Text="{DynamicResource Ui.Auto.1BD1893C09003D8A}"
                                FontSize="11"
@@ -2201,11 +2200,15 @@
                 <StackPanel Grid.Row="1" Margin="6,14,6,14" Orientation="Horizontal" Spacing="10">
                     <TextBox x:Name="ReadingMaterialsSearchBox"
                              Width="420"
+                             Height="36"
+                             VerticalAlignment="Bottom"
                              HorizontalAlignment="Left"
                              PlaceholderText="{DynamicResource Ui.Auto.C813DF885BD71685}"
                              TextChanged="ReadingMaterialsSearchBox_TextChanged" />
                     <ComboBox x:Name="ReadingMaterialsSourceBox"
                               Width="170"
+                              Height="36"
+                              VerticalAlignment="Bottom"
                               SelectedIndex="0"
                               SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
                         <ComboBoxItem Content="Any source" Tag="all" />
@@ -2237,9 +2240,9 @@
                         <ItemsControl ItemsSource="{Binding ReadingMaterialGroups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:Stage3ReadingMaterialGroupViewModel">
-                                    <Border Classes="flatRow" Margin="0,0,0,10">
+                                    <Border Classes="flatRow" Margin="0,0,0,4">
                                         <StackPanel>
-                                            <Grid ColumnDefinitions="Auto,58,*,Auto" ColumnSpacing="0" Margin="0,12,12,12">
+                                            <Grid ColumnDefinitions="Auto,44,*" ColumnSpacing="0" Margin="0,10,12,10">
                                                 <CheckBox Grid.Column="0"
                                                           IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                                           IsVisible="{Binding IsExportMode}"
@@ -2247,42 +2250,32 @@
                                                           VerticalAlignment="Center"
                                                           Margin="0,0,12,0"
                                                           Click="ReadingMaterialSelectionChanged" />
-                                                <Border Grid.Column="1" Width="48" Height="64" HorizontalAlignment="Left" Background="{DynamicResource CoverBrush}" BorderBrush="{DynamicResource InkBrush}" BorderThickness="1">
+                                                <Border Grid.Column="1" Width="40" Height="54" HorizontalAlignment="Left" Background="{DynamicResource CoverBrush}" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
                                                     <Grid>
                                                         <TextBlock Text="BOOK" FontSize="8" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding HasNoCover}" />
                                                         <Image Source="{Binding CoverImage}" Stretch="UniformToFill" IsVisible="{Binding HasCover}" />
                                                     </Grid>
                                                 </Border>
-                                                <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center" Margin="12,0,0,0">
+                                                <Button Grid.Column="2" Classes="quiet" BorderThickness="0" Background="Transparent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="12,4" Tag="{Binding}" Click="ReadingMaterialGroupToggleButton_Click" AutomationProperties.Name="{Binding ExpandLabel}">
+                                                <StackPanel Spacing="5" VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding DisplayBookTitle}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                                         <TextBlock Text="{Binding SourceLabel}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                                                        <TextBlock Text="·" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                                         <TextBlock Text="{Binding CountLabel}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                                     </StackPanel>
                                                 </StackPanel>
-                                                <Button Grid.Column="3"
-                                                        Tag="{Binding}"
-                                                        AutomationProperties.Name="{Binding ExpandLabel}"
-                                                        ToolTip.Tip="{Binding ExpandLabel}"
-                                                        Classes="quiet libraryToolbar"
-                                                        VerticalAlignment="Center"
-                                                        Margin="12,0,0,0"
-                                                        Click="ReadingMaterialGroupToggleButton_Click">
-                                                    <Grid Width="18" Height="18">
-                                                        <Path Classes="libraryGlyph" Data="M 5,8 L 12,15 L 19,8" IsVisible="{Binding IsCollapsed}" />
-                                                        <Path Classes="libraryGlyph" Data="M 5,15 L 12,8 L 19,15" IsVisible="{Binding IsExpanded}" />
-                                                    </Grid>
                                                 </Button>
                                             </Grid>
                                             <ItemsControl ItemsSource="{Binding Items}" IsVisible="{Binding IsExpanded}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate x:DataType="local:Stage3ReadingMaterialViewModel">
-                                                        <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="12,10" DoubleTapped="ReadingMaterialEntry_DoubleTapped" PointerEntered="ReadingMaterialEntry_PointerEntered" PointerExited="ReadingMaterialEntry_PointerExited">
+                                                        <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Margin="56,0,12,0" Padding="0,16" DoubleTapped="ReadingMaterialEntry_DoubleTapped" PointerEntered="ReadingMaterialEntry_PointerEntered" PointerExited="ReadingMaterialEntry_PointerExited">
                                                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                                                                 <CheckBox IsChecked="{Binding IsSelected}"
                                                                           VerticalAlignment="Top"
                                                                           Click="ReadingMaterialSelectionChanged" />
-                                                                <StackPanel Grid.Column="1" Spacing="5">
+                                                                <StackPanel Grid.Column="1" Spacing="10">
                                                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                                                         <TextBlock Text="{Binding SourceLabel}"
                                                                                    FontSize="10"
@@ -2293,14 +2286,16 @@
                                                                     </StackPanel>
                                                                     <TextBlock Text="{Binding ChapterDisplayLabel}"
                                                                                FontSize="11"
-                                                                               FontWeight="SemiBold"
+                                                                               Foreground="{DynamicResource MutedInkBrush}"
                                                                                TextWrapping="Wrap" />
-                                                                    <TextBlock Text="{Binding SelectedContentLabel}"
-                                                                               FontSize="12"
+                                                                    <Border BorderBrush="{DynamicResource SubtleInkBrush}" BorderThickness="2,0,0,0" Padding="12,2,0,2" IsVisible="{Binding IsNotBookReflection}">
+                                                                    <TextBlock Text="{Binding QuoteLabel}"
+                                                                               FontSize="13" LineHeight="22"
                                                                                MaxLines="8"
                                                                                TextTrimming="CharacterEllipsis"
                                                                                TextWrapping="Wrap"
                                                                                IsVisible="{Binding IsNotBookReflection}" />
+                                                                    </Border>
                                                                      <TextBlock Text="{Binding ReflectionPreviewText}"
                                                                                 FontSize="12"
                                                                                 MaxLines="1"
@@ -2310,10 +2305,13 @@
                                                                                 IsVisible="{Binding IsBookReflection}">
                                                                      </TextBlock>
                                                                     <TextBlock Text="{Binding NoteLabel}"
-                                                                               FontSize="11"
-                                                                               Foreground="{DynamicResource MutedInkBrush}"
+                                                                               FontSize="13" LineHeight="22"
                                                                                IsVisible="{Binding HasNote}"
                                                                                TextWrapping="Wrap" />
+                                                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                                                        <TextBlock Text="{Binding Location}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" />
+                                                                        <TextBlock Text="{Binding DateLabel}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" />
+                                                                    </StackPanel>
                                                                 </StackPanel>
                                                             </Grid>
                                                         </Border>
@@ -2396,16 +2394,6 @@
                                    IsVisible="False" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
-                        <ComboBox x:Name="DashboardRangeBox"
-                                  Width="118"
-                                  Height="32"
-                                  VerticalAlignment="Center"
-                                  SelectedIndex="1"
-                                  SelectionChanged="DashboardRangeBox_SelectionChanged">
-                            <ComboBoxItem Content="{DynamicResource Ui.Auto.2261B06712A3C505}" Tag="7" />
-                            <ComboBoxItem Content="{DynamicResource Ui.Auto.0188E32B20BCE1BC}" Tag="14" />
-                            <ComboBoxItem Content="{DynamicResource Ui.Auto.F729BB3D3F7EF33C}" Tag="30" />
-                        </ComboBox>
                         <Button x:Name="RefreshReadingDashboardButton" Content="{DynamicResource Ui.Auto.BC87A4121A0873B3}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingDashboardButton_Click" />
                         <Button x:Name="ExportReadingDashboardButton" Content="{DynamicResource Ui.Auto.E40A628FFEC72072}" ContentTemplate="{StaticResource LibraryExportActionContent}" Classes="quiet libraryToolbar" Click="ExportReadingDashboardButton_Click" />
                     </StackPanel>
@@ -2448,11 +2436,20 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
-                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="16">
+                        <Grid x:Name="DashboardChartsGrid" ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="16" Grid.IsSharedSizeScope="True">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" SharedSizeGroup="DashboardChartRow" />
+                                <RowDefinition Height="Auto" SharedSizeGroup="DashboardChartRow" />
+                            </Grid.RowDefinitions>
                             <Border Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
-                                <StackPanel Spacing="10">
-                                    <TextBlock Text="{DynamicResource Ui.Auto.7644551F37492A5D}" FontSize="14" FontWeight="SemiBold" />
-                                    <ItemsControl ItemsSource="{Binding DashboardDays}" AutomationProperties.Name="{DynamicResource Ui.Auto.83A25C492C9A33C4}">
+                                <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                                    <Button x:Name="DashboardDailyRangeButton" Classes="quiet" Padding="0"
+                                            BorderThickness="0" Background="Transparent" MinHeight="0"
+                                            HorizontalAlignment="Left" Cursor="Hand"
+                                            Click="DashboardDailyRangeButton_Click">
+                                        <TextBlock x:Name="DashboardDailyTitleText" Text="{DynamicResource Ui.Auto.7644551F37492A5D}" FontSize="14" FontWeight="SemiBold" />
+                                    </Button>
+                                    <ItemsControl x:Name="DashboardDaysChart" Grid.Row="1" MinHeight="220" Padding="16,0" ItemsSource="{Binding DashboardDays}" AutomationProperties.Name="{DynamicResource Ui.Auto.83A25C492C9A33C4}">
                                         <ItemsControl.Styles>
                                             <Style Selector="ContentPresenter">
                                                 <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -2460,69 +2457,82 @@
                                         </ItemsControl.Styles>
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <WrapPanel Orientation="Horizontal" />
+                                                <UniformGrid Rows="1" UseLayoutRounding="False" />
                                             </ItemsPanelTemplate>
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardDayViewModel">
-                                                <Grid Width="44" Height="170" RowDefinitions="*,Auto,Auto" Margin="2,0" ToolTip.Tip="{Binding TimeLabel}">
+                                                <Grid MinHeight="220" RowDefinitions="*,18,18" Margin="2,0" ToolTip.Tip="{Binding DetailLabel}">
                                                     <Border VerticalAlignment="Bottom"
                                                             Height="{Binding BarHeight}"
-                                                            CornerRadius="2"
+                                                            CornerRadius="0"
                                                             Opacity="{Binding BarOpacity}"
                                                             Background="{DynamicResource InkBrush}"
-                                                            ToolTip.Tip="{Binding TimeLabel}" />
-                                                    <TextBlock Grid.Row="1" Text="{Binding TimeLabel}" FontSize="9" TextAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
-                                                    <TextBlock Grid.Row="2" Text="{Binding DateLabel}" FontSize="9" Foreground="{DynamicResource MutedInkBrush}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                            ToolTip.Tip="{Binding DetailLabel}" />
+                                                    <TextBlock Grid.Row="1" Width="44" HorizontalAlignment="Center" Text="{Binding TimeLabel}" FontSize="9" TextAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+                                                    <TextBlock Grid.Row="2" Width="44" HorizontalAlignment="Center" Text="{Binding DateLabel}" FontSize="9" Foreground="{DynamicResource MutedInkBrush}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                </StackPanel>
+                                </Grid>
                             </Border>
                             <Border Grid.Column="1" Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
-                                <StackPanel Spacing="8">
+                                <Grid RowDefinitions="Auto,*" RowSpacing="10">
                                     <TextBlock Text="{DynamicResource Ui.Auto.57A00AA8DDA6EA8E}" FontSize="14" FontWeight="SemiBold" />
-                                    <ItemsControl ItemsSource="{Binding DashboardBookTimes}" AutomationProperties.Name="{DynamicResource Ui.Auto.FB37D1646C81A5BA}">
+                                    <ItemsControl x:Name="DashboardBookTimesChart" Grid.Row="1" MinHeight="220" ItemsSource="{Binding DashboardBookTimes}" AutomationProperties.Name="{DynamicResource Ui.Auto.FB37D1646C81A5BA}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Columns="1" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardBarViewModel">
-                                                <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8" Margin="0,4" ToolTip.Tip="{Binding ValueLabel}">
+                                                <Grid Classes="dashboardBarRow" Background="Transparent" ColumnDefinitions="120,*,Auto" ColumnSpacing="8" Margin="0,4" ToolTip.Tip="{Binding ValueLabel}">
                                                     <TextBlock Text="{Binding Label}" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding Label}" />
-                                                    <Border Grid.Column="1" Width="{Binding BarWidth}" Height="10" CornerRadius="2" Background="{DynamicResource InkBrush}" HorizontalAlignment="Left" />
+                                                    <Border Classes="dashboardBar" Grid.Column="1" Width="{Binding BarWidth}" Height="7" VerticalAlignment="Center" HorizontalAlignment="Left" />
                                                     <TextBlock Grid.Column="2" Text="{Binding ValueLabel}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                </StackPanel>
+                                </Grid>
                             </Border>
                             <Border Grid.Row="1" Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
-                                <StackPanel Spacing="8">
+                                <Grid RowDefinitions="Auto,*" RowSpacing="10">
                                     <TextBlock Text="{DynamicResource Ui.Auto.C89EA308CEDC2ECC}" FontSize="14" FontWeight="SemiBold" />
-                                    <ItemsControl ItemsSource="{Binding DashboardProgressBuckets}" AutomationProperties.Name="{DynamicResource Ui.Auto.A0994B78FD83CF3A}">
+                                    <ItemsControl x:Name="DashboardProgressChart" Grid.Row="1" MinHeight="220" ItemsSource="{Binding DashboardProgressBuckets}" AutomationProperties.Name="{DynamicResource Ui.Auto.A0994B78FD83CF3A}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Columns="1" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:Stage3DashboardBarViewModel">
-                                                <Grid ColumnDefinitions="70,*,Auto" ColumnSpacing="8" Margin="0,4" ToolTip.Tip="{Binding ValueLabel}">
+                                                <Grid Classes="dashboardBarRow" Background="Transparent" ColumnDefinitions="70,*,Auto" ColumnSpacing="8" Margin="0,4" ToolTip.Tip="{Binding ValueLabel}">
                                                     <TextBlock Text="{Binding Label}" FontSize="11" VerticalAlignment="Center" />
-                                                    <Border Grid.Column="1" Width="{Binding BarWidth}" Height="10" CornerRadius="2" Background="{DynamicResource InkBrush}" HorizontalAlignment="Left" />
+                                                    <Grid Grid.Column="1" Width="210" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                        <Border Height="1" Background="{DynamicResource HairlineBrush}" VerticalAlignment="Center" />
+                                                        <Border Classes="dashboardBar" Width="{Binding BarWidth}" Height="6" VerticalAlignment="Center" HorizontalAlignment="Left" />
+                                                    </Grid>
                                                     <TextBlock Grid.Column="2" Text="{Binding ValueLabel}" FontSize="10" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                </StackPanel>
+                                </Grid>
                             </Border>
                             <Border Grid.Row="1" Grid.Column="1" Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
-                                <StackPanel Spacing="8">
+                                <Grid RowDefinitions="Auto,*" RowSpacing="10">
                                     <TextBlock Text="{DynamicResource Ui.Auto.E06FCFAF83B0B55C}" FontSize="14" FontWeight="SemiBold" />
-                                    <ScrollViewer x:Name="DashboardRecentScrollViewer" Classes="dashboardScroll"
+                                    <ScrollViewer x:Name="DashboardRecentScrollViewer" Grid.Row="1" MinHeight="220" Classes="dashboardScroll"
                                                   MaxHeight="220"
                                                   VerticalScrollBarVisibility="Auto"
                                                   AutomationProperties.Name="{DynamicResource Ui.Auto.914F86CA5C6739D9}">
                                         <ItemsControl ItemsSource="{Binding DashboardRecentItems}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="local:Stage3DashboardRecentViewModel">
-                                                    <Border Padding="0,8"
+                                                    <Border Height="44" Padding="0,4"
                                                             Background="Transparent"
                                                             DoubleTapped="DashboardRecentBook_DoubleTapped"
                                                             BorderBrush="{DynamicResource HairlineBrush}"
@@ -2542,13 +2552,13 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
                                     </ScrollViewer>
-                                    <TextBlock x:Name="DashboardRecentEmptyText"
+                                    <TextBlock x:Name="DashboardRecentEmptyText" Grid.Row="1" VerticalAlignment="Center"
                                                Text="{DynamicResource Ui.Auto.DF7356640E9FC306}"
                                                FontSize="11"
                                                Foreground="{DynamicResource MutedInkBrush}"
                                                TextWrapping="Wrap"
                                                IsVisible="False" />
-                                </StackPanel>
+                                </Grid>
                             </Border>
                         </Grid>
                         <Border Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16,24,16,16">
@@ -2578,6 +2588,66 @@
                                    ToolTip.Tip="{DynamicResource Ui.Auto.709BDE6F962E3F2A}" />
                         <TextBlock x:Name="SettingsStatusText" Text=""
                                    IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                        <StackPanel x:Name="SettingsSearchPanel" Spacing="6" Margin="0,8,0,0">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                <TextBox x:Name="SettingsSearchBox"
+                                         PlaceholderText="{DynamicResource Ui.Settings.Search.Placeholder}"
+                                         AutomationProperties.Name="{DynamicResource Ui.Settings.Search.Placeholder}"
+                                         TextChanged="SettingsSearchBox_TextChanged"
+                                         KeyDown="SettingsSearchBox_KeyDown" />
+                                <Button x:Name="SettingsSearchClearButton"
+                                        Grid.Column="1"
+                                        Classes="quiet settingsSearchClear"
+                                        Width="38"
+                                        MinWidth="38"
+                                        Padding="0"
+                                        Content="×"
+                                        ToolTip.Tip="{DynamicResource Ui.Settings.Search.Clear}"
+                                        AutomationProperties.Name="{DynamicResource Ui.Settings.Search.Clear}"
+                                        IsVisible="False"
+                                        Click="SettingsSearchClearButton_Click" />
+                            </Grid>
+                            <TextBlock x:Name="SettingsSearchNoResultsText"
+                                       Text="{DynamicResource Ui.Settings.Search.NoResults}"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       TextWrapping="Wrap"
+                                       IsVisible="False" />
+                            <Border x:Name="SettingsSearchResultsPanel"
+                                    Classes="flatSubsection settingsSearchResults"
+                                    MaxHeight="236"
+                                    Padding="0"
+                                    IsVisible="False">
+                                <ScrollViewer MaxHeight="236"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsControl x:Name="SettingsSearchResults">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:SettingsSearchResult">
+                                                <Button Classes="quiet settingsSearchResult"
+                                                        Tag="{Binding}"
+                                                        HorizontalContentAlignment="Stretch"
+                                                        AutomationProperties.Name="{Binding AccessibleName}"
+                                                        Click="SettingsSearchResultButton_Click">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                        <StackPanel Spacing="2">
+                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding Detail}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding CategoryLabel}"
+                                                                   FontSize="11"
+                                                                   Foreground="{DynamicResource MutedInkBrush}"
+                                                                   VerticalAlignment="Center"
+                                                                   TextWrapping="Wrap" />
+                                                    </Grid>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
                     <WrapPanel x:Name="SettingsCategoryButtons" Grid.Row="1" Margin="0,20,0,16" Orientation="Horizontal">
                         <Button x:Name="SettingsGeneralButton" Content="{DynamicResource Ui.Settings.Category.General}" Classes="settingsCategory" Tag="General" Click="SettingsCategoryButton_Click" />
@@ -2613,10 +2683,10 @@
                                                 <SolidColorBrush x:Key="ThemeOptionInk" Color="#000000" />
                                             </ComboBoxItem.Resources>
                                         </ComboBoxItem>
-                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Night}" Tag="Night">
+                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Beige}" Tag="Beige">
                                             <ComboBoxItem.Resources>
-                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#20231F" />
-                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#E5E5DB" />
+                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#F4F2EC" />
+                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#303030" />
                                             </ComboBoxItem.Resources>
                                         </ComboBoxItem>
                                         <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Green}" Tag="Green">
@@ -2625,20 +2695,9 @@
                                                 <SolidColorBrush x:Key="ThemeOptionInk" Color="#27392A" />
                                             </ComboBoxItem.Resources>
                                         </ComboBoxItem>
-                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.MistBlue}" Tag="MistBlue">
-                                            <ComboBoxItem.Resources>
-                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#E8EFF5" />
-                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#283746" />
-                                            </ComboBoxItem.Resources>
-                                        </ComboBoxItem>
-                                        <ComboBoxItem Classes="mainThemeOption" Content="{DynamicResource Ui.Appearance.Ivory}" Tag="Ivory">
-                                            <ComboBoxItem.Resources>
-                                                <SolidColorBrush x:Key="ThemeOptionPaper" Color="#F8F5EC" />
-                                                <SolidColorBrush x:Key="ThemeOptionInk" Color="#37342D" />
-                                            </ComboBoxItem.Resources>
-                                        </ComboBoxItem>
                                     </ComboBox>
                                 </Grid>
+                                <TextBlock Text="{DynamicResource Ui.Settings.Group.Network}" Classes="settingsSectionTitle" Margin="0,16,0,0" TextWrapping="Wrap" />
                                 <ToggleSwitch x:Name="NetworkEnabledCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.D7842A57D154C697}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.098925F827B88E7A}" AutomationProperties.Name="{DynamicResource Ui.Auto.098925F827B88E7A}" />
                                             <Grid x:Name="TranslationGoogleProxyPane" ColumnDefinitions="*,220" ColumnSpacing="12" Background="Transparent" ToolTip.Tip="{DynamicResource Ui.Auto.8B7B5D7E5F3A1C20}">
                                                 <TextBlock Text="{DynamicResource Ui.Auto.4D6C4A7B0E6E3A11}" FontSize="14" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.8B7B5D7E5F3A1C20}" />
@@ -2655,6 +2714,7 @@
                                 <ToggleSwitch x:Name="ShowSyncStatusIconCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.ShowSyncStatusIconHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Library.ShowSyncStatusIcon}" AutomationProperties.Name="{DynamicResource Ui.Library.ShowSyncStatusIcon}" />
                                 <ToggleSwitch x:Name="ShowLibraryPresenceIconCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.ShowPresenceIconHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Library.ShowPresenceIcon}" AutomationProperties.Name="{DynamicResource Ui.Library.ShowPresenceIcon}" />
                                 <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.CollectionsMutuallyExclusiveHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.F6A273284E344858}" AutomationProperties.Name="{DynamicResource Ui.Auto.F6A273284E344858}" />
+                                <TextBlock Text="{DynamicResource Ui.Settings.Group.Import}" Classes="settingsSectionTitle" Margin="0,16,0,0" TextWrapping="Wrap" />
                                 <ToggleSwitch x:Name="AutoDoubanMatchCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.4799DAF25FD6C6CC}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" AutomationProperties.Name="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" />
                                 <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.8B0CC19DB0791E72}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.55A2226420BCBF78}" AutomationProperties.Name="{DynamicResource Ui.Auto.55A2226420BCBF78}" />
                                 <Expander x:Name="SettingsCalibreExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.39F073ED740B19B8}" Tag="{DynamicResource Ui.Auto.76B87E0C608BEE4A}" AutomationProperties.Name="{DynamicResource Ui.Auto.39F073ED740B19B8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
@@ -4120,6 +4180,229 @@
                                     Content="{DynamicResource Ui.Auto.2326E4996E2C8C85}"
                                     Padding="13,7"
                                     Click="DoubanPreviewApplyButton_Click" />
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Grid x:Name="TxtImportRulesOverlay"
+                  Grid.ColumnSpan="3"
+                  Background="#66000000"
+                  IsVisible="False"
+                  ZIndex="107"
+                  Focusable="True"
+                  KeyDown="TxtImportRulesOverlay_KeyDown">
+                <Border MaxWidth="820"
+                        MaxHeight="720"
+                        Margin="18"
+                        Background="{DynamicResource PaperBrush}"
+                        BorderBrush="{DynamicResource InkBrush}"
+                        BorderThickness="1"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Center">
+                    <Grid RowDefinitions="Auto,*,Auto">
+                        <StackPanel Margin="28,22,28,16" Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Rectangle Width="10" Height="24" Fill="{DynamicResource InkBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="{DynamicResource Ui.TxtImport.Title}"
+                                           FontSize="24"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="TxtImportFileTitleText"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Text="{DynamicResource Ui.TxtImport.Description}"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="Auto,10,Auto,*,Auto,8,Auto" ColumnSpacing="8">
+                                <Button x:Name="TxtImportPreviousFileButton"
+                                        Content="{DynamicResource Ui.TxtImport.PreviousFile}"
+                                        Classes="quiet"
+                                        Padding="10,5"
+                                        Click="TxtImportPreviousFileButton_Click" />
+                                <Button x:Name="TxtImportNextFileButton"
+                                        Grid.Column="2"
+                                        Content="{DynamicResource Ui.TxtImport.NextFile}"
+                                        Classes="quiet"
+                                        Padding="10,5"
+                                        Click="TxtImportNextFileButton_Click" />
+                                <TextBlock x:Name="TxtImportFilePageText"
+                                           Grid.Column="4"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource MutedInkBrush}"
+                                           VerticalAlignment="Center" />
+                                <Button x:Name="TxtImportResetFileButton"
+                                        Grid.Column="6"
+                                        Content="{DynamicResource Ui.TxtImport.ResetFile}"
+                                        Classes="quiet"
+                                        Padding="10,5"
+                                        Click="TxtImportResetFileButton_Click" />
+                            </Grid>
+                        </StackPanel>
+
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <Grid Margin="28,0,28,14"
+                                  ColumnDefinitions="300,*"
+                                  ColumnSpacing="22">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="{DynamicResource Ui.TxtImport.Encoding}"
+                                               FontWeight="SemiBold" />
+                                    <ComboBox x:Name="TxtImportEncodingBox"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="TxtImportEncodingBox_SelectionChanged">
+                                        <ComboBoxItem Tag="Auto" Content="{DynamicResource Ui.TxtImport.Encoding.Auto}" />
+                                        <ComboBoxItem Tag="Utf8" Content="UTF-8" />
+                                        <ComboBoxItem Tag="Utf16LittleEndian" Content="UTF-16 LE" />
+                                        <ComboBoxItem Tag="Utf16BigEndian" Content="UTF-16 BE" />
+                                        <ComboBoxItem Tag="Gb18030" Content="GB18030" />
+                                    </ComboBox>
+
+                                    <TextBlock Text="{DynamicResource Ui.TxtImport.HeadingRule}"
+                                               FontWeight="SemiBold"
+                                               Margin="0,4,0,0" />
+                                    <ComboBox x:Name="TxtImportHeadingRuleBox"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="TxtImportHeadingRuleBox_SelectionChanged">
+                                        <ComboBoxItem Tag="Automatic" Content="{DynamicResource Ui.TxtImport.Rule.Automatic}" />
+                                        <ComboBoxItem Tag="ChineseNumbered" Content="{DynamicResource Ui.TxtImport.Rule.Chinese}" />
+                                        <ComboBoxItem Tag="EnglishChapter" Content="{DynamicResource Ui.TxtImport.Rule.English}" />
+                                        <ComboBoxItem Tag="SpecialHeadings" Content="{DynamicResource Ui.TxtImport.Rule.Special}" />
+                                        <ComboBoxItem Tag="NoHeadings" Content="{DynamicResource Ui.TxtImport.Rule.None}" />
+                                        <ComboBoxItem Tag="CustomRegex" Content="{DynamicResource Ui.TxtImport.Rule.Custom}" />
+                                    </ComboBox>
+                                    <TextBox x:Name="TxtImportCustomPatternBox"
+                                             IsVisible="False"
+                                             PlaceholderText="{DynamicResource Ui.TxtImport.CustomPattern.Placeholder}"
+                                             TextChanged="TxtImportCustomPatternBox_TextChanged" />
+                                    <CheckBox x:Name="TxtImportVolumesBox"
+                                              Content="{DynamicResource Ui.TxtImport.RecognizeVolumes}"
+                                              IsChecked="True"
+                                              Click="TxtImportVolumesBox_Click" />
+
+                                    <Border Margin="0,8,0,0"
+                                            Padding="12"
+                                            BorderBrush="{DynamicResource HairlineBrush}"
+                                            BorderThickness="1">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="{DynamicResource Ui.TxtImport.Correction.Title}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Ui.TxtImport.Correction.Help}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource MutedInkBrush}"
+                                                       TextWrapping="Wrap" />
+                                            <Grid ColumnDefinitions="88,*" ColumnSpacing="8">
+                                                <TextBox x:Name="TxtImportCorrectionLineBox"
+                                                         PlaceholderText="{DynamicResource Ui.TxtImport.Correction.Line}" />
+                                                <TextBox x:Name="TxtImportCorrectionTitleBox"
+                                                         Grid.Column="1"
+                                                         PlaceholderText="{DynamicResource Ui.TxtImport.Correction.Heading}" />
+                                            </Grid>
+                                            <ComboBox x:Name="TxtImportCorrectionHeadingBox"
+                                                      SelectedIndex="0"
+                                                      HorizontalAlignment="Stretch">
+                                                <ComboBoxItem Tag="Auto" Content="{DynamicResource Ui.TxtImport.Correction.KeepRule}" />
+                                                <ComboBoxItem Tag="True" Content="{DynamicResource Ui.TxtImport.Correction.ForceHeading}" />
+                                                <ComboBoxItem Tag="False" Content="{DynamicResource Ui.TxtImport.Correction.ForceText}" />
+                                            </ComboBox>
+                                            <ComboBox x:Name="TxtImportCorrectionVolumeBox"
+                                                      SelectedIndex="0"
+                                                      HorizontalAlignment="Stretch">
+                                                <ComboBoxItem Tag="Auto" Content="{DynamicResource Ui.TxtImport.Correction.KeepVolume}" />
+                                                <ComboBoxItem Tag="True" Content="{DynamicResource Ui.TxtImport.Correction.ForceVolume}" />
+                                                <ComboBoxItem Tag="False" Content="{DynamicResource Ui.TxtImport.Correction.ForceChapter}" />
+                                            </ComboBox>
+                                            <Button Content="{DynamicResource Ui.TxtImport.Correction.Apply}"
+                                                    Classes="quiet"
+                                                    HorizontalAlignment="Stretch"
+                                                    Click="TxtImportCorrectionApplyButton_Click" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Spacing="10">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="{DynamicResource Ui.TxtImport.Preview.Title}"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                        <Button x:Name="TxtImportRefreshPreviewButton"
+                                                Grid.Column="1"
+                                                Content="{DynamicResource Ui.TxtImport.Preview.Refresh}"
+                                                Classes="quiet"
+                                                Padding="10,5"
+                                                Click="TxtImportRefreshPreviewButton_Click" />
+                                    </Grid>
+                                    <TextBlock x:Name="TxtImportPreviewStatusText"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               TextWrapping="Wrap" />
+                                    <Border BorderBrush="{DynamicResource HairlineBrush}"
+                                            BorderThickness="1"
+                                            Padding="10,6"
+                                            MinHeight="250">
+                                        <ScrollViewer MaxHeight="320"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl x:Name="TxtImportPreviewItems">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:TxtImportPreviewDisplayItem">
+                                                        <Grid ColumnDefinitions="64,*,Auto"
+                                                              ColumnSpacing="10"
+                                                              Margin="0,5">
+                                                            <TextBlock Text="{Binding Number}"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource MutedInkBrush}" />
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding Title}"
+                                                                       TextWrapping="Wrap" />
+                                                            <TextBlock Grid.Column="2"
+                                                                       Text="{Binding Detail}"
+                                                                       FontSize="11"
+                                                                       Foreground="{DynamicResource MutedInkBrush}"
+                                                                       VerticalAlignment="Center" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Border>
+                                    <Grid ColumnDefinitions="*,10,*">
+                                        <Button x:Name="TxtImportPreviewPreviousButton"
+                                                Content="{DynamicResource Ui.TxtImport.Preview.Previous}"
+                                                Classes="quiet"
+                                                HorizontalAlignment="Stretch"
+                                                Click="TxtImportPreviewPreviousButton_Click" />
+                                        <Button x:Name="TxtImportPreviewNextButton"
+                                                Grid.Column="2"
+                                                Content="{DynamicResource Ui.TxtImport.Preview.Next}"
+                                                Classes="quiet"
+                                                HorizontalAlignment="Stretch"
+                                                Click="TxtImportPreviewNextButton_Click" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+                        </ScrollViewer>
+
+                        <Grid Grid.Row="2"
+                              Margin="28,14,28,22"
+                              ColumnDefinitions="*,12,*,12,*">
+                            <Button Content="{DynamicResource Ui.TxtImport.Confirm}"
+                                    HorizontalAlignment="Stretch"
+                                    Click="TxtImportConfirmButton_Click" />
+                            <Button Grid.Column="2"
+                                    Content="{DynamicResource Ui.TxtImport.ResetAll}"
+                                    Classes="quiet"
+                                    HorizontalAlignment="Stretch"
+                                    Click="TxtImportResetAllButton_Click" />
+                            <Button Grid.Column="4"
+                                    Content="{DynamicResource Ui.TxtImport.Cancel}"
+                                    Classes="quiet"
+                                    HorizontalAlignment="Stretch"
+                                    Click="TxtImportCancelButton_Click" />
                         </Grid>
                     </Grid>
                 </Border>
@@ -6062,8 +6345,36 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="22,20" Spacing="12">
                                 <TextBlock Text="{DynamicResource Ui.Reader.Settings}" FontSize="20" FontWeight="SemiBold" />
+                                <Border Padding="12"
+                                        Background="{DynamicResource ReaderHoverBrush}"
+                                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                                        BorderThickness="1">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="{DynamicResource Ui.Reader.LayoutScopeTitle}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold" />
+                                        <StackPanel Orientation="Horizontal" Spacing="18">
+                                            <RadioButton x:Name="ReaderBookScopeGlobalOption"
+                                                         GroupName="ReaderBookScope"
+                                                         Tag="global"
+                                                         Content="{DynamicResource Ui.Reader.LayoutScopeGlobal}"
+                                                         IsCheckedChanged="ReaderBookScopeOption_IsCheckedChanged" />
+                                            <RadioButton x:Name="ReaderBookScopeBookOption"
+                                                         GroupName="ReaderBookScope"
+                                                         Tag="book"
+                                                         Content="{DynamicResource Ui.Reader.LayoutScopeBook}"
+                                                         IsCheckedChanged="ReaderBookScopeOption_IsCheckedChanged" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="ReaderBookScopeHint"
+                                                   Text="{DynamicResource Ui.Reader.LayoutScopeHint}"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="False" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock Text="{DynamicResource Ui.Reader.Appearance}" FontSize="13" FontWeight="SemiBold" />
-                                <UniformGrid Columns="5" Rows="1">
+                                <UniformGrid Columns="3" Rows="1">
                                     <RadioButton x:Name="ReaderClassicThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="Classic"
                                                  IsCheckedChanged="ReaderThemeOption_IsCheckedChanged">
                                         <StackPanel Spacing="7">
@@ -6073,13 +6384,13 @@
                                             <TextBlock Text="{DynamicResource Ui.Reader.Theme.Classic}" HorizontalAlignment="Center" />
                                         </StackPanel>
                                     </RadioButton>
-                                    <RadioButton x:Name="ReaderNightThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="Night"
+                                    <RadioButton x:Name="ReaderBeigeThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="Beige"
                                                  IsCheckedChanged="ReaderThemeOption_IsCheckedChanged">
                                         <StackPanel Spacing="7">
-                                            <Border Background="#242623" Height="38">
-                                                <TextBlock Text="Aa" Foreground="#DDDACE" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border Background="#F4F2EC" Height="38">
+                                                <TextBlock Text="Aa" Foreground="#303030" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <TextBlock Text="{DynamicResource Ui.Reader.Theme.Night}" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{DynamicResource Ui.Reader.Theme.Beige}" HorizontalAlignment="Center" />
                                         </StackPanel>
                                     </RadioButton>
                                     <RadioButton x:Name="ReaderGreenThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="Green"
@@ -6089,24 +6400,6 @@
                                                 <TextBlock Text="Aa" Foreground="#29382D" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                             <TextBlock Text="{DynamicResource Ui.Reader.Theme.Green}" HorizontalAlignment="Center" />
-                                        </StackPanel>
-                                    </RadioButton>
-                                    <RadioButton x:Name="ReaderMistBlueThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="MistBlue"
-                                                 IsCheckedChanged="ReaderThemeOption_IsCheckedChanged">
-                                        <StackPanel Spacing="7">
-                                            <Border Background="#E8EFF5" Height="38">
-                                                <TextBlock Text="Aa" Foreground="#283746" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <TextBlock Text="{DynamicResource Ui.Reader.Theme.MistBlue}" HorizontalAlignment="Center" />
-                                        </StackPanel>
-                                    </RadioButton>
-                                    <RadioButton x:Name="ReaderIvoryThemeOption" Classes="readerThemeOption" GroupName="ReaderTheme" Tag="Ivory"
-                                                 IsCheckedChanged="ReaderThemeOption_IsCheckedChanged">
-                                        <StackPanel Spacing="7">
-                                            <Border Background="#F8F5EC" Height="38">
-                                                <TextBlock Text="Aa" Foreground="#37342D" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <TextBlock Text="{DynamicResource Ui.Reader.Theme.Ivory}" HorizontalAlignment="Center" />
                                         </StackPanel>
                                     </RadioButton>
                                 </UniformGrid>
@@ -6126,8 +6419,6 @@
                                               IsCheckedChanged="ReaderPaperCheck_IsCheckedChanged" />
                                 </StackPanel>
                                 <TextBlock Text="{DynamicResource Ui.Reader.PaperHint}" FontSize="11" Foreground="{DynamicResource ReaderMutedBrush}" TextWrapping="Wrap" />
-                                <TextBlock x:Name="ReaderNightPaperHint" Text="{DynamicResource Ui.Reader.NightPaperHint}" FontSize="11"
-                                           Foreground="{DynamicResource ReaderMutedBrush}" TextWrapping="Wrap" IsVisible="False" />
                                 <TextBlock x:Name="ReaderAppearanceSaveStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
                                 <Border Height="1" Background="{DynamicResource ReaderBorderBrush}" Margin="0,4" />
                                 <TextBlock Text="{DynamicResource Ui.Reader.Layout}" FontSize="13" FontWeight="SemiBold" />

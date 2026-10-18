@@ -836,12 +836,13 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null)
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null,
+        IReadOnlyDictionary<string, TxtImportRules>? txtImportRules = null)
     {
         IsBusy = true;
         try
         {
-            var result = await _library.ImportAsync(paths, progress, cancellationToken, conflictResolver);
+            var result = await _library.ImportAsync(paths, progress, cancellationToken, conflictResolver, txtImportRules);
             await RefreshAsync(cancellationToken);
             StatusText = result.FailureCount == 0
                 ? result.SkippedCount == 0

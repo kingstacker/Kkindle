@@ -19,7 +19,7 @@ public sealed partial class SettingsTests
             await Render();
             var labels = scope.Get<Button>("KindleBooksButton").GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text).ToArray();
             Assert.Contains(language == "zh-CN" ? "设备书库" : "Device library", labels);
-            Assert.Equal(language == "zh-CN" ? "设备与账户" : "Devices & accounts", scope.Get<Button>("SettingsKindleButton").Content);
+            Assert.Equal(language == "zh-CN" ? "设备与传输" : "Devices & transfer", scope.Get<Button>("SettingsKindleButton").Content);
             Assert.Contains("Kindle", UiText.Get("发送到 Kindle 邮箱"));
             Assert.Equal(language == "zh-CN" ? "当前设备" : "Current device",
                 ((ComboBoxItem)scope.Get<ComboBox>("ReadingMaterialsSourceBox").Items[2]!).Content);

@@ -16,6 +16,52 @@ namespace Kkindle.Tests;
 
 public sealed partial class S3SyncIntegrationTests
 {
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("retained-notes-key", false)]
+    [InlineData("", true)]
+    public async Task DeletedBookNotesCarryTitleAndCoverToFreshDevice(string encryptionKey, bool previouslySynced)
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket, encryptionKey);
+        await using var b = await Device.CreateAsync(bucket, encryptionKey);
+        var book = await a.AddBookAsync();
+        await a.SetCoverAsync(book.BookId, "retained-cover", DateTimeOffset.UtcNow);
+        await a.Reader.SaveAnnotationAsync(new ReaderAnnotation
+        {
+            Id = Guid.NewGuid(), BookId = book.BookId, BookFileId = book.FileId,
+            ChapterPath = "chapter.xhtml", SelectedText = "Retained quote", Note = "Retained note"
+        });
+        if (previouslySynced)
+        {
+            await a.SyncAsync();
+            await b.SyncAsync();
+        }
+        await a.Library.DeleteAsync(book.BookId);
+        await a.SyncAsync();
+        var capture = typeof(S3SyncService).GetMethod("CaptureSnapshotAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        async Task<S3SyncSnapshot> Capture(Device device) => await (Task<S3SyncSnapshot>)capture.Invoke(
+            device.Service, [device.Id, Array.Empty<S3SyncTombstone>(), CancellationToken.None])!;
+        var archived = Assert.Single((await Capture(a)).ReadingMaterialBooks);
+        Assert.Equal("Book " + book.BookId, archived.Title);
+        Assert.NotNull(archived.CoverHash);
+        await b.SyncAsync();
+        Assert.Equal(0, await b.BookCountAsync());
+        Assert.Equal(1, await b.ScalarAsync("SELECT COUNT(*) FROM ReaderAnnotations;"));
+        await using (var connection = new SqliteConnection($"Data Source={b.Paths.Database}"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT Title,CoverPath FROM ReadingMaterialBooks;";
+            await using var reader = await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(archived.Title, reader.GetString(0));
+            Assert.Equal("retained-cover", await File.ReadAllTextAsync(Path.Combine(b.Paths.Data, reader.GetString(1))));
+        }
+        await b.SyncAsync();
+        Assert.Single((await Capture(b)).ReadingMaterialBooks);
+    }
+
     [Fact]
     public async Task ManyBookBadgesStayCorrectAcrossCachedReadsAndResync()
     {

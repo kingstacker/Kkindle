@@ -186,13 +186,12 @@ public sealed partial class SettingsTests
         Assert.True(flyoutPreview.Bounds.Width <= flyoutScroll.Bounds.Width + 1);
         reflectionFlyout.Hide();
         var detailStack = scope.Get<StackPanel>("DetailContentStack");
-        var separator = scope.Get<Avalonia.Controls.Shapes.Rectangle>("DetailReflectionSeparator");
         var cover = scope.Get<Grid>("DetailCoverAndActions");
         var format = scope.Get<TextBlock>("DetailFormatText");
         var saveRow = Assert.IsType<Grid>(scope.Get<Button>("SaveDetailsButton").Parent);
-        Assert.True(detailStack.Children.IndexOf(cover) < detailStack.Children.IndexOf(format));
-        Assert.True(detailStack.Children.IndexOf(format) < detailStack.Children.IndexOf(separator));
-        Assert.True(detailStack.Children.IndexOf(separator) < detailStack.Children.IndexOf(reflectionPanel));
+        Assert.True(format.TranslatePoint(default, scope.Window)!.Value.Y
+                    < cover.TranslatePoint(default, scope.Window)!.Value.Y);
+        Assert.True(detailStack.Children.IndexOf(cover) < detailStack.Children.IndexOf(reflectionPanel));
         Assert.True(detailStack.Children.IndexOf(reflectionPanel) < detailStack.Children.IndexOf(saveRow));
     });
 
@@ -225,12 +224,7 @@ public sealed partial class SettingsTests
         Capture(scope.Window, "view-switch-grid");
         var viewButton = scope.Get<Button>("LibraryViewToggleButton");
         viewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.True(viewButton.ContextMenu!.IsOpen);
-        Assert.True(scope.Get<ListBox>("BookGrid").IsVisible);
-        Assert.True(scope.Get<MenuItem>("LibraryGridViewMenuItem").IsChecked);
-        viewButton.ContextMenu.Close();
-
-        scope.Get<MenuItem>("LibraryListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.False(viewButton.ContextMenu!.IsOpen);
         Assert.True(scope.Get<ListBox>("BookList").IsVisible);
         Assert.Equal(collection.Id, viewModel.CollectionFilterId);
         Assert.Equal(LibrarySortMode.TitleAscending, viewModel.SortMode);
@@ -239,13 +233,9 @@ public sealed partial class SettingsTests
         Assert.Equal(gridToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window));
         Capture(scope.Window, "view-switch-list");
 
-        scope.Get<MenuItem>("LibraryGridViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Assert.True(scope.Get<ListBox>("BookGrid").IsVisible);
-        Assert.Equal(collection.Id, viewModel.CollectionFilterId);
-
-        scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        viewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Until(() => !viewModel.IsBusy);
-        Assert.True(scope.Get<ScrollViewer>("CollectionScroll").IsVisible);
+        Assert.True(scope.Get<ListBox>("CollectionList").IsVisible);
         Assert.Null(viewModel.CollectionFilterId);
         Assert.True(scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").IsChecked);
         Assert.Equal(LibrarySortMode.TitleAscending, viewModel.SortMode);
@@ -259,7 +249,7 @@ public sealed partial class SettingsTests
         await Render();
         var resizedToolbarBounds = GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window);
         Capture(scope.Window, "view-switch-resized-collections");
-        scope.Get<MenuItem>("LibraryGridViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        viewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Render();
         Assert.Equal(resizedToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("LibraryToolbarActions"), scope.Window));
         Capture(scope.Window, "view-switch-resized-grid");
@@ -339,7 +329,7 @@ public sealed partial class SettingsTests
             LibraryViewMode = "Collections"
         });
 
-        Assert.True(scope.Get<ScrollViewer>("CollectionScroll").IsVisible);
+        Assert.True(scope.Get<ListBox>("CollectionList").IsVisible);
         Assert.True(scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").IsChecked);
 
         scope.Get<MenuItem>("LibraryListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
@@ -398,12 +388,12 @@ public sealed partial class SettingsTests
 
     private static void AssertLibraryToolbar(TestWindow scope)
     {
-        foreach (var name in new[] { "SearchBox", "FilterButton", "LibrarySortBox", "LibraryViewToggleButton", "ImportButton" })
+        foreach (var name in new[] { "SearchBox", "FilterButton", "LibrarySortBox", "LibraryViewToggleButton", "BackgroundTaskHistoryButton", "ImportButton" })
             AssertWithinWindow(scope.Get<Control>(name), scope.Window);
         var import = scope.Get<Button>("ImportButton");
         var importPosition = import.TranslatePoint(default, scope.Window)!.Value;
-        Assert.True(importPosition.Y >= 38, "Import must remain below the title-bar hit region.");
-        var workspace = scope.Get<Grid>("LibraryWorkspace");
+        Assert.True(importPosition.Y >= 38, "Toolbar actions must remain below the title-bar hit region.");
+        var workspace = scope.Get<Grid>("LibraryBody");
         var workspaceRight = workspace.TranslatePoint(default, scope.Window)!.Value.X + workspace.Bounds.Width
                              - scope.Get<Grid>("LibraryToolbar").Margin.Right;
         Assert.InRange(Math.Abs(workspaceRight - importPosition.X - import.Bounds.Width), 0, 1);

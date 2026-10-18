@@ -137,7 +137,7 @@ public sealed partial class S3SyncIntegrationTests
         await a.Reader.AddReadingTimeAsync(book.BookId, book.FileId, 17, 5, 0, 10);
         await SaveResetTestProgressAsync(a, book.BookId, book.FileId, 5);
         await a.SyncAsync();
-        Assert.Equal(3, bucket.Snapshot(a.SnapshotKey).Version);
+        Assert.Equal(5, bucket.Snapshot(a.SnapshotKey).Version);
 
         await b.Reader.AddReadingTimeAsync(book.BookId, book.FileId, 200, 92, 9, 10);
         await SaveResetTestProgressAsync(b, book.BookId, book.FileId, 92, DateTimeOffset.UtcNow.AddDays(3));

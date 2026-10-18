@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Security.Cryptography;
 using Kkindle.Core;
 using Microsoft.Data.Sqlite;
@@ -55,6 +55,7 @@ public sealed partial class S3SyncService
         CancellationToken cancellationToken)
     {
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
+        await ReadingMaterialBookSchema.EnsureAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         using (var control = CreateCommand(connection, transaction, """
             CREATE TABLE IF NOT EXISTS S3SyncDeletionControl (
@@ -267,9 +268,8 @@ public sealed partial class S3SyncService
         var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
         var snapshot = new S3SyncSnapshot
         {
-            // Older clients must not merge counters across a reset. Keep the
-            // existing format until the first reset, then require version 3.
-            Version = readingReset is null ? 2 : 3,
+            // Version 5 protects archived note metadata and its blob references from older clients.
+            Version = SnapshotVersion,
             ReadingDataReset = readingReset,
             DeviceId = deviceId,
             CreatedAt = captureStartedAt,
@@ -489,7 +489,9 @@ public sealed partial class S3SyncService
         using (var command = CreateCommand(connection, transaction, 
             """
             SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                   FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt
+                   FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                   UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                   AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt
             FROM ReaderLayoutSettings;
             """
             ))
@@ -509,7 +511,16 @@ public sealed partial class S3SyncService
                     VerticalWriting = reader.GetInt32(8) != 0,
                     TwoPageMode = reader.GetInt32(9) != 0,
                     ParagraphIndent = reader.GetInt32(10) != 0,
-                    UpdatedAt = ParseTimestamp(reader.GetString(11))
+                    UseBookOverride = reader.GetInt32(11) != 0,
+                    AppearanceTheme = Enum.IsDefined((ReaderTheme)reader.GetInt32(12))
+                        ? (ReaderTheme)reader.GetInt32(12)
+                        : ReaderTheme.Classic,
+                    AppearancePaperEnabled = reader.GetInt32(13) != 0,
+                    AppearancePaperStrength = reader.GetDouble(14),
+                    AppearanceFibersEnabled = reader.GetInt32(15) != 0,
+                    ProfileUpdatedAt = reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)),
+                    LayoutUpdatedAt = reader.IsDBNull(17) ? null : ParseTimestamp(reader.GetString(17)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(18))
                 });
         }
 
@@ -545,6 +556,7 @@ public sealed partial class S3SyncService
         snapshot.LocalDeletionTimes = recorded;
         snapshot.Tombstones = MergeTombstones(
             FilterReadingTombstones(tombstones, readingReset), GetRecordedTombstones(recorded, snapshot));
+        await CaptureReadingMaterialBooksAsync(connection, transaction, snapshot, cancellationToken);
         return snapshot;
     }
 
@@ -572,7 +584,7 @@ public sealed partial class S3SyncService
         var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
         var snapshot = new S3SyncSnapshot
         {
-            Version = readingReset is null ? 2 : 3,
+            Version = SnapshotVersion,
             ReadingDataReset = readingReset,
             DeviceId = deviceId,
             CreatedAt = captureStartedAt,
@@ -926,13 +938,18 @@ public sealed partial class S3SyncService
         var layoutsSql = fullScanNonAnnotationTables
             ? """
               SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt
+                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                     UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                     AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt
               FROM ReaderLayoutSettings;
               """
             : """
               SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt
-              FROM ReaderLayoutSettings WHERE UpdatedAt > $since;
+                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                     UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                     AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt
+              FROM ReaderLayoutSettings
+              WHERE UpdatedAt > $since OR (ProfileUpdatedAt IS NOT NULL AND ProfileUpdatedAt > $since);
               """;
         using (var command = CreateCommand(connection, transaction, layoutsSql))
         {
@@ -953,7 +970,16 @@ public sealed partial class S3SyncService
                     VerticalWriting = reader.GetInt32(8) != 0,
                     TwoPageMode = reader.GetInt32(9) != 0,
                     ParagraphIndent = reader.GetInt32(10) != 0,
-                    UpdatedAt = ParseTimestamp(reader.GetString(11))
+                    UseBookOverride = reader.GetInt32(11) != 0,
+                    AppearanceTheme = Enum.IsDefined((ReaderTheme)reader.GetInt32(12))
+                        ? (ReaderTheme)reader.GetInt32(12)
+                        : ReaderTheme.Classic,
+                    AppearancePaperEnabled = reader.GetInt32(13) != 0,
+                    AppearancePaperStrength = reader.GetDouble(14),
+                    AppearanceFibersEnabled = reader.GetInt32(15) != 0,
+                    ProfileUpdatedAt = reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)),
+                    LayoutUpdatedAt = reader.IsDBNull(17) ? null : ParseTimestamp(reader.GetString(17)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(18))
                 };
                 if (layoutIndex.TryGetValue(layout.BookFileId, out var index))
                     layouts[index] = layout;
@@ -998,6 +1024,7 @@ public sealed partial class S3SyncService
         snapshot.Tombstones = MergeTombstones(
             FilterReadingTombstones(snapshot.Tombstones, readingReset),
             GetRecordedTombstones(recorded, snapshot));
+        await CaptureReadingMaterialBooksAsync(connection, transaction, snapshot, cancellationToken);
         return snapshot;
     }
 
@@ -1156,7 +1183,7 @@ public sealed partial class S3SyncService
         S3SyncSnapshot snapshot,
         CancellationToken cancellationToken)
     {
-        foreach (var book in snapshot.Books)
+        foreach (var book in snapshot.Books.Concat(snapshot.ReadingMaterialBooks))
         {
             var coverPath = book.LocalCoverPath;
             if (string.IsNullOrWhiteSpace(coverPath)) continue;
@@ -1256,6 +1283,12 @@ public sealed partial class S3SyncService
     }
 
     private static DateTimeOffset Max(DateTimeOffset left, DateTimeOffset right) => left >= right ? left : right;
+
+    private static DateTimeOffset LayoutSyncVersion(S3SyncLayout layout)
+    {
+        var version = Max(layout.UpdatedAt, layout.ProfileUpdatedAt ?? DateTimeOffset.MinValue);
+        return Max(version, layout.LayoutUpdatedAt ?? DateTimeOffset.MinValue);
+    }
 
     private async Task<DatabaseMergeResult> ApplyRemoteSnapshotsAsync(
         ISyncObjectStore client,
@@ -1425,12 +1458,10 @@ public sealed partial class S3SyncService
             .ToArray();
         var remoteLayouts = snapshots
             .SelectMany(snapshot => snapshot.Layouts)
-            .GroupBy(layout => layout.BookFileId)
-            .Select(group => group.OrderByDescending(layout => layout.UpdatedAt).First())
             .Where(item => !tombstonedBooks.Contains(item.BookId)
-                && !IsTombstoned(tombstoneIndex, "book", item.BookId, item.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "layout", item.BookFileId, item.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "file", item.BookFileId, item.UpdatedAt))
+                && !IsTombstoned(tombstoneIndex, "book", item.BookId, LayoutSyncVersion(item))
+                && !IsTombstoned(tombstoneIndex, "layout", item.BookFileId, LayoutSyncVersion(item))
+                && !IsTombstoned(tombstoneIndex, "file", item.BookFileId, LayoutSyncVersion(item)))
             .ToArray();
         var remoteStats = snapshots
             .Where(snapshot => snapshot.ReadingDataReset == readingReset)
@@ -1686,6 +1717,9 @@ public sealed partial class S3SyncService
             }
         }
 
+        var retainedWarningCount = warnings.Count;
+        var retainedBooks = await PrepareReadingMaterialBooksAsync(client, settings, snapshots, bookMap, progress, warnings, cancellationToken);
+        isPartial |= warnings.Count > retainedWarningCount;
         var locallyKnownFiles = localIdentity.FilesById.Values.ToDictionary(file => file.Id, file => file.BookId);
         foreach (var prepared in preparedFilesByLocalId.Values)
             locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
@@ -2037,24 +2071,56 @@ public sealed partial class S3SyncService
                 {
                     ParagraphIndent = layout.ParagraphIndent
                 });
-                var command = commandCache.Get(
-                    """
+                var normalizedAppearance = ReaderAppearanceSettings.Normalize(new ReaderAppearanceSettings
+                {
+                    Theme = layout.AppearanceTheme,
+                    PaperEnabled = layout.AppearancePaperEnabled,
+                    PaperStrength = layout.AppearancePaperStrength,
+                    FibersEnabled = layout.AppearanceFibersEnabled
+                });
+                var layoutIsNewer = """
+                    julianday(COALESCE(excluded.LayoutUpdatedAt, excluded.UpdatedAt))
+                    > julianday(COALESCE(ReaderLayoutSettings.LayoutUpdatedAt, ReaderLayoutSettings.UpdatedAt))
+                    """;
+                var profileIsNewer = """
+                    excluded.ProfileUpdatedAt IS NOT NULL
+                    AND (ReaderLayoutSettings.ProfileUpdatedAt IS NULL
+                         OR julianday(excluded.ProfileUpdatedAt) > julianday(ReaderLayoutSettings.ProfileUpdatedAt))
+                    """;
+                var layoutUpsertSql = $"""
                     INSERT INTO ReaderLayoutSettings (
                         BookFileId, BookId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                        FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt)
+                        FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                        UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                        AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt)
                     VALUES (
                         $bookFileId, $bookId, $fontScale, $lineHeight, $maxWidth, $bodyPadding,
-                        $fontFamily, $flowMode, $verticalWriting, $twoPageMode, $paragraphIndent, $updatedAt)
+                        $fontFamily, $flowMode, $verticalWriting, $twoPageMode, $paragraphIndent,
+                        $useBookOverride, $appearanceTheme, $appearancePaperEnabled,
+                        $appearancePaperStrength, $appearanceFibersEnabled, $profileUpdatedAt, $layoutUpdatedAt, $updatedAt)
                     ON CONFLICT(BookFileId) DO UPDATE SET
-                        BookId = excluded.BookId, FontScale = excluded.FontScale,
-                        LineHeight = excluded.LineHeight, MaxWidth = excluded.MaxWidth,
-                        BodyPadding = excluded.BodyPadding, FontFamily = excluded.FontFamily,
-                        FlowMode = excluded.FlowMode, VerticalWriting = excluded.VerticalWriting,
-                        TwoPageMode = excluded.TwoPageMode, ParagraphIndent = excluded.ParagraphIndent,
-                        UpdatedAt = excluded.UpdatedAt
-                    WHERE julianday(excluded.UpdatedAt) > julianday(ReaderLayoutSettings.UpdatedAt);
-                    """
-                    );
+                        BookId = excluded.BookId,
+                        FontScale = CASE WHEN {layoutIsNewer} THEN excluded.FontScale ELSE ReaderLayoutSettings.FontScale END,
+                        LineHeight = CASE WHEN {layoutIsNewer} THEN excluded.LineHeight ELSE ReaderLayoutSettings.LineHeight END,
+                        MaxWidth = CASE WHEN {layoutIsNewer} THEN excluded.MaxWidth ELSE ReaderLayoutSettings.MaxWidth END,
+                        BodyPadding = CASE WHEN {layoutIsNewer} THEN excluded.BodyPadding ELSE ReaderLayoutSettings.BodyPadding END,
+                        FontFamily = CASE WHEN {layoutIsNewer} THEN excluded.FontFamily ELSE ReaderLayoutSettings.FontFamily END,
+                        FlowMode = CASE WHEN {layoutIsNewer} THEN excluded.FlowMode ELSE ReaderLayoutSettings.FlowMode END,
+                        VerticalWriting = CASE WHEN {layoutIsNewer} THEN excluded.VerticalWriting ELSE ReaderLayoutSettings.VerticalWriting END,
+                        TwoPageMode = CASE WHEN {layoutIsNewer} THEN excluded.TwoPageMode ELSE ReaderLayoutSettings.TwoPageMode END,
+                        ParagraphIndent = CASE WHEN {layoutIsNewer} THEN excluded.ParagraphIndent ELSE ReaderLayoutSettings.ParagraphIndent END,
+                        LayoutUpdatedAt = CASE WHEN {layoutIsNewer} THEN excluded.LayoutUpdatedAt ELSE ReaderLayoutSettings.LayoutUpdatedAt END,
+                        UseBookOverride = CASE WHEN {profileIsNewer} THEN excluded.UseBookOverride ELSE ReaderLayoutSettings.UseBookOverride END,
+                        AppearanceTheme = CASE WHEN {profileIsNewer} THEN excluded.AppearanceTheme ELSE ReaderLayoutSettings.AppearanceTheme END,
+                        AppearancePaperEnabled = CASE WHEN {profileIsNewer} THEN excluded.AppearancePaperEnabled ELSE ReaderLayoutSettings.AppearancePaperEnabled END,
+                        AppearancePaperStrength = CASE WHEN {profileIsNewer} THEN excluded.AppearancePaperStrength ELSE ReaderLayoutSettings.AppearancePaperStrength END,
+                        AppearanceFibersEnabled = CASE WHEN {profileIsNewer} THEN excluded.AppearanceFibersEnabled ELSE ReaderLayoutSettings.AppearanceFibersEnabled END,
+                        ProfileUpdatedAt = CASE WHEN {profileIsNewer} THEN excluded.ProfileUpdatedAt ELSE ReaderLayoutSettings.ProfileUpdatedAt END,
+                        UpdatedAt = CASE WHEN julianday(excluded.UpdatedAt) > julianday(ReaderLayoutSettings.UpdatedAt)
+                            THEN excluded.UpdatedAt ELSE ReaderLayoutSettings.UpdatedAt END
+                    WHERE {layoutIsNewer} OR {profileIsNewer};
+                    """;
+                var command = commandCache.Get(layoutUpsertSql);
                 AddParameter(command, "$bookFileId", localFileId.ToString());
                 AddParameter(command, "$bookId", localBookId.ToString());
                 AddParameter(command, "$fontScale", normalized.FontScale);
@@ -2066,6 +2132,14 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$verticalWriting", normalized.VerticalWriting ? 1 : 0);
                 AddParameter(command, "$twoPageMode", normalized.TwoPageMode ? 1 : 0);
                 AddParameter(command, "$paragraphIndent", normalized.ParagraphIndent ? 1 : 0);
+                AddParameter(command, "$useBookOverride", layout.ProfileUpdatedAt is not null && layout.UseBookOverride ? 1 : 0);
+                AddParameter(command, "$appearanceTheme", (int)normalizedAppearance.Theme);
+                AddParameter(command, "$appearancePaperEnabled", normalizedAppearance.PaperEnabled ? 1 : 0);
+                AddParameter(command, "$appearancePaperStrength", normalizedAppearance.PaperStrength);
+                AddParameter(command, "$appearanceFibersEnabled", normalizedAppearance.FibersEnabled ? 1 : 0);
+                AddParameter(command, "$profileUpdatedAt", layout.ProfileUpdatedAt?.ToString("O"));
+                AddParameter(command, "$layoutUpdatedAt", layout.LayoutUpdatedAt?.ToString("O")
+                    ?? (layout.ProfileUpdatedAt is null ? layout.UpdatedAt.ToString("O") : null));
                 AddParameter(command, "$updatedAt", layout.UpdatedAt.ToString("O"));
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
             }
@@ -2137,6 +2211,8 @@ public sealed partial class S3SyncService
                 pathsToDelete,
                 commandCache,
                 cancellationToken);
+
+            changed |= await SaveReadingMaterialBooksAsync(connection, transaction, retainedBooks, cancellationToken);
 
             // Older snapshots can contain both the system "未收藏" row and
             // user-created collection rows. Keep the derived system view
@@ -4206,17 +4282,9 @@ public sealed partial class S3SyncService
     private static Dictionary<string, DateTimeOffset> GetSnapshotEntityVersions(S3SyncSnapshot snapshot)
     {
         var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
-        void Add(string type, string key, DateTimeOffset version) => result[VersionKey(type, key)] = version;
-        foreach (var row in snapshot.Books) Add("book", row.Id.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.Files) Add("file", row.Id.ToString("N"), row.ModifiedAt);
-        foreach (var row in snapshot.Collections) Add("collection", row.Id.ToString("N"), CollectionUpdatedAt(row));
-        foreach (var row in snapshot.CollectionItems) Add("collection-item", CompositeKey(row.CollectionId, row.BookId), row.AddedAt);
-        foreach (var row in snapshot.Annotations) Add("annotation", row.Id.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.BookReflections) Add("reflection", row.BookId.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.Progress) Add("progress", row.BookFileId.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.Bookmarks) Add("bookmark", row.Id.ToString("N"), row.CreatedAt);
-        foreach (var row in snapshot.Layouts) Add("layout", row.BookFileId.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.ReadingStats) Add("stats", row.BookFileId.ToString("N"), row.UpdatedAt);
+        foreach (var entity in SyncEntities.Where(entity => entity.TrackDeletion))
+            foreach (var row in entity.Rows(snapshot))
+                result[VersionKey(entity.Type, row.Key)] = row.Version;
         return result;
     }
 
@@ -4262,86 +4330,13 @@ public sealed partial class S3SyncService
         var result = new List<S3SyncTombstone>();
         var sameReadingGeneration = previous.ReadingDataReset == current.ReadingDataReset;
 
-        AddMissing(
-            "book",
-            previous.Books.Select(item => (item.Id.ToString("N"), item.UpdatedAt)),
-            current.Books.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "file",
-            previous.Files.Select(item => (item.Id.ToString("N"), item.ModifiedAt)),
-            current.Files.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "collection",
-            previous.Collections.Select(item => (item.Id.ToString("N"), CollectionUpdatedAt(item))),
-            current.Collections.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "collection-item",
-            previous.CollectionItems.Select(item => (CompositeKey(item.CollectionId, item.BookId), item.AddedAt)),
-            current.CollectionItems.Select(item => CompositeKey(item.CollectionId, item.BookId)),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "annotation",
-            previous.Annotations.Select(item => (item.Id.ToString("N"), item.UpdatedAt)),
-            current.Annotations.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "reflection",
-            previous.BookReflections.Select(item => (item.BookId.ToString("N"), item.UpdatedAt)),
-            current.BookReflections.Select(item => item.BookId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        if (sameReadingGeneration) AddMissing(
-            "progress",
-            previous.Progress.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
-            current.Progress.Select(item => item.BookFileId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "bookmark",
-            previous.Bookmarks.Select(item => (item.Id.ToString("N"), item.CreatedAt)),
-            current.Bookmarks.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "layout",
-            previous.Layouts.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
-            current.Layouts.Select(item => item.BookFileId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        if (sameReadingGeneration) AddMissing(
-            "stats",
-            previous.ReadingStats.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
-            current.ReadingStats.Select(item => item.BookFileId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
+        foreach (var entity in SyncEntities.Where(entity => entity.TrackDeletion))
+        {
+            if (!sameReadingGeneration && IsResetReadingEntity(entity.Type)) continue;
+            AddMissing(entity.Type, entity.Rows(previous).Select(row => (row.Key, row.Version)),
+                entity.Rows(current).Select(row => row.Key), result,
+                previous.CreatedAt, current.CreatedAt, recordedDeletionTimes);
+        }
         foreach (var item in result.Where(item => IsResetReadingEntity(item.EntityType)))
             item.ReadingDataResetId = current.ReadingDataReset?.Id;
         return result;

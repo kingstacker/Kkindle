@@ -44,7 +44,8 @@ public sealed record AppSettings
     public const string DefaultEmbeddingModelId = "BAAI/bge-small-zh-v1.5";
     public const string DefaultPinyinEngineId = PinyinBookEngineCatalog.DotNetG2PId;
 
-    public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();    public AppTheme MainTheme { get; init; } = AppTheme.Classic;
+    public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
+    public AppTheme MainTheme { get; init; } = AppTheme.Classic;
     public bool OnboardingCompleted { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultDeviceModel { get; init; }
@@ -93,7 +94,15 @@ public sealed record AppSettings
     public bool ShowSyncStatusIcon { get; init; } = true;
     public bool ShowLibraryPresenceIcon { get; init; } = true;
     public bool ShowUnearnedReadingMedals { get; init; }
+    public bool ShowReadingMedals { get; init; } = true;
     public bool ReadingMaterialsCollapsedByDefault { get; init; } = true;
+    // Null is reserved for settings files created before the compact reader
+    // toolbar existed. Preserve their old pinned TTS action once, while new
+    // profiles start with an uncluttered toolbar.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReaderPinnedTools { get; init; }
+    public string LastKindleSendMethod { get; init; } = "web";
+    public string ReaderAiServiceProfileId { get; init; } = "default";
     public bool PinyinContextMenuEnabled { get; init; } = true;
     public bool PinyinLocalOnly { get; init; } = true;
     public BookTranslationSettings Translation { get; init; } = new();
@@ -120,6 +129,9 @@ public sealed record AppSettings
         {
             UiLanguage = UiText.NormalizeLanguage(settings.UiLanguage),
             MainTheme = Enum.IsDefined(settings.MainTheme) ? settings.MainTheme : AppTheme.Classic,
+            ReaderPinnedTools = NormalizeReaderPinnedTools(settings.ReaderPinnedTools, settings.OnboardingCompleted),
+            LastKindleSendMethod = NormalizeKindleSendMethod(settings.LastKindleSendMethod),
+            ReaderAiServiceProfileId = NormalizeProfileId(settings.ReaderAiServiceProfileId),
             DefaultDeviceModel = string.IsNullOrWhiteSpace(settings.DefaultDeviceModel)
                 ? null
                 : settings.DefaultDeviceModel.Trim(),
@@ -140,6 +152,25 @@ public sealed record AppSettings
             McpServer = McpServerSettings.Normalize(settings.McpServer)
         };
     }
+
+    private static string NormalizeReaderPinnedTools(string? value, bool onboardingCompleted)
+    {
+        if (value is null) return onboardingCompleted ? "tts" : string.Empty;
+        var requested = value.Split([',', ';', ' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        string[] allowed = ["tts", "translation", "pinyin", "ai"];
+        return string.Join(',', allowed.Where(requested.Contains));
+    }
+
+    private static string NormalizeKindleSendMethod(string? value)
+    {
+        var method = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return method is "usb" or "web" or "email" ? method : "web";
+    }
+
+    private static string NormalizeProfileId(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "default" : value.Trim();
 }
 
 public sealed record McpServerSettings

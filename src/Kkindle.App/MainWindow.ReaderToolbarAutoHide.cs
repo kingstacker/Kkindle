@@ -84,7 +84,6 @@ public partial class MainWindow
         var enabled = ReaderRoot.IsVisible && !_readerZenMode
             && !_readerTocExpanded
             && !ReaderTocPanel.IsVisible
-            && !ReaderTocCompactPanel.IsVisible
             && !ReaderAssistantPanel.IsVisible
             && !ReaderSearchPanel.IsVisible
             && Volatile.Read(ref _readerCloseInProgress) == 0;

@@ -1393,10 +1393,16 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        // Every reader layout option comes from the global profile. Legacy
-        // per-book rows remain in the database for compatibility, but opening
-        // another book must never replace the current global layout.
-        _readerLayout = NormalizeReaderLayoutForPlatform(_appSettings.DefaultReaderLayout);
+        await LoadReaderBookProfileAsync(cancellationToken);
+        var globalLayout = NormalizeReaderLayoutForPlatform(
+            _appSettings.DefaultReaderLayout);
+        _readerLayout = ReaderLayoutDefaults.ApplyPreferences(
+            _readerBookLayoutProfile?.Layout ?? globalLayout,
+            globalLayout,
+            ReaderUsesBookOverride);
+        ApplyReaderAppearance();
+        SyncReaderAppearanceControls();
+        SyncReaderBookScopeControls();
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
@@ -6660,16 +6666,7 @@ public partial class MainWindow
     private async Task SaveCurrentReaderGlobalPreferencesAsync(
         CancellationToken cancellationToken)
     {
-        if (_readerIsPdf) return;
-        var layout = NormalizeReaderLayoutForPlatform(_readerLayout);
-        _readerLayout = layout;
-        _appSettings = AppSettings.Normalize(_appSettings with
-        {
-            DefaultReaderLayout = layout
-        });
-
-        await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
-        HandleLocalDataChanged(LocalDataChangeKind.Settings);
+        await SaveCurrentReaderPreferencesAsync(cancellationToken);
     }
 
     // ------------------------------------------------------------------
@@ -8737,7 +8734,7 @@ public partial class MainWindow
         });
         SyncReaderFlowMenu();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+        await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
             ShowReaderTransientStatus(
                 _readerLayout.FlowMode == 0
                     ? T("已切换为滚动阅读。")
@@ -8858,7 +8855,7 @@ public partial class MainWindow
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with { FontScale = _readerLayout.FontScale + delta });
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+        await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
     }
 
     private void ReaderBookmarkButton_Click(object? sender, RoutedEventArgs e)

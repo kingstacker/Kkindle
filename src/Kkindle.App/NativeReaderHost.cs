@@ -2446,13 +2446,6 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             // readable on every paper, including previously saved notes.
             if (color.Red <= 0x33 && color.Green <= 0x33 && color.Blue <= 0x33)
                 return _paintTheme.Text;
-            if (_appearance.Theme == ReaderTheme.Night)
-            {
-                return new SKColor(
-                    (byte)((color.Red + _paintTheme.Text.Red) / 2),
-                    (byte)((color.Green + _paintTheme.Text.Green) / 2),
-                    (byte)((color.Blue + _paintTheme.Text.Blue) / 2));
-            }
             return color;
         }
 

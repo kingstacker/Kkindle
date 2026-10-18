@@ -4321,15 +4321,10 @@ public partial class MainWindow
         await RefreshReadingDashboardAsync();
     }
 
-    private async void DashboardRangeBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private async void DashboardDailyRangeButton_Click(object? sender, RoutedEventArgs e)
     {
-        // The ComboBox raises SelectionChanged while XAML is still loading;
-        // the dashboard service and the rest of the page are not ready yet.
         if (!_stage3Ready) return;
-        if (DashboardRangeBox.SelectedItem is not ComboBoxItem { Tag: string tag }
-            || !int.TryParse(tag, out var days))
-            return;
-        _readingDashboardDayCount = Math.Clamp(days, 1, 90);
+        _readingDashboardDayCount = _readingDashboardDayCount switch { 7 => 14, 14 => 30, _ => 7 };
         await RefreshReadingDashboardAsync();
     }
 
@@ -4376,15 +4371,26 @@ public partial class MainWindow
             DashboardRecentEmptyText.IsVisible = _readingDashboardItems.Count == 0;
 
             DashboardDays.Clear();
+            DashboardDailyTitleText.Text = T("近 {0} 天阅读时长", dashboard.DailyReading.Count);
             var maximumSeconds = Math.Max(1, dashboard.DailyReading.Max(day => day.ActiveSeconds));
             var today = DateOnly.FromDateTime(DateTime.Today);
+            var dayIndex = 0;
+            var labelInterval = Math.Max(1, (int)Math.Ceiling(dashboard.DailyReading.Count / 7d));
             foreach (var day in dashboard.DailyReading)
             {
+                var lastIndex = dashboard.DailyReading.Count - 1;
+                var showLabel = dayIndex == lastIndex
+                    || (dayIndex % labelInterval == 0 && lastIndex - dayIndex >= Math.Min(labelInterval, 2));
+                var timeLabel = T("{0:0.#} 分", day.ActiveSeconds / 60d);
                 DashboardDays.Add(new Stage3DashboardDayViewModel(
-                    day.Date.ToString("MM-dd", CultureInfo.InvariantCulture),
-                    day.ActiveSeconds == 0 ? "" : T("{0:0.#} 分", day.ActiveSeconds / 60d),
-                    day.ActiveSeconds == 0 ? 4 : 10 + 108d * day.ActiveSeconds / maximumSeconds,
-                    day.Date == today ? 1d : 0.3));
+                    showLabel ? day.Date.ToString("MM-dd", CultureInfo.InvariantCulture) : "",
+                    showLabel && day.ActiveSeconds > 0 ? timeLabel : "",
+                    day.ActiveSeconds == 0 ? 4 : 10 + 170d * day.ActiveSeconds / maximumSeconds,
+                    day.Date == today ? 1d : 0.3)
+                {
+                    DetailLabel = $"{day.Date:yyyy-MM-dd}: {timeLabel}"
+                });
+                dayIndex++;
             }
 
             PopulateDashboardBars(DashboardBookTimes, dashboard.MostReadBooks
@@ -4470,7 +4476,7 @@ public partial class MainWindow
             target.Add(new Stage3DashboardBarViewModel(
                 item.Label,
                 item.ValueLabel,
-                item.Value <= 0 ? 2 : Math.Max(8, 210d * item.Value / maximum)));
+                item.Value <= 0 ? 0 : Math.Max(8, 210d * item.Value / maximum)));
     }
 
     private async void RefreshReadingDashboardButton_Click(object? sender, RoutedEventArgs e) =>
@@ -6730,7 +6736,10 @@ public sealed record Stage3DashboardDayViewModel(
     string DateLabel,
     string TimeLabel,
     double BarHeight,
-    double BarOpacity);
+    double BarOpacity)
+{
+    public string DetailLabel { get; init; } = "";
+}
 
 public sealed record Stage3DashboardBarViewModel(
     string Label,
@@ -6990,7 +6999,7 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
     }
 
     private static string GetReflectionTooltipText(string markdown) =>
-        string.Join(Environment.NewLine, GetReflectionTextLines(markdown)).Trim();
+        string.Join("\n", GetReflectionTextLines(markdown)).Trim();
 
     private static IEnumerable<string> GetReflectionTextLines(string markdown)
     {

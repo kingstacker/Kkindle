@@ -18,13 +18,12 @@ public sealed partial class SettingsTests
 {
     [Theory]
     [InlineData(AppTheme.Classic, "#FFFFFF")]
-    [InlineData(AppTheme.Night, "#20231F")]
+    [InlineData(AppTheme.Beige, "#F4F2EC")]
     [InlineData(AppTheme.Green, "#EDF3EA")]
-    [InlineData(AppTheme.MistBlue, "#E8EFF5")]
-    [InlineData(AppTheme.Ivory, "#F8F5EC")]
     public Task MainThemesUpdateExistingLibraryControlsAndPersist(AppTheme theme, string background) => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
+        Assert.Equal(3, scope.Get<ComboBox>("MainThemeBox").Items.Count);
         await SeedLayoutLibrary(scope);
         var initialAppearance = scope.Field<AppSettings>("_appSettings").ReaderAppearance;
         var root = scope.Get<Grid>("LibraryRoot");
@@ -37,7 +36,7 @@ public sealed partial class SettingsTests
         await Render();
         Assert.Equal(Color.Parse(background), ColorOf(root.Background));
         Assert.Same(books, bookGrid.ItemsSource);
-        Assert.Equal(theme == AppTheme.Night ? ThemeVariant.Dark : ThemeVariant.Light, scope.Window.ActualThemeVariant);
+        Assert.Equal(ThemeVariant.Light, scope.Window.ActualThemeVariant);
         Assert.Equal(ResourceColor("SidebarBrush"), ColorOf(scope.Get<Border>("LibrarySidebar").Background));
         Assert.Equal(ResourceColor("MutedInkBrush"), ColorOf(scope.Get<Avalonia.Controls.Shapes.Path>("S3SyncCloudIcon").Stroke));
         AssertThemeContrast();
@@ -57,11 +56,11 @@ public sealed partial class SettingsTests
         await Until(() => scope.Get<Border>("LibraryDetailPane").IsVisible);
         await Render();
         Assert.Equal(ResourceColor("PaperBrush"), ColorOf(scope.Get<Border>("LibraryDetailPane").Background));
-        if (theme == AppTheme.Night) Capture(scope.Window, "night-details");
+        if (theme == AppTheme.Beige) Capture(scope.Window, "night-details");
         scope.Get<Button>("LibraryDetailCloseButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         scope.Get<MenuItem>("LibraryListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         await Render();
-        if (theme == AppTheme.Night) Capture(scope.Window, "night-list");
+        if (theme == AppTheme.Beige) Capture(scope.Window, "night-list");
 
         Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
         var saved = await new AppSettingsStore(scope.Paths).LoadAsync();
@@ -73,21 +72,21 @@ public sealed partial class SettingsTests
     public Task ThemeAndOtherPendingPreferencesSurviveImmediateCloseAndRestart() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
-        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Night;
-        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.MistBlue;
+        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Beige;
+        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Green;
         scope.Get<ToggleSwitch>("GridGalleryDisplayCheck").IsChecked = true;
         var reader = new ReaderAppearanceSettings { Theme = ReaderTheme.Green, PaperEnabled = true, FibersEnabled = true };
         scope.Call("ChangeReaderAppearance", reader);
         scope.Window.Close();
         await Until(() => !scope.Window.IsVisible);
         var saved = await new AppSettingsStore(scope.Paths).LoadAsync();
-        Assert.Equal(AppTheme.MistBlue, saved.MainTheme);
+        Assert.Equal(AppTheme.Green, saved.MainTheme);
         Assert.True(saved.GridGalleryDisplay);
         Assert.Equal(reader, saved.ReaderAppearance);
 
         await using var reopened = await TestWindow.Create(saved);
-        Assert.Equal((int)AppTheme.MistBlue, reopened.Get<ComboBox>("MainThemeBox").SelectedIndex);
-        Assert.Equal(Color.Parse("#E8EFF5"), ColorOf(reopened.Get<Grid>("LibraryRoot").Background));
+        Assert.Equal((int)AppTheme.Green, reopened.Get<ComboBox>("MainThemeBox").SelectedIndex);
+        Assert.Equal(Color.Parse("#EDF3EA"), ColorOf(reopened.Get<Grid>("LibraryRoot").Background));
         Assert.Equal(ReaderTheme.Green, reopened.Field<AppSettings>("_appSettings").ReaderAppearance.Theme);
     });
 
@@ -95,7 +94,7 @@ public sealed partial class SettingsTests
     public Task MainAndReaderThemeScopesRemainIndependentAcrossRepeatedChanges() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
-        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Night;
+        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Beige;
         scope.Get<Control>("ReaderRoot").IsVisible = true;
         await Render();
         var readerScope = scope.Get<ThemeVariantScope>("ReaderThemeScope");
@@ -113,29 +112,30 @@ public sealed partial class SettingsTests
             Assert.Equal(Colors.White, (Color)scope.Window.Resources["ReaderPageColor"]!);
         }
 
-        scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { Theme = ReaderTheme.Night });
+        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Green;
+        scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { Theme = ReaderTheme.Beige });
         await scope.Field<Task>("_readerAppearanceSaveTask");
         await Render();
-        Assert.Equal(ThemeVariant.Dark, readerScope.ActualThemeVariant);
+        Assert.Equal(ThemeVariant.Light, readerScope.ActualThemeVariant);
         Assert.Equal(ThemeVariant.Light, scope.Window.ActualThemeVariant);
-        Assert.Equal(Color.Parse("#F8F5EC"), ColorOf(scope.Get<Grid>("LibraryRoot").Background));
-        Assert.Equal(Color.Parse("#DDDACE"), readerInk.Color);
+        Assert.Equal(Color.Parse("#EDF3EA"), ColorOf(scope.Get<Grid>("LibraryRoot").Background));
+        Assert.Equal(Color.Parse("#303030"), readerInk.Color);
         scope.Get<Control>("ReaderRoot").IsVisible = false;
         await Render();
         Assert.DoesNotContain("readerChrome", scope.Get<Grid>("ReaderWindowTitleBar").Classes);
-        Assert.Equal(AppTheme.Ivory, scope.Field<AppSettings>("_appSettings").MainTheme);
+        Assert.Equal(AppTheme.Green, scope.Field<AppSettings>("_appSettings").MainTheme);
     });
 
     [Theory]
     [InlineData("zh-CN")]
     [InlineData("en-US")]
-    public Task NightSettingsMenusAndDialogsStayLegibleAtMinimumSize(string language) => Run(async () =>
+    public Task BeigeSettingsMenusAndDialogsStayLegibleAtMinimumSize(string language) => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
         scope.Window.Width = 1024;
         scope.Window.Height = 664;
         ((Kkindle.App)Application.Current!).ApplyLanguage(language);
-        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Night;
+        scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)AppTheme.Beige;
         scope.Call("SettingsButton_Click", null, new RoutedEventArgs());
         await Render();
         var selector = scope.Get<ComboBox>("MainThemeBox");
@@ -175,7 +175,7 @@ public sealed partial class SettingsTests
             progress.Show(scope.Window);
             var originalBackground = progress.Background;
             var summary = progress.GetVisualDescendants().OfType<TextBlock>().First(x => x.Text == "本地注音  ·  仅本地生成");
-            foreach (var theme in new[] { AppTheme.Night, AppTheme.Green, AppTheme.Classic })
+            foreach (var theme in new[] { AppTheme.Beige, AppTheme.Green, AppTheme.Classic })
             {
                 scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)theme;
                 await Render();

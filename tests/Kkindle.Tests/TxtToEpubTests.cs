@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
+using Kkindle.Core;
 using Kkindle.Infrastructure;
 
 namespace Kkindle.Tests;
@@ -137,6 +138,138 @@ public sealed class TxtToEpubTests
                 ReadXml(zip, "OEBPS/nav.xhtml").Descendants(ns + "a").Select(a => a.Value));
             Assert.Contains("第一章提到的人，后来又出现了。",
                 ReadXml(zip, "OEBPS/chapter-00005.xhtml").Descendants(ns + "p").Select(p => p.Value));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PreviewAndConversionUseTheSameSelectedRulesAndCorrections()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "custom.txt");
+            await File.WriteAllTextAsync(source,
+                "作者：测试作者\n第一幕\n正文一\n普通行\n正文二\n", new UTF8Encoding(false));
+            var rules = new TxtImportRules
+            {
+                Encoding = TxtTextEncoding.Utf8,
+                HeadingPreset = TxtHeadingRulePreset.CustomRegex,
+                CustomHeadingPattern = @"^第[一二三]幕$",
+                RecognizeVolumes = false,
+                Corrections =
+                [
+                    new TxtChapterCorrection(2, IsHeading: true, Title: "卷一：校正标题", IsVolume: true),
+                    new TxtChapterCorrection(4, IsHeading: true, Title: "第二幕（手工修正）")
+                ]
+            };
+
+            var preview = await TxtToEpubService.PreviewAsync(source, rules, pageSize: 10);
+            var output = Path.Combine(root, "custom.epub");
+            await TxtToEpubService.ConvertWithRulesAsync(source, output, rules);
+
+            Assert.Equal(TxtTextEncoding.Utf8, preview.DetectedEncoding);
+            Assert.Equal(new[] { "前言", "卷一：校正标题", "第二幕（手工修正）" }, preview.Chapters.Select(chapter => chapter.Title));
+            Assert.Equal(new[] { false, true, false }, preview.Chapters.Select(chapter => chapter.IsVolume));
+            using var zip = ZipFile.OpenRead(output);
+            XNamespace ns = "http://www.w3.org/1999/xhtml";
+            var toc = ReadXml(zip, "OEBPS/nav.xhtml");
+            Assert.Equal(preview.Chapters.Select(chapter => chapter.Title), toc.Descendants(ns + "a").Select(anchor => anchor.Value));
+            Assert.Equal(2, toc.Descendants(ns + "ol").Count());
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task LibraryImportUsesPerFileTxtRules()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "custom-import.txt");
+            await File.WriteAllTextAsync(source,
+                "作者：测试作者\n第一幕\n正文一\n普通行\n正文二\n",
+                new UTF8Encoding(false));
+            var rules = new TxtImportRules
+            {
+                Encoding = TxtTextEncoding.Utf8,
+                HeadingPreset = TxtHeadingRulePreset.CustomRegex,
+                CustomHeadingPattern = @"^第[一二三]幕$",
+                RecognizeVolumes = false,
+                Corrections =
+                [
+                    new TxtChapterCorrection(4, IsHeading: true, Title: "第二幕（导入修正）")
+                ]
+            };
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await library.InitializeAsync();
+
+            var result = await library.ImportAsync(
+                [source],
+                txtImportRules: new Dictionary<string, TxtImportRules>(
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    [source] = rules
+                });
+
+            Assert.True(Assert.Single(result.Items).Succeeded);
+            var book = Assert.Single(await library.SearchAsync());
+            var file = Assert.Single(book.Files);
+            var epub = Path.Combine(paths.Data, file.RelativePath);
+            using var zip = ZipFile.OpenRead(epub);
+            XNamespace ns = "http://www.w3.org/1999/xhtml";
+            Assert.Equal(
+                new[] { "前言", "第一幕", "第二幕（导入修正）" },
+                ReadXml(zip, "OEBPS/nav.xhtml").Descendants(ns + "a").Select(anchor => anchor.Value));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PreviewReturnsOnlyRequestedPageAndReportsTotalChapterCount()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "many-chapters.txt");
+            var text = string.Join('\n', Enumerable.Range(1, 251).SelectMany(number =>
+                new[] { $"第{number}章 标题{number}", "正文内容" }));
+            await File.WriteAllTextAsync(source, text);
+
+            var secondPage = await TxtToEpubService.PreviewAsync(source, pageIndex: 1, pageSize: 100);
+
+            Assert.Equal(251, secondPage.ChapterCount);
+            Assert.Equal(100, secondPage.Chapters.Count);
+            Assert.Equal(101, secondPage.Chapters[0].Number);
+            Assert.Equal("第101章 标题101", secondPage.Chapters[0].Title);
+            Assert.True(secondPage.HasPreviousPage);
+            Assert.True(secondPage.HasNextPage);
+            var finalPage = await TxtToEpubService.PreviewAsync(source, pageIndex: 2, pageSize: 100);
+            Assert.Equal(51, finalPage.Chapters.Count);
+            Assert.Equal(201, finalPage.Chapters[0].Number);
+            Assert.Equal(251, finalPage.Chapters[^1].Number);
+            Assert.False(finalPage.HasNextPage);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PreviewHonorsForcedEncodingAndCancellation()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var source = Path.Combine(root, "utf16.txt");
+            await File.WriteAllTextAsync(source, "第1章 标题\n正文", new UnicodeEncoding(false, true, true));
+            var preview = await TxtToEpubService.PreviewAsync(source, new TxtImportRules { Encoding = TxtTextEncoding.Utf16LittleEndian });
+            Assert.Equal(TxtTextEncoding.Utf16LittleEndian, preview.DetectedEncoding);
+            Assert.Equal("第1章 标题", Assert.Single(preview.Chapters).Title);
+
+            using var canceled = new CancellationTokenSource();
+            canceled.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                TxtToEpubService.PreviewAsync(source, cancellationToken: canceled.Token));
         }
         finally { TestHelpers.TryDelete(root); }
     }

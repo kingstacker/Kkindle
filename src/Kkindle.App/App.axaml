@@ -29,11 +29,13 @@
         <SolidColorBrush x:Key="MutedInkBrush" Color="{DynamicResource MutedInkColor}" />
         <SolidColorBrush x:Key="SidebarIndicatorBrush" Color="{DynamicResource SidebarIndicatorColor}" />
         <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource SidebarIndicatorColor}" />
+        <SolidColorBrush x:Key="StrongBorderBrush" Color="{DynamicResource SidebarIndicatorColor}" />
         <SolidColorBrush x:Key="SoftHoverBrush" Color="{DynamicResource SoftHoverColor}" />
         <SolidColorBrush x:Key="SidebarIconBrush" Color="#404040" />
         <SolidColorBrush x:Key="SidebarChevronBrush" Color="#606060" />
         <SolidColorBrush x:Key="SidebarCountBrush" Color="#858585" />
         <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#F3F4F5" />
+        <SolidColorBrush x:Key="SidebarSelectedForegroundBrush" Color="{DynamicResource InkColor}" />
 
         <!-- The original bundled font remains the default for all application
              chrome. Reader body text has its own setting and can override it. -->
@@ -144,6 +146,7 @@
         <!-- Fluent paints the focused TextBox border with the accent colour;
              the reader search box and AI input must stay black-on-white. -->
         <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="{DynamicResource InkColor}" />
+        <SolidColorBrush x:Key="FocusRingBrush" Color="#005FCC" />
 
         <!-- Fluent's popup templates read these values through DynamicResource
              from inside their templates. Keep the entire popup layer in the
@@ -290,6 +293,36 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
+        <Style Selector="Border.dashboardBar">
+            <Setter Property="Background" Value="{DynamicResource SubtleInkBrush}" />
+        </Style>
+        <Style Selector="Grid.dashboardBarRow:pointerover Border.dashboardBar">
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="FlyoutPresenter.backgroundTaskFlyout">
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Grid>
+                    <Border Margin="0,8,0,0" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter Content="{TemplateBinding Content}"
+                                          ContentTemplate="{TemplateBinding ContentTemplate}" />
+                    </Border>
+                    <Path Data="M 0,9 L 8,1 L 16,9" Width="16" Height="10"
+                          Margin="11,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Top"
+                          Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}"
+                          StrokeThickness="1" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter>
+        </Style>
 
         <!-- Avalonia's ScrollBar already owns the interaction state needed for
              automatic hiding. This keeps the behavior in the control theme,
@@ -335,13 +368,18 @@
         </Style>
         <Style Selector="Button:pointerover">
             <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         </Style>
         <Style Selector="Button:pressed">
             <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentPressedBrush}" />
+        </Style>
+        <Style Selector="Button:disabled">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrongBorderBrush}" />
         </Style>
         <Style Selector="Button.readerSelectionAction">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
@@ -461,7 +499,7 @@
             <Setter Property="SelectionForegroundBrush" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="TextBox:focus">
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
         </Style>
         <!-- Fluent fades placeholders to half opacity. The palette already
              supplies a muted ink, so a second fade makes night fields illegible. -->
@@ -471,7 +509,7 @@
         <!-- Fluent replaces the template border thickness on focus. Override
              that inner state as well so typing never draws a rectangle. -->
         <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
         <!-- The native reflection editor draws the formatted text behind a
@@ -1021,7 +1059,7 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0,0,0,2" />
+            <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="Template">
@@ -1042,13 +1080,14 @@
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="Button.settingsCategory.active">
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="FontWeight" Value="Bold" />
         </Style>
         <Style Selector="Button.settingsCategory:focus-visible">
             <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
         </Style>
         <Style Selector="Grid.settingsPage TextBox, Grid.settingsPage ComboBox, Grid.settingsPage NumericUpDown">
             <Setter Property="MinHeight" Value="38" />
@@ -2892,5 +2931,9 @@
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <StyleInclude Source="avares://Kkindle.App/ReaderAppearanceStyles.axaml" />
+        <Style Selector="Button:focus-visible">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+            <Setter Property="BorderThickness" Value="2" />
+        </Style>
     </Application.Styles>
 </Application>
