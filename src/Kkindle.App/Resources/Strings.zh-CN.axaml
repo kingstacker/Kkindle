@@ -971,7 +971,7 @@
     <x:String x:Key="Ui.Auto.3B7474B3DA54A7A6">定价：{0}</x:String>
     <x:String x:Key="Ui.Auto.8C9FAA27FECFC94B">定位失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.7A1C1C78C9F189D7">对话已清空。</x:String>
-    <x:String x:Key="Ui.Auto.31BF77F91220473A">导入 EPUB、PDF、MOBI 或 AZW3 文件开始阅读。</x:String>
+    <x:String x:Key="Ui.Auto.31BF77F91220473A">导入 EPUB、PDF、MOBI、AZW3 或 TXT 文件开始阅读。</x:String>
     <x:String x:Key="Ui.Auto.CA30CA2078F8A2D4">导入设备资源</x:String>
     <x:String x:Key="Ui.Auto.95F98628E65049E4">导入 Kkindle 备份</x:String>
     <x:String x:Key="Ui.Auto.AD264F75C2C0CB91">导入书库失败。</x:String>
@@ -1105,7 +1105,7 @@
     <x:String x:Key="Ui.Auto.DB945CFE9F9F8FFE">快速</x:String>
     <x:String x:Key="Ui.Auto.BDF920B34B43D7CA">成功 {0} 本，失败 {1} 本。</x:String>
     <x:String x:Key="Ui.Auto.D01A1A06907FF9FD">所选书籍的格式电脑书库暂不支持。</x:String>
-    <x:String x:Key="Ui.Auto.4DBE7874FB5F5BCC">所选位置没有 EPUB、PDF、MOBI 或 AZW3 文件。</x:String>
+    <x:String x:Key="Ui.Auto.4DBE7874FB5F5BCC">所选位置没有 EPUB、PDF、MOBI、AZW3 或 TXT 文件。</x:String>
     <x:String x:Key="Ui.Auto.44D3DEF00685D764">所选格式文件不存在或不支持。</x:String>
     <x:String x:Key="Ui.Auto.3CD1D89168D52221">所选格式文件不存在或已不再支持。</x:String>
     <x:String x:Key="Ui.Auto.3BE2CC79EE39A7D6">所选格式文件不存在或已被删除。</x:String>
@@ -1132,7 +1132,7 @@
     <x:String x:Key="Ui.Auto.A657B10A6D021218">找不到这条批注对应的本地书籍文件。</x:String>
     <x:String x:Key="Ui.Auto.C921FC3DA796A4DC">找到 {0} 本书</x:String>
     <x:String x:Key="Ui.Auto.ECCA585A2376114C">拖入的文件中没有可用的 {0} 文件。</x:String>
-    <x:String x:Key="Ui.Auto.8620BCFCEC2838A5">拖入的文件或文件夹中没有 EPUB、PDF、MOBI 或 AZW3 书籍文件。</x:String>
+    <x:String x:Key="Ui.Auto.8620BCFCEC2838A5">拖入的文件或文件夹中没有 EPUB、PDF、MOBI、AZW3 或 TXT 书籍文件。</x:String>
     <x:String x:Key="Ui.Auto.7247E8E90D2AAFCC">拖动以调整数值</x:String>
     <x:String x:Key="Ui.Auto.6B5DDE6E3A599A71">搜索失败</x:String>
     <x:String x:Key="Ui.Auto.E39E2D0469606C2F">搜索失败：{0}</x:String>

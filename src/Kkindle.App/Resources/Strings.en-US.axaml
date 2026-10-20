@@ -971,7 +971,7 @@
     <x:String x:Key="Ui.Auto.3B7474B3DA54A7A6">Price: {0}</x:String>
     <x:String x:Key="Ui.Auto.8C9FAA27FECFC94B">Location failed: {0}</x:String>
     <x:String x:Key="Ui.Auto.7A1C1C78C9F189D7">Conversation cleared.</x:String>
-    <x:String x:Key="Ui.Auto.31BF77F91220473A">Import an EPUB, PDF, MOBI, or AZW3 file to start reading.</x:String>
+    <x:String x:Key="Ui.Auto.31BF77F91220473A">Import an EPUB, PDF, MOBI, AZW3, or TXT file to start reading.</x:String>
     <x:String x:Key="Ui.Auto.CA30CA2078F8A2D4">Import device resource</x:String>
     <x:String x:Key="Ui.Auto.95F98628E65049E4">Import Kkindle backup</x:String>
     <x:String x:Key="Ui.Auto.AD264F75C2C0CB91">Failed to import the library.</x:String>
@@ -1105,7 +1105,7 @@
     <x:String x:Key="Ui.Auto.DB945CFE9F9F8FFE">Fast</x:String>
     <x:String x:Key="Ui.Auto.BDF920B34B43D7CA">{0} succeeded, {1} failed.</x:String>
     <x:String x:Key="Ui.Auto.D01A1A06907FF9FD">The computer library does not currently support the selected book format.</x:String>
-    <x:String x:Key="Ui.Auto.4DBE7874FB5F5BCC">The selected location contains no EPUB, PDF, MOBI, or AZW3 files.</x:String>
+    <x:String x:Key="Ui.Auto.4DBE7874FB5F5BCC">The selected location contains no EPUB, PDF, MOBI, AZW3, or TXT files.</x:String>
     <x:String x:Key="Ui.Auto.44D3DEF00685D764">The selected format file does not exist or is unsupported.</x:String>
     <x:String x:Key="Ui.Auto.3CD1D89168D52221">The selected format file does not exist or is no longer supported.</x:String>
     <x:String x:Key="Ui.Auto.3BE2CC79EE39A7D6">The selected format file does not exist or has been deleted.</x:String>
@@ -1132,7 +1132,7 @@
     <x:String x:Key="Ui.Auto.A657B10A6D021218">The local book file for this annotation could not be found.</x:String>
     <x:String x:Key="Ui.Auto.C921FC3DA796A4DC">Found {0} books</x:String>
     <x:String x:Key="Ui.Auto.ECCA585A2376114C">The dropped files contain no usable {0} files.</x:String>
-    <x:String x:Key="Ui.Auto.8620BCFCEC2838A5">The dropped files or folders contain no EPUB, PDF, MOBI, or AZW3 book files.</x:String>
+    <x:String x:Key="Ui.Auto.8620BCFCEC2838A5">The dropped files or folders contain no EPUB, PDF, MOBI, AZW3, or TXT book files.</x:String>
     <x:String x:Key="Ui.Auto.7247E8E90D2AAFCC">Drag to adjust the value</x:String>
     <x:String x:Key="Ui.Auto.6B5DDE6E3A599A71">Search failed</x:String>
     <x:String x:Key="Ui.Auto.E39E2D0469606C2F">Search failed: {0}</x:String>

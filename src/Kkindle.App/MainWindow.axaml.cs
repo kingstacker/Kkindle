@@ -1313,7 +1313,7 @@ public partial class MainWindow : Window
         else if (ViewModel.BookCount == 0)
         {
             EmptyLibraryTitleText.Text = T("电脑书库还是空的");
-            EmptyLibraryMessageText.Text = T("导入 EPUB、PDF、MOBI 或 AZW3 文件开始阅读。");
+            EmptyLibraryMessageText.Text = T("导入 EPUB、PDF、MOBI、AZW3 或 TXT 文件开始阅读。");
         }
         else
         {
@@ -1881,8 +1881,8 @@ public partial class MainWindow : Window
             var inputPaths = LibraryDropImportPolicy.ExpandImportableFiles(selectedPaths);
             if (inputPaths.Length == 0)
             {
-                SetTaskStatus(T("所选位置没有 EPUB、PDF、MOBI 或 AZW3 文件。"));
-                await ShowMessageAsync(T("无法导入"), T("拖入的文件或文件夹中没有 EPUB、PDF、MOBI 或 AZW3 书籍文件。"));
+                SetTaskStatus(T("所选位置没有 EPUB、PDF、MOBI、AZW3 或 TXT 文件。"));
+                await ShowMessageAsync(T("无法导入"), T("拖入的文件或文件夹中没有 EPUB、PDF、MOBI、AZW3 或 TXT 书籍文件。"));
                 return;
             }
             var requestedFormats = await ChooseImportFormatsAsync(inputPaths);

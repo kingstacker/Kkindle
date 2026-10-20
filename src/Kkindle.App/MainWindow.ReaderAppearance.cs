@@ -58,6 +58,10 @@ public partial class MainWindow
         {
             Text = title,
             TextWrapping = TextWrapping.Wrap,
+            // The title is a single-line, trimmed TextBlock. Override these
+            // inherited text settings on the popup so it shows the whole title.
+            MaxLines = 0,
+            TextTrimming = TextTrimming.None,
             MaxWidth = 480
         });
     }

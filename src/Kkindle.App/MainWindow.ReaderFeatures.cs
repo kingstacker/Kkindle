@@ -272,6 +272,9 @@ public partial class MainWindow
             _readerPdfSourcePath = path;
             await EnsureReaderHostsAsync();
             var host = (NativePdfReaderHost)CurrentReaderHost!;
+            // Do not expose the page origin while the saved zoom and pan are
+            // still being restored after the first raster has loaded.
+            host.Opacity = 0;
             var pageCount = await host.PrepareDocumentAsync(path, token);
             var pages = Enumerable.Range(1, pageCount).Select(page => new PdfPageText(page, string.Empty)).ToArray();
             _readerPdfPages = pages;
@@ -286,6 +289,9 @@ public partial class MainWindow
             _readerChapterIndex = _readerPdfPage - 1;
             _readerTocItems = [];
             BuildReaderTocRows();
+            RefreshReaderTocRows();
+            if (GetReaderTocScrollViewer() is { } tocScroll)
+                tocScroll.Offset = default;
             SetReaderCompactNavigationItems(_readerTocItems);
 
             ReaderBookInfoText.Text = card.Title;
@@ -320,6 +326,8 @@ public partial class MainWindow
             await ApplySavedReaderPdfAnnotationsAsync(token);
             if (progress is not null)
                 await host.RestoreViewStateAsync(progress.Fragment, progress.ScrollPosition);
+            token.ThrowIfCancellationRequested();
+            host.Opacity = 1;
             RememberCurrentPdfPageText();
             SyncReaderPdfTocSelection();
             StartReaderPdfBackgroundWork(host, file.Id, token);

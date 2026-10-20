@@ -145,7 +145,7 @@ internal static class LibraryDropImportPolicy
         // without a FileSystemInfo-backed storage item.
         var uri = item.Path;
         return uri.IsAbsoluteUri && uri.IsFile
-            ? Uri.UnescapeDataString(uri.LocalPath)
+            ? uri.LocalPath
             : null;
     }
 
@@ -172,7 +172,9 @@ internal static class LibraryDropImportPolicy
 
             if (Uri.TryCreate(line, UriKind.Absolute, out var uri) && uri.IsFile)
             {
-                paths.Add(Path.GetFullPath(Uri.UnescapeDataString(uri.LocalPath)));
+                // LocalPath already decodes URI escaping. Decoding twice changes
+                // literal names such as "book%20notes.pdf" into another path.
+                paths.Add(Path.GetFullPath(uri.LocalPath));
                 continue;
             }
 
