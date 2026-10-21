@@ -540,15 +540,20 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task KindleEmailTransferUsesBottomRightProgressToast() => Run(async () =>
+    public Task KindleEmailTransferUsesTaskHistory() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
 
         scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "正在发送…", null, true, false, false);
         await Render();
 
-        Assert.True(scope.Get<Control>("TransferToast").IsEffectivelyVisible);
-        Assert.True(scope.Get<ProgressBar>("TransferToastProgress").IsEffectivelyVisible);
+        Assert.False(scope.Get<Control>("TransferToast").IsEffectivelyVisible);
+        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
+        var center = scope.Field<Kkindle.Infrastructure.BackgroundTaskCenterService>("_backgroundTasks");
+        Assert.Contains(center.GetSnapshot(), task => task.Title == "发送到 Kindle 邮箱" && task.Status == Kkindle.Core.BackgroundTaskStatus.Running);
+        scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "正在发送附件", 37d, false, false, false);
+        Assert.Contains(center.GetSnapshot(), task => task.ProgressCurrent == 37 && task.ProgressTotal == 100);
+
         Assert.True(scope.Get<Control>("TransferToastSpinnerIcon").IsVisible);
         var spinner = scope.Get<Control>("TransferToastSpinnerIcon");
         var beforeRotation = Assert.IsType<RotateTransform>(spinner.RenderTransform).Angle;
@@ -559,6 +564,9 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.False(scope.Get<Control>("TaskProgressPopup").IsEffectivelyVisible);
         Assert.False(scope.Get<Control>("ConfirmationOverlay").IsEffectivelyVisible);
 
+        scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "已完成", 100d, false, true, true);
+        await Until(() => center.GetSnapshot().All(task => task.Status != Kkindle.Core.BackgroundTaskStatus.Running));
+        scope.Field<Flyout>("_backgroundTaskFlyout").Hide();
         using var transferCancellation = new CancellationTokenSource();
         scope.Set("_isTransferring", true);
         scope.Set("_transferCancellation", transferCancellation);

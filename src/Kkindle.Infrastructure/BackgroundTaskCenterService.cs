@@ -58,7 +58,8 @@ public sealed class BackgroundTaskCenterService
         string title,
         BackgroundTaskKind kind,
         BackgroundTaskOperation operation,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowRetry = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(operation);
@@ -74,7 +75,7 @@ public sealed class BackgroundTaskCenterService
             {
                 Status = BackgroundTaskStatus.Running,
                 UpdatedAtUtc = now,
-                Operation = operation,
+                Operation = allowRetry ? operation : null,
                 Cancellation = cancellation,
                 RunGeneration = 1
             };
@@ -86,6 +87,19 @@ public sealed class BackgroundTaskCenterService
         RaiseChanged(id);
         var completion = ExecuteAsync(state, operation, cancellation, generation);
         return new BackgroundTaskHandle(id, completion);
+    }
+
+    public async Task<bool> RemoveCompletedAsync(Guid id)
+    {
+        lock (_sync)
+        {
+            if (!_tasks.TryGetValue(id, out var task)
+                || task.Status is BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued) return false;
+            _tasks.Remove(id);
+        }
+        RaiseChanged(id);
+        await PersistBestEffortAsync().ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>Retries a failed or cancelled task from this process only.</summary>
@@ -158,7 +172,18 @@ public sealed class BackgroundTaskCenterService
         try
         {
             var context = new BackgroundTaskContext((stage, current, total) =>
-                ReportProgress(state, generation, cancellation, stage, current, total));
+                ReportProgress(state, generation, cancellation, stage, current, total), titles =>
+                {
+                    lock (_sync)
+                    {
+                        if (state.Status != BackgroundTaskStatus.Running || state.RunGeneration != generation
+                            || !ReferenceEquals(state.Cancellation, cancellation)) return;
+                        state.BookTitles = titles.Select(title => SafeText(title, 300))
+                            .Where(title => !string.IsNullOrWhiteSpace(title)).Select(title => title!)
+                            .Distinct(StringComparer.Ordinal).ToArray();
+                    }
+                    RaiseChanged(state.Id);
+                });
             await operation(context, cancellation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -294,6 +319,8 @@ public sealed class BackgroundTaskCenterService
                     Status = interrupted ? BackgroundTaskStatus.Interrupted : entry.Status,
                     UpdatedAtUtc = entry.UpdatedAtUtc,
                     Stage = SafeText(entry.Stage, 120),
+                    BookTitles = entry.BookTitles?.Select(title => SafeText(title, 300))
+                        .Where(title => !string.IsNullOrWhiteSpace(title)).Select(title => title!).ToArray(),
                     ProgressCurrent = entry.ProgressCurrent,
                     ProgressTotal = entry.ProgressTotal,
                     Error = interrupted
@@ -325,7 +352,8 @@ public sealed class BackgroundTaskCenterService
         !state.IsFromPreviousRun
             && state.Operation is not null
             && state.Status is BackgroundTaskStatus.Failed or BackgroundTaskStatus.Canceled,
-        state.IsFromPreviousRun);
+        state.IsFromPreviousRun,
+        state.BookTitles);
 
     private static PersistedTask ToPersisted(TaskState state) => new(
         state.Id,
@@ -337,7 +365,8 @@ public sealed class BackgroundTaskCenterService
         SafeText(state.Stage, 120),
         state.ProgressCurrent,
         state.ProgressTotal,
-        SafeText(state.Error, 500));
+        SafeText(state.Error, 500),
+        state.BookTitles);
 
     private void TrimHistory()
     {
@@ -384,6 +413,7 @@ public sealed class BackgroundTaskCenterService
         public DateTimeOffset CreatedAtUtc { get; } = createdAtUtc;
         public DateTimeOffset UpdatedAtUtc { get; set; } = createdAtUtc;
         public string? Stage { get; set; }
+        public string[]? BookTitles { get; set; }
         public int? ProgressCurrent { get; set; }
         public int? ProgressTotal { get; set; }
         public string? Error { get; set; }
@@ -405,5 +435,6 @@ public sealed class BackgroundTaskCenterService
         string? Stage,
         int? ProgressCurrent,
         int? ProgressTotal,
-        string? Error);
+        string? Error,
+        string[]? BookTitles = null);
 }

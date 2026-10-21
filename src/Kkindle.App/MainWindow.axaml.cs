@@ -1905,14 +1905,16 @@ public partial class MainWindow : Window
             SetTaskStatus(T("正在导入 {0} 个位置…", inputPaths.Length));
             ShowTaskProgressPopup();
             TaskProgressPopupText.Text = T("正在导入 {0} 个位置…", inputPaths.Length);
-            var importOutcome = await RunTrackedTaskAsync(T("书库导入"), BackgroundTaskKind.Import, async (context, token) =>
+            var importTitle = T("书库导入");
+            var importOutcome = await RunTrackedTaskAsync(importTitle, BackgroundTaskKind.Import, async (context, token) =>
             {
+            context.ReportBooks(inputPaths.Select(Path.GetFileNameWithoutExtension).Select(name => name ?? string.Empty).ToArray());
             using var progress = new CoalescingUiProgress<TransferProgress>(value =>
             {
-                context.ReportProgress(T("正在导入书籍"), (int)value.Percentage, 100);
                 var message = string.IsNullOrWhiteSpace(value.Message)
                     ? T("正在导入：{0:0}%", value.Percentage)
                     : UiText.Localize(value.Message);
+                context.ReportProgress(message, (int)value.Percentage, 100);
                 SetTaskStatus(message);
                 TaskProgressPopupBar.Value = value.Percentage;
                 TaskProgressPopupText.Text = message;
@@ -1923,12 +1925,24 @@ public partial class MainWindow : Window
                 token,
                 ResolveImportConflictAsync,
                 txtImportRules);
+            progress.Dispose(); // Ignore queued import updates once format generation starts.
+            var importedTitles = ViewModel.Books.Where(card => card.Book is not null)
+                .ToDictionary(card => card.Book!.Id, card => card.Book!.Title);
+            context.ReportBooks(imported.Items.Select(item => item.Book?.Title
+                ?? (item.BookId is { } id ? importedTitles.GetValueOrDefault(id) : null)
+                ?? Path.GetFileNameWithoutExtension(item.SourcePath)).ToArray());
             context.ReportProgress(T("正在补齐阅读格式"));
-            var generated = await AutoGenerateReaderFormatsForImportsAsync(imported, token, requestedFormats);
+            var generated = await AutoGenerateReaderFormatsForImportsAsync(imported, token, requestedFormats, context);
             await RefreshLibraryMatchRecordsAsync(token);
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
             await RefreshBookSyncStatusesAsync(token);
+            var formatSummary = generated.Failures.Count > 0
+                ? T("；格式补齐失败 {0} 项", generated.Failures.Count)
+                : generated.GeneratedCount > 0
+                    ? T("；已补齐 {0} 个 EPUB/AZW3 文件", generated.GeneratedCount)
+                    : string.Empty;
+            context.ReportProgress(BuildImportSummary(imported, formatSummary));
             return (Result: imported, AutomaticFormats: generated);
             }, _lifetimeCancellation.Token);
             var result = importOutcome.Result;
@@ -3308,7 +3322,8 @@ public partial class MainWindow : Window
     private async Task<AutomaticReaderFormatGenerationResult> AutoGenerateReaderFormatsForImportsAsync(
         ImportBatchResult importResult,
         CancellationToken cancellationToken = default,
-        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? requestedFormatsBySourcePath = null)
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? requestedFormatsBySourcePath = null,
+        BackgroundTaskContext? taskContext = null)
     {
         // The global setting gates flows without an explicit per-file choice;
         // the folder-import dialog always decides explicitly, so its toggles
@@ -3372,6 +3387,7 @@ public partial class MainWindow : Window
                         Directory.CreateDirectory(bookTemporaryDirectory);
                         var sourcePath = _library.GetAbsoluteFilePath(sourceFile);
                         SetTaskStatus(T("正在为《{0}》生成 {1}…", book.Title, targetFormat.ToUpperInvariant()));
+                        taskContext?.ReportProgress(T("正在为《{0}》生成 {1}…", book.Title, targetFormat.ToUpperInvariant()));
                         await _formatConverter.ConvertAsync(
                             sourcePath,
                             temporaryOutput,

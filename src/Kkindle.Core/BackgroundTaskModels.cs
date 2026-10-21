@@ -38,7 +38,8 @@ public sealed record BackgroundTaskSnapshot(
     string? Error,
     bool CanCancel,
     bool CanRetry,
-    bool IsFromPreviousRun);
+    bool IsFromPreviousRun,
+    IReadOnlyList<string>? BookTitles = null);
 
 public sealed class BackgroundTaskChangedEventArgs(Guid taskId) : EventArgs
 {
@@ -46,8 +47,10 @@ public sealed class BackgroundTaskChangedEventArgs(Guid taskId) : EventArgs
 }
 
 /// <summary>Reports progress for one task. Progress values are optional and clamped by the task center.</summary>
-public sealed class BackgroundTaskContext(Action<string?, int?, int?> report)
+public sealed class BackgroundTaskContext(Action<string?, int?, int?> report, Action<IReadOnlyList<string>>? reportBooks = null)
 {
+    public void ReportBooks(IReadOnlyList<string> titles) => reportBooks?.Invoke(titles);
+
     public void ReportProgress(string? stage, int? current = null, int? total = null) =>
         report(stage, current, total);
 }

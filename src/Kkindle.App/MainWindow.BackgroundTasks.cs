@@ -13,6 +13,117 @@ public partial class MainWindow
     private BackgroundTaskCenterService? _backgroundTasks;
     private Flyout? _backgroundTaskFlyout;
     private StackPanel? _backgroundTaskRows;
+    private DispatcherTimer? _taskHistoryAnimation;
+    private readonly Avalonia.Media.RotateTransform _taskHistoryRotation = new();
+    private readonly AsyncLocal<BackgroundTaskContext?> _resourceTaskContext = new();
+    private BackgroundTaskContext? _genericTaskContext;
+    private TaskCompletionSource? _genericTaskCompletion;
+    private BackgroundTaskContext? _transferTaskContext;
+    private TaskCompletionSource? _transferTaskCompletion;
+    private string? _transferTaskTitle;
+    private bool _genericTaskActive;
+    private bool _progressSubscriptionsAdded;
+    private readonly HashSet<Guid> _displayOnlyTaskIds = [];
+
+    private void BeginGenericTaskRecord()
+    {
+        _genericTaskActive = true;
+        if (!_progressSubscriptionsAdded)
+        {
+            _progressSubscriptionsAdded = true;
+            TaskProgressPopupText.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == TextBlock.TextProperty) UpdateGenericTaskProgress();
+            };
+            TaskProgressPopupBar.PropertyChanged += (_, _) => UpdateGenericTaskProgress();
+        }
+        // Import attaches its own context synchronously after showing progress.
+        // Defer fallback creation so that it has only one history entry.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_genericTaskActive || _genericTaskContext is not null) return;
+            _genericTaskCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = _genericTaskCompletion;
+            var handle = BackgroundTasks.Start(TaskProgressPopupText.Text ?? T("后台任务"), BackgroundTaskKind.Other,
+                async (context, token) =>
+                {
+                    _genericTaskContext = context;
+                    UpdateGenericTaskProgress();
+                    await completion.Task.WaitAsync(token);
+                }, _lifetimeCancellation.Token, allowRetry: false);
+            _displayOnlyTaskIds.Add(handle.Id);
+        });
+    }
+
+    private void UpdateGenericTaskProgress()
+    {
+        if (!_genericTaskActive) return;
+        _genericTaskContext?.ReportProgress(TaskProgressPopupText.Text,
+            TaskProgressPopupBar.IsIndeterminate ? null : (int)TaskProgressPopupBar.Value,
+            TaskProgressPopupBar.IsIndeterminate ? null : (int)TaskProgressPopupBar.Maximum);
+    }
+
+    private void EndGenericTaskRecord()
+    {
+        _genericTaskActive = false;
+        _genericTaskCompletion?.TrySetResult();
+        _genericTaskCompletion = null;
+        _genericTaskContext = null;
+    }
+
+    private void UpdateTransferTaskRecord(string title, string message, double? progress,
+        bool isIndeterminate, bool autoHide, bool completed)
+    {
+        // Device file operations already have individual records. Their actual
+        // byte progress is supplied by CreateRecordedTransferProgress below.
+        var trackedDeviceOperation = title == T("发送到设备") || title == T("从设备删除书籍")
+            || title == T("导出到电脑书库") || title == T("导入设备资源")
+            || title == T("导出设备资源") || title == T("删除设备资源");
+        if (trackedDeviceOperation) return;
+        if (_transferTaskCompletion is not null && _transferTaskTitle != title)
+            EndTransferTaskRecord(new OperationCanceledException(T("任务已切换")));
+        if (_transferTaskCompletion is null && !autoHide && !completed)
+        {
+            _transferTaskTitle = title;
+            _transferTaskCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = _transferTaskCompletion;
+            var handle = BackgroundTasks.Start(title, BackgroundTaskKind.Other, async (context, token) =>
+            {
+                _transferTaskContext = context;
+                await completion.Task.WaitAsync(token);
+            }, _lifetimeCancellation.Token, allowRetry: false);
+            _displayOnlyTaskIds.Add(handle.Id);
+        }
+        _transferTaskContext?.ReportProgress(message,
+            !isIndeterminate && progress.HasValue ? (int)Math.Clamp(progress.Value, 0, 100) : null,
+            !isIndeterminate && progress.HasValue ? 100 : null);
+        if (completed || autoHide)
+            EndTransferTaskRecord(completed ? null : new InvalidOperationException(message));
+    }
+
+    private void EndTransferTaskRecord(Exception? error = null)
+    {
+        if (error is null) _transferTaskCompletion?.TrySetResult();
+        else _transferTaskCompletion?.TrySetException(error);
+        _transferTaskCompletion = null;
+        _transferTaskContext = null;
+        _transferTaskTitle = null;
+    }
+
+    private IProgress<TransferProgress> CreateRecordedTransferProgress(IProgress<TransferProgress>? original)
+    {
+        var context = _resourceTaskContext.Value;
+        return new RecordedTransferProgress(value =>
+        {
+            context?.ReportProgress(UiText.Localize(value.Message), (int)value.Percentage, 100);
+            original?.Report(value);
+        });
+    }
+
+    private sealed class RecordedTransferProgress(Action<TransferProgress> report) : IProgress<TransferProgress>
+    {
+        public void Report(TransferProgress value) => report(value);
+    }
 
     private BackgroundTaskCenterService BackgroundTasks => _backgroundTasks ??= CreateBackgroundTasks();
 
@@ -32,7 +143,20 @@ public partial class MainWindow
         var tasks = BackgroundTasks.GetSnapshot();
         var running = tasks.Where(task => task.Status is BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued).ToArray();
         var failed = tasks.Count(task => !task.IsFromPreviousRun && task.Status == BackgroundTaskStatus.Failed);
-        BackgroundTaskStatusButton.IsVisible = running.Length > 0 || failed > 0;
+        BackgroundTaskStatusButton.IsVisible = false;
+        TaskHistoryIdleIcon.IsVisible = running.Length == 0;
+        TaskHistoryActivityIcon.IsVisible = running.Length > 0;
+        ToolTip.SetTip(BackgroundTaskHistoryButton, T("任务记录")
+            + (running.Length > 0 ? T(" · 进行中 {0}", running.Length) : failed > 0 ? T(" · 失败 {0}", failed) : string.Empty));
+        if (_taskHistoryAnimation is null)
+        {
+            TaskHistoryActivityIcon.RenderTransform = _taskHistoryRotation;
+            _taskHistoryAnimation = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
+            _taskHistoryAnimation.Tick += (_, _) => _taskHistoryRotation.Angle = (_taskHistoryRotation.Angle + 12) % 360;
+            Closed += (_, _) => _taskHistoryAnimation.Stop();
+        }
+        if (running.Length > 0) _taskHistoryAnimation.Start();
+        else { _taskHistoryAnimation.Stop(); _taskHistoryRotation.Angle = 0; }
         if (running.Length > 0)
         {
             var task = running[0];
@@ -48,24 +172,49 @@ public partial class MainWindow
     }
 
     private async Task<T> RunTrackedTaskAsync<T>(string title, BackgroundTaskKind kind,
-        Func<BackgroundTaskContext, CancellationToken, Task<T>> operation, CancellationToken cancellationToken)
+        Func<BackgroundTaskContext, CancellationToken, Task<T>> operation, CancellationToken cancellationToken,
+        bool allowRetry = true)
     {
         T result = default!;
         ExceptionDispatchInfo? failure = null;
         var handle = BackgroundTasks.Start(title, kind, async (context, token) =>
         {
             failure = null;
+            if (_genericTaskActive && _genericTaskContext is null)
+            {
+                _genericTaskContext = context;
+                UpdateGenericTaskProgress();
+            }
             try { result = await operation(context, token); }
             catch (Exception exception)
             {
                 failure = ExceptionDispatchInfo.Capture(exception);
                 throw;
             }
-        }, cancellationToken);
+        }, cancellationToken, allowRetry);
         await handle.Completion;
         failure?.Throw();
         return result;
     }
+
+    private Task<T> RecordResourceOperationAsync<T>(string action, string name,
+        Func<CancellationToken, Task<T>> operation, CancellationToken token) =>
+        RunTrackedTaskAsync(action, BackgroundTaskKind.Other, async (context, cancellationToken) =>
+        {
+            context.ReportBooks([name]);
+            var previous = _resourceTaskContext.Value;
+            _resourceTaskContext.Value = context;
+            try { return await operation(cancellationToken); }
+            finally { _resourceTaskContext.Value = previous; }
+        }, token, allowRetry: false);
+
+    private async Task RecordResourceActionAsync(string action, string name,
+        Func<CancellationToken, Task> operation, CancellationToken token) =>
+        await RecordResourceOperationAsync(action, name, async cancellationToken =>
+        {
+            await operation(cancellationToken);
+            return true;
+        }, token);
 
     private void BackgroundTasksButton_Click(object? sender, RoutedEventArgs e)
     {
@@ -87,12 +236,12 @@ public partial class MainWindow
             };
             _backgroundTaskFlyout = new Flyout
             {
-                Placement = PlacementMode.BottomEdgeAlignedLeft,
+                Placement = PlacementMode.TopEdgeAlignedLeft,
                 VerticalOffset = 0,
                 FlyoutPresenterClasses = { "backgroundTaskFlyout" },
                 Content = new Border
                 {
-                    Width = Math.Clamp(Bounds.Width - 80, 240, 340),
+                    MinWidth = 240, MaxWidth = Math.Clamp(Bounds.Width - 80, 240, 560),
                     Child = content
                 }
             };
@@ -124,21 +273,82 @@ public partial class MainWindow
                 _ => T("等待中")
             };
             var row = new StackPanel { Spacing = 6 };
-            row.Children.Add(new TextBlock { Text = task.Title + " · " + status, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-            if (!string.IsNullOrWhiteSpace(task.Stage))
+            var isBatchImport = task.Kind == BackgroundTaskKind.Import && task.BookTitles is { Count: > 1 };
+            var names = !isBatchImport && task.BookTitles is { Count: > 0 }
+                ? string.Join("、", task.BookTitles.Select(title => "《" + title + "》")) : string.Empty;
+            var identity = isBatchImport ? T("批量导入") : task.Title + (names.Length > 0 ? " · " + names : string.Empty);
+            var result = task.Status == BackgroundTaskStatus.Succeeded
+                ? task.UpdatedAtUtc.ToLocalTime().ToString("MM-dd HH:mm:ss") : string.Empty;
+            var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,*,Auto"), ColumnSpacing = 6 };
+            ToolTip.SetTip(heading, status + " · " + identity + (result.Length > 0 ? " · " + result : string.Empty));
+            var statusGeometry = task.Status switch
+            {
+                BackgroundTaskStatus.Succeeded => "M 3,8 L 6,11 L 13,4",
+                BackgroundTaskStatus.Failed => "M 4,4 L 12,12 M 12,4 L 4,12",
+                BackgroundTaskStatus.Canceled => "M 8,1 A 7,7 0 1 1 8,15 A 7,7 0 1 1 8,1 M 3,3 L 13,13",
+                BackgroundTaskStatus.Interrupted => "M 5,3 V 13 M 11,3 V 13",
+                _ => "M 8,1 A 7,7 0 1 1 8,15 A 7,7 0 1 1 8,1 M 8,4 V 8 L 11,10"
+            };
+            var statusIcon = new Avalonia.Controls.Shapes.Path
+            {
+                Width = 12, Height = 12, Stretch = Avalonia.Media.Stretch.Uniform,
+                Data = Avalonia.Media.Geometry.Parse(statusGeometry),
+                Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 0.8,
+                        Fill = Avalonia.Media.Brushes.Transparent,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+            };
+            ToolTip.SetTip(statusIcon, status);
+            Avalonia.Automation.AutomationProperties.SetName(statusIcon, status);
+            heading.Children.Add(statusIcon);
+            var identityText = new TextBlock
+            {
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center, Text = identity, MaxWidth = Math.Clamp(Bounds.Width - 300, 60, 300), FontSize = 13, TextWrapping = Avalonia.Media.TextWrapping.NoWrap,
+                TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+            };
+            Grid.SetColumn(identityText, 1);
+            heading.Children.Add(identityText);
+            var resultText = new TextBlock { Text = result, FontSize = 13, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+            Grid.SetColumn(resultText, 2);
+            heading.Children.Add(resultText);
+            var canCancel = task.CanCancel && !_displayOnlyTaskIds.Contains(task.Id);
+            if (canCancel || task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued))
+            {
+                var delete = new Button
+                {
+                    Classes = { "eject" }, Width = 25, MinWidth = 25, Height = 23,
+                    Content = new Avalonia.Controls.Shapes.Path
+                    {
+                        Width = 10, Height = 10, Stretch = Avalonia.Media.Stretch.Uniform,
+                        Data = Avalonia.Media.Geometry.Parse("M 2,2 L 12,12 M 12,2 L 2,12"),
+                        Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 0.8,
+                        Fill = Avalonia.Media.Brushes.Transparent
+                    }
+                };
+                var actionLabel = canCancel ? T("取消") : T("删除");
+                ToolTip.SetTip(delete, actionLabel);
+                Avalonia.Automation.AutomationProperties.SetName(delete, actionLabel);
+                delete.Click += async (_, _) =>
+                {
+                    if (canCancel) BackgroundTasks.Cancel(task.Id);
+                    else await BackgroundTasks.RemoveCompletedAsync(task.Id);
+                };
+                Grid.SetColumn(delete, 4);
+                heading.Children.Add(delete);
+            }
+            row.Children.Add(heading);
+            if (!string.IsNullOrWhiteSpace(task.Stage) && task.Status != BackgroundTaskStatus.Succeeded)
                 row.Children.Add(new TextBlock { Text = task.Stage, FontSize = 12,
                     Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-            if (task.ProgressTotal is > 0)
+            if (task.ProgressTotal is > 0 && task.Status is BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued)
+            {
+                row.Children.Add(new TextBlock { Text = T("进度：{0}/{1}", task.ProgressCurrent ?? 0, task.ProgressTotal), FontSize = 12 });
                 row.Children.Add(new ProgressBar { Maximum = task.ProgressTotal.Value, Value = task.ProgressCurrent ?? 0 });
+            }
+            else if (task.Status is BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued)
+                row.Children.Add(new ProgressBar { IsIndeterminate = true });
             if (!string.IsNullOrWhiteSpace(task.Error))
                 row.Children.Add(new TextBlock { Text = task.Error, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
             var actions = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
-            if (task.CanCancel)
-            {
-                var cancel = new Button { Content = T("取消") };
-                cancel.Click += (_, _) => BackgroundTasks.Cancel(task.Id);
-                actions.Children.Add(cancel);
-            }
             if (task.CanRetry)
             {
                 var retry = new Button { Content = T("重试") };

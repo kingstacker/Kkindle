@@ -6,6 +6,49 @@ namespace Kkindle.Tests;
 public sealed class BackgroundTaskCenterServiceTests
 {
     [Fact]
+    public async Task RemovingCompletedTaskPersistsAndRejectsRunningTask()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var history = Path.Combine(root, "tasks.json");
+            var service = new BackgroundTaskCenterService(history);
+            var completed = service.Start("完成", BackgroundTaskKind.Other, (_, _) => Task.CompletedTask);
+            await completed.Completion;
+            var running = service.Start("运行", BackgroundTaskKind.Other, async (_, token) => await Task.Delay(Timeout.Infinite, token));
+            Assert.False(await service.RemoveCompletedAsync(running.Id));
+            service.Cancel(running.Id);
+            await running.Completion;
+            Assert.True(await service.RemoveCompletedAsync(completed.Id));
+            Assert.DoesNotContain(new BackgroundTaskCenterService(history).GetSnapshot(), task => task.Id == completed.Id);
+            Assert.Contains(service.GetSnapshot(), task => task.Id == running.Id);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task BookTitlesSurviveRestartWithoutPersistingSourcePaths()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var history = Path.Combine(root, "tasks.json");
+            var service = new BackgroundTaskCenterService(history);
+            var handle = service.Start("书库导入", BackgroundTaskKind.Import, (context, _) =>
+            {
+                context.ReportBooks(["三体", "活着", @"C:\private\book.epub"]);
+                return Task.CompletedTask;
+            });
+            await handle.Completion;
+            var restored = Assert.Single(new BackgroundTaskCenterService(history).GetSnapshot());
+            Assert.Contains("三体", restored.BookTitles!);
+            Assert.Contains("活着", restored.BookTitles!);
+            Assert.DoesNotContain("private", await File.ReadAllTextAsync(history));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task RetryIsExclusiveAndLateProgressFromPreviousAttemptIsIgnored()
     {
         var root = TestHelpers.CreateTempDirectory();

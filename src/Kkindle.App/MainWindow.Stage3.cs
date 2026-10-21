@@ -278,12 +278,10 @@ public partial class MainWindow
         _s3SyncTimer.Start();
     }
 
-    // Unified bottom-right task progress surface, matching the WinUI
-    // TransferToast.cs behaviour. The transfer toast replaces the generic
-    // task popup while a Kindle operation is active so the two overlays never
-    // stack. Popups fade out over ~220 ms instead of vanishing abruptly.
-    private void ShowTaskProgressPopup()
+    // Keep existing progress producers synchronized with title-bar task history.
+    private void ShowTaskProgressPopup(bool recordTask = true)
     {
+        if (recordTask) BeginGenericTaskRecord();
         // An active transfer toast owns the single visible task surface. A
         // generic task may still run in the background, but it must not steal
         // or stop the transfer task's spinner.
@@ -292,12 +290,13 @@ public partial class MainWindow
         TransferToast.IsVisible = false;
         TransferToast.Opacity = 0;
         StartTaskSpinner(TaskProgressPopupSpinnerIcon);
-        TaskProgressPopup.IsVisible = true;
+        TaskProgressPopup.IsVisible = false;
         TaskProgressPopup.Opacity = 1;
     }
 
     private void HideTaskProgressPopup()
     {
+        EndGenericTaskRecord();
         StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
         FadeOutPopup(TaskProgressPopup);
     }
@@ -310,6 +309,7 @@ public partial class MainWindow
         bool autoHide = false,
         bool completed = false)
     {
+        UpdateTransferTaskRecord(title, message, progress, isIndeterminate, autoHide, completed);
         StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
         TaskProgressPopup.IsVisible = false;
         TaskProgressPopup.Opacity = 0;
@@ -352,7 +352,7 @@ public partial class MainWindow
         {
             TransferToastProgress.IsVisible = false;
         }
-        TransferToast.IsVisible = true;
+        TransferToast.IsVisible = false;
         TransferToast.Opacity = 1;
         if (autoHide)
         {
@@ -363,6 +363,7 @@ public partial class MainWindow
 
     private void HideTransferToast()
     {
+        EndTransferTaskRecord();
         _transferToastTimer.Stop();
         StopTransferToastSpinner();
         TransferToastCancelButton.IsVisible = false;
@@ -2283,7 +2284,7 @@ public partial class MainWindow
         _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         var cancellation = _transferCancellation;
         TaskProgressPopupBar.Value = 0;
-        ShowTaskProgressPopup();
+        ShowTaskProgressPopup(recordTask: false);
         ShowTransferToast(T("发送到设备"), T("正在发送 {0} 本书…", cards.Count), progress: 0);
         var acceptProgressUpdates = true;
         Task<PreparedKindleTransfer>? lookaheadTask = null;
@@ -2371,13 +2372,13 @@ public partial class MainWindow
                     }
 
                     await EnsureCurrentDeviceAsync(device);
-                    await _kindle.SendBookAsync(
+                    await RecordResourceActionAsync(T("发送书籍到设备"), card.Title, token => _kindle.SendBookAsync(
                         device,
                         prepared.File,
                         prepared.SourcePath,
-                        progress,
-                        cancellationToken: cancellation.Token,
-                        coverOverridePath: prepared.CoverOverridePath);
+                        CreateRecordedTransferProgress(progress),
+                        cancellationToken: token,
+                        coverOverridePath: prepared.CoverOverridePath), cancellation.Token);
                     sent++;
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -2627,7 +2628,7 @@ public partial class MainWindow
             _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
             var cancellation = _transferCancellation;
             TaskProgressPopupBar.Value = 0;
-            ShowTaskProgressPopup();
+            ShowTaskProgressPopup(recordTask: false);
             ShowTransferToast(T("发送到设备"), T("正在发送《{0}》…", card.Title), progress: 0);
             var acceptProgressUpdates = true;
             try
@@ -2646,13 +2647,13 @@ public partial class MainWindow
                     cancellation.Token,
                     requestedSource);
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.SendBookAsync(
+                await RecordResourceActionAsync(T("发送书籍到设备"), card.Title, token => _kindle.SendBookAsync(
                     device,
                     prepared.File,
                     prepared.SourcePath,
-                    progress,
-                    cancellationToken: cancellation.Token,
-                    coverOverridePath: prepared.CoverOverridePath);
+                    CreateRecordedTransferProgress(progress),
+                    cancellationToken: token,
+                    coverOverridePath: prepared.CoverOverridePath), cancellation.Token);
                 var completionMessage = _transferStopRequested
                     ? T("已完成当前书籍，发送已停止。")
                     : T("已发送《{0}》到 {1}。", card.Title, device.Name);
@@ -2863,7 +2864,7 @@ public partial class MainWindow
         var calibreMissing = false;
         var failureDetails = new List<string>();
         TaskProgressPopupBar.Value = 0;
-        ShowTaskProgressPopup();
+        ShowTaskProgressPopup(recordTask: false);
         ShowTransferToast(T("导出到电脑书库"), T("正在从设备导出 {0} 本书…", pending.Length), progress: 0);
         var acceptProgressUpdates = true;
         try
@@ -2890,12 +2891,12 @@ public partial class MainWindow
                     });
                     DevicePageStatusText.Text = T("正在从设备读取《{0}》（{1}/{2}）…", card.Title, index + 1, pending.Length);
                     await EnsureCurrentDeviceAsync(device);
-                    var localSource = await _kindle.ExportBookAsync(
+                    var localSource = await RecordResourceOperationAsync(T("从设备导出书籍"), card.Title, token => _kindle.ExportBookAsync(
                         device,
                         card.Book,
                         bookDirectory,
-                        progress,
-                        _lifetimeCancellation.Token);
+                        CreateRecordedTransferProgress(progress),
+                        token), _lifetimeCancellation.Token);
                     var importPath = localSource;
                     if (BookFormatConversionPolicy.Normalize(card.Book.Format) == "kfx")
                     {
@@ -3044,7 +3045,7 @@ public partial class MainWindow
             try
             {
                 await WaitForDeviceBookReadsAsync(device);
-                await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(T("从设备删除书籍"), card.Title, token => _kindle.RemoveBookAsync(device, card.Book, token), _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
                 _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
                 _libraryPresenceComparison = null;
@@ -3081,7 +3082,7 @@ public partial class MainWindow
             try
             {
                 await WaitForDeviceBookReadsAsync(device);
-                await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(T("从设备删除书籍"), card.Title, token => _kindle.RemoveBookAsync(device, card.Book, token), _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
                 _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
                 _libraryPresenceComparison = null;
@@ -4136,8 +4137,8 @@ public partial class MainWindow
                         DictionaryImportProgressBar.IsIndeterminate = update.Percent is null;
                         DictionaryImportProgressBar.Value = update.Percent ?? 0;
                     });
-                    var imported = await Task.Run(() => _dictionaryService.ImportAsync(path,
-                        cancellationToken: _lifetimeCancellation.Token, progress: progress), _lifetimeCancellation.Token);
+                    var imported = await RecordResourceOperationAsync(T("导入本地词典"), Path.GetFileNameWithoutExtension(path), token => Task.Run(() => _dictionaryService.ImportAsync(path,
+                        cancellationToken: token, progress: progress), token), _lifetimeCancellation.Token);
                     if (knownIds.Add(imported.Id)) importedCount++;
                     else skippedDuplicateCount++;
                 }
@@ -4214,11 +4215,12 @@ public partial class MainWindow
                 var path = paths[index];
                 DeviceResourceStatusText.Text = T("正在导入 {0}…", Path.GetFileName(path));
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.SendResourceAsync(
+                await RecordResourceActionAsync(resourceKind == KindleResourceKind.Font ? T("导入设备字体") : T("导入设备词典"), Path.GetFileNameWithoutExtension(path), token => _kindle.SendResourceAsync(
                     device,
                     resourceKind,
                     path,
-                    cancellationToken: _lifetimeCancellation.Token);
+                    progress: CreateRecordedTransferProgress(null),
+                    cancellationToken: token), _lifetimeCancellation.Token);
                 resourceChanged = true;
                 ShowTransferToast(T("导入设备资源"), T("正在导入 {0}…", Path.GetFileName(path)), progress: (index + 1) * 100 / paths.Length);
             }
@@ -4273,7 +4275,7 @@ public partial class MainWindow
             try
             {
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.ExportResourceAsync(device, resource, path, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(resource.Kind == KindleResourceKind.Font ? T("导出设备字体") : T("导出设备词典"), Path.GetFileNameWithoutExtension(resource.FileName), token => _kindle.ExportResourceAsync(device, resource, path, token), _lifetimeCancellation.Token);
                 DeviceResourceStatusText.Text = T("已导出 {0}", resource.FileName);
                 ShowTransferToast(T("导出设备资源"), T("已导出 {0}", resource.FileName), progress: 100, autoHide: true, completed: true);
             }
@@ -4298,7 +4300,7 @@ public partial class MainWindow
             try
             {
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.RemoveResourceAsync(device, resource, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(resource.Kind == KindleResourceKind.Font ? T("删除设备字体") : T("删除设备词典"), Path.GetFileNameWithoutExtension(resource.FileName), token => _kindle.RemoveResourceAsync(device, resource, token), _lifetimeCancellation.Token);
                 InvalidateCurrentDeviceResourceCaches();
                 RemoveDeletedDeviceResourceFromCacheAndView(device, resource);
                 await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
@@ -6099,7 +6101,7 @@ public partial class MainWindow
             });
             var path = files.FirstOrDefault()?.TryGetLocalPath();
             if (string.IsNullOrWhiteSpace(path)) return;
-            await _fontLibrary.ImportAsync(path, _lifetimeCancellation.Token);
+            await RecordResourceActionAsync(T("导入本地字体"), Path.GetFileNameWithoutExtension(path), token => _fontLibrary.ImportAsync(path, token), _lifetimeCancellation.Token);
             await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
             FontManagementStatusText.Text = T("字体已导入。");
         }
@@ -6117,7 +6119,7 @@ public partial class MainWindow
         if (ManagedFontList.SelectedItem is not ManagedFont font) return;
         try
         {
-            await _fontLibrary.RemoveAsync(font.Id, _lifetimeCancellation.Token);
+            await RecordResourceActionAsync(T("删除本地字体"), font.DisplayName, token => _fontLibrary.RemoveAsync(font.Id, token), _lifetimeCancellation.Token);
             await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
             FontManagementStatusText.Text = T("字体已移除。");
         }
@@ -6164,7 +6166,7 @@ public partial class MainWindow
         if (sender is not Control { DataContext: DictionaryDefinition dictionary }) return;
         try
         {
-            await _dictionaryService.RemoveAsync(dictionary.Id, _lifetimeCancellation.Token);
+            await RecordResourceActionAsync(T("删除本地词典"), dictionary.Name, token => _dictionaryService.RemoveAsync(dictionary.Id, token), _lifetimeCancellation.Token);
             await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
             DictionaryResultText.Text = T("词典已移除。");
         }

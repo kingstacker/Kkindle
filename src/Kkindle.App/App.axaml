@@ -300,6 +300,7 @@
             <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="FlyoutPresenter.backgroundTaskFlyout">
+            <Setter Property="MaxWidth" Value="640" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
@@ -309,14 +310,14 @@
             <Setter Property="Template">
                 <ControlTemplate>
                     <Grid>
-                    <Border Margin="0,8,0,0" Background="{TemplateBinding Background}"
+                    <Border Margin="0,0,0,8" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}">
                         <ContentPresenter Content="{TemplateBinding Content}"
                                           ContentTemplate="{TemplateBinding ContentTemplate}" />
                     </Border>
-                    <Path Data="M 0,9 L 8,1 L 16,9" Width="16" Height="10"
-                          Margin="11,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Top"
+                    <Path Data="M 0,1 L 8,9 L 16,1" Width="16" Height="10"
+                          Margin="4,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Bottom"
                           Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}"
                           StrokeThickness="1" />
                     </Grid>
@@ -1809,6 +1810,21 @@
         <Style Selector="Button.eject:pressed Polygon.ejectGlyph">
             <Setter Property="RenderTransform" Value="scale(0.92)" />
         </Style>
+        <Style Selector="Grid.taskHistoryGlyph">
+            <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+            <Setter Property="RenderTransform" Value="scale(1)" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.14" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.eject:pointerover Grid.taskHistoryGlyph">
+            <Setter Property="RenderTransform" Value="scale(1.08)" />
+        </Style>
+        <Style Selector="Button.eject:pressed Grid.taskHistoryGlyph">
+            <Setter Property="RenderTransform" Value="scale(0.92)" />
+        </Style>
         <Style Selector="TextBlock.kindleStatusTrigger">
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="RenderTransformOrigin" Value="0%,50%" />
@@ -2934,6 +2950,16 @@
         <Style Selector="Button:focus-visible">
             <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
             <Setter Property="BorderThickness" Value="2" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.quiet.settingsSearchResult">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.quiet.settingsSearchResult.selected">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+        </Style>
+        <Style Selector="Grid.libraryShell Button.quiet.settingsSearchResult:focus-visible">
+            <Setter Property="BorderThickness" Value="0" />
         </Style>
     </Application.Styles>
 </Application>

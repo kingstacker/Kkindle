@@ -188,7 +188,6 @@ public partial class MainWindow
         _settingsSearchCancellation = null;
         var query = SettingsSearchBox.Text?.Trim() ?? string.Empty;
         var searching = query.Length > 0;
-        SettingsSearchClearButton.IsVisible = searching;
         SettingsCategoryButtons.IsVisible = !searching;
         SettingsScrollViewer.IsVisible = !searching;
         SettingsSearchNoResultsText.IsVisible = false;
@@ -223,12 +222,6 @@ public partial class MainWindow
         }
     }
 
-    private void SettingsSearchClearButton_Click(object? sender, RoutedEventArgs e)
-    {
-        SettingsSearchBox.Text = string.Empty;
-        SettingsSearchBox.Focus();
-    }
-
     private void SettingsSearchBox_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape && !string.IsNullOrWhiteSpace(SettingsSearchBox.Text))
@@ -259,8 +252,7 @@ public partial class MainWindow
         for (var index = 0; index < buttons.Length; index++)
         {
             var selected = index == _settingsSearchSelectedIndex;
-            buttons[index].BorderThickness = selected ? new Thickness(2) : new Thickness(0);
-            buttons[index].BorderBrush = AppAppearanceResources.GetBrush("InkBrush");
+            buttons[index].Classes.Set("selected", selected);
             if (selected) buttons[index].BringIntoView();
         }
     }

@@ -669,7 +669,7 @@
                             Padding="10"
                             Background="Transparent">
                         <StackPanel Spacing="5">
-                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="6">
+                            <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="6">
                                 <TextBlock x:Name="KindleStatusText"
                                            Classes="kindleStatusTrigger"
                                            Text="{DynamicResource Ui.Auto.92424890EA6A8543}"
@@ -685,6 +685,21 @@
                                             FontSize="10"
                                             TextWrapping="Wrap"
                                             HorizontalAlignment="Stretch" />
+                <Button x:Name="BackgroundTaskHistoryButton" Grid.Column="2" Classes="eject"
+                        Width="25" MinWidth="25" Height="23" Padding="0" VerticalAlignment="Center"
+                        ToolTip.Tip="{DynamicResource Ui.Tasks.History}"
+                        AutomationProperties.Name="{DynamicResource Ui.Tasks.History}"
+                        Click="BackgroundTasksButton_Click">
+                    <Grid Classes="taskHistoryGlyph" Width="16" Height="16">
+                        <Path x:Name="TaskHistoryIdleIcon" Width="14" Height="14" Stretch="Uniform"
+                              Stroke="{DynamicResource InkBrush}" StrokeThickness="1" Fill="Transparent"
+                              Data="M 12,3 A 9,9 0 1 1 12,21 A 9,9 0 1 1 12,3 M 12,7 V 12 L 16,14" />
+                        <Path x:Name="TaskHistoryActivityIcon" Width="14" Height="14" Stretch="Uniform"
+                              Stroke="{DynamicResource InkBrush}" StrokeThickness="1" Fill="Transparent"
+                              RenderTransformOrigin="50%,50%" IsVisible="False"
+                              Data="M 12,3 A 9,9 0 1 1 3,12" />
+                    </Grid>
+                </Button>
                                 <Border Grid.Column="1"
                                         Grid.Row="0"
                                         Classes="ejectHoverArea"
@@ -771,13 +786,6 @@
                                 Orientation="Horizontal"
                                 Spacing="8"
                                 SizeChanged="LibraryToolbar_SizeChanged">
-                        <Button x:Name="BackgroundTaskHistoryButton" Classes="quiet libraryToolbar"
-                                ToolTip.Tip="{DynamicResource Ui.Tasks.History}"
-                                AutomationProperties.Name="{DynamicResource Ui.Tasks.History}"
-                                Click="BackgroundTasksButton_Click">
-                            <Path Classes="libraryGlyph"
-                                  Data="M 9,5 H 21 M 9,12 H 21 M 9,19 H 21 M 2,5 L 4,7 L 7,3 M 2,12 L 4,14 L 7,10 M 2,19 L 4,21 L 7,17" />
-                        </Button>
                         <Button x:Name="FilterButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.0289E5BA6BFEA5E2}" Click="FilterButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.B5F15473FDC0FEFE}">
                             <Path Classes="libraryGlyph"
                                   Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
@@ -2589,23 +2597,13 @@
                         <TextBlock x:Name="SettingsStatusText" Text=""
                                    IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                         <StackPanel x:Name="SettingsSearchPanel" Spacing="6" Margin="0,8,0,0">
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                            <Grid>
                                 <TextBox x:Name="SettingsSearchBox"
                                          PlaceholderText="{DynamicResource Ui.Settings.Search.Placeholder}"
                                          AutomationProperties.Name="{DynamicResource Ui.Settings.Search.Placeholder}"
                                          TextChanged="SettingsSearchBox_TextChanged"
                                          KeyDown="SettingsSearchBox_KeyDown" />
-                                <Button x:Name="SettingsSearchClearButton"
-                                        Grid.Column="1"
-                                        Classes="quiet settingsSearchClear"
-                                        Width="38"
-                                        MinWidth="38"
-                                        Padding="0"
-                                        Content="×"
-                                        ToolTip.Tip="{DynamicResource Ui.Settings.Search.Clear}"
-                                        AutomationProperties.Name="{DynamicResource Ui.Settings.Search.Clear}"
-                                        IsVisible="False"
-                                        Click="SettingsSearchClearButton_Click" />
+
                             </Grid>
                             <TextBlock x:Name="SettingsSearchNoResultsText"
                                        Text="{DynamicResource Ui.Settings.Search.NoResults}"
@@ -2625,6 +2623,7 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:SettingsSearchResult">
                                                 <Button Classes="quiet settingsSearchResult"
+                                                        HorizontalAlignment="Stretch"
                                                         Tag="{Binding}"
                                                         HorizontalContentAlignment="Stretch"
                                                         AutomationProperties.Name="{Binding AccessibleName}"
