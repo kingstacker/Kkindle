@@ -42,6 +42,7 @@ public sealed partial class S3SyncIntegrationTests
         await a.SyncAsync();
         var json = JsonSerializer.SerializeToNode(bucket.Snapshot(a.SnapshotKey))!;
         json["Version"] = 4;
+        json.AsObject().Remove("MinimumReaderVersion");
         json["ReadingAchievements"] = JsonNode.Parse("""
             {"Awards":[{"Id":"time-1","RuleVersion":1,"EarnedAt":"2026-10-02T00:00:00Z","Historical":false,"Seen":false}],"Completions":[]}
             """);

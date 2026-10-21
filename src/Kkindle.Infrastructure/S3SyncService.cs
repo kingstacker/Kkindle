@@ -22,8 +22,8 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public sealed partial class S3SyncService
 {
-    // Version 4 added optional badge data. Continue accepting those snapshots
-    // so removing badges does not prevent existing devices from syncing.
+    // Additive changes keep this wire version. A future wire version can still
+    // be read when its explicit MinimumReaderVersion permits it.
     private const int SnapshotVersion = 5;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
@@ -531,6 +531,7 @@ public sealed partial class S3SyncService
                 MergeTombstones(FilterReadingTombstones(detectedDeletions, finalSnapshot.ReadingDataReset), recordedTombstones),
                 options?.ConfirmedDeletionFingerprint);
             finalSnapshot.Tombstones = MergeTombstones(finalSnapshot.Tombstones, recordedTombstones);
+            PreserveForwardCompatibleData(finalSnapshot, state.LastUploadedSnapshot, remoteSnapshots);
 
             // Publish exactly this captured view after all its objects exist.
             // Writes after capture remain outside the saved local baseline.
@@ -1438,6 +1439,10 @@ public sealed partial class S3SyncService
         IReadOnlyList<S3SyncSnapshot> downloadedRemoteSnapshots,
         CancellationToken cancellationToken)
     {
+        // Unknown data may reference blobs or encode deletion semantics we do
+        // not understand. Leave retention/compaction to a reader that does.
+        if (HasForwardCompatibleData(localSnapshot)
+            || downloadedRemoteSnapshots.Any(HasForwardCompatibleData)) return null;
         IReadOnlyList<SyncObjectMetadata> deviceObjects;
         try
         {
@@ -1596,6 +1601,7 @@ public sealed partial class S3SyncService
         IReadOnlyList<S3SyncSnapshot> targets)
     {
         if (targets.Count == 0) return false;
+        if (HasForwardCompatibleData(candidate)) return false;
         var targetLiveRows = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         var tombstoneVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         foreach (var target in targets)
@@ -1740,8 +1746,7 @@ public sealed partial class S3SyncService
             {
                 var payload = await DownloadObjectBytesAsync(client, keysToRead[index], token);
                 var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, token);
-                if (snapshot.Version > SnapshotVersion)
-                    throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
+                ValidateSnapshotCompatibility(snapshot);
                 ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
                 if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
                     throw new InvalidDataException("同步快照缺少有效的设备 ID。");

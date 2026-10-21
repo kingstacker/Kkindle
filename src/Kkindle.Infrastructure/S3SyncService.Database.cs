@@ -268,8 +268,8 @@ public sealed partial class S3SyncService
         var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
         var snapshot = new S3SyncSnapshot
         {
-            // Version 5 protects archived note metadata and its blob references from older clients.
             Version = SnapshotVersion,
+            MinimumReaderVersion = SnapshotVersion,
             ReadingDataReset = readingReset,
             DeviceId = deviceId,
             CreatedAt = captureStartedAt,
@@ -585,6 +585,7 @@ public sealed partial class S3SyncService
         var snapshot = new S3SyncSnapshot
         {
             Version = SnapshotVersion,
+            MinimumReaderVersion = SnapshotVersion,
             ReadingDataReset = readingReset,
             DeviceId = deviceId,
             CreatedAt = captureStartedAt,
@@ -1299,7 +1300,6 @@ public sealed partial class S3SyncService
         CancellationToken cancellationToken)
     {
         var snapshots = remoteSnapshots
-            .Where(snapshot => snapshot.Version <= SnapshotVersion)
             .GroupBy(snapshot => NormalizeKnownDeviceId(snapshot.DeviceId), StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(snapshot => snapshot.CreatedAt).First())
             .ToArray();

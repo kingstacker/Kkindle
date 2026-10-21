@@ -6195,6 +6195,7 @@ public partial class MainWindow
 
     private async Task LookupSettingsDictionaryAsync()
     {
+        SettingsDictionaryEntries.SetEntries([]);
         var term = DictionaryTestBox.Text?.Trim() ?? string.Empty;
         if (term.Length == 0)
         {
@@ -6205,8 +6206,16 @@ public partial class MainWindow
         var entries = await _dictionaryService.LookupAsync(term, _lifetimeCancellation.Token);
         DictionaryResultText.Text = entries.Count == 0
             ? T("没有找到“{0}”。", term)
-            : string.Join(Environment.NewLine + Environment.NewLine,
-                entries.Select(entry => $"{entry.Term} · {entry.DictionaryName}{Environment.NewLine}{entry.Definition}"));
+            : string.Empty;
+        SettingsDictionaryEntries.SetEntries(entries);
+        SettingsDictionaryEntries.TermRequested -= SettingsDictionaryTermRequested;
+        SettingsDictionaryEntries.TermRequested += SettingsDictionaryTermRequested;
+    }
+
+    private async void SettingsDictionaryTermRequested(object? sender, string term)
+    {
+        DictionaryTestBox.Text = term;
+        await LookupSettingsDictionaryAsync();
     }
 
     private async void DictionaryTestButton_Click(object? sender, RoutedEventArgs e) => await LookupSettingsDictionaryAsync();

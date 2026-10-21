@@ -693,6 +693,7 @@ public sealed partial class S3SyncIntegrationTests
         await a.SyncAsync();
         var legacySnapshot = bucket.Snapshot(a.SnapshotKey);
         legacySnapshot.Version = 1;
+        legacySnapshot.MinimumReaderVersion = null;
         foreach (var stats in legacySnapshot.ReadingStats) stats.SecondsByDevice.Clear();
         bucket.Objects[a.SnapshotKey] = MemoryBucket.Encode(legacySnapshot);
         await a.SqlAsync("DELETE FROM S3SyncReadingTimeCounters; DELETE FROM S3SyncLocalMetadata WHERE Key = 'reading-time-v1';");
@@ -900,6 +901,7 @@ public sealed partial class S3SyncIntegrationTests
     {
         public ConcurrentDictionary<string, byte[]> Objects { get; } = new(StringComparer.Ordinal);
         public int WriteCount;
+        public ConcurrentDictionary<string, DateTime> ModifiedTimes { get; } = new(StringComparer.Ordinal);
         public Func<string, CancellationToken, Task>? BeforeGet;
         public Func<string, byte[], Task>? BeforePut;
         public S3SyncSnapshot Snapshot(string key) => Decode(Objects[key]);
@@ -928,7 +930,7 @@ public sealed partial class S3SyncIntegrationTests
             {
                 IsTruncated = false,
                 S3Objects = bucket.Objects.Keys.Where(key => key.StartsWith(request.Prefix, StringComparison.Ordinal))
-                    .Select(key => new S3Object { Key = key }).ToList()
+                    .Select(key => new S3Object { Key = key, LastModified = bucket.ModifiedTimes.TryGetValue(key, out var modified) ? modified : null }).ToList()
             });
         }
 
@@ -939,6 +941,13 @@ public sealed partial class S3SyncIntegrationTests
             if (!bucket.Objects.TryGetValue(request.Key, out var bytes))
                 throw new AmazonS3Exception("Missing test object") { StatusCode = HttpStatusCode.NotFound, ErrorCode = "NoSuchKey" };
             return new GetObjectResponse { ContentLength = bytes.Length, ResponseStream = new MemoryStream(bytes, false), HttpStatusCode = HttpStatusCode.OK };
+        }
+
+        public override Task<DeleteObjectResponse> DeleteObjectAsync(DeleteObjectRequest request, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            bucket.Objects.TryRemove(request.Key, out _);
+            return Task.FromResult(new DeleteObjectResponse { HttpStatusCode = HttpStatusCode.NoContent });
         }
 
         public override async Task<PutObjectResponse> PutObjectAsync(PutObjectRequest request, CancellationToken cancellationToken = default)

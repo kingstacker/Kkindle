@@ -18,6 +18,7 @@ public sealed partial class S3SyncIntegrationTests
         var snapshot = bucket.Snapshot(a.SnapshotKey);
         Assert.Equal(5, snapshot.Version);
         snapshot.Version++;
+        snapshot.MinimumReaderVersion = snapshot.Version;
         bucket.Objects[a.SnapshotKey] = MemoryBucket.Encode(snapshot);
         await using var b = await Device.CreateAsync(bucket);
         await b.AddBookAsync();
@@ -38,6 +39,7 @@ public sealed partial class S3SyncIntegrationTests
         await a.SyncAsync();
         var snapshot = bucket.Snapshot(a.SnapshotKey);
         snapshot.Version = 4;
+        snapshot.MinimumReaderVersion = null;
         bucket.Objects[a.SnapshotKey] = MemoryBucket.Encode(snapshot);
         await using var b = await Device.CreateAsync(bucket);
         await b.SyncAsync();

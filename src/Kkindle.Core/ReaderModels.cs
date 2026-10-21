@@ -117,6 +117,9 @@ public sealed record ReaderLayoutSettings(
     bool VerticalWriting = false,
     bool TwoPageMode = false)
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; init; }
+
     // Keep this as an initialized property instead of a new positional
     // constructor parameter. Older JSON settings do not contain the field;
     // the initializer therefore gives new settings the current default.

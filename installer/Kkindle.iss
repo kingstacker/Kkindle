@@ -101,6 +101,7 @@ var
   Script: String;
   Parameters: String;
   ResultCode: Integer;
+  Stopped: Boolean;
 begin
   Result := '';
   TargetPath := ExpandConstant('{app}');
@@ -152,9 +153,20 @@ begin
 
   Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ScriptPath + '" "' + TargetPath + '"';
-  if not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    Result := CustomMessage('StopMcpBeforeUpgradeFailed')
-  else if ResultCode <> 0 then
+  Stopped := Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if Stopped then
+    Stopped := ResultCode = 0;
+  if not Stopped then
+  begin
+    { Keep the installation path from the original user. Elevate only the shutdown helper,
+      not Setup: elevating Setup could change a per-user installation path. }
+    Log('Process shutdown needs administrator access; retrying the path-scoped helper.');
+    Stopped := ShellExec('runas', PowerShellPath, Parameters, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+    if Stopped then
+      Stopped := ResultCode = 0;
+  end;
+  if not Stopped then
     Result := CustomMessage('StopMcpBeforeUpgradeFailed');
 
   DeleteFile(ScriptPath);

@@ -7,7 +7,16 @@ namespace Kkindle.Infrastructure;
 // A reset starts a new generation for statistics and progress. Wall-clock
 // timestamps cannot distinguish new reading from an offline device's old
 // cumulative counters, so only data from the same generation can be merged.
-internal sealed record ReadingDataReset(long Generation, Guid Id);
+internal sealed record ReadingDataReset(long Generation, Guid Id)
+{
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+
+    // Opaque metadata must not change the identity of a reading generation.
+    public bool Equals(ReadingDataReset? other) => other is not null
+        && Generation == other.Generation && Id == other.Id;
+    public override int GetHashCode() => HashCode.Combine(Generation, Id);
+}
 
 internal static class ReaderReadingDataReset
 {

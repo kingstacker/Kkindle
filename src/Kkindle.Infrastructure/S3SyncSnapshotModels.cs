@@ -1,3 +1,4 @@
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Kkindle.Core;
 
@@ -6,9 +7,12 @@ namespace Kkindle.Infrastructure;
 // These types are deliberately separate from the live SQLite rows. Relative
 // paths and device-local secrets never cross the sync boundary; book files are
 // identified by their content hash and reader rows refer to portable IDs.
-internal sealed class S3SyncSnapshot
+internal sealed class S3SyncSnapshot : S3SyncExtensibleData
 {
     public int Version { get; set; } = 5;
+    // Missing on legacy snapshots: their Version is the required reader version.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MinimumReaderVersion { get; set; }
     public string DeviceId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public S3SyncSettingsSnapshot? Settings { get; set; }
@@ -43,7 +47,7 @@ internal sealed class S3SyncSnapshot
     public Dictionary<string, DateTimeOffset> LocalDeletionTimes { get; set; } = [];
 }
 
-internal sealed class S3SyncBook
+internal sealed class S3SyncBook : S3SyncExtensibleData
 {
     public Guid Id { get; set; }
     public string Title { get; set; } = string.Empty;
@@ -73,7 +77,7 @@ internal sealed class S3SyncBook
     public string? LocalCoverPath { get; set; }
 }
 
-internal sealed class S3SyncBookFile
+internal sealed class S3SyncBookFile : S3SyncExtensibleData
 {
     public Guid Id { get; set; }
     public Guid BookId { get; set; }
@@ -84,7 +88,7 @@ internal sealed class S3SyncBookFile
     public DateTimeOffset ModifiedAt { get; set; }
 }
 
-internal sealed class S3SyncCollection
+internal sealed class S3SyncCollection : S3SyncExtensibleData
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -92,14 +96,14 @@ internal sealed class S3SyncCollection
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-internal sealed class S3SyncCollectionItem
+internal sealed class S3SyncCollectionItem : S3SyncExtensibleData
 {
     public Guid CollectionId { get; set; }
     public Guid BookId { get; set; }
     public DateTimeOffset AddedAt { get; set; }
 }
 
-internal sealed class S3SyncAnnotation
+internal sealed class S3SyncAnnotation : S3SyncExtensibleData
 {
     public Guid Id { get; set; }
     public Guid BookId { get; set; }
@@ -118,7 +122,7 @@ internal sealed class S3SyncAnnotation
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-internal sealed class S3SyncBookReflection
+internal sealed class S3SyncBookReflection : S3SyncExtensibleData
 {
     public Guid BookId { get; set; }
     public string Content { get; set; } = string.Empty;
@@ -126,7 +130,7 @@ internal sealed class S3SyncBookReflection
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-internal sealed class S3SyncProgress
+internal sealed class S3SyncProgress : S3SyncExtensibleData
 {
     public Guid BookId { get; set; }
     public Guid BookFileId { get; set; }
@@ -141,7 +145,7 @@ internal sealed class S3SyncProgress
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-internal sealed class S3SyncBookmark
+internal sealed class S3SyncBookmark : S3SyncExtensibleData
 {
     public Guid Id { get; set; }
     public Guid BookId { get; set; }
@@ -158,7 +162,7 @@ internal sealed class S3SyncBookmark
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-internal sealed class S3SyncLayout
+internal sealed class S3SyncLayout : S3SyncExtensibleData
 {
     public Guid BookId { get; set; }
     public Guid BookFileId { get; set; }
@@ -181,7 +185,7 @@ internal sealed class S3SyncLayout
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-internal sealed class S3SyncReadingStats
+internal sealed class S3SyncReadingStats : S3SyncExtensibleData
 {
     public Guid BookId { get; set; }
     public Guid BookFileId { get; set; }
@@ -197,7 +201,7 @@ internal sealed class S3SyncReadingStats
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-internal sealed class S3SyncTombstone
+internal sealed class S3SyncTombstone : S3SyncExtensibleData
 {
     public string EntityType { get; set; } = string.Empty;
     public string Key { get; set; } = string.Empty;
@@ -206,7 +210,7 @@ internal sealed class S3SyncTombstone
     public Guid? ReadingDataResetId { get; set; }
 }
 
-internal sealed class S3SyncSettingsSnapshot
+internal sealed class S3SyncSettingsSnapshot : S3SyncExtensibleData
 {
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? AppUpdatedAt { get; set; }
@@ -217,7 +221,7 @@ internal sealed class S3SyncSettingsSnapshot
     public S3SyncKindleEmailSettings KindleEmail { get; set; } = new();
 }
 
-internal sealed class S3SyncAppSettings
+internal sealed class S3SyncAppSettings : S3SyncExtensibleData
 {
     public string UiLanguage { get; set; } = string.Empty;
     public string PreferredOpenFormat { get; set; } = "epub";
@@ -241,14 +245,14 @@ internal sealed class S3SyncAppSettings
     public ReaderLayoutSettings DefaultReaderLayout { get; set; } = new();
 }
 
-internal sealed class S3SyncAiSettings
+internal sealed class S3SyncAiSettings : S3SyncExtensibleData
 {
     public string Provider { get; set; } = string.Empty;
     public string BaseUrl { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
 }
 
-internal sealed class S3SyncKindleEmailSettings
+internal sealed class S3SyncKindleEmailSettings : S3SyncExtensibleData
 {
     public string KindleEmailAddress { get; set; } = string.Empty;
     public string SenderEmailAddress { get; set; } = string.Empty;
@@ -280,4 +284,15 @@ internal sealed class S3SyncState
     public Dictionary<Guid, string> LocalFilePaths { get; set; } = [];
     public Dictionary<Guid, string> LocalCoverPaths { get; set; } = [];
     public Dictionary<string, DateTimeOffset> LocalDeletionTimes { get; set; } = [];
+}
+
+// Unknown optional fields survive capture, baseline persistence and re-upload.
+internal abstract class S3SyncExtensibleData
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+
+    // Preserve the original field clock when an older client republishes it.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, DateTimeOffset>? ExtensionDataVersions { get; set; }
 }
