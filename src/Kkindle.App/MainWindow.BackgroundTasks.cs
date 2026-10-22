@@ -140,7 +140,9 @@ public partial class MainWindow
 
     private BackgroundTaskCenterService CreateBackgroundTasks()
     {
-        var service = new BackgroundTaskCenterService(Path.Combine(_paths.Data, "background-tasks.json"));
+        var service = new BackgroundTaskCenterService(
+            Path.Combine(_paths.Data, "background-tasks.json"),
+            clearHistoryOnStartup: true);
         service.Changed += (_, _) => Dispatcher.UIThread.Post(() =>
         {
             RefreshBackgroundTaskStatus();
@@ -296,7 +298,7 @@ public partial class MainWindow
             _backgroundTaskFlyout = new Flyout
             {
                 Placement = PlacementMode.TopEdgeAlignedLeft,
-                VerticalOffset = 0,
+                VerticalOffset = 4,
                 FlyoutPresenterClasses = { "backgroundTaskFlyout" },
                 Content = new Border
                 {

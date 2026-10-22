@@ -195,6 +195,9 @@ public partial class MainWindow : Window
         AppSettings? startupSettings = null)
     {
         _paths = paths;
+        // Clear the previous process's task records as the window starts, even
+        // if the user does not open the task-history flyout during this run.
+        _ = BackgroundTasks;
         _rootConfigurationDirectory = services?.RootConfigurationDirectory ?? AppContext.BaseDirectory;
         _library = library;
         _appSettings = AppSettings.Normalize(startupSettings);
