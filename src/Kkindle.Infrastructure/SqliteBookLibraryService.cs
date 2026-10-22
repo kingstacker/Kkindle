@@ -441,7 +441,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         string? category = null,
         Guid? collectionId = null,
         LibraryReadingStatus? readingStatus = null,
-        bool favoritesOnly = false,
+        bool? favorite = null,
         LibrarySortMode sortMode = LibrarySortMode.UpdatedDescending,
         int pageIndex = 0,
         int pageSize = 200,
@@ -459,11 +459,11 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             category,
             collectionId,
             readingStatus,
-            favoritesOnly);
+            favorite);
 
         var countCommand = connection.CreateCommand();
         countCommand.CommandText = $"SELECT COUNT(*) FROM Books b {where};";
-        AddLibrarySearchParameters(countCommand, query, author, tag, format, category, collectionId, readingStatus, favoritesOnly);
+        AddLibrarySearchParameters(countCommand, query, author, tag, format, category, collectionId, readingStatus);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
 
         var command = connection.CreateCommand();
@@ -475,7 +475,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             ORDER BY {GetLibrarySortSql(sortMode)}
             LIMIT $limit OFFSET $offset;
             """;
-        AddLibrarySearchParameters(command, query, author, tag, format, category, collectionId, readingStatus, favoritesOnly);
+        AddLibrarySearchParameters(command, query, author, tag, format, category, collectionId, readingStatus);
         command.Parameters.AddWithValue("$limit", pageSize);
         command.Parameters.AddWithValue("$offset", (long)pageIndex * pageSize);
 
@@ -672,7 +672,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         string? category,
         Guid? collectionId,
         LibraryReadingStatus? readingStatus,
-        bool favoritesOnly)
+        bool? favorite)
     {
         var clauses = new List<string> { "WHERE 1 = 1" };
         clauses.Add("AND ($query = '' OR b.Title LIKE $like OR b.Authors LIKE $like OR b.Tags LIKE $like OR b.Series LIKE $like)");
@@ -688,8 +688,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             clauses.Add("AND EXISTS (SELECT 1 FROM BookCollectionItems ci WHERE ci.BookId = b.Id AND ci.CollectionId = $collectionId)");
         if (readingStatus is not null)
             clauses.Add("AND b.ReadingStatus = $readingStatus");
-        if (favoritesOnly)
-            clauses.Add("AND b.IsFavorite = 1");
+        if (favorite is not null)
+            clauses.Add($"AND b.IsFavorite = {(favorite.Value ? 1 : 0)}");
         return string.Join("\n", clauses);
     }
 
@@ -701,8 +701,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         string? format,
         string? category,
         Guid? collectionId,
-        LibraryReadingStatus? readingStatus,
-        bool favoritesOnly)
+        LibraryReadingStatus? readingStatus)
     {
         var text = query?.Trim() ?? string.Empty;
         command.Parameters.AddWithValue("$query", text);

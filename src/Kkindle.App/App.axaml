@@ -1790,6 +1790,7 @@
         </Style>
         <Style Selector="Polygon.ejectGlyph">
             <Setter Property="Fill" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
             <Setter Property="RenderTransformOrigin" Value="50%,50%" />
             <Setter Property="RenderTransform" Value="scale(1)" />
             <Setter Property="Transitions">

@@ -42,6 +42,7 @@ public partial class MainWindow
     private readonly DispatcherTimer _s3LocalChangeSyncTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private static readonly TimeSpan S3LocalChangeSyncDebounce = TimeSpan.FromSeconds(5);
     private IReadOnlyList<KindleDevice> _devices = [];
+    private Task<IReadOnlyList<KindleDevice>>? _deviceDetectionTask;
     private string? _lastDeviceIdentity;
     private string? _acceptedDeviceId;
     private string? _ignoredDeviceId;
@@ -538,10 +539,15 @@ public partial class MainWindow
     {
         if (_stage3Ready) return;
 
+        SetTaskStatus(T("正在加载云端同步设置…"));
         _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(cancellationToken);
+        SetTaskStatus(T("正在初始化阅读数据…"));
         await _readerData.InitializeAsync(cancellationToken);
+        SetTaskStatus(T("正在初始化同步记录…"));
         await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken, _s3SyncStoredSettings.DeviceId);
+        SetTaskStatus(T("正在初始化设备设置…"));
         await _deviceModelStore.InitializeAsync(cancellationToken);
+        SetTaskStatus(T("正在读取应用设置…"));
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
         SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode));
         ApplyMainAppearance();
@@ -552,12 +558,17 @@ public partial class MainWindow
         _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
         RefreshLocalizedReadingMaterialsSourceFilter();
         LoadReaderVerticalDebugBoxesSetting();
+        SetTaskStatus(T("正在检查 Calibre…"));
         await DetectCalibreAtStartupAsync(cancellationToken);
+        SetTaskStatus(T("正在加载发送设置…"));
         _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
         RefreshS3SyncIndicatorFromSettings();
         PopulateSettingsControls();
         ConfigureAppSettingsAutoSave();
+        SetTaskStatus(T("正在加载本地资源…"));
         await RefreshManagedResourcesAsync(cancellationToken);
+        SetTaskStatus(T("正在检查设备…"));
+        DeviceStorageText.Text = T("正在读取存储信息…");
         DevicePageDeviceText.Text = T("正在检查设备…");
         DevicePageStatusText.Text = T("正在读取设备连接状态。");
         _stage3Ready = true;
@@ -720,7 +731,7 @@ public partial class MainWindow
                 return;
             }
 
-            var detected = await _kindle.DetectDevicesAsync(cancellationToken);
+            var detected = await DetectDevicesWithTimeoutAsync(cancellationToken);
             if (detected.Count != 1)
             {
                 _acceptedDeviceId = null;
@@ -781,7 +792,7 @@ public partial class MainWindow
             DeviceNameButton.IsEnabled = true;
             DevicePageStatusText.Text = changed ? T("设备已连接，正在准备设备信息…") : T("设备已连接。");
             KindleStatusText.Text = _deviceDisplayName;
-            KindleConnectionText.Text = T("{0} · 已连接", device.ConnectionLabel);
+            KindleConnectionText.Text = T("已连接");
             KindleConnectionText.IsVisible = true;
             DeviceStorageText.Text = device.CapacityLabel;
             _deviceUsedRatio = device.TotalBytes > 0
@@ -800,6 +811,15 @@ public partial class MainWindow
         catch (OperationCanceledException)
         {
         }
+        catch (TimeoutException exception)
+        {
+            var detail = T("设备检测失败：{0}", UiText.Localize(exception.Message));
+            if (CurrentDevice is null)
+                SetDisconnectedDeviceUi(detail);
+            else
+                DevicePageStatusText.Text = detail;
+            KindleStatusText.Text = T("设备状态读取失败");
+        }
         catch (Exception exception)
         {
             SetDisconnectedDeviceUi(T("设备检测失败：{0}", UiText.Localize(exception.Message)));
@@ -808,6 +828,29 @@ public partial class MainWindow
         finally
         {
             _isRefreshingDevices = false;
+        }
+    }
+
+    private async Task<IReadOnlyList<KindleDevice>> DetectDevicesWithTimeoutAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_kindle is null) return [];
+        var effectiveToken = cancellationToken.CanBeCanceled
+            ? cancellationToken
+            : _lifetimeCancellation.Token;
+        var detectionTask = _deviceDetectionTask ??= _kindle.DetectDevicesAsync(effectiveToken);
+        try
+        {
+            return await detectionTask.WaitAsync(TimeSpan.FromSeconds(15), effectiveToken);
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException("设备扫描超时，请确认设备已解锁后重试。");
+        }
+        finally
+        {
+            if (detectionTask.IsCompleted && ReferenceEquals(_deviceDetectionTask, detectionTask))
+                _deviceDetectionTask = null;
         }
     }
 
@@ -1951,7 +1994,7 @@ public partial class MainWindow
 
         _deviceDisplayName = normalized ?? device.Name;
         KindleStatusText.Text = _deviceDisplayName;
-        KindleConnectionText.Text = T("{0} · 已连接", device.ConnectionLabel);
+        KindleConnectionText.Text = T("已连接");
         KindleConnectionText.IsVisible = true;
         DevicePageDeviceText.Text = $"{_deviceDisplayName} · {device.ConnectionLabel}";
         DeviceNameButton.IsEnabled = true;

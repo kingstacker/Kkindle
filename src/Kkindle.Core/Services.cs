@@ -16,7 +16,7 @@ public interface IBookLibraryService
         string? category = null,
         Guid? collectionId = null,
         LibraryReadingStatus? readingStatus = null,
-        bool favoritesOnly = false,
+        bool? favorite = null,
         LibrarySortMode sortMode = LibrarySortMode.UpdatedDescending,
         int pageIndex = 0,
         int pageSize = 200,

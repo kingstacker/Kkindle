@@ -47,7 +47,6 @@ public partial class MainWindow : Window
     // command arrives, so a close that was interrupted by a re-select can
     // never collapse a freshly re-opened pane.
     private int _detailPaneAnimationVersion;
-    private double _authorPopupWidth = double.NaN;
     private DispatcherTimer? _dropOverlayHideTimer;
     private DispatcherTimer? _bookDetailClickTimer;
     private CancellationTokenSource? _librarySearchDebounce;
@@ -144,7 +143,7 @@ public partial class MainWindow : Window
     private readonly HashSet<BookCardViewModel> _pdfCoverRequests = [];
     private TaskCompletionSource<bool>? _confirmationCompletion;
     private TaskCompletionSource<BookRemovalChoice>? _bookRemovalCompletion;
-    private enum BookRemovalChoice { Cancel, KeepFiles, MoveToTrash }
+    private enum BookRemovalChoice { Cancel, MoveToTrash }
     private TaskCompletionSource<string?>? _collectionNameCompletion;
     private TaskCompletionSource<bool>? _messageCompletion;
     private bool _conversionInProgress;
@@ -462,18 +461,6 @@ public partial class MainWindow : Window
         ConfigureStage3Timer();
         SetEjectButtonsEnabled(false);
         Opened += (_, _) => EnsureInteractiveControlToolTips();
-        // The author dropdown must keep one constant popup width; assign it on
-        // every open because ApplyTemplate can rebuild the PART_Popup instance.
-        AuthorFilterBox.DropDownOpened += (_, _) =>
-        {
-            if (AuthorFilterBox.GetVisualDescendants().OfType<Popup>().FirstOrDefault() is { } popup)
-                popup.Width = _authorPopupWidth;
-        };
-        AuthorFilterBox.TemplateApplied += (_, e) =>
-        {
-            if (e.NameScope.Find("PART_Popup") is Popup popup)
-                popup.Width = _authorPopupWidth;
-        };
         BookGrid.TemplateApplied += (_, _) => AttachBookGridAutoHideScrollbar();
         BookList.TemplateApplied += (_, _) => AttachBookListAutoHideScrollbar();
         Dispatcher.UIThread.Post(UpdateBookGridLayout, DispatcherPriority.Loaded);
@@ -618,11 +605,13 @@ public partial class MainWindow : Window
         S3SyncDeviceText.Text = T("当前设备 ID：{0}", _s3SyncStoredSettings.DeviceId[..Math.Min(12, _s3SyncStoredSettings.DeviceId.Length)]);
         RefreshOnboardingLocalizedChoices();
         if (_filterControlsReady)
+        {
             RefreshLocalizedFilterItems();
+            ViewModel.RefreshView();
+        }
         RefreshLocalizedZLibraryFilterItems();
         RefreshDeviceShelfLanguage();
         RefreshLocalizedReadingMaterialsSourceFilter();
-        ViewModel.RefreshView();
         UpdateLibraryUi();
         if (_selectedCard is not null)
         {
@@ -670,13 +659,16 @@ public partial class MainWindow : Window
     private void RefreshLocalizedFilterItems()
     {
         var readingStatusIndex = ReadingStatusFilterBox.SelectedIndex;
+        var favoriteIndex = FavoritesFilterBox.SelectedIndex;
         var sortIndex = LibrarySortBox.SelectedIndex;
         _updatingFilterControls = true;
         try
         {
             ReadingStatusFilterBox.ItemsSource = new[] { T("待读"), T("阅读中"), T("已读") };
+            FavoritesFilterBox.ItemsSource = new[] { T("收藏"), T("未收藏") };
             LibrarySortBox.ItemsSource = new[] { T("最近更新"), T("标题升序"), T("作者升序"), T("创建时间"), T("进度优先") };
             ReadingStatusFilterBox.SelectedIndex = readingStatusIndex;
+            FavoritesFilterBox.SelectedIndex = favoriteIndex;
             LibrarySortBox.SelectedIndex = sortIndex;
         }
         finally
@@ -758,8 +750,12 @@ public partial class MainWindow : Window
             // Stage 3 startup (S3 settings, Calibre detection, managed resource
             // lists, automatic backup and device enumeration) does not affect
             // the shelf and used to delay it by seconds.
-            await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
+            SetTaskStatus(T("正在加载本地书架…"));
+            await ViewModel.RefreshAsync(
+                _lifetimeCancellation.Token,
+                progress => SetTaskStatus(T(progress)));
             SetupFilterControls();
+            SetTaskStatus(T("正在加载书籍分组…"));
             await RefreshCollectionsAsync();
             _filterControlsReady = true;
             UpdateLibraryUi();
@@ -767,6 +763,7 @@ public partial class MainWindow : Window
             ShowOnboardingIfNeeded();
             StartAutomaticUpdateCheck();
 
+            SetTaskStatus(T("正在初始化设备与设置…"));
             await InitializeStage3Async(_lifetimeCancellation.Token);
             // The shelf is already populated; only the data that depends on
             // Stage 3 settings (match records and sync badges) needs a pass.
@@ -1175,14 +1172,11 @@ public partial class MainWindow : Window
             // keep the "全部..." labels out of the popup item list.
             var authors = IncludeActiveFilter(ViewModel.AvailableAuthors, ViewModel.AuthorFilter);
             AuthorFilterBox.ItemsSource = authors;
-            // The popup resizes itself to the currently realized items, so its
-            // width follows whatever author names are on screen while scrolling.
-            // Pin the popup to one fixed width, sized by the longest author name.
-            _authorPopupWidth = Math.Ceiling(MeasureWidestFilterText(AuthorFilterBox, authors)) + 6;
             TagFilterBox.ItemsSource = IncludeActiveFilter(ViewModel.AvailableTags, ViewModel.TagFilter);
             FormatFilterBox.ItemsSource = IncludeActiveFilter(ViewModel.AvailableFormats, ViewModel.FormatFilter);
             CategoryFilterBox.ItemsSource = IncludeActiveFilter(ViewModel.AvailableCategories, ViewModel.CategoryFilter);
             ReadingStatusFilterBox.ItemsSource = new[] { T("待读"), T("阅读中"), T("已读") };
+            FavoritesFilterBox.ItemsSource = new[] { T("收藏"), T("未收藏") };
             LibrarySortBox.ItemsSource = new[] { T("最近更新"), T("标题升序"), T("作者升序"), T("创建时间"), T("进度优先") };
 
             AuthorFilterBox.SelectedItem = ViewModel.AuthorFilter;
@@ -1191,7 +1185,12 @@ public partial class MainWindow : Window
             CategoryFilterBox.SelectedItem = ViewModel.CategoryFilter;
             ReadingStatusFilterBox.SelectedIndex = ViewModel.ReadingStatusFilter is { } readingStatus ? (int)readingStatus : -1;
             LibrarySortBox.SelectedIndex = (int)ViewModel.SortMode;
-            FavoritesOnlyCheckBox.IsChecked = ViewModel.FavoritesOnly;
+            FavoritesFilterBox.SelectedIndex = ViewModel.FavoriteFilter switch
+            {
+                true => 0,
+                false => 1,
+                _ => -1
+            };
         }
         finally
         {
@@ -1203,29 +1202,6 @@ public partial class MainWindow : Window
         string.IsNullOrWhiteSpace(active)
             ? choices.ToArray()
             : choices.Append(active).Distinct(StringComparer.Ordinal).ToArray();
-
-    private static double MeasureWidestFilterText(ComboBox comboBox, IEnumerable<string> labels)
-    {
-        var probe = new TextBlock
-        {
-            FontFamily = comboBox.FontFamily,
-            FontSize = comboBox.FontSize,
-            FontStretch = comboBox.FontStretch,
-            FontStyle = comboBox.FontStyle,
-            FontWeight = comboBox.FontWeight
-        };
-        var widestText = 0d;
-        foreach (var label in labels)
-        {
-            probe.Text = label;
-            probe.Measure(Size.Infinity);
-            widestText = Math.Max(widestText, probe.DesiredSize.Width);
-        }
-
-        // ComboBoxItemThemePadding is 7px per side and the popup reserves a
-        // 12px scrollbar lane, so both belong in the fixed item width.
-        return widestText + 14 + 12;
-    }
 
     private void ViewModel_ViewChanged(object? sender, EventArgs e)
     {
@@ -1973,7 +1949,9 @@ public partial class MainWindow : Window
                 : automaticFormats.GeneratedCount > 0
                     ? T("；已补齐 {0} 个 EPUB/AZW3 文件", automaticFormats.GeneratedCount)
                     : string.Empty;
-            SetTaskStatus(BuildImportSummary(result, automaticSuffix));
+            var importSummary = BuildImportSummary(result, automaticSuffix);
+            SetTaskStatus(importSummary);
+            ShowSettingsCapsule(importSummary, 2400, success: result.FailureCount == 0);
         }
         catch (OperationCanceledException)
         {
@@ -2450,28 +2428,20 @@ public partial class MainWindow : Window
             await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        var choice = await ConfirmBookRemovalAsync(T("《{0}》将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。", card.Title));
+        var choice = await ConfirmBookRemovalAsync(T("《{0}》将从书库移除并移入回收站，可恢复。", card.Title));
         if (choice == BookRemovalChoice.Cancel) return;
 
         try
         {
-            if (choice == BookRemovalChoice.KeepFiles)
-            {
-                await _library.RemoveFromLibraryKeepFilesAsync(card.Book.Id, _lifetimeCancellation.Token);
-                await ViewModel.RefreshAsync(_lifetimeCancellation.Token);
-            }
-            else
-            {
-                await ViewModel.DeleteBookAsync(card.Book, _lifetimeCancellation.Token);
-            }
+            await ViewModel.DeleteBookAsync(card.Book, _lifetimeCancellation.Token);
             await RefreshLibraryMatchRecordsAsync(_lifetimeCancellation.Token);
             ClearSelectedBook();
             ClearBookMultiSelection();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
-            SetTaskStatus(choice == BookRemovalChoice.KeepFiles
-                ? T("已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。", card.Title)
-                : ViewModel.StatusText);
+            var completionMessage = ViewModel.StatusText;
+            SetTaskStatus(completionMessage);
+            ShowSettingsCapsule(completionMessage, 2400, success: true);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -3082,24 +3052,19 @@ public partial class MainWindow : Window
             await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读其中一本书，请先关闭阅读器。"));
             return;
         }
-        var choice = await ConfirmBookRemovalAsync(T("选中的 {0} 本书将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。", cards.Count));
+        var choice = await ConfirmBookRemovalAsync(T("选中的 {0} 本书将从书库移除并移入回收站，可恢复。", cards.Count));
         if (choice == BookRemovalChoice.Cancel) return;
 
         try
         {
             foreach (var card in cards)
-            {
-                if (choice == BookRemovalChoice.KeepFiles)
-                    await _library.RemoveFromLibraryKeepFilesAsync(card.Book.Id, _lifetimeCancellation.Token);
-                else
-                    await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
-            }
+                await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
             ClearSelectedBook();
             ClearBookMultiSelection();
             await RefreshLibraryAsync();
-            SetTaskStatus(choice == BookRemovalChoice.KeepFiles
-                ? T("已从书库移除 {0} 本书，文件保留在 Kkindle 的 data/library 目录。", cards.Count)
-                : T("已将 {0} 本书移入回收站。", cards.Count));
+            var completionMessage = T("已将 {0} 本书移入回收站。", cards.Count);
+            SetTaskStatus(completionMessage);
+            ShowSettingsCapsule(completionMessage, 2400, success: true);
         }
         catch (Exception exception)
         {
@@ -3115,21 +3080,18 @@ public partial class MainWindow : Window
             await ShowMessageAsync(T("无法删除书籍"), T("当前正在阅读这本书，请先关闭阅读器。"));
             return;
         }
-        var choice = await ConfirmBookRemovalAsync(T("《{0}》将从书库移除。选择“保留文件”可保留本地文件；选择“删除文件”会移入回收站，可恢复。", card.Title));
+        var choice = await ConfirmBookRemovalAsync(T("《{0}》将从书库移除并移入回收站，可恢复。", card.Title));
         if (choice == BookRemovalChoice.Cancel) return;
         try
         {
-            if (choice == BookRemovalChoice.KeepFiles)
-                await _library.RemoveFromLibraryKeepFilesAsync(card.Book.Id, _lifetimeCancellation.Token);
-            else
-                await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
+            await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
             _selectedBookIds.Remove(card.Book.Id);
             if (_selectedCard?.Book.Id == card.Book.Id) ClearSelectedBook();
             ClearBookMultiSelection();
             await RefreshLibraryAsync();
-            SetTaskStatus(choice == BookRemovalChoice.KeepFiles
-                ? T("已从书库移除《{0}》，文件保留在 Kkindle 的 data/library 目录。", card.Title)
-                : T("已将《{0}》移入回收站。", card.Title));
+            var completionMessage = T("已将《{0}》移入回收站。", card.Title);
+            SetTaskStatus(completionMessage);
+            ShowSettingsCapsule(completionMessage, 2400, success: true);
         }
         catch (Exception exception)
         {
@@ -3943,7 +3905,6 @@ public partial class MainWindow : Window
         cancellationToken.ThrowIfCancellationRequested();
         if (allowDiagnosticAutoConfirm && Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
         if (_confirmationCompletion is not null || _bookRemovalCompletion is not null) return false;
-        ConfirmationKeepFilesButton.IsVisible = false;
         ConfirmationTitleText.Text = title;
         ConfirmationMessageText.Text = message;
         var previousCancelText = ConfirmationCancelButton.Content;
@@ -3975,8 +3936,6 @@ public partial class MainWindow : Window
             return BookRemovalChoice.Cancel;
         ConfirmationTitleText.Text = T("从书库移除书籍");
         ConfirmationMessageText.Text = message;
-        ConfirmationKeepFilesButton.Content = T("保留文件");
-        ConfirmationKeepFilesButton.IsVisible = true;
         ConfirmationOkButton.Content = T("删除文件");
         ShowOverlay(ConfirmationOverlay);
         _bookRemovalCompletion = new TaskCompletionSource<BookRemovalChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -3990,7 +3949,6 @@ public partial class MainWindow : Window
             if (ReferenceEquals(_bookRemovalCompletion, completion))
             {
                 _bookRemovalCompletion = null;
-                ConfirmationKeepFilesButton.IsVisible = false;
                 ConfirmationOverlay.IsVisible = false;
             }
         }
@@ -4256,6 +4214,10 @@ public partial class MainWindow : Window
     private async void SearchBox_TextChanged(object? sender, TextChangedEventArgs e)
     {
         ViewModel.SearchText = SearchBox.Text ?? string.Empty;
+        // The initial Text binding raises this event while the first page is
+        // still loading. A debounced refresh here would cancel startup before
+        // SetupFilterControls has populated the shelf controls.
+        if (!_filterControlsReady) return;
 
         // Typing used to run a full COUNT + page query and rebuild every card
         // per keystroke. Coalesce bursts of input into one query; ViewChanged
@@ -4279,7 +4241,14 @@ public partial class MainWindow : Window
     private void FilterButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         FilterPanel.IsVisible = !FilterPanel.IsVisible;
+        UpdateLibraryContentSpacing();
         FilterButton.Classes.Set("active", FilterPanel.IsVisible || ViewModel.HasActiveFilters);
+    }
+
+    private void UpdateLibraryContentSpacing()
+    {
+        if (LibraryContentHost is null || FilterPanel is null) return;
+        LibraryContentHost.Margin = new Thickness(0, FilterPanel.IsVisible ? 4 : 18, 0, 0);
     }
 
     private void LibraryViewToggleButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -4407,6 +4376,7 @@ public partial class MainWindow : Window
         else if (FilterPanel.IsVisible)
         {
             FilterPanel.IsVisible = false;
+            UpdateLibraryContentSpacing();
             FilterButton.Classes.Set("active", ViewModel.HasActiveFilters);
         }
     }
@@ -4426,15 +4396,30 @@ public partial class MainWindow : Window
 
     private void ImportButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        var menu = new ContextMenu();
-        var importFiles = new MenuItem { Header = T("导入文件") };
+        var menu = new ContextMenu { Classes = { "shelfViewMenu" } };
+        var importFiles = new MenuItem
+        {
+            Header = T("导入文件"),
+            FontSize = 14,
+            Height = double.NaN,
+            MinHeight = 0,
+            MaxHeight = double.PositiveInfinity
+        };
         importFiles.Click += ImportFilesButton_Click;
         menu.Items.Add(importFiles);
 
-        var importFolder = new MenuItem { Header = T("导入文件夹") };
+        var importFolder = new MenuItem
+        {
+            Header = T("导入文件夹"),
+            FontSize = 14,
+            Height = double.NaN,
+            MinHeight = 0,
+            MaxHeight = double.PositiveInfinity
+        };
         importFolder.Click += ImportFolderButton_Click;
         menu.Items.Add(importFolder);
 
+        menu.Placement = PlacementMode.BottomEdgeAlignedLeft;
         menu.Open(ImportButton);
     }
 
@@ -4487,17 +4472,15 @@ public partial class MainWindow : Window
         ViewModel.ReadingStatusFilter = ReadingStatusFilterBox.SelectedIndex < 0
             ? null
             : (LibraryReadingStatus)ReadingStatusFilterBox.SelectedIndex;
+        ViewModel.FavoriteFilter = FavoritesFilterBox.SelectedIndex switch
+        {
+            0 => true,
+            1 => false,
+            _ => null
+        };
         ViewModel.SortMode = LibrarySortBox.SelectedIndex < 0
             ? LibrarySortMode.UpdatedDescending
             : (LibrarySortMode)LibrarySortBox.SelectedIndex;
-        ViewModel.RefreshView();
-        UpdateLibraryUi();
-    }
-
-    private void FavoritesOnlyCheckBox_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (!_filterControlsReady || _updatingFilterControls) return;
-        ViewModel.FavoritesOnly = FavoritesOnlyCheckBox.IsChecked == true;
         ViewModel.RefreshView();
         UpdateLibraryUi();
     }
@@ -4513,7 +4496,7 @@ public partial class MainWindow : Window
             ViewModel.FormatFilter = null;
             ViewModel.CategoryFilter = null;
             ViewModel.ReadingStatusFilter = null;
-            ViewModel.FavoritesOnly = false;
+            ViewModel.FavoriteFilter = null;
             ViewModel.CollectionFilterId = null;
             ViewModel.CollectionFilterName = null;
             ViewModel.SortMode = LibrarySortMode.UpdatedDescending;
@@ -4523,8 +4506,8 @@ public partial class MainWindow : Window
             FormatFilterBox.SelectedIndex = -1;
             CategoryFilterBox.SelectedIndex = -1;
             ReadingStatusFilterBox.SelectedIndex = -1;
+            FavoritesFilterBox.SelectedIndex = -1;
             LibrarySortBox.SelectedIndex = 0;
-            FavoritesOnlyCheckBox.IsChecked = false;
             ViewModel.RefreshView();
             SetLibraryViewMode(LibraryViewMode.Grid);
         }
@@ -5253,12 +5236,6 @@ public partial class MainWindow : Window
 
     private void ConfirmationOkButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => CompleteConfirmation(true);
-
-    private void ConfirmationKeepFilesButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        ConfirmationOverlay.IsVisible = false;
-        _bookRemovalCompletion?.TrySetResult(BookRemovalChoice.KeepFiles);
-    }
 
     private void CollectionNameCancelButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => CompleteCollectionName(null);

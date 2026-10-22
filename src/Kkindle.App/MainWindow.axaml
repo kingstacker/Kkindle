@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -176,9 +176,6 @@
     </Window.Resources>
 
     <Window.Styles>
-        <Style Selector="ComboBox.librarySort /template/ Path#DropDownGlyph, ComboBox.librarySort /template/ PathIcon#DropDownGlyph">
-            <Setter Property="IsVisible" Value="False" />
-        </Style>
         <Style Selector="Border.librarySort">
             <Setter Property="Background" Value="Transparent" />
         </Style>
@@ -233,7 +230,30 @@
             <Setter Property="ContentTemplate" Value="{StaticResource LibraryCancelActionContent}" />
         </Style>
         <Style Selector="ComboBox.librarySort ComboBoxItem">
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+        <!-- Library popups are kept in the window overlay so their border,
+             placement and content are painted atomically with the shelf. -->
+        <Style Selector="ComboBox.filterCombo /template/ Popup">
+            <Setter Property="ShouldUseOverlayLayer" Value="True" />
+        </Style>
+        <Style Selector="ComboBox.filterCombo">
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.shelfSortItem">
+            <Setter Property="MinWidth" Value="96" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="8,4,8,5" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+        <Style Selector="Button.shelfSortItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="ContextMenu.shelfViewMenu MenuItem">
             <Setter Property="FontSize" Value="13" />
@@ -671,21 +691,24 @@
                         <StackPanel Spacing="5">
                             <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="6">
                                 <TextBlock x:Name="KindleStatusText"
-                                           Grid.Row="1" Grid.ColumnSpan="3"
-                                           Margin="0,2,0,0"
+                                           Grid.Row="0"
                                            Classes="kindleStatusTrigger"
                                            Text="{DynamicResource Ui.Auto.92424890EA6A8543}"
                                            FontWeight="Bold"
-                                           TextWrapping="Wrap"
+                                           FontSize="12"
+                                           MaxLines="1"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
                                            VerticalAlignment="Center"
                                            Tapped="DeviceStatusBox_Tapped"
-                                           ToolTip.Tip="{DynamicResource Ui.Auto.562195D98680EA3D}" />
+                                           ToolTip.Tip="{ReflectionBinding Text, RelativeSource={RelativeSource Self}}" />
                                 <TextBlock x:Name="KindleConnectionText"
-                                            Grid.Row="0"
-                                            VerticalAlignment="Center"
+                                            Grid.Row="1"
+                                            Margin="0,2,0,0"
                                             Foreground="{DynamicResource MutedInkBrush}"
                                             FontSize="10"
                                             TextWrapping="Wrap"
+                                            IsVisible="False"
                                             HorizontalAlignment="Stretch" />
                 <Button x:Name="BackgroundTaskHistoryButton" Grid.Column="2" Classes="eject"
                         Width="25" MinWidth="25" Height="23" Padding="0" VerticalAlignment="Center"
@@ -724,7 +747,6 @@
                                                  Points="0,8 7,0 14,8"
                                                  Width="14"
                                                  Height="8"
-                                                 Stroke="{DynamicResource InkBrush}"
                                                  StrokeThickness="1"
                                                  Stretch="Fill"
                                                  HorizontalAlignment="Center"
@@ -793,8 +815,8 @@
                                   Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
                         </Button>
                         <Border Classes="librarySort" Width="38" Height="38"
-                                VerticalAlignment="Center" PointerPressed="LibrarySort_PointerPressed">
-                            <ComboBox x:Name="LibrarySortBox"
+                                VerticalAlignment="Center">
+                            <Grid><ComboBox IsVisible="False" x:Name="LibrarySortBox"
                                       Classes="filterCombo librarySort"
                                       Background="Transparent"
                                       MinWidth="0"
@@ -806,11 +828,10 @@
                                       BorderThickness="0"
                                       Padding="0"
                                       SelectionBoxItemTemplate="{StaticResource LibrarySortActionContent}"
-                                      PlaceholderText="{DynamicResource Ui.Auto.A96C9A854190874D}"
                                       ToolTip.Tip="{DynamicResource Ui.Auto.A96C9A854190874D}"
                                       AutomationProperties.Name="{DynamicResource Ui.Auto.A96C9A854190874D}"
                                       SelectionChanged="FilterComboBox_SelectionChanged" />
-                        </Border>
+                        <Button x:Name="LibrarySortButton" Classes="quiet libraryToolbar" Tag="LibrarySortBox" Click="ShelfSortButton_Click" ToolTip.Tip="{DynamicResource Ui.Auto.A96C9A854190874D}" AutomationProperties.Name="{DynamicResource Ui.Auto.A96C9A854190874D}"><Path Classes="libraryGlyph" Data="M 7,3 V 21 M 3,7 L 7,3 L 11,7 M 17,3 V 21 M 13,17 L 17,21 L 21,17" /></Button></Grid></Border>
                         <Button x:Name="LibraryViewToggleButton"
                                 Classes="quiet libraryToolbar"
                                 ToolTip.Tip="{DynamicResource Ui.Auto.EE20B1318E9AFE1B}"
@@ -839,9 +860,10 @@
 
                 <Border x:Name="FilterPanel"
                         Classes="flatSubsection"
+                        BorderThickness="0"
                         Grid.Row="2"
-                        Margin="0,0,0,12"
-                        Padding="10"
+                        Margin="0"
+                        Padding="10,10,10,2"
                         IsVisible="False">
                     <!-- English labels need more room than the Chinese labels. Let
                          the controls wrap as a group at narrow window widths so no
@@ -851,43 +873,51 @@
                                VerticalAlignment="Center">
                         <ComboBox x:Name="AuthorFilterBox"
                                   Classes="filterCombo"
-                                  Width="145"
-                                  Margin="0,0,6,6"
+                                  Width="132"
+                                  Margin="0,0,4,6"
                                   PlaceholderText="{DynamicResource Ui.Auto.89050DD0FBDA32A3}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="TagFilterBox"
                                   Classes="filterCombo"
-                                  Width="145"
-                                  Margin="0,0,6,6"
+                                  Width="132"
+                                  Margin="0,0,4,6"
                                   PlaceholderText="{DynamicResource Ui.Auto.B709CB12F0ABA6BE}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="FormatFilterBox"
                                   Classes="filterCombo"
-                                  Width="145"
-                                  Margin="0,0,6,6"
+                                  Width="132"
+                                  Margin="0,0,4,6"
                                   PlaceholderText="{DynamicResource Ui.Auto.CCCB7189507A26E7}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="CategoryFilterBox"
                                   Classes="filterCombo"
-                                  Width="145"
-                                  Margin="0,0,6,6"
+                                  Width="132"
+                                  Margin="0,0,4,6"
                                   PlaceholderText="{DynamicResource Ui.Auto.A1054434857F0A98}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="ReadingStatusFilterBox"
                                   Classes="filterCombo"
-                                  Width="145"
-                                  Margin="0,0,6,6"
+                                  Width="132"
+                                  Margin="0,0,4,6"
                                   PlaceholderText="{DynamicResource Ui.Auto.0A379C1E7398FBA1}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
-                        <CheckBox x:Name="FavoritesOnlyCheckBox"
-                                  Content="{DynamicResource Ui.Auto.60A53514EB9228A2}"
-                                  Margin="0,0,12,6"
-                                  VerticalAlignment="Center"
-                                  Click="FavoritesOnlyCheckBox_Click" />
-                        <Button Classes="quiet"
-                                Content="{DynamicResource Ui.Auto.657D9CBF45EC9E6A}"
+                        <ComboBox x:Name="FavoritesFilterBox"
+                                  Classes="filterCombo"
+                                  Width="132"
+                                  Margin="0,0,4,6"
+                                  PlaceholderText="{DynamicResource Ui.Auto.77196E6DEB2195FA}"
+                                  SelectionChanged="FilterComboBox_SelectionChanged" />
+                        <Button Classes="quiet libraryToolbar"
+                                Height="{Binding #FavoritesFilterBox.Bounds.Height}"
+                                MinHeight="0"
+                                VerticalAlignment="Center"
                                 Margin="0,0,0,6"
-                                Click="ClearFiltersButton_Click" />
+                                ToolTip.Tip="{DynamicResource Ui.Auto.657D9CBF45EC9E6A}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.657D9CBF45EC9E6A}"
+                                Click="ClearFiltersButton_Click">
+                            <Path Classes="libraryGlyph"
+                                  Data="M 13.013,3 H 2 L 10,12.46 V 19 L 14,21 V 12.46 L 14.9,11.405 M 22,3 L 17,8 M 17,3 L 22,8" />
+                        </Button>
                     </WrapPanel>
                 </Border>
 
@@ -1839,8 +1869,8 @@
                         <Button x:Name="DeviceBookFilterButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.0289E5BA6BFEA5E2}" Click="DeviceBookFilterButton_Click" AutomationProperties.Name="{DynamicResource Ui.Auto.B5F15473FDC0FEFE}">
                             <Path Classes="libraryGlyph" Data="M 5,5.4 H 19 L 14.2,11 V 17.6 L 9.8,19.8 V 11 Z" />
                         </Button>
-                        <Border Classes="librarySort" Width="38" Height="38" VerticalAlignment="Center" PointerPressed="LibrarySort_PointerPressed">
-                            <ComboBox x:Name="DeviceBookSortBox" Classes="filterCombo librarySort" MinWidth="0" Width="38" Height="38"
+                        <Border Classes="librarySort" Width="38" Height="38" VerticalAlignment="Center">
+                            <Grid><ComboBox IsVisible="False" x:Name="DeviceBookSortBox" Classes="filterCombo librarySort" MinWidth="0" Width="38" Height="38"
                                       HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                       FontSize="13" BorderThickness="0" Padding="0" SelectedIndex="0"
                                       SelectionBoxItemTemplate="{StaticResource LibrarySortActionContent}"
@@ -1851,7 +1881,7 @@
                                 <ComboBoxItem Content="{DynamicResource Ui.Auto.AD3BF1EEA84B70E4}" Tag="modified" />
                                 <ComboBoxItem Content="{DynamicResource Ui.Auto.B9BF6916437A77EB}" Tag="size" />
                             </ComboBox>
-                        </Border>
+                        <Button x:Name="DeviceBookSortButton" Classes="quiet libraryToolbar" Tag="DeviceBookSortBox" Click="ShelfSortButton_Click" ToolTip.Tip="{DynamicResource Ui.Auto.A96C9A854190874D}" AutomationProperties.Name="{DynamicResource Ui.Auto.A96C9A854190874D}"><Path Classes="libraryGlyph" Data="M 7,3 V 21 M 3,7 L 7,3 L 11,7 M 17,3 V 21 M 13,17 L 17,21 L 21,17" /></Button></Grid></Border>
                         <Button x:Name="DeviceViewToggleButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.EE20B1318E9AFE1B}" AutomationProperties.Name="{DynamicResource Ui.Auto.EE20B1318E9AFE1B}" Click="DeviceViewToggleButton_Click">
                             <Button.ContextMenu>
                                 <ContextMenu Classes="shelfViewMenu" Placement="BottomEdgeAlignedRight">
@@ -1870,7 +1900,7 @@
                     </StackPanel>
                 </Grid>
 
-                <Border x:Name="DeviceBookFilterPanel" Classes="flatSubsection" Grid.Row="2" Margin="0,0,0,12" Padding="10" IsVisible="False">
+                <Border x:Name="DeviceBookFilterPanel" Classes="flatSubsection" BorderThickness="0" Grid.Row="2" Margin="0,0,0,12" Padding="10" IsVisible="False">
                     <WrapPanel Orientation="Horizontal">
                         <ComboBox x:Name="DeviceBookFormatFilterBox" Classes="filterCombo" Width="145" Margin="0,0,8,6" PlaceholderText="{DynamicResource Ui.Auto.CCCB7189507A26E7}" SelectionChanged="DeviceBookFilter_SelectionChanged">
                             <ComboBoxItem Content="{DynamicResource Ui.Auto.CCCB7189507A26E7}" Tag="" />
@@ -3782,7 +3812,6 @@
                         <TextBlock x:Name="ConfirmationMessageText" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="7" Margin="0,8,0,0">
                             <Button x:Name="ConfirmationCancelButton" Content="{DynamicResource Ui.Auto.2CD0F3BE8738A86C}" Classes="quiet" Padding="13,7" Click="ConfirmationCancelButton_Click" />
-                            <Button x:Name="ConfirmationKeepFilesButton" IsVisible="False" Padding="13,7" Click="ConfirmationKeepFilesButton_Click" />
                             <Button x:Name="ConfirmationOkButton" Content="{DynamicResource Ui.Auto.A3EA3C17B401BD2F}" Padding="13,7" Click="ConfirmationOkButton_Click" />
                         </StackPanel>
                     </StackPanel>

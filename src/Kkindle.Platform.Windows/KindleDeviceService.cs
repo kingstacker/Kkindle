@@ -13,6 +13,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
     private const long MaximumMetadataFileSize = 128L * 1024 * 1024;
     private const int FileOperationRetryAttempts = 30;
     private const int FileOperationRetryDelayMilliseconds = 100;
+    private static readonly TimeSpan WpdDetectionTimeout = TimeSpan.FromSeconds(12);
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".epub", ".pdf", ".mobi", ".azw3", ".azw", ".prc", ".kfx"
@@ -21,6 +22,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
     private readonly IBookFormatConverter _formatConverter;
     private readonly string? _coverCacheDirectory;
     private readonly KindleScanCacheStore? _scanCache;
+    private readonly object _wpdDetectionSync = new();
+    private Task<IReadOnlyList<KindleDevice>>? _wpdDetectionTask;
 
     public KindleDeviceService()
         : this(null, new BookMetadataService(), new BookFormatConversionService())
@@ -40,6 +43,51 @@ public sealed class KindleDeviceService : IKindleDeviceService
     }
 
     public async Task<IReadOnlyList<KindleDevice>> DetectDevicesAsync(CancellationToken cancellationToken = default)
+    {
+        var devices = await Task.Run(() => DetectMassStorageDevices(cancellationToken), cancellationToken)
+            .ConfigureAwait(false);
+        var wpdTask = GetOrStartWpdDetectionTask();
+        IReadOnlyList<KindleDevice> wpdDevices;
+        try
+        {
+            wpdDevices = await wpdTask.WaitAsync(WpdDetectionTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (wpdTask.IsCompleted)
+            {
+                lock (_wpdDetectionSync)
+                {
+                    if (ReferenceEquals(_wpdDetectionTask, wpdTask))
+                        _wpdDetectionTask = null;
+                }
+            }
+        }
+
+        devices.AddRange(wpdDevices.Where(wpd => devices.All(disk =>
+            !string.Equals(disk.Identity, wpd.Identity, StringComparison.OrdinalIgnoreCase))));
+        return devices;
+    }
+
+    private Task<IReadOnlyList<KindleDevice>> GetOrStartWpdDetectionTask()
+    {
+        lock (_wpdDetectionSync)
+        {
+            if (_wpdDetectionTask is null || _wpdDetectionTask.IsCompleted)
+            {
+                _wpdDetectionTask = Task.Run<IReadOnlyList<KindleDevice>>(
+                    () => WpdKindleAccess.DetectDevices(CancellationToken.None));
+                _ = _wpdDetectionTask.ContinueWith(
+                    task => _ = task.Exception,
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+            return _wpdDetectionTask;
+        }
+    }
+
+    private static List<KindleDevice> DetectMassStorageDevices(CancellationToken cancellationToken)
     {
         var devices = new List<KindleDevice>();
         foreach (var drive in DriveInfo.GetDrives())
@@ -64,9 +112,6 @@ public sealed class KindleDeviceService : IKindleDeviceService
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
-        var wpdDevices = await Task.Run(() => WpdKindleAccess.DetectDevices(cancellationToken), cancellationToken);
-        devices.AddRange(wpdDevices.Where(wpd => devices.All(disk =>
-            !string.Equals(disk.Identity, wpd.Identity, StringComparison.OrdinalIgnoreCase))));
         return devices;
     }
 

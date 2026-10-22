@@ -16,7 +16,7 @@ public partial class MainWindow
     {
         var message = T("设备连接已变化，请确认当前设备后重试。");
         if (_kindle is null || !IsCurrentDevice(device)) throw new IOException(message);
-        var detected = await _kindle.DetectDevicesAsync(_lifetimeCancellation.Token);
+        var detected = await DetectDevicesWithTimeoutAsync(_lifetimeCancellation.Token);
         if (!IsCurrentDevice(device)) throw new IOException(message);
         if (detected.Count == 1 && IsSameDevice(detected[0], device)) return;
         _acceptedDeviceId = null;

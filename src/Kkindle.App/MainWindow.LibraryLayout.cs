@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia;
+using Avalonia.Controls.Primitives;
 using Avalonia.VisualTree;
 using System.Runtime.CompilerServices;
 
@@ -8,6 +9,78 @@ namespace Kkindle;
 
 public partial class MainWindow
 {
+    private Popup? _shelfSortPopup;
+
+    private void ShelfSortButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button) return;
+        var sortBox = button.Tag as string == "DeviceBookSortBox" ? DeviceBookSortBox : LibrarySortBox;
+
+        if (_shelfSortPopup is { IsOpen: true } openPopup
+            && ReferenceEquals(openPopup.PlacementTarget, button))
+        {
+            CloseShelfSortPopup();
+            e.Handled = true;
+            return;
+        }
+        CloseShelfSortPopup();
+        var items = new StackPanel();
+        for (var index = 0; index < sortBox.Items.Count; index++)
+        {
+            var selectedIndex = index;
+            var value = sortBox.Items[index];
+            var item = new Button
+            {
+                Content = value is ComboBoxItem option ? option.Content : value,
+                Classes = { "shelfSortItem" },
+                FontSize = 14,
+            };
+            item.Click += (_, _) =>
+            {
+                sortBox.SelectedIndex = selectedIndex;
+                CloseShelfSortPopup();
+            };
+            items.Children.Add(item);
+        }
+
+        // Keep shelf sorting in the window overlay. A native popup window can
+        // be composited as a single clipped corner on some Windows setups.
+        var popup = new Popup
+        {
+            Child = new Border
+            {
+                Background = Avalonia.Application.Current!.FindResource("PaperBrush") as Avalonia.Media.IBrush,
+                BorderBrush = Avalonia.Application.Current!.FindResource("InkBrush") as Avalonia.Media.IBrush,
+                BorderThickness = new Thickness(1),
+                Child = items
+            },
+            PlacementTarget = button,
+            Placement = PlacementMode.BottomEdgeAlignedLeft,
+            ShouldUseOverlayLayer = true,
+            IsLightDismissEnabled = true
+        };
+        popup.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_shelfSortPopup, popup))
+                _shelfSortPopup = null;
+            if (popup.Parent is Panel parent)
+                parent.Children.Remove(popup);
+        };
+        _shelfSortPopup = popup;
+        LibraryWorkspace.Children.Add(popup);
+        popup.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void CloseShelfSortPopup()
+    {
+        if (_shelfSortPopup is not { } popup) return;
+        _shelfSortPopup = null;
+        popup.IsOpen = false;
+        if (popup.Parent is Panel parent)
+            parent.Children.Remove(popup);
+    }
+
     private bool _deviceShelfControlsReady;
 
     private void InitializeDeviceShelfControls()
@@ -25,7 +98,7 @@ public partial class MainWindow
     private void DeviceToolbar_LayoutUpdated(object? sender, EventArgs e)
     {
         if (!_deviceShelfControlsReady || !DeviceToolbar.IsEffectivelyVisible) return;
-        NormalizeLibrarySortChrome(DeviceBookSortBox);
+
         AlignShelfToolbar(DeviceToolbar, DevicePage, DevicePage);
         ArrangeShelfToolbar(DeviceToolbar, DeviceBookSearchBox, DeviceToolbarActions);
     }
@@ -65,7 +138,7 @@ public partial class MainWindow
         if (LibraryToolbar is null || LibraryWorkspace is null || LibraryContentHost is null)
             return;
 
-        NormalizeLibrarySortChrome(LibrarySortBox);
+
         AlignShelfToolbar(LibraryToolbar, LibraryBody, LibraryContentHost, alignDetailBoundary: true);
         AlignCollectionHeader(LibraryToolbar, CollectionHeader);
         AlignLibraryListRightEdge(LibraryToolbar, BookList);

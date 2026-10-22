@@ -654,7 +654,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     private Guid? _collectionFilterId;
     private string? _collectionFilterName;
     private LibraryReadingStatus? _readingStatusFilter;
-    private bool _favoritesOnly;
+    private bool? _favoriteFilter;
     private LibrarySortMode _sortMode;
     private int _pageIndex;
     private int _pageCount = 1;
@@ -745,10 +745,10 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         set => SetFilter(ref _readingStatusFilter, value);
     }
 
-    public bool FavoritesOnly
+    public bool? FavoriteFilter
     {
-        get => _favoritesOnly;
-        set => SetFilter(ref _favoritesOnly, value);
+        get => _favoriteFilter;
+        set => SetFilter(ref _favoriteFilter, value);
     }
 
     public LibrarySortMode SortMode
@@ -762,7 +762,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         || !string.IsNullOrWhiteSpace(FormatFilter)
         || !string.IsNullOrWhiteSpace(CategoryFilter)
         || ReadingStatusFilter is not null
-        || FavoritesOnly
+        || FavoriteFilter is not null
         || CollectionFilterId is not null;
 
     public string StatusText
@@ -773,7 +773,9 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
     public event EventHandler? ViewChanged;
 
-    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    public async Task RefreshAsync(
+        CancellationToken cancellationToken = default,
+        Action<string>? progress = null)
     {
         IsBusy = true;
         try
@@ -781,11 +783,13 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             // Microsoft.Data.Sqlite executes its "async" commands synchronously,
             // so run the whole query on the thread pool instead of letting it
             // block the UI thread between awaits.
+            progress?.Invoke("正在统计书籍…");
             _bookCount = await Task.Run(
                 () => _library.GetBookCountAsync(cancellationToken),
                 cancellationToken);
             OnPropertyChanged(nameof(BookCount));
 
+            progress?.Invoke("正在读取筛选选项…");
             var options = await Task.Run(
                 () => _library.GetFilterOptionsAsync(cancellationToken),
                 cancellationToken);
@@ -798,7 +802,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(AvailableTags));
             OnPropertyChanged(nameof(AvailableFormats));
             OnPropertyChanged(nameof(AvailableCategories));
-            await RefreshViewAsync(resetPage: true, cancellationToken);
+            await RefreshViewAsync(resetPage: true, cancellationToken, progress);
         }
         finally
         {
@@ -877,7 +881,8 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
     public async Task RefreshViewAsync(
         bool resetPage = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? progress = null)
     {
         if (resetPage) _pageIndex = 0;
         var requestId = Interlocked.Increment(ref _viewRequestId);
@@ -888,6 +893,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
+            progress?.Invoke("正在查询书架内容…");
             var page = await Task.Run(
                 () => _library.SearchPageAsync(
                     SearchText,
@@ -897,7 +903,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
                     CategoryFilter,
                     CollectionFilterId,
                     ReadingStatusFilter,
-                    FavoritesOnly,
+                    FavoriteFilter,
                     SortMode,
                     _pageIndex,
                     PageSize,
@@ -906,6 +912,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             requestToken.ThrowIfCancellationRequested();
             if (requestId != _viewRequestId) return;
 
+            progress?.Invoke("正在整理书籍卡片…");
             var lastPageIndex = Math.Max(0, (int)Math.Ceiling(page.TotalCount / (double)PageSize) - 1);
             if (_pageIndex > lastPageIndex)
             {
@@ -919,7 +926,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
                         CategoryFilter,
                         CollectionFilterId,
                         ReadingStatusFilter,
-                        FavoritesOnly,
+                        FavoriteFilter,
                         SortMode,
                         _pageIndex,
                         PageSize,
@@ -968,6 +975,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
                 orderedCards.Add(card);
             }
             Books.ReplaceAll(orderedCards);
+            progress?.Invoke("正在刷新书架界面…");
 
             var baseStatus = page.TotalCount == 0
                 ? _bookCount == 0 ? UiText.Get("书库还是空的")
@@ -984,6 +992,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
             OnPropertyChanged(nameof(HasActiveFilters));
             ViewChanged?.Invoke(this, EventArgs.Empty);
+            progress?.Invoke("书架界面已刷新");
         }
         finally
         {

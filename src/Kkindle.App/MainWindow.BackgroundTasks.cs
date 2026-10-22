@@ -92,7 +92,6 @@ public partial class MainWindow
             }, _lifetimeCancellation.Token, allowRetry: false);
             _transferTaskId = handle.Id;
             _displayOnlyTaskIds.Add(handle.Id);
-            ShowBackgroundTaskFlyout(autoOpened: true);
         }
         _transferTaskProgress = !isIndeterminate && progress.HasValue
             ? (int)Math.Clamp(progress.Value, 0, 100)
