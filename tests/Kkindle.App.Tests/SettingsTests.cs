@@ -544,53 +544,75 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     {
         await using var scope = await TestWindow.Create();
 
+        Assert.Null(scope.Window.FindControl<Control>("TransferToast"));
         scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "正在发送…", null, true, false, false);
         await Render();
 
-        Assert.False(scope.Get<Control>("TransferToast").IsEffectivelyVisible);
-        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
+        Assert.True(scope.Get<Control>("TaskHistoryActivityIcon").IsVisible);
+        Assert.False(scope.Get<Control>("TaskHistoryIdleIcon").IsVisible);
+        Assert.True(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
         var center = scope.Field<Kkindle.Infrastructure.BackgroundTaskCenterService>("_backgroundTasks");
         Assert.Contains(center.GetSnapshot(), task => task.Title == "发送到 Kindle 邮箱" && task.Status == Kkindle.Core.BackgroundTaskStatus.Running);
         scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "正在发送附件", 37d, false, false, false);
         Assert.Contains(center.GetSnapshot(), task => task.ProgressCurrent == 37 && task.ProgressTotal == 100);
+        await Render();
 
-        Assert.True(scope.Get<Control>("TransferToastSpinnerIcon").IsVisible);
-        var spinner = scope.Get<Control>("TransferToastSpinnerIcon");
-        var beforeRotation = Assert.IsType<RotateTransform>(spinner.RenderTransform).Angle;
-        scope.Call("TickTaskSpinner");
-        var afterRotation = Assert.IsType<RotateTransform>(spinner.RenderTransform).Angle;
-        Assert.NotEqual(beforeRotation, afterRotation);
-        Assert.False(scope.Get<Control>("TransferToastSuccessIcon").IsVisible);
+        var rows = scope.Field<StackPanel>("_backgroundTaskRows");
+        Assert.Contains(rows.GetVisualDescendants().OfType<ProgressBar>(),
+            progress => progress.Maximum == 100 && progress.Value == 37);
         Assert.False(scope.Get<Control>("TaskProgressPopup").IsEffectivelyVisible);
         Assert.False(scope.Get<Control>("ConfirmationOverlay").IsEffectivelyVisible);
+        Capture(scope.Window, "transfer-task-history-running");
 
-        scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "已完成", 100d, false, true, true);
+        scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "已通过邮件发送 1 本书。", 100d, false, true, true);
         await Until(() => center.GetSnapshot().All(task => task.Status != Kkindle.Core.BackgroundTaskStatus.Running));
-        scope.Field<Flyout>("_backgroundTaskFlyout").Hide();
+        await Render();
+        Assert.False(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
+        Assert.True(scope.Get<Control>("SettingsSavedCapsule").IsEffectivelyVisible);
+        Assert.True(scope.Get<Control>("SettingsCapsuleCheckIcon").IsVisible);
+        Assert.Contains("任务完成", scope.Get<TextBlock>("SettingsSavedCapsuleText").Text);
+        Assert.Contains("已通过邮件发送 1 本书", scope.Get<TextBlock>("SettingsSavedCapsuleText").Text);
+        Capture(scope.Window, "transfer-task-history-completed");
+        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
+        await Render();
+        Assert.True(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
+        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
+        await Render();
+        Assert.False(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
+
         using var transferCancellation = new CancellationTokenSource();
         scope.Set("_isTransferring", true);
         scope.Set("_transferCancellation", transferCancellation);
         scope.Call("ShowTransferToast", "发送到设备", "正在发送…", 0d, false, false, false);
-        Assert.True(scope.Get<Control>("TransferToastCancelButton").IsVisible);
-        scope.Call("TransferToastCancelButton_Click", null, new RoutedEventArgs());
+        await Render();
+        rows = scope.Field<StackPanel>("_backgroundTaskRows");
+        var cancel = rows.GetVisualDescendants().OfType<Button>()
+            .First(button => Avalonia.Automation.AutomationProperties.GetName(button) == "取消");
+        cancel.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.False(transferCancellation.IsCancellationRequested);
         Assert.True(scope.Field<bool>("_transferStopRequested"));
-        Assert.Contains("当前书籍发送完成后将停止", scope.Get<TextBlock>("TransferToastMessageText").Text);
+        Assert.Contains(center.GetSnapshot(), task => task.Title == "发送到设备"
+            && task.Stage?.Contains("当前书籍发送完成后将停止", StringComparison.Ordinal) == true);
 
         // A book can report 100% while a batch still has more books. The
-        // overall task must keep its spinner and stop affordance until the
+        // overall task must remain active in the task list until the
         // explicit completed state arrives.
         scope.Set("_transferStopRequested", false);
         scope.Call("ShowTransferToast", "发送到设备", "单本已完成", 100d, false, false, false);
-        Assert.True(scope.Get<Control>("TransferToastSpinnerIcon").IsVisible);
-        Assert.True(scope.Get<Control>("TransferToastCancelButton").IsVisible);
-        Assert.NotNull(scope.Get<Button>("TransferToastCancelButton").ContentTemplate);
-
-        scope.Call("ShowTransferToast", "发送到设备", "已完成", 100d, false, true, true);
         await Render();
-        Assert.False(scope.Get<Control>("TransferToastSpinnerIcon").IsVisible);
-        Assert.True(scope.Get<Control>("TransferToastSuccessIcon").IsVisible);
-        Assert.Equal("任务完成", scope.Get<TextBlock>("TransferToastMessageText").Text);
+        Assert.True(scope.Get<Control>("TaskHistoryActivityIcon").IsVisible);
+        rows = scope.Field<StackPanel>("_backgroundTaskRows");
+        Assert.Contains(rows.GetVisualDescendants().OfType<Button>(),
+            button => Avalonia.Automation.AutomationProperties.GetName(button) == "取消");
+
+        scope.Call("ShowTransferToast", "发送到设备", "已发送 1 本书到 Kindle。", 100d, false, true, true);
+        await Until(() => center.GetSnapshot().All(task => task.Status != Kkindle.Core.BackgroundTaskStatus.Running));
+        await Render();
+        Assert.False(scope.Get<Control>("TaskHistoryActivityIcon").IsVisible);
+        Assert.True(scope.Get<Control>("TaskHistoryIdleIcon").IsVisible);
+        Assert.True(scope.Get<Control>("SettingsSavedCapsule").IsEffectivelyVisible);
+        Assert.True(scope.Get<Control>("SettingsCapsuleCheckIcon").IsVisible);
+        Assert.Contains("已发送 1 本书到 Kindle", scope.Get<TextBlock>("SettingsSavedCapsuleText").Text);
         scope.Set("_transferCancellation", null);
         scope.Set("_isTransferring", false);
         scope.Set("_transferStopRequested", false);

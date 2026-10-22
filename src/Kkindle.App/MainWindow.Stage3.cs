@@ -33,7 +33,6 @@ public partial class MainWindow
     private const int MaxReadingMaterials = 5_000;
     private const int DevicePageSize = 200;
     private readonly DispatcherTimer _stage3Timer = new() { Interval = TimeSpan.FromSeconds(3) };
-    private readonly DispatcherTimer _transferToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _taskSpinnerTimer = new(DispatcherPriority.Render)
     {
         Interval = TimeSpan.FromMilliseconds(50)
@@ -119,15 +118,11 @@ public partial class MainWindow
     private CancellationTokenSource? _transferCancellation;
     private CancellationTokenSource? _transferPrefetchCancellation;
     private bool _transferStopRequested;
-    // The popup and transfer toast share the 50 ms dispatcher tick, but they
-    // do not share ownership. Overlay visibility can change while its task is
-    // still running, so the active flags—not IsVisible—control the animation.
+    // The generic progress popup uses this tick. Transfer progress lives in
+    // the task-history flyout instead of a second floating surface.
     private bool _taskProgressPopupSpinnerActive;
-    private bool _transferToastSpinnerActive;
     private double _taskProgressPopupSpinnerAngle;
-    private double _transferToastSpinnerAngle;
     private RotateTransform? _taskProgressPopupSpinnerTransform;
-    private RotateTransform? _transferToastSpinnerTransform;
 
     private sealed class CoalescingUiProgress<T> : IProgress<T>, IDisposable
     {
@@ -261,12 +256,6 @@ public partial class MainWindow
             await RefreshDevicesAsync(scanBooks: DevicePage.IsVisible);
         };
         _stage3Timer.Start();
-        _transferToastTimer.Tick += (_, _) =>
-        {
-            _transferToastTimer.Stop();
-            if (!_transferToastSpinnerActive)
-                HideTransferToast();
-        };
         _taskSpinnerTimer.Tick += (_, _) => TickTaskSpinner();
         _deviceStatusToastTimer.Tick += (_, _) =>
         {
@@ -282,13 +271,10 @@ public partial class MainWindow
     private void ShowTaskProgressPopup(bool recordTask = true)
     {
         if (recordTask) BeginGenericTaskRecord();
-        // An active transfer toast owns the single visible task surface. A
-        // generic task may still run in the background, but it must not steal
-        // or stop the transfer task's spinner.
-        if (_transferToastSpinnerActive) return;
+        // Transfer progress is rendered in the task-history flyout. Do not
+        // introduce a second floating progress surface while it is active.
+        if (_transferTaskCompletion is not null) return;
 
-        TransferToast.IsVisible = false;
-        TransferToast.Opacity = 0;
         StartTaskSpinner(TaskProgressPopupSpinnerIcon);
         TaskProgressPopup.IsVisible = false;
         TaskProgressPopup.Opacity = 1;
@@ -309,70 +295,23 @@ public partial class MainWindow
         bool autoHide = false,
         bool completed = false)
     {
-        UpdateTransferTaskRecord(title, message, progress, isIndeterminate, autoHide, completed);
-        StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
-        TaskProgressPopup.IsVisible = false;
-        TaskProgressPopup.Opacity = 0;
-        TransferToastTitleText.Text = title;
-        TransferToastMessageText.Text = completed
-            ? T("任务完成")
-            : _transferStopRequested && _isTransferring
-                ? T("当前书籍发送完成后将停止…")
-                : message;
-        // A per-file progress callback can legitimately report 100% while a
-        // batch task still has more files to process. Only the explicit
-        // overall completion state or an auto-hidden terminal state stops the
-        // activity indicator.
         var transferActive = !completed && !autoHide;
-        TransferToastSuccessIcon.IsVisible = completed;
-        TransferToastCancelButton.IsVisible = _isTransferring && transferActive;
-        TransferToastCancelButton.IsEnabled = !_transferStopRequested;
-        TransferToastSpinnerIcon.IsVisible = transferActive;
+        UpdateTransferTaskRecord(title, message, progress, isIndeterminate, autoHide, completed);
         if (transferActive)
         {
-            // A previous completion toast may still have an auto-hide timer;
-            // it must not hide or stop the newly started task animation.
-            _transferToastTimer.Stop();
-            StartTaskSpinner(TransferToastSpinnerIcon);
+            StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
+            TaskProgressPopup.IsVisible = false;
+            TaskProgressPopup.Opacity = 0;
+            return;
         }
-        else
-            StopTransferToastSpinner();
-        if (isIndeterminate)
-        {
-            TransferToastProgress.IsIndeterminate = true;
-            TransferToastProgress.IsVisible = true;
-        }
-        else if (progress.HasValue)
-        {
-            TransferToastProgress.IsIndeterminate = false;
-            TransferToastProgress.Value = Math.Clamp(progress.Value, 0, 100);
-            TransferToastProgress.IsVisible = true;
-        }
-        else
-        {
-            TransferToastProgress.IsVisible = false;
-        }
-        TransferToast.IsVisible = false;
-        TransferToast.Opacity = 1;
-        if (autoHide)
-        {
-            _transferToastTimer.Stop();
-            _transferToastTimer.Start();
-        }
+
+        var capsuleMessage = completed ? T("任务完成：{0}", message) : message;
+        ShowSettingsCapsule(capsuleMessage, completed ? 2400 : 3600, success: completed);
     }
 
     private void HideTransferToast()
     {
         EndTransferTaskRecord();
-        _transferToastTimer.Stop();
-        StopTransferToastSpinner();
-        TransferToastCancelButton.IsVisible = false;
-        FadeOutPopup(TransferToast);
-    }
-
-    private void StopTransferToastSpinner()
-    {
-        StopTaskSpinnerFor(TransferToastSpinnerIcon);
     }
 
     private void StartTaskSpinner(Control icon)
@@ -387,17 +326,6 @@ public partial class MainWindow
                 _taskProgressPopupSpinnerTransform.Angle = 0;
             }
             icon.RenderTransform = _taskProgressPopupSpinnerTransform;
-        }
-        else if (ReferenceEquals(icon, TransferToastSpinnerIcon))
-        {
-            _transferToastSpinnerTransform ??= new RotateTransform(0);
-            if (!_transferToastSpinnerActive)
-            {
-                _transferToastSpinnerActive = true;
-                _transferToastSpinnerAngle = 0;
-                _transferToastSpinnerTransform.Angle = 0;
-            }
-            icon.RenderTransform = _transferToastSpinnerTransform;
         }
         else
         {
@@ -417,30 +345,16 @@ public partial class MainWindow
             _taskProgressPopupSpinnerActive = false;
             _taskProgressPopupSpinnerAngle = 0;
         }
-        else if (ReferenceEquals(icon, TransferToastSpinnerIcon))
-        {
-            _transferToastSpinnerActive = false;
-            _transferToastSpinnerAngle = 0;
-        }
         else
         {
             return;
         }
 
-        if (ReferenceEquals(icon, TaskProgressPopupSpinnerIcon))
-        {
-            _taskProgressPopupSpinnerTransform ??= new RotateTransform(0);
-            _taskProgressPopupSpinnerTransform.Angle = 0;
-            icon.RenderTransform = _taskProgressPopupSpinnerTransform;
-        }
-        else
-        {
-            _transferToastSpinnerTransform ??= new RotateTransform(0);
-            _transferToastSpinnerTransform.Angle = 0;
-            icon.RenderTransform = _transferToastSpinnerTransform;
-        }
+        _taskProgressPopupSpinnerTransform ??= new RotateTransform(0);
+        _taskProgressPopupSpinnerTransform.Angle = 0;
+        icon.RenderTransform = _taskProgressPopupSpinnerTransform;
         icon.IsVisible = false;
-        if (!_taskProgressPopupSpinnerActive && !_transferToastSpinnerActive)
+        if (!_taskProgressPopupSpinnerActive)
             _taskSpinnerTimer.Stop();
     }
 
@@ -448,22 +362,16 @@ public partial class MainWindow
     {
         _taskSpinnerTimer.Stop();
         _taskProgressPopupSpinnerActive = false;
-        _transferToastSpinnerActive = false;
         _taskProgressPopupSpinnerAngle = 0;
-        _transferToastSpinnerAngle = 0;
         _taskProgressPopupSpinnerTransform ??= new RotateTransform(0);
         _taskProgressPopupSpinnerTransform.Angle = 0;
         TaskProgressPopupSpinnerIcon.RenderTransform = _taskProgressPopupSpinnerTransform;
         TaskProgressPopupSpinnerIcon.IsVisible = false;
-        _transferToastSpinnerTransform ??= new RotateTransform(0);
-        _transferToastSpinnerTransform.Angle = 0;
-        TransferToastSpinnerIcon.RenderTransform = _transferToastSpinnerTransform;
-        TransferToastSpinnerIcon.IsVisible = false;
     }
 
     private void TickTaskSpinner()
     {
-        if (!_taskProgressPopupSpinnerActive && !_transferToastSpinnerActive)
+        if (!_taskProgressPopupSpinnerActive)
         {
             _taskSpinnerTimer.Stop();
             return;
@@ -477,23 +385,13 @@ public partial class MainWindow
             _taskProgressPopupSpinnerTransform.Angle = _taskProgressPopupSpinnerAngle;
             TaskProgressPopupSpinnerIcon.RenderTransform = _taskProgressPopupSpinnerTransform;
         }
-
-        if (_transferToastSpinnerActive)
-        {
-            TransferToastSpinnerIcon.IsVisible = true;
-            _transferToastSpinnerAngle = (_transferToastSpinnerAngle + 18) % 360;
-            _transferToastSpinnerTransform ??= new RotateTransform(0);
-            _transferToastSpinnerTransform.Angle = _transferToastSpinnerAngle;
-            TransferToastSpinnerIcon.RenderTransform = _transferToastSpinnerTransform;
-        }
     }
 
-    private void TransferToastCancelButton_Click(object? sender, RoutedEventArgs e)
+    private void RequestTransferStop()
     {
         if (!_isTransferring) return;
         _transferStopRequested = true;
-        TransferToastCancelButton.IsEnabled = false;
-        TransferToastMessageText.Text = T("当前书籍发送完成后将停止…");
+        ReportTransferTaskStage(T("当前书籍发送完成后将停止…"));
         SetTaskStatus(T("当前书籍发送完成后将停止发送。"));
         _transferPrefetchCancellation?.Cancel();
     }
@@ -735,7 +633,7 @@ public partial class MainWindow
     {
         if (!_isTransferring) return false;
         SetTaskStatus(T("正在发送书籍，完成或停止后才能切换功能区。"));
-        TransferToastMessageText.Text = T("正在发送，请完成或停止任务后再切换功能区。" );
+        ReportTransferTaskStage(T("正在发送，请完成或停止任务后再切换功能区。"));
         return true;
     }
 
@@ -2255,7 +2153,7 @@ public partial class MainWindow
         }
         if (_isTransferring)
         {
-            ShowTransferToast(T("发送到设备"), T("已有发送任务正在进行中。"), autoHide: true);
+            ShowSettingsCapsule(T("已有发送任务正在进行中。"), 2400);
             return;
         }
 
@@ -2263,7 +2161,7 @@ public partial class MainWindow
         if (CurrentDevice is not { } device)
         {
             SetTaskStatus(T("请先连接并解锁设备。"));
-            ShowTransferToast(T("发送到设备"), T("未检测到设备，请连接并解锁设备。"), autoHide: true);
+            ShowSettingsCapsule(T("未检测到设备，请连接并解锁设备。"), 3200);
             return;
         }
 
@@ -2284,8 +2182,8 @@ public partial class MainWindow
         _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         var cancellation = _transferCancellation;
         TaskProgressPopupBar.Value = 0;
-        ShowTaskProgressPopup(recordTask: false);
         ShowTransferToast(T("发送到设备"), T("正在发送 {0} 本书…", cards.Count), progress: 0);
+        ShowTaskProgressPopup(recordTask: false);
         var acceptProgressUpdates = true;
         Task<PreparedKindleTransfer>? lookaheadTask = null;
         CancellationTokenSource? lookaheadCancellation = null;
@@ -2604,7 +2502,7 @@ public partial class MainWindow
         }
         if (_isTransferring)
         {
-            ShowTransferToast(T("发送到设备"), T("已有发送任务正在进行中。"), autoHide: true);
+            ShowSettingsCapsule(T("已有发送任务正在进行中。"), 2400);
             return;
         }
 
@@ -2612,7 +2510,7 @@ public partial class MainWindow
         if (CurrentDevice is not { } device)
         {
             SetTaskStatus(T("请先连接并解锁设备。"));
-            ShowTransferToast(T("发送到设备"), T("未检测到设备，请连接并解锁设备。"), autoHide: true);
+            ShowSettingsCapsule(T("未检测到设备，请连接并解锁设备。"), 3200);
             return;
         }
 
@@ -2628,8 +2526,8 @@ public partial class MainWindow
             _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
             var cancellation = _transferCancellation;
             TaskProgressPopupBar.Value = 0;
-            ShowTaskProgressPopup(recordTask: false);
             ShowTransferToast(T("发送到设备"), T("正在发送《{0}》…", card.Title), progress: 0);
+            ShowTaskProgressPopup(recordTask: false);
             var acceptProgressUpdates = true;
             try
             {
@@ -2864,8 +2762,8 @@ public partial class MainWindow
         var calibreMissing = false;
         var failureDetails = new List<string>();
         TaskProgressPopupBar.Value = 0;
-        ShowTaskProgressPopup(recordTask: false);
         ShowTransferToast(T("导出到电脑书库"), T("正在从设备导出 {0} 本书…", pending.Length), progress: 0);
+        ShowTaskProgressPopup(recordTask: false);
         var acceptProgressUpdates = true;
         try
         {

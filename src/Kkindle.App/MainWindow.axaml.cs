@@ -1002,7 +1002,6 @@ public partial class MainWindow : Window
         _s3SyncTimer.Stop();
         StopS3SyncIndicatorAnimation();
         StopReaderAiThinkingAnimation();
-        _transferToastTimer.Stop();
         StopTaskSpinner();
         _deviceStatusToastTimer.Stop();
         _appSettingsAutoSaveCancellation?.Cancel();

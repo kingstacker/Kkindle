@@ -21,6 +21,10 @@ public partial class MainWindow
     private BackgroundTaskContext? _transferTaskContext;
     private TaskCompletionSource? _transferTaskCompletion;
     private string? _transferTaskTitle;
+    private Guid? _transferTaskId;
+    private int? _transferTaskProgress;
+    private int? _transferTaskProgressTotal;
+    private bool _backgroundTaskFlyoutAutoOpened;
     private bool _genericTaskActive;
     private bool _progressSubscriptionsAdded;
     private readonly HashSet<Guid> _displayOnlyTaskIds = [];
@@ -74,12 +78,6 @@ public partial class MainWindow
     private void UpdateTransferTaskRecord(string title, string message, double? progress,
         bool isIndeterminate, bool autoHide, bool completed)
     {
-        // Device file operations already have individual records. Their actual
-        // byte progress is supplied by CreateRecordedTransferProgress below.
-        var trackedDeviceOperation = title == T("发送到设备") || title == T("从设备删除书籍")
-            || title == T("导出到电脑书库") || title == T("导入设备资源")
-            || title == T("导出设备资源") || title == T("删除设备资源");
-        if (trackedDeviceOperation) return;
         if (_transferTaskCompletion is not null && _transferTaskTitle != title)
             EndTransferTaskRecord(new OperationCanceledException(T("任务已切换")));
         if (_transferTaskCompletion is null && !autoHide && !completed)
@@ -92,11 +90,15 @@ public partial class MainWindow
                 _transferTaskContext = context;
                 await completion.Task.WaitAsync(token);
             }, _lifetimeCancellation.Token, allowRetry: false);
+            _transferTaskId = handle.Id;
             _displayOnlyTaskIds.Add(handle.Id);
+            ShowBackgroundTaskFlyout(autoOpened: true);
         }
-        _transferTaskContext?.ReportProgress(message,
-            !isIndeterminate && progress.HasValue ? (int)Math.Clamp(progress.Value, 0, 100) : null,
-            !isIndeterminate && progress.HasValue ? 100 : null);
+        _transferTaskProgress = !isIndeterminate && progress.HasValue
+            ? (int)Math.Clamp(progress.Value, 0, 100)
+            : null;
+        _transferTaskProgressTotal = _transferTaskProgress.HasValue ? 100 : null;
+        _transferTaskContext?.ReportProgress(message, _transferTaskProgress, _transferTaskProgressTotal);
         if (completed || autoHide)
             EndTransferTaskRecord(completed ? null : new InvalidOperationException(message));
     }
@@ -108,6 +110,15 @@ public partial class MainWindow
         _transferTaskCompletion = null;
         _transferTaskContext = null;
         _transferTaskTitle = null;
+        _transferTaskId = null;
+        _transferTaskProgress = null;
+        _transferTaskProgressTotal = null;
+        HideBackgroundTaskFlyoutIfAutoOpened();
+    }
+
+    private void ReportTransferTaskStage(string stage)
+    {
+        _transferTaskContext?.ReportProgress(stage, _transferTaskProgress, _transferTaskProgressTotal);
     }
 
     private IProgress<TransferProgress> CreateRecordedTransferProgress(IProgress<TransferProgress>? original)
@@ -221,8 +232,14 @@ public partial class MainWindow
         if (_backgroundTaskFlyout?.IsOpen == true)
         {
             _backgroundTaskFlyout.Hide();
+            _backgroundTaskFlyoutAutoOpened = false;
             return;
         }
+        ShowBackgroundTaskFlyout(autoOpened: false);
+    }
+
+    private void EnsureBackgroundTaskFlyout()
+    {
         if (_backgroundTaskFlyout is null)
         {
             _backgroundTaskRows = new StackPanel { Spacing = 0 };
@@ -246,8 +263,26 @@ public partial class MainWindow
                 }
             };
         }
+    }
+
+    private void ShowBackgroundTaskFlyout(bool autoOpened)
+    {
+        EnsureBackgroundTaskFlyout();
+        if (_backgroundTaskFlyout?.IsOpen == true)
+        {
+            if (autoOpened) _backgroundTaskFlyoutAutoOpened = true;
+            return;
+        }
         RefreshBackgroundTaskRows();
-        _backgroundTaskFlyout.ShowAt(BackgroundTaskHistoryButton);
+        _backgroundTaskFlyout?.ShowAt(BackgroundTaskHistoryButton);
+        _backgroundTaskFlyoutAutoOpened = autoOpened;
+    }
+
+    private void HideBackgroundTaskFlyoutIfAutoOpened()
+    {
+        if (!_backgroundTaskFlyoutAutoOpened) return;
+        _backgroundTaskFlyout?.Hide();
+        _backgroundTaskFlyoutAutoOpened = false;
     }
 
     private void RefreshBackgroundTaskRows()
@@ -310,7 +345,10 @@ public partial class MainWindow
             var resultText = new TextBlock { Text = result, FontSize = 13, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
             Grid.SetColumn(resultText, 2);
             heading.Children.Add(resultText);
-            var canCancel = task.CanCancel && !_displayOnlyTaskIds.Contains(task.Id);
+            var isTransferTask = task.Id == _transferTaskId;
+            var canCancel = task.Status is (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued)
+                && ((isTransferTask && _isTransferring)
+                    || (task.CanCancel && !_displayOnlyTaskIds.Contains(task.Id)));
             if (canCancel || task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued))
             {
                 var delete = new Button
@@ -329,7 +367,8 @@ public partial class MainWindow
                 Avalonia.Automation.AutomationProperties.SetName(delete, actionLabel);
                 delete.Click += async (_, _) =>
                 {
-                    if (canCancel) BackgroundTasks.Cancel(task.Id);
+                    if (isTransferTask) RequestTransferStop();
+                    else if (canCancel) BackgroundTasks.Cancel(task.Id);
                     else await BackgroundTasks.RemoveCompletedAsync(task.Id);
                 };
                 Grid.SetColumn(delete, 4);

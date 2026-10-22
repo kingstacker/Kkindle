@@ -671,6 +671,8 @@
                         <StackPanel Spacing="5">
                             <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="6">
                                 <TextBlock x:Name="KindleStatusText"
+                                           Grid.Row="1" Grid.ColumnSpan="3"
+                                           Margin="0,2,0,0"
                                            Classes="kindleStatusTrigger"
                                            Text="{DynamicResource Ui.Auto.92424890EA6A8543}"
                                            FontWeight="Bold"
@@ -679,8 +681,8 @@
                                            Tapped="DeviceStatusBox_Tapped"
                                            ToolTip.Tip="{DynamicResource Ui.Auto.562195D98680EA3D}" />
                                 <TextBlock x:Name="KindleConnectionText"
-                                            Grid.Row="1"
-                                            Margin="0,2,0,0"
+                                            Grid.Row="0"
+                                            VerticalAlignment="Center"
                                             Foreground="{DynamicResource MutedInkBrush}"
                                             FontSize="10"
                                             TextWrapping="Wrap"
@@ -1688,7 +1690,7 @@
                         <ItemsControl ItemsSource="{Binding ZLibraryBooks}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:ZLibraryBookCardViewModel">
-                                    <Border Classes="flatSubsection" Padding="12" Margin="0,0,0,8" Tapped="ZLibraryBookRow_Tapped" DoubleTapped="ZLibraryBookRow_Tapped">
+                                    <Border Classes="flatSubsection" BorderThickness="0,0,0,1" Padding="12" Margin="0,0,0,8" Tapped="ZLibraryBookRow_Tapped" DoubleTapped="ZLibraryBookRow_Tapped">
                                         <Grid ColumnDefinitions="72,*,Auto" ColumnSpacing="12">
                                             <Border Width="68" Height="92" Background="{DynamicResource SoftHoverBrush}" ClipToBounds="True">
                                                 <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
@@ -3659,95 +3661,10 @@
                 </StackPanel>
             </Border>
 
-            <!-- Transfer toast: the progress surface for Kindle send/export
-                 operations. It replaces the generic task popup while active. -->
-            <Border x:Name="TransferToast"
-                    Grid.ColumnSpan="3"
-                    Width="360"
-                    Padding="16"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Bottom"
-                    Margin="0,0,30,30"
-                    Background="{DynamicResource PaperBrush}"
-                    BorderBrush="{DynamicResource InkBrush}"
-                     BorderThickness="1"
-                     IsVisible="False"
-                     ZIndex="90"
-                     IsHitTestVisible="True">
-                <Border.Transitions>
-                    <Transitions>
-                        <DoubleTransition Property="Opacity" Duration="0:0:0.22" />
-                    </Transitions>
-                </Border.Transitions>
-                <StackPanel Spacing="7">
-                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
-                        <TextBlock x:Name="TransferToastTitleText"
-                                   FontSize="15"
-                                   FontWeight="SemiBold"
-                                   MaxLines="1"
-                                   TextTrimming="CharacterEllipsis" />
-                        <Grid x:Name="TransferToastStatusGlyphHost"
-                              Grid.Column="1"
-                              Width="18"
-                              Height="18"
-                              VerticalAlignment="Center">
-                            <Path x:Name="TransferToastSpinnerIcon"
-                                  Data="M 17.65,6.35 C 16.2,4.9 14.21,4 12,4 C 7.58,4 4.01,7.58 4.01,12 C 4.01,16.42 7.58,20 12,20 C 15.73,20 18.84,17.45 19.73,14 H 17.65 C 16.83,16.33 14.61,18 12,18 C 8.69,18 6,15.31 6,12 C 6,8.69 8.69,6 12,6 C 13.66,6 15.14,6.69 16.22,7.78 L 13,11 H 20 V 4 Z"
-                                  Width="16"
-                                  Height="16"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Stretch="Uniform"
-                                  Fill="{DynamicResource InkBrush}"
-                                  RenderTransformOrigin="50%,50%"
-                                  IsVisible="False"
-                                  IsHitTestVisible="False" />
-                            <Path x:Name="TransferToastSuccessIcon"
-                                  Data="M 9,16.17 L 4.83,12 L 3.41,13.41 L 9,19 L 21,7 L 19.59,5.59 Z"
-                                  Width="16"
-                                  Height="16"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Stretch="Uniform"
-                                  Fill="{DynamicResource InkBrush}"
-                                  IsVisible="False"
-                                  IsHitTestVisible="False" />
-                        </Grid>
-                        <Button x:Name="TransferToastCancelButton"
-                                Grid.Column="2"
-                                Content="{DynamicResource Ui.Auto.CA4D973C0B006B75}"
-                                ContentTemplate="{StaticResource LibraryStopActionContent}"
-                                Classes="quiet libraryToolbar"
-                                Width="32"
-                                MinWidth="32"
-                                Height="32"
-                                Padding="0"
-                                VerticalAlignment="Center"
-                                AutomationProperties.Name="{DynamicResource Ui.Auto.CA4D973C0B006B75}"
-                                ToolTip.Tip="{DynamicResource Ui.Auto.CA4D973C0B006B75}"
-                                IsVisible="False"
-                                Click="TransferToastCancelButton_Click" />
-                    </Grid>
-                    <TextBlock x:Name="TransferToastMessageText"
-                               FontSize="11"
-                               Foreground="{DynamicResource MutedInkBrush}"
-                               MaxLines="2"
-                               TextWrapping="Wrap"
-                               TextTrimming="CharacterEllipsis" />
-                    <ProgressBar x:Name="TransferToastProgress"
-                                 Minimum="0"
-                                 Maximum="100"
-                                 Height="5"
-                                 Background="{DynamicResource PaperBrush}"
-                                 IsVisible="False" />
-                </StackPanel>
-            </Border>
-
-            <!-- Settings feedback capsule: a bottom-center pill for explicit
-                 settings confirmations and longer-lived notices. Library view
-                 switches save silently because they are navigation. It rises
-                 into place, then sinks away after a delay; the check glyph
-                 only appears for success messages. -->
+            <!-- Bottom-center feedback capsule for explicit settings
+                 confirmations and completed background tasks. It rises into
+                 place, then sinks away after a delay; the check glyph only
+                 appears for successful operations. -->
             <Border x:Name="SettingsSavedCapsule"
                     Grid.ColumnSpan="3"
                     HorizontalAlignment="Center"
