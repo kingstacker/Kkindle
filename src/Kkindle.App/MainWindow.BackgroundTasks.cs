@@ -13,6 +13,7 @@ public partial class MainWindow
     private BackgroundTaskCenterService? _backgroundTasks;
     private Flyout? _backgroundTaskFlyout;
     private StackPanel? _backgroundTaskRows;
+    private TextBlock? _taskHistoryTooltipText;
     private DispatcherTimer? _taskHistoryAnimation;
     private readonly Avalonia.Media.RotateTransform _taskHistoryRotation = new();
     private readonly AsyncLocal<BackgroundTaskContext?> _resourceTaskContext = new();
@@ -156,8 +157,50 @@ public partial class MainWindow
         BackgroundTaskStatusButton.IsVisible = false;
         TaskHistoryIdleIcon.IsVisible = running.Length == 0;
         TaskHistoryActivityIcon.IsVisible = running.Length > 0;
-        ToolTip.SetTip(BackgroundTaskHistoryButton, T("任务记录")
-            + (running.Length > 0 ? T(" · 进行中 {0}", running.Length) : failed > 0 ? T(" · 失败 {0}", failed) : string.Empty));
+        // Update the existing tooltip content so an already-open tooltip keeps
+        // showing live stages and progress without closing on every report.
+        if (_taskHistoryTooltipText is null)
+        {
+            _taskHistoryTooltipText = new TextBlock
+            {
+                FontSize = 12,
+                LineHeight = 18,
+                MaxWidth = 420,
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap
+            };
+            ToolTip.SetTip(BackgroundTaskHistoryButton, new ScrollViewer
+            {
+                Content = _taskHistoryTooltipText,
+                MaxHeight = 360,
+                HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+            });
+        }
+        var tooltipSections = new List<string>
+        {
+            T("任务记录") + (running.Length > 0 ? T(" · 进行中 {0}", running.Length)
+                : failed > 0 ? T(" · 失败 {0}", failed) : string.Empty)
+        };
+        foreach (var task in running)
+        {
+            var details = new List<string>
+            {
+                (task.Status == BackgroundTaskStatus.Queued ? T("等待中") : T("进行中")) + " · " + task.Title
+            };
+            if (!string.IsNullOrWhiteSpace(task.Stage) && task.Stage != task.Title)
+                details.Add(task.Stage);
+            if (task.BookTitles is { Count: > 0 })
+                details.Add(string.Join("、", task.BookTitles.Take(3).Select(title => "《" + title + "》"))
+                    + (task.BookTitles.Count > 3 ? " …" : string.Empty));
+            if (task.ProgressTotal is > 0)
+            {
+                var current = Math.Clamp(task.ProgressCurrent ?? 0, 0, task.ProgressTotal.Value);
+                details.Add(T("进度：{0}/{1}", current, task.ProgressTotal)
+                    + $" · {100d * current / task.ProgressTotal.Value:0}%");
+            }
+            tooltipSections.Add(string.Join(Environment.NewLine, details));
+        }
+        _taskHistoryTooltipText.Text = string.Join(Environment.NewLine + Environment.NewLine, tooltipSections);
         if (_taskHistoryAnimation is null)
         {
             TaskHistoryActivityIcon.RenderTransform = _taskHistoryRotation;

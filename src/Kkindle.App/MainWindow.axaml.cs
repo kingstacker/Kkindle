@@ -4462,6 +4462,19 @@ public partial class MainWindow : Window
             .Select(path => path!));
     }
 
+    private void LibraryFilter_TemplateApplied(object? sender, TemplateAppliedEventArgs e)
+    {
+        // Set local values: the Fluent template's popup placement otherwise
+        // takes precedence over style setters and centers wide option lists.
+        if (e.NameScope.Find<Popup>("PART_Popup") is not { } popup) return;
+        popup.Placement = PlacementMode.BottomEdgeAlignedLeft;
+        popup.HorizontalOffset = 0;
+        popup.VerticalOffset = 0;
+        // Keep both sides of the open outline flush, including long author names.
+        if (sender is ComboBox filter)
+            popup.Bind(Popup.WidthProperty, new Binding("Bounds.Width") { Source = filter });
+    }
+
     private void FilterComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (!_filterControlsReady || _updatingFilterControls) return;

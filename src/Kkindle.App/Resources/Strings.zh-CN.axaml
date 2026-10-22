@@ -2253,4 +2253,10 @@
     <x:String x:Key="Ui.Auto.DF0F9566309A4954">F1  显示本帮助</x:String>
     <x:String x:Key="Ui.Settings.Group.Network">网络连接</x:String>
     <x:String x:Key="Ui.Settings.Group.Import">导入与格式转换</x:String>
+    <x:String x:Key="Library.Filter.All0">全部作者</x:String>
+    <x:String x:Key="Library.Filter.All1">全部标签</x:String>
+    <x:String x:Key="Library.Filter.All2">全部格式</x:String>
+    <x:String x:Key="Library.Filter.All3">全部分类</x:String>
+    <x:String x:Key="Library.Filter.All4">全部阅读状态</x:String>
+    <x:String x:Key="Library.Filter.All5">全部收藏状态</x:String>
 </ResourceDictionary>

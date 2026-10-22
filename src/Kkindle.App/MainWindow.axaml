@@ -234,11 +234,63 @@
         </Style>
         <!-- Library popups are kept in the window overlay so their border,
              placement and content are painted atomically with the shelf. -->
+        <Style Selector="TextBlock.pageTitle">
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="LineHeight" Value="28" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="TextBlock.pageDescription">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="LineHeight" Value="16" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
         <Style Selector="ComboBox.filterCombo /template/ Popup">
             <Setter Property="ShouldUseOverlayLayer" Value="True" />
         </Style>
         <Style Selector="ComboBox.filterCombo">
             <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <!-- Draw the search underline on its outer layout edge, independent
+             of the Fluent TextBox template's internal border inset. -->
+        <Style Selector="TextBox.librarySearch /template/ Border#PART_BorderElement,
+                         TextBox.librarySearch:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ComboBox.libraryFilter">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrongBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="PlaceholderForeground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Padding" Value="10,5" />
+        </Style>
+        <Style Selector="ComboBox.libraryFilter /template/ Popup">
+            <Setter Property="Placement" Value="BottomEdgeAlignedLeft" />
+            <Setter Property="HorizontalOffset" Value="0" />
+            <Setter Property="VerticalOffset" Value="0" />
+        </Style>
+        <!-- The open filter header and its list share one continuous outline. -->
+        <Style Selector="ComboBox.libraryFilter:dropdownopen">
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1,1,1,0" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+            <Setter Property="PlaceholderForeground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="ComboBox.libraryFilter:dropdownopen /template/ Border#Background,
+                         ComboBox.libraryFilter:dropdownopen /template/ Border#HighlightBackground">
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderThickness" Value="1,1,1,0" />
+            <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+        </Style>
+        <Style Selector="ComboBox.libraryFilter /template/ Border#PopupBorder">
+            <Setter Property="BorderThickness" Value="1,0,1,1" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="ComboBox.libraryFilter ComboBoxItem TextBlock">
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
         <Style Selector="Button.shelfSortItem">
             <Setter Property="MinWidth" Value="96" />
@@ -449,7 +501,7 @@
                                     Margin="16,0,0,0">
                             <StackPanel Orientation="Horizontal" Spacing="5">
                                 <TextBlock Text="Kkindle"
-                                           FontSize="18"
+                                           FontSize="20"
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
                                 <!-- Update badge: hovering shows the release notes; after
@@ -466,9 +518,7 @@
                                         <Ellipse Width="8" Height="8" Fill="#E0A100" />
                                     </Button>
                             </StackPanel>
-                            <TextBlock Text="{DynamicResource Ui.Auto.61CD63ABFA7D1DAD}"
-                                       FontSize="11"
-                                       Foreground="{DynamicResource MutedInkBrush}" />
+
                         </StackPanel>
                         <Button x:Name="S3SyncIndicatorButton"
                                 Grid.Column="1"
@@ -675,7 +725,7 @@
                     </ScrollViewer>
 
                     <Button x:Name="SettingsNavigationButton"
-                            Grid.Row="2" Margin="0,0,0,12" Classes="sidebarPrimaryItem"
+                            Grid.Row="2" Height="36" Margin="0" Classes="sidebarPrimaryItem"
                             AutomationProperties.Name="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}"
                             Click="SettingsButton_Click">
                         <Grid Classes="sidebarEntry" ColumnDefinitions="20,12,*,16">
@@ -774,35 +824,38 @@
             <!-- Local library -->
             <Grid x:Name="LibraryWorkspace"
                   Grid.Column="1"
-                  Margin="30,24,30,18"
+                  Margin="30,36,30,18"
                   RowDefinitions="Auto,Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
                   <Grid.Transitions>
                       <Transitions>
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
                       </Transitions>
                   </Grid.Transitions>
-                <Grid x:Name="LibraryHeader" ColumnDefinitions="*,Auto" ColumnSpacing="20" Margin="0,14,0,0">
-                    <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center" Margin="6,0,0,0">
-                        <TextBlock Text="{DynamicResource Ui.Auto.FAFE70E30BE14271}" FontSize="28" FontWeight="Bold" />
+                <Grid x:Name="LibraryHeader" MinHeight="48" ColumnDefinitions="*,Auto" ColumnSpacing="20" Margin="0">
+                    <StackPanel Spacing="3" VerticalAlignment="Top" Margin="6,0,0,0">
+                        <TextBlock Text="{DynamicResource Ui.Auto.FAFE70E30BE14271}" Classes="pageTitle" />
                     </StackPanel>
                 </Grid>
 
                 <Grid x:Name="LibraryToolbar"
                       Grid.Row="1"
-                      Margin="0,22,0,0"
+                      Margin="0"
                       ColumnDefinitions="*,Auto"
                       RowDefinitions="Auto,Auto"
                       ColumnSpacing="24"
                       LayoutUpdated="LibraryToolbar_LayoutUpdated"
                       SizeChanged="LibraryToolbar_SizeChanged">
-                    <TextBox x:Name="SearchBox"
-                             Width="420"
-                             HorizontalAlignment="Left"
-                             Height="38"
-                             Padding="13,7"
-                             PlaceholderText="{DynamicResource Ui.Auto.168A769EBA62A8E8}"
-                             Text="{Binding ViewModel.SearchText, Mode=TwoWay}"
-                             TextChanged="SearchBox_TextChanged" />
+                    <Border x:Name="LibrarySearchField" Width="420" Height="38" Margin="0"
+                            HorizontalAlignment="Left"
+                            BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1">
+                        <TextBox x:Name="SearchBox" Classes="librarySearch"
+                                 HorizontalAlignment="Stretch"
+                                 Padding="0,7"
+                                 BorderThickness="0"
+                                 PlaceholderText="{DynamicResource Ui.Auto.168A769EBA62A8E8}"
+                                 Text="{Binding ViewModel.SearchText, Mode=TwoWay}"
+                                 TextChanged="SearchBox_TextChanged" />
+                    </Border>
                     <StackPanel x:Name="LibraryToolbarActions"
                                 Grid.Column="1"
                                 HorizontalAlignment="Right"
@@ -862,8 +915,8 @@
                         Classes="flatSubsection"
                         BorderThickness="0"
                         Grid.Row="2"
-                        Margin="0"
-                        Padding="10,10,10,2"
+                        Margin="6,0,0,0"
+                        Padding="0,6,0,0"
                         IsVisible="False">
                     <!-- English labels need more room than the Chinese labels. Let
                          the controls wrap as a group at narrow window widths so no
@@ -872,40 +925,52 @@
                                HorizontalAlignment="Stretch"
                                VerticalAlignment="Center">
                         <ComboBox x:Name="AuthorFilterBox"
-                                  Classes="filterCombo"
-                                  Width="132"
-                                  Margin="0,0,4,6"
-                                  PlaceholderText="{DynamicResource Ui.Auto.89050DD0FBDA32A3}"
+                                  Classes="filterCombo libraryFilter"
+                                  TemplateApplied="LibraryFilter_TemplateApplied"
+                                  Width="126"
+                                  Margin="0,0,8,6"
+                                  PlaceholderText="{DynamicResource Library.Filter.All0}"
+                                  AutomationProperties.Name="{DynamicResource Ui.Auto.89050DD0FBDA32A3}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="TagFilterBox"
-                                  Classes="filterCombo"
-                                  Width="132"
-                                  Margin="0,0,4,6"
-                                  PlaceholderText="{DynamicResource Ui.Auto.B709CB12F0ABA6BE}"
+                                  Classes="filterCombo libraryFilter"
+                                  TemplateApplied="LibraryFilter_TemplateApplied"
+                                  Width="126"
+                                  Margin="0,0,8,6"
+                                  PlaceholderText="{DynamicResource Library.Filter.All1}"
+                                  AutomationProperties.Name="{DynamicResource Ui.Auto.B709CB12F0ABA6BE}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="FormatFilterBox"
-                                  Classes="filterCombo"
-                                  Width="132"
-                                  Margin="0,0,4,6"
-                                  PlaceholderText="{DynamicResource Ui.Auto.CCCB7189507A26E7}"
+                                  Classes="filterCombo libraryFilter"
+                                  TemplateApplied="LibraryFilter_TemplateApplied"
+                                  Width="126"
+                                  Margin="0,0,8,6"
+                                  PlaceholderText="{DynamicResource Library.Filter.All2}"
+                                  AutomationProperties.Name="{DynamicResource Ui.Auto.CCCB7189507A26E7}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="CategoryFilterBox"
-                                  Classes="filterCombo"
-                                  Width="132"
-                                  Margin="0,0,4,6"
-                                  PlaceholderText="{DynamicResource Ui.Auto.A1054434857F0A98}"
+                                  Classes="filterCombo libraryFilter"
+                                  TemplateApplied="LibraryFilter_TemplateApplied"
+                                  Width="126"
+                                  Margin="0,0,8,6"
+                                  PlaceholderText="{DynamicResource Library.Filter.All3}"
+                                  AutomationProperties.Name="{DynamicResource Ui.Auto.A1054434857F0A98}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="ReadingStatusFilterBox"
-                                  Classes="filterCombo"
-                                  Width="132"
-                                  Margin="0,0,4,6"
-                                  PlaceholderText="{DynamicResource Ui.Auto.0A379C1E7398FBA1}"
+                                  Classes="filterCombo libraryFilter"
+                                  TemplateApplied="LibraryFilter_TemplateApplied"
+                                  Width="126"
+                                  Margin="0,0,8,6"
+                                  PlaceholderText="{DynamicResource Library.Filter.All4}"
+                                  AutomationProperties.Name="{DynamicResource Ui.Auto.0A379C1E7398FBA1}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <ComboBox x:Name="FavoritesFilterBox"
-                                  Classes="filterCombo"
-                                  Width="132"
-                                  Margin="0,0,4,6"
-                                  PlaceholderText="{DynamicResource Ui.Auto.77196E6DEB2195FA}"
+                                  Classes="filterCombo libraryFilter"
+                                  TemplateApplied="LibraryFilter_TemplateApplied"
+                                  Width="126"
+                                  Margin="0,0,8,6"
+                                  PlaceholderText="{DynamicResource Library.Filter.All5}"
+                                  AutomationProperties.Name="{DynamicResource Ui.Auto.77196E6DEB2195FA}"
                                   SelectionChanged="FilterComboBox_SelectionChanged" />
                         <Button Classes="quiet libraryToolbar"
                                 Height="{Binding #FavoritesFilterBox.Bounds.Height}"
@@ -935,7 +1000,7 @@
                             BorderThickness="0,0,0,1"
                             IsVisible="False">
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                            <TextBlock x:Name="ActiveCollectionTitleText" FontSize="28" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                            <TextBlock x:Name="ActiveCollectionTitleText" Classes="pageTitle" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxLines="1" />
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                 <Button x:Name="BackToCollectionsButton"
                                         Classes="quiet"
@@ -1512,7 +1577,7 @@
                                 <TextBlock Text="{DynamicResource Ui.Auto.7D4146CA082798F0}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
                                 <TextBox x:Name="DetailAuthorsText" FontSize="13" />
                             </StackPanel>
-                            
+
                             <Border x:Name="DetailReflectionPanel"
                                     Background="Transparent"
                                     BorderThickness="0"
@@ -1584,7 +1649,7 @@
                                 <TextBox x:Name="DetailDescriptionBox" MinHeight="100" AcceptsReturn="True" TextWrapping="Wrap" />
                             </StackPanel>
 
-                            
+
                             <TextBlock Text="{DynamicResource Ui.Auto.D0976E76BF2566C5}"
                                        FontSize="13"
                                        FontWeight="SemiBold"
@@ -1620,7 +1685,7 @@
 
 
 
-                            
+
                             <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                                 <Button x:Name="SaveDetailsButton"
                                         Classes="detailSave"
@@ -1661,7 +1726,7 @@
                  the About version label. -->
             <Grid x:Name="ZLibraryPage"
                   Grid.Column="1"
-                  Margin="30,24,30,18"
+                  Margin="30,36,30,18"
                   IsVisible="False"
                   RowDefinitions="Auto,Auto,*,Auto" ColumnDefinitions="*,0" ClipToBounds="True" Background="Transparent" Tapped="ZLibraryPage_Tapped">
                 <Grid.Styles>
@@ -1686,11 +1751,11 @@
                         <Setter Property="Foreground" Value="#999999" />
                     </Style>
                 </Grid.Styles>
-                <StackPanel Grid.Row="0" Spacing="3" Margin="6,14,0,0">
-                    <TextBlock Text="{DynamicResource Ui.ZLibrary.Title}" FontSize="28" FontWeight="Bold" />
-                    <TextBlock x:Name="ZLibraryStatusText" Text="{DynamicResource Ui.ZLibrary.AccountDescription}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                <StackPanel Grid.Row="0" MinHeight="48" Spacing="3" Margin="6,0,0,0">
+                    <TextBlock Text="{DynamicResource Ui.ZLibrary.Title}" Classes="pageTitle" />
+                    <TextBlock x:Name="ZLibraryStatusText" Classes="pageDescription" Text="" IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
                 </StackPanel>
-                <Grid Grid.Row="1" Margin="0,18,0,12" ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid Grid.Row="1" Margin="6,0,6,12" ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <TextBox x:Name="ZLibrarySearchBox"
                              Height="38"
                              Padding="13,7"
@@ -1825,7 +1890,7 @@
                  platform service behind the portable UI. -->
             <Grid x:Name="DevicePage"
                   Grid.Column="1"
-                  Margin="30,24,30,18"
+                  Margin="30,36,30,18"
                   IsVisible="False"
                   RowDefinitions="Auto,Auto,Auto,*,Auto" ColumnDefinitions="*,Auto">
                   <Grid.Transitions>
@@ -1833,9 +1898,9 @@
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
                       </Transitions>
                   </Grid.Transitions>
-                <StackPanel x:Name="DeviceHeader" Spacing="3" Margin="6,14,0,0">
+                <StackPanel x:Name="DeviceHeader" MinHeight="48" Spacing="3" Margin="6,0,0,0">
                     <StackPanel Orientation="Horizontal" Spacing="9">
-                        <TextBlock Text="{DynamicResource Ui.Auto.EC63017A628AB5D9}" FontSize="28" FontWeight="Bold" />
+                        <TextBlock Text="{DynamicResource Ui.Auto.EC63017A628AB5D9}" Classes="pageTitle" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="False">
                         <Button x:Name="DeviceNameButton"
@@ -1855,13 +1920,13 @@
                     </StackPanel>
                 </StackPanel>
 
-                <Grid x:Name="DeviceToolbar" Grid.Row="1" Margin="6,22,6,18"
+                <Grid x:Name="DeviceToolbar" Grid.Row="1" Margin="6,0,6,18"
                       ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="24"
                       SizeChanged="DeviceToolbar_SizeChanged" LayoutUpdated="DeviceToolbar_LayoutUpdated">
                     <TextBox x:Name="DeviceBookSearchBox"
                              Width="420" HorizontalAlignment="Left"
                              Height="38"
-                             Padding="13,7"
+                             Padding="0,7"
                              PlaceholderText="{DynamicResource Ui.Auto.168A769EBA62A8E8}"
                              TextChanged="DeviceBookSearchBox_TextChanged" />
                     <StackPanel x:Name="DeviceToolbarActions" Grid.Column="1" Orientation="Horizontal" Spacing="8"
@@ -2016,7 +2081,7 @@
                                         PointerExited="DeviceBook_PointerExited"
                                         DoubleTapped="DeviceBook_DoubleTapped"
                                         ContextRequested="DeviceBook_ContextRequested">
-                                    <Grid ColumnDefinitions="54,2*,*,180" ColumnSpacing="10" MinHeight="72">
+                                    <Grid ColumnDefinitions="54,2*,*,180" ColumnSpacing="10" MinHeight="48">
                                         <Grid Width="42" Height="56" VerticalAlignment="Center">
                                             <Border Background="{DynamicResource PressedBrush}" BorderBrush="{DynamicResource InkBrush}" BorderThickness="1">
                                                 <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
@@ -2097,7 +2162,7 @@
             <!-- Stage 3: fonts and dictionaries on the connected Kindle. -->
             <Grid x:Name="DeviceResourcePage"
                   Grid.Column="1"
-                  Margin="30,24,30,18"
+                  Margin="30,36,30,18"
                   IsVisible="False"
                   RowDefinitions="Auto,*"
                   DragDrop.AllowDrop="True">
@@ -2106,11 +2171,14 @@
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
                       </Transitions>
                   </Grid.Transitions>
-                <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
-                    <StackPanel Spacing="3" Margin="6,0,0,0">
+                <Grid RowDefinitions="Auto,Auto" RowSpacing="0">
+                    <StackPanel MinHeight="48" Spacing="3" Margin="6,0,0,0">
                         <StackPanel Orientation="Horizontal" Spacing="9">
-                            <TextBlock x:Name="DeviceResourcePageTitle" Text="{DynamicResource Ui.Auto.F15EE48ED5493552}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap" />
+                            <TextBlock x:Name="DeviceResourcePageTitle" Text="{DynamicResource Ui.Auto.F15EE48ED5493552}" Classes="pageTitle" TextWrapping="Wrap" />
                         </StackPanel>
+                    </StackPanel>
+                    <Grid Grid.Row="1" MinHeight="38" Margin="6,0,6,0" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Grid.Column="0" Margin="0" Spacing="3">
                         <StackPanel Orientation="Horizontal" Spacing="7">
                             <TextBlock x:Name="DeviceResourceDeviceText" Text="{DynamicResource Ui.Auto.9514487168A00698}" Foreground="{DynamicResource InkBrush}" FontSize="12" FontWeight="SemiBold" />
                             <TextBlock Text="·" Foreground="{DynamicResource MutedInkBrush}" FontSize="12" />
@@ -2120,10 +2188,9 @@
                             <TextBlock Text="·" Foreground="{DynamicResource MutedInkBrush}" FontSize="12" />
                             <TextBlock x:Name="DeviceResourceCountText" Text="{DynamicResource Ui.Auto.0399514D6A1113C3}" Foreground="{DynamicResource MutedInkBrush}" FontSize="12" />
                         </StackPanel>
-                        <TextBlock x:Name="DeviceResourceStatusText" Text="{DynamicResource Ui.Auto.DD4E63F4F9C0F4B5}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="DeviceResourceStatusText" Classes="pageDescription" Text="{DynamicResource Ui.Auto.DD4E63F4F9C0F4B5}" />
                     </StackPanel>
-                    <Grid Grid.Row="1" ColumnDefinitions="*">
-                        <StackPanel
+                        <StackPanel Grid.Column="1"
                                     Orientation="Horizontal"
                                     HorizontalAlignment="Right"
                                     Spacing="4">
@@ -2150,6 +2217,7 @@
                                     Click="RefreshDeviceResourcesButton_Click" />
                         </StackPanel>
                     </Grid>
+
                 </Grid>
                 <Grid Grid.Row="1" Margin="0,20,0,0">
                     <ListBox x:Name="DeviceResourceList"
@@ -2206,7 +2274,7 @@
             <!-- Stage 3: local and Kindle reading materials. -->
             <Grid x:Name="ReadingMaterialsPage"
                   Grid.Column="1"
-                  Margin="30,24,30,18"
+                  Margin="30,36,30,18"
                   IsVisible="False"
                   RowDefinitions="Auto,Auto,Auto,Auto,*">
                   <Grid.Transitions>
@@ -2214,14 +2282,32 @@
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
                       </Transitions>
                   </Grid.Transitions>
-                <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Spacing="3" Margin="6,0,0,0">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                    <StackPanel MinHeight="48" Spacing="3" Margin="6,0,0,0">
                         <StackPanel Orientation="Horizontal" Spacing="9">
-                            <TextBlock x:Name="ReadingMaterialsPageTitle" Text="{DynamicResource Ui.Auto.9CD1F9CD7B9AC663}" FontSize="28" FontWeight="Bold" />
+                            <TextBlock x:Name="ReadingMaterialsPageTitle" Text="{DynamicResource Ui.Auto.9CD1F9CD7B9AC663}" Classes="pageTitle" />
                         </StackPanel>
-                        <TextBlock x:Name="ReadingMaterialsStatusText" Text="{DynamicResource Ui.Auto.5F83A944D270ED82}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                     </StackPanel>
-                    <StackPanel x:Name="ReadingMaterialsNotesActions" Grid.Column="1" Margin="0,46,0,0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                <StackPanel Grid.Row="1" Margin="6,0,6,14" Orientation="Horizontal" Spacing="10">
+                    <TextBox x:Name="ReadingMaterialsSearchBox"
+                             Width="420"
+                             Height="38"
+                             VerticalAlignment="Bottom"
+                             HorizontalAlignment="Left"
+                             PlaceholderText="{DynamicResource Ui.Auto.C813DF885BD71685}"
+                             TextChanged="ReadingMaterialsSearchBox_TextChanged" />
+                    <ComboBox x:Name="ReadingMaterialsSourceBox"
+                              Width="170"
+                              Height="38"
+                              VerticalAlignment="Bottom"
+                              SelectedIndex="0"
+                              SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
+                        <ComboBoxItem Content="Any source" Tag="all" />
+                        <ComboBoxItem Content="Local library" Tag="local" />
+                        <ComboBoxItem Content="{DynamicResource Ui.Device.Current}" Tag="device" />
+                    </ComboBox>
+                </StackPanel>
+                    <StackPanel x:Name="ReadingMaterialsNotesActions" Grid.Row="1" Grid.Column="1" Margin="0,0,6,14" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
                         <Button x:Name="ExportReadingMaterialsToggleButton"
                                 Content="{DynamicResource Ui.Auto.B4FBE589C50EE54E}"
                                 Classes="quiet libraryToolbar readingExportToggle"
@@ -2237,25 +2323,7 @@
                         <Button x:Name="RefreshReadingMaterialsButton" Content="{DynamicResource Ui.Auto.AEE88743413144A2}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingMaterialsButton_Click" />
                     </StackPanel>
                 </Grid>
-                <StackPanel Grid.Row="1" Margin="6,14,6,14" Orientation="Horizontal" Spacing="10">
-                    <TextBox x:Name="ReadingMaterialsSearchBox"
-                             Width="420"
-                             Height="36"
-                             VerticalAlignment="Bottom"
-                             HorizontalAlignment="Left"
-                             PlaceholderText="{DynamicResource Ui.Auto.C813DF885BD71685}"
-                             TextChanged="ReadingMaterialsSearchBox_TextChanged" />
-                    <ComboBox x:Name="ReadingMaterialsSourceBox"
-                              Width="170"
-                              Height="36"
-                              VerticalAlignment="Bottom"
-                              SelectedIndex="0"
-                              SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
-                        <ComboBoxItem Content="Any source" Tag="all" />
-                        <ComboBoxItem Content="Local library" Tag="local" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Device.Current}" Tag="device" />
-                    </ComboBox>
-                </StackPanel>
+                <TextBlock x:Name="ReadingMaterialsStatusText" Classes="pageDescription" Grid.Row="1" Margin="6,0,6,8" Text="{DynamicResource Ui.Auto.5F83A944D270ED82}" />
                 <Border x:Name="ReadingMaterialsSummaryBorder"
                         Classes="flatPanel"
                         Grid.Row="2"
@@ -2414,7 +2482,7 @@
                  from editable application settings. -->
             <Grid x:Name="ReadingDashboardPage"
                   Grid.Column="1"
-                  Margin="30,48,30,18"
+                  Margin="30,36,30,18"
                   IsVisible="False"
                   RowDefinitions="Auto,*">
                   <Grid.Transitions>
@@ -2422,18 +2490,15 @@
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
                       </Transitions>
                   </Grid.Transitions>
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="{DynamicResource Ui.Auto.440C143379A34160}" FontSize="28" FontWeight="Bold" />
-                        <TextBlock Text="{DynamicResource Ui.Device.ReadingDataScope}" FontSize="11"
-                                   Foreground="{DynamicResource MutedInkBrush}" />
-                        <TextBlock x:Name="DashboardStatusText"
-                                   FontSize="12"
-                                   Foreground="{DynamicResource MutedInkBrush}"
-                                   TextWrapping="Wrap"
-                                   IsVisible="False" />
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="16">
+                    <StackPanel Spacing="3" Margin="6,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="{DynamicResource Ui.Auto.440C143379A34160}" Classes="pageTitle" />
+
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+                    <TextBlock x:Name="DashboardStatusText" Classes="pageDescription"
+                               Grid.Row="1" Grid.ColumnSpan="2" Margin="6,4,6,0" VerticalAlignment="Center"
+                               IsVisible="False" />
+                    <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,6,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                         <Button x:Name="RefreshReadingDashboardButton" Content="{DynamicResource Ui.Auto.BC87A4121A0873B3}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingDashboardButton_Click" />
                         <Button x:Name="ExportReadingDashboardButton" Content="{DynamicResource Ui.Auto.E40A628FFEC72072}" ContentTemplate="{StaticResource LibraryExportActionContent}" Classes="quiet libraryToolbar" Click="ExportReadingDashboardButton_Click" />
                     </StackPanel>
@@ -2621,22 +2686,24 @@
             </Grid>
 
             <!-- One settings destination; inactive categories and collapsed forms leave the focus tree. -->
-            <Grid x:Name="SettingsPage" Classes="settingsPage" Grid.Column="1" Margin="30,24,30,18" IsVisible="False">
+            <Grid x:Name="SettingsPage" Classes="settingsPage" Grid.Column="1" Margin="30,36,30,18" IsVisible="False">
                 <Grid RowDefinitions="Auto,Auto,*,Auto" MaxWidth="820" HorizontalAlignment="Left" Width="{Binding Bounds.Width, ElementName=SettingsPage}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap"
+                    <StackPanel Spacing="0" Margin="6,0,0,0">
+                        <StackPanel MinHeight="48" Spacing="3">
+                        <TextBlock Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" Classes="pageTitle" TextWrapping="Wrap"
                                    ToolTip.Tip="{DynamicResource Ui.Auto.709BDE6F962E3F2A}" />
-                        <TextBlock x:Name="SettingsStatusText" Text=""
-                                   IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                        <StackPanel x:Name="SettingsSearchPanel" Spacing="6" Margin="0,8,0,0">
+                        </StackPanel>
+                        <StackPanel x:Name="SettingsSearchPanel" Spacing="6" Margin="0">
                             <Grid>
-                                <TextBox x:Name="SettingsSearchBox"
+                                <TextBox x:Name="SettingsSearchBox" Height="38"
                                          PlaceholderText="{DynamicResource Ui.Settings.Search.Placeholder}"
                                          AutomationProperties.Name="{DynamicResource Ui.Settings.Search.Placeholder}"
                                          TextChanged="SettingsSearchBox_TextChanged"
                                          KeyDown="SettingsSearchBox_KeyDown" />
 
                             </Grid>
+                            <TextBlock x:Name="SettingsStatusText" Classes="pageDescription" Text=""
+                                   IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
                             <TextBlock x:Name="SettingsSearchNoResultsText"
                                        Text="{DynamicResource Ui.Settings.Search.NoResults}"
                                        FontSize="12"

@@ -197,7 +197,7 @@ public partial class MainWindow
         right = Math.Min(right, Math.Max(6, workspace.Bounds.Width - left - actions.DesiredSize.Width));
         // Book content keeps its own top inset; the detail pane starts directly
         // at the toolbar boundary, including when actions wrap to a second row.
-        var margin = new Thickness(left, 22, right, alignDetailBoundary ? 0 : 18);
+        var margin = new Thickness(left, 0, right, alignDetailBoundary ? 0 : 18);
         if (toolbar.Margin != margin)
             toolbar.Margin = margin;
     }
@@ -236,12 +236,12 @@ public partial class MainWindow
     private void LibraryToolbar_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
         // XAML initialization and language changes can resize either group.
-        if (LibraryToolbar is null || LibraryToolbarActions is null || SearchBox is null)
+        if (LibraryToolbar is null || LibraryToolbarActions is null || LibrarySearchField is null)
             return;
-        ArrangeShelfToolbar(LibraryToolbar, SearchBox, LibraryToolbarActions);
+        ArrangeShelfToolbar(LibraryToolbar, LibrarySearchField, LibraryToolbarActions);
     }
 
-    private static void ArrangeShelfToolbar(Grid toolbar, TextBox searchBox, StackPanel actions)
+    private static void ArrangeShelfToolbar(Grid toolbar, Control searchBox, StackPanel actions)
     {
         var width = toolbar.Bounds.Width;
         var actionsWidth = actions.DesiredSize.Width;
@@ -258,8 +258,8 @@ public partial class MainWindow
         toolbar.RowSpacing = stacked ? 10 : 0;
 
         var searchWidth = stacked ? width : Math.Min(420, width - actionsWidth - groupSpacing);
-        if (double.IsNaN(searchBox.Width) || Math.Abs(searchBox.Width - searchWidth) > 0.5)
-            searchBox.Width = searchWidth;
+        if (double.IsNaN(searchBox.Width) || Math.Abs(searchBox.Width - Math.Max(0, searchWidth - searchBox.Margin.Left - searchBox.Margin.Right)) > 0.5)
+            searchBox.Width = Math.Max(0, searchWidth - searchBox.Margin.Left - searchBox.Margin.Right);
     }
 
     private void LibraryDetailCloseButton_Click(object? sender, RoutedEventArgs e)

@@ -2253,4 +2253,10 @@
     <x:String x:Key="Ui.Auto.DF0F9566309A4954">F1  Show this help</x:String>
     <x:String x:Key="Ui.Settings.Group.Network">Network connection</x:String>
     <x:String x:Key="Ui.Settings.Group.Import">Import &amp; format conversion</x:String>
+    <x:String x:Key="Library.Filter.All0">All authors</x:String>
+    <x:String x:Key="Library.Filter.All1">All tags</x:String>
+    <x:String x:Key="Library.Filter.All2">All formats</x:String>
+    <x:String x:Key="Library.Filter.All3">All categories</x:String>
+    <x:String x:Key="Library.Filter.All4">Any reading status</x:String>
+    <x:String x:Key="Library.Filter.All5">Any favorite status</x:String>
 </ResourceDictionary>

@@ -6,6 +6,25 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.0.14 (2026-10-22)
+
+### Added
+
+- Cross-book notes, batch management, duplicate detection, and smart shelves.
+- Unified background task history with live hover details for stages, books, and progress.
+
+### Improved
+
+- Consistent page titles, search fields, and action placement; tighter reading statistics and sidebar layouts.
+- Compact library filters with connected dropdown outlines and clearer English and Chinese defaults.
+- Faster large libraries, device scans, reader layout, dictionary lookup, and incremental synchronization.
+- Refined settings, reading themes, sync details, and keyboard shortcuts.
+
+### Fixed
+
+- PDF reading state restoration, title and file imports, device book operations, and update installation.
+- Improved sync compatibility and preservation of deleted-book metadata.
+
 ## 1.0.13 (2026-10-13)
 
 ### Improved

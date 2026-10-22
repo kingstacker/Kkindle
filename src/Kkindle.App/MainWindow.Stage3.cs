@@ -793,7 +793,7 @@ public partial class MainWindow
             DevicePageStatusText.Text = changed ? T("设备已连接，正在准备设备信息…") : T("设备已连接。");
             KindleStatusText.Text = _deviceDisplayName;
             KindleConnectionText.Text = T("已连接");
-            KindleConnectionText.IsVisible = true;
+            KindleConnectionText.IsVisible = false;
             DeviceStorageText.Text = device.CapacityLabel;
             _deviceUsedRatio = device.TotalBytes > 0
                 ? Math.Clamp((device.TotalBytes - device.FreeBytes) / (double)device.TotalBytes, 0, 1)
@@ -1995,7 +1995,7 @@ public partial class MainWindow
         _deviceDisplayName = normalized ?? device.Name;
         KindleStatusText.Text = _deviceDisplayName;
         KindleConnectionText.Text = T("已连接");
-        KindleConnectionText.IsVisible = true;
+        KindleConnectionText.IsVisible = false;
         DevicePageDeviceText.Text = $"{_deviceDisplayName} · {device.ConnectionLabel}";
         DeviceNameButton.IsEnabled = true;
         if (DeviceResourcePage.IsVisible)
