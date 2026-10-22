@@ -349,7 +349,7 @@ public partial class MainWindow
                 BackgroundTaskStatus.Interrupted => T("已中断"),
                 _ => T("等待中")
             };
-            var row = new StackPanel { Spacing = 6 };
+            var row = new StackPanel { Spacing = 4 };
             var isBatchImport = task.Kind == BackgroundTaskKind.Import && task.BookTitles is { Count: > 1 };
             var names = !isBatchImport && task.BookTitles is { Count: > 0 }
                 ? string.Join("、", task.BookTitles.Select(title => "《" + title + "》")) : string.Empty;
@@ -358,20 +358,10 @@ public partial class MainWindow
                 ? task.UpdatedAtUtc.ToLocalTime().ToString("MM-dd HH:mm:ss") : string.Empty;
             var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,*,Auto"), ColumnSpacing = 6 };
             ToolTip.SetTip(heading, status + " · " + identity + (result.Length > 0 ? " · " + result : string.Empty));
-            var statusGeometry = task.Status switch
+            var statusIcon = new Avalonia.Controls.Shapes.Ellipse
             {
-                BackgroundTaskStatus.Succeeded => "M 3,8 L 6,11 L 13,4",
-                BackgroundTaskStatus.Failed => "M 4,4 L 12,12 M 12,4 L 4,12",
-                BackgroundTaskStatus.Canceled => "M 8,1 A 7,7 0 1 1 8,15 A 7,7 0 1 1 8,1 M 3,3 L 13,13",
-                BackgroundTaskStatus.Interrupted => "M 5,3 V 13 M 11,3 V 13",
-                _ => "M 8,1 A 7,7 0 1 1 8,15 A 7,7 0 1 1 8,1 M 8,4 V 8 L 11,10"
-            };
-            var statusIcon = new Avalonia.Controls.Shapes.Path
-            {
-                Width = 12, Height = 12, Stretch = Avalonia.Media.Stretch.Uniform,
-                Data = Avalonia.Media.Geometry.Parse(statusGeometry),
-                Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 0.8,
-                        Fill = Avalonia.Media.Brushes.Transparent,
+                Width = 4, Height = 4, Margin = new Thickness(4, 0),
+                Fill = AppAppearanceResources.GetBrush("MutedInkBrush"),
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
             };
             ToolTip.SetTip(statusIcon, status);
@@ -393,24 +383,31 @@ public partial class MainWindow
                     || (task.CanCancel && !_displayOnlyTaskIds.Contains(task.Id)));
             if (canCancel || task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued))
             {
+                var succeeded = task.Status == BackgroundTaskStatus.Succeeded;
                 var delete = new Button
                 {
-                    Classes = { "eject" }, Width = 25, MinWidth = 25, Height = 23,
+                    Classes = { "eject" }, Width = 25, MinWidth = 25, Height = 23, MinHeight = 23,
+                    Padding = new Thickness(0), Margin = new Thickness(0),
                     Content = new Avalonia.Controls.Shapes.Path
                     {
                         Width = 10, Height = 10, Stretch = Avalonia.Media.Stretch.Uniform,
-                        Data = Avalonia.Media.Geometry.Parse("M 2,2 L 12,12 M 12,2 L 2,12"),
+                        Data = Avalonia.Media.Geometry.Parse(succeeded
+                            ? "M 2,7 L 6,11 L 14,3"
+                            : "M 2,2 L 12,12 M 12,2 L 2,12"),
                         Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 0.8,
                         Fill = Avalonia.Media.Brushes.Transparent
                     }
                 };
-                var actionLabel = canCancel ? T("取消") : T("删除");
+                var actionLabel = canCancel ? T("取消") : succeeded ? T("已完成") : T("删除");
                 ToolTip.SetTip(delete, actionLabel);
                 Avalonia.Automation.AutomationProperties.SetName(delete, actionLabel);
                 delete.Click += async (_, _) =>
                 {
-                    if (isTransferTask) RequestTransferStop();
-                    else if (canCancel) BackgroundTasks.Cancel(task.Id);
+                    if (canCancel)
+                    {
+                        if (isTransferTask) RequestTransferStop();
+                        else BackgroundTasks.Cancel(task.Id);
+                    }
                     else await BackgroundTasks.RemoveCompletedAsync(task.Id);
                 };
                 Grid.SetColumn(delete, 4);
@@ -439,7 +436,7 @@ public partial class MainWindow
             if (actions.Children.Count > 0) row.Children.Add(actions);
             _backgroundTaskRows.Children.Add(new Border
             {
-                Padding = new Thickness(16, 12), BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(12, 4), BorderThickness = new Thickness(0, 0, 0, 1),
                 BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"), Child = row
             });
         }

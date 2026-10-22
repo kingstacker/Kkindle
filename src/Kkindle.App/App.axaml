@@ -2780,6 +2780,15 @@
             <Setter Property="MaxHeight" Value="32" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
+        <!-- Compact tray commands in both supported UI languages. -->
+        <Style Selector="MenuItem[Header='打开 Kkindle'], MenuItem[Header='Open Kkindle'],
+                         MenuItem[Header='退出'], MenuItem[Header='Exit']">
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="MaxHeight" Value="24" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Padding" Value="8,2" />
+        </Style>
         <!-- 选中某条：黑色矩形 + 白色反色文字。子菜单箭头等矢量图形同样
              只允许黑白两色，避免 Fluent 模板主题色渗入。 -->
         <Style Selector="MenuItem:pointerover">
