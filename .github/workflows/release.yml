@@ -125,7 +125,7 @@ jobs:
         run: dotnet test Kkindle.sln -c Release -p:Platform=x64 --no-restore
 
       - name: Build Avalonia Windows head
-        run: dotnet build src/Kkindle.Desktop.Windows/Kkindle.Desktop.Windows.csproj -c Release -p:Platform=x64 --no-restore
+        run: dotnet build src/Kkindle.Desktop.Windows/Kkindle.Desktop.Windows.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true
 
       - name: Install release toolchain
         shell: pwsh
