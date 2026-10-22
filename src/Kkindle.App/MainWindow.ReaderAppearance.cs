@@ -102,6 +102,12 @@ public partial class MainWindow
             ReaderPaperEnabledCheck.IsChecked = appearance.PaperEnabled;
             ReaderPaperStrengthSlider.Value = appearance.PaperStrength * 100;
             ReaderFibersEnabledCheck.IsChecked = appearance.FibersEnabled;
+            ReaderPdfAnnotationDisplayModePanel.IsVisible = _readerIsPdf;
+            foreach (var option in new[] { ReaderPdfAnnotationPinnedOption, ReaderPdfAnnotationClickOption })
+            {
+                option.IsChecked = Enum.TryParse<ReaderAnnotationDisplayMode>(option.Tag?.ToString(), out var mode)
+                    && mode == appearance.AnnotationDisplayMode;
+            }
             UpdateReaderAppearanceLabels();
         }
         finally { _suppressReaderAppearanceChange = false; }
@@ -145,6 +151,17 @@ public partial class MainWindow
     {
         if (_suppressReaderAppearanceChange) return;
         ChangeReaderAppearance(CurrentReaderAppearance with { PaperStrength = ReaderPaperStrengthSlider.Value / 100 });
+    }
+
+    private void ReaderPdfAnnotationDisplayModeOption_IsCheckedChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_suppressReaderAppearanceChange
+            || sender is not RadioButton { IsChecked: true } option
+            || !Enum.TryParse<ReaderAnnotationDisplayMode>(option.Tag?.ToString(), out var mode)) return;
+        if (CurrentReaderAppearance.AnnotationDisplayMode == mode) return;
+        HideReaderAnnotationHoverPopup();
+        ChangeReaderAppearance(CurrentReaderAppearance with { AnnotationDisplayMode = mode });
+        ShowCurrentReaderPdfAnnotation();
     }
 
     private void ChangeReaderAppearance(ReaderAppearanceSettings appearance)

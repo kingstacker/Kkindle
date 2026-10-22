@@ -6480,6 +6480,34 @@
                                               IsCheckedChanged="ReaderPaperCheck_IsCheckedChanged" />
                                 </StackPanel>
                                 <TextBlock Text="{DynamicResource Ui.Reader.PaperHint}" FontSize="11" Foreground="{DynamicResource ReaderMutedBrush}" TextWrapping="Wrap" />
+                                <Border x:Name="ReaderPdfAnnotationDisplayModePanel"
+                                        Padding="12"
+                                        Background="{DynamicResource ReaderHoverBrush}"
+                                        BorderBrush="{DynamicResource ReaderBorderBrush}"
+                                        BorderThickness="1"
+                                        IsVisible="False">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="{DynamicResource Ui.Reader.AnnotationNoteMode}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold" />
+                                        <StackPanel Orientation="Horizontal" Spacing="18">
+                                            <RadioButton x:Name="ReaderPdfAnnotationPinnedOption"
+                                                         GroupName="ReaderPdfAnnotationDisplayMode"
+                                                         Tag="Pinned"
+                                                         Content="{DynamicResource Ui.Reader.AnnotationNotePinned}"
+                                                         IsCheckedChanged="ReaderPdfAnnotationDisplayModeOption_IsCheckedChanged" />
+                                            <RadioButton x:Name="ReaderPdfAnnotationClickOption"
+                                                         GroupName="ReaderPdfAnnotationDisplayMode"
+                                                         Tag="Click"
+                                                         Content="{DynamicResource Ui.Reader.AnnotationNoteClick}"
+                                                         IsCheckedChanged="ReaderPdfAnnotationDisplayModeOption_IsCheckedChanged" />
+                                        </StackPanel>
+                                        <TextBlock Text="{DynamicResource Ui.Reader.AnnotationNoteModeHint}"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource ReaderMutedBrush}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock x:Name="ReaderAppearanceSaveStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
                                 <Border Height="1" Background="{DynamicResource ReaderBorderBrush}" Margin="0,4" />
                                 <TextBlock Text="{DynamicResource Ui.Reader.Layout}" FontSize="13" FontWeight="SemiBold" />
@@ -6915,22 +6943,24 @@
                    TakesFocusFromNativeControl="False"
                    Closed="ReaderAnnotationInputPopup_Closed">
                 <Border x:Name="ReaderAnnotationInputPanel"
-                        Width="320"
-                        Padding="12"
+                        Width="264"
+                        Height="152"
+                        Padding="8"
                         Background="{DynamicResource ReaderPageBrush}"
                         BorderBrush="{DynamicResource ReaderBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="0">
-                    <StackPanel Spacing="10">
+                    <StackPanel Spacing="6">
                         <TextBlock x:Name="ReaderAnnotationInputQuote"
                                    FontSize="11"
                                    Foreground="{DynamicResource ReaderMutedBrush}"
-                                   MaxHeight="40"
+                                   MaxHeight="30"
                                    TextTrimming="CharacterEllipsis"
                                    TextWrapping="Wrap" />
                         <TextBox x:Name="ReaderAnnotationInputBox"
                                  Classes="readerMinimalField"
-                                 MinHeight="64"
+                                 MinHeight="48"
+                                 MaxHeight="52"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
                                  PlaceholderText="{DynamicResource Ui.Auto.39700B6351624E48}"
@@ -6994,26 +7024,50 @@
                    TakesFocusFromNativeControl="False"
                    IsHitTestVisible="False">
                 <Border x:Name="ReaderAnnotationHoverPopup"
-                        MaxWidth="360"
-                        MaxHeight="260"
-                        Padding="12,10"
+                        Width="258"
+                        Height="132"
+                        Padding="10"
                         Background="{DynamicResource ReaderPageBrush}"
-                        BorderBrush="{DynamicResource ReaderBorderBrush}"
-                        BorderThickness="2"
-                        CornerRadius="0"
+                        BorderBrush="{DynamicResource ReaderAccentBrush}"
+                        BorderThickness="1.25"
+                        CornerRadius="8"
                         IsHitTestVisible="False"
                         IsVisible="False">
-                    <ScrollViewer MaxHeight="236"
+                    <Grid RowDefinitions="Auto,*">
+                        <Grid ColumnDefinitions="*,Auto" Margin="2,0,0,6">
+                            <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                                <Border Width="7" Height="7" CornerRadius="4" Background="{DynamicResource ReaderAccentBrush}" />
+                                <TextBlock Text="{DynamicResource Ui.Reader.AnnotationNoteLabel}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource ReaderMutedBrush}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    Content="×"
+                                    FontSize="18"
+                                    Foreground="{DynamicResource ReaderMutedBrush}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    ToolTip.Tip="{DynamicResource Ui.Reader.AnnotationNoteClose}"
+                                    AutomationProperties.Name="{DynamicResource Ui.Reader.AnnotationNoteClose}"
+                                    Click="ReaderAnnotationHoverCloseButton_Click" />
+                        </Grid>
+                        <ScrollViewer Grid.Row="1"
+                                      MaxHeight="90"
                                   HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                        <StackPanel Spacing="6">
+                                      VerticalScrollBarVisibility="Auto"
+                                      PointerPressed="ReaderAnnotationHoverNote_PointerPressed">
                             <TextBlock x:Name="ReaderAnnotationHoverNote"
-                                       Foreground="{DynamicResource ReaderMutedBrush}"
-                                       FontSize="11"
-                                       LineHeight="18"
+                                       Foreground="{DynamicResource ReaderInkBrush}"
+                                       FontSize="14"
+                                       LineHeight="20"
                                        TextWrapping="Wrap" />
-                        </StackPanel>
-                    </ScrollViewer>
+                        </ScrollViewer>
+                    </Grid>
                 </Border>
             </Popup>
 

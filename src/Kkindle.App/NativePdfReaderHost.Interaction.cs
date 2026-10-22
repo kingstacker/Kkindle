@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Input;
 using Avalonia.Media;
 using Kkindle.Core;
@@ -54,6 +54,162 @@ public sealed partial class NativePdfReaderHost
             x * size.Width,
             y * size.Height);
         return GetPageTransform(bounds).Transform(local);
+    }
+
+    public bool TryGetAnnotationAnchor(ReaderAnnotation annotation, out int pageNumber, out Point anchor)
+    {
+        pageNumber = 0;
+        anchor = default;
+        if (!annotation.ChapterPath.StartsWith("pdf:", StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(annotation.ChapterPath[(annotation.ChapterPath.LastIndexOf(':') + 1)..], out pageNumber)
+            || pageNumber < 1
+            || pageNumber > PageCount)
+            return false;
+
+        if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out _, out _)
+            && GetPdfPointPosition(annotation) is { } point)
+        {
+            anchor = point;
+            return true;
+        }
+
+        var bounds = GetRangeBounds(pageNumber, annotation.StartOffset, annotation.EndOffset);
+        if (bounds.Count == 0) return false;
+        anchor = bounds[0].TopLeft;
+        return true;
+    }
+
+    public bool TryGetAnnotationCalloutBounds(int pageNumber, Point anchor, Size preferredSize, out Rect bounds)
+    {
+        bounds = default;
+        if (_layout is null || pageNumber < 1 || pageNumber > PageCount
+            || preferredSize.Width <= 0 || preferredSize.Height <= 0)
+            return false;
+
+        const double inset = 8;
+        const double gap = 18;
+        var viewport = new Rect(Bounds.Size).Deflate(inset);
+        if (viewport.Width < preferredSize.Width || viewport.Height < preferredSize.Height) return false;
+        var page = GetPageBounds(pageNumber);
+        // A clamped card must never outlive its anchor in the visible page.
+        if (!page.Contains(anchor) || !new Rect(Viewport).Contains(anchor)) return false;
+        var left = Math.Max(viewport.Left, page.Right + gap);
+        if (left + preferredSize.Width > viewport.Right) return false;
+        bounds = new Rect(left,
+            Math.Clamp(anchor.Y - preferredSize.Height / 2, viewport.Top, viewport.Bottom - preferredSize.Height),
+            preferredSize.Width, preferredSize.Height);
+        var candidate = bounds;
+        if (VisiblePageNumbers.Where(number => number != pageNumber)
+            .Any(number => GetPageBounds(number).Intersects(candidate))) return false;
+        return true;
+    }
+
+    private readonly List<(ReaderAnnotation Annotation, Action<Rect> Moved)> _additionalAnnotationCallouts = [];
+    private readonly List<(Point Anchor, Rect Bounds)> _additionalAnnotationConnectors = [];
+
+    public void SetAdditionalAnnotationCallouts(IEnumerable<(ReaderAnnotation Annotation, Action<Rect> Moved)> callouts)
+    {
+        _additionalAnnotationCallouts.Clear();
+        _additionalAnnotationCallouts.AddRange(callouts);
+        UpdateAnnotationCallout();
+        InvalidateVisual();
+    }
+
+    public void DismissAnnotationCallout(Guid? additionalId = null)
+    {
+        if (additionalId is { } id)
+            _additionalAnnotationCallouts.RemoveAll(item => item.Annotation.Id == id);
+        else _annotationCalloutDismissed = true;
+        UpdateAnnotationCallout();
+        InvalidateVisual();
+    }
+
+    private bool _annotationCalloutVisible;
+    private bool _annotationCalloutDismissed;
+    private Size _annotationCalloutSize;
+    private Action<Rect>? _annotationCalloutMoved;
+    private int _annotationCalloutPage;
+    private Point _annotationCalloutPagePoint;
+    private Size _annotationCalloutPageSize;
+    private Size _annotationCalloutViewportSize;
+    private int _annotationCalloutRotation;
+
+    public void SetAnnotationCallout(Point anchor, Rect bounds, Action<Rect>? moved = null, int pageNumber = 0)
+    {
+        _annotationCalloutPage = pageNumber > 0 ? pageNumber : PageNumber;
+        var page = GetPageBounds(_annotationCalloutPage);
+        var size = GetUnrotatedPageSize(page);
+        var local = GetPageTransform(page).Invert().Transform(anchor);
+        // Keep the anchor in document space, never in stale screen coordinates.
+        _annotationCalloutPagePoint = new(local.X / size.Width, local.Y / size.Height);
+        _annotationCalloutPageSize = page.Size;
+        _annotationCalloutViewportSize = Bounds.Size;
+        _annotationCalloutRotation = Rotation;
+        _annotationCallout = (anchor, bounds);
+        _annotationCalloutSize = bounds.Size;
+        _annotationCalloutDismissed = false;
+        _annotationCalloutMoved = moved;
+        UpdateAnnotationCallout();
+        InvalidateVisual();
+    }
+
+    private void UpdateAnnotationCallout()
+    {
+        if (_annotationCallout is not { } callout || _layout is null
+            || _annotationCalloutPage < 1 || _annotationCalloutPage > PageCount) return;
+        var page = GetPageBounds(_annotationCalloutPage);
+        var size = GetUnrotatedPageSize(page);
+        var anchor = GetPageTransform(page).Transform(new Point(
+            _annotationCalloutPagePoint.X * size.Width,
+            _annotationCalloutPagePoint.Y * size.Height));
+        _annotationCalloutVisible = TryGetAnnotationCalloutBounds(
+            _annotationCalloutPage, anchor, _annotationCalloutSize, out var bounds);
+        _annotationCalloutVisible &= !_annotationCalloutDismissed;
+        if (!_annotationCalloutVisible) bounds = callout.Bounds;
+        _annotationCalloutPageSize = page.Size;
+        _annotationCalloutViewportSize = Bounds.Size;
+        _annotationCalloutRotation = Rotation;
+        _annotationCallout = (anchor, bounds);
+        _additionalAnnotationConnectors.Clear();
+        var cards = new List<(Point Anchor, Rect Bounds, Action<Rect>? Moved, bool Primary)>();
+        if (_annotationCalloutVisible) cards.Add((anchor, bounds, _annotationCalloutMoved, true));
+        else _annotationCalloutMoved?.Invoke(default);
+        foreach (var item in _additionalAnnotationCallouts)
+        {
+            if (TryGetAnnotationAnchor(item.Annotation, out var number, out var point)
+                && TryGetAnnotationCalloutBounds(number, point, new Size(258, 132), out var cardBounds))
+                cards.Add((point, cardBounds, item.Moved, false));
+            else item.Moved(default);
+        }
+        cards.Sort((a, b) => a.Anchor.Y.CompareTo(b.Anchor.Y));
+        var available = new Rect(Viewport).Deflate(8);
+        var height = cards.Count == 0 ? 132 : Math.Min(132, Math.Max(1,
+            (available.Height - 8 * (cards.Count - 1)) / cards.Count));
+        var nextTop = available.Top;
+        for (var index = 0; index < cards.Count; index++)
+        {
+            var card = cards[index];
+            var remaining = cards.Count - index;
+            var top = Math.Clamp(card.Anchor.Y - height / 2, nextTop,
+                Math.Max(nextTop, available.Bottom - remaining * height - (remaining - 1) * 8));
+            var positioned = cards.Count == 1 ? card.Bounds
+                : new Rect(card.Bounds.X, top, card.Bounds.Width, height);
+            nextTop = positioned.Bottom + 8;
+            if (card.Primary) _annotationCallout = (card.Anchor, positioned);
+            else _additionalAnnotationConnectors.Add((card.Anchor, positioned));
+            card.Moved?.Invoke(positioned);
+        }
+    }
+
+    public void ClearAnnotationCallout()
+    {
+        foreach (var item in _additionalAnnotationCallouts) item.Moved(default);
+        _additionalAnnotationCallouts.Clear();
+        _additionalAnnotationConnectors.Clear();
+        if (_annotationCallout is null) return;
+        _annotationCallout = null;
+        _annotationCalloutMoved = null;
+        InvalidateVisual();
     }
 
     public void ScrollToPdfPoint(double x, double y)
@@ -241,8 +397,6 @@ public sealed partial class NativePdfReaderHost
         foreach (var pageNumber in VisiblePageNumbers)
         {
             var page = GetPageBounds(pageNumber);
-            var shadow = page.Translate(new Vector(0, 2));
-            context.FillRectangle(new SolidColorBrush(Color.FromArgb(22, 0, 0, 0)), shadow.Inflate(1));
             context.DrawRectangle(new SolidColorBrush(_palette.Page), new Pen(new SolidColorBrush(_palette.Border), 0.5), page);
             if (_pages.TryGetValue(pageNumber, out var cached) && cached.Bitmap is { } bitmap && cached.Raster is { } raster
                 && raster.Rotation == Rotation && cached.Palette == _palette)
@@ -284,6 +438,69 @@ public sealed partial class NativePdfReaderHost
                 foreach (var rect in GetLocalRangeBounds(pageNumber, speech.Start, speech.Start + speech.Length))
                     context.FillRectangle(new SolidColorBrush(Color.FromArgb(65, 100, 160, 95)), rect.Inflate(1));
         }
+
+        if (_annotationCalloutVisible && _annotationCallout is { } callout)
+            DrawAnnotationCalloutConnector(context, callout.Anchor, callout.Bounds, _palette.Ink);
+        foreach (var additional in _additionalAnnotationConnectors)
+            DrawAnnotationCalloutConnector(context, additional.Anchor, additional.Bounds, _palette.Ink);
+    }
+
+    private static void DrawAnnotationCalloutConnector(DrawingContext context, Point anchor, Rect bounds, Color color)
+    {
+        var connector = new Pen(
+            new SolidColorBrush(Color.FromArgb(190, color.R, color.G, color.B)),
+            1.35,
+            DashStyle.Dash);
+        Point endpoint;
+        Point firstBend;
+        Point secondBend;
+        if (anchor.X <= bounds.Left)
+        {
+            endpoint = new(bounds.Left, FindCalloutPort(anchor.Y, bounds.Top, bounds.Bottom));
+            var elbowX = anchor.X + (endpoint.X - anchor.X) * 0.68;
+            firstBend = new(elbowX, anchor.Y);
+            secondBend = new(elbowX, endpoint.Y);
+        }
+        else if (anchor.X >= bounds.Right)
+        {
+            endpoint = new(bounds.Right, FindCalloutPort(anchor.Y, bounds.Top, bounds.Bottom));
+            var elbowX = anchor.X + (endpoint.X - anchor.X) * 0.68;
+            firstBend = new(elbowX, anchor.Y);
+            secondBend = new(elbowX, endpoint.Y);
+        }
+        else if (anchor.Y <= bounds.Top)
+        {
+            endpoint = new(FindCalloutPort(anchor.X, bounds.Left, bounds.Right), bounds.Top);
+            var elbowY = anchor.Y + (endpoint.Y - anchor.Y) * 0.68;
+            firstBend = new(anchor.X, elbowY);
+            secondBend = new(endpoint.X, elbowY);
+        }
+        else
+        {
+            endpoint = new(FindCalloutPort(anchor.X, bounds.Left, bounds.Right), bounds.Bottom);
+            var elbowY = anchor.Y + (endpoint.Y - anchor.Y) * 0.68;
+            firstBend = new(anchor.X, elbowY);
+            secondBend = new(endpoint.X, elbowY);
+        }
+
+        context.DrawLine(connector, anchor, firstBend);
+        context.DrawLine(connector, firstBend, secondBend);
+        context.DrawLine(connector, secondBend, endpoint);
+        context.DrawEllipse(Brushes.White, new Pen(new SolidColorBrush(color), 1.4), anchor, 5, 5);
+        context.DrawEllipse(new SolidColorBrush(color), null, anchor, 1.8, 1.8);
+    }
+
+    private static double FindCalloutPort(double anchor, double start, double end)
+    {
+        var margin = Math.Min(22, (end - start) / 3);
+        var minimum = start + margin;
+        var maximum = end - margin;
+        var port = Math.Clamp(anchor, minimum, maximum);
+        if (Math.Abs(port - anchor) >= 18) return port;
+
+        var upper = Math.Clamp((start + end) / 2 - 24, minimum, maximum);
+        var lower = Math.Clamp((start + end) / 2 + 24, minimum, maximum);
+        return Math.Abs(upper - anchor) >= Math.Abs(lower - anchor) ? upper : lower;
     }
 
     private static void DrawAnnotation(DrawingContext context, Rect rect, string style, Color color)
@@ -381,6 +598,7 @@ public sealed partial class NativePdfReaderHost
         if (page == 0)
         {
             ClearSelection();
+            Emit(new { type = "annotationBlankClick" });
             return;
         }
         ActivatePage(page);
@@ -456,7 +674,11 @@ public sealed partial class NativePdfReaderHost
         e.Pointer.Capture(null);
         if (dragged) SelectRange(_selectionStart, _selectionEnd);
         else if (AnnotationAt(e.GetPosition(this)) is { } annotation) Emit(new { type = "annotationClick", id = annotation.Id });
-        else ClearSelection();
+        else
+        {
+            ClearSelection();
+            Emit(new { type = "annotationBlankClick" });
+        }
         e.Handled = true;
     }
 

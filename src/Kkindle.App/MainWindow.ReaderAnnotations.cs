@@ -1,6 +1,7 @@
-using System.Text;
+﻿using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -46,7 +47,7 @@ public partial class MainWindow
         }
 
         var chapterPath = _readerIsPdf
-            ? $"pdf:page:{_readerPdfPage}"
+            ? _selectedReaderAnnotation?.ChapterPath ?? $"pdf:page:{_readerPdfPage}"
             : GetReaderChapterPath();
         if (string.IsNullOrWhiteSpace(chapterPath)) return;
 
@@ -151,23 +152,88 @@ public partial class MainWindow
                 ?? T("PDF 第 {0} 页 · 页面批注", _readerPdfPage)
             : _readerPendingSelection;
         ReaderAnnotationInputBox.Text = _selectedReaderAnnotation?.Note ?? string.Empty;
-        ShowReaderPopupNearSelection(
-            ReaderAnnotationInputPopup,
-            ReaderAnnotationInputPanel,
-            fallbackWidth: 320,
-            fallbackHeight: 190,
-            _readerLastSelectionPopupAnchor,
-            _readerLastSelectionPopupBottom);
+        var placedOutsidePdfPage = _readerIsPdf
+            && CurrentReaderHost is NativePdfReaderHost pdf
+            && TryShowReaderPdfAnnotationCallout(
+                ReaderAnnotationInputPopup,
+                pdf,
+                _selectedReaderAnnotation,
+                _readerLastSelectionPopupAnchor,
+                new Size(264, 152));
+        if (!placedOutsidePdfPage && !_readerIsPdf)
+        {
+            ShowReaderPopupNearSelection(
+                ReaderAnnotationInputPopup,
+                ReaderAnnotationInputPanel,
+                fallbackWidth: 264,
+                fallbackHeight: 152,
+                _readerLastSelectionPopupAnchor,
+                _readerLastSelectionPopupBottom);
+        }
         ReaderAnnotationInputBox.Focus();
+    }
+
+    private bool TryShowReaderPdfAnnotationCallout(
+        Popup popup,
+        NativePdfReaderHost pdf,
+        ReaderAnnotation? annotation,
+        Point? fallbackAnchor,
+        Size preferredSize)
+    {
+        var pageNumber = 0;
+        var anchor = default(Point);
+        var hasAnnotationAnchor = annotation is not null
+            && pdf.TryGetAnnotationAnchor(annotation, out pageNumber, out anchor);
+        if (!hasAnnotationAnchor)
+        {
+            if (fallbackAnchor is not { } readerAnchor
+                || ReaderWebViewHost.TranslatePoint(readerAnchor, pdf) is not { } pdfAnchor)
+                return false;
+            pageNumber = Math.Clamp(_readerPdfPage, 1, Math.Max(1, pdf.PageCount));
+            anchor = pdfAnchor;
+        }
+
+        if (!pdf.TryGetAnnotationCalloutBounds(pageNumber, anchor, preferredSize, out var calloutBounds))
+            calloutBounds = new Rect(new Point(), preferredSize);
+        var popupOrigin = pdf.TranslatePoint(calloutBounds.TopLeft, ReaderWebViewHost);
+        if (popupOrigin is null) return false;
+
+        pdf.SetAnnotationCallout(anchor, calloutBounds, movedBounds =>
+        {
+            // Keep an editor draft alive while its right margin is unavailable.
+            if (popup.Child is { } child)
+            {
+                child.IsVisible = movedBounds.Width > 0;
+                if (movedBounds.Width > 0) child.Height = movedBounds.Height;
+            }
+            if (movedBounds.Width > 0
+                && pdf.TranslatePoint(movedBounds.TopLeft, ReaderWebViewHost) is { } origin)
+                popup.PlacementRect = new Rect(origin, new Size(1, 1));
+        }, pageNumber);
+        popup.PlacementTarget = ReaderWebViewHost;
+        popup.Placement = PlacementMode.AnchorAndGravity;
+        popup.PlacementRect = new Rect(popupOrigin.Value, new Size(1, 1));
+        popup.PlacementAnchor = Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
+        popup.PlacementGravity = Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight;
+        popup.PlacementConstraintAdjustment =
+            Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.None;
+        popup.HorizontalOffset = 0;
+        popup.VerticalOffset = 0;
+        popup.IsOpen = true;
+        return true;
     }
 
     private void HideReaderAnnotationInputPopup()
     {
+        if (CurrentReaderHost is NativePdfReaderHost pdf)
+            pdf.ClearAnnotationCallout();
         ReaderAnnotationInputPopup.IsOpen = false;
     }
 
     private void ReaderAnnotationInputPopup_Closed(object? sender, EventArgs e)
     {
+        if (CurrentReaderHost is NativePdfReaderHost pdf)
+            pdf.ClearAnnotationCallout();
         // Light dismiss (clicking back into the body) closes the popup without
         // going through cancel/save; drop the pending selection so a stale
         // highlight doesn't linger behind the Closed cleanup.
@@ -465,7 +531,7 @@ public partial class MainWindow
 
     private void EditReaderPdfAnnotation(ReaderAnnotation annotation)
     {
-        if (!_readerIsPdf || !TryGetReaderPdfPage(annotation.ChapterPath, out var page) || page != _readerPdfPage) return;
+        if (!_readerIsPdf || !TryGetReaderPdfPage(annotation.ChapterPath, out var page)) return;
         _selectedReaderAnnotation = annotation;
         var isPoint = ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var pointX, out var pointY);
         _readerPendingPdfPoint = isPoint ? (pointX, pointY) : null;

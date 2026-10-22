@@ -1965,6 +1965,12 @@
     <x:String x:Key="Ui.Reader.PaperStrength">纸感强度</x:String>
     <x:String x:Key="Ui.Reader.Fibers">叠加纸张纤维</x:String>
     <x:String x:Key="Ui.Reader.PaperHint">细颗粒与轻微明暗起伏，可单独叠加纤维。设置自动保存，适用于所有书籍。</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteMode">PDF 批注便签</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNotePinned">显示</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteClick">关闭</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteModeHint">显示：自动展开当前页批注，翻页后切换；点击锚点可编辑。关闭：隐藏批注便签。</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteLabel">批注</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteClose">关闭批注便签</x:String>
     <x:String x:Key="Ui.Reader.Layout">排版</x:String>
     <x:String x:Key="Ui.Auto.E39749D197606F9F">缩小页面</x:String>
     <x:String x:Key="Ui.Auto.834C7F164B44D4CD">放大页面</x:String>

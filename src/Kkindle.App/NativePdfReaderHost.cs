@@ -63,6 +63,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private string _searchQuery = string.Empty;
     private (int Page, int Start, int Length)? _speechHighlight;
     private bool _pointAnnotationMode;
+    private (Point Anchor, Rect Bounds)? _annotationCallout;
 
     public NativePdfReaderHost()
     {
@@ -432,6 +433,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         SyncScrollBars();
         InvalidateArrange();
         InvalidateVisual();
+        UpdateAnnotationCallout();
     }
 
     private async Task LoadPageContentsAsync(IEnumerable<int> pages, int version, CancellationToken token)
@@ -601,6 +603,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         SyncScrollBars();
         _vertical.Arrange(new Rect(Math.Max(0, finalSize.Width - 12), 0, 12, Math.Max(0, finalSize.Height - 12)));
         _horizontal.Arrange(new Rect(0, Math.Max(0, finalSize.Height - 12), Math.Max(0, finalSize.Width - 12), 12));
+        UpdateAnnotationCallout();
         return finalSize;
     }
 
@@ -628,10 +631,11 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     {
         _pan = pan;
         SyncScrollBars();
+        UpdateAnnotationCallout();
         if (trackPage && DisplayMode == PdfReaderDisplayMode.Continuous && _layout is not null)
             ActivatePage(_layout.PageAt(_pan.Y + PdfReaderLayout.Margin + 1));
         InvalidateArrange();
-        ClearHover();
+        if (_annotationCallout is null) ClearHover();
         InvalidateVisual();
         EmitPage();
         if (render) ScheduleRender();

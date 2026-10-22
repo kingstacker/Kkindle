@@ -9,6 +9,12 @@ public enum ReaderTheme
     Green = 2
 }
 
+public enum ReaderAnnotationDisplayMode
+{
+    Pinned = 0,
+    Click = 1
+}
+
 /// <summary>Global paint preferences, deliberately separate from pagination settings.</summary>
 public sealed record ReaderAppearanceSettings
 {
@@ -18,6 +24,7 @@ public sealed record ReaderAppearanceSettings
     public bool PaperEnabled { get; init; }
     public double PaperStrength { get; init; } = DefaultPaperStrength;
     public bool FibersEnabled { get; init; }
+    public ReaderAnnotationDisplayMode AnnotationDisplayMode { get; init; } = ReaderAnnotationDisplayMode.Pinned;
 
     public static ReaderAppearanceSettings Normalize(ReaderAppearanceSettings? settings)
     {
@@ -25,6 +32,9 @@ public sealed record ReaderAppearanceSettings
         return settings with
         {
             Theme = Enum.IsDefined(settings.Theme) ? settings.Theme : ReaderTheme.Classic,
+            AnnotationDisplayMode = Enum.IsDefined(settings.AnnotationDisplayMode)
+                ? settings.AnnotationDisplayMode
+                : ReaderAnnotationDisplayMode.Pinned,
             PaperStrength = double.IsFinite(settings.PaperStrength)
                 ? Math.Clamp(settings.PaperStrength, 0, 1)
                 : DefaultPaperStrength
