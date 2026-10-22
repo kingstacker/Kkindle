@@ -26,15 +26,20 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 {
     public const string BundledFontFileName = "KingHwaOldSong-v3.0.ttf";
 
+    private const int ImageCacheCapacity = 12;
+    private const int ImageDecodeMaxDimension = 2048;
     private static readonly object ImageCacheLock = new();
-    private static readonly Dictionary<string, SKImage> ImageCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Queue<string> ImageCacheOrder = new();
+    private static readonly Dictionary<string, (SKImage Image, long UsedAt)> ImageCache =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static long _imageCacheTick;
 
     private readonly TaskCompletionSource _readyTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private TypesetEngine? _engine;
     private readonly object _engineGate = new();
+    private CancellationTokenSource? _relayoutCts;
+    internal Task RelayoutTask { get; private set; } = Task.CompletedTask;
     private ChapterContent? _content;
     private ChapterLayout? _layout;
     private TypesetLayoutOptions? _options;
@@ -51,6 +56,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private int _pageIndex;
     private bool _composePending;
     private bool _showVerticalDebugBoxes;
+    private CancellationTokenSource? _imagePrefetchCancellation;
+    private TypesetFontLibrary? _fontLibrary;
+    private readonly object _fontLibraryGate = new();
+    private DateTime _lastScrollEmitUtc;
+    private DispatcherTimer? _scrollEmitTimer;
     private bool _bitmapDirty;
     private WriteableBitmap? _bitmap;
     private int _bitmapPixelWidth;
@@ -206,12 +216,19 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     public void Stop()
     {
         ++_configurationVersion;
+        _relayoutCts?.Cancel();
         _navigationCts?.Cancel();
     }
 
     public void Dispose()
     {
         _disposed = true;
+        _relayoutCts?.Cancel();
+        _scrollEmitTimer?.Stop();
+        _scrollEmitTimer = null;
+        _imagePrefetchCancellation?.Cancel();
+        _imagePrefetchCancellation?.Dispose();
+        _imagePrefetchCancellation = null;
         _navigationCts?.Cancel();
         _navigationCts?.Dispose();
         _navigationCts = null;
@@ -224,6 +241,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         {
             _engine?.Dispose();
             _engine = null;
+        }
+        lock (_fontLibraryGate)
+        {
+            _fontLibrary?.Dispose();
+            _fontLibrary = null;
         }
         _layout = null;
         _content = null;
@@ -340,7 +362,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
         else if (_content is not null && (settingsChanged || _layout is null))
         {
-            Recompose(readingAnchor);
+            _relayoutTimer?.Stop();
+            await (RelayoutTask = RecomposeAsync(readingAnchor));
+            await RelayoutTask;
+            if (_disposed || configurationVersion != _configurationVersion) return;
         }
 
         // A saved progress position is authoritative when it exists. The
@@ -639,7 +664,37 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _scrollOffset = next;
         _bitmapDirty = true;
         InvalidateVisual();
-        EmitScroll();
+        ScheduleScrollEmit();
+    }
+
+    /// <summary>
+    /// Scroll input can arrive dozens of times per second. Serializing and
+    /// dispatching every event made the UI thread do JSON + TOC work between
+    /// frames; coalesce to ~30 fps and always emit the final resting position.
+    /// </summary>
+    private void ScheduleScrollEmit()
+    {
+        if (_disposed) return;
+        var now = DateTime.UtcNow;
+        if ((now - _lastScrollEmitUtc).TotalMilliseconds >= 33)
+        {
+            _lastScrollEmitUtc = now;
+            EmitScroll();
+            return;
+        }
+
+        if (_scrollEmitTimer is null)
+        {
+            _scrollEmitTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
+            _scrollEmitTimer.Tick += (_, _) =>
+            {
+                _scrollEmitTimer?.Stop();
+                _lastScrollEmitUtc = DateTime.UtcNow;
+                EmitScroll();
+            };
+        }
+        _scrollEmitTimer.Stop();
+        _scrollEmitTimer.Start();
     }
 
     public void SetAnnotations(IReadOnlyList<ReaderAnnotation> annotations)
@@ -857,6 +912,72 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public IReadOnlyList<(int Start, int Length)> RubyAnnotationRanges =>
         _content?.RubyAnnotationRanges ?? [];
+
+    private ReaderSearchTextPolicy.PreparedSearchText? _preparedSearchText;
+    private ChapterContent? _preparedSearchContent;
+
+    /// <summary>
+    /// Search over the current chapter. The normalized text and its raw-offset
+    /// table are built once per loaded chapter; each keystroke only normalizes
+    /// the query. Previously every search rebuilt a multi-megabyte string on
+    /// the UI thread.
+    /// </summary>
+    /// <summary>
+    /// Page count of the chapter currently composed in this host, used by the
+    /// book-wide estimate so the visible chapter is not parsed and laid out
+    /// a second time.
+    /// </summary>
+    internal (string ChapterPath, int PageCount)? CurrentChapterPageCount
+    {
+        get
+        {
+            var layout = _layout;
+            var content = _content;
+            return layout is null || content is null
+                ? null
+                : (content.ChapterPath, layout.Pages.Count);
+        }
+    }
+
+    /// <summary>
+    /// Returns the current chapter's page count only when the live layout was
+    /// composed with the same settings and viewport as the requested estimate.
+    /// Otherwise a settings change could report a stale count.
+    /// </summary>
+    internal (string ChapterPath, int PageCount)? GetCurrentChapterPageCountFor(
+        ReaderLayoutSettings settings,
+        double width,
+        double height)
+    {
+        var layout = _layout;
+        var content = _content;
+        var options = _options;
+        if (layout is null || content is null || options is null) return null;
+        var expected = BuildOptions(settings, width, height);
+        return options.WritingMode == expected.WritingMode
+            && Math.Abs(options.BaseFontSize - expected.BaseFontSize) < 0.01f
+            && Math.Abs(options.LineHeight - expected.LineHeight) < 0.001f
+            && options.ParagraphIndent == expected.ParagraphIndent
+            && Math.Abs(options.ViewportWidth - expected.ViewportWidth) < 0.5f
+            && Math.Abs(options.ViewportHeight - expected.ViewportHeight) < 0.5f
+            && Math.Abs(options.InsetHorizontal - expected.InsetHorizontal) < 0.5f
+            && Math.Abs(options.InsetVertical - expected.InsetVertical) < 0.5f
+                ? (content.ChapterPath, layout.Pages.Count)
+                : null;
+    }
+
+    internal IReadOnlyList<ReaderSearchMatch> FindSearchMatches(string query)
+    {
+        var content = _content;
+        if (_preparedSearchText is null || !ReferenceEquals(_preparedSearchContent, content))
+        {
+            _preparedSearchText = ReaderSearchTextPolicy.Prepare(
+                content?.BodyText ?? string.Empty,
+                content?.RubyAnnotationRanges);
+            _preparedSearchContent = content;
+        }
+        return ReaderSearchTextPolicy.FindMatches(_preparedSearchText, query);
+    }
 
     /// <summary>
     /// Returns the text that is actually represented by visible content
@@ -1203,6 +1324,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _viewportReadingAnchor = null;
         _viewportReadingState = null;
         _preserveViewportPosition = false;
+        _relayoutCts?.Cancel();
         _navigationCts?.Cancel();
         _navigationCts?.Dispose();
         var navigationCts = new CancellationTokenSource();
@@ -1249,6 +1371,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _navigationTask = completion.Task;
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
         {
+            TypesetEngine? navigationEngine = null;
             try
             {
                 var composed = await Task.Run(() =>
@@ -1257,9 +1380,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                     var loader = new XhtmlChapterLoader(settings.ParagraphIndent,
                         string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment));
                     var content = loader.Load(chapterPath, navigationToken);
-                    var options = BuildOptions(settings, width, height);
-                    SelectReaderMainFont(settings.FontFamily);
-                    var layout = Compose(content, options, navigationToken);
+                    var options = BuildOptions(settings, width, height, _showVerticalDebugBoxes);
+                    navigationEngine = new TypesetEngine(FontLibrary, ownsFonts: false);
+                    SelectReaderMainFont(navigationEngine, settings.FontFamily);
+                    var layout = navigationEngine.Compose(content, options, navigationToken);
                     return (content, options, layout);
                 }, navigationToken);
 
@@ -1269,6 +1393,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                     return;
                 }
 
+                lock (_engineGate)
+                {
+                    var previous = _engine;
+                    _engine = navigationEngine;
+                    navigationEngine = null;
+                    previous?.Dispose();
+                }
                 _content = composed.content;
                 _loadedFootnoteFragment = string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment);
                 _options = composed.options;
@@ -1280,8 +1411,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 _pageIndex = 0;
                 if (Math.Abs(width - ComposePageWidth(Bounds.Width)) > 0.01
                     || Math.Abs(height - Math.Max(1, Bounds.Height)) > 0.01)
-                    Recompose();
+                    await (RelayoutTask = RecomposeAsync());
+                navigationToken.ThrowIfCancellationRequested();
+                if (_disposed || version != Volatile.Read(ref _navigationVersion)) return;
                 ApplyPendingPosition();
+                PrefetchVisibleImages();
                 InvalidateVisual();
                 EmitScroll();
                 NavigationCompleted?.Invoke(this, new ReaderNavigationCompletedEventArgs(navigationSource, true));
@@ -1304,6 +1438,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             }
             finally
             {
+                navigationEngine?.Dispose();
                 completion.TrySetResult(false);
             }
         });
@@ -1318,10 +1453,21 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             {
                 if (_engine is null)
                 {
-                    _engine = new TypesetEngine(CreateFontLibrary());
+                    _engine = new TypesetEngine(FontLibrary, ownsFonts: false);
                 }
 
                 return _engine;
+            }
+        }
+    }
+
+    internal TypesetFontLibrary FontLibrary
+    {
+        get
+        {
+            lock (_fontLibraryGate)
+            {
+                return _fontLibrary ??= CreateFontLibrary();
             }
         }
     }
@@ -1489,7 +1635,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         engine.Fonts.TrySetMainFont(selected);
     }
 
-    private static TypesetLayoutOptions BuildOptions(ReaderLayoutSettings settings, double width, double height)
+    private static TypesetLayoutOptions BuildOptions(
+        ReaderLayoutSettings settings,
+        double width,
+        double height,
+        bool collectDebugBoxes = false)
     {
         var vertical = settings.VerticalWriting;
         var horizontalInset = Math.Max(0, settings.BodyPadding);
@@ -1522,6 +1672,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             ViewportHeight = (float)height,
             InsetHorizontal = (float)horizontalInset,
             InsetVertical = (float)verticalInset,
+            CollectDebugBoxes = collectDebugBoxes,
         };
     }
 
@@ -1536,15 +1687,106 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         ReaderLayoutSettings settings,
         double width,
         double height,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TypesetFontLibrary? sharedFonts = null,
+        (string ChapterPath, int PageCount)? knownChapter = null)
     {
-        using var engine = new TypesetEngine(CreateFontLibrary());
+        var cacheKey = BuildPageCountCacheKey(
+            chapterPaths, settings, width, height, knownChapter);
+        lock (PageCountCacheLock)
+        {
+            if (PageCountCache.TryGetValue(cacheKey, out var cached))
+            {
+                cached.LastUse = ++_pageCountCacheTick;
+                return cached.Counts.ToArray();
+            }
+        }
+
+        var counts = EstimatePageCountsCore(
+            chapterPaths, settings, width, height, cancellationToken, sharedFonts, knownChapter);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (PageCountCacheLock)
+        {
+            PageCountCache[cacheKey] = (counts.ToArray(), ++_pageCountCacheTick);
+            while (PageCountCache.Count > 4)
+            {
+                long oldestUse = long.MaxValue;
+                long? oldestKey = null;
+                foreach (var entry in PageCountCache)
+                {
+                    if (entry.Value.LastUse >= oldestUse) continue;
+                    oldestUse = entry.Value.LastUse;
+                    oldestKey = entry.Key;
+                }
+                if (oldestKey is not { } key) break;
+                PageCountCache.Remove(key);
+            }
+        }
+        return counts;
+    }
+
+    private static readonly object PageCountCacheLock = new();
+    private static readonly Dictionary<long, (int[] Counts, long LastUse)> PageCountCache = [];
+    private static long _pageCountCacheTick;
+
+    private static long BuildPageCountCacheKey(
+        IReadOnlyList<string> chapterPaths,
+        ReaderLayoutSettings settings,
+        double width,
+        double height,
+        (string ChapterPath, int PageCount)? knownChapter)
+    {
+        var hash = new HashCode();
+        hash.Add(width);
+        hash.Add(height);
+        hash.Add(settings.VerticalWriting);
+        hash.Add(settings.ParagraphIndent);
+        hash.Add(settings.FontScale);
+        hash.Add(settings.LineHeight);
+        hash.Add(settings.MaxWidth);
+        hash.Add(settings.BodyPadding);
+        hash.Add(settings.FontFamily, StringComparer.Ordinal);
+        hash.Add(knownChapter?.ChapterPath, StringComparer.Ordinal);
+        hash.Add(knownChapter?.PageCount ?? -1);
+        foreach (var path in chapterPaths)
+        {
+            var info = new FileInfo(path);
+            hash.Add(path, StringComparer.Ordinal);
+            hash.Add(info.Exists ? info.Length : -1);
+            hash.Add(info.Exists ? info.LastWriteTimeUtc.Ticks : 0);
+        }
+        return hash.ToHashCode();
+    }
+
+    private static int[] EstimatePageCountsCore(
+        IReadOnlyList<string> chapterPaths,
+        ReaderLayoutSettings settings,
+        double width,
+        double height,
+        CancellationToken cancellationToken,
+        TypesetFontLibrary? sharedFonts,
+        (string ChapterPath, int PageCount)? knownChapter)
+    {
+        // Reuse the live reader's font library when available: opening a book
+        // must not decode every candidate CJK face a second time just to
+        // estimate page counts.
+        var fonts = sharedFonts ?? CreateFontLibrary();
+        try
+        {
+        using var engine = new TypesetEngine(fonts, ownsFonts: sharedFonts is null);
         SelectReaderMainFont(engine, settings.FontFamily);
         var options = BuildOptions(settings, width, height);
         var counts = new int[chapterPaths.Count];
         for (var index = 0; index < chapterPaths.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (knownChapter is { } known
+                && string.Equals(known.ChapterPath, chapterPaths[index], StringComparison.Ordinal))
+            {
+                counts[index] = Math.Max(1, known.PageCount);
+                continue;
+            }
             try
             {
                 var content = new XhtmlChapterLoader(settings.ParagraphIndent).Load(chapterPaths[index], cancellationToken);
@@ -1552,6 +1794,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                throw;
+            }
+            catch (ObjectDisposedException) when (sharedFonts is not null)
+            {
+                // The reader host closed while we were reusing its library.
                 throw;
             }
             catch
@@ -1563,6 +1810,14 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         return counts;
+        }
+        catch (ObjectDisposedException) when (sharedFonts is not null)
+        {
+            // Fall back to a private library so closing a book cannot turn a
+            // background page-count estimate into an unobserved exception.
+            return EstimatePageCounts(
+                chapterPaths, settings, width, height, cancellationToken, null, knownChapter);
+        }
     }
 
     private bool SameChapter(ReaderAnnotation annotation)
@@ -1764,12 +2019,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         PreservePositionForViewportChange();
-        _relayoutTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(70), DispatcherPriority.Background, (_, _) =>
+        _relayoutTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(70), DispatcherPriority.Background, async (_, _) =>
         {
             _relayoutTimer!.Stop();
             if (!_disposed && _content is not null && !_composePending)
             {
-                Recompose();
+                await (RelayoutTask = RecomposeAsync());
+                if (_disposed || _composePending) return;
                 ApplyPendingPosition();
                 _pageIndex = Math.Clamp(_pageIndex, 0, Math.Max(0, PageCount - 1));
                 _bitmapDirty = true;
@@ -1781,7 +2037,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _relayoutTimer.Start();
     }
 
-    private void Recompose(ViewportReadingAnchor? readingAnchor = null)
+    private async Task RecomposeAsync(ViewportReadingAnchor? readingAnchor = null)
     {
         if (_disposed || _content is null)
         {
@@ -1798,10 +2054,40 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             ? _layout.Pages[_pageIndex].TextStartOffset
             : -1;
 
-        SelectReaderMainFont(_settings.FontFamily);
-        var options = BuildOptions(_settings, width, height);
-        _options = options;
-        _layout = Compose(_content, options);
+        var content = _content;
+        var settings = _settings;
+        var options = BuildOptions(settings, width, height, _showVerticalDebugBoxes);
+        _relayoutCts?.Cancel();
+        using var request = new CancellationTokenSource();
+        _relayoutCts = request;
+        var token = request.Token;
+        TypesetEngine? workerEngine = null;
+        try
+        {
+            var result = await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                workerEngine = new TypesetEngine(FontLibrary, ownsFonts: false);
+                SelectReaderMainFont(workerEngine, settings.FontFamily);
+                return workerEngine.Compose(content, options, token);
+            }, token);
+            if (_disposed || token.IsCancellationRequested || !ReferenceEquals(content, _content)) return;
+            lock (_engineGate)
+            {
+                var previous = _engine;
+                _engine = workerEngine;
+                workerEngine = null;
+                _options = options;
+                _layout = result;
+                previous?.Dispose();
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+        finally
+        {
+            workerEngine?.Dispose();
+            if (ReferenceEquals(_relayoutCts, request)) _relayoutCts = null;
+        }
         InvalidateSpeechTextSnapshot();
         _composePending = false;
 
@@ -1838,6 +2124,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             _viewportReadingAnchor = null;
             _viewportReadingState = null;
         }
+        PrefetchVisibleImages();
     }
 
     /// <summary>Repaint only: selection, layout, page index and scroll offset stay intact.</summary>
@@ -1985,38 +2272,112 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         {
             if (ImageCache.TryGetValue(path, out var cached))
             {
-                return cached;
-            }
-
-            try
-            {
-                using var bitmap = SKBitmap.Decode(path);
-                if (bitmap is null)
-                {
-                    return null;
-                }
-
-                var image = SKImage.FromBitmap(bitmap);
-                ImageCache[path] = image;
-                ImageCacheOrder.Enqueue(path);
-                while (ImageCacheOrder.Count > 12)
-                {
-                    var oldest = ImageCacheOrder.Dequeue();
-                    if (ImageCache.TryGetValue(oldest, out var stale)
-                        && !ReferenceEquals(stale, image))
-                    {
-                        ImageCache.Remove(oldest);
-                        stale.Dispose();
-                    }
-                }
-
-                return image;
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                return null;
+                ImageCache[path] = (cached.Image, ++_imageCacheTick);
+                return cached.Image;
             }
         }
+
+        SKImage? image;
+        try
+        {
+            image = DecodeImageScaled(path);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return null;
+        }
+        if (image is null) return null;
+
+        lock (ImageCacheLock)
+        {
+            if (ImageCache.TryGetValue(path, out var raced))
+            {
+                // Another reader finished the same decode while we were busy.
+                image.Dispose();
+                ImageCache[path] = (raced.Image, ++_imageCacheTick);
+                return raced.Image;
+            }
+
+            ImageCache[path] = (image, ++_imageCacheTick);
+            while (ImageCache.Count > ImageCacheCapacity)
+            {
+                string? oldestKey = null;
+                var oldestUse = long.MaxValue;
+                foreach (var entry in ImageCache)
+                {
+                    if (entry.Value.UsedAt >= oldestUse) continue;
+                    oldestUse = entry.Value.UsedAt;
+                    oldestKey = entry.Key;
+                }
+                if (oldestKey is null || !ImageCache.Remove(oldestKey, out var stale)) break;
+                stale.Image.Dispose();
+            }
+        }
+        return image;
+    }
+
+    /// <summary>
+    /// Decode at the size the page can actually show. A 4000px scan used to be
+    /// decoded in full on the UI thread and then scaled down per frame.
+    /// </summary>
+    private static SKImage? DecodeImageScaled(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var codec = SKCodec.Create(stream);
+        if (codec is null) return null;
+        var source = codec.Info;
+        if (source.Width <= 0 || source.Height <= 0) return null;
+        var scale = Math.Min(1d, ImageDecodeMaxDimension / (double)Math.Max(source.Width, source.Height));
+        var target = new SKImageInfo(
+            Math.Max(1, (int)Math.Round(source.Width * scale)),
+            Math.Max(1, (int)Math.Round(source.Height * scale)),
+            SKColorType.Bgra8888,
+            SKAlphaType.Premul);
+        using var bitmap = new SKBitmap(target);
+        var result = codec.GetPixels(target, bitmap.GetPixels());
+        if (result is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
+            return null;
+        return SKImage.FromPixelCopy(target, bitmap.GetPixels(), bitmap.RowBytes);
+    }
+
+    /// <summary>
+    /// Warm the decoded-image cache for the visible page and its neighbour in
+    /// the background, so the first paint after a page turn does not block on
+    /// a full-size decode.
+    /// </summary>
+    private void PrefetchVisibleImages()
+    {
+        if (_disposed || IsScroll) return;
+        var layout = _layout;
+        if (layout is null || layout.Pages.Count == 0) return;
+
+        var first = Math.Clamp(_pageIndex, 0, layout.Pages.Count - 1);
+        var last = Math.Min(layout.Pages.Count - 1, first + (IsSpread ? 2 : 1));
+        var paths = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = first; index <= last; index++)
+        {
+            foreach (var image in layout.Pages[index].Images)
+            {
+                if (!string.IsNullOrWhiteSpace(image.Path) && seen.Add(image.Path))
+                    paths.Add(image.Path);
+            }
+        }
+        if (paths.Count == 0) return;
+
+        _imagePrefetchCancellation?.Cancel();
+        _imagePrefetchCancellation?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        _imagePrefetchCancellation = cancellation;
+        _ = Task.Run(() =>
+        {
+            foreach (var path in paths)
+            {
+                if (cancellation.IsCancellationRequested) return;
+                try { ResolveImage(path); }
+                catch (Exception exception) when (exception is not OutOfMemoryException) { }
+            }
+        }, cancellation.Token);
     }
 
     private IReadOnlyList<SKRect>? SelectionBandsFor(LayoutPage page)
@@ -2085,13 +2446,6 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             // readable on every paper, including previously saved notes.
             if (color.Red <= 0x33 && color.Green <= 0x33 && color.Blue <= 0x33)
                 return _paintTheme.Text;
-            if (_appearance.Theme == ReaderTheme.Night)
-            {
-                return new SKColor(
-                    (byte)((color.Red + _paintTheme.Text.Red) / 2),
-                    (byte)((color.Green + _paintTheme.Text.Green) / 2),
-                    (byte)((color.Blue + _paintTheme.Text.Blue) / 2));
-            }
             return color;
         }
 

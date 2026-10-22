@@ -5,7 +5,7 @@ using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
 
-public sealed class SqliteBookLibraryService : IBookLibraryService
+public sealed partial class SqliteBookLibraryService : IBookLibraryService
 {
     // Import results are only used for the small post-import workflows (format
     // generation and optional metadata matching). Do not retain a full Book
@@ -59,7 +59,10 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
     {
         DataSource = _paths.Database,
         Mode = SqliteOpenMode.ReadWriteCreate,
-        Cache = SqliteCacheMode.Shared
+        // WAL already allows one writer with many readers; a shared cache adds
+        // table-level locking on top and makes concurrent readers contend.
+        Cache = SqliteCacheMode.Private,
+        DefaultTimeout = 30
     }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -101,13 +104,18 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 Sha256 TEXT NOT NULL UNIQUE
             );
             CREATE INDEX IF NOT EXISTS IX_Books_TitleAuthors ON Books(Title, Authors);
+            CREATE INDEX IF NOT EXISTS IX_Books_TitleAuthors_NoCase ON Books(Title COLLATE NOCASE, Authors COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS IX_Books_UpdatedAt ON Books(UpdatedAt DESC);
+            CREATE INDEX IF NOT EXISTS IX_Books_CreatedAt ON Books(CreatedAt DESC);
             CREATE INDEX IF NOT EXISTS IX_BookFiles_BookId ON BookFiles(BookId);
+            CREATE INDEX IF NOT EXISTS IX_BookFiles_BookId_Format ON BookFiles(BookId, Format);
             CREATE TABLE IF NOT EXISTS BookCollections (
                 Id TEXT PRIMARY KEY,
                 Name TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS IX_BookCollections_UpdatedAt ON BookCollections(UpdatedAt DESC);
             CREATE TABLE IF NOT EXISTS BookCollectionItems (
                 CollectionId TEXT NOT NULL REFERENCES BookCollections(Id) ON DELETE CASCADE,
                 BookId TEXT NOT NULL REFERENCES Books(Id) ON DELETE CASCADE,
@@ -132,14 +140,73 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 OriginalCoverPath TEXT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_LibraryTrash_DeletedAt ON LibraryTrash(DeletedAt DESC);
+            CREATE TABLE IF NOT EXISTS ReadingMaterialBooks (
+                Id TEXT PRIMARY KEY,
+                Title TEXT NOT NULL,
+                CoverPath TEXT NULL
+            );
+            CREATE TRIGGER IF NOT EXISTS PreserveReadingMaterialBook BEFORE DELETE ON Books
+            BEGIN
+                INSERT OR REPLACE INTO ReadingMaterialBooks(Id, Title, CoverPath)
+                VALUES(OLD.Id, OLD.Title, OLD.CoverPath);
+            END;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await ReadingMaterialBookSchema.EnsureAsync(connection, cancellationToken);
         await EnsureLibraryTrashBookFileIdColumnAsync(connection, cancellationToken);
         await EnsureBookCollectionUpdatedAtColumnAsync(connection, cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
+        // These columns are added by the migration above, so their indexes
+        // must be created afterwards: a legacy database does not have them
+        // when the initial schema script runs.
+        using (var productivityIndexes = connection.CreateCommand())
+        {
+            productivityIndexes.CommandText = """
+                CREATE INDEX IF NOT EXISTS IX_Books_ReadingStatus ON Books(ReadingStatus, UpdatedAt DESC);
+                CREATE INDEX IF NOT EXISTS IX_Books_IsFavorite ON Books(IsFavorite, UpdatedAt DESC);
+                """;
+            await productivityIndexes.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await EnsureSummaryCacheVersionsAsync(connection, cancellationToken);
         await EnsureDefaultCollectionAsync(connection, cancellationToken);
         await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
+        await PreserveTrashDisplayInfosAsync(connection, cancellationToken);
+    }
+
+    private async Task PreserveTrashDisplayInfosAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var entries = new List<(Guid Id, string Title, string? Cover)>();
+        using (var query = connection.CreateCommand())
+        {
+            query.CommandText = "SELECT BookId, Title, TrashCoverPath FROM LibraryTrash WHERE Kind = 0;";
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                if (Guid.TryParse(reader.GetString(0), out var id))
+                    entries.Add((id, reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2)));
+        }
+        foreach (var entry in entries)
+        {
+            var cover = PreserveReadingMaterialCover(entry.Id, entry.Cover);
+            using var save = connection.CreateCommand();
+            save.CommandText = "INSERT INTO ReadingMaterialBooks(Id, Title, CoverPath) VALUES($id,$title,$cover) ON CONFLICT(Id) DO UPDATE SET CoverPath=COALESCE(excluded.CoverPath,ReadingMaterialBooks.CoverPath);";
+            save.Parameters.AddWithValue("$id", entry.Id.ToString());
+            save.Parameters.AddWithValue("$title", entry.Title);
+            save.Parameters.AddWithValue("$cover", (object?)cover ?? DBNull.Value);
+            await save.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private string? PreserveReadingMaterialCover(Guid bookId, string? coverPath)
+    {
+        if (string.IsNullOrWhiteSpace(coverPath)) return null;
+        var source = ResolveDataPath(coverPath);
+        if (!File.Exists(source)) return null;
+        var destination = Path.Combine(_paths.Data, "reading-material-covers", bookId.ToString("N") + Path.GetExtension(source));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (!string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
+            File.Copy(source, destination, true);
+        return Path.GetRelativePath(_paths.Data, destination);
     }
 
     private static async Task EnsureLibraryTrashBookFileIdColumnAsync(
@@ -328,7 +395,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         return await ReadBookByIdAsync(connection, bookId, cancellationToken);
     }
 
-    public async Task<LibraryFilterOptions> GetFilterOptionsAsync(CancellationToken cancellationToken = default)
+    private async Task<LibraryFilterOptions> GetFilterOptionsCoreAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
         var authors = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
@@ -374,7 +441,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         string? category = null,
         Guid? collectionId = null,
         LibraryReadingStatus? readingStatus = null,
-        bool favoritesOnly = false,
+        bool? favorite = null,
         LibrarySortMode sortMode = LibrarySortMode.UpdatedDescending,
         int pageIndex = 0,
         int pageSize = 200,
@@ -392,11 +459,11 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             category,
             collectionId,
             readingStatus,
-            favoritesOnly);
+            favorite);
 
         var countCommand = connection.CreateCommand();
         countCommand.CommandText = $"SELECT COUNT(*) FROM Books b {where};";
-        AddLibrarySearchParameters(countCommand, query, author, tag, format, category, collectionId, readingStatus, favoritesOnly);
+        AddLibrarySearchParameters(countCommand, query, author, tag, format, category, collectionId, readingStatus);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
 
         var command = connection.CreateCommand();
@@ -408,7 +475,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             ORDER BY {GetLibrarySortSql(sortMode)}
             LIMIT $limit OFFSET $offset;
             """;
-        AddLibrarySearchParameters(command, query, author, tag, format, category, collectionId, readingStatus, favoritesOnly);
+        AddLibrarySearchParameters(command, query, author, tag, format, category, collectionId, readingStatus);
         command.Parameters.AddWithValue("$limit", pageSize);
         command.Parameters.AddWithValue("$offset", (long)pageIndex * pageSize);
 
@@ -460,11 +527,13 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         var coverPathsByCollection = new Dictionary<Guid, List<string>>();
         var covers = connection.CreateCommand();
         covers.CommandText = """
-            SELECT i.CollectionId, b.CoverPath
-            FROM BookCollectionItems i
-            INNER JOIN Books b ON b.Id = i.BookId
-            WHERE b.CoverPath IS NOT NULL AND trim(b.CoverPath) <> ''
-            ORDER BY i.CollectionId, b.UpdatedAt DESC, b.Id;
+            SELECT CollectionId, CoverPath FROM (
+                SELECT i.CollectionId, b.CoverPath,
+                       ROW_NUMBER() OVER (PARTITION BY i.CollectionId ORDER BY b.UpdatedAt DESC, b.Id) AS Position
+                FROM BookCollectionItems i
+                INNER JOIN Books b ON b.Id = i.BookId
+                WHERE b.CoverPath IS NOT NULL AND trim(b.CoverPath) <> ''
+            ) WHERE Position <= 3 ORDER BY CollectionId, Position;
             """;
         await using (var reader = await covers.ExecuteReaderAsync(cancellationToken))
         {
@@ -488,7 +557,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             .ToArray();
     }
 
-    public async Task<IReadOnlyList<LibraryBookMatch>> GetLibraryMatchRecordsAsync(
+    private async Task<IReadOnlyList<LibraryBookMatch>> GetLibraryMatchRecordsCoreAsync(
         CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -565,7 +634,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         {
             var command = connection.CreateCommand();
             var parameters = batch.Select((_, index) => $"$book{index}").ToArray();
-            command.CommandText = $"SELECT Id, Title, CoverPath FROM Books WHERE Id IN ({string.Join(", ", parameters)});";
+            command.CommandText = $"SELECT Id, Title, CoverPath, 1 FROM ReadingMaterialBooks WHERE Id IN ({string.Join(", ", parameters)}) AND Id NOT IN (SELECT Id FROM Books) UNION ALL SELECT Id, Title, CoverPath, 0 FROM Books WHERE Id IN ({string.Join(", ", parameters)});";
             for (var index = 0; index < batch.Length; index++)
                 command.Parameters.AddWithValue(parameters[index], batch[index].ToString());
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -575,7 +644,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 result[id] = new LibraryBookDisplayInfo(
                     id,
                     reader.GetString(1),
-                    reader.IsDBNull(2) ? null : reader.GetString(2));
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.GetInt32(3) != 0);
             }
         }
         return result;
@@ -602,7 +672,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         string? category,
         Guid? collectionId,
         LibraryReadingStatus? readingStatus,
-        bool favoritesOnly)
+        bool? favorite)
     {
         var clauses = new List<string> { "WHERE 1 = 1" };
         clauses.Add("AND ($query = '' OR b.Title LIKE $like OR b.Authors LIKE $like OR b.Tags LIKE $like OR b.Series LIKE $like)");
@@ -618,8 +688,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             clauses.Add("AND EXISTS (SELECT 1 FROM BookCollectionItems ci WHERE ci.BookId = b.Id AND ci.CollectionId = $collectionId)");
         if (readingStatus is not null)
             clauses.Add("AND b.ReadingStatus = $readingStatus");
-        if (favoritesOnly)
-            clauses.Add("AND b.IsFavorite = 1");
+        if (favorite is not null)
+            clauses.Add($"AND b.IsFavorite = {(favorite.Value ? 1 : 0)}");
         return string.Join("\n", clauses);
     }
 
@@ -631,8 +701,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         string? format,
         string? category,
         Guid? collectionId,
-        LibraryReadingStatus? readingStatus,
-        bool favoritesOnly)
+        LibraryReadingStatus? readingStatus)
     {
         var text = query?.Trim() ?? string.Empty;
         command.Parameters.AddWithValue("$query", text);
@@ -665,7 +734,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null)
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null,
+        IReadOnlyDictionary<string, TxtImportRules>? txtImportRules = null)
     {
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         var files = ExpandInputFiles(paths).ToList();
@@ -674,6 +744,10 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         var totalBytes = files.Sum(GetFileLengthSafe);
         long completedBytes = 0;
         var changed = false;
+        // The uncollected collection id is stable for the whole import; query
+        // it once instead of per imported book.
+        Guid? defaultCollectionId = null;
+        var defaultCollectionResolved = false;
 
         try
         {
@@ -697,7 +771,11 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     Directory.CreateDirectory(conversionDirectory);
                     importPath = Path.Combine(conversionDirectory, Path.GetFileNameWithoutExtension(sourcePath) + ".epub");
                     progress?.Report(new TransferProgress(completedBytes, totalBytes, $"正在识别 TXT 章节：{file.Name}"));
-                    await TxtToEpubService.ConvertAsync(sourcePath, importPath, cancellationToken);
+                    var rules = txtImportRules is not null
+                                && txtImportRules.TryGetValue(sourcePath, out var selectedRules)
+                        ? selectedRules
+                        : TxtImportRules.Default;
+                    await TxtToEpubService.ConvertWithRulesAsync(sourcePath, importPath, rules, cancellationToken);
                 }
                 var hash = await Hashing.Sha256Async(importPath, cancellationToken);
                 await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -776,6 +854,18 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                     if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
                 }
 
+                // Resolve the uncollected collection before the write
+                // transaction starts: a command executed on a connection with
+                // a pending local transaction must carry that transaction.
+                if (newBook && !defaultCollectionResolved)
+                {
+                    defaultCollectionId = await GetCollectionIdByNameAsync(
+                        connection,
+                        BookLibraryDefaults.UncollectedCollectionName,
+                        cancellationToken);
+                    defaultCollectionResolved = true;
+                }
+
                 // Publish the file, book row and collection membership together.
                 // A failed insert must not leave an empty book in the library.
                 using var transaction = connection.BeginTransaction();
@@ -790,11 +880,6 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
 
                 if (newBook)
                 {
-                    var defaultCollectionId = await GetCollectionIdByNameAsync(
-                        connection,
-                        BookLibraryDefaults.UncollectedCollectionName,
-                        cancellationToken,
-                        transaction);
                     if (defaultCollectionId is not null)
                     {
                         var membership = connection.CreateCommand();
@@ -986,8 +1071,9 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             using var update = connection.CreateCommand();
             // Do not overwrite a cover chosen while the first page rendered,
             // or rewrite other metadata from an old UI snapshot.
-            update.CommandText = "UPDATE Books SET CoverPath=$cover WHERE Id=$id AND CoverPath IS $previous;";
+            update.CommandText = "UPDATE Books SET CoverPath=$cover, UpdatedAt=$updatedAt WHERE Id=$id AND CoverPath IS $previous;";
             update.Parameters.AddWithValue("$cover", relative);
+            update.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
             update.Parameters.AddWithValue("$id", bookId.ToString());
             update.Parameters.AddWithValue("$previous", (object?)book.CoverPath ?? DBNull.Value);
             return await update.ExecuteNonQueryAsync(cancellationToken) > 0 ? relative : null;
@@ -1236,7 +1322,8 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             {
                 if (entry.Kind == LibraryTrashItemKind.Book)
                 {
-                    if (await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                    if (ShouldDeleteAnnotationsWhenDeletingBook()
+                        && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
                         await DeletePurgeReaderRowsAsync(
                             connection,
                             transaction,
@@ -1288,6 +1375,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         CancellationToken cancellationToken)
     {
         var trashId = Guid.NewGuid();
+        var retainedCoverPath = PreserveReadingMaterialCover(book.Id, book.CoverPath);
         var trashDirectory = Path.Combine(_paths.Trash, "books", trashId.ToString("N"));
         var originalDirectory = Path.Combine(_paths.Library, book.Id.ToString("N"));
         var trashPath = Path.GetRelativePath(_paths.Data, trashDirectory);
@@ -1354,6 +1442,12 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
                 delete.CommandText = "DELETE FROM Books WHERE Id = $id;";
                 delete.Parameters.AddWithValue("$id", book.Id.ToString());
                 await delete.ExecuteNonQueryAsync(cancellationToken);
+                using var retainedCover = connection.CreateCommand();
+                retainedCover.Transaction = transaction;
+                retainedCover.CommandText = "UPDATE ReadingMaterialBooks SET CoverPath=$cover WHERE Id=$id;";
+                retainedCover.Parameters.AddWithValue("$id", book.Id.ToString());
+                retainedCover.Parameters.AddWithValue("$cover", (object?)retainedCoverPath ?? DBNull.Value);
+                await retainedCover.ExecuteNonQueryAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
             }
             catch
@@ -2208,9 +2302,19 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
             "unicode_lower",
             static value => value?.ToLowerInvariant(),
             isDeterministic: true);
-        var foreignKeys = connection.CreateCommand();
-        foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
-        await foreignKeys.ExecuteNonQueryAsync(cancellationToken);
+        using var pragma = connection.CreateCommand();
+        // synchronous=NORMAL is the recommended WAL pairing: it keeps commits
+        // durable across application crashes while removing an fsync per write.
+        // The page cache and in-memory temp store keep large library scans and
+        // sorts off the disk.
+        pragma.CommandText = """
+            PRAGMA foreign_keys = ON;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA cache_size = -65536;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA busy_timeout = 5000;
+            """;
+        await pragma.ExecuteNonQueryAsync(cancellationToken);
         return connection;
     }
 
@@ -2464,7 +2568,7 @@ public sealed class SqliteBookLibraryService : IBookLibraryService
         command.CommandText = """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
                    Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
-            FROM Books WHERE lower(Title) = lower($title) AND lower(Authors) = lower($authors) LIMIT 1;
+            FROM Books WHERE Title = $title COLLATE NOCASE AND Authors = $authors COLLATE NOCASE LIMIT 1;
             """;
         command.Parameters.AddWithValue("$title", title);
         command.Parameters.AddWithValue("$authors", authors);

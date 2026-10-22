@@ -22,9 +22,9 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public sealed partial class S3SyncService
 {
-    // Version 4 added optional badge data. Continue accepting those snapshots
-    // so removing badges does not prevent existing devices from syncing.
-    private const int SnapshotVersion = 4;
+    // Additive changes keep this wire version. A future wire version can still
+    // be read when its explicit MinimumReaderVersion permits it.
+    private const int SnapshotVersion = 5;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
     private const int EncryptionNonceBytes = 12;
@@ -157,9 +157,49 @@ public sealed partial class S3SyncService
         ThrowIfInvalid(normalized);
 
         using var client = _clientFactory(normalized);
+        // Listing proves the credentials and bucket are usable, and decoding a
+        // single snapshot validates the encryption key. Downloading every
+        // device snapshot here made a connectivity test pull the whole cloud
+        // library before it could report success.
         var keys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
-        await DownloadRemoteSnapshotsAsync(client, normalized, keys, string.Empty, false, null, cancellationToken);
+        if (keys.Count > 0)
+        {
+            var payload = await DownloadObjectBytesAsync(client, keys[0], cancellationToken);
+            _ = await DecodeSnapshotAsync(payload, normalized.EncryptionKey, cancellationToken);
+        }
         await client.TestWriteAsync(normalized.Prefix, cancellationToken);
+    }
+
+    /// Local-only summary for the sync details dialog. It reads the persisted
+    /// baseline state and never contacts the remote object store.
+    /// </summary>
+    public async Task<S3SyncStatusSummary> GetStatusAsync(
+        string deviceId,
+        S3SyncSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = S3SyncSettings.Normalize(settings);
+        deviceId = NormalizeDeviceId(deviceId);
+        var storageIdentity = BuildStorageIdentity(normalized);
+        await _syncGate.WaitAsync(cancellationToken);
+        try
+        {
+            var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
+            var snapshot = state.LastUploadedSnapshot;
+            return new S3SyncStatusSummary(
+                state.LastSyncAt,
+                state.RemoteBookIds?.Count ?? 0,
+                state.RemoteOnlyFileHashes?.Count ?? 0,
+                snapshot?.Books.Count ?? 0,
+                snapshot?.Files.Count ?? 0,
+                snapshot?.Annotations.Count ?? 0,
+                snapshot?.Tombstones.Count ?? 0,
+                snapshot?.CreatedAt);
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
     }
 
     /// <summary>
@@ -245,26 +285,23 @@ public sealed partial class S3SyncService
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
-            var state = await LoadStateAsync(
+            var state = await LoadBadgeStateAsync(
                 NormalizeDeviceId(deviceId),
                 BuildStorageIdentity(normalized),
                 cancellationToken);
             var baseline = state.LastUploadedSnapshot;
             if (baseline is null) return statuses;
 
-            var remoteBookIds = (state.RemoteBookIds ?? [])
-                .Select(id => Guid.TryParse(id, out var parsed) ? parsed : (Guid?)null)
-                .Where(id => id is not null)
-                .Select(id => id!.Value)
-                .ToHashSet();
-            var remoteOnlyFileHashes = (state.RemoteOnlyFileHashes ?? [])
-                .Where(IsSha256)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
+            if (_badgeIndex is null || !ReferenceEquals(_badgeIndex.State, state))
+                _badgeIndex = new BadgeIndex(state);
+            var remoteBookIds = _badgeIndex.RemoteBooks;
+            var remoteOnlyFileHashes = _badgeIndex.RemoteHashes;
+            var booksById = _badgeIndex.Books;
+            var filesByBook = _badgeIndex.Files;
             foreach (var book in books)
             {
-                var baselineBook = baseline.Books.FirstOrDefault(item => item.Id == book.Id);
-                var baselineFiles = baseline.Files.Where(item => item.BookId == book.Id).ToArray();
+                var baselineBook = booksById.GetValueOrDefault(book.Id);
+                var baselineFiles = filesByBook[book.Id];
                 if (baselineBook is null
                     || book.UpdatedAt != baselineBook.UpdatedAt
                     || !BookFilesMatchBaseline(book.Files, baselineFiles))
@@ -340,7 +377,12 @@ public sealed partial class S3SyncService
             }
             var storageIdentity = BuildStorageIdentity(normalized);
             var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
-            var local = await CaptureSnapshotAsync(deviceId, state.Tombstones, cancellationToken);
+            var local = await CaptureSnapshotWithBaselineAsync(
+                deviceId,
+                state.Tombstones,
+                cancellationToken,
+                state.LastUploadedSnapshot,
+                state.SnapshotWatermark);
             local.TombstonesPrunedBefore = state.LastUploadedSnapshot?.TombstonesPrunedBefore;
             PreserveSettingsTimestampsForUnchangedValues(
                 local.Settings,
@@ -469,7 +511,16 @@ public sealed partial class S3SyncService
             // Capture again after the merge. This makes this device's snapshot
             // a complete converged view, so a third device can catch up from it
             // without having to contact every previous device forever.
-            var finalSnapshot = await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
+            var remoteAnnotationIds = remoteSnapshots
+                .SelectMany(snapshot => snapshot.Annotations)
+                .Select(annotation => annotation.Id)
+                .Distinct()
+                .ToArray();
+            var finalSnapshot = databaseResult.LocalBaseline is { } convergedBase
+                ? await CaptureConvergedSnapshotAsync(
+                    deviceId, local.Tombstones, convergedBase, remoteAnnotationIds,
+                    databaseResult.ConsolidatedDuplicates, cancellationToken)
+                : await CaptureSnapshotAsync(deviceId, local.Tombstones, cancellationToken);
             finalSnapshot.TombstonesPrunedBefore = local.TombstonesPrunedBefore;
             var finalDeletions = finalSnapshot.LocalDeletionTimes
                 .Where(entry => finalSnapshot.TombstonesPrunedBefore is not { } watermark
@@ -480,6 +531,7 @@ public sealed partial class S3SyncService
                 MergeTombstones(FilterReadingTombstones(detectedDeletions, finalSnapshot.ReadingDataReset), recordedTombstones),
                 options?.ConfirmedDeletionFingerprint);
             finalSnapshot.Tombstones = MergeTombstones(finalSnapshot.Tombstones, recordedTombstones);
+            PreserveForwardCompatibleData(finalSnapshot, state.LastUploadedSnapshot, remoteSnapshots);
 
             // Publish exactly this captured view after all its objects exist.
             // Writes after capture remain outside the saved local baseline.
@@ -495,6 +547,14 @@ public sealed partial class S3SyncService
             state.LastSyncAt = DateTimeOffset.UtcNow;
             state.LastUploadedSnapshot = finalSnapshot;
             state.Tombstones = finalSnapshot.Tombstones;
+            // Persist the local maps needed by the next incremental capture.
+            // They are state-file only; S3SyncSnapshot keeps them [JsonIgnore]
+            // so relative paths never reach the cloud.
+            state.SnapshotWatermark = finalSnapshot.CreatedAt;
+            state.LocalFilePaths = new Dictionary<Guid, string>(finalSnapshot.LocalFilePaths);
+            state.LocalCoverPaths = new Dictionary<Guid, string>(finalSnapshot.LocalCoverPaths);
+            state.LocalDeletionTimes = new Dictionary<string, DateTimeOffset>(
+                finalSnapshot.LocalDeletionTimes, StringComparer.OrdinalIgnoreCase);
             var finalBookIds = finalSnapshot.Books.Select(book => book.Id).ToHashSet();
             state.RemoteBookIds = state.RemoteBookIds
                 .Where(id => Guid.TryParse(id, out var parsed) && finalBookIds.Contains(parsed))
@@ -531,10 +591,10 @@ public sealed partial class S3SyncService
             {
                 cleanupWarning = UiText.Get("远端清理未完成：{0}", UiText.Localize(exception.Message));
             }
-            state.LastUploadedSnapshot = finalSnapshot;
-            state.Tombstones = finalSnapshot.Tombstones;
-            await SaveStateAsync(state, cancellationToken);
 
+            // Cleanup only mutates the persisted state in its rare snapshot
+            // compaction path, which saves on its own. Re-saving the whole
+            // snapshot here doubled the state write for every normal sync.
             var warning = string.Join(
                 " ",
                 new[] { uploadWarning, databaseResult.Warning, cleanupWarning }
@@ -626,17 +686,13 @@ public sealed partial class S3SyncService
     {
         if (previousLocal is null || remoteSnapshots.Count == 0) return;
         var unchangedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddUnchangedKeys(local.Books, previousLocal.Books, item => item.Id.ToString("N"), "book", unchangedKeys);
-        AddUnchangedKeys(local.Files, previousLocal.Files, item => item.Id.ToString("N"), "file", unchangedKeys);
-        AddUnchangedKeys(local.Collections, previousLocal.Collections, item => item.Id.ToString("N"), "collection", unchangedKeys);
-        AddUnchangedKeys(local.CollectionItems, previousLocal.CollectionItems,
-            item => CompositeKey(item.CollectionId, item.BookId), "collection-item", unchangedKeys);
-        AddUnchangedKeys(local.Annotations, previousLocal.Annotations, item => item.Id.ToString("N"), "annotation", unchangedKeys);
-        AddUnchangedKeys(local.BookReflections, previousLocal.BookReflections, item => item.BookId.ToString("N"), "reflection", unchangedKeys);
-        AddUnchangedKeys(local.Progress, previousLocal.Progress, item => item.BookFileId.ToString("N"), "progress", unchangedKeys);
-        AddUnchangedKeys(local.Bookmarks, previousLocal.Bookmarks, item => item.Id.ToString("N"), "bookmark", unchangedKeys);
-        AddUnchangedKeys(local.Layouts, previousLocal.Layouts, item => item.BookFileId.ToString("N"), "layout", unchangedKeys);
-        AddUnchangedKeys(local.ReadingStats, previousLocal.ReadingStats, item => item.BookFileId.ToString("N"), "stats", unchangedKeys);
+        foreach (var entity in SyncEntities.Where(entity => entity.TrackDeletion))
+        {
+            var previous = entity.Rows(previousLocal).ToDictionary(row => row.Key, StringComparer.OrdinalIgnoreCase);
+            foreach (var row in entity.Rows(local))
+                if (previous.TryGetValue(row.Key, out var old) && SnapshotRowsEqual(row.Value, old.Value))
+                    unchangedKeys.Add(VersionKey(entity.Type, row.Key));
+        }
         if (unchangedKeys.Count == 0) return;
 
         var remoteVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
@@ -678,25 +734,14 @@ public sealed partial class S3SyncService
         }
     }
 
-    private static void AddUnchangedKeys<T>(
-        IEnumerable<T> currentRows,
-        IEnumerable<T> previousRows,
-        Func<T, string> id,
-        string entityType,
-        ISet<string> output)
-    {
-        var previous = previousRows.ToDictionary(id, StringComparer.OrdinalIgnoreCase);
-        foreach (var current in currentRows)
-        {
-            var entityId = id(current);
-            if (previous.TryGetValue(entityId, out var old)
-                && string.Equals(
-                    JsonSerializer.Serialize(current, JsonOptions),
-                    JsonSerializer.Serialize(old, JsonOptions),
-                    StringComparison.Ordinal))
-                output.Add(VersionKey(entityType, entityId));
-        }
-    }
+    /// <summary>
+    /// Structural row equality without materializing two UTF-16 JSON strings.
+    /// Called for every row in large annotation/bookmark sets.
+    /// </summary>
+    private static bool SnapshotRowsEqual<T>(T left, T right) =>
+        JsonSerializer.SerializeToUtf8Bytes(left, JsonOptions)
+            .AsSpan()
+            .SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(right, JsonOptions));
 
     private async Task<HashSet<string>> ResolveLocalRestorationsAsync(
         S3SyncSnapshot local,
@@ -717,18 +762,19 @@ public sealed partial class S3SyncService
         var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var updatedBookVersions = new Dictionary<Guid, DateTimeOffset>();
 
+        var localBooksById = local.Books.ToDictionary(item => item.Id);
+        var localFilesByBook = local.Files.ToLookup(item => item.BookId);
         foreach (var book in local.Books)
         {
             var bookKey = VersionKey("book", book.Id);
             var changedSinceBaseline = !previousBooks.TryGetValue(book.Id, out var previous)
-                || !JsonSerializer.Serialize(book, JsonOptions)
-                    .Equals(JsonSerializer.Serialize(previous, JsonOptions), StringComparison.Ordinal);
+                || !SnapshotRowsEqual(book, previous);
             if (!changedSinceBaseline || !deletionVersions.TryGetValue(bookKey, out var bookDeletedAt))
                 continue;
 
             resolved.Add(bookKey);
             var restoreVersion = bookDeletedAt;
-            foreach (var file in local.Files.Where(item => item.BookId == book.Id))
+            foreach (var file in localFilesByBook[book.Id])
             {
                 var fileKey = VersionKey("file", file.Id);
                 if (deletionVersions.TryGetValue(fileKey, out var fileDeletedAt))
@@ -746,14 +792,13 @@ public sealed partial class S3SyncService
         {
             var fileKey = VersionKey("file", file.Id);
             var changedSinceBaseline = !previousFiles.TryGetValue(file.Id, out var previous)
-                || !JsonSerializer.Serialize(file, JsonOptions)
-                    .Equals(JsonSerializer.Serialize(previous, JsonOptions), StringComparison.Ordinal);
+                || !SnapshotRowsEqual(file, previous);
             if (!changedSinceBaseline || !deletionVersions.TryGetValue(fileKey, out var deletedAt))
                 continue;
 
             resolved.Add(fileKey);
             if (updatedBookVersions.ContainsKey(file.BookId)) continue;
-            var book = local.Books.FirstOrDefault(item => item.Id == file.BookId);
+            var book = localBooksById.GetValueOrDefault(file.BookId);
             if (book is null) continue;
             var restoreVersion = GetVersionAfter(book.UpdatedAt, deletedAt);
             book.UpdatedAt = restoreVersion;
@@ -949,6 +994,42 @@ public sealed partial class S3SyncService
                 : "plain");
 
     private string StatePath => Path.Combine(_paths.Data, "s3-sync-state.json");
+    private string BaselinePath => Path.Combine(_paths.Data, "s3-sync-baseline.json.gz");
+    private string? _baselineHash;
+
+    private sealed class BadgeIndex(S3SyncState state)
+    {
+        public S3SyncState State { get; } = state;
+        public Dictionary<Guid, S3SyncBook> Books { get; } = state.LastUploadedSnapshot!.Books.ToDictionary(book => book.Id);
+        public ILookup<Guid, S3SyncBookFile> Files { get; } = state.LastUploadedSnapshot!.Files.ToLookup(file => file.BookId);
+        public HashSet<Guid> RemoteBooks { get; } = (state.RemoteBookIds ?? [])
+            .Select(id => Guid.TryParse(id, out var parsed) ? parsed : (Guid?)null)
+            .Where(id => id is not null).Select(id => id!.Value).ToHashSet();
+        public HashSet<string> RemoteHashes { get; } = (state.RemoteOnlyFileHashes ?? [])
+            .Where(IsSha256).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+    private BadgeIndex? _badgeIndex;
+
+    private (string Device, string Storage, long StateLength, long StateModified,
+        long BaselineLength, long BaselineModified, S3SyncState State)? _badgeState;
+
+    private async Task<S3SyncState> LoadBadgeStateAsync(string deviceId, string storageIdentity, CancellationToken token)
+    {
+        var stateInfo = new FileInfo(StatePath);
+        var baselineInfo = new FileInfo(BaselinePath);
+        var stateLength = stateInfo.Exists ? stateInfo.Length : -1;
+        var stateModified = stateInfo.Exists ? stateInfo.LastWriteTimeUtc.Ticks : 0;
+        var baselineLength = baselineInfo.Exists ? baselineInfo.Length : -1;
+        var baselineModified = baselineInfo.Exists ? baselineInfo.LastWriteTimeUtc.Ticks : 0;
+        if (_badgeState is { } cache && cache.Device == deviceId && cache.Storage == storageIdentity
+            && cache.StateLength == stateLength && cache.StateModified == stateModified
+            && cache.BaselineLength == baselineLength && cache.BaselineModified == baselineModified)
+            return cache.State;
+        var state = await LoadStateAsync(deviceId, storageIdentity, token);
+        _badgeState = (deviceId, storageIdentity,
+            stateLength, stateModified, baselineLength, baselineModified, state);
+        return state;
+    }
 
     private async Task<S3SyncState> LoadStateAsync(
         string deviceId,
@@ -964,7 +1045,8 @@ public sealed partial class S3SyncService
                 StatePath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.Read,
+                // Allow an in-flight SaveStateAsync replacement on Windows.
+                FileShare.Read | FileShare.Delete,
                 81920,
                 useAsync: true);
             var state = await JsonSerializer.DeserializeAsync<S3SyncState>(stream, JsonOptions, cancellationToken)
@@ -978,6 +1060,28 @@ public sealed partial class S3SyncService
             state.Tombstones ??= [];
             state.RemoteBookIds ??= [];
             state.RemoteOnlyFileHashes ??= [];
+            state.LocalFilePaths ??= [];
+            state.LocalCoverPaths ??= [];
+            state.LocalDeletionTimes ??= [];
+            _baselineHash = null;
+            // The baseline is stored separately so the frequently rewritten
+            // state file stays small. Older state files still carry the
+            // snapshot inline; keep that as a fallback.
+            if (state.LastUploadedSnapshot is null)
+                state.LastUploadedSnapshot = await LoadBaselineAsync(state.BaselineHash, cancellationToken);
+            if (state.LastUploadedSnapshot is null)
+                state.SnapshotWatermark = null;
+            if (state.LastUploadedSnapshot is { } previous)
+            {
+                previous.LocalFilePaths.Clear();
+                foreach (var (id, path) in state.LocalFilePaths)
+                    previous.LocalFilePaths[id] = path;
+                previous.LocalCoverPaths.Clear();
+                foreach (var (id, path) in state.LocalCoverPaths)
+                    previous.LocalCoverPaths[id] = path;
+                previous.LocalDeletionTimes = new Dictionary<string, DateTimeOffset>(
+                    state.LocalDeletionTimes, StringComparer.OrdinalIgnoreCase);
+            }
             return state;
         }
         catch (Exception exception) when (exception is IOException or JsonException)
@@ -986,22 +1090,132 @@ public sealed partial class S3SyncService
         }
     }
 
+    private async Task<S3SyncSnapshot?> LoadBaselineAsync(string? expectedHash, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(BaselinePath)) return null;
+        try
+        {
+            await using var file = new FileStream(
+                BaselinePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read | FileShare.Delete,
+                81920,
+                useAsync: true);
+            await using var gzip = new GZipStream(file, CompressionMode.Decompress);
+            using var buffer = new MemoryStream();
+            await gzip.CopyToAsync(buffer, cancellationToken);
+            var json = buffer.ToArray();
+            var hash = Convert.ToHexString(SHA256.HashData(json));
+            // The baseline and state are replaced separately. A crash between
+            // those writes must not pair a new baseline with an old watermark.
+            if (!string.Equals(hash, expectedHash, StringComparison.Ordinal)) return null;
+            var snapshot = JsonSerializer.Deserialize<S3SyncSnapshot>(json, JsonOptions);
+            if (snapshot is not null) _baselineHash = hash;
+            return snapshot;
+        }
+        catch (Exception exception) when (exception is IOException or JsonException or InvalidDataException)
+        {
+            return null;
+        }
+    }
+
     private async Task SaveStateAsync(S3SyncState state, CancellationToken cancellationToken)
     {
         _paths.EnsureDirectories();
-        var temporaryPath = StatePath + ".tmp";
-        await using (var stream = new FileStream(
+        var snapshot = state.LastUploadedSnapshot;
+        state.BaselineHash = await SaveBaselineAsync(snapshot, cancellationToken);
+
+        // Keep the frequently rewritten state file small; the full baseline
+        // lives in its own gzipped file and is restored by LoadStateAsync.
+        state.LastUploadedSnapshot = null;
+        try
+        {
+            var temporaryPath = StatePath + ".tmp";
+            await using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                81920,
+                useAsync: true))
+            {
+                await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+            }
+            await MoveFileWithRetryAsync(temporaryPath, StatePath, cancellationToken);
+        }
+        finally
+        {
+            state.LastUploadedSnapshot = snapshot;
+        }
+        _badgeState = null;
+        _badgeIndex = null;
+    }
+
+    private async Task<string?> SaveBaselineAsync(
+        S3SyncSnapshot? snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (snapshot is null)
+        {
+            TryDeleteBaseline();
+            _baselineHash = null;
+            return null;
+        }
+
+        var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions);
+        var hash = Convert.ToHexString(SHA256.HashData(json));
+        if (string.Equals(_baselineHash, hash, StringComparison.Ordinal) && File.Exists(BaselinePath))
+            return hash;
+
+        var temporaryPath = BaselinePath + ".tmp";
+        await using (var file = new FileStream(
             temporaryPath,
             FileMode.Create,
             FileAccess.Write,
             FileShare.None,
             81920,
             useAsync: true))
+        await using (var gzip = new GZipStream(file, CompressionLevel.Optimal, leaveOpen: true))
         {
-            await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+            await gzip.WriteAsync(json, cancellationToken);
         }
+        await MoveFileWithRetryAsync(temporaryPath, BaselinePath, cancellationToken);
+        _baselineHash = hash;
+        return hash;
+    }
 
-        File.Move(temporaryPath, StatePath, overwrite: true);
+    private void TryDeleteBaseline()
+    {
+        try
+        {
+            if (File.Exists(BaselinePath)) File.Delete(BaselinePath);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static async Task MoveFileWithRetryAsync(
+        string source,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        // Antivirus/indexers can briefly hold files on Windows. A short retry
+        // keeps a successful sync from failing on a transient sharing
+        // violation.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(source, destination, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (attempt < 3
+                && exception is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(25 * (attempt + 1), cancellationToken);
+            }
+        }
     }
 
     private static string SnapshotKey(S3SyncSettings settings, string deviceId) =>
@@ -1069,7 +1283,7 @@ public sealed partial class S3SyncService
                 objects.Add(new LocalSyncObject(file.Sha256, path, "application/octet-stream"));
         }
 
-        foreach (var book in snapshot.Books)
+        foreach (var book in snapshot.Books.Concat(snapshot.ReadingMaterialBooks))
         {
             if (!IsSha256(book.CoverHash) || string.IsNullOrWhiteSpace(book.CoverFileName)) continue;
             var relativePath = book.LocalCoverPath
@@ -1154,7 +1368,7 @@ public sealed partial class S3SyncService
         {
             if (settings.EncryptionKey.Length == 0)
             {
-                await client.PutAsync(key, input, item.ContentType, cancellationToken);
+                await client.PutAsync(key, input, item.ContentType, cancellationToken, actualHash);
             }
             else
             {
@@ -1225,6 +1439,10 @@ public sealed partial class S3SyncService
         IReadOnlyList<S3SyncSnapshot> downloadedRemoteSnapshots,
         CancellationToken cancellationToken)
     {
+        // Unknown data may reference blobs or encode deletion semantics we do
+        // not understand. Leave retention/compaction to a reader that does.
+        if (HasForwardCompatibleData(localSnapshot)
+            || downloadedRemoteSnapshots.Any(HasForwardCompatibleData)) return null;
         IReadOnlyList<SyncObjectMetadata> deviceObjects;
         try
         {
@@ -1305,10 +1523,9 @@ public sealed partial class S3SyncService
         var referencedBlobKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var snapshot in retainedSnapshots)
         {
-            foreach (var file in snapshot.Files)
-                if (IsSha256(file.Sha256)) referencedBlobKeys.Add(BlobKey(settings, file.Sha256));
-            foreach (var book in snapshot.Books)
-                if (IsSha256(book.CoverHash)) referencedBlobKeys.Add(BlobKey(settings, book.CoverHash!));
+            foreach (var hash in SyncEntities.SelectMany(entity => entity.Rows(snapshot))
+                         .Select(row => row.BlobHash).Where(IsSha256))
+                referencedBlobKeys.Add(BlobKey(settings, hash!));
         }
 
         IReadOnlyList<SyncObjectMetadata> blobObjects;
@@ -1384,6 +1601,7 @@ public sealed partial class S3SyncService
         IReadOnlyList<S3SyncSnapshot> targets)
     {
         if (targets.Count == 0) return false;
+        if (HasForwardCompatibleData(candidate)) return false;
         var targetLiveRows = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         var tombstoneVersions = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         foreach (var target in targets)
@@ -1399,80 +1617,20 @@ public sealed partial class S3SyncService
             }
         }
 
-        var targetSnapshots = targets.ToArray();
-        bool RowsCovered<T>(
-            IEnumerable<T> sourceRows,
-            IEnumerable<T> targetRows,
-            Func<T, string> key,
-            Func<T, DateTimeOffset> version,
-            Func<T, IEnumerable<string>> fallbackTombstones)
+        foreach (var entity in SyncEntities)
         {
-            var byKey = targetRows
-                .GroupBy(key, StringComparer.OrdinalIgnoreCase)
+            var byKey = targets.SelectMany(entity.Rows)
+                .GroupBy(row => row.Key, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
-            foreach (var source in sourceRows)
+            foreach (var source in entity.Rows(candidate))
             {
-                var sourceKey = key(source);
-                var sourceVersion = version(source);
-                if (byKey.TryGetValue(sourceKey, out var alternatives)
-                    && alternatives.Any(target => version(target) >= sourceVersion
-                        && JsonSerializer.Serialize(target, JsonOptions)
-                            .Equals(JsonSerializer.Serialize(source, JsonOptions), StringComparison.Ordinal)))
-                    continue;
-
-                var covered = fallbackTombstones(source).Any(tombstoneKey =>
-                    tombstoneVersions.TryGetValue(tombstoneKey, out var deletedAt)
-                    && deletedAt >= sourceVersion);
-                if (!covered) return false;
+                if (byKey.TryGetValue(source.Key, out var alternatives)
+                    && alternatives.Any(target => target.Version >= source.Version
+                        && SnapshotRowsEqual(target.Value, source.Value))) continue;
+                if (!source.DeletionKeys.Any(key => tombstoneVersions.TryGetValue(key, out var deletedAt)
+                    && deletedAt >= source.Version)) return false;
             }
-            return true;
         }
-
-        var targetBooks = targetSnapshots.SelectMany(snapshot => snapshot.Books);
-        var targetFiles = targetSnapshots.SelectMany(snapshot => snapshot.Files);
-        var targetCollections = targetSnapshots.SelectMany(snapshot => snapshot.Collections);
-        var targetItems = targetSnapshots.SelectMany(snapshot => snapshot.CollectionItems);
-        var targetAnnotations = targetSnapshots.SelectMany(snapshot => snapshot.Annotations);
-        var targetReflections = targetSnapshots.SelectMany(snapshot => snapshot.BookReflections);
-        var targetProgress = targetSnapshots.SelectMany(snapshot => snapshot.Progress);
-        var targetBookmarks = targetSnapshots.SelectMany(snapshot => snapshot.Bookmarks);
-        var targetLayouts = targetSnapshots.SelectMany(snapshot => snapshot.Layouts);
-        var targetStats = targetSnapshots.SelectMany(snapshot => snapshot.ReadingStats);
-
-        if (!RowsCovered(candidate.Books, targetBooks,
-                item => item.Id.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("book", item.Id)])) return false;
-        if (!RowsCovered(candidate.Files, targetFiles,
-                item => item.Id.ToString("N"), item => item.ModifiedAt,
-                item => [VersionKey("file", item.Id), VersionKey("book", item.BookId)])) return false;
-        if (!RowsCovered(candidate.Collections, targetCollections,
-                item => item.Id.ToString("N"), CollectionUpdatedAt,
-                item => [VersionKey("collection", item.Id)])) return false;
-        if (!RowsCovered(candidate.CollectionItems, targetItems,
-                item => CompositeKey(item.CollectionId, item.BookId), item => item.AddedAt,
-                item => [
-                    VersionKey("collection-item", CompositeKey(item.CollectionId, item.BookId)),
-                    VersionKey("collection", item.CollectionId),
-                    VersionKey("book", item.BookId)
-                ])) return false;
-        if (!RowsCovered(candidate.Annotations, targetAnnotations,
-                item => item.Id.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("annotation", item.Id), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.BookReflections, targetReflections,
-                item => item.BookId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("reflection", item.BookId), VersionKey("book", item.BookId)])) return false;
-        if (!RowsCovered(candidate.Progress, targetProgress,
-                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("progress", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.Bookmarks, targetBookmarks,
-                item => item.Id.ToString("N"), item => item.CreatedAt,
-                item => [VersionKey("bookmark", item.Id), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.Layouts, targetLayouts,
-                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("layout", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
-        if (!RowsCovered(candidate.ReadingStats, targetStats,
-                item => item.BookFileId.ToString("N"), item => item.UpdatedAt,
-                item => [VersionKey("stats", item.BookFileId), VersionKey("book", item.BookId), VersionKey("file", item.BookFileId)])) return false;
 
         foreach (var tombstone in candidate.Tombstones ?? [])
         {
@@ -1545,7 +1703,7 @@ public sealed partial class S3SyncService
                 || snapshot.BookReflections.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
                 || snapshot.Progress.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
                 || snapshot.Bookmarks.Any(row => row.BookId == bookId && row.CreatedAt <= deletedAt)
-                || snapshot.Layouts.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
+                || snapshot.Layouts.Any(row => row.BookId == bookId && LayoutSyncVersion(row) <= deletedAt)
                 || snapshot.ReadingStats.Any(row => row.BookId == bookId && row.UpdatedAt <= deletedAt)
                 || snapshot.CollectionItems.Any(row => row.BookId == bookId && row.AddedAt <= deletedAt);
         }
@@ -1555,7 +1713,7 @@ public sealed partial class S3SyncService
                 || snapshot.Annotations.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
                 || snapshot.Progress.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
                 || snapshot.Bookmarks.Any(row => row.BookFileId == fileId && row.CreatedAt <= deletedAt)
-                || snapshot.Layouts.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt)
+                || snapshot.Layouts.Any(row => row.BookFileId == fileId && LayoutSyncVersion(row) <= deletedAt)
                 || snapshot.ReadingStats.Any(row => row.BookFileId == fileId && row.UpdatedAt <= deletedAt);
         }
 
@@ -1572,27 +1730,35 @@ public sealed partial class S3SyncService
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        var snapshots = new List<S3SyncSnapshot>();
-        var processed = 0;
         var keysToRead = snapshotKeys
             .Where(key => !skipOwnSnapshot || !IsSnapshotKeyForDevice(key, settings, localDeviceId))
             .ToArray();
-        foreach (var key in keysToRead)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var payload = await DownloadObjectBytesAsync(client, key, cancellationToken);
-            var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, cancellationToken);
-            if (snapshot.Version > SnapshotVersion)
-                throw new InvalidDataException(UiText.Get("同步快照版本 {0} 高于当前版本。请先升级 Kkindle。", snapshot.Version));
-            ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
-            if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
-                throw new InvalidDataException("同步快照缺少有效的设备 ID。");
-            snapshot.DeviceId = parsedDeviceId.ToString("N");
-            snapshot.Tombstones ??= [];
-            snapshots.Add(snapshot);
-            progress?.Report(UiText.Get("已读取 {0}/{1} 台设备的快照…", ++processed, keysToRead.Length));
-        }
-        return snapshots;
+        var results = new S3SyncSnapshot?[keysToRead.Length];
+        var processed = 0;
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, keysToRead.Length),
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Max(1, settings.ConcurrentRequests),
+                CancellationToken = cancellationToken
+            },
+            async (index, token) =>
+            {
+                var payload = await DownloadObjectBytesAsync(client, keysToRead[index], token);
+                var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, token);
+                ValidateSnapshotCompatibility(snapshot);
+                ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
+                if (!Guid.TryParse(snapshot.DeviceId, out var parsedDeviceId))
+                    throw new InvalidDataException("同步快照缺少有效的设备 ID。");
+                snapshot.DeviceId = parsedDeviceId.ToString("N");
+                snapshot.Tombstones ??= [];
+                results[index] = snapshot;
+                progress?.Report(UiText.Get("已读取 {0}/{1} 台设备的快照…",
+                    Interlocked.Increment(ref processed), keysToRead.Length));
+            });
+        return results.Where(snapshot => snapshot is not null)
+            .Select(snapshot => snapshot!)
+            .ToList();
     }
 
     private static bool IsSnapshotKeyForDevice(

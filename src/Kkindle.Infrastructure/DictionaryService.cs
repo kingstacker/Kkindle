@@ -11,7 +11,7 @@ namespace Kkindle.Infrastructure;
 
 public sealed record DictionaryImportProgress(string Stage, int EntryCount = 0, double? Percent = null, string? Detail = null);
 
-public sealed class DictionaryService
+public sealed partial class DictionaryService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private static readonly HashSet<string> BlockElements = new(StringComparer.OrdinalIgnoreCase)
@@ -49,9 +49,10 @@ public sealed class DictionaryService
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("词典文件不存在。", sourcePath);
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
         progress?.Report(new("读取词典"));
+        var richEntries = extension == ".mdx" ? new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase) : null;
         var entries = extension switch
         {
-            ".mdx" => await ParseMdxAsync(sourcePath, cancellationToken, progress),
+            ".mdx" => await ParseMdxAsync(sourcePath, cancellationToken, progress, richEntries),
             ".azw" or ".mobi" or ".prc" => await ParseKindleDictionaryAsync(sourcePath, cancellationToken, progress),
             ".txt" or ".tsv" or ".csv" => await ParseAsync(sourcePath, cancellationToken, progress),
             _ => throw new NotSupportedException("支持 MDX、AZW、AZW3、MOBI、PRC、KFX、TXT、TSV 和 CSV 词典。")
@@ -106,11 +107,13 @@ public sealed class DictionaryService
                     foreach (var duplicate in exactDuplicates.Skip(1))
                     {
                         var duplicatePath = ResolveSafePath(duplicate.RelativePath);
-                        try { if (File.Exists(duplicatePath)) File.Delete(duplicatePath); }
+                        try { if (File.Exists(duplicatePath)) File.Delete(duplicatePath); File.Delete(Path.ChangeExtension(duplicatePath, "rich.db")); File.Delete(Path.ChangeExtension(duplicatePath, "lookup.db")); }
                         catch (IOException) { }
                         catch (UnauthorizedAccessException) { }
                     }
                 }
+                await SaveRichEntriesAsync(ResolveSafePath(existing.RelativePath), richEntries, sourcePath, cancellationToken);
+                await LookupIndexedAsync(ResolveSafePath(existing.RelativePath), "", cancellationToken);
                 progress?.Report(new("导入完成", entries.Count, 100));
                 return existing;
             }
@@ -124,6 +127,8 @@ public sealed class DictionaryService
         await using (var stream = File.Create(Path.Combine(_paths.Dictionaries, relativePath)))
             await JsonSerializer.SerializeAsync(stream, entries, JsonOptions, cancellationToken);
         var definition = new DictionaryDefinition(id, displayName, relativePath, entries.Count, DateTimeOffset.UtcNow, SourceFormat: extension.TrimStart('.').ToUpperInvariant());
+        await SaveRichEntriesAsync(ResolveSafePath(relativePath), richEntries, sourcePath, cancellationToken);
+        await LookupIndexedAsync(ResolveSafePath(relativePath), "", cancellationToken);
         progress?.Report(new("保存词典目录", entries.Count));
         manifest.Add(definition);
         await SaveManifestAsync(manifest, cancellationToken);
@@ -170,7 +175,7 @@ public sealed class DictionaryService
         // prevent the removed dictionary from being imported again.
         foreach (var path in paths)
         {
-            try { if (File.Exists(path)) File.Delete(path); }
+            try { if (File.Exists(path)) File.Delete(path); File.Delete(Path.ChangeExtension(path, "rich.db")); File.Delete(Path.ChangeExtension(path, "lookup.db")); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
@@ -203,11 +208,12 @@ public sealed class DictionaryService
         {
             var path = ResolveSafePath(dictionary.RelativePath);
             if (!File.Exists(path)) continue;
-            await using var stream = File.OpenRead(path);
-            var entries = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(stream, JsonOptions, cancellationToken);
-            if (entries is null) continue;
-            var match = entries.FirstOrDefault(pair => pair.Key.Equals(normalized, StringComparison.CurrentCultureIgnoreCase));
-            if (!string.IsNullOrEmpty(match.Key)) result.Add(new DictionaryEntry(match.Key, match.Value, dictionary.Name));
+            var match = await LookupIndexedAsync(path, normalized, cancellationToken).ConfigureAwait(false);
+            if (match is not null)
+            {
+                var rich = await ReadRichEntryAsync(path, match.Value.Term, cancellationToken).ConfigureAwait(false);
+                result.Add(new DictionaryEntry(match.Value.Term, match.Value.Definition, dictionary.Name, rich.Html, rich.Css));
+            }
             if (result.Count >= 8) break;
         }
         return result;
@@ -235,7 +241,8 @@ public sealed class DictionaryService
     internal static async Task<Dictionary<string, string>> ParseMdxAsync(
         string path,
         CancellationToken cancellationToken = default,
-        IProgress<DictionaryImportProgress>? progress = null)
+        IProgress<DictionaryImportProgress>? progress = null,
+        Dictionary<string, string>? richEntries = null)
     {
         try
         {
@@ -245,14 +252,17 @@ public sealed class DictionaryService
                 var result = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
                 using var stream = File.OpenRead(path);
                 progress?.Report(new("读取 MDX 索引"));
-                var document = new MdxDocument(stream, Encoding.Unicode);
+                var document = new MdxDocument(stream);
                 var records = 0;
                 foreach (var record in document.RecordDatas)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (++records % 256 == 0) progress?.Report(new("解析 MDX 词条", result.Count));
                     if (!record.IsBinary)
+                    {
                         AddEntry(result, record.Key, ToReadableText(record.Text));
+                        if (richEntries is not null) AddEntry(richEntries, record.Key, record.Text);
+                    }
                 }
                 return result;
             }, cancellationToken);

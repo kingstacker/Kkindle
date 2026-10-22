@@ -14,11 +14,11 @@ public sealed class ReaderTransitionRenderingTests(SettingsUiSession session)
 {
     [Theory]
     [InlineData(1, 1, ReaderTheme.Classic)]
-    [InlineData(1, -1, ReaderTheme.Night)]
-    [InlineData(2, 1, ReaderTheme.Ivory)]
-    [InlineData(2, -1, ReaderTheme.Night)]
-    [InlineData(3, 1, ReaderTheme.Ivory)]
-    [InlineData(3, -1, ReaderTheme.Night)]
+    [InlineData(1, -1, ReaderTheme.Beige)]
+    [InlineData(2, 1, ReaderTheme.Green)]
+    [InlineData(2, -1, ReaderTheme.Beige)]
+    [InlineData(3, 1, ReaderTheme.Green)]
+    [InlineData(3, -1, ReaderTheme.Beige)]
     public Task PageFramesKeepOutgoingAndIncomingInkSeparate(
         int animation, int direction, ReaderTheme theme) => session.Session.Dispatch(async () =>
     {

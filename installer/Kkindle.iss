@@ -1,4 +1,4 @@
-#ifndef MyAppVersion
+﻿#ifndef MyAppVersion
   #define MyAppVersion "1.0.6"
 #endif
 
@@ -59,8 +59,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinese"; MessagesFile: "ChineseSimplified.isl"
 
 [CustomMessages]
-english.StopMcpBeforeUpgradeFailed=Setup could not stop the Kkindle MCP server from this installation. Close the AI client connected to Kkindle, then try again.
-chinese.StopMcpBeforeUpgradeFailed=安装程序无法结束当前安装目录中的 Kkindle MCP 进程。请退出使用 Kkindle MCP 的 AI 客户端后重试。
+english.StopMcpBeforeUpgradeFailed=Setup could not identify or stop all running Kkindle processes. Close Kkindle and the AI client connected to this installation, then try again.
+chinese.StopMcpBeforeUpgradeFailed=安装程序无法确认或结束所有运行中的 Kkindle 进程。请退出 Kkindle 和连接此安装的 AI 客户端后重试。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -93,7 +93,7 @@ Type: files; Name: "{app}\app-root.json.tmp"
 Type: files; Name: "{app}\kkindle-crash.log"
 
 [Code]
-function StopInstalledMcpServer: String;
+function StopInstalledProcesses: String;
 var
   PowerShellPath: String;
   ScriptPath: String;
@@ -101,11 +101,10 @@ var
   Script: String;
   Parameters: String;
   ResultCode: Integer;
+  Stopped: Boolean;
 begin
   Result := '';
-  TargetPath := ExpandConstant('{app}\mcp\Kkindle.McpServer.exe');
-  if not FileExists(TargetPath) then
-    Exit;
+  TargetPath := ExpandConstant('{app}');
 
   PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   if not FileExists(PowerShellPath) then
@@ -117,24 +116,33 @@ begin
   ScriptPath := ExpandConstant('{tmp}\Kkindle-StopMcp.ps1');
   Script :=
     '$ErrorActionPreference = ''Stop''' + #13#10 +
-    '$targetPath = [System.IO.Path]::GetFullPath($args[0])' + #13#10 +
+    '$installPath = [System.IO.Path]::GetFullPath($args[0])' + #13#10 +
+    '$targets = @((Join-Path $installPath ''Kkindle.exe''), (Join-Path $installPath ''mcp\Kkindle.McpServer.exe''))' + #13#10 +
     '$deadline = [DateTime]::UtcNow.AddSeconds(10)' + #13#10 +
     'do {' + #13#10 +
-    '  $allProcesses = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = ''Kkindle.McpServer.exe''")' + #13#10 +
+    '  $allProcesses = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = ''Kkindle.McpServer.exe'' OR Name = ''Kkindle.exe''")' + #13#10 +
     '  $matchingProcesses = @()' + #13#10 +
+    '  $unknownProcesses = @()' + #13#10 +
     '  foreach ($process in $allProcesses) {' + #13#10 +
-    '    if (-not $process.ExecutablePath) { Write-Error ''Cannot inspect a Kkindle MCP process path.''; exit 2 }' + #13#10 +
-    '    if ([System.String]::Equals([System.IO.Path]::GetFullPath($process.ExecutablePath), $targetPath, [System.StringComparison]::OrdinalIgnoreCase)) {' + #13#10 +
+    '    $path = $process.ExecutablePath' + #13#10 +
+    '    if (-not $path) {' + #13#10 +
+    '      try { $path = (Get-Process -Id $process.ProcessId -ErrorAction Stop).Path } catch {}' + #13#10 +
+    '    }' + #13#10 +
+    '    if (-not $path) {' + #13#10 +
+    '      if (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue) { $unknownProcesses += $process.ProcessId }' + #13#10 +
+    '      continue' + #13#10 +
+    '    }' + #13#10 +
+    '    if ($targets -contains [System.IO.Path]::GetFullPath($path)) {' + #13#10 +
     '      $matchingProcesses += $process' + #13#10 +
     '    }' + #13#10 +
     '  }' + #13#10 +
-    '  if ($matchingProcesses.Count -eq 0) { exit 0 }' + #13#10 +
+    '  if ($matchingProcesses.Count -eq 0 -and $unknownProcesses.Count -eq 0) { exit 0 }' + #13#10 +
     '  foreach ($process in $matchingProcesses) {' + #13#10 +
     '    try { Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop } catch {}' + #13#10 +
     '  }' + #13#10 +
     '  Start-Sleep -Milliseconds 200' + #13#10 +
     '} while ([DateTime]::UtcNow -lt $deadline)' + #13#10 +
-    'Write-Error ''Timed out while stopping the Kkindle MCP server.''' + #13#10 +
+    'Write-Error ''Could not identify or stop all Kkindle processes before timeout.''' + #13#10 +
     'exit 1' + #13#10;
 
   if not SaveStringToFile(ScriptPath, Script, False) then
@@ -145,9 +153,20 @@ begin
 
   Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ScriptPath + '" "' + TargetPath + '"';
-  if not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    Result := CustomMessage('StopMcpBeforeUpgradeFailed')
-  else if ResultCode <> 0 then
+  Stopped := Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if Stopped then
+    Stopped := ResultCode = 0;
+  if not Stopped then
+  begin
+    { Keep the installation path from the original user. Elevate only the shutdown helper,
+      not Setup: elevating Setup could change a per-user installation path. }
+    Log('Process shutdown needs administrator access; retrying the path-scoped helper.');
+    Stopped := ShellExec('runas', PowerShellPath, Parameters, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+    if Stopped then
+      Stopped := ResultCode = 0;
+  end;
+  if not Stopped then
     Result := CustomMessage('StopMcpBeforeUpgradeFailed');
 
   DeleteFile(ScriptPath);
@@ -155,5 +174,5 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  Result := StopInstalledMcpServer;
+  Result := StopInstalledProcesses;
 end;

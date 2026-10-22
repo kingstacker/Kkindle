@@ -126,6 +126,17 @@ public sealed record S3SyncResult(
     public bool IsPartial { get; init; }
 }
 
+/// <summary>Local view of the persisted sync baseline for the details dialog.</summary>
+public sealed record S3SyncStatusSummary(
+    DateTimeOffset? LastSyncAt,
+    int RemoteBookCount,
+    int PendingFileDownloadCount,
+    int SnapshotBookCount,
+    int SnapshotFileCount,
+    int SnapshotAnnotationCount,
+    int TombstoneCount,
+    DateTimeOffset? SnapshotCreatedAt);
+
 public sealed record S3SyncOptions
 {
     public string? ConfirmedDeletionFingerprint { get; init; }

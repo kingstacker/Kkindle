@@ -26,7 +26,10 @@ public sealed partial class SettingsTests
                 ancestor => ReferenceEquals(ancestor, scope.Get<Control>($"Settings{category}Section")));
 
         var data = scope.Get<StackPanel>("SettingsDataSection");
-        Assert.Same(scope.Get<Expander>("SettingsReadingDataExpander"), data.Children.Last());
+        Assert.Same(scope.Get<Border>("SettingsReadingDataSection"), data.Children.Last());
+        scope.Call("OpenSettingsExpander", "Advanced", scope.Get<Expander>("SettingsDiagnosticsExpander"));
+        await Render();
+        Capture(scope.Window, "settings-diagnostics-single-title");
         scope.Call("ZLibraryAccountButton_Click", null, new RoutedEventArgs());
         await Render();
         Assert.True(scope.Get<Control>("SettingsLibrarySection").IsEffectivelyVisible);

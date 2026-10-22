@@ -361,7 +361,7 @@ internal sealed class VerticalComposer
             ? -(cell.FootnoteMarker ? _context.Options.BaseFontSize * 0.30f : cell.FontSize * 0.35f)
             : 0f;
 
-        if (!cell.IsSpace)
+        if (!cell.IsSpace && _context.Options.CollectDebugBoxes)
         {
             _pages.AddDebugBox(new TypesetDebugBox(
                 new SKRect(columnLeft, paintY, columnLeft + ColumnPitch, y + flowAdvance),
@@ -625,6 +625,7 @@ internal sealed class VerticalComposer
 
     private void AddDebugGlyphBox(LayoutCell cell, PlacedRun run)
     {
+        if (!_context.Options.CollectDebugBoxes) return;
         if (run.Glyphs.Length == 0 || run.X.Length == 0)
         {
             return;

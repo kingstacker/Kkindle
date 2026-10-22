@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -6,6 +8,45 @@ using Kkindle.Core;
 using Kkindle.Infrastructure;
 
 namespace Kkindle;
+
+/// <summary>
+/// ObservableCollection with a single-notification bulk replace. A library
+/// refresh used to raise one Remove/Insert/Move per card, and every event made
+/// the virtualizing panel tear down its realized containers.
+/// </summary>
+public sealed class BulkObservableCollection<T> : ObservableCollection<T>
+{
+    public void ReplaceAll(IEnumerable<T> items)
+    {
+        Items.Clear();
+        foreach (var item in items) Items.Add(item);
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    /// <summary>
+    /// Skips the reset when the ordered item identities are unchanged. Search
+    /// filtering runs on every library view change, and the common case leaves
+    /// the collection list untouched.
+    /// </summary>
+    public void ReplaceAllIfChanged(IReadOnlyList<T> items)
+    {
+        if (Count == items.Count)
+        {
+            var same = true;
+            var comparer = EqualityComparer<T>.Default;
+            for (var index = 0; index < items.Count; index++)
+            {
+                if (comparer.Equals(Items[index], items[index])) continue;
+                same = false;
+                break;
+            }
+            if (same) return;
+        }
+        ReplaceAll(items);
+    }
+}
 
 /// <summary>
 /// Presentation data for one local-library book. The domain model remains
@@ -19,87 +60,50 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         UiText.LanguageChanged += OnLanguageChanged;
         Book = book;
         DataRoot = dataRoot;
+        _coverFileStamp = CoverFileStamp(book);
         Refresh();
     }
 
-    public Book Book { get; }
+    public Book Book { get; private set; }
     public string DataRoot { get; }
-    public string Title => UiText.Localize(Book.Title);
-    public string Authors => UiText.Localize(Book.Authors);
+    public string Title => _title;
+    public string Authors => _authors;
     // A book can contain several EPUB files (for example the original plus a
     // translated or bilingual edition). The old gallery only showed the
     // distinct extension, which made a successfully imported edition look as
     // if it had never been added. Keep the list view's detailed summary
     // separate and surface the file count in the compact gallery label.
-    public string FormatLabel => Book.Files.Count <= 1
-        ? Book.FormatSummary
-        : UiText.Get("{0} · {1}", Book.FormatSummary, FileCountLabel);
-    public string FileCountLabel => Book.Files.Count == 0 ? string.Empty : UiText.Get("{0} 个文件", Book.Files.Count);
-    public string TotalSizeLabel => Book.Files.Count == 0 ? UiText.Get("暂无文件") : FormatSize(Book.Files.Sum(file => file.Size));
-    public string FileSummaryLabel => string.Join(" · ", new[] { Book.FormatSummary, FileCountLabel, TotalSizeLabel }
-        .Where(value => value.Length > 0));
-    public string ReadingStatusLabel => Book.ReadingStatus switch
-    {
-        LibraryReadingStatus.Reading => UiText.Get("阅读中"),
-        LibraryReadingStatus.Finished => UiText.Get("已读"),
-        _ => UiText.Get("待读")
-    };
-    public string ReadingStateLabel => Book.IsFavorite
-        ? UiText.Get("{0} · ★ 收藏", ReadingStatusLabel)
-        : ReadingStatusLabel;
-    public string OrganizationLabel
-    {
-        get
-        {
-            var labels = new[]
-            {
-                string.IsNullOrWhiteSpace(Book.Category) ? string.Empty : UiText.Get("分类：{0}", Book.Category),
-                string.IsNullOrWhiteSpace(Book.Tags) ? string.Empty : UiText.Get("标签：{0}", Book.Tags)
-            }.Where(value => value.Length > 0).ToArray();
-            return labels.Length == 0 ? UiText.Get("暂无分类或标签") : string.Join(" · ", labels);
-        }
-    }
-    public string PublicationLabel
-    {
-        get
-        {
-            var labels = new[]
-            {
-                string.IsNullOrWhiteSpace(Book.Publisher) ? string.Empty : UiText.Get("出版社：{0}", Book.Publisher),
-                string.IsNullOrWhiteSpace(Book.PublishDate) ? string.Empty : UiText.Get("出版：{0}", Book.PublishDate),
-                string.IsNullOrWhiteSpace(Book.PageCount) ? string.Empty : UiText.Get("页数：{0}", Book.PageCount),
-                string.IsNullOrWhiteSpace(Book.Binding) ? string.Empty : UiText.Get("装帧：{0}", Book.Binding)
-            }.Where(value => value.Length > 0).ToArray();
-            return labels.Length == 0 ? UiText.Get("暂无出版信息") : string.Join(" · ", labels);
-        }
-    }
-    public string IdentifierLabel
-    {
-        get
-        {
-            var labels = new[]
-            {
-                string.IsNullOrWhiteSpace(Book.Isbn) ? string.Empty : UiText.Get("ISBN：{0}", Book.Isbn),
-                Book.DoubanRating is { } rating
-                    ? UiText.Get("豆瓣：{0:0.0}（{1} 人评价）", rating, Book.DoubanRatingCount ?? 0)
-                    : string.Empty
-            }.Where(value => value.Length > 0).ToArray();
-            return labels.Length == 0 ? UiText.Get("暂无 ISBN 或评分") : string.Join(" · ", labels);
-        }
-    }
-    public string DescriptionSummaryLabel
-    {
-        get
-        {
-            var description = string.IsNullOrWhiteSpace(Book.Description)
-                ? UiText.Get("暂无简介")
-                : Regex.Replace(Book.Description, @"\s+", " ").Trim();
-            return description.Length <= 90 ? description : $"{description[..90]}…";
-        }
-    }
-    public string UpdatedLabel => UiText.Get("更新于 {0:yyyy-MM-dd HH:mm}", Book.UpdatedAt.ToLocalTime());
-    public string DescriptionLabel => string.IsNullOrWhiteSpace(Book.Description) ? UiText.Get("暂无简介") : Book.Description;
+    public string FormatLabel => _formatLabel;
+    public string FileCountLabel => _fileCountLabel;
+    public string TotalSizeLabel => _totalSizeLabel;
+    public string FileSummaryLabel => _fileSummaryLabel;
+    public string ReadingStatusLabel => _readingStatusLabel;
+    public string ReadingStateLabel => _readingStateLabel;
+    public string OrganizationLabel => _organizationLabel;
+    public string PublicationLabel => _publicationLabel;
+    public string IdentifierLabel => _identifierLabel;
+    public string DescriptionSummaryLabel => _descriptionSummaryLabel;
+    public string UpdatedLabel => _updatedLabel;
+    public string DescriptionLabel => _descriptionLabel;
     public Bitmap? CoverImage { get; private set; }
+
+    // Every visible label is derived from the immutable Book snapshot and the
+    // current language. Computing them once per Refresh keeps binding reads
+    // (including Text + ToolTip.Tip on the same property) allocation-free.
+    private string _title = "";
+    private string _authors = "";
+    private string _formatLabel = "";
+    private string _fileCountLabel = "";
+    private string _totalSizeLabel = "";
+    private string _fileSummaryLabel = "";
+    private string _readingStatusLabel = "";
+    private string _readingStateLabel = "";
+    private string _organizationLabel = "";
+    private string _publicationLabel = "";
+    private string _identifierLabel = "";
+    private string _descriptionSummaryLabel = "";
+    private string _updatedLabel = "";
+    private string _descriptionLabel = "";
 
     // Keep selection on the card itself. The legacy WinUI shelf did not use
     // the list control's selection fill; it drew a black outline around the
@@ -108,6 +112,10 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     private bool _isMultiSelected;
     private bool _isHovered;
     private bool _coverLoadAttempted;
+    private bool _disposed;
+    private int _coverVersion;
+    private CancellationTokenSource? _coverCancellation;
+    public Task CoverLoadingTask { get; private set; } = Task.CompletedTask;
 
     // Any selection (single click or multi-select) turns the card outline
     // black; the check badge below is reserved for genuine multi-selection.
@@ -299,41 +307,164 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         ConversionProgressMessage = UiText.Get("正在转换…");
     }
 
-    public void Refresh()
+    private string _coverFileStamp = "";
+    private string CoverFileStamp(Book book)
     {
-        UnloadCover();
+        if (string.IsNullOrWhiteSpace(book.CoverPath)) return "";
+        var info = new FileInfo(Path.Combine(DataRoot, book.CoverPath));
+        return info.Exists ? $"{info.Length}:{info.LastWriteTimeUtc.Ticks}" : "";
+    }
 
-        OnPropertyChanged(nameof(Title));
-        OnPropertyChanged(nameof(Authors));
-        OnPropertyChanged(nameof(FormatLabel));
-        OnPropertyChanged(nameof(FileCountLabel));
-        OnPropertyChanged(nameof(TotalSizeLabel));
-        OnPropertyChanged(nameof(FileSummaryLabel));
-        OnPropertyChanged(nameof(ReadingStatusLabel));
-        OnPropertyChanged(nameof(ReadingStateLabel));
-        OnPropertyChanged(nameof(OrganizationLabel));
-        OnPropertyChanged(nameof(PublicationLabel));
-        OnPropertyChanged(nameof(IdentifierLabel));
-        OnPropertyChanged(nameof(DescriptionSummaryLabel));
-        OnPropertyChanged(nameof(UpdatedLabel));
-        OnPropertyChanged(nameof(DescriptionLabel));
+    public void UpdateBook(Book book)
+    {
+        // The page query returns the same UpdatedAt for unchanged books, so a
+        // refresh no longer stats every cover file just to rediscover that
+        // nothing changed.
+        var filesChanged = !Book.Files.Select(file => (file.Id, file.Sha256, file.RelativePath))
+            .SequenceEqual(book.Files.Select(file => (file.Id, file.Sha256, file.RelativePath)));
+        var metadataChanged = Book.UpdatedAt != book.UpdatedAt
+            || Book.Title != book.Title
+            || Book.CoverPath != book.CoverPath
+            || filesChanged;
+        var stamp = metadataChanged ? CoverFileStamp(book) : _coverFileStamp;
+        var coverChanged = metadataChanged
+            && (stamp != _coverFileStamp || Book.Title != book.Title
+                || Book.CoverPath != book.CoverPath || filesChanged);
+        var wasLoaded = _coverLoadAttempted;
+        _coverFileStamp = stamp;
+        Book = book;
+        Refresh(coverChanged);
+        if (coverChanged && wasLoaded) LoadCover();
+    }
+
+    public void Refresh(bool unloadCover = true)
+    {
+        if (unloadCover) UnloadCover();
+
+        var files = Book.Files;
+        var title = UiText.Localize(Book.Title);
+        var authors = UiText.Localize(Book.Authors);
+        var fileCountLabel = files.Count == 0 ? string.Empty : UiText.Get("{0} 个文件", files.Count);
+        var totalSizeLabel = files.Count == 0 ? UiText.Get("暂无文件") : FormatSize(files.Sum(file => file.Size));
+        var formatLabel = files.Count <= 1
+            ? Book.FormatSummary
+            : UiText.Get("{0} · {1}", Book.FormatSummary, fileCountLabel);
+        var fileSummaryLabel = string.Join(" · ", new[] { Book.FormatSummary, fileCountLabel, totalSizeLabel }
+            .Where(value => value.Length > 0));
+        var readingStatusLabel = Book.ReadingStatus switch
+        {
+            LibraryReadingStatus.Reading => UiText.Get("阅读中"),
+            LibraryReadingStatus.Finished => UiText.Get("已读"),
+            _ => UiText.Get("待读")
+        };
+        var readingStateLabel = Book.IsFavorite
+            ? UiText.Get("{0} · ★ 收藏", readingStatusLabel)
+            : readingStatusLabel;
+        var organizationLabel = JoinLabels(
+            string.IsNullOrWhiteSpace(Book.Category) ? string.Empty : UiText.Get("分类：{0}", Book.Category),
+            string.IsNullOrWhiteSpace(Book.Tags) ? string.Empty : UiText.Get("标签：{0}", Book.Tags),
+            empty: UiText.Get("暂无分类或标签"));
+        var publicationLabel = JoinLabels(
+            string.IsNullOrWhiteSpace(Book.Publisher) ? string.Empty : UiText.Get("出版社：{0}", Book.Publisher),
+            string.IsNullOrWhiteSpace(Book.PublishDate) ? string.Empty : UiText.Get("出版：{0}", Book.PublishDate),
+            string.IsNullOrWhiteSpace(Book.PageCount) ? string.Empty : UiText.Get("页数：{0}", Book.PageCount),
+            string.IsNullOrWhiteSpace(Book.Binding) ? string.Empty : UiText.Get("装帧：{0}", Book.Binding),
+            empty: UiText.Get("暂无出版信息"));
+        var identifierLabel = JoinLabels(
+            string.IsNullOrWhiteSpace(Book.Isbn) ? string.Empty : UiText.Get("ISBN：{0}", Book.Isbn),
+            Book.DoubanRating is { } rating
+                ? UiText.Get("豆瓣：{0:0.0}（{1} 人评价）", rating, Book.DoubanRatingCount ?? 0)
+                : string.Empty,
+            empty: UiText.Get("暂无 ISBN 或评分"));
+        string descriptionLabel;
+        string descriptionSummaryLabel;
+        if (string.IsNullOrWhiteSpace(Book.Description))
+        {
+            descriptionLabel = descriptionSummaryLabel = UiText.Get("暂无简介");
+        }
+        else
+        {
+            descriptionLabel = Book.Description;
+            var description = Regex.Replace(Book.Description, @"\s+", " ").Trim();
+            descriptionSummaryLabel = description.Length <= 90 ? description : $"{description[..90]}…";
+        }
+        var updatedLabel = UiText.Get("更新于 {0:yyyy-MM-dd HH:mm}", Book.UpdatedAt.ToLocalTime());
+
+        SetLabel(ref _title, title, nameof(Title));
+        SetLabel(ref _authors, authors, nameof(Authors));
+        SetLabel(ref _formatLabel, formatLabel, nameof(FormatLabel));
+        SetLabel(ref _fileCountLabel, fileCountLabel, nameof(FileCountLabel));
+        SetLabel(ref _totalSizeLabel, totalSizeLabel, nameof(TotalSizeLabel));
+        SetLabel(ref _fileSummaryLabel, fileSummaryLabel, nameof(FileSummaryLabel));
+        SetLabel(ref _readingStatusLabel, readingStatusLabel, nameof(ReadingStatusLabel));
+        SetLabel(ref _readingStateLabel, readingStateLabel, nameof(ReadingStateLabel));
+        SetLabel(ref _organizationLabel, organizationLabel, nameof(OrganizationLabel));
+        SetLabel(ref _publicationLabel, publicationLabel, nameof(PublicationLabel));
+        SetLabel(ref _identifierLabel, identifierLabel, nameof(IdentifierLabel));
+        SetLabel(ref _descriptionSummaryLabel, descriptionSummaryLabel, nameof(DescriptionSummaryLabel));
+        SetLabel(ref _updatedLabel, updatedLabel, nameof(UpdatedLabel));
+        SetLabel(ref _descriptionLabel, descriptionLabel, nameof(DescriptionLabel));
         OnPropertyChanged(nameof(CoverImage));
+    }
+
+    private void SetLabel(ref string field, string value, string propertyName)
+    {
+        if (string.Equals(field, value, StringComparison.Ordinal)) return;
+        field = value;
+        OnPropertyChanged(propertyName);
+    }
+
+    private static string JoinLabels(string first, string second, string empty)
+    {
+        if (first.Length == 0) return second.Length == 0 ? empty : second;
+        return second.Length == 0 ? first : string.Concat(first, " · ", second);
+    }
+
+    private static string JoinLabels(string first, string second, string third, string fourth, string empty)
+    {
+        var parts = new List<string>(4);
+        if (first.Length > 0) parts.Add(first);
+        if (second.Length > 0) parts.Add(second);
+        if (third.Length > 0) parts.Add(third);
+        if (fourth.Length > 0) parts.Add(fourth);
+        return parts.Count == 0 ? empty : string.Join(" · ", parts);
     }
 
     public void LoadCover()
     {
-        if (_coverLoadAttempted) return;
+        if (_disposed || _coverLoadAttempted) return;
         _coverLoadAttempted = true;
-        var storedCoverPath = string.IsNullOrWhiteSpace(Book.CoverPath) ? null : Path.Combine(DataRoot, Book.CoverPath);
-        var generatedTxtCover = Book.Files.Where(file => file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase))
-            .Any(file => TitleCoverService.IsGeneratedTxtCover(Path.Combine(DataRoot, file.RelativePath), storedCoverPath));
-        CoverImage = generatedTxtCover ? null : LoadCoverImage(DataRoot, Book.CoverPath, 320);
-        if (CoverImage is null)
+        var version = ++_coverVersion;
+        var cancellation = new CancellationTokenSource();
+        _coverCancellation = cancellation;
+        CoverLoadingTask = LoadCoverAsync(Book, version, cancellation);
+    }
+
+    private async Task LoadCoverAsync(Book book, int version, CancellationTokenSource cancellation)
+    {
+        Bitmap? image = null;
+        try
         {
-            using var cover = new MemoryStream(TitleCoverService.CreatePng(Book.Title));
-            CoverImage = Bitmap.DecodeToWidth(cover, 320);
+            image = await CoverThumbnailCache.LoadAsync(book, DataRoot, cancellation.Token);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_disposed || version != _coverVersion) return;
+                CoverImage = image;
+                image = null;
+                OnPropertyChanged(nameof(CoverImage));
+            });
         }
-        OnPropertyChanged(nameof(CoverImage));
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            if (version == _coverVersion) _coverLoadAttempted = false;
+        }
+        finally
+        {
+            image?.Dispose();
+            if (ReferenceEquals(_coverCancellation, cancellation)) _coverCancellation = null;
+            cancellation.Dispose();
+        }
     }
 
     /// <summary>
@@ -343,6 +474,8 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
     /// </summary>
     public void UnloadCover()
     {
+        ++_coverVersion;
+        _coverCancellation?.Cancel();
         if (CoverImage is null && !_coverLoadAttempted) return;
         CoverImage?.Dispose();
         CoverImage = null;
@@ -352,19 +485,9 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        OnPropertyChanged(nameof(Title));
-        OnPropertyChanged(nameof(Authors));
-        OnPropertyChanged(nameof(FileCountLabel));
-        OnPropertyChanged(nameof(TotalSizeLabel));
-        OnPropertyChanged(nameof(FileSummaryLabel));
-        OnPropertyChanged(nameof(ReadingStatusLabel));
-        OnPropertyChanged(nameof(ReadingStateLabel));
-        OnPropertyChanged(nameof(OrganizationLabel));
-        OnPropertyChanged(nameof(PublicationLabel));
-        OnPropertyChanged(nameof(IdentifierLabel));
-        OnPropertyChanged(nameof(DescriptionSummaryLabel));
-        OnPropertyChanged(nameof(UpdatedLabel));
-        OnPropertyChanged(nameof(DescriptionLabel));
+        // Refresh recomputes every cached label; the remaining properties are
+        // not derived from Book and only need a notification.
+        Refresh(unloadCover: false);
         OnPropertyChanged(nameof(PresenceLabel));
         OnPropertyChanged(nameof(SyncStatusLabel));
         OnPropertyChanged(nameof(ConversionProgressMessage));
@@ -372,6 +495,7 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         UiText.LanguageChanged -= OnLanguageChanged;
         UnloadCover();
     }
@@ -407,6 +531,11 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
 public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposable
 {
     private readonly Bitmap?[] _covers = new Bitmap?[3];
+    private static readonly SemaphoreSlim CoverGate = new(2, 2);
+    private string _coverStamp = string.Empty;
+    private int _coverVersion;
+    private bool _disposed;
+    public Task CoverLoadingTask { get; private set; } = Task.CompletedTask;
 
     public BookCollectionFolderViewModel(
         BookCollection collection,
@@ -415,23 +544,62 @@ public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposabl
         IReadOnlyList<string?> coverPaths)
     {
         UiText.LanguageChanged += OnLanguageChanged;
+        Update(collection, bookCount, dataRoot, coverPaths);
+    }
+
+    public BookCollection Collection { get; private set; } = null!;
+    public void Update(BookCollection collection, int count, string root, IReadOnlyList<string?> paths)
+    {
         Collection = collection;
-        BookCount = bookCount;
-        for (var index = 0; index < _covers.Length; index++)
+        BookCount = count;
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(BookCountLabel));
+        var stamp = string.Join("|", paths.Select(path =>
         {
-            var path = index < coverPaths.Count ? coverPaths[index] : null;
-            _covers[index] = LoadCoverImage(dataRoot, path, 96);
+            var file = new FileInfo(Path.Combine(root, path ?? "__missing__"));
+            return file.Exists ? $"{file.FullName}:{file.Length}:{file.LastWriteTimeUtc.Ticks}" : path;
+        }));
+        if (stamp == _coverStamp) return;
+        _coverStamp = stamp;
+        var version = ++_coverVersion;
+        CoverLoadingTask = LoadCoversAsync(root, paths.ToArray(), version);
+    }
+
+    private async Task LoadCoversAsync(string root, IReadOnlyList<string?> paths, int version)
+    {
+        await CoverGate.WaitAsync();
+        Bitmap?[]? loaded = null;
+        try
+        {
+            if (_disposed || version != _coverVersion) return;
+            loaded = await Task.Run(() => Enumerable.Range(0, 3)
+                .Select(index => LoadCoverImage(root, index < paths.Count ? paths[index] : null, 96)).ToArray());
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_disposed || version != _coverVersion) return;
+                for (var i = 0; i < 3; i++)
+                {
+                    _covers[i]?.Dispose();
+                    _covers[i] = loaded[i];
+                    loaded[i] = null;
+                    OnPropertyChanged($"Cover{i + 1}");
+                }
+            });
+        }
+        finally
+        {
+            if (loaded is not null) foreach (var image in loaded) image?.Dispose();
+            CoverGate.Release();
         }
     }
 
-    public BookCollection Collection { get; }
     public string Name => string.Equals(
         Collection.Name,
         BookLibraryDefaults.UncollectedCollectionName,
         StringComparison.Ordinal)
         ? UiText.Get("未收藏")
         : UiText.Localize(Collection.Name);
-    public int BookCount { get; }
+    public int BookCount { get; private set; }
     public string BookCountLabel => UiText.Get("{0} 本书", BookCount);
     public Bitmap? Cover1 => _covers[0];
     public Bitmap? Cover2 => _covers[1];
@@ -445,6 +613,8 @@ public sealed class BookCollectionFolderViewModel : ObservableObject, IDisposabl
 
     public void Dispose()
     {
+        _disposed = true;
+        ++_coverVersion;
         UiText.LanguageChanged -= OnLanguageChanged;
         foreach (var cover in _covers) cover?.Dispose();
     }
@@ -484,7 +654,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     private Guid? _collectionFilterId;
     private string? _collectionFilterName;
     private LibraryReadingStatus? _readingStatusFilter;
-    private bool _favoritesOnly;
+    private bool? _favoriteFilter;
     private LibrarySortMode _sortMode;
     private int _pageIndex;
     private int _pageCount = 1;
@@ -499,10 +669,12 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
     {
         _library = library;
         _dataRoot = dataRoot;
-        UiText.LanguageChanged += OnLanguageChanged;
+        // MainWindow owns the language-change refresh (cards still subscribe
+        // individually for their cached labels); refreshing here as well ran
+        // two identical database queries and cancelled one of them.
     }
 
-    public ObservableCollection<BookCardViewModel> Books { get; } = [];
+    public BulkObservableCollection<BookCardViewModel> Books { get; } = [];
     public IReadOnlyList<Book> LibraryBooks { get; private set; } = [];
     public IReadOnlyList<string> AvailableAuthors { get; private set; } = [];
     public IReadOnlyList<string> AvailableTags { get; private set; } = [];
@@ -573,10 +745,10 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         set => SetFilter(ref _readingStatusFilter, value);
     }
 
-    public bool FavoritesOnly
+    public bool? FavoriteFilter
     {
-        get => _favoritesOnly;
-        set => SetFilter(ref _favoritesOnly, value);
+        get => _favoriteFilter;
+        set => SetFilter(ref _favoriteFilter, value);
     }
 
     public LibrarySortMode SortMode
@@ -590,7 +762,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         || !string.IsNullOrWhiteSpace(FormatFilter)
         || !string.IsNullOrWhiteSpace(CategoryFilter)
         || ReadingStatusFilter is not null
-        || FavoritesOnly
+        || FavoriteFilter is not null
         || CollectionFilterId is not null;
 
     public string StatusText
@@ -601,15 +773,26 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
     public event EventHandler? ViewChanged;
 
-    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    public async Task RefreshAsync(
+        CancellationToken cancellationToken = default,
+        Action<string>? progress = null)
     {
         IsBusy = true;
         try
         {
-            _bookCount = await _library.GetBookCountAsync(cancellationToken);
+            // Microsoft.Data.Sqlite executes its "async" commands synchronously,
+            // so run the whole query on the thread pool instead of letting it
+            // block the UI thread between awaits.
+            progress?.Invoke("正在统计书籍…");
+            _bookCount = await Task.Run(
+                () => _library.GetBookCountAsync(cancellationToken),
+                cancellationToken);
             OnPropertyChanged(nameof(BookCount));
 
-            var options = await _library.GetFilterOptionsAsync(cancellationToken);
+            progress?.Invoke("正在读取筛选选项…");
+            var options = await Task.Run(
+                () => _library.GetFilterOptionsAsync(cancellationToken),
+                cancellationToken);
             AvailableAuthors = options.Authors;
             AvailableTags = options.Tags;
             AvailableFormats = options.Formats;
@@ -619,7 +802,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(AvailableTags));
             OnPropertyChanged(nameof(AvailableFormats));
             OnPropertyChanged(nameof(AvailableCategories));
-            await RefreshViewAsync(resetPage: true, cancellationToken);
+            await RefreshViewAsync(resetPage: true, cancellationToken, progress);
         }
         finally
         {
@@ -645,7 +828,6 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        UiText.LanguageChanged -= OnLanguageChanged;
         _viewCancellation?.Cancel();
         _viewCancellation?.Dispose();
         foreach (var card in _bookCards.Values)
@@ -658,12 +840,13 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null)
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null,
+        IReadOnlyDictionary<string, TxtImportRules>? txtImportRules = null)
     {
         IsBusy = true;
         try
         {
-            var result = await _library.ImportAsync(paths, progress, cancellationToken, conflictResolver);
+            var result = await _library.ImportAsync(paths, progress, cancellationToken, conflictResolver, txtImportRules);
             await RefreshAsync(cancellationToken);
             StatusText = result.FailureCount == 0
                 ? result.SkippedCount == 0
@@ -698,7 +881,8 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
     public async Task RefreshViewAsync(
         bool resetPage = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? progress = null)
     {
         if (resetPage) _pageIndex = 0;
         var requestId = Interlocked.Increment(ref _viewRequestId);
@@ -709,27 +893,9 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            var page = await _library.SearchPageAsync(
-                SearchText,
-                AuthorFilter,
-                TagFilter,
-                FormatFilter,
-                CategoryFilter,
-                CollectionFilterId,
-                ReadingStatusFilter,
-                FavoritesOnly,
-                SortMode,
-                _pageIndex,
-                PageSize,
-                requestToken);
-            requestToken.ThrowIfCancellationRequested();
-            if (requestId != _viewRequestId) return;
-
-            var lastPageIndex = Math.Max(0, (int)Math.Ceiling(page.TotalCount / (double)PageSize) - 1);
-            if (_pageIndex > lastPageIndex)
-            {
-                _pageIndex = lastPageIndex;
-                page = await _library.SearchPageAsync(
+            progress?.Invoke("正在查询书架内容…");
+            var page = await Task.Run(
+                () => _library.SearchPageAsync(
                     SearchText,
                     AuthorFilter,
                     TagFilter,
@@ -737,10 +903,34 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
                     CategoryFilter,
                     CollectionFilterId,
                     ReadingStatusFilter,
-                    FavoritesOnly,
+                    FavoriteFilter,
                     SortMode,
                     _pageIndex,
                     PageSize,
+                    requestToken),
+                requestToken);
+            requestToken.ThrowIfCancellationRequested();
+            if (requestId != _viewRequestId) return;
+
+            progress?.Invoke("正在整理书籍卡片…");
+            var lastPageIndex = Math.Max(0, (int)Math.Ceiling(page.TotalCount / (double)PageSize) - 1);
+            if (_pageIndex > lastPageIndex)
+            {
+                _pageIndex = lastPageIndex;
+                page = await Task.Run(
+                    () => _library.SearchPageAsync(
+                        SearchText,
+                        AuthorFilter,
+                        TagFilter,
+                        FormatFilter,
+                        CategoryFilter,
+                        CollectionFilterId,
+                        ReadingStatusFilter,
+                        FavoriteFilter,
+                        SortMode,
+                        _pageIndex,
+                        PageSize,
+                        requestToken),
                     requestToken);
                 requestToken.ThrowIfCancellationRequested();
                 if (requestId != _viewRequestId) return;
@@ -762,15 +952,30 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CanGoToNextPage));
             OnPropertyChanged(nameof(PageStatusText));
 
-            foreach (var card in _bookCards.Values) card.Dispose();
-            _bookCards.Clear();
-            Books.Clear();
+            var incomingIds = page.Books.Select(book => book.Id).ToHashSet();
+            foreach (var id in _bookCards.Keys.Where(id => !incomingIds.Contains(id)).ToArray())
+            {
+                var old = _bookCards[id];
+                old.Dispose();
+                _bookCards.Remove(id);
+            }
+
+            var orderedCards = new List<BookCardViewModel>(page.Books.Count);
             foreach (var book in page.Books)
             {
-                var card = new BookCardViewModel(book, _dataRoot);
-                _bookCards[book.Id] = card;
-                Books.Add(card);
+                if (!_bookCards.TryGetValue(book.Id, out var card))
+                {
+                    card = new BookCardViewModel(book, _dataRoot);
+                    _bookCards.Add(book.Id, card);
+                }
+                else
+                {
+                    card.UpdateBook(book);
+                }
+                orderedCards.Add(card);
             }
+            Books.ReplaceAll(orderedCards);
+            progress?.Invoke("正在刷新书架界面…");
 
             var baseStatus = page.TotalCount == 0
                 ? _bookCount == 0 ? UiText.Get("书库还是空的")
@@ -787,6 +992,7 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
 
             OnPropertyChanged(nameof(HasActiveFilters));
             ViewChanged?.Invoke(this, EventArgs.Empty);
+            progress?.Invoke("书架界面已刷新");
         }
         finally
         {
@@ -815,7 +1021,4 @@ public sealed class LibraryViewModel : ObservableObject, IDisposable
         if (!SetProperty(ref field, value, propertyName)) return;
         OnPropertyChanged(nameof(HasActiveFilters));
     }
-
-    private void OnLanguageChanged(object? sender, EventArgs e) =>
-        _ = RefreshViewSafelyAsync(resetPage: false);
 }

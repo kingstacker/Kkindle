@@ -584,4 +584,44 @@ public sealed class ReaderProductivityTests
         var empty = ReaderAnnotationExport.BuildMarkdown("空书", "作者", [], null);
         Assert.Contains("暂无划线与批注", empty);
     }
+    [Fact]
+    public async Task LargeBookExactSearchPreservesShortAndLiteralMatches()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var service = new ReaderDataService(new AppPaths(Path.Combine(root, "app")));
+            await service.InitializeAsync();
+            var bookId = Guid.NewGuid();
+            var fileId = Guid.NewGuid();
+            var drafts = Enumerable.Range(0, 12000).Select(index =>
+                new BookContentChunkDraft(index, 0, $"Chapter {index}", $"{index}.xhtml", 0, 1000,
+                    new string('文', 950) + (index == 11999 ? "目标 100% a_b 长短语检索目标" : "普通正文"))).ToArray();
+            await service.ReplaceBookChunksAsync(bookId, fileId, new string('f', 64), drafts);
+            foreach (var query in new[] { "目标", "100%", "a_b", "长短语检索目标", "完全不存在的短语" })
+            {
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+                var hits = await service.SearchBookAsync(bookId, query, 500,
+                    exactPhraseOnly: true, bookFileId: fileId);
+                Console.WriteLine($"Large book: {query}, {timer.Elapsed.TotalMilliseconds:F1} ms");
+                if (query == "完全不存在的短语") Assert.Empty(hits);
+                else Assert.Equal(11999, Assert.Single(hits).ChapterIndex);
+            }
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                service.SearchBookAsync(bookId, "目标", cancellationToken: cancellation.Token));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public void PdfSearchHonorsCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Assert.Throws<OperationCanceledException>(() => PdfTextService.Search(
+            [new PdfPageText(1, new string('x', 1000000))], "missing", 500, cancellation.Token));
+    }
+
 }

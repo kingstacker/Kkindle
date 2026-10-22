@@ -9,6 +9,46 @@ namespace Kkindle.Platform.Common.Tests;
 public sealed class MassStorageKindleDeviceServiceTests
 {
     [Fact]
+    public async Task LargeLibraryRescanReusesCoverlessMetadataAndRechecksChangedFiles()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var kindle = Path.Combine(root, "Kindle");
+            var documents = Path.Combine(kindle, "documents");
+            Directory.CreateDirectory(documents);
+            for (var i = 0; i < 1000; i++) await File.WriteAllTextAsync(Path.Combine(documents, $"book-{i}.epub"), $"payload {i}");
+            var metadata = new CountingMetadataService();
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new MassStorageKindleDeviceService(paths, metadata, [root]);
+            var device = new KindleDevice { RootPath = kindle, Transport = KindleTransport.MassStorage };
+            var first = await service.ScanBooksAsync(device);
+            Assert.Equal(1000, first.Count);
+            Assert.Equal(1000, metadata.Reads);
+            // A fresh service must reuse the persisted cache, including missing covers.
+            service = new MassStorageKindleDeviceService(paths, metadata, [root]);
+            Assert.Equal(1000, (await service.ScanBooksAsync(device)).Count);
+            Assert.Equal(1000, metadata.Reads);
+            await File.AppendAllTextAsync(Path.Combine(documents, "book-0.epub"), "new edition");
+            var third = await service.ScanBooksAsync(device);
+            Assert.Equal(1001, metadata.Reads);
+            Assert.NotEqual(first.Single(book => book.RelativePath.EndsWith("book-0.epub")).Sha256,
+                third.Single(book => book.RelativePath.EndsWith("book-0.epub")).Sha256);
+        }
+        finally { TryDelete(root); }
+    }
+
+    private sealed class CountingMetadataService : IMetadataService
+    {
+        public int Reads;
+        public Task<BookMetadata> ReadMetadataAsync(string path, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref Reads);
+            return Task.FromResult(new BookMetadata { Title = "Coverless", Authors = "Author" });
+        }
+    }
+
+    [Fact]
     public async Task DetectSendScanExportAndRemove_RoundTripsMountedKindle()
     {
         var root = CreateTempDirectory();
@@ -34,7 +74,8 @@ public sealed class MassStorageKindleDeviceServiceTests
             await File.WriteAllBytesAsync(source, bytes);
             var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
-            await service.SendBookAsync(device, new BookFile { Sha256 = hash }, source);
+            var sourceFile = new BookFile { Sha256 = hash };
+            await service.SendBookAsync(device, sourceFile, source);
             var book = Assert.Single(await service.ScanBooksAsync(device));
             Assert.Equal("测试书籍", book.Title);
             Assert.Equal(hash, book.Sha256);
@@ -43,8 +84,21 @@ public sealed class MassStorageKindleDeviceServiceTests
             var exported = await service.ExportBookAsync(device, book, exportDirectory);
             Assert.Equal(bytes, await File.ReadAllBytesAsync(exported));
 
+            var readingState = Path.ChangeExtension(Path.Combine(device.RootPath, book.RelativePath), ".sdr");
+            Directory.CreateDirectory(readingState);
+            await File.WriteAllTextAsync(Path.Combine(readingState, "notes"), "saved annotation");
+            await service.SendBookAsync(device, sourceFile, source);
+            Assert.True(Directory.Exists(readingState));
             await service.RemoveBookAsync(device, book);
             Assert.Empty(await service.ScanBooksAsync(device));
+            Assert.False(Directory.Exists(readingState));
+            Assert.Empty(Directory.GetDirectories(Path.GetDirectoryName(readingState)!, "kkindle-reading-backup-*"));
+            Directory.CreateDirectory(readingState);
+            await File.WriteAllTextAsync(Path.Combine(readingState, "stale"), "old edition");
+            await service.SendBookAsync(device, sourceFile, source);
+            Assert.False(Directory.Exists(readingState));
+            Assert.Single(await service.ScanBooksAsync(device));
+            Assert.Empty(Directory.GetDirectories(Path.GetDirectoryName(readingState)!, "kkindle-reading-backup-*"));
         }
         finally
         {

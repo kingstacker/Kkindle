@@ -33,7 +33,6 @@ public partial class MainWindow
     private const int MaxReadingMaterials = 5_000;
     private const int DevicePageSize = 200;
     private readonly DispatcherTimer _stage3Timer = new() { Interval = TimeSpan.FromSeconds(3) };
-    private readonly DispatcherTimer _transferToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _taskSpinnerTimer = new(DispatcherPriority.Render)
     {
         Interval = TimeSpan.FromMilliseconds(50)
@@ -43,6 +42,7 @@ public partial class MainWindow
     private readonly DispatcherTimer _s3LocalChangeSyncTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private static readonly TimeSpan S3LocalChangeSyncDebounce = TimeSpan.FromSeconds(5);
     private IReadOnlyList<KindleDevice> _devices = [];
+    private Task<IReadOnlyList<KindleDevice>>? _deviceDetectionTask;
     private string? _lastDeviceIdentity;
     private string? _acceptedDeviceId;
     private string? _ignoredDeviceId;
@@ -86,6 +86,8 @@ public partial class MainWindow
     private int _s3LocalChangeRetryAttempt;
     private bool _suppressS3SettingsDraftTracking;
     private DateTimeOffset? _lastS3SyncAt;
+    private S3SyncResult? _lastS3SyncResult;
+    private int _readingDashboardDayCount = 14;
     private bool _readingMaterialsExportMode;
     private Popup? _readingMaterialPreviewPopup;
     private Border? _readingMaterialPreviewTarget;
@@ -117,15 +119,11 @@ public partial class MainWindow
     private CancellationTokenSource? _transferCancellation;
     private CancellationTokenSource? _transferPrefetchCancellation;
     private bool _transferStopRequested;
-    // The popup and transfer toast share the 50 ms dispatcher tick, but they
-    // do not share ownership. Overlay visibility can change while its task is
-    // still running, so the active flags—not IsVisible—control the animation.
+    // The generic progress popup uses this tick. Transfer progress lives in
+    // the task-history flyout instead of a second floating surface.
     private bool _taskProgressPopupSpinnerActive;
-    private bool _transferToastSpinnerActive;
     private double _taskProgressPopupSpinnerAngle;
-    private double _transferToastSpinnerAngle;
     private RotateTransform? _taskProgressPopupSpinnerTransform;
-    private RotateTransform? _transferToastSpinnerTransform;
 
     private sealed class CoalescingUiProgress<T> : IProgress<T>, IDisposable
     {
@@ -212,7 +210,8 @@ public partial class MainWindow
     private bool _diagnosticsRefreshing;
 
     public ObservableCollection<KindleBookCardViewModel> DeviceBooks { get; } = [];
-    public ObservableCollection<KindleBookCardViewModel> VisibleDeviceBooks { get; } = [];
+    private readonly Dictionary<string, KindleBookCardViewModel> _deviceCardsByPath = new(StringComparer.OrdinalIgnoreCase);
+    public BulkObservableCollection<KindleBookCardViewModel> VisibleDeviceBooks { get; } = [];
     private IReadOnlyList<KindleBookCardViewModel> _filteredDeviceBooks = [];
     private int _devicePageIndex;
     private int _devicePageCount = 1;
@@ -234,6 +233,7 @@ public partial class MainWindow
         new(new ReadingMaterialGroupKeyComparer());
     private ObservableCollection<Stage3DashboardRecentViewModel> _readingDashboardItems => DashboardRecentItems;
     private bool _readingMaterialsDirty;
+    private int _stage3IdleTicks;
 
     private KindleDevice? CurrentDevice => _devices.FirstOrDefault();
 
@@ -242,15 +242,21 @@ public partial class MainWindow
         _stage3Timer.Tick += async (_, _) =>
         {
             if (!_stage3Ready || _kindle is null || _deviceEjectInProgress) return;
+            // When the device shelf is hidden and nothing is attached, polling
+            // every 3 seconds only burns COM/disk enumeration. Check every
+            // fifth tick (15s) instead; opening the shelf still refreshes
+            // immediately through the explicit navigation path.
+            if (!DevicePage.IsVisible && _devices.Count == 0)
+            {
+                if (++_stage3IdleTicks % 5 != 0) return;
+            }
+            else
+            {
+                _stage3IdleTicks = 0;
+            }
             await RefreshDevicesAsync(scanBooks: DevicePage.IsVisible);
         };
         _stage3Timer.Start();
-        _transferToastTimer.Tick += (_, _) =>
-        {
-            _transferToastTimer.Stop();
-            if (!_transferToastSpinnerActive)
-                HideTransferToast();
-        };
         _taskSpinnerTimer.Tick += (_, _) => TickTaskSpinner();
         _deviceStatusToastTimer.Tick += (_, _) =>
         {
@@ -262,26 +268,22 @@ public partial class MainWindow
         _s3SyncTimer.Start();
     }
 
-    // Unified bottom-right task progress surface, matching the WinUI
-    // TransferToast.cs behaviour. The transfer toast replaces the generic
-    // task popup while a Kindle operation is active so the two overlays never
-    // stack. Popups fade out over ~220 ms instead of vanishing abruptly.
-    private void ShowTaskProgressPopup()
+    // Keep existing progress producers synchronized with title-bar task history.
+    private void ShowTaskProgressPopup(bool recordTask = true)
     {
-        // An active transfer toast owns the single visible task surface. A
-        // generic task may still run in the background, but it must not steal
-        // or stop the transfer task's spinner.
-        if (_transferToastSpinnerActive) return;
+        if (recordTask) BeginGenericTaskRecord();
+        // Transfer progress is rendered in the task-history flyout. Do not
+        // introduce a second floating progress surface while it is active.
+        if (_transferTaskCompletion is not null) return;
 
-        TransferToast.IsVisible = false;
-        TransferToast.Opacity = 0;
         StartTaskSpinner(TaskProgressPopupSpinnerIcon);
-        TaskProgressPopup.IsVisible = true;
+        TaskProgressPopup.IsVisible = false;
         TaskProgressPopup.Opacity = 1;
     }
 
     private void HideTaskProgressPopup()
     {
+        EndGenericTaskRecord();
         StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
         FadeOutPopup(TaskProgressPopup);
     }
@@ -294,68 +296,23 @@ public partial class MainWindow
         bool autoHide = false,
         bool completed = false)
     {
-        StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
-        TaskProgressPopup.IsVisible = false;
-        TaskProgressPopup.Opacity = 0;
-        TransferToastTitleText.Text = title;
-        TransferToastMessageText.Text = completed
-            ? T("任务完成")
-            : _transferStopRequested && _isTransferring
-                ? T("当前书籍发送完成后将停止…")
-                : message;
-        // A per-file progress callback can legitimately report 100% while a
-        // batch task still has more files to process. Only the explicit
-        // overall completion state or an auto-hidden terminal state stops the
-        // activity indicator.
         var transferActive = !completed && !autoHide;
-        TransferToastSuccessIcon.IsVisible = completed;
-        TransferToastCancelButton.IsVisible = _isTransferring && transferActive;
-        TransferToastCancelButton.IsEnabled = !_transferStopRequested;
-        TransferToastSpinnerIcon.IsVisible = transferActive;
+        UpdateTransferTaskRecord(title, message, progress, isIndeterminate, autoHide, completed);
         if (transferActive)
         {
-            // A previous completion toast may still have an auto-hide timer;
-            // it must not hide or stop the newly started task animation.
-            _transferToastTimer.Stop();
-            StartTaskSpinner(TransferToastSpinnerIcon);
+            StopTaskSpinnerFor(TaskProgressPopupSpinnerIcon);
+            TaskProgressPopup.IsVisible = false;
+            TaskProgressPopup.Opacity = 0;
+            return;
         }
-        else
-            StopTransferToastSpinner();
-        if (isIndeterminate)
-        {
-            TransferToastProgress.IsIndeterminate = true;
-            TransferToastProgress.IsVisible = true;
-        }
-        else if (progress.HasValue)
-        {
-            TransferToastProgress.IsIndeterminate = false;
-            TransferToastProgress.Value = Math.Clamp(progress.Value, 0, 100);
-            TransferToastProgress.IsVisible = true;
-        }
-        else
-        {
-            TransferToastProgress.IsVisible = false;
-        }
-        TransferToast.IsVisible = true;
-        TransferToast.Opacity = 1;
-        if (autoHide)
-        {
-            _transferToastTimer.Stop();
-            _transferToastTimer.Start();
-        }
+
+        var capsuleMessage = completed ? T("任务完成：{0}", message) : message;
+        ShowSettingsCapsule(capsuleMessage, completed ? 2400 : 3600, success: completed);
     }
 
     private void HideTransferToast()
     {
-        _transferToastTimer.Stop();
-        StopTransferToastSpinner();
-        TransferToastCancelButton.IsVisible = false;
-        FadeOutPopup(TransferToast);
-    }
-
-    private void StopTransferToastSpinner()
-    {
-        StopTaskSpinnerFor(TransferToastSpinnerIcon);
+        EndTransferTaskRecord();
     }
 
     private void StartTaskSpinner(Control icon)
@@ -370,17 +327,6 @@ public partial class MainWindow
                 _taskProgressPopupSpinnerTransform.Angle = 0;
             }
             icon.RenderTransform = _taskProgressPopupSpinnerTransform;
-        }
-        else if (ReferenceEquals(icon, TransferToastSpinnerIcon))
-        {
-            _transferToastSpinnerTransform ??= new RotateTransform(0);
-            if (!_transferToastSpinnerActive)
-            {
-                _transferToastSpinnerActive = true;
-                _transferToastSpinnerAngle = 0;
-                _transferToastSpinnerTransform.Angle = 0;
-            }
-            icon.RenderTransform = _transferToastSpinnerTransform;
         }
         else
         {
@@ -400,30 +346,16 @@ public partial class MainWindow
             _taskProgressPopupSpinnerActive = false;
             _taskProgressPopupSpinnerAngle = 0;
         }
-        else if (ReferenceEquals(icon, TransferToastSpinnerIcon))
-        {
-            _transferToastSpinnerActive = false;
-            _transferToastSpinnerAngle = 0;
-        }
         else
         {
             return;
         }
 
-        if (ReferenceEquals(icon, TaskProgressPopupSpinnerIcon))
-        {
-            _taskProgressPopupSpinnerTransform ??= new RotateTransform(0);
-            _taskProgressPopupSpinnerTransform.Angle = 0;
-            icon.RenderTransform = _taskProgressPopupSpinnerTransform;
-        }
-        else
-        {
-            _transferToastSpinnerTransform ??= new RotateTransform(0);
-            _transferToastSpinnerTransform.Angle = 0;
-            icon.RenderTransform = _transferToastSpinnerTransform;
-        }
+        _taskProgressPopupSpinnerTransform ??= new RotateTransform(0);
+        _taskProgressPopupSpinnerTransform.Angle = 0;
+        icon.RenderTransform = _taskProgressPopupSpinnerTransform;
         icon.IsVisible = false;
-        if (!_taskProgressPopupSpinnerActive && !_transferToastSpinnerActive)
+        if (!_taskProgressPopupSpinnerActive)
             _taskSpinnerTimer.Stop();
     }
 
@@ -431,22 +363,16 @@ public partial class MainWindow
     {
         _taskSpinnerTimer.Stop();
         _taskProgressPopupSpinnerActive = false;
-        _transferToastSpinnerActive = false;
         _taskProgressPopupSpinnerAngle = 0;
-        _transferToastSpinnerAngle = 0;
         _taskProgressPopupSpinnerTransform ??= new RotateTransform(0);
         _taskProgressPopupSpinnerTransform.Angle = 0;
         TaskProgressPopupSpinnerIcon.RenderTransform = _taskProgressPopupSpinnerTransform;
         TaskProgressPopupSpinnerIcon.IsVisible = false;
-        _transferToastSpinnerTransform ??= new RotateTransform(0);
-        _transferToastSpinnerTransform.Angle = 0;
-        TransferToastSpinnerIcon.RenderTransform = _transferToastSpinnerTransform;
-        TransferToastSpinnerIcon.IsVisible = false;
     }
 
     private void TickTaskSpinner()
     {
-        if (!_taskProgressPopupSpinnerActive && !_transferToastSpinnerActive)
+        if (!_taskProgressPopupSpinnerActive)
         {
             _taskSpinnerTimer.Stop();
             return;
@@ -460,23 +386,13 @@ public partial class MainWindow
             _taskProgressPopupSpinnerTransform.Angle = _taskProgressPopupSpinnerAngle;
             TaskProgressPopupSpinnerIcon.RenderTransform = _taskProgressPopupSpinnerTransform;
         }
-
-        if (_transferToastSpinnerActive)
-        {
-            TransferToastSpinnerIcon.IsVisible = true;
-            _transferToastSpinnerAngle = (_transferToastSpinnerAngle + 18) % 360;
-            _transferToastSpinnerTransform ??= new RotateTransform(0);
-            _transferToastSpinnerTransform.Angle = _transferToastSpinnerAngle;
-            TransferToastSpinnerIcon.RenderTransform = _transferToastSpinnerTransform;
-        }
     }
 
-    private void TransferToastCancelButton_Click(object? sender, RoutedEventArgs e)
+    private void RequestTransferStop()
     {
         if (!_isTransferring) return;
         _transferStopRequested = true;
-        TransferToastCancelButton.IsEnabled = false;
-        TransferToastMessageText.Text = T("当前书籍发送完成后将停止…");
+        ReportTransferTaskStage(T("当前书籍发送完成后将停止…"));
         SetTaskStatus(T("当前书籍发送完成后将停止发送。"));
         _transferPrefetchCancellation?.Cancel();
     }
@@ -623,10 +539,15 @@ public partial class MainWindow
     {
         if (_stage3Ready) return;
 
+        SetTaskStatus(T("正在加载云端同步设置…"));
         _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(cancellationToken);
+        SetTaskStatus(T("正在初始化阅读数据…"));
         await _readerData.InitializeAsync(cancellationToken);
+        SetTaskStatus(T("正在初始化同步记录…"));
         await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken, _s3SyncStoredSettings.DeviceId);
+        SetTaskStatus(T("正在初始化设备设置…"));
         await _deviceModelStore.InitializeAsync(cancellationToken);
+        SetTaskStatus(T("正在读取应用设置…"));
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
         SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode));
         ApplyMainAppearance();
@@ -637,12 +558,17 @@ public partial class MainWindow
         _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
         RefreshLocalizedReadingMaterialsSourceFilter();
         LoadReaderVerticalDebugBoxesSetting();
+        SetTaskStatus(T("正在检查 Calibre…"));
         await DetectCalibreAtStartupAsync(cancellationToken);
+        SetTaskStatus(T("正在加载发送设置…"));
         _kindleEmailSettings = await _kindleEmailSettingsStore.LoadAsync(cancellationToken);
         RefreshS3SyncIndicatorFromSettings();
         PopulateSettingsControls();
         ConfigureAppSettingsAutoSave();
+        SetTaskStatus(T("正在加载本地资源…"));
         await RefreshManagedResourcesAsync(cancellationToken);
+        SetTaskStatus(T("正在检查设备…"));
+        DeviceStorageText.Text = T("正在读取存储信息…");
         DevicePageDeviceText.Text = T("正在检查设备…");
         DevicePageStatusText.Text = T("正在读取设备连接状态。");
         _stage3Ready = true;
@@ -718,7 +644,7 @@ public partial class MainWindow
     {
         if (!_isTransferring) return false;
         SetTaskStatus(T("正在发送书籍，完成或停止后才能切换功能区。"));
-        TransferToastMessageText.Text = T("正在发送，请完成或停止任务后再切换功能区。" );
+        ReportTransferTaskStage(T("正在发送，请完成或停止任务后再切换功能区。"));
         return true;
     }
 
@@ -805,7 +731,7 @@ public partial class MainWindow
                 return;
             }
 
-            var detected = await _kindle.DetectDevicesAsync(cancellationToken);
+            var detected = await DetectDevicesWithTimeoutAsync(cancellationToken);
             if (detected.Count != 1)
             {
                 _acceptedDeviceId = null;
@@ -866,8 +792,8 @@ public partial class MainWindow
             DeviceNameButton.IsEnabled = true;
             DevicePageStatusText.Text = changed ? T("设备已连接，正在准备设备信息…") : T("设备已连接。");
             KindleStatusText.Text = _deviceDisplayName;
-            KindleConnectionText.Text = T("{0} · 已连接", device.ConnectionLabel);
-            KindleConnectionText.IsVisible = true;
+            KindleConnectionText.Text = T("已连接");
+            KindleConnectionText.IsVisible = false;
             DeviceStorageText.Text = device.CapacityLabel;
             _deviceUsedRatio = device.TotalBytes > 0
                 ? Math.Clamp((device.TotalBytes - device.FreeBytes) / (double)device.TotalBytes, 0, 1)
@@ -885,6 +811,15 @@ public partial class MainWindow
         catch (OperationCanceledException)
         {
         }
+        catch (TimeoutException exception)
+        {
+            var detail = T("设备检测失败：{0}", UiText.Localize(exception.Message));
+            if (CurrentDevice is null)
+                SetDisconnectedDeviceUi(detail);
+            else
+                DevicePageStatusText.Text = detail;
+            KindleStatusText.Text = T("设备状态读取失败");
+        }
         catch (Exception exception)
         {
             SetDisconnectedDeviceUi(T("设备检测失败：{0}", UiText.Localize(exception.Message)));
@@ -896,6 +831,29 @@ public partial class MainWindow
         }
     }
 
+    private async Task<IReadOnlyList<KindleDevice>> DetectDevicesWithTimeoutAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_kindle is null) return [];
+        var effectiveToken = cancellationToken.CanBeCanceled
+            ? cancellationToken
+            : _lifetimeCancellation.Token;
+        var detectionTask = _deviceDetectionTask ??= _kindle.DetectDevicesAsync(effectiveToken);
+        try
+        {
+            return await detectionTask.WaitAsync(TimeSpan.FromSeconds(15), effectiveToken);
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException("设备扫描超时，请确认设备已解锁后重试。");
+        }
+        finally
+        {
+            if (detectionTask.IsCompleted && ReferenceEquals(_deviceDetectionTask, detectionTask))
+                _deviceDetectionTask = null;
+        }
+    }
+
     private void SetDisconnectedDeviceUi(string? detail = null)
     {
         _deviceBookScanGeneration++;
@@ -904,6 +862,7 @@ public partial class MainWindow
         _deviceBookScanTask = null;
         foreach (var book in DeviceBooks) book.Dispose();
         DeviceBooks.Clear();
+        _deviceCardsByPath.Clear();
         _libraryPresenceComparison = null;
         _filteredDeviceBooks = [];
         VisibleDeviceBooks.Clear();
@@ -1075,7 +1034,7 @@ public partial class MainWindow
             var card = FindDeviceBookCard(book.RelativePath);
             if (card is null)
             {
-                DeviceBooks.Add(new KindleBookCardViewModel(book));
+                AddDeviceBookCard(book);
                 added = true;
             }
             else
@@ -1090,12 +1049,13 @@ public partial class MainWindow
             var card = FindDeviceBookCard(path);
             if (card is null) continue;
             DeviceBooks.Remove(card);
+            _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
             card.Dispose();
             removed = true;
         }
 
         DeviceBookCountText.Text = DeviceBooks.Count.ToString();
-        UpdateDeviceBookSelectionUi();
+        if (removed) UpdateDeviceBookSelectionUi();
         if (added || removed)
             ApplyDeviceBookFilter(resetPage: false);
         if (DeviceBooks.Count == 0)
@@ -1105,11 +1065,23 @@ public partial class MainWindow
         }
     }
 
-    private KindleBookCardViewModel? FindDeviceBookCard(string relativePath) =>
-        DeviceBooks.FirstOrDefault(card => string.Equals(
-            NormalizeDeviceBookPath(card.Book.RelativePath),
-            NormalizeDeviceBookPath(relativePath),
-            StringComparison.OrdinalIgnoreCase));
+    private KindleBookCardViewModel? FindDeviceBookCard(string relativePath)
+    {
+        if (_deviceCardsByPath.Count != DeviceBooks.Count)
+        {
+            _deviceCardsByPath.Clear();
+            foreach (var card in DeviceBooks)
+                _deviceCardsByPath[NormalizeDeviceBookPath(card.Book.RelativePath)] = card;
+        }
+        return _deviceCardsByPath.GetValueOrDefault(NormalizeDeviceBookPath(relativePath));
+    }
+
+    private void AddDeviceBookCard(KindleBook book)
+    {
+        var card = new KindleBookCardViewModel(book);
+        _deviceCardsByPath[NormalizeDeviceBookPath(book.RelativePath)] = card;
+        DeviceBooks.Add(card);
+    }
 
     private void ReplaceDeviceBookCards(IReadOnlyList<KindleBook> books, bool resetPage)
     {
@@ -1122,6 +1094,7 @@ public partial class MainWindow
         {
             if (incoming.ContainsKey(NormalizeDeviceBookPath(old.Book.RelativePath))) continue;
             DeviceBooks.Remove(old);
+            _deviceCardsByPath.Remove(NormalizeDeviceBookPath(old.Book.RelativePath));
             old.Dispose();
         }
 
@@ -1129,7 +1102,7 @@ public partial class MainWindow
         {
             var card = FindDeviceBookCard(book.RelativePath);
             if (card is null)
-                DeviceBooks.Add(new KindleBookCardViewModel(book));
+                AddDeviceBookCard(book);
             else
                 card.UpdateBook(book);
         }
@@ -1325,11 +1298,10 @@ public partial class MainWindow
     private void UpdateDeviceBookSelectionUi()
     {
         // 与电脑书库一致：只有真正多选（≥2 本）时卡片才显示 ✓ 徽标。
-        var multi = DeviceBooks.Count(book => book.IsSelected) > 1;
+        var selected = GetSelectedDeviceBooks();
+        var multi = selected.Count > 1;
         foreach (var book in DeviceBooks)
             book.IsMultiSelected = book.IsSelected && multi;
-
-        var selected = GetSelectedDeviceBooks();
         DeviceBookSelectionBar.IsVisible = selected.Count > 1;
         DeviceBookSelectionText.Text = selected.Count == 0 ? string.Empty : T("已选择 {0} 本书", selected.Count);
     }
@@ -1422,11 +1394,9 @@ public partial class MainWindow
         if (resetPage) _devicePageIndex = 0;
         _devicePageCount = Math.Max(1, (int)Math.Ceiling(_filteredDeviceBooks.Count / (double)DevicePageSize));
         if (_devicePageIndex >= _devicePageCount) _devicePageIndex = _devicePageCount - 1;
-        VisibleDeviceBooks.Clear();
-        foreach (var card in _filteredDeviceBooks
+        VisibleDeviceBooks.ReplaceAll(_filteredDeviceBooks
             .Skip(_devicePageIndex * DevicePageSize)
-            .Take(DevicePageSize))
-            VisibleDeviceBooks.Add(card);
+            .Take(DevicePageSize));
         UpdateDeviceBookPaginationUi();
         UpdateDeviceBookEmptyState();
     }
@@ -1559,6 +1529,9 @@ public partial class MainWindow
 
     private void DeviceBookGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        // Context requests select the target before right-button release.
+        // Only finish an actual left-button selection gesture here.
+        if (e.InitialPressMouseButton != MouseButton.Left) return;
         if (_deviceRubberBandPointerSequenceHandled) return;
         _deviceRubberBandPointerSequenceHandled = true;
         if (!_deviceRubberBandSelecting)
@@ -1739,14 +1712,15 @@ public partial class MainWindow
             UpdateDeviceBookSelectionUi();
         }
 
-        var selectedCount = GetSelectedDeviceBooks().Count;
+        var selectedBooks = GetSelectedDeviceBooks().ToArray();
+        var selectedCount = selectedBooks.Length;
         var menu = new ContextMenu();
         menu.Items.Add(CreateMenuItem(
             selectedCount > 1 ? T("导出到电脑书库（{0}）", selectedCount) : T("导出到电脑书库"),
             selectedCount > 1 ? ExportSelectedDeviceBooksAsync : () => ExportDeviceBookAsync(card)));
         menu.Items.Add(CreateMenuItem(
             selectedCount > 1 ? T("从设备删除所选（{0}）", selectedCount) : T("从设备删除"),
-            DeleteSelectedDeviceBooksAsync));
+            () => TrackDeviceOperationAsync(() => DeleteSelectedDeviceBooksCoreAsync(selectedBooks))));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem(T("取消选择"), () =>
         {
@@ -1818,6 +1792,7 @@ public partial class MainWindow
             await _kindle.EjectAsync(device, _lifetimeCancellation.Token);
             foreach (var book in DeviceBooks) book.Dispose();
             DeviceBooks.Clear();
+            _deviceCardsByPath.Clear();
             _libraryPresenceComparison = null;
             VisibleDeviceBooks.Clear();
             _filteredDeviceBooks = [];
@@ -2019,8 +1994,8 @@ public partial class MainWindow
 
         _deviceDisplayName = normalized ?? device.Name;
         KindleStatusText.Text = _deviceDisplayName;
-        KindleConnectionText.Text = T("{0} · 已连接", device.ConnectionLabel);
-        KindleConnectionText.IsVisible = true;
+        KindleConnectionText.Text = T("已连接");
+        KindleConnectionText.IsVisible = false;
         DevicePageDeviceText.Text = $"{_deviceDisplayName} · {device.ConnectionLabel}";
         DeviceNameButton.IsEnabled = true;
         if (DeviceResourcePage.IsVisible)
@@ -2221,7 +2196,7 @@ public partial class MainWindow
         }
         if (_isTransferring)
         {
-            ShowTransferToast(T("发送到设备"), T("已有发送任务正在进行中。"), autoHide: true);
+            ShowSettingsCapsule(T("已有发送任务正在进行中。"), 2400);
             return;
         }
 
@@ -2229,7 +2204,7 @@ public partial class MainWindow
         if (CurrentDevice is not { } device)
         {
             SetTaskStatus(T("请先连接并解锁设备。"));
-            ShowTransferToast(T("发送到设备"), T("未检测到设备，请连接并解锁设备。"), autoHide: true);
+            ShowSettingsCapsule(T("未检测到设备，请连接并解锁设备。"), 3200);
             return;
         }
 
@@ -2250,8 +2225,8 @@ public partial class MainWindow
         _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         var cancellation = _transferCancellation;
         TaskProgressPopupBar.Value = 0;
-        ShowTaskProgressPopup();
         ShowTransferToast(T("发送到设备"), T("正在发送 {0} 本书…", cards.Count), progress: 0);
+        ShowTaskProgressPopup(recordTask: false);
         var acceptProgressUpdates = true;
         Task<PreparedKindleTransfer>? lookaheadTask = null;
         CancellationTokenSource? lookaheadCancellation = null;
@@ -2338,13 +2313,13 @@ public partial class MainWindow
                     }
 
                     await EnsureCurrentDeviceAsync(device);
-                    await _kindle.SendBookAsync(
+                    await RecordResourceActionAsync(T("发送书籍到设备"), card.Title, token => _kindle.SendBookAsync(
                         device,
                         prepared.File,
                         prepared.SourcePath,
-                        progress,
-                        cancellationToken: cancellation.Token,
-                        coverOverridePath: prepared.CoverOverridePath);
+                        CreateRecordedTransferProgress(progress),
+                        cancellationToken: token,
+                        coverOverridePath: prepared.CoverOverridePath), cancellation.Token);
                     sent++;
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -2570,7 +2545,7 @@ public partial class MainWindow
         }
         if (_isTransferring)
         {
-            ShowTransferToast(T("发送到设备"), T("已有发送任务正在进行中。"), autoHide: true);
+            ShowSettingsCapsule(T("已有发送任务正在进行中。"), 2400);
             return;
         }
 
@@ -2578,7 +2553,7 @@ public partial class MainWindow
         if (CurrentDevice is not { } device)
         {
             SetTaskStatus(T("请先连接并解锁设备。"));
-            ShowTransferToast(T("发送到设备"), T("未检测到设备，请连接并解锁设备。"), autoHide: true);
+            ShowSettingsCapsule(T("未检测到设备，请连接并解锁设备。"), 3200);
             return;
         }
 
@@ -2594,8 +2569,8 @@ public partial class MainWindow
             _transferCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
             var cancellation = _transferCancellation;
             TaskProgressPopupBar.Value = 0;
-            ShowTaskProgressPopup();
             ShowTransferToast(T("发送到设备"), T("正在发送《{0}》…", card.Title), progress: 0);
+            ShowTaskProgressPopup(recordTask: false);
             var acceptProgressUpdates = true;
             try
             {
@@ -2613,13 +2588,13 @@ public partial class MainWindow
                     cancellation.Token,
                     requestedSource);
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.SendBookAsync(
+                await RecordResourceActionAsync(T("发送书籍到设备"), card.Title, token => _kindle.SendBookAsync(
                     device,
                     prepared.File,
                     prepared.SourcePath,
-                    progress,
-                    cancellationToken: cancellation.Token,
-                    coverOverridePath: prepared.CoverOverridePath);
+                    CreateRecordedTransferProgress(progress),
+                    cancellationToken: token,
+                    coverOverridePath: prepared.CoverOverridePath), cancellation.Token);
                 var completionMessage = _transferStopRequested
                     ? T("已完成当前书籍，发送已停止。")
                     : T("已发送《{0}》到 {1}。", card.Title, device.Name);
@@ -2830,8 +2805,8 @@ public partial class MainWindow
         var calibreMissing = false;
         var failureDetails = new List<string>();
         TaskProgressPopupBar.Value = 0;
-        ShowTaskProgressPopup();
         ShowTransferToast(T("导出到电脑书库"), T("正在从设备导出 {0} 本书…", pending.Length), progress: 0);
+        ShowTaskProgressPopup(recordTask: false);
         var acceptProgressUpdates = true;
         try
         {
@@ -2857,12 +2832,12 @@ public partial class MainWindow
                     });
                     DevicePageStatusText.Text = T("正在从设备读取《{0}》（{1}/{2}）…", card.Title, index + 1, pending.Length);
                     await EnsureCurrentDeviceAsync(device);
-                    var localSource = await _kindle.ExportBookAsync(
+                    var localSource = await RecordResourceOperationAsync(T("从设备导出书籍"), card.Title, token => _kindle.ExportBookAsync(
                         device,
                         card.Book,
                         bookDirectory,
-                        progress,
-                        _lifetimeCancellation.Token);
+                        CreateRecordedTransferProgress(progress),
+                        token), _lifetimeCancellation.Token);
                     var importPath = localSource;
                     if (BookFormatConversionPolicy.Normalize(card.Book.Format) == "kfx")
                     {
@@ -2994,7 +2969,11 @@ public partial class MainWindow
 
     private async Task DeleteSelectedDeviceBooksCoreAsync()
     {
-        var selected = GetSelectedDeviceBooks();
+        await DeleteSelectedDeviceBooksCoreAsync(GetSelectedDeviceBooks());
+    }
+
+    private async Task DeleteSelectedDeviceBooksCoreAsync(IReadOnlyList<KindleBookCardViewModel> selected)
+    {
         if (selected.Count == 0 || _kindle is null || CurrentDevice is not { } device) return;
         if (!await ConfirmAsync(T("从设备删除书籍"), T("确定从 {0} 删除选中的 {1} 本书吗？电脑书库不受影响。", device.Name, selected.Count))) return;
 
@@ -3007,8 +2986,9 @@ public partial class MainWindow
             try
             {
                 await WaitForDeviceBookReadsAsync(device);
-                await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(T("从设备删除书籍"), card.Title, token => _kindle.RemoveBookAsync(device, card.Book, token), _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
+                _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
                 _libraryPresenceComparison = null;
                 card.Dispose();
                 removed++;
@@ -3043,8 +3023,9 @@ public partial class MainWindow
             try
             {
                 await WaitForDeviceBookReadsAsync(device);
-                await _kindle.RemoveBookAsync(device, card.Book, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(T("从设备删除书籍"), card.Title, token => _kindle.RemoveBookAsync(device, card.Book, token), _lifetimeCancellation.Token);
                 DeviceBooks.Remove(card);
+                _deviceCardsByPath.Remove(NormalizeDeviceBookPath(card.Book.RelativePath));
                 _libraryPresenceComparison = null;
                 card.Dispose();
                 DeviceBookCountText.Text = DeviceBooks.Count.ToString();
@@ -3164,7 +3145,10 @@ public partial class MainWindow
                     annotation.Note,
                     annotation.UpdatedAt,
                     annotation,
-                    null));
+                    null)
+                {
+                    IsDeletedBook = !displayInfos.TryGetValue(annotation.BookId, out var info) || info.IsDeleted
+                });
             }
             foreach (var reflection in reflections)
             {
@@ -3179,7 +3163,10 @@ public partial class MainWindow
                     reflection.UpdatedAt,
                     null,
                     null,
-                    localReflection: reflection));
+                    localReflection: reflection)
+                {
+                    IsDeletedBook = !displayInfos.TryGetValue(reflection.BookId, out var info) || info.IsDeleted
+                });
             }
 
             if (CurrentDevice is { CanReadNotes: true } device && _kindle is not null)
@@ -4091,8 +4078,8 @@ public partial class MainWindow
                         DictionaryImportProgressBar.IsIndeterminate = update.Percent is null;
                         DictionaryImportProgressBar.Value = update.Percent ?? 0;
                     });
-                    var imported = await Task.Run(() => _dictionaryService.ImportAsync(path,
-                        cancellationToken: _lifetimeCancellation.Token, progress: progress), _lifetimeCancellation.Token);
+                    var imported = await RecordResourceOperationAsync(T("导入本地词典"), Path.GetFileNameWithoutExtension(path), token => Task.Run(() => _dictionaryService.ImportAsync(path,
+                        cancellationToken: token, progress: progress), token), _lifetimeCancellation.Token);
                     if (knownIds.Add(imported.Id)) importedCount++;
                     else skippedDuplicateCount++;
                 }
@@ -4169,11 +4156,12 @@ public partial class MainWindow
                 var path = paths[index];
                 DeviceResourceStatusText.Text = T("正在导入 {0}…", Path.GetFileName(path));
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.SendResourceAsync(
+                await RecordResourceActionAsync(resourceKind == KindleResourceKind.Font ? T("导入设备字体") : T("导入设备词典"), Path.GetFileNameWithoutExtension(path), token => _kindle.SendResourceAsync(
                     device,
                     resourceKind,
                     path,
-                    cancellationToken: _lifetimeCancellation.Token);
+                    progress: CreateRecordedTransferProgress(null),
+                    cancellationToken: token), _lifetimeCancellation.Token);
                 resourceChanged = true;
                 ShowTransferToast(T("导入设备资源"), T("正在导入 {0}…", Path.GetFileName(path)), progress: (index + 1) * 100 / paths.Length);
             }
@@ -4228,7 +4216,7 @@ public partial class MainWindow
             try
             {
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.ExportResourceAsync(device, resource, path, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(resource.Kind == KindleResourceKind.Font ? T("导出设备字体") : T("导出设备词典"), Path.GetFileNameWithoutExtension(resource.FileName), token => _kindle.ExportResourceAsync(device, resource, path, token), _lifetimeCancellation.Token);
                 DeviceResourceStatusText.Text = T("已导出 {0}", resource.FileName);
                 ShowTransferToast(T("导出设备资源"), T("已导出 {0}", resource.FileName), progress: 100, autoHide: true, completed: true);
             }
@@ -4253,7 +4241,7 @@ public partial class MainWindow
             try
             {
                 await EnsureCurrentDeviceAsync(device);
-                await _kindle.RemoveResourceAsync(device, resource, _lifetimeCancellation.Token);
+                await RecordResourceActionAsync(resource.Kind == KindleResourceKind.Font ? T("删除设备字体") : T("删除设备词典"), Path.GetFileNameWithoutExtension(resource.FileName), token => _kindle.RemoveResourceAsync(device, resource, token), _lifetimeCancellation.Token);
                 InvalidateCurrentDeviceResourceCaches();
                 RemoveDeletedDeviceResourceFromCacheAndView(device, resource);
                 await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
@@ -4276,18 +4264,27 @@ public partial class MainWindow
         await RefreshReadingDashboardAsync();
     }
 
+    private async void DashboardDailyRangeButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!_stage3Ready) return;
+        _readingDashboardDayCount = _readingDashboardDayCount switch { 7 => 14, 14 => 30, _ => 7 };
+        await RefreshReadingDashboardAsync();
+    }
+
     private async Task RefreshReadingDashboardAsync()
     {
         try
         {
-            var dashboard = await _readerData.GetReadingDashboardAsync(100, _lifetimeCancellation.Token);
+            var dashboard = await _readerData.GetReadingDashboardAsync(
+                100, _lifetimeCancellation.Token, _readingDashboardDayCount);
             DashboardBooksStartedText.Text = T("{0} 本", dashboard.BooksStarted);
             DashboardBooksFinishedText.Text = T("{0} 本", dashboard.BooksFinished);
             DashboardTotalTimeText.Text = FormatReadingTime(dashboard.TotalSeconds);
             DashboardAverageProgressText.Text = T("平均进度 {0:0.#}%", dashboard.AverageProgress);
             DashboardBookmarksText.Text = $"{dashboard.BookmarkCount.ToString(CultureInfo.InvariantCulture)} / {dashboard.AnnotationCount.ToString(CultureInfo.InvariantCulture)}";
 
-            var weekSeconds = dashboard.DailyReading.Skip(7).Sum(day => day.ActiveSeconds);
+            var lastSevenDays = dashboard.DailyReading.TakeLast(7).ToArray();
+            var weekSeconds = lastSevenDays.Sum(day => day.ActiveSeconds);
             DashboardDailyAverageText.Text = weekSeconds == 0
                 ? T("近 7 天日均 —")
                 : T("近 7 天日均 {0}", FormatReadingTime((long)Math.Round(weekSeconds / 7d)));
@@ -4317,15 +4314,26 @@ public partial class MainWindow
             DashboardRecentEmptyText.IsVisible = _readingDashboardItems.Count == 0;
 
             DashboardDays.Clear();
+            DashboardDailyTitleText.Text = T("近 {0} 天阅读时长", dashboard.DailyReading.Count);
             var maximumSeconds = Math.Max(1, dashboard.DailyReading.Max(day => day.ActiveSeconds));
             var today = DateOnly.FromDateTime(DateTime.Today);
+            var dayIndex = 0;
+            var labelInterval = Math.Max(1, (int)Math.Ceiling(dashboard.DailyReading.Count / 7d));
             foreach (var day in dashboard.DailyReading)
             {
+                var lastIndex = dashboard.DailyReading.Count - 1;
+                var showLabel = dayIndex == lastIndex
+                    || (dayIndex % labelInterval == 0 && lastIndex - dayIndex >= Math.Min(labelInterval, 2));
+                var timeLabel = T("{0:0.#} 分", day.ActiveSeconds / 60d);
                 DashboardDays.Add(new Stage3DashboardDayViewModel(
-                    day.Date.ToString("MM-dd", CultureInfo.InvariantCulture),
-                    day.ActiveSeconds == 0 ? "" : T("{0:0.#} 分", day.ActiveSeconds / 60d),
-                    day.ActiveSeconds == 0 ? 4 : 10 + 108d * day.ActiveSeconds / maximumSeconds,
-                    day.Date == today ? 1d : 0.3));
+                    showLabel ? day.Date.ToString("MM-dd", CultureInfo.InvariantCulture) : "",
+                    showLabel && day.ActiveSeconds > 0 ? timeLabel : "",
+                    day.ActiveSeconds == 0 ? 4 : 10 + 170d * day.ActiveSeconds / maximumSeconds,
+                    day.Date == today ? 1d : 0.3)
+                {
+                    DetailLabel = $"{day.Date:yyyy-MM-dd}: {timeLabel}"
+                });
+                dayIndex++;
             }
 
             PopulateDashboardBars(DashboardBookTimes, dashboard.MostReadBooks
@@ -4411,7 +4419,7 @@ public partial class MainWindow
             target.Add(new Stage3DashboardBarViewModel(
                 item.Label,
                 item.ValueLabel,
-                item.Value <= 0 ? 2 : Math.Max(8, 210d * item.Value / maximum)));
+                item.Value <= 0 ? 0 : Math.Max(8, 210d * item.Value / maximum)));
     }
 
     private async void RefreshReadingDashboardButton_Click(object? sender, RoutedEventArgs e) =>
@@ -4457,8 +4465,6 @@ public partial class MainWindow
 
     private void UpdateDiagnosticsTexts()
     {
-        SettingsDiagnosticsTitleText.Text = T("跨平台诊断");
-        SettingsDiagnosticsDescriptionText.Text = T("检测数据目录、阅读器、PDF、Calibre 和设备能力；缺少可安装依赖时可在这里一键修复。");
         RepairDiagnosticsButton.Content = T("一键修复");
         RefreshDiagnosticsButton.Content = T("重新检测");
     }
@@ -4482,7 +4488,6 @@ public partial class MainWindow
         {
             var diagnostics = (await _platformDiagnostics.CollectAsync(
                 _appSettings.CalibrePath,
-                _kindle is not null,
                 _lifetimeCancellation.Token)).ToList();
             try
             {
@@ -5217,6 +5222,41 @@ public partial class MainWindow
 
     private async void S3SyncNowButton_Click(object? sender, RoutedEventArgs e) => await RunS3SyncAsync(silent: false);
 
+    private async void S3DetailsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var summary = await _s3SyncService.GetStatusAsync(
+                _s3SyncStoredSettings.DeviceId,
+                _s3SyncStoredSettings.Settings,
+                _lifetimeCancellation.Token);
+            var lines = new List<string>
+            {
+                T("上次同步：{0}", summary.LastSyncAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? T("尚未同步")),
+                T("云端快照：{0} 本书 · {1} 个文件 · {2} 条批注",
+                    summary.SnapshotBookCount, summary.SnapshotFileCount, summary.SnapshotAnnotationCount),
+                T("已登记远端书籍：{0} 本", summary.RemoteBookCount),
+                T("待按需下载文件：{0} 个", summary.PendingFileDownloadCount),
+                T("删除墓碑：{0} 条", summary.TombstoneCount)
+            };
+            if (summary.SnapshotCreatedAt is { } created)
+                lines.Add(T("快照时间：{0}", created.ToLocalTime().ToString("yyyy-MM-dd HH:mm")));
+            if (_lastS3SyncResult is { } result)
+            {
+                lines.Add(string.Empty);
+                lines.Add(T("本次同步：新增 {0} 本，下载 {1} 个文件，应用 {2} 条批注，设置 {3} 项",
+                    result.BooksAdded, result.FilesDownloaded, result.AnnotationsApplied, result.SettingsApplied));
+                if (result.IsPartial) lines.Add(T("本次同步部分完成，稍后会自动重试。"));
+                if (!string.IsNullOrWhiteSpace(result.Warning)) lines.Add(result.Warning);
+            }
+            await ShowMessageAsync(T("同步详情"), string.Join("\n", lines));
+        }
+        catch (Exception exception)
+        {
+            await ShowMessageAsync(T("无法读取同步详情"), UiText.Localize(exception.Message));
+        }
+    }
+
     private void S3RemoteSettingsApplied(object? sender, EventArgs e) => _s3RemoteSettingsChanged = true;
 
     private void S3CancelSyncButton_Click(object? sender, RoutedEventArgs e)
@@ -5625,6 +5665,7 @@ public partial class MainWindow
             }
             _s3DeletionConfirmationPending = false;
             _lastS3SyncAt = DateTimeOffset.UtcNow;
+            _lastS3SyncResult = result;
 
             if (result.SettingsApplied > 0 || _s3RemoteSettingsChanged)
                 await RefreshSettingsAfterS3SyncAsync(token);
@@ -6001,7 +6042,7 @@ public partial class MainWindow
             });
             var path = files.FirstOrDefault()?.TryGetLocalPath();
             if (string.IsNullOrWhiteSpace(path)) return;
-            await _fontLibrary.ImportAsync(path, _lifetimeCancellation.Token);
+            await RecordResourceActionAsync(T("导入本地字体"), Path.GetFileNameWithoutExtension(path), token => _fontLibrary.ImportAsync(path, token), _lifetimeCancellation.Token);
             await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
             FontManagementStatusText.Text = T("字体已导入。");
         }
@@ -6019,7 +6060,7 @@ public partial class MainWindow
         if (ManagedFontList.SelectedItem is not ManagedFont font) return;
         try
         {
-            await _fontLibrary.RemoveAsync(font.Id, _lifetimeCancellation.Token);
+            await RecordResourceActionAsync(T("删除本地字体"), font.DisplayName, token => _fontLibrary.RemoveAsync(font.Id, token), _lifetimeCancellation.Token);
             await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
             FontManagementStatusText.Text = T("字体已移除。");
         }
@@ -6066,7 +6107,7 @@ public partial class MainWindow
         if (sender is not Control { DataContext: DictionaryDefinition dictionary }) return;
         try
         {
-            await _dictionaryService.RemoveAsync(dictionary.Id, _lifetimeCancellation.Token);
+            await RecordResourceActionAsync(T("删除本地词典"), dictionary.Name, token => _dictionaryService.RemoveAsync(dictionary.Id, token), _lifetimeCancellation.Token);
             await RefreshManagedResourcesAsync(_lifetimeCancellation.Token);
             DictionaryResultText.Text = T("词典已移除。");
         }
@@ -6095,6 +6136,7 @@ public partial class MainWindow
 
     private async Task LookupSettingsDictionaryAsync()
     {
+        SettingsDictionaryEntries.SetEntries([]);
         var term = DictionaryTestBox.Text?.Trim() ?? string.Empty;
         if (term.Length == 0)
         {
@@ -6105,8 +6147,16 @@ public partial class MainWindow
         var entries = await _dictionaryService.LookupAsync(term, _lifetimeCancellation.Token);
         DictionaryResultText.Text = entries.Count == 0
             ? T("没有找到“{0}”。", term)
-            : string.Join(Environment.NewLine + Environment.NewLine,
-                entries.Select(entry => $"{entry.Term} · {entry.DictionaryName}{Environment.NewLine}{entry.Definition}"));
+            : string.Empty;
+        SettingsDictionaryEntries.SetEntries(entries);
+        SettingsDictionaryEntries.TermRequested -= SettingsDictionaryTermRequested;
+        SettingsDictionaryEntries.TermRequested += SettingsDictionaryTermRequested;
+    }
+
+    private async void SettingsDictionaryTermRequested(object? sender, string term)
+    {
+        DictionaryTestBox.Text = term;
+        await LookupSettingsDictionaryAsync();
     }
 
     private async void DictionaryTestButton_Click(object? sender, RoutedEventArgs e) => await LookupSettingsDictionaryAsync();
@@ -6224,6 +6274,18 @@ public partial class MainWindow
         }
     }
 
+    private void AboutDeveloperButton_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://github.com/kingstacker") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            ShowSettingsCapsule(UiText.Localize(exception.Message), 4000);
+        }
+    }
+
     private void OpenUserManualButton_Click(object? sender, RoutedEventArgs e)
     {
         try
@@ -6310,7 +6372,8 @@ public partial class MainWindow
                     PendingUpdateReleaseNotes = null,
                     PendingUpdateReleaseNotesEnglish = null,
                     PendingUpdatePackagePath = null,
-                    PendingUpdateDownloadedAt = null
+                    PendingUpdateDownloadedAt = null,
+                    PendingUpdateInstallStartedAt = null
                 });
                 _pendingUpdateVersion = null;
                 HideUpdateBadge();
@@ -6625,7 +6688,10 @@ public sealed record Stage3DashboardDayViewModel(
     string DateLabel,
     string TimeLabel,
     double BarHeight,
-    double BarOpacity);
+    double BarOpacity)
+{
+    public string DetailLabel { get; init; } = "";
+}
 
 public sealed record Stage3DashboardBarViewModel(
     string Label,
@@ -6700,6 +6766,11 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
 
     public ReadingMaterialSource Source { get; }
     public bool IsMixedSource { get; }
+    public bool HasDeletedBook => Items.Any(item => item.IsDeletedBook);
+    public string DeletedLabel => UiText.IsEnglish ? "Deleted" : "已删除";
+    public string DisplayBookTitle => HasDeletedBook
+        ? UiText.IsEnglish ? $"{BookTitle} ({DeletedLabel})" : $"{BookTitle}（{DeletedLabel}）"
+        : BookTitle;
     public bool IsExportMode { get; }
     public string SourceLabel => string.Join(" + ", Items.Select(item => item.Source == ReadingMaterialSource.Local
         ? UiText.Get("本地书籍") : item.SourceLabel).Distinct(StringComparer.Ordinal));
@@ -6746,6 +6817,8 @@ public sealed class Stage3ReadingMaterialGroupViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(BookTitle));
         OnPropertyChanged(nameof(SourceLabel));
         OnPropertyChanged(nameof(CountLabel));
+        OnPropertyChanged(nameof(DeletedLabel));
+        OnPropertyChanged(nameof(DisplayBookTitle));
         OnPropertyChanged(nameof(ExpandLabel));
     }
 
@@ -6857,6 +6930,7 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
     public bool HasNote => !IsBookReflection && !string.IsNullOrWhiteSpace(Note);
     public string DateLabel => UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? UiText.Get("时间未知");
     public string SearchText => string.Join('\n', SourceLabel, BookTitle, TypeLabel, ChapterLabel, Location, Quote, Note);
+    public bool IsDeletedBook { get; init; }
     public bool IsSelected
     {
         get => _isSelected;
@@ -6877,7 +6951,7 @@ public sealed class Stage3ReadingMaterialViewModel : ObservableObject, IDisposab
     }
 
     private static string GetReflectionTooltipText(string markdown) =>
-        string.Join(Environment.NewLine, GetReflectionTextLines(markdown)).Trim();
+        string.Join("\n", GetReflectionTextLines(markdown)).Trim();
 
     private static IEnumerable<string> GetReflectionTextLines(string markdown)
     {

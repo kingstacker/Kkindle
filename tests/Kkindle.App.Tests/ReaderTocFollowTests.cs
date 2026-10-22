@@ -30,6 +30,7 @@ public sealed class ReaderTocFollowTests(SettingsUiSession session)
         // Read normally, without clicking a TOC row or asking the shell to
         // refresh. Incidental paragraph ids must never replace a TOC anchor.
         while (VisiblePage(host) < secondPage) Advance(host, 1);
+        await ReaderTests.Render();
         AssertCurrent(scope, "二", "chapter-二");
         await ReaderTests.Render();
         Capture(scope.Window, $"toc-follow-{flow}-{vertical}-{spread}");
@@ -37,9 +38,11 @@ public sealed class ReaderTocFollowTests(SettingsUiSession session)
         Assert.True(rows.Single(row => row.Title == "上部").IsExpanded);
         var source = scope.Get<ListBox>("ReaderTocList").ItemsSource;
         Advance(host, 1);
+        await ReaderTests.Render();
         AssertCurrent(scope, "二", "chapter-二");
         Assert.Same(source, scope.Get<ListBox>("ReaderTocList").ItemsSource);
         while (VisiblePage(host) >= secondPage) Advance(host, -1);
+        await ReaderTests.Render();
         AssertCurrent(scope, "一", "one");
         host.SeekToBoundary(toEnd: false);
         AssertCurrent(scope, "封面", "cover");
@@ -163,7 +166,8 @@ public sealed class ReaderTocFollowTests(SettingsUiSession session)
     }
 
     private static int VisiblePage(NativeReaderHost host) => host.IsPaginated
-        ? host.CurrentPage : (int)(host.GetScrollState().Position / host.Bounds.Height);
+        ? host.CurrentPage : (int)(host.GetScrollState().Position
+            / NativeField<ChapterLayout>(host, "_layout").Pages[0].Height);
 
     private static void AssertCurrent(ReaderTestWindow scope, string title, string fragment)
     {

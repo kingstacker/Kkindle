@@ -38,6 +38,53 @@ public sealed class TypesetPainter
     private readonly TypesetPaintTheme _theme;
     private readonly Func<string, SKImage?>? _imageResolver;
 
+    // A layout page is painted many times (scroll, selection, search, theme
+    // repaint) while its runs never change. Cache one immutable blob per run;
+    // the cap bounds memory for long books and a new chapter starts fresh.
+    private const int RunBlobCacheCapacity = 8192;
+    private static readonly object RunBlobCacheLock = new();
+    private static readonly Dictionary<PlacedRun, SKTextBlob> RunBlobCache =
+        new(ReferenceEqualityComparer.Instance);
+
+    private static SKTextBlob? GetOrCreateRunBlob(PlacedRun run, SKTypeface typeface, int glyphCount)
+    {
+        lock (RunBlobCacheLock)
+        {
+            if (RunBlobCache.TryGetValue(run, out var cached)) return cached;
+        }
+
+        using var font = new SKFont(typeface, run.FontSize * run.Scale);
+        using var builder = new SKTextBlobBuilder();
+        var buffer = builder.AllocatePositionedRun(font, glyphCount);
+        buffer.SetGlyphs(run.Glyphs.AsSpan(0, glyphCount));
+#pragma warning disable CS0618 // SkiaSharp 3.119 has no non-obsolete accessor for positioned runs
+        var positions = buffer.GetPositionSpan();
+#pragma warning restore CS0618
+        for (var i = 0; i < positions.Length; i++)
+        {
+            positions[i] = new SKPoint(run.X[i], run.Y[i]);
+        }
+
+        var blob = builder.Build();
+        if (blob is null) return null;
+
+        lock (RunBlobCacheLock)
+        {
+            if (RunBlobCache.TryGetValue(run, out var raced))
+            {
+                blob.Dispose();
+                return raced;
+            }
+            if (RunBlobCache.Count >= RunBlobCacheCapacity)
+            {
+                foreach (var value in RunBlobCache.Values) value.Dispose();
+                RunBlobCache.Clear();
+            }
+            RunBlobCache[run] = blob;
+        }
+        return blob;
+    }
+
     public TypesetPainter(
         TypesetFontLibrary fonts,
         TypesetPaintTheme? theme = null,
@@ -197,32 +244,21 @@ public sealed class TypesetPainter
                 continue;
             }
 
-            using var font = new SKFont(typeface, run.FontSize * run.Scale);
-            using var builder = new SKTextBlobBuilder();
-            var buffer = builder.AllocatePositionedRun(font, glyphCount);
-            buffer.SetGlyphs(run.Glyphs.AsSpan(0, glyphCount));
-#pragma warning disable CS0618 // SkiaSharp 3.119 has no non-obsolete accessor for positioned runs
-            var positions = buffer.GetPositionSpan();
-#pragma warning restore CS0618
-            for (var i = 0; i < positions.Length; i++)
-            {
-                positions[i] = new SKPoint(run.X[i], run.Y[i]);
-            }
-
-            using var blob = builder.Build();
+            var blob = GetOrCreateRunBlob(run, typeface, glyphCount);
             if (blob is null)
             {
                 continue;
             }
 
             var syntheticBold = run.SyntheticBold || run.Style.Bold;
-            DrawPlacedBlob(canvas, run, font, blob, textFill, syntheticBold, run.FontSize * run.Scale);
+            DrawPlacedBlob(canvas, run, blob, textFill, syntheticBold, run.FontSize * run.Scale);
 
             // Paint only selected or marker-covered glyphs in the inverted
             // color. The old implementation inverted every run on a page as
             // soon as a selection existed, making unrelated text unreadable.
             if (inversionBands is not null)
             {
+                using var glyphFont = new SKFont(typeface, run.FontSize * run.Scale);
                 for (var glyphIndex = 0; glyphIndex < glyphCount; glyphIndex++)
                 {
                     var glyphRect = ChapterLayoutInteraction.GetGlyphRect(page, run, glyphIndex);
@@ -232,7 +268,7 @@ public sealed class TypesetPainter
                     }
 
                     using var glyphBuilder = new SKTextBlobBuilder();
-                    var glyphBuffer = glyphBuilder.AllocatePositionedRun(font, 1);
+                    var glyphBuffer = glyphBuilder.AllocatePositionedRun(glyphFont, 1);
                     glyphBuffer.SetGlyphs(new[] { run.Glyphs[glyphIndex] });
 #pragma warning disable CS0618 // SkiaSharp 3.119 has no non-obsolete accessor for positioned runs
                     var glyphPositions = glyphBuffer.GetPositionSpan();
@@ -243,7 +279,7 @@ public sealed class TypesetPainter
                     using var glyphBlob = glyphBuilder.Build();
                     if (glyphBlob is not null)
                     {
-                        DrawPlacedBlob(canvas, run, font, glyphBlob, textInverted, syntheticBold, run.FontSize * run.Scale);
+                        DrawPlacedBlob(canvas, run, glyphBlob, textInverted, syntheticBold, run.FontSize * run.Scale);
                     }
                 }
             }
@@ -590,7 +626,6 @@ public sealed class TypesetPainter
     private static void DrawPlacedBlob(
         SKCanvas canvas,
         PlacedRun run,
-        SKFont font,
         SKTextBlob blob,
         SKPaint fill,
         bool syntheticBold,
@@ -606,7 +641,7 @@ public sealed class TypesetPainter
                 canvas.Skew(-0.22f, 0f);
             }
 
-            DrawRun(canvas, blob, font, fill, syntheticBold, fontSize);
+            DrawRun(canvas, blob, fill, syntheticBold, fontSize);
             canvas.Restore();
             return;
         }
@@ -620,7 +655,7 @@ public sealed class TypesetPainter
                 canvas.Skew(-0.22f, 0f);
             }
 
-            DrawRun(canvas, blob, font, fill, syntheticBold, fontSize);
+            DrawRun(canvas, blob, fill, syntheticBold, fontSize);
             canvas.Restore();
             return;
         }
@@ -629,18 +664,17 @@ public sealed class TypesetPainter
         {
             canvas.Save();
             canvas.Skew(-0.22f, 0f);
-            DrawRun(canvas, blob, font, fill, syntheticBold, fontSize);
+            DrawRun(canvas, blob, fill, syntheticBold, fontSize);
             canvas.Restore();
             return;
         }
 
-        DrawRun(canvas, blob, font, fill, syntheticBold, fontSize);
+        DrawRun(canvas, blob, fill, syntheticBold, fontSize);
     }
 
     private static void DrawRun(
         SKCanvas canvas,
         SKTextBlob blob,
-        SKFont font,
         SKPaint fill,
         bool syntheticBold,
         float fontSize)

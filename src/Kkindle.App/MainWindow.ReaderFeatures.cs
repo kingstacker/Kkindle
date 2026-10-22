@@ -20,6 +20,8 @@ public partial class MainWindow
     private const int MaxReaderAnnotations = 5_000;
     private const int MaxReaderBookmarks = 5_000;
     private int _readerWholeSearchSequence;
+    private CancellationTokenSource? _readerWholeSearchCancellation;
+    private readonly SemaphoreSlim _readerWholeSearchGate = new(1, 1);
     private int _readerPdfSearchSequence;
     private bool _readerSearchVisible;
     private bool _readerSearchLayoutCaptured;
@@ -270,6 +272,9 @@ public partial class MainWindow
             _readerPdfSourcePath = path;
             await EnsureReaderHostsAsync();
             var host = (NativePdfReaderHost)CurrentReaderHost!;
+            // Do not expose the page origin while the saved zoom and pan are
+            // still being restored after the first raster has loaded.
+            host.Opacity = 0;
             var pageCount = await host.PrepareDocumentAsync(path, token);
             var pages = Enumerable.Range(1, pageCount).Select(page => new PdfPageText(page, string.Empty)).ToArray();
             _readerPdfPages = pages;
@@ -284,6 +289,9 @@ public partial class MainWindow
             _readerChapterIndex = _readerPdfPage - 1;
             _readerTocItems = [];
             BuildReaderTocRows();
+            RefreshReaderTocRows();
+            if (GetReaderTocScrollViewer() is { } tocScroll)
+                tocScroll.Offset = default;
             SetReaderCompactNavigationItems(_readerTocItems);
 
             ReaderBookInfoText.Text = card.Title;
@@ -318,6 +326,8 @@ public partial class MainWindow
             await ApplySavedReaderPdfAnnotationsAsync(token);
             if (progress is not null)
                 await host.RestoreViewStateAsync(progress.Fragment, progress.ScrollPosition);
+            token.ThrowIfCancellationRequested();
+            host.Opacity = 1;
             RememberCurrentPdfPageText();
             SyncReaderPdfTocSelection();
             StartReaderPdfBackgroundWork(host, file.Id, token);
@@ -564,6 +574,7 @@ public partial class MainWindow
             _readerSearchQuery = ReaderTocSearchBox.Text?.Trim() ?? string.Empty;
         _readerSearchVisible = false;
         _readerWholeSearchSequence++;
+        _readerWholeSearchCancellation?.Cancel();
         ReaderSearchPanel.IsVisible = false;
         ReaderTocSearchBox.Text = string.Empty;
         if (_readerSearchPreviousBookmarkTabActive && restorePreviousLayout)
@@ -1102,6 +1113,7 @@ public partial class MainWindow
     {
         if (!_readerSearchVisible) return;
         var sequence = ++_readerWholeSearchSequence;
+        _readerWholeSearchCancellation?.Cancel();
         var query = ReaderTocSearchBox.Text?.Trim() ?? string.Empty;
         _readerSearchQuery = query;
         if (query.Length == 0)
@@ -1118,12 +1130,18 @@ public partial class MainWindow
     private async Task RefreshReaderWholeSearchAsync(string query, int? sequence = null)
     {
         if (sequence is not null && sequence.Value != _readerWholeSearchSequence) return;
+        _readerWholeSearchCancellation?.Cancel();
+        using var searchCancellation = CancellationTokenSource.CreateLinkedTokenSource(ReaderToken);
+        _readerWholeSearchCancellation = searchCancellation;
+        var searchToken = searchCancellation.Token;
         if (query.Length == 0)
         {
             ClearReaderSearchResultSelection();
             ReaderSearchResults.Clear();
             ReaderWholeSearchCountText.Text = string.Empty;
             ShowReaderSearchStatus(T("输入关键词，实时搜索整本书。"));
+            if (ReferenceEquals(_readerWholeSearchCancellation, searchCancellation))
+                _readerWholeSearchCancellation = null;
             return;
         }
 
@@ -1137,9 +1155,10 @@ public partial class MainWindow
             if (_readerIsPdf)
             {
                 var fileId = _readerBookFile?.Id;
-                await EnsureReaderPdfTextIndexAsync(ReaderToken);
+                await EnsureReaderPdfTextIndexAsync(searchToken);
                 if (!_readerIsPdf || _readerBookFile?.Id != fileId) return;
-                var results = PdfTextService.Search(_readerPdfPages, query, MaxWholeBookSearchResults);
+                var pages = _readerPdfPages;
+                var results = await Task.Run(() => PdfTextService.Search(pages, query, MaxWholeBookSearchResults, searchToken), searchToken);
                 foreach (var result in results)
                     pendingResults.Add(new ReaderSearchResultViewModel(
                         T("第 {0} 页", result.PageNumber),
@@ -1152,20 +1171,28 @@ public partial class MainWindow
             }
             else if (_readerBookCard is not null && _readerBookFile is not null && _readerDocument is not null)
             {
-                await _bookContent.EnsureIndexedAsync(_readerBookCard.Book, _readerBookFile, _readerDocument, ReaderToken);
-                var results = await _readerData.SearchBookAsync(
-                    _readerBookCard.Book.Id,
-                    query,
-                    MaxWholeBookSearchResults,
-                    ReaderToken,
-                    exactPhraseOnly: true,
-                    bookFileId: _readerBookFile.Id);
+                var book = _readerBookCard.Book;
+                var file = _readerBookFile;
+                var document = _readerDocument;
+                var indexToken = ReaderToken;
+                var results = await Task.Run(async () =>
+                {
+                    await _readerWholeSearchGate.WaitAsync(searchToken);
+                    try
+                    {
+                        await _bookContent.EnsureIndexedAsync(book, file, document, indexToken);
+                        return await _readerData.SearchBookAsync(book.Id, query,
+                            MaxWholeBookSearchResults, searchToken,
+                            exactPhraseOnly: true, bookFileId: file.Id);
+                    }
+                    finally { _readerWholeSearchGate.Release(); }
+                }, searchToken);
                 // The same visible excerpt can come from duplicate EPUB spine
                 // entries or legacy chunks with different paths/offsets. At this
                 // final presentation boundary, identical title + snippet means an
                 // identical user-facing result and must only be shown once.
                 var distinct = EpubReaderSearchPolicy
-                    .FilterAndOrder(_readerDocument, results)
+                    .FilterAndOrder(document, results)
                     .Select(result => new ReaderSearchResultViewModel(result, query))
                     .DistinctBy(
                         item => $"{item.Title}\u001f{item.Excerpt}",
@@ -1186,7 +1213,7 @@ public partial class MainWindow
                     ? (_readerIsPdf ? T("没有找到匹配的内容。") : T("没有找到匹配的片段。"))
                     : null);
         }
-        catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (searchToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
@@ -1194,6 +1221,11 @@ public partial class MainWindow
             if (sequence is not null && sequence.Value != _readerWholeSearchSequence) return;
             ReaderWholeSearchCountText.Text = string.Empty;
             ShowReaderSearchStatus(T("搜索失败：{0}", UiText.Localize(exception.Message)));
+        }
+        finally
+        {
+            if (ReferenceEquals(_readerWholeSearchCancellation, searchCancellation))
+                _readerWholeSearchCancellation = null;
         }
     }
 
@@ -1581,9 +1613,10 @@ public partial class MainWindow
     private void ReaderLayoutSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
         SyncReaderAppearanceControls();
+        SyncReaderBookScopeControls();
         ReaderVerticalWritingCheck.Content = OperatingSystem.IsLinux()
-            ? T("竖排排版（全局，自绘单页）")
-            : T("竖排排版（全局，仅支持单页）");
+            ? T("竖排排版（自绘单页）")
+            : T("竖排排版（仅支持单页）");
         _suppressReaderLayoutChange = true;
         try
         {
@@ -1655,7 +1688,7 @@ public partial class MainWindow
         {
             UpdateReaderZoomLabel();
             await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-            await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+            await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
         }
         catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
         {
@@ -1690,7 +1723,7 @@ public partial class MainWindow
                     _readerPageAnimation = GetSelectedReaderPageAnimation();
                     UpdateReaderZoomLabel();
                     await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-                    await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+                    await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
                 }
                 catch
                 {
@@ -1717,6 +1750,53 @@ public partial class MainWindow
 
     private async void ReaderLayoutResetButton_Click(object? sender, RoutedEventArgs e)
     {
+        _readerLayoutApplyCancellation?.Cancel();
+        _readerLayoutApplyCancellation?.Dispose();
+        _readerLayoutApplyCancellation = null;
+
+        if (CanUseReaderBookProfile && ReaderUsesBookOverride)
+        {
+            var globalLayout = NormalizeReaderLayoutForPlatform(
+                _appSettings.DefaultReaderLayout);
+            _readerBookLayoutProfile = ReaderBookLayoutProfile.Normalize(
+                _readerBookLayoutProfile! with
+                {
+                    UseBookOverride = false,
+                    Layout = globalLayout,
+                    Appearance = ReaderAppearanceSettings.Normalize(
+                        _appSettings.ReaderAppearance)
+                });
+            _readerLayout = globalLayout;
+            _suppressReaderLayoutChange = true;
+            try
+            {
+                ReaderFontScaleSlider.Value = _readerLayout.FontScale;
+                ReaderLineHeightSlider.Value = _readerLayout.LineHeight;
+                ReaderMaxWidthSlider.Value = _readerLayout.MaxWidth;
+                ReaderBodyPaddingSlider.Value = _readerLayout.BodyPadding;
+                ReaderVerticalWritingCheck.IsChecked = _readerLayout.VerticalWriting;
+                ReaderParagraphIndentCheck.IsChecked = _readerLayout.ParagraphIndent;
+                SelectReaderFontFamily(_readerLayout.FontFamily);
+                SelectReaderFlowMode(_readerLayout.FlowMode, _readerLayout.TwoPageMode);
+            }
+            finally
+            {
+                _suppressReaderLayoutChange = false;
+            }
+            UpdateReaderLayoutSliderLabels();
+            ApplyReaderAppearance();
+            SyncReaderAppearanceControls();
+            SyncReaderBookScopeControls();
+            await ApplyReaderLayoutToHostsAsync(ReaderToken);
+            // Turning the override off makes SaveCurrentReaderPreferencesAsync
+            // enter the global-settings branch. Persist the disabled per-book
+            // profile explicitly so reopening the book does not restore it.
+            await _readerData.SaveBookLayoutProfileAsync(
+                _readerBookLayoutProfile!,
+                CancellationToken.None);
+            return;
+        }
+
         _suppressReaderLayoutChange = true;
         try
         {
@@ -1739,7 +1819,7 @@ public partial class MainWindow
         _readerPageAnimation = ReaderAnimationFade;
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(ReaderToken);
-        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+        await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
     }
 
     private void UpdateReaderLayoutSliderLabels()

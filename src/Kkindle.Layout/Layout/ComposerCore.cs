@@ -279,6 +279,9 @@ internal sealed class CellFactory
 {
     private readonly ComposerContext _context;
     private readonly Dictionary<(string FontPath, float Size), (float Ascent, float Descent)> _metricsCache = new();
+    // A compose has fixed fonts and spacing. Reuse immutable glyph arrays for
+    // repeated characters/words, while assigning source offsets per occurrence.
+    private readonly Dictionary<(string Text, float Size), LayoutCell> _cellCache = new();
 
     public CellFactory(ComposerContext context)
     {
@@ -308,6 +311,15 @@ internal sealed class CellFactory
             // mathematical/text superscripts do not change unexpectedly.
             fontSize *= footnoteMarker ? 0.70f : 0.75f;
         }
+
+        var cacheable = unitText.Length <= 64;
+        var key = (unitText, fontSize);
+        if (cacheable && _cellCache.TryGetValue(key, out var cached))
+            return cached with
+            {
+                TextStart = globalTextStart, Style = style, LinkHref = linkHref,
+                FootnoteHref = footnoteHref, FootnoteText = footnoteText, FootnoteMarker = footnoteMarker
+            };
 
         string fontPath = _context.MainFont;
         // HTML collapses ordinary line breaks and runs of whitespace. Keep
@@ -353,7 +365,7 @@ internal sealed class CellFactory
         // line fitting matches the visible ink.
         var advance = glyphCount > 0 ? pen - letterSpacing : 0f;
 
-        return new LayoutCell
+        var result = new LayoutCell
         {
             Glyphs = shaped.GlyphIds,
             GlyphX = glyphX,
@@ -374,6 +386,8 @@ internal sealed class CellFactory
             FootnoteMarker = footnoteMarker,
             Character = unitText.Length == 1 && !TypesetText.IsSpace(unitText[0]) ? unitText[0] : null,
         };
+        if (cacheable && _cellCache.Count < 4096) _cellCache.TryAdd(key, result);
+        return result;
     }
 
     private LayoutCell ShapeRubyCell(LayoutCell baseCell)
@@ -651,29 +665,15 @@ internal sealed class CellFactory
     public static void CollapseWhitespace(List<LayoutCell> cells)
     {
         var previousWasSpace = false;
-        for (var index = 0; index < cells.Count; index++)
+        var write = 0;
+        for (var read = 0; read < cells.Count; read++)
         {
-            var cell = cells[index];
-            if (cell.IsLineBreak)
-            {
-                previousWasSpace = false;
-                continue;
-            }
-
-            if (!cell.IsSpace)
-            {
-                previousWasSpace = false;
-                continue;
-            }
-
-            if (previousWasSpace)
-            {
-                cells.RemoveAt(index--);
-                continue;
-            }
-
-            previousWasSpace = true;
+            var cell = cells[read];
+            if (cell.IsSpace && !cell.IsLineBreak && previousWasSpace) continue;
+            previousWasSpace = cell.IsSpace && !cell.IsLineBreak;
+            cells[write++] = cell;
         }
+        if (write < cells.Count) cells.RemoveRange(write, cells.Count - write);
     }
 
     private void AppendVerticalCells(List<LayoutCell> cells, InlineItem item)

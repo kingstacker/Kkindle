@@ -130,13 +130,21 @@ internal sealed class S3SyncObjectStore(S3SyncSettings settings, IAmazonS3 clien
         }
     }
 
-    public async Task PutAsync(string key, Stream input, string contentType, CancellationToken cancellationToken)
+    public async Task PutAsync(
+        string key,
+        Stream input,
+        string contentType,
+        CancellationToken cancellationToken,
+        string? knownSha256 = null)
     {
         if (input.CanSeek && input.Length - input.Position >= MultipartThresholdBytes)
         {
             var startPosition = input.Position;
-            var sourceHashBytes = await SHA256.HashDataAsync(input, cancellationToken);
-            var sourceHash = Convert.ToHexString(sourceHashBytes);
+            // The caller already hashed the source file for its integrity
+            // check; reuse it instead of reading the whole book a second time.
+            var sourceHash = knownSha256 is { Length: 64 }
+                ? knownSha256.ToUpperInvariant()
+                : Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken));
             input.Position = startPosition;
             try
             {

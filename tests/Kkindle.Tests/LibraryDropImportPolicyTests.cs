@@ -4,6 +4,34 @@ namespace Kkindle.Tests;
 
 public sealed class LibraryDropImportPolicyTests
 {
+    [Theory]
+    [InlineData(".pdf")]
+    [InlineData(".TXT")]
+    [InlineData(".epub")]
+    [InlineData(".mobi")]
+    [InlineData(".azw3")]
+    public void FileUriDropPreservesLiteralPercentEscapes(string extension)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var file = Path.Combine(root, "书籍%20原文%23章节" + extension);
+            File.WriteAllText(file, "book");
+            var format = DataFormat.CreateStringPlatformFormat("text/uri-list");
+            using var transfer = new DataTransfer();
+            transfer.Add(DataTransferItem.Create(format, new Uri(root + Path.DirectorySeparatorChar).AbsoluteUri + Uri.EscapeDataString(Path.GetFileName(file))));
+
+            var paths = LibraryDropImportPolicy.GetLocalPaths(transfer);
+
+            Assert.Equal([file], paths);
+            Assert.Equal([file], LibraryDropImportPolicy.ExpandImportableFiles(paths));
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
     [Fact]
     public void AcceptsAdvertisedFileFormatBeforeLinuxPayloadIsMaterialized()
     {

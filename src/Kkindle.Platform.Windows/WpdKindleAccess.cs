@@ -9,6 +9,74 @@ internal static class WpdKindleAccess
     private const int MyComputerShellFolder = 17;
     private static readonly Guid WpdObjectPropertySet = new("EF6B490D-5CD8-437A-AFFC-DA8B60EE4A3C");
 
+    /// <summary>
+    /// One Shell/device/storage session reused for a whole scan. Opening the
+    /// WPD device and walking to the storage object is the expensive part of
+    /// every per-book copy; the previous code did it once per book and forced
+    /// two full GCs afterwards.
+    /// </summary>
+    internal sealed class WpdSession : IDisposable
+    {
+        private readonly dynamic _shell;
+        private readonly dynamic _device;
+        private readonly dynamic _storage;
+        private readonly Dictionary<string, dynamic> _folderCache = new(StringComparer.OrdinalIgnoreCase);
+        private bool _disposed;
+
+        public WpdSession(KindleDevice device)
+        {
+            _shell = CreateShell();
+            _device = FindDevice(_shell, device.RootPath)
+                ?? throw new IOException("设备已断开连接。");
+            _storage = FindFirstStorage(_device)
+                ?? throw new IOException("无法读取设备内部存储。");
+        }
+
+        public dynamic FindItem(string relativePath) =>
+            TryFindItem(relativePath) ?? throw new FileNotFoundException("设备文件不存在。", relativePath);
+
+        public dynamic? TryFindItem(string relativePath)
+        {
+            var normalized = relativePath.Replace('/', '\\').Trim('\\');
+            if (normalized.Length == 0) return _storage;
+
+            var segments = normalized.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+            dynamic current = _storage;
+            var prefix = string.Empty;
+            for (var index = 0; index < segments.Length; index++)
+            {
+                prefix = prefix.Length == 0 ? segments[index] : $"{prefix}\\{segments[index]}";
+                if (_folderCache.TryGetValue(prefix, out var cached))
+                {
+                    current = cached;
+                    continue;
+                }
+
+                var child = FindChild(current, segments[index]);
+                if (child is null) return null;
+                // Folders are stable for the scan; files are released after
+                // each copy, so never keep their RCW in the cache.
+                if (index < segments.Length - 1 || (bool)child.IsFolder)
+                    _folderCache[prefix] = child;
+                current = child;
+            }
+            return current;
+        }
+
+        public static void ReleaseItem(object? item) => Release(item);
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            Release(_storage);
+            Release(_device);
+            Release(_shell);
+            // One finalizer flush per scan, not per book.
+            FlushReleasedComObjects();
+        }
+    }
+
     public static void ReleaseDeviceSessions(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -553,20 +621,22 @@ internal static class WpdKindleAccess
         string destinationDirectory,
         CancellationToken cancellationToken)
     {
+        using var session = new WpdSession(device);
+        return CopyBookToLocal(session, device, book, destinationDirectory, cancellationToken);
+    }
+
+    public static string CopyBookToLocal(
+        WpdSession session,
+        KindleDevice device,
+        KindleBook book,
+        string destinationDirectory,
+        CancellationToken cancellationToken)
+    {
         Directory.CreateDirectory(destinationDirectory);
-        dynamic? shell = null;
-        dynamic? kindle = null;
-        dynamic? storage = null;
         dynamic? item = null;
         try
         {
-            shell = CreateShell();
-            kindle = FindDevice(shell, device.RootPath)
-                ?? throw new IOException("设备已断开连接。");
-            storage = FindFirstStorage(kindle)
-                ?? throw new IOException("无法读取设备内部存储。");
-            item = FindItemByRelativePath(storage, Path.Combine(device.Profile.BooksDirectory, book.RelativePath))
-                ?? throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
+            item = session.FindItem(Path.Combine(device.Profile.BooksDirectory, book.RelativePath));
             var destinationPath = GetUniqueLocalDestination(destinationDirectory, book.FileName);
             try
             {
@@ -592,15 +662,22 @@ internal static class WpdKindleAccess
         }
         finally
         {
-            Release(item);
-            Release(storage);
-            Release(kindle);
-            Release(shell);
-            FlushReleasedComObjects();
+            WpdSession.ReleaseItem(item);
         }
     }
 
     public static string CopyStorageFileToLocal(
+        KindleDevice device,
+        string relativePath,
+        string destinationDirectory,
+        CancellationToken cancellationToken)
+    {
+        using var session = new WpdSession(device);
+        return CopyStorageFileToLocal(session, device, relativePath, destinationDirectory, cancellationToken);
+    }
+
+    public static string CopyStorageFileToLocal(
+        WpdSession session,
         KindleDevice device,
         string relativePath,
         string destinationDirectory,
@@ -611,19 +688,10 @@ internal static class WpdKindleAccess
             throw new InvalidOperationException("设备文件路径无效。");
 
         Directory.CreateDirectory(destinationDirectory);
-        dynamic? shell = null;
-        dynamic? kindle = null;
-        dynamic? storage = null;
         dynamic? item = null;
         try
         {
-            shell = CreateShell();
-            kindle = FindDevice(shell, device.RootPath)
-                ?? throw new IOException("设备已断开连接。");
-            storage = FindFirstStorage(kindle)
-                ?? throw new IOException("无法读取设备内部存储。");
-            item = FindItemByRelativePath(storage, relativePath)
-                ?? throw new FileNotFoundException("设备文件不存在。", relativePath);
+            item = session.FindItem(relativePath);
             if ((bool)item.IsFolder) throw new InvalidOperationException("设备目标不能是文件夹。");
             var fileName = Path.GetFileName(relativePath);
             var destinationPath = GetUniqueLocalDestination(destinationDirectory, fileName);
@@ -649,11 +717,7 @@ internal static class WpdKindleAccess
         }
         finally
         {
-            Release(item);
-            Release(storage);
-            Release(kindle);
-            Release(shell);
-            FlushReleasedComObjects();
+            WpdSession.ReleaseItem(item);
         }
     }
 
@@ -683,6 +747,13 @@ internal static class WpdKindleAccess
             if ((bool)item.IsFolder) throw new InvalidOperationException("不能删除设备文件夹。");
 
             cancellationToken.ThrowIfCancellationRequested();
+            dynamic? readingState = FindItemByRelativePath(documents, Path.ChangeExtension(book.RelativePath, ".sdr"));
+            try
+            {
+                if (readingState is not null && (bool)readingState.IsFolder)
+                    WpdNativeTransfer.DeleteObject(device.RootPath, GetWpdObjectId(readingState), cancellationToken);
+            }
+            finally { Release(readingState); }
             ShellFileOperation.DeletePermanently((object)item);
             var startedAt = DateTime.UtcNow;
             while (DateTime.UtcNow - startedAt < TimeSpan.FromSeconds(20))
@@ -783,6 +854,16 @@ internal static class WpdKindleAccess
             }
 
             var existing = FindChild(documents, finalName);
+            if (existing is null)
+            {
+                dynamic? orphanState = FindChild(documents, Path.ChangeExtension(finalName, ".sdr"));
+                try
+                {
+                    if (orphanState is not null && (bool)orphanState.IsFolder)
+                        WpdNativeTransfer.DeleteObject(device.RootPath, GetWpdObjectId(orphanState), cancellationToken);
+                }
+                finally { Release(orphanState); }
+            }
             if (existing is not null)
             {
                 try
@@ -959,25 +1040,41 @@ internal static class WpdKindleAccess
 
     private static dynamic? FindFirstStorage(dynamic device)
     {
-        dynamic children = device.GetFolder.Items();
-        for (var index = 0; index < (int)children.Count; index++)
+        dynamic? children = null;
+        try
         {
-            dynamic child = children.Item(index);
-            if ((bool)child.IsFolder) return child;
+            children = device.GetFolder.Items();
+            for (var index = 0; index < (int)children.Count; index++)
+            {
+                dynamic child = children.Item(index);
+                if ((bool)child.IsFolder) return child;
+            }
+            return null;
         }
-        return null;
+        finally
+        {
+            Release(children);
+        }
     }
 
     private static dynamic? FindChild(dynamic parent, string name)
     {
-        dynamic children = parent.GetFolder.Items();
-        for (var index = 0; index < (int)children.Count; index++)
+        dynamic? children = null;
+        try
         {
-            dynamic child = children.Item(index);
-            if (string.Equals(GetItemFileName(child), name, StringComparison.OrdinalIgnoreCase))
-                return child;
+            children = parent.GetFolder.Items();
+            for (var index = 0; index < (int)children.Count; index++)
+            {
+                dynamic child = children.Item(index);
+                if (string.Equals(GetItemFileName(child), name, StringComparison.OrdinalIgnoreCase))
+                    return child;
+            }
+            return null;
         }
-        return null;
+        finally
+        {
+            Release(children);
+        }
     }
 
     private static string GetItemFileName(dynamic item)

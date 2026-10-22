@@ -5,10 +5,8 @@ namespace Kkindle.Core;
 public enum ReaderTheme
 {
     Classic = 0,
-    Night = 1,
-    Green = 2,
-    MistBlue = 3,
-    Ivory = 4
+    Beige = 1,
+    Green = 2
 }
 
 /// <summary>Global paint preferences, deliberately separate from pagination settings.</summary>
@@ -33,10 +31,9 @@ public sealed record ReaderAppearanceSettings
         };
     }
 
-    // Keep the user's strength/fiber preferences when paper is disabled. Night
-    // paper uses less contrast without changing the saved slider position.
+    // Keep the user's strength/fiber preferences when paper is disabled.
     [JsonIgnore]
     public double EffectivePaperStrength => PaperEnabled
-        ? PaperStrength * (Theme == ReaderTheme.Night ? 0.38 : 1)
+        ? PaperStrength
         : 0;
 }

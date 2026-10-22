@@ -79,6 +79,9 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         Capture(scope.Window, "default-classic");
         scope.Call("ReaderLayoutSettingsButton_Click", null, new RoutedEventArgs());
         Assert.True(scope.Get<RadioButton>("ReaderClassicThemeOption").IsChecked);
+        var themes = Assert.IsType<UniformGrid>(scope.Get<RadioButton>("ReaderClassicThemeOption").Parent);
+        Assert.Equal(3, themes.Children.Count);
+        Assert.Equal(3, themes.Columns);
         scope.Get<RadioButton>("ReaderGreenThemeOption").IsChecked = true;
         scope.Get<CheckBox>("ReaderPaperEnabledCheck").IsChecked = true;
         scope.Get<Slider>("ReaderPaperStrengthSlider").Value = 75;
@@ -99,10 +102,9 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         scope.Call("ReaderLayoutSettingsButton_Click", null, new RoutedEventArgs());
         Assert.True(scope.Get<CheckBox>("ReaderFibersEnabledCheck").IsChecked);
         scope.Get<CheckBox>("ReaderPaperEnabledCheck").IsChecked = true;
-        scope.Get<RadioButton>("ReaderNightThemeOption").IsChecked = true;
+        scope.Get<RadioButton>("ReaderBeigeThemeOption").IsChecked = true;
         await scope.Field<Task>("_readerAppearanceSaveTask");
         await ReaderTests.Render();
-        Assert.True(scope.Get<TextBlock>("ReaderNightPaperHint").IsVisible);
         var card = scope.Get<Border>("ReaderLayoutSettingsCard");
         Assert.InRange(card.Bounds.Height, 200, scope.Window.Bounds.Height);
         CapturePopup(scope.Get<Popup>("ReaderLayoutSettingsPopup"), "settings-night");
@@ -122,7 +124,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
     [Fact]
     public Task PaperHasTonalVariationAndFibersCanBeRemovedWithoutRemovingGrain() => Run(() =>
     {
-        var appearance = new ReaderAppearanceSettings { Theme = ReaderTheme.Ivory, PaperEnabled = true, PaperStrength = 0.8 };
+        var appearance = new ReaderAppearanceSettings { Theme = ReaderTheme.Green, PaperEnabled = true, PaperStrength = 0.8 };
         using var paper = PaintPaper(appearance);
         using var fibers = PaintPaper(appearance with { FibersEnabled = true });
         using var flat = PaintPaper(appearance with { PaperEnabled = false, FibersEnabled = true });
@@ -144,7 +146,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task NightReaderSurfacesMenusAndAssistantUseTheReaderPalette() => Run(async () =>
+    public Task BeigeReaderSurfacesMenusAndAssistantUseTheReaderPalette() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
         using var host = await LoadChapter(scope, new());
@@ -153,7 +155,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         scope.Call("ReaderAssistantToggleButton_Click", null, new RoutedEventArgs());
         scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings
         {
-            Theme = ReaderTheme.Night,
+            Theme = ReaderTheme.Beige,
             PaperEnabled = false,
             PaperStrength = 0.8,
             FibersEnabled = true
@@ -161,7 +163,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         await scope.Field<Task>("_readerAppearanceSaveTask");
         await Task.Delay(250);
         await ReaderTests.Render();
-        var palette = ReaderPalette.For(ReaderTheme.Night);
+        var palette = ReaderPalette.For(ReaderTheme.Beige);
         var pageBrush = scope.Window.Resources["ReaderPageBrush"];
         var sidebarBrush = scope.Window.Resources["ReaderSidebarBrush"];
         var chromeBrush = scope.Window.Resources["ReaderChromeBrush"];
@@ -192,7 +194,141 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
     });
 
+    [Fact]
+    public Task PerBookLayoutAndAppearanceStayIsolatedAndResetReturnsToGlobal() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var host = await LoadChapter(scope, new());
+        var globalSettings = scope.Field<AppSettings>("_appSettings");
+        var bookId = Guid.NewGuid();
+        var file = new BookFile
+        {
+            Id = Guid.NewGuid(),
+            BookId = bookId,
+            Format = "epub",
+            RelativePath = "book-one.epub"
+        };
+        var book = new Book
+        {
+            Id = bookId,
+            Title = "单书排版测试",
+            Files = [file]
+        };
+        using var card = new BookCardViewModel(book, scope.Paths.Data);
+        scope.Set("_readerBookCard", card);
+        scope.Set("_readerBookFile", file);
+
+        await scope.Call<Task>("LoadReaderBookProfileAsync", CancellationToken.None);
+        await scope.Call<Task>("SetReaderBookOverrideAsync", true);
+        var perBookLayout = globalSettings.DefaultReaderLayout with
+        {
+            FontScale = 1.47,
+            LineHeight = 2.1
+        };
+        scope.Set("_readerLayout", perBookLayout);
+        scope.Call("ChangeReaderAppearance",
+            globalSettings.ReaderAppearance with { Theme = ReaderTheme.Beige });
+        await scope.Field<Task>("_readerAppearanceSaveTask");
+
+        Assert.Equal(globalSettings.DefaultReaderLayout, scope.Field<AppSettings>("_appSettings").DefaultReaderLayout);
+        Assert.Equal(globalSettings.ReaderAppearance, scope.Field<AppSettings>("_appSettings").ReaderAppearance);
+        var storedSettings = await new AppSettingsStore(scope.Paths).LoadAsync();
+        Assert.Equal(globalSettings.DefaultReaderLayout, storedSettings.DefaultReaderLayout);
+        Assert.Equal(globalSettings.ReaderAppearance, storedSettings.ReaderAppearance);
+
+        var readerData = scope.Field<ReaderDataService>("_readerData");
+        var storedProfile = await readerData.GetBookLayoutProfileAsync(bookId, file.Id);
+        Assert.NotNull(storedProfile);
+        Assert.True(storedProfile.UseBookOverride);
+        Assert.Equal(perBookLayout, storedProfile.Layout);
+        Assert.Equal(ReaderTheme.Beige, storedProfile.Appearance.Theme);
+
+        scope.Set("_readerCompactNavigationItems",
+            new[] { new EpubReaderNavigationItem("Chapter 1", "chapter.xhtml", 0) });
+        scope.Call("RefreshReaderCompactMarkers");
+        var marker = Assert.Single(
+            scope.Get<ItemsControl>("ReaderTocCompactList").ItemsSource!.OfType<ReaderTocMarker>());
+        Assert.Equal(
+            ReaderPalette.For(ReaderTheme.Beige).AccentBrush,
+            marker.Palette.AccentBrush);
+
+        scope.Call("ReaderLayoutResetButton_Click", null, new RoutedEventArgs());
+        Assert.False(scope.Field<ReaderBookLayoutProfile?>("_readerBookLayoutProfile")!.UseBookOverride);
+        Assert.Equal(globalSettings.DefaultReaderLayout, scope.Field<ReaderLayoutSettings>("_readerLayout"));
+        Assert.Equal(
+            globalSettings.ReaderAppearance.Theme,
+            scope.Property<ReaderAppearanceSettings>("CurrentReaderAppearance").Theme);
+        await WaitUntilAsync(async () =>
+            (await readerData.GetBookLayoutProfileAsync(bookId, file.Id))?.UseBookOverride == false);
+
+        var secondBookId = Guid.NewGuid();
+        var secondFile = new BookFile
+        {
+            Id = Guid.NewGuid(),
+            BookId = secondBookId,
+            Format = "epub",
+            RelativePath = "book-two.epub"
+        };
+        var secondBook = new Book
+        {
+            Id = secondBookId,
+            Title = "继承全局排版",
+            Files = [secondFile]
+        };
+        using var secondCard = new BookCardViewModel(secondBook, scope.Paths.Data);
+        scope.Set("_readerBookCard", secondCard);
+        scope.Set("_readerBookFile", secondFile);
+        await scope.Call<Task>("LoadReaderBookProfileAsync", CancellationToken.None);
+        scope.Call("ApplyReaderAppearance");
+        Assert.False(scope.Field<ReaderBookLayoutProfile?>("_readerBookLayoutProfile")!.UseBookOverride);
+        Assert.Equal(
+            globalSettings.ReaderAppearance.Theme,
+            scope.Property<ReaderAppearanceSettings>("CurrentReaderAppearance").Theme);
+
+        scope.Set("_readerActiveHost", null);
+        scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
+    });
+
+    [Fact]
+    public Task PdfHidesPerBookLayoutScope() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var book = new Book { Id = Guid.NewGuid(), Title = "PDF" };
+        var file = new BookFile
+        {
+            Id = Guid.NewGuid(),
+            BookId = book.Id,
+            Format = "pdf",
+            RelativePath = "pdf-test.pdf"
+        };
+        using var card = new BookCardViewModel(book, scope.Paths.Data);
+        scope.Set("_readerBookCard", card);
+        scope.Set("_readerBookFile", file);
+        scope.Set("_readerIsPdf", true);
+        scope.Call("SyncReaderBookScopeControls");
+        Assert.False(scope.Get<RadioButton>("ReaderBookScopeGlobalOption").IsVisible);
+        Assert.False(scope.Get<RadioButton>("ReaderBookScopeBookOption").IsVisible);
+        Assert.False(scope.Get<TextBlock>("ReaderBookScopeHint").IsVisible);
+
+        scope.Set("_readerIsPdf", false);
+        scope.Call("SyncReaderBookScopeControls");
+        Assert.True(scope.Get<RadioButton>("ReaderBookScopeGlobalOption").IsVisible);
+        Assert.True(scope.Get<RadioButton>("ReaderBookScopeBookOption").IsVisible);
+    });
+
     private Task Run(Func<Task> action) => session.Session.Dispatch(async () => { await action(); return true; }, CancellationToken.None);
+
+    private static async Task WaitUntilAsync(Func<Task<bool>> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await condition()) return;
+            await Task.Delay(40);
+        }
+
+        Assert.True(await condition(), "Timed out waiting for the reader profile update.");
+    }
 
     internal static async Task<NativeReaderHost> LoadChapter(ReaderTestWindow scope, ReaderLayoutSettings layout)
     {

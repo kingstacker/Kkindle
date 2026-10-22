@@ -5,6 +5,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
+using Avalonia.VisualTree;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 using Kkindle.TestFixtures;
@@ -17,6 +18,43 @@ namespace Kkindle.Ui.Tests;
 [Trait("Category", "Slow")]
 public sealed class PdfReaderTests(SettingsUiSession session)
 {
+    [Fact]
+    public Task ReopeningPdfClearsOldTocAndRevealsOnlyTheRestoredPage() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        await pdf.SetZoomAsync(2);
+        pdf.ScrollToTop(0.45);
+        var saved = pdf.CaptureViewState();
+        await scope.Call<Task>("CloseReaderAsync");
+        var list = scope.Get<ListBox>("ReaderTocList");
+        list.ItemsSource = Enumerable.Range(0, 80).Select(index => new ReaderTocRow(
+            new EpubReaderNavigationItem("旧目录 " + index, "file:///old#" + index, index), false, false)).ToArray();
+        var firstPaintWasHidden = false;
+        var root = scope.Get<Control>("ReaderRoot");
+        root.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != Control.IsVisibleProperty || !root.IsVisible) return;
+            Assert.Empty(list.Items);
+            var loadingHost = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+            loadingHost.NavigationCompleted += (_, _) => firstPaintWasHidden = loadingHost.Opacity == 0;
+        };
+        var path = new SqliteBookLibraryService(scope.Paths, new BookMetadataService()).GetAbsoluteFilePath(card.Book.Files[0]);
+        await scope.Call<Task>("OpenPdfReaderAsync", card, card.Book.Files[0], path);
+        pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        Assert.True(firstPaintWasHidden);
+        Assert.Equal(1, pdf.Opacity);
+        Assert.Equal(saved, pdf.CaptureViewState());
+        await scope.Field<Task>("_readerPdfOutlineTask");
+        await ReaderTests.Render();
+        var first = list.GetVisualDescendants().OfType<ListBoxItem>().First(item => item.DataContext is ReaderTocRow row && row.Title == "Cover");
+        Assert.InRange(first.TranslatePoint(default, list)!.Value.Y, 0, 20);
+        AssertCurrent(scope, "Chapter Two");
+        Capture(scope.Window, "pdf-reopen-restored");
+    });
+
     [Fact]
     public Task PdfOpensWithFirstPageCoverAndFollowsItsNestedOutline() => Run(async () =>
     {
@@ -205,7 +243,7 @@ public sealed class PdfReaderTests(SettingsUiSession session)
 
     [Theory]
     [InlineData(ReaderTheme.Classic)]
-    [InlineData(ReaderTheme.Night)]
+    [InlineData(ReaderTheme.Beige)]
     public Task ColoredMarkersRenderAndKeepTheirNotesAndColorsWhenReopened(ReaderTheme theme) => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
@@ -242,7 +280,9 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         var stylesButton = scope.Get<Button>("ReaderSelectionHighlightMenuButton");
         stylesButton.Flyout!.ShowAt(stylesButton);
         await ReaderTests.Render();
-        Assert.Equal(UiText.Get("黄色"), scope.Get<TextBlock>("ReaderSelectionMarkerColorText").Text);
+        Assert.Equal(Avalonia.Media.Color.Parse("#FFD54F"),
+            Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(
+                scope.Get<Border>("ReaderSelectionMarkerColorPreview").Background).Color);
         var picker = scope.Get<Button>("ReaderSelectionMarkerColorButton");
         ReaderHighlightColorTests.Click(picker);
         await ReaderTests.Render();

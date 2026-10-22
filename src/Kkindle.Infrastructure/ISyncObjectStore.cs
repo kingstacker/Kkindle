@@ -13,7 +13,12 @@ internal interface ISyncObjectStore : IDisposable
         string key,
         CancellationToken cancellationToken,
         long rangeStart = 0);
-    Task PutAsync(string key, Stream input, string contentType, CancellationToken cancellationToken);
+    Task PutAsync(
+        string key,
+        Stream input,
+        string contentType,
+        CancellationToken cancellationToken,
+        string? knownSha256 = null);
     Task DeleteAsync(string key, CancellationToken cancellationToken);
     Task TestWriteAsync(string prefix, CancellationToken cancellationToken);
 }

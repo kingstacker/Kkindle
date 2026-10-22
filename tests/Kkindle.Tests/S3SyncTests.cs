@@ -739,4 +739,291 @@ public sealed class S3SyncTests
             TestHelpers.TryDelete(root);
         }
     }
+
+    [Fact]
+    public async Task IncrementalCaptureMatchesFullCaptureAfterUpdatesAndDeletes()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            var data = new ReaderDataService(paths);
+            await data.InitializeAsync();
+
+            var bookId = Guid.NewGuid();
+            var fileId = Guid.NewGuid();
+            var collectionId = Guid.NewGuid();
+            var annotationId = Guid.NewGuid();
+            var bookmarkId = Guid.NewGuid();
+            var time = DateTimeOffset.UtcNow.AddMinutes(-10);
+
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO Books (Id, Title, Authors, Tags, Category, IsFavorite, ReadingStatus, CreatedAt, UpdatedAt)
+                    VALUES ($book, 'Incremental sync', 'Author', '', '', 0, 0, $time, $time);
+                    INSERT INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256)
+                    VALUES ($file, $book, 'epub', 'library/book.epub', 1234, $sha);
+                    INSERT INTO BookCollections (Id, Name, CreatedAt, UpdatedAt)
+                    VALUES ($collection, '目标收藏夹', $time, $time);
+                    INSERT INTO BookCollectionItems (CollectionId, BookId, AddedAt)
+                    VALUES ($collection, $book, $time);
+                    INSERT INTO ReaderLayoutSettings (BookFileId, BookId, UpdatedAt)
+                    VALUES ($file, $book, $time);
+                    INSERT INTO ReaderReadingStats (BookFileId, BookId, CumulativeSeconds, ProgressPercent, CompletedChapters, TotalChapters, UpdatedAt)
+                    VALUES ($file, $book, 120, 10, 1, 10, $time);
+                    """;
+                command.Parameters.AddWithValue("$book", bookId.ToString());
+                command.Parameters.AddWithValue("$file", fileId.ToString());
+                command.Parameters.AddWithValue("$collection", collectionId.ToString());
+                command.Parameters.AddWithValue("$time", time.ToString("O"));
+                command.Parameters.AddWithValue("$sha", new string('a', 64));
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await data.SaveAnnotationAsync(new ReaderAnnotation
+            {
+                Id = annotationId,
+                BookId = bookId,
+                BookFileId = fileId,
+                ChapterPath = "chapter.xhtml",
+                StartOffset = 0,
+                EndOffset = 4,
+                SelectedText = "text",
+                CreatedAt = time,
+                UpdatedAt = time
+            });
+            await data.SaveBookmarkAsync(new ReaderBookmark
+            {
+                Id = bookmarkId,
+                BookId = bookId,
+                BookFileId = fileId,
+                ChapterPath = "chapter.xhtml",
+                ChapterIndex = 0,
+                Title = "mark",
+                Quote = "text",
+                CreatedAt = time
+            });
+            await data.SaveProgressAsync(new ReaderProgressRow(
+                bookId, fileId, "chapter.xhtml", null, 0, 10, 5, 0, time));
+            await data.SaveBookReflectionAsync(new ReaderBookReflection
+            {
+                BookId = bookId,
+                Content = "first",
+                CreatedAt = time,
+                UpdatedAt = time
+            });
+
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var fullMethod = typeof(S3SyncService).GetMethod(
+                "CaptureSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var incrementalMethod = typeof(S3SyncService).GetMethod(
+                "CaptureSnapshotWithBaselineAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            Task<S3SyncSnapshot> CaptureFull() => (Task<S3SyncSnapshot>)fullMethod.Invoke(
+                service, ["incremental-device", Array.Empty<S3SyncTombstone>(), CancellationToken.None])!;
+            Task<S3SyncSnapshot> CaptureIncremental(S3SyncSnapshot baseline) =>
+                (Task<S3SyncSnapshot>)incrementalMethod.Invoke(
+                    service,
+                    [
+                        "incremental-device",
+                        Array.Empty<S3SyncTombstone>(),
+                        CancellationToken.None,
+                        baseline,
+                        baseline.CreatedAt
+                    ])!;
+
+            var baseline = await CaptureFull();
+
+            var changedAt = DateTimeOffset.UtcNow;
+            await using (var connection = new SqliteConnection($"Data Source={paths.Database}"))
+            {
+                await connection.OpenAsync();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    UPDATE Books SET Title = 'Incremental sync v2', UpdatedAt = $changed WHERE Id = $book;
+                    DELETE FROM ReaderLayoutSettings WHERE BookFileId = $file;
+                    DELETE FROM BookCollectionItems WHERE CollectionId = $collection AND BookId = $book;
+                    """;
+                command.Parameters.AddWithValue("$changed", changedAt.ToString("O"));
+                command.Parameters.AddWithValue("$book", bookId.ToString());
+                command.Parameters.AddWithValue("$file", fileId.ToString());
+                command.Parameters.AddWithValue("$collection", collectionId.ToString());
+                await command.ExecuteNonQueryAsync();
+            }
+            await data.DeleteAnnotationAsync(annotationId);
+            await data.DeleteBookmarkAsync(bookmarkId);
+            await data.SaveAnnotationAsync(new ReaderAnnotation
+            {
+                Id = Guid.NewGuid(),
+                BookId = bookId,
+                BookFileId = fileId,
+                ChapterPath = "chapter.xhtml",
+                StartOffset = 10,
+                EndOffset = 14,
+                SelectedText = "more",
+                CreatedAt = changedAt,
+                UpdatedAt = changedAt
+            });
+            await data.SaveProgressAsync(new ReaderProgressRow(
+                bookId, fileId, "chapter.xhtml", null, 1, 20, 15, 0, changedAt));
+            await data.SaveBookReflectionAsync(new ReaderBookReflection
+            {
+                BookId = bookId,
+                Content = "second",
+                CreatedAt = time,
+                UpdatedAt = changedAt
+            });
+
+            var incremental = await CaptureIncremental(baseline);
+            var expected = await CaptureFull();
+
+            Assert.Equal(
+                CanonicalSnapshot(expected),
+                CanonicalSnapshot(incremental));
+            Assert.Equal(expected.LocalFilePaths, incremental.LocalFilePaths);
+            Assert.Equal(expected.LocalDeletionTimes.Count, incremental.LocalDeletionTimes.Count);
+
+            // A merged remote row can carry an UpdatedAt older than the
+            // transaction start. The converged capture must still include it,
+            // which is why it re-reads the IDs present in the remote snapshots.
+            var remoteAnnotationId = Guid.NewGuid();
+            await data.SaveAnnotationAsync(new ReaderAnnotation
+            {
+                Id = remoteAnnotationId,
+                BookId = bookId,
+                BookFileId = fileId,
+                ChapterPath = "chapter.xhtml",
+                StartOffset = 30,
+                EndOffset = 34,
+                SelectedText = "remote",
+                CreatedAt = time,
+                UpdatedAt = time
+            });
+            var convergedMethod = typeof(S3SyncService).GetMethod(
+                "CaptureConvergedSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var converged = await (Task<S3SyncSnapshot>)convergedMethod.Invoke(
+                service,
+                [
+                    "incremental-device",
+                    Array.Empty<S3SyncTombstone>(),
+                    baseline,
+                    new[] { remoteAnnotationId },
+                    false,
+                    CancellationToken.None
+                ])!;
+            var convergedExpected = await CaptureFull();
+            Assert.Equal(
+                CanonicalSnapshot(convergedExpected),
+                CanonicalSnapshot(converged));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task StateFileKeepsTheBaselineInASeparateGzippedFile()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            await new ReaderDataService(paths).InitializeAsync();
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var capture = typeof(S3SyncService).GetMethod(
+                "CaptureSnapshotAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var snapshot = await (Task<S3SyncSnapshot>)capture.Invoke(
+                service, ["state-device", Array.Empty<S3SyncTombstone>(), CancellationToken.None])!;
+
+            var save = typeof(S3SyncService).GetMethod(
+                "SaveStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var state = new S3SyncState
+            {
+                DeviceId = "state-device",
+                StorageIdentity = "storage",
+                LastUploadedSnapshot = snapshot,
+                SnapshotWatermark = snapshot.CreatedAt
+            };
+            await (Task)save.Invoke(service, [state, CancellationToken.None])!;
+
+            var stateJson = await File.ReadAllTextAsync(Path.Combine(paths.Data, "s3-sync-state.json"));
+            Assert.Contains("\"LastUploadedSnapshot\":null", stateJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"LastUploadedSnapshot\":{", stateJson, StringComparison.Ordinal);
+            var baselinePath = Path.Combine(paths.Data, "s3-sync-baseline.json.gz");
+            Assert.True(File.Exists(baselinePath));
+
+            var load = typeof(S3SyncService).GetMethod(
+                "LoadStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var loaded = await (Task<S3SyncState>)load.Invoke(
+                service, ["state-device", "storage", CancellationToken.None])!;
+            Assert.NotNull(loaded.LastUploadedSnapshot);
+            Assert.Equal(snapshot.Books.Count, loaded.LastUploadedSnapshot!.Books.Count);
+            Assert.Equal(snapshot.CreatedAt, loaded.SnapshotWatermark);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvalidSplitBaselineDisablesIncrementalCaptureAndCanBeRepaired(bool validButMismatched)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            var service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector());
+            var snapshot = new S3SyncSnapshot { DeviceId = "state-device" };
+            var state = new S3SyncState
+            {
+                DeviceId = "state-device", StorageIdentity = "storage",
+                LastUploadedSnapshot = snapshot, SnapshotWatermark = snapshot.CreatedAt
+            };
+            var save = typeof(S3SyncService).GetMethod("SaveStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var load = typeof(S3SyncService).GetMethod("LoadStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            await (Task)save.Invoke(service, [state, CancellationToken.None])!;
+            var baselinePath = Path.Combine(paths.Data, "s3-sync-baseline.json.gz");
+            if (validButMismatched)
+            {
+                await using var file = File.Create(baselinePath);
+                await using var gzip = new System.IO.Compression.GZipStream(file, System.IO.Compression.CompressionMode.Compress);
+                await JsonSerializer.SerializeAsync(gzip, new S3SyncSnapshot { DeviceId = "interrupted-write" });
+            }
+            else await File.WriteAllTextAsync(baselinePath, "corrupt gzip");
+
+            var loaded = await (Task<S3SyncState>)load.Invoke(service, ["state-device", "storage", CancellationToken.None])!;
+            Assert.Null(loaded.LastUploadedSnapshot);
+            Assert.Null(loaded.SnapshotWatermark);
+
+            // Re-saving the original snapshot must repair the file even when
+            // its hash still matches the hash in the old state document.
+            await (Task)save.Invoke(service, [state, CancellationToken.None])!;
+            loaded = await (Task<S3SyncState>)load.Invoke(service, ["state-device", "storage", CancellationToken.None])!;
+            Assert.Equal("state-device", loaded.LastUploadedSnapshot!.DeviceId);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    private static string CanonicalSnapshot(S3SyncSnapshot snapshot)
+    {
+        snapshot.CreatedAt = DateTimeOffset.UnixEpoch;
+        snapshot.DeviceId = "incremental-device";
+        snapshot.Books = snapshot.Books.OrderBy(item => item.Id).ToList();
+        snapshot.Files = snapshot.Files.OrderBy(item => item.Id).ToList();
+        snapshot.Collections = snapshot.Collections.OrderBy(item => item.Id).ToList();
+        snapshot.CollectionItems = snapshot.CollectionItems
+            .OrderBy(item => item.CollectionId).ThenBy(item => item.BookId).ToList();
+        snapshot.Annotations = snapshot.Annotations.OrderBy(item => item.Id).ToList();
+        snapshot.BookReflections = snapshot.BookReflections.OrderBy(item => item.BookId).ToList();
+        snapshot.Progress = snapshot.Progress.OrderBy(item => item.BookFileId).ToList();
+        snapshot.Bookmarks = snapshot.Bookmarks.OrderBy(item => item.Id).ToList();
+        snapshot.Layouts = snapshot.Layouts.OrderBy(item => item.BookFileId).ToList();
+        snapshot.ReadingStats = snapshot.ReadingStats.OrderBy(item => item.BookFileId).ToList();
+        snapshot.Tombstones = snapshot.Tombstones
+            .OrderBy(item => item.EntityType).ThenBy(item => item.Key).ToList();
+        return JsonSerializer.Serialize(snapshot);
+    }
 }

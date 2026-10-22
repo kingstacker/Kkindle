@@ -60,11 +60,10 @@ public sealed record BookContentChunkDraft(
     string Content);
 
 // ------------------------------------------------------------------
-// Reader persistence: progress restore, bookmarks, legacy per-book layout
-// rows and cumulative reading stats. All rows are keyed by the BookFile so
-// every format of the same book keeps its own position. The active reader
-// layout is now stored in the global app profile; old layout rows remain only
-// for compatibility with existing data.
+// Reader persistence: progress restore, bookmarks, per-format layout rows,
+// book-level layout/appearance scope and cumulative reading stats. Layout
+// controls stay per format while a book's selected scope and appearance are
+// shared by every format of that logical book.
 // ------------------------------------------------------------------
 
 public sealed record ReaderProgressRow(
@@ -118,10 +117,31 @@ public sealed record ReaderLayoutSettings(
     bool VerticalWriting = false,
     bool TwoPageMode = false)
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; init; }
+
     // Keep this as an initialized property instead of a new positional
     // constructor parameter. Older JSON settings do not contain the field;
     // the initializer therefore gives new settings the current default.
     public bool ParagraphIndent { get; init; } = false;
+}
+
+/// <summary>
+/// A book-scoped layout and appearance profile. The active layout row is
+/// stored with the book's reader data so it follows the book across devices.
+/// </summary>
+public sealed record ReaderBookLayoutProfile(
+    Guid BookId,
+    Guid BookFileId,
+    bool UseBookOverride,
+    ReaderLayoutSettings Layout,
+    ReaderAppearanceSettings Appearance)
+{
+    public static ReaderBookLayoutProfile Normalize(ReaderBookLayoutProfile profile) => profile with
+    {
+        Layout = ReaderLayoutDefaults.Normalize(profile.Layout),
+        Appearance = ReaderAppearanceSettings.Normalize(profile.Appearance)
+    };
 }
 
 // ------------------------------------------------------------------
@@ -160,6 +180,12 @@ public static class ReaderLayoutDefaults
         _ = bookLayout;
         return Normalize(globalLayout);
     }
+
+    public static ReaderLayoutSettings ApplyPreferences(
+        ReaderLayoutSettings bookLayout,
+        ReaderLayoutSettings globalLayout,
+        bool useBookOverride) =>
+        Normalize(useBookOverride ? bookLayout : globalLayout);
 
     public static ReaderLayoutSettings Normalize(ReaderLayoutSettings settings)
     {

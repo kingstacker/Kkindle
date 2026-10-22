@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Security.Cryptography;
 using Kkindle.Core;
 using Microsoft.Data.Sqlite;
@@ -11,7 +11,7 @@ public sealed partial class S3SyncService
     {
         DataSource = _paths.Database,
         Mode = SqliteOpenMode.ReadWriteCreate,
-        Cache = SqliteCacheMode.Shared,
+        Cache = SqliteCacheMode.Private,
         DefaultTimeout = 30
     }.ToString();
 
@@ -19,9 +19,15 @@ public sealed partial class S3SyncService
     {
         var connection = new SqliteConnection(DatabaseConnectionString);
         await connection.OpenAsync(cancellationToken);
-        using var foreignKeys = connection.CreateCommand();
-        foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
-        await foreignKeys.ExecuteNonQueryAsync(cancellationToken);
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = """
+            PRAGMA foreign_keys = ON;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA cache_size = -65536;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA busy_timeout = 5000;
+            """;
+        await pragma.ExecuteNonQueryAsync(cancellationToken);
         return connection;
     }
 
@@ -49,6 +55,7 @@ public sealed partial class S3SyncService
         CancellationToken cancellationToken)
     {
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
+        await ReadingMaterialBookSchema.EnsureAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         using (var control = CreateCommand(connection, transaction, """
             CREATE TABLE IF NOT EXISTS S3SyncDeletionControl (
@@ -255,17 +262,17 @@ public sealed partial class S3SyncService
         SqliteTransaction transaction,
         string deviceId,
         IReadOnlyCollection<S3SyncTombstone> tombstones,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTimeOffset captureStartedAt)
     {
         var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
         var snapshot = new S3SyncSnapshot
         {
-            // Older clients must not merge counters across a reset. Keep the
-            // existing format until the first reset, then require version 3.
-            Version = readingReset is null ? 2 : 3,
+            Version = SnapshotVersion,
+            MinimumReaderVersion = SnapshotVersion,
             ReadingDataReset = readingReset,
             DeviceId = deviceId,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = captureStartedAt,
             Tombstones = tombstones.ToList()
         };
 
@@ -482,7 +489,9 @@ public sealed partial class S3SyncService
         using (var command = CreateCommand(connection, transaction, 
             """
             SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                   FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt
+                   FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                   UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                   AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt
             FROM ReaderLayoutSettings;
             """
             ))
@@ -502,7 +511,16 @@ public sealed partial class S3SyncService
                     VerticalWriting = reader.GetInt32(8) != 0,
                     TwoPageMode = reader.GetInt32(9) != 0,
                     ParagraphIndent = reader.GetInt32(10) != 0,
-                    UpdatedAt = ParseTimestamp(reader.GetString(11))
+                    UseBookOverride = reader.GetInt32(11) != 0,
+                    AppearanceTheme = Enum.IsDefined((ReaderTheme)reader.GetInt32(12))
+                        ? (ReaderTheme)reader.GetInt32(12)
+                        : ReaderTheme.Classic,
+                    AppearancePaperEnabled = reader.GetInt32(13) != 0,
+                    AppearancePaperStrength = reader.GetDouble(14),
+                    AppearanceFibersEnabled = reader.GetInt32(15) != 0,
+                    ProfileUpdatedAt = reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)),
+                    LayoutUpdatedAt = reader.IsDBNull(17) ? null : ParseTimestamp(reader.GetString(17)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(18))
                 });
         }
 
@@ -532,34 +550,641 @@ public sealed partial class S3SyncService
                 });
         }
 
-        foreach (var stats in snapshot.ReadingStats)
-        {
-            stats.SecondsByDevice = await ReadingTimeSyncTracker.CaptureAsync(
-                connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
-            stats.CumulativeSeconds = ReadingTimeSyncTracker.Total(stats.SecondsByDevice);
-            stats.SecondsByDateByDevice = await ReadingTimeSyncTracker.CaptureReadingDaysAsync(
-                connection, transaction, stats.BookFileId, cancellationToken);
-            await ReadingTimeSyncTracker.UpdateTotalAsync(connection, transaction, stats.BookFileId, stats.CumulativeSeconds, cancellationToken);
-        }
+        await ReadingTimeSyncTracker.CaptureAllAsync(
+            connection, transaction, snapshot.ReadingStats, cancellationToken);
         var recorded = await ReadRecordedDeletionTimesInTransactionAsync(connection, transaction, cancellationToken);
         snapshot.LocalDeletionTimes = recorded;
         snapshot.Tombstones = MergeTombstones(
             FilterReadingTombstones(tombstones, readingReset), GetRecordedTombstones(recorded, snapshot));
+        await CaptureReadingMaterialBooksAsync(connection, transaction, snapshot, cancellationToken);
         return snapshot;
     }
 
-    private async Task<S3SyncSnapshot> CaptureSnapshotAsync(
+    /// <summary>
+    /// Incremental counterpart of <see cref="CaptureDatabaseSnapshotAsync"/>.
+    /// Rows with an UpdatedAt column are read only when they changed after the
+    /// watermark; unchanged rows are reused from the previous snapshot.
+    /// BookFiles, CollectionItems, Bookmarks and ReadingStats are still read in
+    /// full: they are small, and BookFiles/Bookmarks can be updated without an
+    /// UpdatedAt column.
+    /// </summary>
+    private static async Task<S3SyncSnapshot> CaptureIncrementalDatabaseSnapshotAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
         string deviceId,
         IReadOnlyCollection<S3SyncTombstone> tombstones,
-        CancellationToken cancellationToken)
+        S3SyncSnapshot baseline,
+        DateTimeOffset since,
+        DateTimeOffset captureStartedAt,
+        CancellationToken cancellationToken,
+        bool fullScanNonAnnotationTables = false,
+        IReadOnlyCollection<Guid>? annotationIds = null,
+        bool fullScanAnnotations = false)
     {
+        var readingReset = await ReaderReadingDataReset.ReadAsync(connection, transaction, cancellationToken);
+        var snapshot = new S3SyncSnapshot
+        {
+            Version = SnapshotVersion,
+            MinimumReaderVersion = SnapshotVersion,
+            ReadingDataReset = readingReset,
+            DeviceId = deviceId,
+            CreatedAt = captureStartedAt,
+            Tombstones = CloneTombstones(tombstones),
+            TombstonesPrunedBefore = baseline.TombstonesPrunedBefore
+        };
+
+        var recorded = await ReadRecordedDeletionTimesInTransactionAsync(connection, transaction, cancellationToken);
+        var sinceText = since.ToUniversalTime().ToString("O");
+        var deletedBookIds = new HashSet<Guid>();
+
+        // Cover paths are local-only and are persisted in the state file, not
+        // in the baseline JSON. Seed them before the changed-book overlay.
+        if (!fullScanNonAnnotationTables)
+        {
+            foreach (var (id, path) in baseline.LocalCoverPaths)
+                snapshot.LocalCoverPaths[id] = path;
+        }
+
+        // Books: reuse the baseline, drop deleted rows, then overlay rows that
+        // changed after the watermark. The converged post-merge capture scans
+        // this small table in full because merged remote rows can carry an
+        // older UpdatedAt.
+        var books = new List<S3SyncBook>(fullScanNonAnnotationTables ? 0 : baseline.Books.Count);
+        var bookIndex = new Dictionary<Guid, int>();
+        if (!fullScanNonAnnotationTables)
+        {
+            foreach (var source in baseline.Books)
+            {
+                if (recorded.ContainsKey(VersionKey("book", source.Id)))
+                {
+                    deletedBookIds.Add(source.Id);
+                    snapshot.LocalCoverPaths.Remove(source.Id);
+                    continue;
+                }
+                var book = CloneBook(source);
+                bookIndex[book.Id] = books.Count;
+                books.Add(book);
+                if (!string.IsNullOrWhiteSpace(book.LocalCoverPath))
+                    snapshot.LocalCoverPaths[book.Id] = book.LocalCoverPath;
+            }
+        }
+
+        var booksSql = fullScanNonAnnotationTables
+            ? """
+              SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
+                     PublishDate, Isbn, PageCount, Binding, DoubanRating,
+                     DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                     CreatedAt, UpdatedAt, CoverPath
+              FROM Books;
+              """
+            : """
+              SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
+                     PublishDate, Isbn, PageCount, Binding, DoubanRating,
+                     DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                     CreatedAt, UpdatedAt, CoverPath
+              FROM Books WHERE UpdatedAt > $since;
+              """;
+        using (var command = CreateCommand(connection, transaction, booksSql))
+        {
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var book = ReadBookRow(reader);
+                deletedBookIds.Remove(book.Id);
+                if (bookIndex.TryGetValue(book.Id, out var index)) books[index] = book;
+                else
+                {
+                    bookIndex[book.Id] = books.Count;
+                    books.Add(book);
+                }
+                if (!string.IsNullOrWhiteSpace(book.LocalCoverPath))
+                    snapshot.LocalCoverPaths[book.Id] = book.LocalCoverPath;
+                else
+                    snapshot.LocalCoverPaths.Remove(book.Id);
+            }
+        }
+        snapshot.Books = books;
+        var bookUpdatedAt = books.ToDictionary(book => book.Id, book => book.UpdatedAt);
+
+        // Files have no UpdatedAt and can be renamed; a full scan is both
+        // cheaper and safer than trying to infer changes.
+        using (var command = CreateCommand(connection, transaction, """
+            SELECT Id, BookId, Format, RelativePath, Size, Sha256
+            FROM BookFiles;
+            """))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = ParseGuid(reader.GetString(0), "BookFiles.Id");
+                var bookId = ParseGuid(reader.GetString(1), "BookFiles.BookId");
+                if (deletedBookIds.Contains(bookId)) continue;
+                var relativePath = reader.GetString(3);
+                snapshot.LocalFilePaths[id] = relativePath;
+                snapshot.Files.Add(new S3SyncBookFile
+                {
+                    Id = id,
+                    BookId = bookId,
+                    Format = reader.GetString(2),
+                    FileName = Path.GetFileName(relativePath.Replace('\\', '/')),
+                    Size = reader.GetInt64(4),
+                    Sha256 = reader.GetString(5),
+                    ModifiedAt = bookUpdatedAt.GetValueOrDefault(bookId, snapshot.CreatedAt)
+                });
+            }
+        }
+
+        var collections = new List<S3SyncCollection>(
+            fullScanNonAnnotationTables ? 0 : baseline.Collections.Count);
+        var collectionIndex = new Dictionary<Guid, int>();
+        if (!fullScanNonAnnotationTables)
+        {
+            foreach (var source in baseline.Collections)
+            {
+                if (recorded.ContainsKey(VersionKey("collection", source.Id))) continue;
+                collectionIndex[source.Id] = collections.Count;
+                collections.Add(source);
+            }
+        }
+        var collectionsSql = fullScanNonAnnotationTables
+            ? "SELECT Id, Name, CreatedAt, UpdatedAt FROM BookCollections;"
+            : "SELECT Id, Name, CreatedAt, UpdatedAt FROM BookCollections WHERE UpdatedAt > $since;";
+        using (var command = CreateCommand(connection, transaction, collectionsSql))
+        {
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var collection = new S3SyncCollection
+                {
+                    Id = ParseGuid(reader.GetString(0), "BookCollections.Id"),
+                    Name = reader.GetString(1),
+                    CreatedAt = ParseTimestamp(reader.GetString(2)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(3))
+                };
+                if (collectionIndex.TryGetValue(collection.Id, out var index))
+                    collections[index] = collection;
+                else
+                {
+                    collectionIndex[collection.Id] = collections.Count;
+                    collections.Add(collection);
+                }
+            }
+        }
+        snapshot.Collections = collections;
+
+        // Collection items have no UpdatedAt; the table is small and cascades
+        // from both books and collections.
+        using (var command = CreateCommand(connection, transaction, """
+            SELECT CollectionId, BookId, AddedAt
+            FROM BookCollectionItems;
+            """))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                snapshot.CollectionItems.Add(new S3SyncCollectionItem
+                {
+                    CollectionId = ParseGuid(reader.GetString(0), "BookCollectionItems.CollectionId"),
+                    BookId = ParseGuid(reader.GetString(1), "BookCollectionItems.BookId"),
+                    AddedAt = ParseTimestamp(reader.GetString(2))
+                });
+        }
+
+        var annotations = new List<S3SyncAnnotation>(
+            fullScanAnnotations ? 0 : baseline.Annotations.Count);
+        var annotationIndex = new Dictionary<Guid, int>();
+        if (!fullScanAnnotations)
+        {
+            foreach (var source in baseline.Annotations)
+            {
+                if (recorded.ContainsKey(VersionKey("annotation", source.Id))) continue;
+                annotationIndex[source.Id] = annotations.Count;
+                annotations.Add(source);
+            }
+        }
+        var annotationsSql = fullScanAnnotations
+            ? """
+              SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
+                     SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
+              FROM ReaderAnnotations;
+              """
+            : """
+              SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
+                     SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
+              FROM ReaderAnnotations WHERE UpdatedAt > $since;
+              """;
+        using (var command = CreateCommand(connection, transaction, annotationsSql))
+        {
+            if (!fullScanAnnotations) AddParameter(command, "$since", sinceText);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                OverlayAnnotation(ReadAnnotationRow(reader), annotations, annotationIndex);
+        }
+
+        // The converged capture must include remote annotations whose
+        // timestamps are older than the transaction start. Re-read exactly the
+        // IDs that were present in the downloaded snapshots.
+        if (!fullScanAnnotations && annotationIds is { Count: > 0 })
+        {
+            foreach (var chunk in annotationIds.Distinct().Chunk(500))
+            {
+                var names = chunk.Select((_, index) => $"$id{index}").ToArray();
+                var sql = $"""
+                    SELECT Id, BookId, BookFileId, ChapterPath, Fragment, StartOffset, EndOffset,
+                           SelectedText, Prefix, Suffix, Color, UnderlineStyle, Note, CreatedAt, UpdatedAt
+                    FROM ReaderAnnotations WHERE Id IN ({string.Join(", ", names)});
+                    """;
+                using var command = CreateCommand(connection, transaction, sql);
+                for (var index = 0; index < chunk.Length; index++)
+                    AddParameter(command, names[index], chunk[index].ToString());
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                    OverlayAnnotation(ReadAnnotationRow(reader), annotations, annotationIndex);
+            }
+        }
+        snapshot.Annotations = annotations;
+
+        var reflections = new List<S3SyncBookReflection>(
+            fullScanNonAnnotationTables ? 0 : baseline.BookReflections.Count);
+        var reflectionIndex = new Dictionary<Guid, int>();
+        if (!fullScanNonAnnotationTables)
+        {
+            foreach (var source in baseline.BookReflections)
+            {
+                if (recorded.ContainsKey(VersionKey("reflection", source.BookId.ToString("N")))) continue;
+                reflectionIndex[source.BookId] = reflections.Count;
+                reflections.Add(source);
+            }
+        }
+        var reflectionsSql = fullScanNonAnnotationTables
+            ? "SELECT BookId, Content, CreatedAt, UpdatedAt FROM ReaderBookReflections;"
+            : "SELECT BookId, Content, CreatedAt, UpdatedAt FROM ReaderBookReflections WHERE UpdatedAt > $since;";
+        using (var command = CreateCommand(connection, transaction, reflectionsSql))
+        {
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var reflection = new S3SyncBookReflection
+                {
+                    BookId = ParseGuid(reader.GetString(0), "ReaderBookReflections.BookId"),
+                    Content = reader.GetString(1),
+                    CreatedAt = ParseTimestamp(reader.GetString(2)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(3))
+                };
+                if (reflectionIndex.TryGetValue(reflection.BookId, out var index))
+                    reflections[index] = reflection;
+                else
+                {
+                    reflectionIndex[reflection.BookId] = reflections.Count;
+                    reflections.Add(reflection);
+                }
+            }
+        }
+        snapshot.BookReflections = reflections;
+
+        var progress = new List<S3SyncProgress>(
+            fullScanNonAnnotationTables ? 0 : baseline.Progress.Count);
+        var progressIndex = new Dictionary<Guid, int>();
+        if (!fullScanNonAnnotationTables)
+        {
+            foreach (var source in baseline.Progress)
+            {
+                if (recorded.ContainsKey(VersionKey("progress", source.BookFileId.ToString("N")))) continue;
+                progressIndex[source.BookFileId] = progress.Count;
+                progress.Add(source);
+            }
+        }
+        var progressSql = fullScanNonAnnotationTables
+            ? """
+              SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
+                     ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
+              FROM ReaderProgress;
+              """
+            : """
+              SELECT BookId, BookFileId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
+                     ProgressPercent, FlowMode, UpdatedAt, ContentPositionJson
+              FROM ReaderProgress WHERE UpdatedAt > $since;
+              """;
+        using (var command = CreateCommand(connection, transaction, progressSql))
+        {
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var row = new S3SyncProgress
+                {
+                    BookId = ParseGuid(reader.GetString(0), "ReaderProgress.BookId"),
+                    BookFileId = ParseGuid(reader.GetString(1), "ReaderProgress.BookFileId"),
+                    ChapterPath = reader.GetString(2),
+                    Fragment = NullableString(reader, 3),
+                    ChapterIndex = reader.GetInt32(4),
+                    ScrollPosition = reader.GetInt32(5),
+                    ProgressPercent = reader.GetDouble(6),
+                    FlowMode = reader.GetInt32(7),
+                    UpdatedAt = ParseTimestamp(reader.GetString(8)),
+                    ContentPositionJson = NullableString(reader, 9)
+                };
+                if (progressIndex.TryGetValue(row.BookFileId, out var index))
+                    progress[index] = row;
+                else
+                {
+                    progressIndex[row.BookFileId] = progress.Count;
+                    progress.Add(row);
+                }
+            }
+        }
+        snapshot.Progress = progress;
+
+        // Bookmarks can be re-pointed to another book without a timestamp;
+        // the table is small, so read it in full.
+        using (var command = CreateCommand(connection, transaction, """
+            SELECT Id, BookId, BookFileId, ChapterPath, Fragment, ChapterIndex,
+                   ScrollPosition, FlowMode, Title, Quote, CreatedAt, ContentPositionJson
+            FROM ReaderBookmarks;
+            """))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                snapshot.Bookmarks.Add(new S3SyncBookmark
+                {
+                    Id = ParseGuid(reader.GetString(0), "ReaderBookmarks.Id"),
+                    BookId = ParseGuid(reader.GetString(1), "ReaderBookmarks.BookId"),
+                    BookFileId = ParseGuid(reader.GetString(2), "ReaderBookmarks.BookFileId"),
+                    ChapterPath = reader.GetString(3),
+                    Fragment = NullableString(reader, 4),
+                    ChapterIndex = reader.GetInt32(5),
+                    ScrollPosition = NullableInt(reader, 6),
+                    FlowMode = reader.GetInt32(7),
+                    Title = reader.GetString(8),
+                    Quote = reader.GetString(9),
+                    CreatedAt = ParseTimestamp(reader.GetString(10)),
+                    ContentPositionJson = NullableString(reader, 11)
+                });
+        }
+
+        var layouts = new List<S3SyncLayout>(
+            fullScanNonAnnotationTables ? 0 : baseline.Layouts.Count);
+        var layoutIndex = new Dictionary<Guid, int>();
+        if (!fullScanNonAnnotationTables)
+        {
+            foreach (var source in baseline.Layouts)
+            {
+                if (recorded.ContainsKey(VersionKey("layout", source.BookFileId.ToString("N")))) continue;
+                layoutIndex[source.BookFileId] = layouts.Count;
+                layouts.Add(source);
+            }
+        }
+        var layoutsSql = fullScanNonAnnotationTables
+            ? """
+              SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
+                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                     UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                     AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt
+              FROM ReaderLayoutSettings;
+              """
+            : """
+              SELECT BookId, BookFileId, FontScale, LineHeight, MaxWidth, BodyPadding,
+                     FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                     UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                     AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt
+              FROM ReaderLayoutSettings
+              WHERE UpdatedAt > $since OR (ProfileUpdatedAt IS NOT NULL AND ProfileUpdatedAt > $since);
+              """;
+        using (var command = CreateCommand(connection, transaction, layoutsSql))
+        {
+            if (!fullScanNonAnnotationTables) AddParameter(command, "$since", sinceText);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var layout = new S3SyncLayout
+                {
+                    BookId = ParseGuid(reader.GetString(0), "ReaderLayoutSettings.BookId"),
+                    BookFileId = ParseGuid(reader.GetString(1), "ReaderLayoutSettings.BookFileId"),
+                    FontScale = reader.GetDouble(2),
+                    LineHeight = reader.GetDouble(3),
+                    MaxWidth = reader.GetDouble(4),
+                    BodyPadding = reader.GetDouble(5),
+                    FontFamily = NullableString(reader, 6),
+                    FlowMode = reader.GetInt32(7),
+                    VerticalWriting = reader.GetInt32(8) != 0,
+                    TwoPageMode = reader.GetInt32(9) != 0,
+                    ParagraphIndent = reader.GetInt32(10) != 0,
+                    UseBookOverride = reader.GetInt32(11) != 0,
+                    AppearanceTheme = Enum.IsDefined((ReaderTheme)reader.GetInt32(12))
+                        ? (ReaderTheme)reader.GetInt32(12)
+                        : ReaderTheme.Classic,
+                    AppearancePaperEnabled = reader.GetInt32(13) != 0,
+                    AppearancePaperStrength = reader.GetDouble(14),
+                    AppearanceFibersEnabled = reader.GetInt32(15) != 0,
+                    ProfileUpdatedAt = reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)),
+                    LayoutUpdatedAt = reader.IsDBNull(17) ? null : ParseTimestamp(reader.GetString(17)),
+                    UpdatedAt = ParseTimestamp(reader.GetString(18))
+                };
+                if (layoutIndex.TryGetValue(layout.BookFileId, out var index))
+                    layouts[index] = layout;
+                else
+                {
+                    layoutIndex[layout.BookFileId] = layouts.Count;
+                    layouts.Add(layout);
+                }
+            }
+        }
+        snapshot.Layouts = layouts;
+
+        // Reading stats are small (one row per file) and CaptureAllAsync
+        // mutates their per-device counters, so read them fresh.
+        using (var command = CreateCommand(connection, transaction, """
+            SELECT s.BookId, s.BookFileId, s.CumulativeSeconds, s.ProgressPercent,
+                   s.CompletedChapters, s.TotalChapters, s.UpdatedAt,
+                   COALESCE(h.Title, ''), COALESCE(h.Sha256, '')
+            FROM ReaderReadingStats s
+            LEFT JOIN ReaderReadingHistory h ON h.BookFileId = s.BookFileId;
+            """))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                snapshot.ReadingStats.Add(new S3SyncReadingStats
+                {
+                    BookId = ParseGuid(reader.GetString(0), "ReaderReadingStats.BookId"),
+                    BookFileId = ParseGuid(reader.GetString(1), "ReaderReadingStats.BookFileId"),
+                    CumulativeSeconds = reader.GetInt64(2),
+                    ProgressPercent = reader.GetDouble(3),
+                    CompletedChapters = reader.GetInt32(4),
+                    TotalChapters = reader.GetInt32(5),
+                    UpdatedAt = ParseTimestamp(reader.GetString(6)),
+                    BookTitle = reader.GetString(7),
+                    FileSha256 = reader.GetString(8)
+                });
+        }
+        await ReadingTimeSyncTracker.CaptureAllAsync(
+            connection, transaction, snapshot.ReadingStats, cancellationToken);
+
+        snapshot.LocalDeletionTimes = recorded;
+        snapshot.Tombstones = MergeTombstones(
+            FilterReadingTombstones(snapshot.Tombstones, readingReset),
+            GetRecordedTombstones(recorded, snapshot));
+        await CaptureReadingMaterialBooksAsync(connection, transaction, snapshot, cancellationToken);
+        return snapshot;
+    }
+
+    private static S3SyncAnnotation ReadAnnotationRow(SqliteDataReader reader) => new()
+    {
+        Id = ParseGuid(reader.GetString(0), "ReaderAnnotations.Id"),
+        BookId = ParseGuid(reader.GetString(1), "ReaderAnnotations.BookId"),
+        BookFileId = ParseGuid(reader.GetString(2), "ReaderAnnotations.BookFileId"),
+        ChapterPath = reader.GetString(3),
+        Fragment = NullableString(reader, 4),
+        StartOffset = reader.GetInt32(5),
+        EndOffset = reader.GetInt32(6),
+        SelectedText = reader.GetString(7),
+        Prefix = reader.GetString(8),
+        Suffix = reader.GetString(9),
+        Color = reader.GetString(10),
+        UnderlineStyle = reader.GetString(11),
+        Note = reader.GetString(12),
+        CreatedAt = ParseTimestamp(reader.GetString(13)),
+        UpdatedAt = ParseTimestamp(reader.GetString(14))
+    };
+
+    private static void OverlayAnnotation(
+        S3SyncAnnotation annotation,
+        List<S3SyncAnnotation> annotations,
+        Dictionary<Guid, int> annotationIndex)
+    {
+        if (annotationIndex.TryGetValue(annotation.Id, out var index))
+            annotations[index] = annotation;
+        else
+        {
+            annotationIndex[annotation.Id] = annotations.Count;
+            annotations.Add(annotation);
+        }
+    }
+
+    private static S3SyncBook ReadBookRow(SqliteDataReader reader) => new()
+    {
+        Id = ParseGuid(reader.GetString(0), "Books.Id"),
+        Title = reader.GetString(1),
+        Authors = reader.GetString(2),
+        Series = NullableString(reader, 3),
+        SeriesIndex = NullableDouble(reader, 4),
+        Description = NullableString(reader, 5),
+        Publisher = NullableString(reader, 6),
+        PublishDate = NullableString(reader, 7),
+        Isbn = NullableString(reader, 8),
+        PageCount = NullableString(reader, 9),
+        Binding = NullableString(reader, 10),
+        DoubanRating = NullableDouble(reader, 11),
+        DoubanRatingCount = NullableInt(reader, 12),
+        Tags = reader.GetString(13),
+        Category = reader.GetString(14),
+        IsFavorite = reader.GetInt32(15) != 0,
+        ReadingStatus = (LibraryReadingStatus)reader.GetInt32(16),
+        CreatedAt = ParseTimestamp(reader.GetString(17)),
+        UpdatedAt = ParseTimestamp(reader.GetString(18)),
+        LocalCoverPath = NullableString(reader, 19)
+    };
+
+    private static S3SyncBook CloneBook(S3SyncBook source) => new()
+    {
+        Id = source.Id,
+        Title = source.Title,
+        Authors = source.Authors,
+        Series = source.Series,
+        SeriesIndex = source.SeriesIndex,
+        Description = source.Description,
+        Publisher = source.Publisher,
+        PublishDate = source.PublishDate,
+        Isbn = source.Isbn,
+        PageCount = source.PageCount,
+        Binding = source.Binding,
+        DoubanRating = source.DoubanRating,
+        DoubanRatingCount = source.DoubanRatingCount,
+        Tags = source.Tags,
+        Category = source.Category,
+        IsFavorite = source.IsFavorite,
+        ReadingStatus = source.ReadingStatus,
+        CreatedAt = source.CreatedAt,
+        UpdatedAt = source.UpdatedAt,
+        CoverHash = source.CoverHash,
+        CoverFileName = source.CoverFileName,
+        LocalCoverPath = source.LocalCoverPath
+    };
+
+    private static List<S3SyncTombstone> CloneTombstones(
+        IReadOnlyCollection<S3SyncTombstone> source) =>
+        source.Select(tombstone => new S3SyncTombstone
+        {
+            EntityType = tombstone.EntityType,
+            Key = tombstone.Key,
+            DeletedAt = tombstone.DeletedAt,
+            ReadingDataResetId = tombstone.ReadingDataResetId
+        }).ToList();
+
+    private Task<S3SyncSnapshot> CaptureSnapshotAsync(
+        string deviceId,
+        IReadOnlyCollection<S3SyncTombstone> tombstones,
+        CancellationToken cancellationToken) =>
+        CaptureSnapshotWithBaselineAsync(deviceId, tombstones, cancellationToken, null, null);
+
+    private async Task<S3SyncSnapshot> CaptureSnapshotWithBaselineAsync(
+        string deviceId,
+        IReadOnlyCollection<S3SyncTombstone> tombstones,
+        CancellationToken cancellationToken,
+        S3SyncSnapshot? incrementalBase = null,
+        DateTimeOffset? since = null)
+    {
+        var captureStartedAt = DateTimeOffset.UtcNow;
         await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
         await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        var snapshot = await CaptureDatabaseSnapshotAsync(connection, transaction, deviceId, tombstones, cancellationToken);
+        var snapshot = incrementalBase is not null && since is not null
+                ? await CaptureIncrementalDatabaseSnapshotAsync(
+                    connection, transaction, deviceId, tombstones, incrementalBase,
+                    since.Value, captureStartedAt, cancellationToken)
+                : await CaptureDatabaseSnapshotAsync(
+                    connection, transaction, deviceId, tombstones,
+                    cancellationToken, captureStartedAt);
         await transaction.CommitAsync(cancellationToken);
 
-        foreach (var book in snapshot.Books)
+        return await FinishSnapshotAsync(snapshot, cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the post-merge converged view from the in-transaction baseline.
+    /// The per-book tables are small and scanned in full (merged rows can carry
+    /// old timestamps); annotations, the large table, are overlaid by the local
+    /// changes since the transaction start plus the remote IDs that were
+    /// actually downloaded.
+    /// </summary>
+    private async Task<S3SyncSnapshot> CaptureConvergedSnapshotAsync(
+        string deviceId,
+        IReadOnlyCollection<S3SyncTombstone> tombstones,
+        S3SyncSnapshot baseline,
+        IReadOnlyCollection<Guid> annotationIds,
+        bool fullScanAnnotations,
+        CancellationToken cancellationToken)
+    {
+        var captureStartedAt = DateTimeOffset.UtcNow;
+        await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+        await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var snapshot = await CaptureIncrementalDatabaseSnapshotAsync(
+            connection, transaction, deviceId, tombstones, baseline,
+            baseline.CreatedAt, captureStartedAt, cancellationToken,
+            fullScanNonAnnotationTables: true,
+            annotationIds: annotationIds,
+            fullScanAnnotations: fullScanAnnotations);
+        await transaction.CommitAsync(cancellationToken);
+        return await FinishSnapshotAsync(snapshot, cancellationToken);
+    }
+
+    private async Task<S3SyncSnapshot> FinishSnapshotAsync(
+        S3SyncSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        foreach (var book in snapshot.Books.Concat(snapshot.ReadingMaterialBooks))
         {
             var coverPath = book.LocalCoverPath;
             if (string.IsNullOrWhiteSpace(coverPath)) continue;
@@ -660,6 +1285,12 @@ public sealed partial class S3SyncService
 
     private static DateTimeOffset Max(DateTimeOffset left, DateTimeOffset right) => left >= right ? left : right;
 
+    private static DateTimeOffset LayoutSyncVersion(S3SyncLayout layout)
+    {
+        var version = Max(layout.UpdatedAt, layout.ProfileUpdatedAt ?? DateTimeOffset.MinValue);
+        return Max(version, layout.LayoutUpdatedAt ?? DateTimeOffset.MinValue);
+    }
+
     private async Task<DatabaseMergeResult> ApplyRemoteSnapshotsAsync(
         ISyncObjectStore client,
         S3SyncSettings settings,
@@ -669,7 +1300,6 @@ public sealed partial class S3SyncService
         CancellationToken cancellationToken)
     {
         var snapshots = remoteSnapshots
-            .Where(snapshot => snapshot.Version <= SnapshotVersion)
             .GroupBy(snapshot => NormalizeKnownDeviceId(snapshot.DeviceId), StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(snapshot => snapshot.CreatedAt).First())
             .ToArray();
@@ -828,12 +1458,10 @@ public sealed partial class S3SyncService
             .ToArray();
         var remoteLayouts = snapshots
             .SelectMany(snapshot => snapshot.Layouts)
-            .GroupBy(layout => layout.BookFileId)
-            .Select(group => group.OrderByDescending(layout => layout.UpdatedAt).First())
             .Where(item => !tombstonedBooks.Contains(item.BookId)
-                && !IsTombstoned(tombstoneIndex, "book", item.BookId, item.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "layout", item.BookFileId, item.UpdatedAt)
-                && !IsTombstoned(tombstoneIndex, "file", item.BookFileId, item.UpdatedAt))
+                && !IsTombstoned(tombstoneIndex, "book", item.BookId, LayoutSyncVersion(item))
+                && !IsTombstoned(tombstoneIndex, "layout", item.BookFileId, LayoutSyncVersion(item))
+                && !IsTombstoned(tombstoneIndex, "file", item.BookFileId, LayoutSyncVersion(item)))
             .ToArray();
         var remoteStats = snapshots
             .Where(snapshot => snapshot.ReadingDataReset == readingReset)
@@ -883,6 +1511,7 @@ public sealed partial class S3SyncService
         progress?.Report(settings.DownloadBookFilesOnSync
             ? UiText.Get("正在准备书籍文件…")
             : UiText.Get("正在登记书籍文件元数据…"));
+        var fileDownloadRequests = new List<(string Hash, string AbsolutePath, string FileName)>();
         foreach (var remoteFile in remoteFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -941,32 +1570,59 @@ public sealed partial class S3SyncService
             plannedRelativePaths.Add(prepared.RelativePath);
 
             if (settings.DownloadBookFilesOnSync)
-            {
-                try
-                {
-                    if (await EnsureLocalBlobAsync(
-                            client,
-                            settings,
-                            remoteFile.Sha256,
-                            absolutePath,
-                            progress,
-                            cancellationToken))
-                        filesDownloaded++;
-                }
-                catch (SyncObjectNotFoundException)
-                {
-                    warnings.Add(UiText.Get("《{0}》的 S3 文件对象不存在，已跳过。", remoteFile.FileName));
-                    isPartial = true;
-                }
-                catch (InvalidDataException exception)
-                {
-                    warnings.Add(UiText.Get("《{0}》校验失败：{1}", remoteFile.FileName, UiText.Localize(exception.Message)));
-                    isPartial = true;
-                }
-            }
+                fileDownloadRequests.Add((remoteFile.Sha256, absolutePath, remoteFile.FileName));
+        }
 
-            if (!File.Exists(absolutePath))
-                remoteOnlyFileHashes.Add(remoteFile.Sha256);
+        // Path planning above is cheap and order-sensitive; the network part is
+        // neither. Run the downloads with the same concurrency as the upload
+        // path instead of paying one round trip per book.
+        if (fileDownloadRequests.Count > 0)
+        {
+            var warningLock = new object();
+            await Parallel.ForEachAsync(
+                fileDownloadRequests,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Math.Max(1, settings.ConcurrentRequests),
+                    CancellationToken = cancellationToken
+                },
+                async (request, token) =>
+                {
+                    try
+                    {
+                        if (await EnsureLocalBlobAsync(
+                                client,
+                                settings,
+                                request.Hash,
+                                request.AbsolutePath,
+                                progress,
+                                token))
+                            Interlocked.Increment(ref filesDownloaded);
+                    }
+                    catch (SyncObjectNotFoundException)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("《{0}》的 S3 文件对象不存在，已跳过。", request.FileName));
+                            isPartial = true;
+                        }
+                    }
+                    catch (InvalidDataException exception)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("《{0}》校验失败：{1}", request.FileName, UiText.Localize(exception.Message)));
+                            isPartial = true;
+                        }
+                    }
+                });
+        }
+
+        foreach (var prepared in preparedFilesByLocalId.Values)
+        {
+            var absolutePath = ResolveDataPath(prepared.RelativePath);
+            if (absolutePath is null || !File.Exists(absolutePath))
+                remoteOnlyFileHashes.Add(prepared.Source.Sha256);
         }
 
         // A retry can see the database row created by an earlier merge, so it
@@ -977,6 +1633,7 @@ public sealed partial class S3SyncService
                      .Select(prepared => prepared.LocalBookId))
             remoteBookIds.Add(localBookId);
 
+        var coverRequests = new Dictionary<Guid, (string RelativePath, string AbsolutePath, string Hash, DateTimeOffset UpdatedAt)>();
         foreach (var remoteBook in remoteBooks)
         {
             if (!IsSha256(remoteBook.CoverHash)
@@ -988,7 +1645,8 @@ public sealed partial class S3SyncService
             var localCoverPath = existing?.CoverPath;
             var remoteWins = existing is null || remoteBook.UpdatedAt >= existing.UpdatedAt;
             if (!remoteWins && !string.IsNullOrWhiteSpace(localCoverPath)) continue;
-            if (coverUpdates.TryGetValue(localBookId, out var previousCover) && previousCover.UpdatedAt > remoteBook.UpdatedAt)
+            if (coverRequests.TryGetValue(localBookId, out var previousCover)
+                && previousCover.UpdatedAt > remoteBook.UpdatedAt)
                 continue;
 
             // Never replace the currently displayed cover during network I/O.
@@ -997,34 +1655,71 @@ public sealed partial class S3SyncService
                 $"{localBookId:N}-{remoteBook.CoverHash!.ToLowerInvariant()}{NormalizeCoverExtension(remoteBook.CoverFileName)}");
             var absolutePath = ResolveDataPath(relativePath);
             if (absolutePath is null) continue;
-            try
-            {
-                coversDownloaded |= await EnsureLocalBlobAsync(
-                    client,
-                    settings,
-                    remoteBook.CoverHash!,
-                    absolutePath,
-                    progress,
-                    cancellationToken);
-                if (coverUpdates.TryGetValue(localBookId, out previousCover))
+            coverRequests[localBookId] =
+                (Path.GetRelativePath(_paths.Data, absolutePath), absolutePath, remoteBook.CoverHash!, remoteBook.UpdatedAt);
+        }
+
+        if (coverRequests.Count > 0)
+        {
+            var failedCovers = new HashSet<Guid>();
+            var warningLock = new object();
+            await Parallel.ForEachAsync(
+                coverRequests,
+                new ParallelOptions
                 {
-                    var previousPath = ResolveDataPath(previousCover.RelativePath);
-                    if (previousPath is not null) pathsToDelete.Add(previousPath);
+                    MaxDegreeOfParallelism = Math.Max(1, settings.ConcurrentRequests),
+                    CancellationToken = cancellationToken
+                },
+                async (entry, token) =>
+                {
+                    var (localBookId, request) = entry;
+                    try
+                    {
+                        if (await EnsureLocalBlobAsync(
+                                client,
+                                settings,
+                                request.Hash,
+                                request.AbsolutePath,
+                                progress,
+                                token))
+                            coversDownloaded = true;
+                    }
+                    catch (SyncObjectNotFoundException)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("有封面对象不存在，已跳过封面同步。"));
+                            isPartial = true;
+                            failedCovers.Add(localBookId);
+                        }
+                    }
+                    catch (InvalidDataException exception)
+                    {
+                        lock (warningLock)
+                        {
+                            warnings.Add(UiText.Get("有封面校验失败：{0}", UiText.Localize(exception.Message)));
+                            isPartial = true;
+                            failedCovers.Add(localBookId);
+                        }
+                    }
+                });
+
+            foreach (var (localBookId, request) in coverRequests)
+            {
+                if (failedCovers.Contains(localBookId)) continue;
+                if (coverUpdates.TryGetValue(localBookId, out var earlier)
+                    && !string.Equals(earlier.RelativePath, request.RelativePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var earlierPath = ResolveDataPath(earlier.RelativePath);
+                    if (earlierPath is not null) pathsToDelete.Add(earlierPath);
                 }
-                coverUpdates[localBookId] = (Path.GetRelativePath(_paths.Data, absolutePath), remoteBook.UpdatedAt);
-            }
-            catch (SyncObjectNotFoundException)
-            {
-                warnings.Add(UiText.Get("有封面对象不存在，已跳过封面同步。"));
-                isPartial = true;
-            }
-            catch (InvalidDataException exception)
-            {
-                warnings.Add(UiText.Get("有封面校验失败：{0}", UiText.Localize(exception.Message)));
-                isPartial = true;
+                coverUpdates[localBookId] = (request.RelativePath, request.UpdatedAt);
             }
         }
 
+        var retainedWarningCount = warnings.Count;
+        var retainedBooks = await PrepareReadingMaterialBooksAsync(client, settings, snapshots, bookMap, progress, warnings, cancellationToken);
+        isPartial |= warnings.Count > retainedWarningCount;
         var locallyKnownFiles = localIdentity.FilesById.Values.ToDictionary(file => file.Id, file => file.BookId);
         foreach (var prepared in preparedFilesByLocalId.Values)
             locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
@@ -1033,6 +1728,7 @@ public sealed partial class S3SyncService
         var booksAdded = 0;
         var addedBookIds = new HashSet<Guid>();
         var annotationsApplied = 0;
+        S3SyncSnapshot? mergedBaseline = null;
         try
         {
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
@@ -1042,8 +1738,10 @@ public sealed partial class S3SyncService
             // Network I/O may have taken minutes. Rebase against the current
             // database and deletion journal under the same writer transaction
             // that applies the merge, so a just-deleted row cannot be revived.
-            var currentLocal = await CaptureDatabaseSnapshotAsync(
-                connection, transaction, localSnapshot.DeviceId, localSnapshot.Tombstones, cancellationToken);
+            var currentLocal = await CaptureIncrementalDatabaseSnapshotAsync(
+                connection, transaction, localSnapshot.DeviceId, localSnapshot.Tombstones,
+                localSnapshot, localSnapshot.CreatedAt, DateTimeOffset.UtcNow, cancellationToken);
+            mergedBaseline = currentLocal;
             var currentReset = ReaderReadingDataReset.Latest(
                 snapshots.Select(snapshot => snapshot.ReadingDataReset).Prepend(currentLocal.ReadingDataReset));
             if (currentReset != readingReset)
@@ -1373,24 +2071,56 @@ public sealed partial class S3SyncService
                 {
                     ParagraphIndent = layout.ParagraphIndent
                 });
-                var command = commandCache.Get(
-                    """
+                var normalizedAppearance = ReaderAppearanceSettings.Normalize(new ReaderAppearanceSettings
+                {
+                    Theme = layout.AppearanceTheme,
+                    PaperEnabled = layout.AppearancePaperEnabled,
+                    PaperStrength = layout.AppearancePaperStrength,
+                    FibersEnabled = layout.AppearanceFibersEnabled
+                });
+                var layoutIsNewer = """
+                    julianday(COALESCE(excluded.LayoutUpdatedAt, excluded.UpdatedAt))
+                    > julianday(COALESCE(ReaderLayoutSettings.LayoutUpdatedAt, ReaderLayoutSettings.UpdatedAt))
+                    """;
+                var profileIsNewer = """
+                    excluded.ProfileUpdatedAt IS NOT NULL
+                    AND (ReaderLayoutSettings.ProfileUpdatedAt IS NULL
+                         OR julianday(excluded.ProfileUpdatedAt) > julianday(ReaderLayoutSettings.ProfileUpdatedAt))
+                    """;
+                var layoutUpsertSql = $"""
                     INSERT INTO ReaderLayoutSettings (
                         BookFileId, BookId, FontScale, LineHeight, MaxWidth, BodyPadding,
-                        FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent, UpdatedAt)
+                        FontFamily, FlowMode, VerticalWriting, TwoPageMode, ParagraphIndent,
+                        UseBookOverride, AppearanceTheme, AppearancePaperEnabled,
+                        AppearancePaperStrength, AppearanceFibersEnabled, ProfileUpdatedAt, LayoutUpdatedAt, UpdatedAt)
                     VALUES (
                         $bookFileId, $bookId, $fontScale, $lineHeight, $maxWidth, $bodyPadding,
-                        $fontFamily, $flowMode, $verticalWriting, $twoPageMode, $paragraphIndent, $updatedAt)
+                        $fontFamily, $flowMode, $verticalWriting, $twoPageMode, $paragraphIndent,
+                        $useBookOverride, $appearanceTheme, $appearancePaperEnabled,
+                        $appearancePaperStrength, $appearanceFibersEnabled, $profileUpdatedAt, $layoutUpdatedAt, $updatedAt)
                     ON CONFLICT(BookFileId) DO UPDATE SET
-                        BookId = excluded.BookId, FontScale = excluded.FontScale,
-                        LineHeight = excluded.LineHeight, MaxWidth = excluded.MaxWidth,
-                        BodyPadding = excluded.BodyPadding, FontFamily = excluded.FontFamily,
-                        FlowMode = excluded.FlowMode, VerticalWriting = excluded.VerticalWriting,
-                        TwoPageMode = excluded.TwoPageMode, ParagraphIndent = excluded.ParagraphIndent,
-                        UpdatedAt = excluded.UpdatedAt
-                    WHERE julianday(excluded.UpdatedAt) > julianday(ReaderLayoutSettings.UpdatedAt);
-                    """
-                    );
+                        BookId = excluded.BookId,
+                        FontScale = CASE WHEN {layoutIsNewer} THEN excluded.FontScale ELSE ReaderLayoutSettings.FontScale END,
+                        LineHeight = CASE WHEN {layoutIsNewer} THEN excluded.LineHeight ELSE ReaderLayoutSettings.LineHeight END,
+                        MaxWidth = CASE WHEN {layoutIsNewer} THEN excluded.MaxWidth ELSE ReaderLayoutSettings.MaxWidth END,
+                        BodyPadding = CASE WHEN {layoutIsNewer} THEN excluded.BodyPadding ELSE ReaderLayoutSettings.BodyPadding END,
+                        FontFamily = CASE WHEN {layoutIsNewer} THEN excluded.FontFamily ELSE ReaderLayoutSettings.FontFamily END,
+                        FlowMode = CASE WHEN {layoutIsNewer} THEN excluded.FlowMode ELSE ReaderLayoutSettings.FlowMode END,
+                        VerticalWriting = CASE WHEN {layoutIsNewer} THEN excluded.VerticalWriting ELSE ReaderLayoutSettings.VerticalWriting END,
+                        TwoPageMode = CASE WHEN {layoutIsNewer} THEN excluded.TwoPageMode ELSE ReaderLayoutSettings.TwoPageMode END,
+                        ParagraphIndent = CASE WHEN {layoutIsNewer} THEN excluded.ParagraphIndent ELSE ReaderLayoutSettings.ParagraphIndent END,
+                        LayoutUpdatedAt = CASE WHEN {layoutIsNewer} THEN excluded.LayoutUpdatedAt ELSE ReaderLayoutSettings.LayoutUpdatedAt END,
+                        UseBookOverride = CASE WHEN {profileIsNewer} THEN excluded.UseBookOverride ELSE ReaderLayoutSettings.UseBookOverride END,
+                        AppearanceTheme = CASE WHEN {profileIsNewer} THEN excluded.AppearanceTheme ELSE ReaderLayoutSettings.AppearanceTheme END,
+                        AppearancePaperEnabled = CASE WHEN {profileIsNewer} THEN excluded.AppearancePaperEnabled ELSE ReaderLayoutSettings.AppearancePaperEnabled END,
+                        AppearancePaperStrength = CASE WHEN {profileIsNewer} THEN excluded.AppearancePaperStrength ELSE ReaderLayoutSettings.AppearancePaperStrength END,
+                        AppearanceFibersEnabled = CASE WHEN {profileIsNewer} THEN excluded.AppearanceFibersEnabled ELSE ReaderLayoutSettings.AppearanceFibersEnabled END,
+                        ProfileUpdatedAt = CASE WHEN {profileIsNewer} THEN excluded.ProfileUpdatedAt ELSE ReaderLayoutSettings.ProfileUpdatedAt END,
+                        UpdatedAt = CASE WHEN julianday(excluded.UpdatedAt) > julianday(ReaderLayoutSettings.UpdatedAt)
+                            THEN excluded.UpdatedAt ELSE ReaderLayoutSettings.UpdatedAt END
+                    WHERE {layoutIsNewer} OR {profileIsNewer};
+                    """;
+                var command = commandCache.Get(layoutUpsertSql);
                 AddParameter(command, "$bookFileId", localFileId.ToString());
                 AddParameter(command, "$bookId", localBookId.ToString());
                 AddParameter(command, "$fontScale", normalized.FontScale);
@@ -1402,6 +2132,14 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$verticalWriting", normalized.VerticalWriting ? 1 : 0);
                 AddParameter(command, "$twoPageMode", normalized.TwoPageMode ? 1 : 0);
                 AddParameter(command, "$paragraphIndent", normalized.ParagraphIndent ? 1 : 0);
+                AddParameter(command, "$useBookOverride", layout.ProfileUpdatedAt is not null && layout.UseBookOverride ? 1 : 0);
+                AddParameter(command, "$appearanceTheme", (int)normalizedAppearance.Theme);
+                AddParameter(command, "$appearancePaperEnabled", normalizedAppearance.PaperEnabled ? 1 : 0);
+                AddParameter(command, "$appearancePaperStrength", normalizedAppearance.PaperStrength);
+                AddParameter(command, "$appearanceFibersEnabled", normalizedAppearance.FibersEnabled ? 1 : 0);
+                AddParameter(command, "$profileUpdatedAt", layout.ProfileUpdatedAt?.ToString("O"));
+                AddParameter(command, "$layoutUpdatedAt", layout.LayoutUpdatedAt?.ToString("O")
+                    ?? (layout.ProfileUpdatedAt is null ? layout.UpdatedAt.ToString("O") : null));
                 AddParameter(command, "$updatedAt", layout.UpdatedAt.ToString("O"));
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
             }
@@ -1474,6 +2212,8 @@ public sealed partial class S3SyncService
                 commandCache,
                 cancellationToken);
 
+            changed |= await SaveReadingMaterialBooksAsync(connection, transaction, retainedBooks, cancellationToken);
+
             // Older snapshots can contain both the system "未收藏" row and
             // user-created collection rows. Keep the derived system view
             // consistent before this merge becomes the next sync baseline.
@@ -1521,7 +2261,9 @@ public sealed partial class S3SyncService
         {
             IsPartial = isPartial,
             RemoteBookIds = remoteBookIds,
-            RemoteOnlyFileHashes = remoteOnlyFileHashes
+            RemoteOnlyFileHashes = remoteOnlyFileHashes,
+            LocalBaseline = mergedBaseline,
+            ConsolidatedDuplicates = duplicateBooksMerged > 0 || readingHistoryMerged
         };
     }
 
@@ -3540,17 +4282,9 @@ public sealed partial class S3SyncService
     private static Dictionary<string, DateTimeOffset> GetSnapshotEntityVersions(S3SyncSnapshot snapshot)
     {
         var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
-        void Add(string type, string key, DateTimeOffset version) => result[VersionKey(type, key)] = version;
-        foreach (var row in snapshot.Books) Add("book", row.Id.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.Files) Add("file", row.Id.ToString("N"), row.ModifiedAt);
-        foreach (var row in snapshot.Collections) Add("collection", row.Id.ToString("N"), CollectionUpdatedAt(row));
-        foreach (var row in snapshot.CollectionItems) Add("collection-item", CompositeKey(row.CollectionId, row.BookId), row.AddedAt);
-        foreach (var row in snapshot.Annotations) Add("annotation", row.Id.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.BookReflections) Add("reflection", row.BookId.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.Progress) Add("progress", row.BookFileId.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.Bookmarks) Add("bookmark", row.Id.ToString("N"), row.CreatedAt);
-        foreach (var row in snapshot.Layouts) Add("layout", row.BookFileId.ToString("N"), row.UpdatedAt);
-        foreach (var row in snapshot.ReadingStats) Add("stats", row.BookFileId.ToString("N"), row.UpdatedAt);
+        foreach (var entity in SyncEntities.Where(entity => entity.TrackDeletion))
+            foreach (var row in entity.Rows(snapshot))
+                result[VersionKey(entity.Type, row.Key)] = row.Version;
         return result;
     }
 
@@ -3596,86 +4330,13 @@ public sealed partial class S3SyncService
         var result = new List<S3SyncTombstone>();
         var sameReadingGeneration = previous.ReadingDataReset == current.ReadingDataReset;
 
-        AddMissing(
-            "book",
-            previous.Books.Select(item => (item.Id.ToString("N"), item.UpdatedAt)),
-            current.Books.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "file",
-            previous.Files.Select(item => (item.Id.ToString("N"), item.ModifiedAt)),
-            current.Files.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "collection",
-            previous.Collections.Select(item => (item.Id.ToString("N"), CollectionUpdatedAt(item))),
-            current.Collections.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "collection-item",
-            previous.CollectionItems.Select(item => (CompositeKey(item.CollectionId, item.BookId), item.AddedAt)),
-            current.CollectionItems.Select(item => CompositeKey(item.CollectionId, item.BookId)),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "annotation",
-            previous.Annotations.Select(item => (item.Id.ToString("N"), item.UpdatedAt)),
-            current.Annotations.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "reflection",
-            previous.BookReflections.Select(item => (item.BookId.ToString("N"), item.UpdatedAt)),
-            current.BookReflections.Select(item => item.BookId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        if (sameReadingGeneration) AddMissing(
-            "progress",
-            previous.Progress.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
-            current.Progress.Select(item => item.BookFileId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "bookmark",
-            previous.Bookmarks.Select(item => (item.Id.ToString("N"), item.CreatedAt)),
-            current.Bookmarks.Select(item => item.Id.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        AddMissing(
-            "layout",
-            previous.Layouts.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
-            current.Layouts.Select(item => item.BookFileId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
-        if (sameReadingGeneration) AddMissing(
-            "stats",
-            previous.ReadingStats.Select(item => (item.BookFileId.ToString("N"), item.UpdatedAt)),
-            current.ReadingStats.Select(item => item.BookFileId.ToString("N")),
-            result,
-            previous.CreatedAt,
-            current.CreatedAt,
-            recordedDeletionTimes);
+        foreach (var entity in SyncEntities.Where(entity => entity.TrackDeletion))
+        {
+            if (!sameReadingGeneration && IsResetReadingEntity(entity.Type)) continue;
+            AddMissing(entity.Type, entity.Rows(previous).Select(row => (row.Key, row.Version)),
+                entity.Rows(current).Select(row => row.Key), result,
+                previous.CreatedAt, current.CreatedAt, recordedDeletionTimes);
+        }
         foreach (var item in result.Where(item => IsResetReadingEntity(item.EntityType)))
             item.ReadingDataResetId = current.ReadingDataReset?.Id;
         return result;
@@ -3858,6 +4519,13 @@ public sealed partial class S3SyncService
         public IReadOnlySet<Guid> RemoteBookIds { get; init; } = new HashSet<Guid>();
         public IReadOnlySet<string> RemoteOnlyFileHashes { get; init; } =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // The pre-merge snapshot captured inside the write transaction. The
+        // caller derives the converged upload view from this instead of
+        // re-reading every table after the commit.
+        public S3SyncSnapshot? LocalBaseline { get; init; }
+        // Duplicate consolidation re-points annotations/files without touching
+        // UpdatedAt, so the converged capture must scan annotations in full.
+        public bool ConsolidatedDuplicates { get; init; }
     }
 
     private static SqliteCommand CreateCommand(

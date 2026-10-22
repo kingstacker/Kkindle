@@ -10,7 +10,7 @@ namespace MdxParser
     {
         #region property
         private Stream m_Stream;
-        private Encoding m_Encoding;
+        private Encoding? m_Encoding;
         private int m_Encrypt;
         private byte[] m_EncryptKey;
         private long m_BlockStartIndex;
@@ -76,15 +76,16 @@ namespace MdxParser
         #endregion
 
         #region Ctr
-        public MdxDocument(string path) : this(path, Encoding.UTF8) { }
-        public MdxDocument(string path, Encoding encoding) : this(File.OpenRead(path), encoding)
+        public MdxDocument(string path) : this(path, null) { }
+        public MdxDocument(string path, Encoding? encoding) : this(File.OpenRead(path), encoding)
         {
         }
-        public MdxDocument(Stream stream, Encoding encoding)
+        public MdxDocument(Stream stream, Encoding? encoding = null)
         {
             Stream = stream;
 
-            m_Encoding = encoding ?? Encoding.UTF8;
+            // A null override lets the MDX header select UTF-8, UTF-16 or a legacy code page.
+            m_Encoding = encoding;
 
             Header = readHeader();
 

@@ -214,11 +214,11 @@ public partial class MainWindow
         if (_readerIsPdf)
         {
             var pdf = new NativePdfReaderHost();
-            pdf.SetAppearance(_appSettings.ReaderAppearance);
+            pdf.SetAppearance(CurrentReaderAppearance);
             return pdf;
         }
         var host = new NativeReaderHost();
-        host.SetAppearance(_appSettings.ReaderAppearance);
+        host.SetAppearance(CurrentReaderAppearance);
         return host;
     }
 
@@ -948,7 +948,7 @@ public partial class MainWindow
         try
         {
             await _readerAppearanceSaveTask;
-            await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+            await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
         }
         catch
         {

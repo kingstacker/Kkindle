@@ -50,6 +50,10 @@ public static class VerticalTextUnits
         var result = new List<Unit>(text.Length);
         var textElementStarts = StringInfo.ParseCombiningCharacters(text);
         var textElementStartSet = textElementStarts.ToHashSet();
+        // Offsets only move forward, so advance through the start list with a
+        // cursor. The previous scan-from-zero made Tokenize O(n²) on the long
+        // CJK paragraphs that dominate vertical books.
+        var textElementIndex = 0;
         for (var offset = 0; offset < text.Length;)
         {
             if (text[offset] is '\r' or '\n')
@@ -68,7 +72,7 @@ public static class VerticalTextUnits
                 && offset + 1 < text.Length
                 && char.IsLowSurrogate(text[offset + 1]))
             {
-                var elementEnd = NextTextElementEnd(text, offset, textElementStarts);
+                var elementEnd = NextTextElementEnd(text, offset, textElementStarts, ref textElementIndex);
                 result.Add(new Unit(offset, elementEnd - offset, false, false));
                 offset = elementEnd;
                 continue;
@@ -98,7 +102,7 @@ public static class VerticalTextUnits
                 continue;
             }
 
-            var nextElementEnd = NextTextElementEnd(text, offset, textElementStarts);
+            var nextElementEnd = NextTextElementEnd(text, offset, textElementStarts, ref textElementIndex);
             result.Add(new Unit(offset, nextElementEnd - offset, false, false));
             offset = nextElementEnd;
         }
@@ -106,15 +110,12 @@ public static class VerticalTextUnits
         return result;
     }
 
-    private static int NextTextElementEnd(string text, int offset, int[] starts)
+    private static int NextTextElementEnd(string text, int offset, int[] starts, ref int startIndex)
     {
-        for (var index = 0; index < starts.Length; index++)
-        {
-            if (starts[index] == offset)
-            {
-                return index + 1 < starts.Length ? starts[index + 1] : text.Length;
-            }
-        }
+        while (startIndex < starts.Length && starts[startIndex] < offset)
+            startIndex++;
+        if (startIndex < starts.Length && starts[startIndex] == offset)
+            return startIndex + 1 < starts.Length ? starts[startIndex + 1] : text.Length;
 
         // This is only reachable for a malformed UTF-16 sequence. Preserve
         // the source unit rather than allowing a zero-length token loop.

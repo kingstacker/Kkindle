@@ -13,7 +13,7 @@
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
     <Product>Kkindle</Product>
     <Authors>kingstacker</Authors>
     <RepositoryUrl>https://github.com/kingstacker/Kkindle</RepositoryUrl>

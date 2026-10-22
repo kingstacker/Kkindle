@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Avalonia.Interactivity;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
@@ -14,17 +14,21 @@ public partial class MainWindow
     private int _readerDictionaryRequestSequence;
     private bool _suppressReaderDictionaryPopupClosed;
 
-    private async Task PerformReaderSelectionDictionaryAsync()
+    private async Task PerformReaderSelectionDictionaryAsync(bool preservePopup = false)
     {
         var term = (_readerPendingSelection ?? string.Empty).Trim();
         if (term.Length == 0) return;
 
-        HideReaderSelectionPopup();
+        if (!preservePopup) HideReaderSelectionPopup();
         _readerDictionaryWikipediaArticle = null;
         ReaderDictionaryTermText.Text = term;
         ReaderDictionaryLocalStatusText.Text = T("正在查本地词典…");
-        ReaderDictionaryLocalResultText.Text = string.Empty;
+        ReaderDictionaryLocalStatusText.IsVisible = true;
+        ReaderDictionaryEntries.SetEntries([]);
+        ReaderDictionaryEntries.TermRequested -= ReaderDictionaryTermRequested;
+        ReaderDictionaryEntries.TermRequested += ReaderDictionaryTermRequested;
         ReaderDictionaryWikipediaExtractText.Text = string.Empty;
+        ReaderDictionaryWikipediaStatusText.IsVisible = true;
         ReaderDictionaryWikipediaResultPanel.IsVisible = false;
         ReaderDictionaryWikipediaOpenButton.IsEnabled = false;
 
@@ -63,9 +67,8 @@ public partial class MainWindow
                 ReaderDictionaryLocalStatusText.Text = entries.Count == 0
                     ? T("没有找到本地释义。请先在字典管理中导入本地词典。")
                     : string.Empty;
-                ReaderDictionaryLocalResultText.Text = string.Join(
-                    $"{Environment.NewLine}{Environment.NewLine}",
-                    entries.Select(entry => $"[{entry.DictionaryName}] {entry.Definition}"));
+                ReaderDictionaryLocalStatusText.IsVisible = entries.Count == 0;
+                ReaderDictionaryEntries.SetEntries(entries);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
             {
@@ -77,6 +80,7 @@ public partial class MainWindow
                 ReaderDictionaryLocalStatusText.Text = T(
                     "本地词典查询失败：{0}",
                     UiText.Localize(exception.Message));
+                ReaderDictionaryLocalStatusText.IsVisible = true;
             }
 
             if (wikipediaTask is null) return;
@@ -93,6 +97,7 @@ public partial class MainWindow
                 _readerDictionaryWikipediaArticle = article;
                 ReaderDictionaryWikipediaExtractText.Text = article.Extract;
                 ReaderDictionaryWikipediaStatusText.Text = string.Empty;
+                ReaderDictionaryWikipediaStatusText.IsVisible = false;
                 ReaderDictionaryWikipediaOpenButton.IsEnabled = true;
                 ReaderDictionaryWikipediaResultPanel.IsVisible = true;
             }
@@ -122,10 +127,18 @@ public partial class MainWindow
         && ReferenceEquals(_readerDictionaryCancellation, cancellation)
         && !cancellation.IsCancellationRequested;
 
+    private async void ReaderDictionaryTermRequested(object? sender, string term)
+    {
+        if (!ReaderDictionaryHostPopup.IsOpen) return;
+        CancelReaderDictionaryRequest();
+        _readerPendingSelection = term;
+        await PerformReaderSelectionDictionaryAsync(preservePopup: true);
+    }
+
     private void ReaderDictionaryPopup_SizeChanged(object? sender, Avalonia.Controls.SizeChangedEventArgs e)
     {
         if (!ReaderDictionaryHostPopup.IsOpen) return;
-        // Re-anchor after async results or a tab switch changes the actual height.
+        // The fixed tab viewport keeps async results and tab switches at the same anchor.
         ShowReaderPopupNearSelection(
             ReaderDictionaryHostPopup, ReaderDictionaryPopup, 440, 140,
             _readerLastSelectionPopupAnchor, _readerLastSelectionPopupBottom,

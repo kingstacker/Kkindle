@@ -37,7 +37,7 @@ public sealed record LibraryBookMatch(
     public string? Isbn { get; init; }
 }
 
-public sealed record LibraryBookDisplayInfo(Guid Id, string Title, string? CoverPath);
+public sealed record LibraryBookDisplayInfo(Guid Id, string Title, string? CoverPath, bool IsDeleted = false);
 
 public sealed record AppSettings
 {
@@ -84,6 +84,8 @@ public sealed record AppSettings
     public string? PendingUpdatePackagePath { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public DateTimeOffset? PendingUpdateDownloadedAt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DateTimeOffset? PendingUpdateInstallStartedAt { get; init; }
 
     public bool AutoDoubanMatchOnImport { get; init; }
     public bool AutoConnectDevice { get; init; } = true;
@@ -92,7 +94,15 @@ public sealed record AppSettings
     public bool ShowSyncStatusIcon { get; init; } = true;
     public bool ShowLibraryPresenceIcon { get; init; } = true;
     public bool ShowUnearnedReadingMedals { get; init; }
+    public bool ShowReadingMedals { get; init; } = true;
     public bool ReadingMaterialsCollapsedByDefault { get; init; } = true;
+    // Null is reserved for settings files created before the compact reader
+    // toolbar existed. Preserve their old pinned TTS action once, while new
+    // profiles start with an uncluttered toolbar.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReaderPinnedTools { get; init; }
+    public string LastKindleSendMethod { get; init; } = "web";
+    public string ReaderAiServiceProfileId { get; init; } = "default";
     public bool PinyinContextMenuEnabled { get; init; } = true;
     public bool PinyinLocalOnly { get; init; } = true;
     public BookTranslationSettings Translation { get; init; } = new();
@@ -119,6 +129,9 @@ public sealed record AppSettings
         {
             UiLanguage = UiText.NormalizeLanguage(settings.UiLanguage),
             MainTheme = Enum.IsDefined(settings.MainTheme) ? settings.MainTheme : AppTheme.Classic,
+            ReaderPinnedTools = NormalizeReaderPinnedTools(settings.ReaderPinnedTools, settings.OnboardingCompleted),
+            LastKindleSendMethod = NormalizeKindleSendMethod(settings.LastKindleSendMethod),
+            ReaderAiServiceProfileId = NormalizeProfileId(settings.ReaderAiServiceProfileId),
             DefaultDeviceModel = string.IsNullOrWhiteSpace(settings.DefaultDeviceModel)
                 ? null
                 : settings.DefaultDeviceModel.Trim(),
@@ -139,6 +152,25 @@ public sealed record AppSettings
             McpServer = McpServerSettings.Normalize(settings.McpServer)
         };
     }
+
+    private static string NormalizeReaderPinnedTools(string? value, bool onboardingCompleted)
+    {
+        if (value is null) return onboardingCompleted ? "tts" : string.Empty;
+        var requested = value.Split([',', ';', ' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        string[] allowed = ["tts", "translation", "pinyin", "ai"];
+        return string.Join(',', allowed.Where(requested.Contains));
+    }
+
+    private static string NormalizeKindleSendMethod(string? value)
+    {
+        var method = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return method is "usb" or "web" or "email" ? method : "web";
+    }
+
+    private static string NormalizeProfileId(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "default" : value.Trim();
 }
 
 public sealed record McpServerSettings
@@ -215,7 +247,7 @@ public sealed record McpServerSettings
 
 public sealed record ManagedFont(string Id, string DisplayName, string CssFamily, string RelativePath, DateTimeOffset ImportedAt);
 public sealed record DictionaryDefinition(string Id, string Name, string RelativePath, int EntryCount, DateTimeOffset ImportedAt, bool Enabled = true, string? SourceFormat = null);
-public sealed record DictionaryEntry(string Term, string Definition, string DictionaryName);
+public sealed record DictionaryEntry(string Term, string Definition, string DictionaryName, string? Html = null, string? Stylesheet = null);
 public sealed record PdfPageText(int PageNumber, string Text);
 public sealed record PdfSearchResult(int PageNumber, string Excerpt, int MatchIndex);
 

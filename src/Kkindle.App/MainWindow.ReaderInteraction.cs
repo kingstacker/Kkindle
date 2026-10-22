@@ -1393,10 +1393,16 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        // Every reader layout option comes from the global profile. Legacy
-        // per-book rows remain in the database for compatibility, but opening
-        // another book must never replace the current global layout.
-        _readerLayout = NormalizeReaderLayoutForPlatform(_appSettings.DefaultReaderLayout);
+        await LoadReaderBookProfileAsync(cancellationToken);
+        var globalLayout = NormalizeReaderLayoutForPlatform(
+            _appSettings.DefaultReaderLayout);
+        _readerLayout = ReaderLayoutDefaults.ApplyPreferences(
+            _readerBookLayoutProfile?.Layout ?? globalLayout,
+            globalLayout,
+            ReaderUsesBookOverride);
+        ApplyReaderAppearance();
+        SyncReaderAppearanceControls();
+        SyncReaderBookScopeControls();
         _readerTocItems = BuildReaderNavigationItems(document);
         _readerRestoredProgress = null;
         _readerBookmarkIndicatorSequence++;
@@ -1427,6 +1433,7 @@ public partial class MainWindow
         _readerPendingSearchContext = null;
         _readerSearchSequence++;
         _readerWholeSearchSequence++;
+        _readerWholeSearchCancellation?.Cancel();
         _readerSearchVisible = false;
         _readerSearchLayoutCaptured = false;
         _readerSearchQuery = string.Empty;
@@ -6441,9 +6448,8 @@ public partial class MainWindow
                 // Case-folded search over the same body-text stream the
                 // WebKit walker saw; highlights paint per page.
                 var nativeQuery = query.Trim();
-                var nativeBody = nativeReader.BodyText ?? string.Empty;
-                var nativeHits = ReaderSearchTextPolicy
-                    .FindMatches(nativeBody, nativeQuery, nativeReader.RubyAnnotationRanges)
+                var nativeHits = nativeReader
+                    .FindSearchMatches(nativeQuery)
                     .Select(match => (match.Start, match.Length))
                     .ToList();
 
@@ -6464,16 +6470,18 @@ public partial class MainWindow
         var script = $$"""
             (() => {
               const oldMarks = Array.from(document.querySelectorAll('mark.kkindle-page-find-hit'));
+              const normalizedParents = new Set();
               const unwrap = mark => {
                 const parent = mark.parentNode;
                 if (!parent) return;
                 while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
                 parent.removeChild(mark);
-                parent.normalize?.();
+                normalizedParents.add(parent);
               };
               for (let index = oldMarks.length - 1; index >= 0; index--) {
                 unwrap(oldMarks[index]);
               }
+              for (const parent of normalizedParents) parent.normalize?.();
               const query = ({{serializedQuery}} || '').trim();
               if (!query || !document.body) return 0;
               const folded = query.toLocaleLowerCase();
@@ -6488,6 +6496,12 @@ public partial class MainWindow
               while (walker.nextNode()) {
                 if (!ignored(walker.currentNode)) nodes.push(walker.currentNode);
               }
+              const nodeOffsets = [];
+              let totalLength = 0;
+              for (const node of nodes) {
+                nodeOffsets.push(totalLength);
+                totalLength += (node.data || '').length;
+              }
               const text = nodes.map(node => node.data || '').join('');
               const foldedText = text.toLocaleLowerCase();
               const matches = [];
@@ -6499,8 +6513,15 @@ public partial class MainWindow
               }
               const segmentsFor = (start, end) => {
                 const segments = [];
-                let cursor = 0;
-                for (const node of nodes) {
+                let low = 0, high = nodes.length;
+                while (low < high) {
+                  const mid = (low + high) >>> 1;
+                  if ((nodeOffsets[mid + 1] ?? totalLength) <= start) low = mid + 1;
+                  else high = mid;
+                }
+                let cursor = nodeOffsets[low] || 0;
+                for (let nodeIndex = low; nodeIndex < nodes.length; nodeIndex++) {
+                  const node = nodes[nodeIndex];
                   const length = (node.data || '').length;
                   const nodeStart = cursor;
                   const nodeEnd = cursor + length;
@@ -6645,16 +6666,7 @@ public partial class MainWindow
     private async Task SaveCurrentReaderGlobalPreferencesAsync(
         CancellationToken cancellationToken)
     {
-        if (_readerIsPdf) return;
-        var layout = NormalizeReaderLayoutForPlatform(_readerLayout);
-        _readerLayout = layout;
-        _appSettings = AppSettings.Normalize(_appSettings with
-        {
-            DefaultReaderLayout = layout
-        });
-
-        await _appSettingsStore.SaveAsync(_appSettings, cancellationToken);
-        HandleLocalDataChanged(LocalDataChangeKind.Settings);
+        await SaveCurrentReaderPreferencesAsync(cancellationToken);
     }
 
     // ------------------------------------------------------------------
@@ -8722,7 +8734,7 @@ public partial class MainWindow
         });
         SyncReaderFlowMenu();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+        await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
             ShowReaderTransientStatus(
                 _readerLayout.FlowMode == 0
                     ? T("已切换为滚动阅读。")
@@ -8843,7 +8855,7 @@ public partial class MainWindow
         _readerLayout = NormalizeReaderLayoutForPlatform(_readerLayout with { FontScale = _readerLayout.FontScale + delta });
         UpdateReaderZoomLabel();
         await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
-        await SaveCurrentReaderGlobalPreferencesAsync(CancellationToken.None);
+        await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
     }
 
     private void ReaderBookmarkButton_Click(object? sender, RoutedEventArgs e)
@@ -9608,7 +9620,26 @@ public partial class MainWindow
     {
         try
         {
-            var useNativeLayout = CurrentReaderHost is NativeReaderHost;
+            var nativeHost = CurrentReaderHost as NativeReaderHost;
+            var useNativeLayout = nativeHost is not null;
+            var knownChapter = nativeHost?.GetCurrentChapterPageCountFor(
+                layout, viewportWidth, viewportHeight);
+
+            // Show a usable total immediately from chapter byte sizes. Exact
+            // pagination waits until the user has actually started reading, so
+            // opening a 500-chapter book no longer competes with the first
+            // page turn.
+            var cheapCounts = BuildCheapReaderPageCounts(document, knownChapter);
+            if (sequence == _readerBookPageCountSequence
+                && !cancellation.IsCancellationRequested
+                && ReferenceEquals(document, _readerDocument))
+            {
+                _readerBookPageCounts = cheapCounts;
+                UpdateReaderToolbar();
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellation.Token);
+
             var counts = await Task.Run(
                 () => useNativeLayout
                     ? NativeReaderHost.EstimatePageCounts(
@@ -9616,7 +9647,9 @@ public partial class MainWindow
                         layout,
                         viewportWidth,
                         viewportHeight,
-                        cancellation.Token)
+                        cancellation.Token,
+                        nativeHost!.FontLibrary,
+                        knownChapter)
                     : document.Chapters
                         .Select(path => EstimateReaderChapterPageCount(
                             path,
@@ -9646,6 +9679,39 @@ public partial class MainWindow
                 cancellation.Dispose();
             }
         }
+    }
+
+    private static int[] BuildCheapReaderPageCounts(
+        EpubReaderDocument document,
+        (string ChapterPath, int PageCount)? knownChapter)
+    {
+        var counts = new int[document.Chapters.Count];
+        var bytesPerPage = 4096d;
+        if (knownChapter is { PageCount: > 0 } known)
+        {
+            try
+            {
+                var knownLength = new FileInfo(known.ChapterPath).Length;
+                if (knownLength > 0)
+                    bytesPerPage = Math.Max(512d, knownLength / (double)known.PageCount);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        for (var index = 0; index < counts.Length; index++)
+        {
+            try
+            {
+                var length = new FileInfo(document.Chapters[index]).Length;
+                counts[index] = Math.Max(1, (int)Math.Round(length / bytesPerPage));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                counts[index] = 1;
+            }
+        }
+        return counts;
     }
 
     private static int EstimateReaderChapterPageCount(

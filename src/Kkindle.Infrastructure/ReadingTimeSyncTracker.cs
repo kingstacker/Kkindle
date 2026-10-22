@@ -269,6 +269,125 @@ internal static class ReadingTimeSyncTracker
         return result;
     }
 
+    /// <summary>
+    /// Fills the per-device and per-day counters for a whole snapshot. The
+    /// per-book version issued 3-5 SQL statements per book; a large library
+    /// made the sync spend most of its time here.
+    /// </summary>
+    public static async Task CaptureAllAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        IReadOnlyList<S3SyncReadingStats> stats,
+        CancellationToken cancellationToken)
+    {
+        if (stats.Count == 0) return;
+
+        var countersByFile = await ReadAllAsync(connection, transaction, cancellationToken);
+        var daysByFile = await ReadAllDaysAsync(connection, transaction, cancellationToken);
+        var baseDeviceId = await ReadLocalDeviceIdAsync(connection, transaction, cancellationToken);
+
+        foreach (var item in stats)
+        {
+            if (!countersByFile.TryGetValue(item.BookFileId, out var counters))
+            {
+                counters = new Dictionary<string, long>(StringComparer.Ordinal);
+                countersByFile[item.BookFileId] = counters;
+            }
+
+            var knownTotal = Total(counters);
+            if (item.CumulativeSeconds > knownTotal)
+            {
+                var deviceId = LocalCounterId(baseDeviceId, item.BookFileId);
+                var value = checked(counters.GetValueOrDefault(deviceId) + item.CumulativeSeconds - knownTotal);
+                if (counters.GetValueOrDefault(deviceId) != value)
+                {
+                    await SetMaximumAsync(
+                        connection, transaction, item.BookFileId, deviceId, value, cancellationToken);
+                    counters[deviceId] = value;
+                }
+            }
+
+            item.SecondsByDevice = counters;
+            item.CumulativeSeconds = Total(counters);
+            item.SecondsByDateByDevice = daysByFile.TryGetValue(item.BookFileId, out var days)
+                ? days
+                : new Dictionary<string, Dictionary<string, long>>(StringComparer.Ordinal);
+            // The UPDATE is a no-op unless the merged total grew.
+            await UpdateTotalAsync(
+                connection, transaction, item.BookFileId, item.CumulativeSeconds, cancellationToken);
+        }
+    }
+
+    private static async Task<Dictionary<Guid, Dictionary<string, long>>> ReadAllAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, Dictionary<string, long>>();
+        using var command = Command(connection, transaction,
+            "SELECT BookFileId, DeviceId, Seconds FROM S3SyncReadingTimeCounters;");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!Guid.TryParse(reader.GetString(0), out var fileId))
+                continue;
+            if (!result.TryGetValue(fileId, out var counters))
+            {
+                counters = new Dictionary<string, long>(StringComparer.Ordinal);
+                result[fileId] = counters;
+            }
+            counters[reader.GetString(1)] = reader.GetInt64(2);
+        }
+        return result;
+    }
+
+    private static async Task<Dictionary<Guid, Dictionary<string, Dictionary<string, long>>>> ReadAllDaysAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, Dictionary<string, Dictionary<string, long>>>();
+        using var command = Command(connection, transaction,
+            "SELECT BookFileId, DeviceId, ReadingDate, Seconds FROM S3SyncReadingDayCounters;");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!Guid.TryParse(reader.GetString(0), out var fileId))
+                continue;
+            if (!result.TryGetValue(fileId, out var byDevice))
+            {
+                byDevice = new Dictionary<string, Dictionary<string, long>>(StringComparer.Ordinal);
+                result[fileId] = byDevice;
+            }
+            var deviceId = reader.GetString(1);
+            if (!byDevice.TryGetValue(deviceId, out var byDate))
+            {
+                byDate = new Dictionary<string, long>(StringComparer.Ordinal);
+                byDevice[deviceId] = byDate;
+            }
+            byDate[reader.GetString(2)] = reader.GetInt64(3);
+        }
+        return result;
+    }
+
+    private static async Task<string> ReadLocalDeviceIdAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        using var device = Command(connection, transaction,
+            "SELECT Value FROM S3SyncLocalMetadata WHERE Key = 'reading-time-device';");
+        return NormalizeDeviceId(await device.ExecuteScalarAsync(cancellationToken) as string) ?? "legacy";
+    }
+
+    private static string LocalCounterId(string baseDeviceId, Guid fileId)
+    {
+        // The opaque GUID remains compatible with older snapshot readers. Do
+        // not rename existing counters: other devices may still hold them.
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"reading-time-v2:{baseDeviceId}:{fileId:N}"));
+        return new Guid(hash.AsSpan(0, 16)).ToString("N");
+    }
+
     private static async Task<Dictionary<string, long>> ReadAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -333,13 +452,8 @@ internal static class ReadingTimeSyncTracker
     private static async Task<string> GetLocalCounterIdAsync(
         SqliteConnection connection, SqliteTransaction transaction, Guid fileId, CancellationToken cancellationToken)
     {
-        using var device = Command(connection, transaction,
-            "SELECT Value FROM S3SyncLocalMetadata WHERE Key = 'reading-time-device';");
-        var deviceId = NormalizeDeviceId(await device.ExecuteScalarAsync(cancellationToken) as string) ?? "legacy";
-        // The opaque GUID remains compatible with older snapshot readers. Do
-        // not rename existing counters: other devices may still hold them.
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"reading-time-v2:{deviceId}:{fileId:N}"));
-        return new Guid(hash.AsSpan(0, 16)).ToString("N");
+        var deviceId = await ReadLocalDeviceIdAsync(connection, transaction, cancellationToken);
+        return LocalCounterId(deviceId, fileId);
     }
 
     private static SqliteCommand Command(

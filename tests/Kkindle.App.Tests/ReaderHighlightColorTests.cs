@@ -29,7 +29,7 @@ public sealed class ReaderHighlightColorTests(SettingsUiSession session)
         using var host = await ReaderAppearanceTests.LoadChapter(scope, new(VerticalWriting: vertical));
         var start = host.BodyText!.IndexOf("第1段", StringComparison.Ordinal);
         Assert.True(start >= 0);
-        foreach (var theme in new[] { ReaderTheme.Classic, ReaderTheme.Night })
+        foreach (var theme in new[] { ReaderTheme.Classic, ReaderTheme.Beige })
         {
             host.SetAppearance(new ReaderAppearanceSettings { Theme = theme });
             host.SetAnnotations([]);
@@ -73,7 +73,7 @@ public sealed class ReaderHighlightColorTests(SettingsUiSession session)
     [Theory]
     [InlineData("zh-CN", ReaderTheme.Classic)]
     [InlineData("en-US", ReaderTheme.Classic)]
-    [InlineData("zh-CN", ReaderTheme.Night)]
+    [InlineData("zh-CN", ReaderTheme.Beige)]
     public Task ColorMenuPreservesExistingNotesAndRemembersTheNewMarkerColor(string language, ReaderTheme theme) => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();

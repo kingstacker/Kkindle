@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using SkiaSharp;
 
 namespace Kkindle.Layout;
@@ -12,18 +13,28 @@ public sealed class TypesetEngine : IDisposable
 {
     private readonly TypesetFontLibrary _fonts;
     private readonly GlyphShaper _shaper;
+    private readonly bool _ownsFonts;
 
-    public TypesetEngine(TypesetFontLibrary fonts)
+    /// <param name="ownsFonts">
+    /// False when the caller keeps one font library alive across engines
+    /// (reader recompose/resize). Loading CJK faces is expensive, so the host
+    /// shares them instead of rebuilding the library on every relayout.
+    /// </param>
+    public TypesetEngine(TypesetFontLibrary fonts, bool ownsFonts = true)
     {
         _fonts = fonts;
         _shaper = new GlyphShaper(fonts);
+        _ownsFonts = ownsFonts;
     }
 
     /// <summary>The font library backing this engine (shared with the painter).</summary>
     public TypesetFontLibrary Fonts => _fonts;
 
     /// <summary>The engine takes ownership of the font library it was built with.</summary>
-    public void Dispose() => _fonts.Dispose();
+    public void Dispose()
+    {
+        if (_ownsFonts) _fonts.Dispose();
+    }
 
     public ChapterLayout Compose(
         ChapterContent content,
@@ -145,25 +156,77 @@ public static class ChapterLayoutInteraction
             return null;
         }
 
-        foreach (var run in layout.Pages[pageIndex].Runs)
+        var page = layout.Pages[pageIndex];
+        var run = FindRunAt(page.Runs, offset);
+        if (run is null)
         {
-            if (run.TextLength <= 0 || offset < run.TextStart || offset >= run.TextStart + run.TextLength)
-            {
-                continue;
-            }
-
-            var local = offset - run.TextStart;
-            var glyphIndex = FindGlyphForCluster(run, local);
-            if (glyphIndex < 0
-                || glyphIndex >= run.Glyphs.Length
-                || glyphIndex >= run.X.Length)
-            {
-                continue;
-            }
-
-            return GetGlyphRect(layout.Pages[pageIndex], run, glyphIndex);
+            return null;
         }
 
+        var local = offset - run.TextStart;
+        var glyphIndex = FindGlyphForCluster(run, local);
+        if (glyphIndex < 0
+            || glyphIndex >= run.Glyphs.Length
+            || glyphIndex >= run.X.Length)
+        {
+            return null;
+        }
+
+        return GetGlyphRect(page, run, glyphIndex);
+    }
+
+    /// <summary>
+    /// Runs are emitted in text order. A binary search turns overlay geometry
+    /// (one lookup per selected character) from O(chars × runs) into
+    /// O(chars × log runs); the linear fallback keeps malformed pages safe.
+    /// </summary>
+    private static PlacedRun? FindRunAt(IReadOnlyList<PlacedRun> runs, int offset)
+    {
+        var low = 0;
+        var high = runs.Count - 1;
+        var found = -1;
+        while (low <= high)
+        {
+            var middle = low + ((high - low) >> 1);
+            var run = runs[middle];
+            if (run.TextStart < 0 || offset < run.TextStart)
+            {
+                high = middle - 1;
+            }
+            else if (offset >= run.TextStart + run.TextLength)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                found = middle;
+                high = middle - 1;
+            }
+        }
+
+        if (found >= 0)
+        {
+            // Ruby and base runs can share a TextStart; the linear version
+            // returned the first match, so walk back to the earliest one.
+            while (found > 0)
+            {
+                var previous = runs[found - 1];
+                if (previous.TextStart != runs[found].TextStart
+                    || previous.TextLength <= 0
+                    || offset < previous.TextStart
+                    || offset >= previous.TextStart + previous.TextLength)
+                    break;
+                found--;
+            }
+            return runs[found];
+        }
+
+        foreach (var run in runs)
+        {
+            if (run.TextLength > 0 && offset >= run.TextStart
+                && offset < run.TextStart + run.TextLength)
+                return run;
+        }
         return null;
     }
 
@@ -199,37 +262,28 @@ public static class ChapterLayoutInteraction
         var bestDistance = float.MaxValue;
         var bestAfterMidpoint = false;
         var page = layout.Pages[pageIndex];
+        var index = HitIndexes.GetValue(page, static candidate => new PageHitIndex(candidate));
 
-        foreach (var run in layout.Pages[pageIndex].Runs)
+        foreach (var (run, glyphIndex, rect) in index.Near(point, 128f))
         {
-            var glyphCount = Math.Min(run.Glyphs.Length, run.X.Length);
-            if (glyphCount == 0 || run.TextStart < 0)
+            var size = run.FontSize * run.Scale;
+            var distance = DistanceToRect(point, rect);
+            var tolerance = Math.Max(6f, size * 1.25f);
+            if (distance > tolerance)
             {
                 continue;
             }
 
-            for (var i = 0; i < glyphCount; i++)
+            var cx = (rect.Left + rect.Right) / 2f;
+            var cy = (rect.Top + rect.Bottom) / 2f;
+            if (distance < bestDistance)
             {
-                var size = run.FontSize * run.Scale;
-                var rect = GetGlyphRect(page, run, i);
-                var distance = DistanceToRect(point, rect);
-                var tolerance = Math.Max(6f, size * 1.25f);
-                if (distance > tolerance)
-                {
-                    continue;
-                }
-
-                var cx = (rect.Left + rect.Right) / 2f;
-                var cy = (rect.Top + rect.Bottom) / 2f;
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    var local = i < run.Clusters.Length ? run.Clusters[i] : 0;
-                    best = run.TextStart + local;
-                    bestAfterMidpoint = page.WritingMode == TypesetWritingMode.VerticalRl
-                        ? point.Y > cy
-                        : point.X > cx;
-                }
+                bestDistance = distance;
+                var local = glyphIndex < run.Clusters.Length ? run.Clusters[glyphIndex] : 0;
+                best = run.TextStart + local;
+                bestAfterMidpoint = page.WritingMode == TypesetWritingMode.VerticalRl
+                    ? point.Y > cy
+                    : point.X > cx;
             }
         }
 
@@ -241,6 +295,61 @@ public static class ChapterLayoutInteraction
         return best < 0
             ? -1
             : Math.Clamp(best, 0, Math.Max(0, layout.BodyTextLength));
+    }
+
+    private static readonly ConditionalWeakTable<LayoutPage, PageHitIndex> HitIndexes = new();
+
+    /// <summary>
+    /// Uniform grid over one page's glyph rectangles. Selection dragging used
+    /// to test every glyph on every pointer move; now only the cells around
+    /// the pointer are visited.
+    /// </summary>
+    private sealed class PageHitIndex
+    {
+        private const float CellSize = 32f;
+        private readonly Dictionary<(int X, int Y), List<(PlacedRun Run, int Glyph, SKRect Rect)>> _cells = [];
+
+        public PageHitIndex(LayoutPage page)
+        {
+            foreach (var run in page.Runs)
+            {
+                var glyphCount = Math.Min(run.Glyphs.Length, run.X.Length);
+                if (glyphCount == 0 || run.TextStart < 0) continue;
+                for (var glyphIndex = 0; glyphIndex < glyphCount; glyphIndex++)
+                {
+                    var rect = GetGlyphRect(page, run, glyphIndex);
+                    if (rect.Width <= 0 || rect.Height <= 0) continue;
+                    var minX = (int)MathF.Floor(rect.Left / CellSize);
+                    var maxX = (int)MathF.Floor(rect.Right / CellSize);
+                    var minY = (int)MathF.Floor(rect.Top / CellSize);
+                    var maxY = (int)MathF.Floor(rect.Bottom / CellSize);
+                    for (var x = minX; x <= maxX; x++)
+                    for (var y = minY; y <= maxY; y++)
+                    {
+                        if (!_cells.TryGetValue((x, y), out var entries))
+                        {
+                            entries = [];
+                            _cells[(x, y)] = entries;
+                        }
+                        entries.Add((run, glyphIndex, rect));
+                    }
+                }
+            }
+        }
+
+        public IEnumerable<(PlacedRun Run, int Glyph, SKRect Rect)> Near(SKPoint point, float tolerance)
+        {
+            var minX = (int)MathF.Floor((point.X - tolerance) / CellSize);
+            var maxX = (int)MathF.Floor((point.X + tolerance) / CellSize);
+            var minY = (int)MathF.Floor((point.Y - tolerance) / CellSize);
+            var maxY = (int)MathF.Floor((point.Y + tolerance) / CellSize);
+            for (var x = minX; x <= maxX; x++)
+            for (var y = minY; y <= maxY; y++)
+            {
+                if (!_cells.TryGetValue((x, y), out var entries)) continue;
+                foreach (var entry in entries) yield return entry;
+            }
+        }
     }
 
     /// <summary>

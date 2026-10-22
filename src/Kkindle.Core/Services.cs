@@ -16,7 +16,7 @@ public interface IBookLibraryService
         string? category = null,
         Guid? collectionId = null,
         LibraryReadingStatus? readingStatus = null,
-        bool favoritesOnly = false,
+        bool? favorite = null,
         LibrarySortMode sortMode = LibrarySortMode.UpdatedDescending,
         int pageIndex = 0,
         int pageSize = 200,
@@ -33,7 +33,8 @@ public interface IBookLibraryService
         IEnumerable<string> paths,
         IProgress<TransferProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null);
+        Func<ImportBookConflict, Task<ImportConflictResolution>>? conflictResolver = null,
+        IReadOnlyDictionary<string, TxtImportRules>? txtImportRules = null);
     Task<BookFile> AddFileToBookAsync(Guid bookId, string sourcePath, CancellationToken cancellationToken = default);
     Task RenameBookAsync(Guid bookId, string title, CancellationToken cancellationToken = default);
     Task UpdateMetadataAsync(Book book, CancellationToken cancellationToken = default);

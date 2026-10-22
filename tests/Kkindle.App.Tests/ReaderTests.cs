@@ -371,6 +371,7 @@ internal sealed class ReaderTestWindow(MainWindow window, AppPaths paths, string
     public AppPaths Paths => paths;
     public T Get<T>(string name) where T : Control => window.FindControl<T>(name)!;
     public T Field<T>(string name) => (T)typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+    public T Property<T>(string name) => (T)typeof(MainWindow).GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
     public void Set(string name, object? value) => typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, value);
     public object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, args);
     public T Call<T>(string name, params object?[] args) => (T)Call(name, args)!;

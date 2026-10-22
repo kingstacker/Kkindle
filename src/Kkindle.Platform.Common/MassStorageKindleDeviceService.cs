@@ -19,6 +19,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         ".epub", ".pdf", ".mobi", ".azw3", ".azw", ".prc", ".kfx"
     };
 
+    private readonly KindleScanCacheStore _scanCache;
     private readonly IMetadataService _metadata;
     private readonly IBookFormatConverter _formatConverter;
     private readonly string _coverCacheDirectory;
@@ -33,6 +34,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         IBookFormatConverter? formatConverter = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        _scanCache = new KindleScanCacheStore(paths);
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _formatConverter = formatConverter ?? new BookFormatConversionService();
         _coverCacheDirectory = Path.Combine(paths.Covers, "kindle");
@@ -60,28 +62,35 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         var documents = GetDocumentsRoot(device);
         if (!Directory.Exists(documents)) return [];
 
-        var books = new List<KindleBook>();
-        foreach (var path in EnumerateFiles(documents))
+        var books = await Task.Run(() =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var withinDocuments = Path.GetRelativePath(documents, path);
-            if (!device.Profile.IsBookPath(withinDocuments)) continue;
-            try
+            var enumerated = new List<KindleBook>();
+            foreach (var path in EnumerateFiles(documents))
             {
-                var info = new FileInfo(path);
-                var book = new KindleBook
+                cancellationToken.ThrowIfCancellationRequested();
+                var withinDocuments = Path.GetRelativePath(documents, path);
+                if (!device.Profile.IsBookPath(withinDocuments)) continue;
+                try
                 {
-                    RelativePath = Path.GetRelativePath(device.RootPath, path),
-                    Format = info.Extension.TrimStart('.').ToLowerInvariant(),
-                    Size = info.Length,
-                    ModifiedAt = info.LastWriteTimeUtc
-                };
-                SetFallbackMetadata(book);
-                books.Add(book);
+                    var info = new FileInfo(path);
+                    var book = new KindleBook
+                    {
+                        RelativePath = Path.GetRelativePath(device.RootPath, path),
+                        Format = info.Extension.TrimStart('.').ToLowerInvariant(),
+                        Size = info.Length,
+                        ModifiedAt = info.LastWriteTimeUtc
+                    };
+                    SetFallbackMetadata(book);
+                    enumerated.Add(book);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
+
+            return enumerated;
+        }, cancellationToken).ConfigureAwait(false);
+        var cached = await _scanCache.GetDeviceEntriesAsync(device.Identity, cancellationToken).ConfigureAwait(false);
+        var entries = new List<KindleScanCacheEntry>(books.Count);
 
         progress?.Report(new KindleScanProgress(
             KindleScanStage.Enumerated,
@@ -92,6 +101,8 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
 
         var visible = new List<KindleBook>(books.Count);
         var processed = 0;
+        var changed = new List<KindleBook>(8);
+        var removed = new List<string>(8);
         foreach (var book in books)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -99,13 +110,34 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
             var isDictionary = false;
             try
             {
-                isDictionary = await KindleBookClassifier.IsDictionaryAsync(source, cancellationToken);
-                if (!isDictionary)
+                if (cached.TryGetValue(book.RelativePath.Replace('/', '\\').TrimStart('\\'), out var entry)
+                    && entry.Matches(book.Size, book.ModifiedAt)
+                    && (entry.CoverPath is null || File.Exists(entry.CoverPath)))
                 {
-                    book.Sha256 = await Hashing.Sha256Async(source, cancellationToken);
-                    await EnrichBookAsync(device, book, source, cancellationToken);
-                    visible.Add(book);
+                    isDictionary = entry.IsDictionary;
+                    book.Format = entry.Format;
+                    book.Title = entry.Title;
+                    book.Authors = entry.Authors;
+                    book.Sha256 = entry.Sha256;
+                    book.CoverPath = entry.CoverPath;
                 }
+                else
+                {
+                    isDictionary = await KindleBookClassifier.IsDictionaryAsync(source, cancellationToken).ConfigureAwait(false);
+                    if (!isDictionary)
+                    {
+                        book.Sha256 = await Hashing.Sha256Async(source, cancellationToken).ConfigureAwait(false);
+                        await EnrichBookAsync(device, book, source, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                entries.Add(new KindleScanCacheEntry
+                {
+                    DeviceIdentity = device.Identity, RelativePath = book.RelativePath,
+                    Size = book.Size, ModifiedAt = book.ModifiedAt, Format = book.Format,
+                    Title = book.Title, Authors = book.Authors, Sha256 = book.Sha256,
+                    CoverPath = book.CoverPath, IsDictionary = isDictionary
+                });
+                if (!isDictionary) visible.Add(book);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
             {
@@ -113,13 +145,18 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
             }
 
             processed++;
-            progress?.Report(new KindleScanProgress(
-                KindleScanStage.Enriched,
-                isDictionary ? [] : [CloneBook(book)],
-                isDictionary ? [book.RelativePath] : [],
-                processed,
-                books.Count));
+            if (isDictionary) removed.Add(book.RelativePath);
+            else changed.Add(CloneBook(book));
+            if (changed.Count + removed.Count >= 8 || processed == books.Count)
+            {
+                progress?.Report(new KindleScanProgress(
+                    KindleScanStage.Enriched, changed.ToArray(), removed.ToArray(), processed, books.Count));
+                changed.Clear();
+                removed.Clear();
+            }
         }
+        try { await _scanCache.ReplaceDeviceEntriesAsync(device.Identity, entries, cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
         return visible;
     }
 
@@ -183,6 +220,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
             if (!string.IsNullOrWhiteSpace(bookFile.Sha256)
                 && !hash.Equals(bookFile.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("传输校验失败，设备上的文件未被替换。");
+            if (!File.Exists(destination)) KindleReadingState.DeleteForRemovedBook(destination);
             await MoveFileAsync(temporary, destination, overwrite: true, cancellationToken);
 
             var thumbnail = device.Profile.UsesKindleThumbnails
@@ -215,6 +253,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         var path = ResolveWithinRoot(device.RootPath, book.RelativePath, GetDocumentsRoot(device));
         RejectLink(path);
         if (!File.Exists(path)) throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
+        KindleReadingState.DeleteForRemovedBook(path);
         File.Delete(path);
         await Task.CompletedTask;
     }

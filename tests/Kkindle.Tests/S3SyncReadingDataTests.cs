@@ -143,6 +143,7 @@ public sealed partial class S3SyncIntegrationTests
             Assert.Equal(420, dashboard.TotalSeconds);
             Assert.Equal(0, dashboard.BookmarkCount);
             Assert.Equal(0, dashboard.AnnotationCount);
+            Assert.Equal(1, await device.ScalarAsync("SELECT COUNT(*) FROM ReaderAnnotations;"));
             Assert.Equal(420, dashboard.DailyReading.Sum(day => day.ActiveSeconds));
             var history = Assert.Single(dashboard.RecentBooks);
             Assert.Equal("Shared reading book", history.Title);

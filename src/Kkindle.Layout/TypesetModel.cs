@@ -145,6 +145,12 @@ public sealed class TypesetLayoutOptions
     public float ViewportHeight { get; init; } = 600f;
     public float InsetHorizontal { get; init; } = 24f;
     public float InsetVertical { get; init; } = 24f;
+    /// <summary>
+    /// Collect per-cell diagnostic frames. Off by default: a vertical chapter
+    /// otherwise allocates a debug box for every glyph even though the user
+    /// never enabled the overlay.
+    /// </summary>
+    public bool CollectDebugBoxes { get; init; }
 
     public float BodyLineHeight => BaseFontSize * LineHeight;
     public float ContentWidth => Math.Max(1f, ViewportWidth - InsetHorizontal * 2f);

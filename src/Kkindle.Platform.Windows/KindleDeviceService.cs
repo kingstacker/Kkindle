@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 
@@ -12,6 +13,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
     private const long MaximumMetadataFileSize = 128L * 1024 * 1024;
     private const int FileOperationRetryAttempts = 30;
     private const int FileOperationRetryDelayMilliseconds = 100;
+    private static readonly TimeSpan WpdDetectionTimeout = TimeSpan.FromSeconds(12);
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".epub", ".pdf", ".mobi", ".azw3", ".azw", ".prc", ".kfx"
@@ -20,6 +22,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
     private readonly IBookFormatConverter _formatConverter;
     private readonly string? _coverCacheDirectory;
     private readonly KindleScanCacheStore? _scanCache;
+    private readonly object _wpdDetectionSync = new();
+    private Task<IReadOnlyList<KindleDevice>>? _wpdDetectionTask;
 
     public KindleDeviceService()
         : this(null, new BookMetadataService(), new BookFormatConversionService())
@@ -39,6 +43,51 @@ public sealed class KindleDeviceService : IKindleDeviceService
     }
 
     public async Task<IReadOnlyList<KindleDevice>> DetectDevicesAsync(CancellationToken cancellationToken = default)
+    {
+        var devices = await Task.Run(() => DetectMassStorageDevices(cancellationToken), cancellationToken)
+            .ConfigureAwait(false);
+        var wpdTask = GetOrStartWpdDetectionTask();
+        IReadOnlyList<KindleDevice> wpdDevices;
+        try
+        {
+            wpdDevices = await wpdTask.WaitAsync(WpdDetectionTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (wpdTask.IsCompleted)
+            {
+                lock (_wpdDetectionSync)
+                {
+                    if (ReferenceEquals(_wpdDetectionTask, wpdTask))
+                        _wpdDetectionTask = null;
+                }
+            }
+        }
+
+        devices.AddRange(wpdDevices.Where(wpd => devices.All(disk =>
+            !string.Equals(disk.Identity, wpd.Identity, StringComparison.OrdinalIgnoreCase))));
+        return devices;
+    }
+
+    private Task<IReadOnlyList<KindleDevice>> GetOrStartWpdDetectionTask()
+    {
+        lock (_wpdDetectionSync)
+        {
+            if (_wpdDetectionTask is null || _wpdDetectionTask.IsCompleted)
+            {
+                _wpdDetectionTask = Task.Run<IReadOnlyList<KindleDevice>>(
+                    () => WpdKindleAccess.DetectDevices(CancellationToken.None));
+                _ = _wpdDetectionTask.ContinueWith(
+                    task => _ = task.Exception,
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+            return _wpdDetectionTask;
+        }
+    }
+
+    private static List<KindleDevice> DetectMassStorageDevices(CancellationToken cancellationToken)
     {
         var devices = new List<KindleDevice>();
         foreach (var drive in DriveInfo.GetDrives())
@@ -63,9 +112,6 @@ public sealed class KindleDeviceService : IKindleDeviceService
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
-        var wpdDevices = await Task.Run(() => WpdKindleAccess.DetectDevices(cancellationToken), cancellationToken);
-        devices.AddRange(wpdDevices.Where(wpd => devices.All(disk =>
-            !string.Equals(disk.Identity, wpd.Identity, StringComparison.OrdinalIgnoreCase))));
         return devices;
     }
 
@@ -83,8 +129,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
             ? await Task.Run(
                 () => WpdKindleAccess.ScanBooks(device,
                     device.Profile.BookFormats.Select(format => "." + format).ToHashSet(StringComparer.OrdinalIgnoreCase), cancellationToken),
-                cancellationToken)
-            : await Task.Run(() => EnumerateMassStorageBooks(device, cancellationToken), cancellationToken);
+                cancellationToken).ConfigureAwait(false)
+            : await Task.Run(() => EnumerateMassStorageBooks(device, cancellationToken), cancellationToken).ConfigureAwait(false);
         foreach (var book in enumerated) SetFallbackMetadata(book);
 
         var cachedEntries = _scanCache is null
@@ -101,12 +147,9 @@ public sealed class KindleDeviceService : IKindleDeviceService
             var key = NormalizeDevicePath(book.RelativePath);
             if (cachedEntries.TryGetValue(key, out var cached)
                 && cached.Matches(book.Size, book.ModifiedAt)
-                // A cache entry without a cover is incomplete. Re-enrich it so
-                // Kindle's system thumbnail can be copied when the book itself
-                // does not contain an embedded cover.
-                && (device.Transport != KindleTransport.Wpd
-                    ? cached.CoverPath is null || File.Exists(cached.CoverPath)
-                    : cached.CoverPath is not null && File.Exists(cached.CoverPath)))
+                // A successful scan may legitimately find no cover. Cache that
+                // outcome too, rather than copying the entire MTP book again.
+                && (cached.CoverPath is null || File.Exists(cached.CoverPath)))
             {
                 ApplyCachedBook(book, cached);
                 currentEntries.Add(cached);
@@ -129,6 +172,11 @@ public sealed class KindleDeviceService : IKindleDeviceService
         var changed = new List<KindleBook>();
         var removed = new List<string>();
         var processed = enumerated.Count - pending.Count;
+        WpdKindleAccess.WpdSession? wpdSession = null;
+        try
+        {
+        if (device.Transport == KindleTransport.Wpd && pending.Count > 0)
+            wpdSession = new WpdKindleAccess.WpdSession(device);
         foreach (var book in pending)
         {
             var stopWpdEnrichment = false;
@@ -141,7 +189,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
             {
                 if (device.Transport == KindleTransport.Wpd)
                 {
-                    isDictionary = await EnrichWpdBookAsync(device, book, enrichmentTimeout.Token);
+                    isDictionary = await EnrichWpdBookAsync(device, book, wpdSession, enrichmentTimeout.Token);
                 }
                 else
                 {
@@ -200,6 +248,11 @@ public sealed class KindleDeviceService : IKindleDeviceService
                 removed.Clear();
             }
             if (stopWpdEnrichment) break;
+        }
+        }
+        finally
+        {
+            wpdSession?.Dispose();
         }
 
         if (_scanCache is not null)
@@ -301,25 +354,37 @@ public sealed class KindleDeviceService : IKindleDeviceService
     private async Task<bool> EnrichWpdBookAsync(
         KindleDevice device,
         KindleBook book,
+        WpdKindleAccess.WpdSession? session,
         CancellationToken cancellationToken)
     {
         SetFallbackMetadata(book);
-        var cachedCover = FindCachedCover(device, book);
         if (_coverCacheDirectory is null || book.Size <= 0 || book.Size > MaximumMetadataFileSize) return false;
         if (book.Format is not ("epub" or "mobi" or "azw" or "azw3" or "kfx")) return false;
+        // A sidecar from a previous scan already owns the hash, title,
+        // authors and cover for this exact size+mtime. Skip the MTP copy.
+        if (TryApplyCachedWpdMetadata(device, book, out var cachedIsDictionary))
+            return cachedIsDictionary;
+        var cachedCover = FindCachedCover(device, book);
 
         var stagingDirectory = Path.Combine(Path.GetTempPath(), "Kkindle", "metadata", Guid.NewGuid().ToString("N"));
         try
         {
-            var localPath = await Task.Run(
-                () => WpdKindleAccess.CopyBookToLocal(device, book, stagingDirectory, cancellationToken),
-                cancellationToken);
+            var localPath = session is not null
+                ? WpdKindleAccess.CopyBookToLocal(session, device, book, stagingDirectory, cancellationToken)
+                : await Task.Run(
+                    () => WpdKindleAccess.CopyBookToLocal(device, book, stagingDirectory, cancellationToken),
+                    cancellationToken);
             book.Sha256 = await Hashing.Sha256Async(localPath, cancellationToken);
             var isDictionary = await KindleBookClassifier.IsDictionaryAsync(localPath, cancellationToken);
-            if (isDictionary) return true;
+            if (isDictionary)
+            {
+                WriteWpdSidecar(device, book, isDictionary: true);
+                return true;
+            }
             if (cachedCover is not null)
             {
                 book.CoverPath = cachedCover;
+                WriteWpdSidecar(device, book, isDictionary: false);
                 return false;
             }
             await EnrichBookAsync(device, book, localPath, cancellationToken);
@@ -328,16 +393,17 @@ public sealed class KindleDeviceService : IKindleDeviceService
                 var thumbnailName = await KindleThumbnailService.ReadThumbnailFileNameAsync(localPath, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(thumbnailName))
                 {
-                    var thumbnailPath = WpdKindleAccess.CopyStorageFileToLocal(
-                        device,
-                        $@"system\thumbnails\{thumbnailName}",
-                        stagingDirectory,
-                        cancellationToken);
+                    var thumbnailPath = session is not null
+                        ? WpdKindleAccess.CopyStorageFileToLocal(
+                            session, device, $@"system\thumbnails\{thumbnailName}", stagingDirectory, cancellationToken)
+                        : WpdKindleAccess.CopyStorageFileToLocal(
+                            device, $@"system\thumbnails\{thumbnailName}", stagingDirectory, cancellationToken);
                     var coverPath = Path.Combine(_coverCacheDirectory, GetCoverCacheKey(device, book) + ".jpg");
                     File.Copy(thumbnailPath, coverPath, overwrite: true);
                     book.CoverPath = coverPath;
                 }
             }
+            WriteWpdSidecar(device, book, isDictionary: false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or TimeoutException)
         {
@@ -399,6 +465,65 @@ public sealed class KindleDeviceService : IKindleDeviceService
     {
         var identity = $"{device.Identity}\n{book.RelativePath}\n{book.Size}\n{book.ModifiedAt?.UtcTicks ?? 0}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
+    }
+
+    private sealed class WpdBookSidecar
+    {
+        public string? Sha256 { get; set; }
+        public string? Title { get; set; }
+        public string? Authors { get; set; }
+        public bool IsDictionary { get; set; }
+    }
+
+    private string? GetWpdSidecarPath(KindleDevice device, KindleBook book) =>
+        _coverCacheDirectory is null
+            ? null
+            : Path.Combine(_coverCacheDirectory, GetCoverCacheKey(device, book) + ".meta.json");
+
+    private bool TryApplyCachedWpdMetadata(
+        KindleDevice device,
+        KindleBook book,
+        out bool isDictionary)
+    {
+        isDictionary = false;
+        var path = GetWpdSidecarPath(device, book);
+        if (path is null || !File.Exists(path)) return false;
+        try
+        {
+            var sidecar = JsonSerializer.Deserialize<WpdBookSidecar>(File.ReadAllText(path));
+            if (sidecar is null) return false;
+            book.Sha256 = sidecar.Sha256 ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(sidecar.Title)) book.Title = sidecar.Title.Trim();
+            if (!string.IsNullOrWhiteSpace(sidecar.Authors)) book.Authors = sidecar.Authors.Trim();
+            book.CoverPath = FindCachedCover(device, book);
+            isDictionary = sidecar.IsDictionary;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
+
+    private void WriteWpdSidecar(KindleDevice device, KindleBook book, bool isDictionary)
+    {
+        var path = GetWpdSidecarPath(device, book);
+        if (path is null) return;
+        try
+        {
+            var sidecar = new WpdBookSidecar
+            {
+                Sha256 = book.Sha256,
+                Title = book.Title,
+                Authors = book.Authors,
+                IsDictionary = isDictionary
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(sidecar));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The sidecar only accelerates the next scan.
+        }
     }
 
     private static void SetFallbackMetadata(KindleBook book)
@@ -486,6 +611,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
             var hash = await Hashing.Sha256Async(temporary, cancellationToken);
             if (!string.Equals(hash, bookFile.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("传输校验失败，设备上的文件未被替换。");
+            if (!File.Exists(destination)) KindleReadingState.DeleteForRemovedBook(destination);
             File.Move(temporary, destination, true);
             if (thumbnail is not null)
             {
@@ -594,6 +720,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("不能删除链接形式的设备文件。");
 
+        KindleReadingState.DeleteForRemovedBook(path);
         File.Delete(path);
     }
 

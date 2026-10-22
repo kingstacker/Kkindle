@@ -5,8 +5,6 @@ namespace Kkindle.Core;
 public enum AppTheme
 {
     Classic = 0,
-    Night = 1,
-    Green = 2,
-    MistBlue = 3,
-    Ivory = 4
+    Beige = 1,
+    Green = 2
 }

@@ -147,7 +147,7 @@ public partial class MainWindow
             var emblem = new Grid
             {
                 Width = 42, Height = 42,
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left
             };
             emblem.Children.Add(new Border
             {
@@ -176,14 +176,14 @@ public partial class MainWindow
             TextBlock Label(string text, double size, string brush) {
                 var label = new TextBlock { Text = text, FontSize = size, TextAlignment = TextAlignment.Center,
                     MaxWidth = 76, TextTrimming = TextTrimming.CharacterEllipsis,
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
                 label.Bind(TextBlock.ForegroundProperty, new DynamicResourceExtension(brush));
                 return label;
             }
             var content = new StackPanel
             {
                 Spacing = 6,
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
             };
             content.Children.Add(emblem);
@@ -198,8 +198,8 @@ public partial class MainWindow
             Avalonia.Automation.AutomationProperties.SetName(emblem, $"{medal.Name}，{medal.Rule}，{status}");
             var card = new Border
             {
-                Width = 84, Height = 84, Padding = new Thickness(4),
-                Margin = new Thickness(4), Child = content
+                Width = 84, Height = 84, Padding = new Thickness(0),
+                Margin = new Thickness(0, 4, 8, 4), Child = content
             };
             DashboardMedalsPanel.Children.Add(card);
         }

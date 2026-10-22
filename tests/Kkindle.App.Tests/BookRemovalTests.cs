@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Input.Platform;
 using Kkindle.Core;
 using Xunit;
 
@@ -8,6 +9,60 @@ namespace Kkindle.Ui.Tests;
 
 public sealed partial class SettingsTests
 {
+    [Theory]
+    [InlineData("zh-CN")]
+    [InlineData("en-US")]
+    public Task AboutUserGroupClickCopiesOnlyGroupNumber(string language) => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        ((Kkindle.App)Application.Current!).ApplyLanguage(language);
+        scope.Call("ShowStage3Page", scope.Get<Grid>("SettingsPage"), null);
+        scope.Call("ShowSettingsSection", "About");
+        var button = scope.Get<Button>("AboutUserGroupButton");
+        await Render();
+        Assert.True(button.IsEffectivelyVisible);
+        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => scope.Get<Control>("SettingsSavedCapsule").IsVisible);
+        Assert.Equal("1109898894", await scope.Window.Clipboard!.TryGetTextAsync());
+        Assert.Equal(language == "en-US" ? "Group number copied to clipboard." : "群号已复制到剪贴板。", scope.Get<TextBlock>("SettingsSavedCapsuleText").Text);
+        await Render();
+        Capture(scope.Window, $"{language}-about-user-group-copy");
+    });
+
+    [Fact]
+    public Task DeletedBookNotesDisplayOriginalTitleAndCover() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        var book = scope.Window.ViewModel.Books[0].Book;
+        var library = scope.Field<IBookLibraryService>("_library");
+        var reader = scope.Field<Kkindle.Infrastructure.ReaderDataService>("_readerData");
+        await reader.SaveAnnotationAsync(new ReaderAnnotation
+        {
+            BookId = book.Id, BookFileId = book.Files[0].Id,
+            ChapterPath = "chapter.xhtml", SelectedText = "保留的划线", Note = "保留的批注", EndOffset = 5
+        });
+        scope.Call("ShowStage3Page", scope.Get<Grid>("ReadingMaterialsPage"), null);
+        await scope.Call<Task>("RefreshReadingMaterialsAsync");
+        var before = Assert.Single(scope.Window.ReadingMaterialGroups);
+        var hadCover = before.HasCover;
+        Assert.True(hadCover);
+        Assert.False(before.HasDeletedBook);
+        await library.DeleteAsync(book.Id);
+        await scope.Call<Task>("RefreshReadingMaterialsAsync");
+        var group = Assert.Single(scope.Window.ReadingMaterialGroups);
+        Assert.Equal(book.Title, group.BookTitle);
+        Assert.True(group.HasCover);
+        Assert.True(group.HasDeletedBook);
+        Assert.Equal("已删除", group.DeletedLabel);
+        group.IsExpanded = true;
+        await Render();
+        Capture(scope.Window, "deleted-book-notes-retained-title-cover");
+        await library.RestoreTrashItemAsync(Assert.Single(await library.GetTrashItemsAsync()).Id);
+        await scope.Call<Task>("RefreshReadingMaterialsAsync");
+        Assert.False(Assert.Single(scope.Window.ReadingMaterialGroups).HasDeletedBook);
+    });
+
     [Theory]
     [InlineData("zh-CN", "ConfirmationCancelButton")]
     [InlineData("zh-CN", "ConfirmationKeepFilesButton")]

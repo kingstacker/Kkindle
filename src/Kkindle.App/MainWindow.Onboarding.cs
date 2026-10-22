@@ -451,8 +451,8 @@ public partial class MainWindow
             {
                 _deviceDisplayName = normalizedModel;
                 KindleStatusText.Text = normalizedModel;
-                KindleConnectionText.Text = T("{0} · 已连接", currentDevice.ConnectionLabel);
-                KindleConnectionText.IsVisible = true;
+                KindleConnectionText.Text = string.Empty;
+                KindleConnectionText.IsVisible = false;
                 DevicePageDeviceText.Text = $"{normalizedModel} · {currentDevice.ConnectionLabel}";
                 DeviceNameButton.IsEnabled = true;
             }

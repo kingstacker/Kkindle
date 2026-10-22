@@ -16,6 +16,7 @@ public sealed partial class EpubBookContentService
     private const long MaxChapterSourceBytes = 64L * 1024 * 1024;
     private const int MaxChapterTextCharacters = 20_000_000;
     private readonly ReaderDataService _readerData;
+    private readonly SemaphoreSlim _indexGate = new(1, 1);
 
     public EpubBookContentService(ReaderDataService readerData)
     {
@@ -27,6 +28,20 @@ public sealed partial class EpubBookContentService
         BookFile file,
         EpubReaderDocument document,
         CancellationToken cancellationToken = default)
+    {
+        await _indexGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // SQLite async commands can complete synchronously. Keep extraction,
+            // chunk generation and insertion off the caller's UI thread together.
+            return await Task.Run(() => EnsureIndexedCoreAsync(book, file, document, cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally { _indexGate.Release(); }
+    }
+
+    private async Task<int> EnsureIndexedCoreAsync(
+        Book book, BookFile file, EpubReaderDocument document, CancellationToken cancellationToken)
     {
         if (await _readerData.IsIndexCurrentAsync(file.Id, file.Sha256, cancellationToken))
             return 0;
@@ -43,16 +58,18 @@ public sealed partial class EpubBookContentService
         EpubReaderDocument document,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        var titles = document.Navigation.GroupBy(item => item.ChapterIndex)
+            .ToDictionary(group => group.Key, group => group.First().Title);
         for (var chapterIndex = 0; chapterIndex < document.Chapters.Count; chapterIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var chapterPath = Path.GetFullPath(document.Chapters[chapterIndex]);
             EnsureContainedPath(document.RootPath, chapterPath);
             var relativePath = Path.GetRelativePath(document.RootPath, chapterPath).Replace('\\', '/');
-            var chapterTitle = document.Navigation.FirstOrDefault(item => item.ChapterIndex == chapterIndex)?.Title
+            var chapterTitle = titles.GetValueOrDefault(chapterIndex)
                 ?? $"第 {chapterIndex + 1} 章";
             var text = await ExtractPlainTextAsync(chapterPath, cancellationToken);
-            foreach (var chunk in CreateChunks(text, chapterIndex, chapterTitle, relativePath))
+            foreach (var chunk in EnumerateChunks(text, chapterIndex, chapterTitle, relativePath, cancellationToken))
                 yield return chunk;
         }
     }
@@ -63,12 +80,19 @@ public sealed partial class EpubBookContentService
         string chapterTitle,
         string chapterPath)
     {
-        if (string.IsNullOrWhiteSpace(text)) return [];
-        var chunks = new List<BookContentChunkDraft>();
+        return EnumerateChunks(text, chapterIndex, chapterTitle, chapterPath).ToArray();
+    }
+
+    internal static IEnumerable<BookContentChunkDraft> EnumerateChunks(
+        string text, int chapterIndex, string chapterTitle, string chapterPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(text)) yield break;
         var start = 0;
         var chunkIndex = 0;
         while (start < text.Length)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             while (start < text.Length && char.IsWhiteSpace(text[start])) start++;
             if (start >= text.Length) break;
 
@@ -80,21 +104,20 @@ public sealed partial class EpubBookContentService
             var content = text[start..end].Trim();
             if (content.Length > 0)
             {
-                chunks.Add(new BookContentChunkDraft(
+                yield return new BookContentChunkDraft(
                     chapterIndex,
                     chunkIndex++,
                     chapterTitle,
                     chapterPath,
                     start,
                     end,
-                    content));
+                    content);
             }
 
             if (end >= text.Length) break;
             var nextStart = Math.Max(start + 1, end - ChunkOverlap);
             start = nextStart;
         }
-        return chunks;
     }
 
     public static async Task<string> ExtractPlainTextAsync(
