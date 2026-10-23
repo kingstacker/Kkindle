@@ -23,6 +23,9 @@
     <PackageReference Include="DotNetG2P.Chinese" Version="1.10.0" />
     <PackageReference Include="SharpZipLib" Version="1.4.2" />
     <PackageReference Include="MailKit" Version="4.18.0" />
+    <!-- MimeKit (via MailKit) resolves System.Security.Cryptography.Pkcs 10.0.0,
+         which trips NU1902/NU1903; pin the patched 10.0.x release directly. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageReference Include="xxHash.Core" Version="2.0.0" />
   </ItemGroup>
   <ItemGroup>

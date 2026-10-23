@@ -7177,7 +7177,7 @@ public partial class MainWindow
         if (properties.IsRightButtonPressed)
         {
             e.Handled = true;
-            _ = ConfirmDeleteReaderPdfAnnotationAsync(annotation);
+            ShowReaderPdfAnnotationMenu(annotation);
         }
         else if (properties.IsLeftButtonPressed)
         {
@@ -7369,6 +7369,18 @@ public partial class MainWindow
                 case "pdfError":
                     ReaderStatusText.Text = UiText.Localize(ReadString(root, "message"));
                     break;
+                case "annotationSelect":
+                    PdfAnnotTrace.Write($"bridge annotationSelect id={ReadString(root, "id")} isPdf={_readerIsPdf}");
+                    if (_readerIsPdf
+                        && Guid.TryParse(ReadString(root, "id"), out var selectedId))
+                    {
+                        // Highlight/underline picked with the left button so the
+                        // Delete key or a right click can remove it. Selecting
+                        // must not open the note editor.
+                        (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(selectedId);
+                        HideReaderSelectionPopup();
+                    }
+                    break;
                 case "annotationClick":
                     if (Guid.TryParse(ReadString(root, "id"), out var annotationId)
                         && ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is { } clickedAnnotation)
@@ -7382,12 +7394,21 @@ public partial class MainWindow
                             EditReaderAnnotation(clickedAnnotation);
                     }
                     break;
+                case "annotationContextMenu":
+                    if (_readerIsPdf
+                        && Guid.TryParse(ReadString(root, "id"), out var menuId)
+                        && ReaderAnnotations.FirstOrDefault(item => item.Id == menuId) is { } menuAnnotation)
+                        ShowReaderPdfAnnotationMenu(menuAnnotation);
+                    break;
                 case "pdfAnnotationDelete":
+                    PdfAnnotTrace.Write($"bridge pdfAnnotationDelete id={ReadString(root, "id")} isPdf={_readerIsPdf}");
                     if (_readerIsPdf && Guid.TryParse(ReadString(root, "id"), out var deleteId)
                         && ReaderAnnotations.FirstOrDefault(item => item.Id == deleteId) is { } deleteAnnotation)
-                        _ = ConfirmDeleteReaderPdfAnnotationAsync(deleteAnnotation);
+                        _ = DeleteReaderAnnotationAsync(deleteAnnotation);
                     break;
                 case "annotationBlankClick":
+                    if (_readerIsPdf)
+                        (CurrentReaderHost as NativePdfReaderHost)?.ClearAnnotationSelection();
                     if (!_readerIsPdf
                         || CurrentReaderAppearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Click)
                         HideReaderAnnotationHoverPopup();

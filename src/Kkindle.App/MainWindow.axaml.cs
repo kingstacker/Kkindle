@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
@@ -262,6 +262,7 @@ public partial class MainWindow : Window
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
+        PromoteModalOverlays();
         InitializeKindleEmailClipboardSupport();
         ApplyMainAppearance();
         InitializeReaderAppearance();
@@ -3901,13 +3902,49 @@ public partial class MainWindow : Window
         bool UpdateCover,
         bool UpdatePublication);
 
+    // The library shell owns the modal overlays (confirmation, collection name,
+    // import prompts, ...) while the reader is a sibling layered above that
+    // shell. An overlay opened from inside the shell therefore stayed behind
+    // the reader: the dialog was invisible yet still swallowed every click,
+    // which made deleting a PDF highlight look like a freeze. Move them into the
+    // shell grid that also hosts the reader so they always paint on top.
+    private void PromoteModalOverlays()
+    {
+        if (LibraryRoot.Parent is not Panel shell) return;
+        Control[] overlays =
+        [
+            DevicePromptOverlay,
+            ConfirmationOverlay,
+            CollectionNameOverlay,
+            DeviceModelInputOverlay,
+            DoubanCandidateOverlay,
+            DoubanPreviewOverlay,
+            TxtImportRulesOverlay,
+            ImportFormatSelectionOverlay,
+            ImportConflictOverlay
+        ];
+        var zIndex = 150;
+        foreach (var overlay in overlays)
+        {
+            if (overlay.Parent is not Panel owner) continue;
+            owner.Children.Remove(overlay);
+            shell.Children.Add(overlay);
+            overlay.ZIndex = zIndex++;
+        }
+    }
+
     private async Task<bool> ConfirmAsync(string title, string message, string? primaryText = null,
         CancellationToken cancellationToken = default, bool allowDiagnosticAutoConfirm = true,
         string? cancelText = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (allowDiagnosticAutoConfirm && Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
-        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null) return false;
+        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null)
+        {
+            PdfAnnotTrace.Write($"ConfirmAsync busy: confirmation={_confirmationCompletion is not null} bookRemoval={_bookRemovalCompletion is not null} title={title}");
+            return false;
+        }
+        PdfAnnotTrace.Write($"ConfirmAsync open title={title}");
         ConfirmationTitleText.Text = title;
         ConfirmationMessageText.Text = message;
         var previousCancelText = ConfirmationCancelButton.Content;

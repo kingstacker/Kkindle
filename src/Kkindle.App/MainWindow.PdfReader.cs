@@ -13,25 +13,56 @@ public partial class MainWindow
     private bool _readerPdfIndexReady;
     private string? _readerPdfIndexError;
 
-    private void StartReaderPdfBackgroundWork(NativePdfReaderHost host, Guid fileId, CancellationToken token)
-    {
-        _readerPdfOutlineTask = LoadReaderPdfOutlineAsync(host, fileId, token);
+    // The rail is cheap (the host already parsed the outline while opening the
+    // document) so it starts before navigation. Full-text indexing stays after
+    // the first paint: it walks every page and must never hold up the reader.
+    private void StartReaderPdfOutlineWork(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
+        _readerPdfOutlineTask = ApplyReaderPdfOutlineWhenReadyAsync(host, fileId, token);
+
+    private void StartReaderPdfTextIndexWork(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
         _readerPdfIndexTask = BuildReaderPdfTextIndexAsync(host, fileId, token);
-    }
 
     private bool IsCurrentPdfSession(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
         !token.IsCancellationRequested && _readerIsPdf && _readerBookFile?.Id == fileId && ReferenceEquals(CurrentReaderHost, host);
+
+    // The host parses the outline while it opens the document, so the rail can
+    // be filled before the first page finishes rendering. Waiting for
+    // ReadDocumentInfoAsync instead would queue behind that render (PDFium is
+    // serialised process-wide) and the table of contents would only appear once
+    // the page was ready.
+    private async Task ApplyReaderPdfOutlineWhenReadyAsync(NativePdfReaderHost host, Guid fileId, CancellationToken token)
+    {
+        try
+        {
+            var waited = 0;
+            while (host.CachedDocumentInfo is null && !token.IsCancellationRequested && waited < 3000)
+            {
+                await Task.Delay(15, token);
+                waited += 15;
+            }
+        }
+        catch (OperationCanceledException) { return; }
+        await LoadReaderPdfOutlineAsync(host, fileId, token);
+    }
 
     private async Task LoadReaderPdfOutlineAsync(NativePdfReaderHost host, Guid fileId, CancellationToken token)
     {
         try
         {
-            // First paint must not wait for thousands of bookmarks or text pages.
-            await Task.Delay(60, token);
-            var info = await host.ReadDocumentInfoAsync(token);
+            // The outline is tiny next to a page raster (tens of ms) and it is
+            // what the reader shows first, so let it take the PDFium lock right
+            // away. Only the text index below waits for the first paint.
+            await Task.Delay(1, token);
+            var outlineWatch = System.Diagnostics.Stopwatch.StartNew();
+            // The host parses the outline while opening the document; taking that
+            // snapshot avoids waiting for the PDFium lock behind page rendering.
+            var info = host.CachedDocumentInfo ?? await host.ReadDocumentInfoAsync(token);
             if (!IsCurrentPdfSession(host, fileId, token)) return;
+            PdfAnnotTrace.Write($"pdf outline read: {outlineWatch.ElapsedMilliseconds}ms for {info.Outline.Count} items");
             _readerPdfEmbeddedOutline = info.Outline;
+            outlineWatch.Restart();
             RebuildReaderPdfNavigationItems();
+            PdfAnnotTrace.Write($"pdf toc rebuild: {outlineWatch.ElapsedMilliseconds}ms for {_readerTocItems.Count} items");
             ReaderTocEmptyText.IsVisible = _readerTocItems.Count == 0;
             SyncReaderPdfTocSelection();
         }

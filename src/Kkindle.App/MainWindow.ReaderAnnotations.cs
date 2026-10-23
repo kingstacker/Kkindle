@@ -385,31 +385,6 @@ public partial class MainWindow
         await DeleteReaderAnnotationAsync(annotation);
     }
 
-    private bool _readerPdfAnnotationDeletePending;
-
-    private async Task ConfirmDeleteReaderPdfAnnotationAsync(ReaderAnnotation annotation)
-    {
-        if (_readerPdfAnnotationDeletePending) return;
-        _readerPdfAnnotationDeletePending = true;
-        var fileId = _readerBookFile?.Id;
-        var token = ReaderToken;
-        try
-        {
-            HideReaderSelectionPopup();
-            HideReaderAnnotationInputPopup();
-            HideReaderAnnotationHoverPopup();
-            if (await ConfirmAsync(T("删除批注"), T("确定删除这条批注及其划线吗？"), T("确认删除"),
-                    token, allowDiagnosticAutoConfirm: false)
-                && _readerBookFile?.Id == fileId && !token.IsCancellationRequested)
-                await DeleteReaderAnnotationAsync(annotation);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-        finally
-        {
-            _readerPdfAnnotationDeletePending = false;
-            if (_readerIsPdf && !token.IsCancellationRequested) ShowCurrentReaderPdfAnnotation();
-        }
-    }
 
     private async Task DeleteReaderAnnotationAsync(ReaderAnnotation annotation)
     {

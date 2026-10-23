@@ -127,6 +127,9 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         var annotationPoint = pdf.TranslatePoint(savedRange.Center, scope.Window)!.Value;
         scope.Window.MouseDown(annotationPoint, MouseButton.Left);
         scope.Window.MouseUp(annotationPoint, MouseButton.Left);
+        Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+        Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        scope.Call("EditReaderPdfAnnotation", annotation);
         Assert.True(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
         Assert.Equal("Right page comment", scope.Get<TextBox>("ReaderAnnotationInputBox").Text);
         await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.SinglePage);
@@ -221,9 +224,15 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
             Capture(scope.Window, $"pdf-rotation-{mode}-{pdf.Rotation}");
             scope.Window.MouseDown(point, MouseButton.Left);
             scope.Window.MouseUp(point, MouseButton.Left);
+            // Left click only picks the highlight; the note editor opens on demand.
+            Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+            Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+            scope.Call("EditReaderPdfAnnotation", annotation);
             Assert.True(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
             Assert.Equal("Rotating comment", scope.Get<TextBox>("ReaderAnnotationInputBox").Text);
             scope.Call("HideReaderAnnotationInputPopup");
+            // The pick tint must not leak into the next turn's pixel check.
+            pdf.ClearAnnotationSelection();
             if (turn == 1)
             {
                 var state = pdf.CaptureViewState();

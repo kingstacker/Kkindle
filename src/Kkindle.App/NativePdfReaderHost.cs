@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
@@ -34,6 +34,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private readonly Dictionary<int, CachedPage> _pages = [];
     private PdfDocumentService? _document;
     private string? _documentPath;
+    private PdfDocumentInfo? _documentInfo;
     private bool _documentReady;
     private CancellationTokenSource? _documentCancellation;
     private CancellationTokenSource? _navigation;
@@ -56,6 +57,10 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private int _selectionStart;
     private int _selectionEnd;
     private bool _dragging;
+    private Guid? _pointerAnnotationHit;
+    private int _pointerClickCount;
+    private readonly DispatcherTimer _selectionDashTimer;
+    private double _selectionDashOffset;
     private Guid? _hoveredAnnotation;
     private readonly List<(int Start, int Length)> _search = [];
     private int _searchPage = 1;
@@ -75,6 +80,19 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         VisualChildren.Add(_horizontal);
         _vertical.ValueChanged += (_, _) => { if (!_syncingBars) SetPan(new(_pan.X, _vertical.Value)); };
         _horizontal.ValueChanged += (_, _) => { if (!_syncingBars) SetPan(new(_horizontal.Value, _pan.Y)); };
+        // Marching ants for the picked highlight/underline: the outline dashes
+        // walk while an annotation stays selected.
+        _selectionDashTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
+        _selectionDashTimer.Tick += (_, _) =>
+        {
+            if (_selectedAnnotationId is null)
+            {
+                _selectionDashTimer.Stop();
+                return;
+            }
+            _selectionDashOffset = (_selectionDashOffset + 1.6) % 14;
+            InvalidateVisual();
+        };
         _resizeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(45) };
         _resizeTimer.Tick += async (_, _) =>
         {
@@ -88,7 +106,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             RebuildLayout(preservePosition: true);
             ScheduleRender();
         };
-        PointerCaptureLost += (_, _) => { _pointerStart = null; _dragging = false; };
+        PointerCaptureLost += (_, _) => { _pointerStart = null; _dragging = false; _pointerAnnotationHit = null; };
     }
 
     public object View => this;
@@ -148,8 +166,14 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
                 _document?.Dispose();
                 _document = null;
                 _documentPath = null;
+                _documentInfo = null;
                 _document = new PdfDocumentService(path);
                 _documentPath = path;
+                // Parse the outline here, on the same thread that opened the
+                // document: PDFium calls are serialised process-wide, so doing
+                // it later queues the rail behind the first page raster and the
+                // table of contents only appears once that page is done.
+                _documentInfo = _document.ReadInfo(token);
                 return _document.PageCount;
             }
         }, token);
@@ -222,11 +246,20 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         }
     }
 
+    /// <summary>
+    /// Outline/document metadata parsed while the document was opened. Reading
+    /// it through <see cref="ReadDocumentInfoAsync"/> would queue behind page
+    /// rasterisation because PDFium is serialised process-wide, so callers take
+    /// this snapshot whenever it is already available.
+    /// </summary>
+    public PdfDocumentInfo? CachedDocumentInfo => Volatile.Read(ref _documentInfo);
+
     public Task<PdfDocumentInfo> ReadDocumentInfoAsync(CancellationToken token) => Task.Run(() =>
     {
         lock (_documentGate)
         {
             token.ThrowIfCancellationRequested();
+            if (_documentInfo is { } cached) return cached;
             return (_document ?? throw new ObjectDisposedException(nameof(NativePdfReaderHost))).ReadInfo(token);
         }
     }, token);
@@ -718,6 +751,6 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         _documentCancellation?.Dispose();
         foreach (var page in _pages.Values) page.Dispose();
         _pages.Clear();
-        lock (_documentGate) { _document?.Dispose(); _document = null; }
+        lock (_documentGate) { _document?.Dispose(); _document = null; _documentInfo = null; }
     }
 }

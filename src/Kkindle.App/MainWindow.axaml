@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -386,7 +386,7 @@
                 Background="{DynamicResource PaperBrush}"
                 BorderBrush="{DynamicResource InkBrush}"
                 BorderThickness="1">
-        <Grid Background="{DynamicResource PaperBrush}">
+        <Grid x:Name="RootShellGrid" Background="{DynamicResource PaperBrush}">
         <!-- Self-drawn square title bar. It is kept for the normal window,
              but zen mode hides this whole layer and leaves the reader's own
              exit controls as the only way to leave distraction-free mode. -->

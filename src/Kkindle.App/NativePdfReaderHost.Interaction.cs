@@ -12,8 +12,36 @@ public sealed partial class NativePdfReaderHost
 
     public void SelectAnnotation(Guid id)
     {
-        _selectedAnnotationId = _annotations.Any(item => item.Id == id) ? id : null;
+        var selected = _annotations.Any(item => item.Id == id) ? id : (Guid?)null;
+        if (_selectedAnnotationId == selected)
+        {
+            Focus();
+            return;
+        }
+        _selectedAnnotationId = selected;
+        if (selected is null)
+        {
+            _selectionDashTimer.Stop();
+        }
+        else if (!_selectionDashTimer.IsEnabled)
+        {
+            _selectionDashOffset = 0;
+            _selectionDashTimer.Start();
+        }
+        InvalidateVisual();
         Focus();
+    }
+
+    /// <summary>The highlight/underline/sticky-note currently picked with the left button.</summary>
+    public Guid? SelectedAnnotationId => _selectedAnnotationId;
+
+    /// <summary>Drops the highlight/underline selection without touching the text selection.</summary>
+    public void ClearAnnotationSelection()
+    {
+        if (_selectedAnnotationId is null) return;
+        _selectedAnnotationId = null;
+        _selectionDashTimer.Stop();
+        InvalidateVisual();
     }
 
     public void SetAnnotations(IReadOnlyList<ReaderAnnotation> annotations)
@@ -419,6 +447,7 @@ public sealed partial class NativePdfReaderHost
         foreach (var pageNumber in VisiblePageNumbers)
         {
             var page = GetPageBounds(pageNumber);
+            DrawPageShadow(context, page);
             context.DrawRectangle(new SolidColorBrush(_palette.Page), new Pen(new SolidColorBrush(_palette.Border), 0.5), page);
             if (_pages.TryGetValue(pageNumber, out var cached) && cached.Bitmap is { } bitmap && cached.Raster is { } raster
                 && raster.Rotation == Rotation && cached.Palette == _palette)
@@ -443,11 +472,24 @@ public sealed partial class NativePdfReaderHost
                     var size = GetUnrotatedPageSize(page);
                     var point = new Point(pointX * size.Width, pointY * size.Height);
                     DrawPointAnnotation(context, point, color);
+                    if (_selectedAnnotationId == annotation.Id)
+                        context.DrawEllipse(
+                            new SolidColorBrush(Color.FromArgb(28, 66, 133, 210)),
+                            SelectionPen(),
+                            point, 8.5, 8.5);
                     continue;
                 }
                 if (annotation.EndOffset <= annotation.StartOffset) continue;
+                var isSelected = _selectedAnnotationId == annotation.Id;
                 foreach (var rect in GetLocalRangeBounds(pageNumber, annotation.StartOffset, annotation.EndOffset))
+                {
                     DrawAnnotation(context, rect, annotation.UnderlineStyle, color);
+                    if (isSelected)
+                        context.DrawRectangle(
+                            new SolidColorBrush(Color.FromArgb(24, 66, 133, 210)),
+                            SelectionPen(),
+                            rect.Inflate(2));
+                }
             }
             if (_searchPage == pageNumber)
                 for (var index = 0; index < _search.Count; index++)
@@ -561,6 +603,30 @@ public sealed partial class NativePdfReaderHost
         }
     }
 
+    // Marching ants: the dash offset is advanced by _selectionDashTimer.
+    private Pen SelectionPen() => new(
+        new SolidColorBrush(Color.FromArgb(235, 66, 133, 210)),
+        1.2,
+        new DashStyle([4, 3], _selectionDashOffset));
+
+    // A drawing context has no blur, so the paper shadow is built from a few
+    // expanding translucent rings: tight and dark near the page edge, wide and
+    // faint further out. Pages read as sheets lying on the surface.
+    private void DrawPageShadow(DrawingContext context, Rect page)
+    {
+        for (var layer = 6; layer >= 1; layer--)
+        {
+            var spread = layer * 2.4;
+            var alpha = (byte)Math.Clamp(54 - layer * 7, 8, 54);
+            var shadow = new Rect(
+                page.X - spread,
+                page.Y - spread + spread * 0.55,
+                page.Width + spread * 2,
+                page.Height + spread * 2);
+            context.DrawRectangle(new SolidColorBrush(Color.FromArgb(alpha, 0, 0, 0)), null, shadow);
+        }
+    }
+
     private static void DrawPointAnnotation(DrawingContext context, Point point, Color color)
     {
         var brush = new SolidColorBrush(color == Colors.Black
@@ -602,18 +668,32 @@ public sealed partial class NativePdfReaderHost
         var point = e.GetPosition(this);
         var page = PageAtPoint(point);
         var properties = e.GetCurrentPoint(this).Properties;
+                if (PdfAnnotTrace.Enabled && page > 0)
+        {
+            var dump = string.Join("; ", AnnotationsForPage(page).Select(a =>
+                a.StartOffset < a.EndOffset
+                    ? $"{a.Id.ToString()[..8]} {a.StartOffset}-{a.EndOffset} [{(GetRangeBounds(page, a.StartOffset, a.EndOffset).FirstOrDefault())}]"
+                    : $"{a.Id.ToString()[..8]} point {a.Fragment} [{GetPdfPointPosition(a)}]"));
+            PdfAnnotTrace.Write($"page {page} annotations: {dump}");
+        }
+        if (PdfAnnotTrace.Enabled)
+            PdfAnnotTrace.Write($"press right={properties.IsRightButtonPressed} left={properties.IsLeftButtonPressed} source={e.Source?.GetType().Name} page={page} point={point.X:F1},{point.Y:F1} sourceIsHost={e.Source == this}");
         if (e.Source != this) return;
         if (properties.IsRightButtonPressed)
         {
-            if (page > 0)
+            if (page > 0 && AnnotationAt(point) is { } annotation)
             {
-                if (AnnotationAt(point) is { } annotation)
-                {
-                    SelectAnnotation(annotation.Id);
-                    Emit(new { type = "pdfAnnotationDelete", id = annotation.Id });
-                }
-                else
-                    EmitPointAnnotation(page, point);
+                // Right-clicking a highlight, underline or sticky note opens a
+                // small delete menu instead of a full-window confirmation.
+                // Right-clicking empty page space only clears the selection.
+                PdfAnnotTrace.Write($"right-click hit annotation {annotation.Id} ({annotation.SelectedText})");
+                SelectAnnotation(annotation.Id);
+                Emit(new { type = "annotationContextMenu", id = annotation.Id, x = point.X, y = point.Y });
+            }
+            else
+            {
+                ClearAnnotationSelection();
+                Emit(new { type = "annotationBlankClick" });
             }
             e.Handled = true;
             return;
@@ -635,6 +715,19 @@ public sealed partial class NativePdfReaderHost
                 Emit(new { type = "annotationClick", id = annotation.Id });
             else
                 EmitPointAnnotation(page, point);
+            e.Handled = true;
+            return;
+        }
+        // A press that lands on a highlight/underline still starts a normal
+        // drag so text can be re-selected over existing markings. The press is
+        // resolved as an annotation pick on release when no drag happened.
+        _pointerAnnotationHit = AnnotationAt(point)?.Id;
+        _pointerClickCount = e.ClickCount;
+        if (_pointerAnnotationHit is { } doubleHit && e.ClickCount >= 2)
+        {
+            Emit(new { type = "annotationClick", id = doubleHit });
+            _pointerStart = null;
+            _pointerAnnotationHit = null;
             e.Handled = true;
             return;
         }
@@ -694,11 +787,22 @@ public sealed partial class NativePdfReaderHost
         base.OnPointerReleased(e);
         if (_pointerStart is null) return;
         var dragged = _dragging;
+        // Read the pending pick before releasing the capture: CaptureLost
+        // clears it, since losing capture cancels the click.
+        var annotationHit = _pointerAnnotationHit;
+        if (PdfAnnotTrace.Enabled) PdfAnnotTrace.Write($"release dragged={dragged} hit={annotationHit}");
         _pointerStart = null;
         _dragging = false;
+        _pointerAnnotationHit = null;
         e.Pointer.Capture(null);
         if (dragged) SelectRange(_selectionStart, _selectionEnd);
-        else if (AnnotationAt(e.GetPosition(this)) is { } annotation) Emit(new { type = "annotationClick", id = annotation.Id });
+        else if (annotationHit is { } hitId)
+        {
+            // Single click picks the highlight/underline so Delete (see
+            // HandleReaderKey) or a right click can remove it.
+            SelectAnnotation(hitId);
+            Emit(new { type = "annotationSelect", id = hitId });
+        }
         else
         {
             _selectedAnnotationId = null;

@@ -48,6 +48,44 @@ internal static class PdfFixture
         return path;
     }
 
+    /// <summary>
+    /// Two outline entries that share one destination: a datasheet puts several
+    /// headings on the same page, so picking the second one must not fall back
+    /// to the first entry that also covers that page.
+    /// </summary>
+    public static string WriteTiedOutline(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "PDF tied outline.pdf");
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /Outlines 8 0 R /PageMode /UseOutlines >>",
+            "<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+            Stream("1 1 1 rg 0 0 400 600 re f 0 0 0 rg BT /F1 20 Tf 40 520 Td (Section one) Tj /F1 14 Tf 0 -60 Td (First entry body.) Tj ET"),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>",
+            Stream("1 1 1 rg 0 0 400 600 re f 0 0 0 rg BT /F1 20 Tf 40 520 Td (Section two) Tj ET"),
+            "<< /Type /Outlines /First 9 0 R /Last 10 0 R /Count 2 >>",
+            "<< /Title (First entry) /Parent 8 0 R /Dest [4 0 R /XYZ null 600 null] /Next 10 0 R >>",
+            "<< /Title (Second entry) /Parent 8 0 R /Dest [4 0 R /XYZ null 600 null] /Prev 9 0 R >>"
+        };
+        using var file = File.Create(path);
+        void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));
+        WriteAscii("%PDF-1.7\n");
+        var offsets = new List<long> { 0 };
+        for (var index = 0; index < objects.Count; index++)
+        {
+            offsets.Add(file.Position);
+            WriteAscii($"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
+        }
+        var xref = file.Position;
+        WriteAscii($"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets.Skip(1)) WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
+        WriteAscii($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return path;
+    }
+
     public static string WriteLong(string directory, int pageCount = 400)
     {
         Directory.CreateDirectory(directory);

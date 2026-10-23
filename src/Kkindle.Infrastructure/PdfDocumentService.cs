@@ -85,7 +85,8 @@ public sealed class PdfDocumentService : IDisposable
             CheckOpen(cancellationToken);
             var outline = new List<PdfOutlineItem>();
             var visited = new HashSet<IntPtr>();
-            ReadOutline(IntPtr.Zero, 0, outline, visited, cancellationToken);
+            var pageTransforms = new Dictionary<int, PageTransform>();
+            ReadOutline(IntPtr.Zero, 0, outline, visited, pageTransforms, cancellationToken);
             return new PdfDocumentInfo(PageCount, ReadMetadata("Title"), ReadMetadata("Author"), outline);
         }
     }
@@ -305,7 +306,8 @@ public sealed class PdfDocumentService : IDisposable
     }
 
     private void ReadOutline(IntPtr parent, int level, List<PdfOutlineItem> items,
-        HashSet<IntPtr> visited, CancellationToken cancellationToken)
+        HashSet<IntPtr> visited, Dictionary<int, PageTransform> pageTransforms,
+        CancellationToken cancellationToken)
     {
         if (level > 64) return;
         for (var node = Native.FPDFBookmark_GetFirstChild(_document, parent);
@@ -347,35 +349,44 @@ public sealed class PdfDocumentService : IDisposable
                             hasY = true;
                         }
                     }
-                    if (hasY && float.IsFinite(y))
+                    if (hasY && float.IsFinite(y)
+                        && GetOutlinePageTransform(pageIndex, pageTransforms) is { } transform)
                     {
-                        var page = Native.FPDF_LoadPage(_document, pageIndex);
-                        if (page != IntPtr.Zero)
-                        {
-                            try
-                            {
-                                var pageWidth = Native.FPDF_GetPageWidth(page);
-                                var pageHeight = Native.FPDF_GetPageHeight(page);
-                                if (pageWidth > 0 && pageHeight > 0)
-                                {
-                                    var transform = CreatePageTransform(page);
-                                    var bounds = TransformBounds(transform, 0, 0, y, y);
-                                    top = Math.Clamp(bounds.Y, 0, 1);
-                                }
-                            }
-                            finally { Native.FPDF_ClosePage(page); }
-                        }
+                        var bounds = TransformBounds(transform, 0, 0, y, y);
+                        top = Math.Clamp(bounds.Y, 0, 1);
                     }
                     items.Add(new(title, pageIndex + 1, level, top));
                     added = true;
                 }
             }
-            ReadOutline(node, title.Length > 0 ? level + 1 : level, items, visited, cancellationToken);
+            ReadOutline(node, title.Length > 0 ? level + 1 : level, items, visited, pageTransforms, cancellationToken);
             // A heading without its own destination still groups children and
             // navigates to the first child, like a container in an EPUB TOC.
             if (!added && title.Length > 0 && items.Count > itemIndex)
                 items.Insert(itemIndex, new(title, items[itemIndex].PageNumber, level, items[itemIndex].Top));
         }
+    }
+
+    // A bookmark only needs the page's user-space transform to normalise its
+    // vertical destination. Datasheets repeat the same page many times, so load
+    // and measure each page at most once per outline walk.
+    private PageTransform? GetOutlinePageTransform(int pageIndex, Dictionary<int, PageTransform> cache)
+    {
+        if (cache.TryGetValue(pageIndex, out var cached)) return cached;
+        PageTransform? transform = null;
+        var page = Native.FPDF_LoadPage(_document, pageIndex);
+        if (page != IntPtr.Zero)
+        {
+            try
+            {
+                var pageWidth = Native.FPDF_GetPageWidth(page);
+                var pageHeight = Native.FPDF_GetPageHeight(page);
+                if (pageWidth > 0 && pageHeight > 0) transform = CreatePageTransform(page);
+            }
+            finally { Native.FPDF_ClosePage(page); }
+        }
+        if (transform is { } value) cache[pageIndex] = value;
+        return transform;
     }
 
     private void CheckOpen(CancellationToken cancellationToken)

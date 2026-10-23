@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
@@ -15,7 +15,7 @@ namespace Kkindle.Ui.Tests;
 public sealed class PdfPointAnnotationTests(SettingsUiSession session)
 {
     [Fact]
-    public Task SelectedUnderlineDeleteAndRightClickRequireConfirmation() => Run(async () =>
+    public Task RightClickShowsDeleteMenuAndDeleteKeyRemovesHighlight() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
         var path = PdfFixture.Write(scope.Paths.ReaderCache);
@@ -29,24 +29,67 @@ public sealed class PdfPointAnnotationTests(SettingsUiSession session)
         pdf.SelectRange(0, 6);
         await scope.Call<Task>("SaveReaderAnnotationAsync", "Delete me", null, null);
         var annotation = Assert.Single(scope.Window.ReaderAnnotations);
-        pdf.SelectAnnotation(annotation.Id);
-        pdf.HandleReaderKey(new KeyEventArgs { Key = Key.Delete });
-        Assert.True(scope.Get<Control>("ConfirmationOverlay").IsVisible);
-        Assert.Single(scope.Window.ReaderAnnotations);
-        scope.Get<Button>("ConfirmationCancelButton").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-        await ReaderTests.Render();
-        Assert.Single(scope.Window.ReaderAnnotations);
+
+        // Right click opens the small context menu, never the full-window dialog.
         var hit = pdf.GetRangeBounds(annotation.StartOffset, annotation.EndOffset)[0];
-        var screenPoint = pdf.TranslatePoint(new Point(hit.Right, hit.Bottom + 2), scope.Window)!.Value;
+        var screenPoint = pdf.TranslatePoint(new Point(hit.Left + 2, hit.Center.Y), scope.Window)!.Value;
         scope.Window.MouseDown(screenPoint, MouseButton.Right);
         scope.Window.MouseUp(screenPoint, MouseButton.Right);
-        Assert.True(scope.Get<Control>("ConfirmationOverlay").IsVisible);
-        scope.Get<Button>("ConfirmationOkButton").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Assert.False(scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+        var menu = scope.Field<ContextMenu?>("_readerPdfAnnotationMenu");
+        Assert.NotNull(menu);
+        var deleteItem = Assert.Single(menu!.Items.OfType<MenuItem>(), item => (string?)item.Tag == "delete");
+        deleteItem.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         for (var i = 0; i < 30 && scope.Window.ReaderAnnotations.Count > 0; i++)
             await ReaderTests.Render();
         Assert.Empty(scope.Window.ReaderAnnotations);
+
+        // Delete key removes a selected highlight directly as well.
+        pdf.SelectRange(0, 6);
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "Delete me again", null, null);
+        var second = Assert.Single(scope.Window.ReaderAnnotations);
+        pdf.SelectAnnotation(second.Id);
+        pdf.HandleReaderKey(new KeyEventArgs { Key = Key.Delete });
+        for (var i = 0; i < 30 && scope.Window.ReaderAnnotations.Count > 0; i++)
+            await ReaderTests.Render();
+        Assert.Empty(scope.Window.ReaderAnnotations);
+        Assert.False(scope.Get<Control>("ConfirmationOverlay").IsVisible);
     });
 
+    [Fact]
+    public Task LeftClickSelectsHighlightAndDeleteRemovesIt() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var path = PdfFixture.Write(scope.Paths.ReaderCache);
+        var library = new SqliteBookLibraryService(scope.Paths, new BookMetadataService());
+        await library.ImportAsync([path]);
+        var book = Assert.Single(await library.SearchAsync());
+        using var card = new BookCardViewModel(book, scope.Paths.Data);
+        await scope.Call<Task>("OpenPdfReaderAsync", card, book.Files[0], library.GetAbsoluteFilePath(book.Files[0]));
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        pdf.SelectRange(0, 6);
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "click me", null, null);
+        var annotation = Assert.Single(scope.Window.ReaderAnnotations);
+        Assert.Null(pdf.SelectedAnnotationId);
+
+        var hit = pdf.GetRangeBounds(annotation.StartOffset, annotation.EndOffset)[0];
+        var point = pdf.TranslatePoint(new Point(hit.Left + 2, hit.Center.Y), scope.Window)!.Value;
+        scope.Window.MouseDown(point, MouseButton.Left);
+        scope.Window.MouseUp(point, MouseButton.Left);
+        await ReaderTests.Render();
+        Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+        Assert.Single(scope.Window.ReaderAnnotations);
+        Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+
+        pdf.HandleReaderKey(new KeyEventArgs { Key = Key.Delete });
+        Assert.False(scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        for (var i = 0; i < 30 && scope.Window.ReaderAnnotations.Count > 0; i++)
+            await ReaderTests.Render();
+        Assert.Empty(scope.Window.ReaderAnnotations);
+        Assert.Null(pdf.SelectedAnnotationId);
+    });
     [Fact]
     public Task TextNoteAnchorsToSelectedGlyphsAndCardsUseAvailableGutterWidth() => Run(async () =>
     {
@@ -165,6 +208,11 @@ public sealed class PdfPointAnnotationTests(SettingsUiSession session)
         var markerScreen = pdf.TranslatePoint(marker, scope.Window)!.Value;
         scope.Window.MouseDown(markerScreen, MouseButton.Left);
         scope.Window.MouseUp(markerScreen, MouseButton.Left);
+        // A single left click only picks the annotation so Delete or a right
+        // click can remove it; the editor opens on a double click / edit call.
+        Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+        Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        scope.Call("EditReaderPdfAnnotation", annotation);
         Assert.True(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
         Assert.Equal("结果区域旁的研究备注", scope.Get<TextBox>("ReaderAnnotationInputBox").Text);
 

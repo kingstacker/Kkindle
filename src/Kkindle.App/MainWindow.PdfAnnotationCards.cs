@@ -12,6 +12,50 @@ namespace Kkindle;
 public partial class MainWindow
 {
     private readonly List<Popup> _readerPdfAnnotationPopups = [];
+    private ContextMenu? _readerPdfAnnotationMenu;
+
+    // Small context menu for a right-clicked highlight/underline/note. Editing
+    // and deleting live here instead of a full-window confirmation dialog.
+    private void ShowReaderPdfAnnotationMenu(ReaderAnnotation annotation)
+    {
+        HideReaderPdfAnnotationMenu();
+        var menu = new ContextMenu { Classes = { "shelfViewMenu" }, Placement = PlacementMode.Pointer };
+        var edit = new MenuItem { Header = T("编辑批注"), Tag = "edit" };
+        edit.Click += (_, _) =>
+        {
+            HideReaderPdfAnnotationMenu();
+            EditReaderPdfAnnotation(annotation);
+        };
+        var delete = new MenuItem { Header = T("删除批注"), Tag = "delete" };
+        delete.Click += async (_, _) =>
+        {
+            HideReaderPdfAnnotationMenu();
+            await DeleteReaderAnnotationAsync(annotation);
+        };
+        menu.Items.Add(edit);
+        menu.Items.Add(delete);
+        menu.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_readerPdfAnnotationMenu, menu)) _readerPdfAnnotationMenu = null;
+        };
+        _readerPdfAnnotationMenu = menu;
+        var target = CurrentReaderHost is NativePdfReaderHost pdf && pdf.View is Control view
+            ? view
+            : (Control)ReaderWebViewHost;
+        // Open after the current pointer event finishes: opening inline lets the
+        // same right-click's release reach the new menu and light-dismiss it.
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (ReferenceEquals(_readerPdfAnnotationMenu, menu)) menu.Open(target);
+        });
+    }
+
+    private void HideReaderPdfAnnotationMenu()
+    {
+        if (_readerPdfAnnotationMenu is not { } menu) return;
+        _readerPdfAnnotationMenu = null;
+        menu.Close();
+    }
 
     private void ShowAdditionalReaderPdfAnnotations(NativePdfReaderHost pdf, IEnumerable<ReaderAnnotation> annotations)
     {
@@ -63,7 +107,7 @@ public partial class MainWindow
                 if (properties.IsRightButtonPressed)
                 {
                     e.Handled = true;
-                    _ = ConfirmDeleteReaderPdfAnnotationAsync(annotation);
+                    ShowReaderPdfAnnotationMenu(annotation);
                 }
                 else if (properties.IsLeftButtonPressed)
                 {
