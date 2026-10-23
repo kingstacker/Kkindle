@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.IO.MemoryMappedFiles;
 using System.Text;
 using SkiaSharp;
 
@@ -26,6 +27,8 @@ public sealed class PdfDocumentService : IDisposable
     private static readonly object NativeGate = new();
     private static bool _initialized;
     private IntPtr _document;
+    private MemoryMappedFile? _mappedFile;
+    private MemoryMappedViewAccessor? _mappedView;
 
     public PdfDocumentService(string path)
     {
@@ -34,9 +37,22 @@ public sealed class PdfDocumentService : IDisposable
         {
             VerifyRuntime();
             _document = Native.FPDF_LoadDocument(Path.GetFullPath(path), null);
+            // PDFium's Windows file loader can reject paths beyond MAX_PATH
+            // even though .NET can open them. Keep a read-only mapped view alive
+            // for the document instead of copying an entire large PDF into RAM.
+            if (_document == IntPtr.Zero && OperatingSystem.IsWindows()
+                && Native.FPDF_GetLastError() == 2 && File.Exists(path))
+            {
+                _mappedFile = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+                _mappedView = _mappedFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+                _document = Native.FPDF_LoadMemDocument64(
+                    _mappedView.SafeMemoryMappedViewHandle.DangerousGetHandle(),
+                    checked((nuint)_mappedView.Capacity), null);
+            }
             if (_document == IntPtr.Zero)
             {
                 var error = Native.FPDF_GetLastError();
+                Dispose();
                 throw new InvalidDataException(error == 4
                     ? "PDF 已加密，请先使用密码解锁文件。"
                     : $"无法读取 PDF 文件（错误 {error}）。");
@@ -372,9 +388,12 @@ public sealed class PdfDocumentService : IDisposable
     {
         lock (NativeGate)
         {
-            if (_document == IntPtr.Zero) return;
-            Native.FPDF_CloseDocument(_document);
+            if (_document != IntPtr.Zero) Native.FPDF_CloseDocument(_document);
             _document = IntPtr.Zero;
+            _mappedView?.Dispose();
+            _mappedView = null;
+            _mappedFile?.Dispose();
+            _mappedFile = null;
         }
         GC.SuppressFinalize(this);
     }
@@ -388,6 +407,7 @@ public sealed class PdfDocumentService : IDisposable
         // elsewhere. Winapi selects the correct convention on each runtime.
         [DllImport(Library)] internal static extern void FPDF_InitLibrary();
         [DllImport(Library)] internal static extern IntPtr FPDF_LoadDocument([MarshalAs(UnmanagedType.LPUTF8Str)] string path, [MarshalAs(UnmanagedType.LPUTF8Str)] string? password);
+        [DllImport(Library)] internal static extern IntPtr FPDF_LoadMemDocument64(IntPtr data, nuint length, [MarshalAs(UnmanagedType.LPUTF8Str)] string? password);
         [DllImport(Library)] internal static extern uint FPDF_GetLastError();
         [DllImport(Library)] internal static extern void FPDF_CloseDocument(IntPtr document);
         [DllImport(Library)] internal static extern int FPDF_GetPageCount(IntPtr document);
