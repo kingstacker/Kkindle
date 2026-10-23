@@ -15,6 +15,108 @@ namespace Kkindle.Ui.Tests;
 public sealed class PdfPointAnnotationTests(SettingsUiSession session)
 {
     [Fact]
+    public Task SelectedUnderlineDeleteAndRightClickRequireConfirmation() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var path = PdfFixture.Write(scope.Paths.ReaderCache);
+        var library = new SqliteBookLibraryService(scope.Paths, new BookMetadataService());
+        await library.ImportAsync([path]);
+        var book = Assert.Single(await library.SearchAsync());
+        using var card = new BookCardViewModel(book, scope.Paths.Data);
+        await scope.Call<Task>("OpenPdfReaderAsync", card, book.Files[0], library.GetAbsoluteFilePath(book.Files[0]));
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        pdf.SelectRange(0, 6);
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "Delete me", null, null);
+        var annotation = Assert.Single(scope.Window.ReaderAnnotations);
+        pdf.SelectAnnotation(annotation.Id);
+        pdf.HandleReaderKey(new KeyEventArgs { Key = Key.Delete });
+        Assert.True(scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        Assert.Single(scope.Window.ReaderAnnotations);
+        scope.Get<Button>("ConfirmationCancelButton").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        await ReaderTests.Render();
+        Assert.Single(scope.Window.ReaderAnnotations);
+        var hit = pdf.GetRangeBounds(annotation.StartOffset, annotation.EndOffset)[0];
+        var screenPoint = pdf.TranslatePoint(new Point(hit.Right, hit.Bottom + 2), scope.Window)!.Value;
+        scope.Window.MouseDown(screenPoint, MouseButton.Right);
+        scope.Window.MouseUp(screenPoint, MouseButton.Right);
+        Assert.True(scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        scope.Get<Button>("ConfirmationOkButton").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        for (var i = 0; i < 30 && scope.Window.ReaderAnnotations.Count > 0; i++)
+            await ReaderTests.Render();
+        Assert.Empty(scope.Window.ReaderAnnotations);
+    });
+
+    [Fact]
+    public Task TextNoteAnchorsToSelectedGlyphsAndCardsUseAvailableGutterWidth() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var path = PdfFixture.Write(scope.Paths.ReaderCache);
+        using var pdf = new NativePdfReaderHost();
+        scope.Get<ContentControl>("ReaderActiveHostSlot").Content = pdf;
+        scope.Get<Control>("LibraryRoot").IsVisible = false;
+        scope.Get<Control>("ReaderRoot").IsVisible = true;
+        await ReaderTests.Render();
+        Assert.True(await pdf.NavigateAsync(new Uri(new Uri(path).AbsoluteUri + "#page=2")));
+        await pdf.SetZoomAsync(0.5);
+        await ReaderTests.Render();
+        var text = pdf.PageContent!.Text;
+        var start = text.IndexOf("Select", StringComparison.Ordinal);
+        var annotation = new ReaderAnnotation
+        {
+            ChapterPath = "pdf:page:2", StartOffset = start, EndOffset = start + 6
+        };
+        Assert.True(pdf.TryGetAnnotationAnchor(annotation, out var page, out var anchor));
+        var selected = pdf.GetRangeBounds(page, start, start + 6)[^1];
+        Assert.Equal(new Point(selected.Right, selected.Bottom + 2), anchor);
+        Assert.True(pdf.TryGetAnnotationCalloutBounds(page, anchor, new Size(1000, 88), out var card));
+        Assert.InRange(card.Width, 144, 999);
+        Assert.True(card.Left >= pdf.GetPageBounds(page).Right + 18);
+        Assert.True(card.Right <= pdf.Bounds.Width - 8);
+        Assert.Equal(88, card.Height);
+        scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task AnnotationEditorRemainsVisibleWithoutARightGutter(bool pointNote) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var path = PdfFixture.Write(scope.Paths.ReaderCache);
+        var library = new SqliteBookLibraryService(scope.Paths, new BookMetadataService());
+        await library.ImportAsync([path]);
+        var book = Assert.Single(await library.SearchAsync());
+        using var card = new BookCardViewModel(book, scope.Paths.Data);
+        await scope.Call<Task>("OpenPdfReaderAsync", card, book.Files[0], library.GetAbsoluteFilePath(book.Files[0]));
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetFitModeAsync(PdfReaderFitMode.Width);
+        await pdf.SetZoomAsync(1);
+        await ReaderTests.Render();
+        var anchor = new Point(pdf.PageBounds.Left + pdf.PageBounds.Width * 0.5,
+            Math.Max(20, pdf.PageBounds.Top + 40));
+        Assert.False(pdf.TryGetAnnotationCalloutBounds(2, anchor, new Size(264, 152), out _));
+        if (pointNote)
+        {
+            pdf.SetPointAnnotationMode(true);
+            var windowPoint = pdf.TranslatePoint(anchor, scope.Window)!.Value;
+            scope.Window.MouseDown(windowPoint, MouseButton.Left);
+            scope.Window.MouseUp(windowPoint, MouseButton.Left);
+        }
+        else
+        {
+            pdf.SelectRange(0, 6);
+            scope.Call("ShowReaderAnnotationInputPopup");
+        }
+        var popup = scope.Get<Popup>("ReaderAnnotationInputPopup");
+        Assert.True(popup.IsOpen);
+        Assert.True(popup.Child!.IsVisible);
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "可见输入框保存的批注", null, null);
+        Assert.Equal("可见输入框保存的批注", Assert.Single(scope.Window.ReaderAnnotations).Note);
+    });
+
+    [Fact]
     public Task PDFPointAnnotationsPersistTheirNormalizedLocation() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
@@ -206,7 +308,7 @@ public sealed class PdfPointAnnotationTests(SettingsUiSession session)
         var cards = additional.Prepend(hover).Select(item =>
         {
             var origin = item.PlacementRect!.Value.TopLeft;
-            return new Rect(origin, new Size(258, item.Child!.Height));
+            return new Rect(origin, new Size(item.Child!.Width, item.Child!.Height));
         }).OrderBy(item => item.Top).ToArray();
         for (var index = 1; index < cards.Length; index++)
             Assert.True(cards[index].Top >= cards[index - 1].Bottom + 7);

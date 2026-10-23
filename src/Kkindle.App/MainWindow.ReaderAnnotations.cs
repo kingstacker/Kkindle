@@ -159,9 +159,16 @@ public partial class MainWindow
                 pdf,
                 _selectedReaderAnnotation,
                 _readerLastSelectionPopupAnchor,
-                new Size(264, 152));
-        if (!placedOutsidePdfPage && !_readerIsPdf)
+                new Size(264, 152),
+                requireVisibleBounds: true);
+        if (!placedOutsidePdfPage)
         {
+            // The PDF right gutter can disappear at fit-width/high zoom.
+            // An explicit edit must still expose a usable input control.
+            if (CurrentReaderHost is NativePdfReaderHost fallbackPdf)
+                fallbackPdf.ClearAnnotationCallout();
+            ReaderAnnotationInputPanel.IsVisible = true;
+            ReaderAnnotationInputPanel.Height = double.NaN;
             ShowReaderPopupNearSelection(
                 ReaderAnnotationInputPopup,
                 ReaderAnnotationInputPanel,
@@ -178,7 +185,8 @@ public partial class MainWindow
         NativePdfReaderHost pdf,
         ReaderAnnotation? annotation,
         Point? fallbackAnchor,
-        Size preferredSize)
+        Size preferredSize,
+        bool requireVisibleBounds = false)
     {
         var pageNumber = 0;
         var anchor = default(Point);
@@ -191,10 +199,17 @@ public partial class MainWindow
                 return false;
             pageNumber = Math.Clamp(_readerPdfPage, 1, Math.Max(1, pdf.PageCount));
             anchor = pdfAnchor;
+            if (!string.IsNullOrWhiteSpace(_readerPendingSelection)
+                && pdf.GetTextAnnotationAnchor(pageNumber, _readerPendingSelectionStartOffset,
+                    _readerPendingSelectionEndOffset) is { } selectedAnchor)
+                anchor = selectedAnchor;
         }
 
         if (!pdf.TryGetAnnotationCalloutBounds(pageNumber, anchor, preferredSize, out var calloutBounds))
+        {
+            if (requireVisibleBounds) return false;
             calloutBounds = new Rect(new Point(), preferredSize);
+        }
         var popupOrigin = pdf.TranslatePoint(calloutBounds.TopLeft, ReaderWebViewHost);
         if (popupOrigin is null) return false;
 
@@ -204,12 +219,16 @@ public partial class MainWindow
             if (popup.Child is { } child)
             {
                 child.IsVisible = movedBounds.Width > 0;
-                if (movedBounds.Width > 0) child.Height = movedBounds.Height;
+                if (movedBounds.Width > 0)
+                {
+                    child.Width = movedBounds.Width;
+                    child.Height = movedBounds.Height;
+                }
             }
             if (movedBounds.Width > 0
                 && pdf.TranslatePoint(movedBounds.TopLeft, ReaderWebViewHost) is { } origin)
                 popup.PlacementRect = new Rect(origin, new Size(1, 1));
-        }, pageNumber);
+        }, pageNumber, preferredSize);
         popup.PlacementTarget = ReaderWebViewHost;
         popup.Placement = PlacementMode.AnchorAndGravity;
         popup.PlacementRect = new Rect(popupOrigin.Value, new Size(1, 1));
@@ -364,6 +383,32 @@ public partial class MainWindow
     {
         if (sender is not Button { Tag: ReaderAnnotation annotation }) return;
         await DeleteReaderAnnotationAsync(annotation);
+    }
+
+    private bool _readerPdfAnnotationDeletePending;
+
+    private async Task ConfirmDeleteReaderPdfAnnotationAsync(ReaderAnnotation annotation)
+    {
+        if (_readerPdfAnnotationDeletePending) return;
+        _readerPdfAnnotationDeletePending = true;
+        var fileId = _readerBookFile?.Id;
+        var token = ReaderToken;
+        try
+        {
+            HideReaderSelectionPopup();
+            HideReaderAnnotationInputPopup();
+            HideReaderAnnotationHoverPopup();
+            if (await ConfirmAsync(T("删除批注"), T("确定删除这条批注及其划线吗？"), T("确认删除"),
+                    token, allowDiagnosticAutoConfirm: false)
+                && _readerBookFile?.Id == fileId && !token.IsCancellationRequested)
+                await DeleteReaderAnnotationAsync(annotation);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        finally
+        {
+            _readerPdfAnnotationDeletePending = false;
+            if (_readerIsPdf && !token.IsCancellationRequested) ShowCurrentReaderPdfAnnotation();
+        }
     }
 
     private async Task DeleteReaderAnnotationAsync(ReaderAnnotation annotation)

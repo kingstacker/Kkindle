@@ -34,7 +34,7 @@ public partial class MainWindow
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             Grid.SetRow(scroll, 1);
             content.Children.Add(scroll);
-            var card = new Border { Width = 258, Height = 132, Padding = new Thickness(10),
+            var card = new Border { Width = 220, Height = 88, Padding = new Thickness(8),
                 CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1.25), Child = content,
                 Background = (IBrush)Resources["ReaderPageBrush"]!, BorderBrush = (IBrush)Resources["ReaderAccentBrush"]!,
                 IsVisible = false };
@@ -55,6 +55,21 @@ public partial class MainWindow
                 if (!e.GetCurrentPoint(scroll).Properties.IsLeftButtonPressed) return;
                 e.Handled = true;
                 EditReaderPdfAnnotation(annotation);
+                pdf.SelectAnnotation(annotation.Id);
+            };
+            card.PointerPressed += (_, e) =>
+            {
+                var properties = e.GetCurrentPoint(card).Properties;
+                if (properties.IsRightButtonPressed)
+                {
+                    e.Handled = true;
+                    _ = ConfirmDeleteReaderPdfAnnotationAsync(annotation);
+                }
+                else if (properties.IsLeftButtonPressed)
+                {
+                    e.Handled = true;
+                    pdf.SelectAnnotation(annotation.Id);
+                }
             };
             _readerPdfAnnotationPopups.Add(popup);
             callouts.Add((annotation, bounds =>
@@ -62,6 +77,7 @@ public partial class MainWindow
                 card.IsVisible = bounds.Width > 0;
                 if (bounds.Width <= 0) return;
                 card.Height = bounds.Height;
+                card.Width = bounds.Width;
                 if (pdf.TranslatePoint(bounds.TopLeft, ReaderWebViewHost) is { } origin)
                     popup.PlacementRect = new Rect(origin, new Size(1, 1));
             }));

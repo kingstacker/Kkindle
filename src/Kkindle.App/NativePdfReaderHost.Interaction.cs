@@ -8,9 +8,18 @@ namespace Kkindle;
 
 public sealed partial class NativePdfReaderHost
 {
+    private Guid? _selectedAnnotationId;
+
+    public void SelectAnnotation(Guid id)
+    {
+        _selectedAnnotationId = _annotations.Any(item => item.Id == id) ? id : null;
+        Focus();
+    }
+
     public void SetAnnotations(IReadOnlyList<ReaderAnnotation> annotations)
     {
         _annotations = annotations.ToArray();
+        if (!_annotations.Any(item => item.Id == _selectedAnnotationId)) _selectedAnnotationId = null;
         ClearHover();
         InvalidateVisual();
     }
@@ -73,10 +82,21 @@ public sealed partial class NativePdfReaderHost
             return true;
         }
 
-        var bounds = GetRangeBounds(pageNumber, annotation.StartOffset, annotation.EndOffset);
-        if (bounds.Count == 0) return false;
-        anchor = bounds[0].TopLeft;
+        if (GetTextAnnotationAnchor(pageNumber, annotation.StartOffset, annotation.EndOffset) is not { } textAnchor)
+            return false;
+        anchor = textAnchor;
         return true;
+    }
+
+    public Point? GetTextAnnotationAnchor(int pageNumber, int start, int end)
+    {
+        var bounds = GetLocalRangeBounds(pageNumber, start, end);
+        if (bounds.Count == 0) return null;
+        var last = bounds[^1];
+        var point = last.Height > last.Width * 2
+            ? new Point(last.Right + 2, last.Bottom)
+            : new Point(last.Right, last.Bottom + 2);
+        return GetPageTransform(GetPageBounds(pageNumber)).Transform(point);
     }
 
     public bool TryGetAnnotationCalloutBounds(int pageNumber, Point anchor, Size preferredSize, out Rect bounds)
@@ -89,15 +109,17 @@ public sealed partial class NativePdfReaderHost
         const double inset = 8;
         const double gap = 18;
         var viewport = new Rect(Bounds.Size).Deflate(inset);
-        if (viewport.Width < preferredSize.Width || viewport.Height < preferredSize.Height) return false;
+        if (viewport.Height < 64) return false;
         var page = GetPageBounds(pageNumber);
         // A clamped card must never outlive its anchor in the visible page.
         if (!page.Contains(anchor) || !new Rect(Viewport).Contains(anchor)) return false;
         var left = Math.Max(viewport.Left, page.Right + gap);
-        if (left + preferredSize.Width > viewport.Right) return false;
+        var width = Math.Min(preferredSize.Width, viewport.Right - left);
+        if (width < 144) return false;
+        var height = Math.Min(preferredSize.Height, viewport.Height);
         bounds = new Rect(left,
-            Math.Clamp(anchor.Y - preferredSize.Height / 2, viewport.Top, viewport.Bottom - preferredSize.Height),
-            preferredSize.Width, preferredSize.Height);
+            Math.Clamp(anchor.Y - height / 2, viewport.Top, viewport.Bottom - height),
+            width, height);
         var candidate = bounds;
         if (VisiblePageNumbers.Where(number => number != pageNumber)
             .Any(number => GetPageBounds(number).Intersects(candidate))) return false;
@@ -134,7 +156,7 @@ public sealed partial class NativePdfReaderHost
     private Size _annotationCalloutViewportSize;
     private int _annotationCalloutRotation;
 
-    public void SetAnnotationCallout(Point anchor, Rect bounds, Action<Rect>? moved = null, int pageNumber = 0)
+    public void SetAnnotationCallout(Point anchor, Rect bounds, Action<Rect>? moved = null, int pageNumber = 0, Size? preferredSize = null)
     {
         _annotationCalloutPage = pageNumber > 0 ? pageNumber : PageNumber;
         var page = GetPageBounds(_annotationCalloutPage);
@@ -146,7 +168,7 @@ public sealed partial class NativePdfReaderHost
         _annotationCalloutViewportSize = Bounds.Size;
         _annotationCalloutRotation = Rotation;
         _annotationCallout = (anchor, bounds);
-        _annotationCalloutSize = bounds.Size;
+        _annotationCalloutSize = preferredSize ?? bounds.Size;
         _annotationCalloutDismissed = false;
         _annotationCalloutMoved = moved;
         UpdateAnnotationCallout();
@@ -177,13 +199,13 @@ public sealed partial class NativePdfReaderHost
         foreach (var item in _additionalAnnotationCallouts)
         {
             if (TryGetAnnotationAnchor(item.Annotation, out var number, out var point)
-                && TryGetAnnotationCalloutBounds(number, point, new Size(258, 132), out var cardBounds))
+                && TryGetAnnotationCalloutBounds(number, point, new Size(220, 88), out var cardBounds))
                 cards.Add((point, cardBounds, item.Moved, false));
             else item.Moved(default);
         }
         cards.Sort((a, b) => a.Anchor.Y.CompareTo(b.Anchor.Y));
         var available = new Rect(Viewport).Deflate(8);
-        var height = cards.Count == 0 ? 132 : Math.Min(132, Math.Max(1,
+        var height = cards.Count == 0 ? 88 : Math.Min(88, Math.Max(1,
             (available.Height - 8 * (cards.Count - 1)) / cards.Count));
         var nextTop = available.Top;
         for (var index = 0; index < cards.Count; index++)
@@ -457,7 +479,8 @@ public sealed partial class NativePdfReaderHost
         if (anchor.X <= bounds.Left)
         {
             endpoint = new(bounds.Left, FindCalloutPort(anchor.Y, bounds.Top, bounds.Bottom));
-            var elbowX = anchor.X + (endpoint.X - anchor.X) * 0.68;
+            // Turn only in the page gutter, never vertically through body text.
+            var elbowX = endpoint.X - 9;
             firstBend = new(elbowX, anchor.Y);
             secondBend = new(elbowX, endpoint.Y);
         }
@@ -486,8 +509,7 @@ public sealed partial class NativePdfReaderHost
         context.DrawLine(connector, anchor, firstBend);
         context.DrawLine(connector, firstBend, secondBend);
         context.DrawLine(connector, secondBend, endpoint);
-        context.DrawEllipse(Brushes.White, new Pen(new SolidColorBrush(color), 1.4), anchor, 5, 5);
-        context.DrawEllipse(new SolidColorBrush(color), null, anchor, 1.8, 1.8);
+        context.DrawEllipse(Brushes.White, new Pen(new SolidColorBrush(color), 1), anchor, 2, 2);
     }
 
     private static double FindCalloutPort(double anchor, double start, double end)
@@ -586,7 +608,10 @@ public sealed partial class NativePdfReaderHost
             if (page > 0)
             {
                 if (AnnotationAt(point) is { } annotation)
-                    Emit(new { type = "annotationClick", id = annotation.Id });
+                {
+                    SelectAnnotation(annotation.Id);
+                    Emit(new { type = "pdfAnnotationDelete", id = annotation.Id });
+                }
                 else
                     EmitPointAnnotation(page, point);
             }
@@ -676,6 +701,7 @@ public sealed partial class NativePdfReaderHost
         else if (AnnotationAt(e.GetPosition(this)) is { } annotation) Emit(new { type = "annotationClick", id = annotation.Id });
         else
         {
+            _selectedAnnotationId = null;
             ClearSelection();
             Emit(new { type = "annotationBlankClick" });
         }
@@ -715,6 +741,12 @@ public sealed partial class NativePdfReaderHost
 
     internal void HandleReaderKey(KeyEventArgs e)
     {
+        if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None && _selectedAnnotationId is { } id)
+        {
+            Emit(new { type = "pdfAnnotationDelete", id });
+            e.Handled = true;
+            return;
+        }
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             if (e.Key == Key.A) { SelectRange(0, PageContent?.Text.Length ?? 0); e.Handled = true; }

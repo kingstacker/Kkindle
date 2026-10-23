@@ -7024,9 +7024,10 @@
                    TakesFocusFromNativeControl="False"
                    IsHitTestVisible="False">
                 <Border x:Name="ReaderAnnotationHoverPopup"
-                        Width="258"
-                        Height="132"
-                        Padding="10"
+                        PointerPressed="ReaderAnnotationHoverNote_PointerPressed"
+                        Width="220"
+                        Height="88"
+                        Padding="8"
                         Background="{DynamicResource ReaderPageBrush}"
                         BorderBrush="{DynamicResource ReaderAccentBrush}"
                         BorderThickness="1.25"

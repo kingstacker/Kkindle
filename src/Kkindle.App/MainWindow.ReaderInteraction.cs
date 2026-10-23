@@ -7115,7 +7115,7 @@ public partial class MainWindow
                     pdf,
                     annotation,
                     _readerAnnotationHoverPlacementPoint,
-                    new Size(258, 132)))
+                    new Size(220, 88)))
                 return;
             pdf.ClearAnnotationCallout();
             HideReaderAnnotationHoverPopup();
@@ -7169,13 +7169,22 @@ public partial class MainWindow
     private void ReaderAnnotationHoverNote_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!_readerIsPdf
-            || !e.GetCurrentPoint(ReaderAnnotationHoverNote).Properties.IsLeftButtonPressed
             || _readerAnnotationHoverAnnotationId is not { } annotationId
             || ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is not { } annotation)
             return;
 
-        e.Handled = true;
-        EditReaderPdfAnnotation(annotation);
+        var properties = e.GetCurrentPoint(ReaderAnnotationHoverNote).Properties;
+        if (properties.IsRightButtonPressed)
+        {
+            e.Handled = true;
+            _ = ConfirmDeleteReaderPdfAnnotationAsync(annotation);
+        }
+        else if (properties.IsLeftButtonPressed)
+        {
+            e.Handled = true;
+            EditReaderPdfAnnotation(annotation);
+            (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(annotation.Id);
+        }
     }
 
     private void ReaderAnnotationHoverCloseButton_Click(object? sender, RoutedEventArgs e)
@@ -7367,10 +7376,16 @@ public partial class MainWindow
                         if (_readerIsPdf)
                         {
                             EditReaderPdfAnnotation(clickedAnnotation);
+                            (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(clickedAnnotation.Id);
                         }
                         else
                             EditReaderAnnotation(clickedAnnotation);
                     }
+                    break;
+                case "pdfAnnotationDelete":
+                    if (_readerIsPdf && Guid.TryParse(ReadString(root, "id"), out var deleteId)
+                        && ReaderAnnotations.FirstOrDefault(item => item.Id == deleteId) is { } deleteAnnotation)
+                        _ = ConfirmDeleteReaderPdfAnnotationAsync(deleteAnnotation);
                     break;
                 case "annotationBlankClick":
                     if (!_readerIsPdf
