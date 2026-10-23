@@ -6773,7 +6773,7 @@
                             </StackPanel>
                         </ScrollViewer>
                         <Grid Grid.Row="3"
-                              ColumnDefinitions="*,Auto"
+                              ColumnDefinitions="*,Auto,Auto"
                               ColumnSpacing="8">
                             <TextBlock x:Name="ReaderTranslationStatusText"
                                        Foreground="{DynamicResource ReaderMutedBrush}"
@@ -6786,6 +6786,13 @@
                                     Content="{DynamicResource Ui.Auto.032EB48C7A431EC0}"
                                     IsEnabled="False"
                                     Click="ReaderTranslationCopyButton_Click" />
+                            <Button x:Name="ReaderTranslationAnnotateButton"
+                                    Grid.Column="2"
+                                    Classes="quiet"
+                                    Content="{DynamicResource Ui.Reader.TranslationAnnotate}"
+                                    ToolTip.Tip="{DynamicResource Ui.Reader.TranslationAnnotateHint}"
+                                    IsEnabled="False"
+                                    Click="ReaderTranslationAnnotateButton_Click" />
                         </Grid>
                     </Grid>
                 </Border>

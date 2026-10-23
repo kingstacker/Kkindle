@@ -50,6 +50,7 @@ public partial class MainWindow
         ReaderTranslationSourceText.Text = source;
         ReaderTranslationProviderText.Text = GetReaderTranslationProviderLabel(provider);
         ReaderTranslationCopyButton.IsEnabled = false;
+        ReaderTranslationAnnotateButton.IsEnabled = false;
         ShowReaderTranslationPopup();
 
         if (!_appSettings.NetworkEnabled)
@@ -95,6 +96,7 @@ public partial class MainWindow
             ReaderTranslationResultText.Text = result;
             ReaderTranslationStatusText.Text = T("翻译已完成");
             ReaderTranslationCopyButton.IsEnabled = result.Length > 0;
+            ReaderTranslationAnnotateButton.IsEnabled = !string.IsNullOrWhiteSpace(result);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -107,6 +109,7 @@ public partial class MainWindow
             ReaderTranslationResultText.Text = string.Empty;
             ReaderTranslationStatusText.Text = T("翻译失败：{0}", UiText.Localize(exception.Message));
             ReaderTranslationCopyButton.IsEnabled = false;
+            ReaderTranslationAnnotateButton.IsEnabled = false;
         }
         finally
         {
@@ -138,6 +141,26 @@ public partial class MainWindow
         {
             await clipboard.SetTextAsync(result);
             ReaderTranslationStatusText.Text = T("译文已复制");
+        }
+    }
+
+    private async void ReaderTranslationAnnotateButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var result = ReaderTranslationResultText.Text?.Trim() ?? string.Empty;
+        if (result.Length == 0 || string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
+
+        ReaderTranslationAnnotateButton.IsEnabled = false;
+        try
+        {
+            await SaveReaderAnnotationAsync(result);
+            // A successful save releases the pending selection. Keep the result
+            // open on failure so the user can retry or copy the translation.
+            if (_readerPendingSelection is null)
+                HideReaderTranslationPopup(clearSelection: true);
+        }
+        finally
+        {
+            ReaderTranslationAnnotateButton.IsEnabled = !string.IsNullOrWhiteSpace(_readerPendingSelection);
         }
     }
 

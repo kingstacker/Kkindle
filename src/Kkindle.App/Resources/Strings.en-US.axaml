@@ -170,6 +170,8 @@
     <x:String x:Key="Ui.Auto.354B28C853334568">Original</x:String>
     <x:String x:Key="Ui.Auto.80461C2DECC549DC">Translation</x:String>
     <x:String x:Key="Ui.Auto.032EB48C7A431EC0">Copy translation</x:String>
+    <x:String x:Key="Ui.Reader.TranslationAnnotate">Add as note</x:String>
+    <x:String x:Key="Ui.Reader.TranslationAnnotateHint">Save the translation as a note on the selected text</x:String>
     <x:String x:Key="Ui.Auto.2B3BDD5F3BED9806">Translation copied</x:String>
     <x:String x:Key="Ui.Auto.7DD03B4CDE9C521A">Translating…</x:String>
     <x:String x:Key="Ui.Auto.271816CBA7EFC4B2">Translation complete</x:String>
