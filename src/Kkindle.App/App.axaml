@@ -65,6 +65,22 @@
             </Border>
         </ControlTemplate>
 
+        <ControlTemplate x:Key="ReaderTranslationActionButtonTemplate" TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{TemplateBinding CornerRadius}">
+                <ContentPresenter Content="{TemplateBinding Content}"
+                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                  Foreground="{TemplateBinding Foreground}"
+                                  Margin="0"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  HorizontalContentAlignment="Center"
+                                  VerticalContentAlignment="Center" />
+            </Border>
+        </ControlTemplate>
+
         <DataTemplate x:Key="ReaderTtsButtonTextTemplate">
             <TextBlock Text="{Binding}"
                        Foreground="{Binding $parent[Button].Foreground}"
@@ -1927,6 +1943,38 @@
         </Style>
         <Style Selector="Grid.readerShell Button.icon:pressed">
             <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction">
+            <Setter Property="Template" Value="{StaticResource ReaderTranslationActionButtonTemplate}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:pointerover">
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:pressed">
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:disabled">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:disabled:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction Path">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Stretch" Value="Uniform" />
         </Style>
         <!-- Quiet buttons in the reader stay outlined white boxes with a
              soft grey hover (WinUI QuietButtonStyle), no scale animation. -->

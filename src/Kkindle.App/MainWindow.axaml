@@ -6770,9 +6770,20 @@
                                        VerticalAlignment="Center" />
                             <Button x:Name="ReaderTranslationCloseButton"
                                     Grid.Column="1"
-                                    Classes="quiet"
-                                    Content="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
-                                    Click="ReaderTranslationCloseButton_Click" />
+                                    Classes="icon readerTranslationAction"
+                                    Width="30" Height="30" MinWidth="30" MinHeight="30" Padding="0"
+                                    HorizontalContentAlignment="Center"
+                                    VerticalContentAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    ToolTip.Tip="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
+                                    AutomationProperties.Name="{DynamicResource Ui.Auto.3FD47EDCE45B3603}"
+                                    Click="ReaderTranslationCloseButton_Click">
+                                <Path Width="14" Height="14"
+                                      StrokeThickness="1.6"
+                                      Data="M 3,3 L 17,17 M 17,3 L 3,17"
+                                      IsHitTestVisible="False" />
+                            </Button>
                         </Grid>
                         <Border Grid.Row="1"
                                 Padding="8"
@@ -6810,17 +6821,38 @@
                                        VerticalAlignment="Center" />
                             <Button x:Name="ReaderTranslationCopyButton"
                                     Grid.Column="1"
-                                    Classes="quiet"
-                                    Content="{DynamicResource Ui.Auto.032EB48C7A431EC0}"
+                                    Classes="icon readerTranslationAction"
+                                    Width="32" Height="32" MinWidth="32" MinHeight="32" Padding="0"
+                                    HorizontalContentAlignment="Center"
+                                    VerticalContentAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    ToolTip.Tip="{DynamicResource Ui.Auto.032EB48C7A431EC0}"
+                                    AutomationProperties.Name="{DynamicResource Ui.Auto.032EB48C7A431EC0}"
                                     IsEnabled="False"
-                                    Click="ReaderTranslationCopyButton_Click" />
+                                    Click="ReaderTranslationCopyButton_Click">
+                                <Path Width="16" Height="16"
+                                      StrokeThickness="1.5"
+                                      Data="M 8,8 H 20 V 21 H 8 Z M 4,16 H 3 V 3 H 16 V 4"
+                                      IsHitTestVisible="False" />
+                            </Button>
                             <Button x:Name="ReaderTranslationAnnotateButton"
                                     Grid.Column="2"
-                                    Classes="quiet"
-                                    Content="{DynamicResource Ui.Reader.TranslationAnnotate}"
+                                    Classes="icon readerTranslationAction"
+                                    Width="32" Height="32" MinWidth="32" MinHeight="32" Padding="0"
+                                    HorizontalContentAlignment="Center"
+                                    VerticalContentAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
                                     ToolTip.Tip="{DynamicResource Ui.Reader.TranslationAnnotateHint}"
+                                    AutomationProperties.Name="{DynamicResource Ui.Reader.TranslationAnnotate}"
                                     IsEnabled="False"
-                                    Click="ReaderTranslationAnnotateButton_Click" />
+                                    Click="ReaderTranslationAnnotateButton_Click">
+                                <Path Width="18" Height="18"
+                                      StrokeThickness="1.5"
+                                      Data="M 12,3 H 5 A 2,2 0 0 0 3,5 V 19 A 2,2 0 0 0 5,21 H 17 A 2,2 0 0 0 19,19 V 12 M 16.5,2.5 A 2.1,2.1 0 0 1 19.5,5.5 L 11,14 H 8 V 11 Z"
+                                      IsHitTestVisible="False" />
+                            </Button>
                         </Grid>
                     </Grid>
                 </Border>
