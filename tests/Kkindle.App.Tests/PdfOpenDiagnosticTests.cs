@@ -15,7 +15,9 @@ public sealed class PdfOpenDiagnosticTests(SettingsUiSession session)
         await using var scope = await ReaderTestWindow.Create();
         var source = Environment.GetEnvironmentVariable("KKINDLE_TEST_PDF")
             ?? PdfFixture.Write(scope.Paths.ReaderCache);
-        var directory = Path.Combine(scope.Paths.ReaderCache, new string('a', 80), new string('b', 80));
+        // Keep the full path above MAX_PATH even with a short Unix temp root.
+        var directory = Path.Combine(scope.Paths.ReaderCache,
+            new string('a', 80), new string('b', 80), new string('c', 80));
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "中文 Investments.pdf");
         File.Copy(source, path);
