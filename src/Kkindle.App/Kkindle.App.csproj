@@ -15,6 +15,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Disabled #if regions still recognize Markdown headings in raw strings
+         as preprocessor directives. Exclude the offline Debug fixture entirely. -->
+    <Compile Remove="MainWindow.ReaderAiPreview.cs" Condition="'$(Configuration)' != 'Debug'" />
     <InternalsVisibleTo Include="Kkindle.App.Tests" />
     <ProjectReference Include="..\Kkindle.Core\Kkindle.Core.csproj" />
     <ProjectReference Include="..\Kkindle.Infrastructure\Kkindle.Infrastructure.csproj" />
