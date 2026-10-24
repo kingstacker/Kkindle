@@ -3997,8 +3997,12 @@ public partial class MainWindow : Window
     // Fade-in helpers: the overlays and pages carry an Opacity transition in
     // XAML; showing them at 0 and restoring 1 on the next frame animates the
     // entrance instead of popping it in.
-    private static void ShowOverlay(Control overlay)
+    private void ShowOverlay(Control overlay)
     {
+        // Flyouts render in Avalonia's popup layer, above in-window overlays.
+        // Dismiss the task-history flyout before opening a modal so update and
+        // other confirmation dialogs remain visible and actionable.
+        DismissBackgroundTaskFlyout();
         overlay.IsVisible = true;
         overlay.Opacity = 0;
         Dispatcher.UIThread.Post(() => overlay.Opacity = 1);

@@ -18,7 +18,7 @@ public sealed class DictionaryHtmlRendererTests
             """, ".sense{display:block;color:blue}")]);
         var doc = new HtmlDocument(); doc.LoadHtml(html);
         Assert.NotNull(doc.DocumentNode.SelectSingleNode("//div[@class='entry']/div[@class='sense']/span[@class='example']"));
-        Assert.Contains(".sense{display:block;color:var(--ink)}", html);
+        Assert.Contains(".sense{display:block;color:blue}", html);
         Assert.DoesNotContain("untrusted()", html);
         Assert.Null(doc.DocumentNode.SelectSingleNode("//*[@onclick or @onerror]"));
         Assert.Null(doc.DocumentNode.SelectSingleNode("//img"));

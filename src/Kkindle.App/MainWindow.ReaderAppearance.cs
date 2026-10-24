@@ -31,7 +31,11 @@ public partial class MainWindow
         ApplyReaderAppearance();
         ReaderRoot.PropertyChanged += (_, e) =>
         {
-            if (e.Property == IsVisibleProperty) UpdateReaderTitleAppearance();
+            if (e.Property != IsVisibleProperty) return;
+
+            UpdateReaderTitleAppearance();
+            if (!ReaderRoot.IsVisible)
+                HideReaderDictionaryPopup(clearSelection: true);
         };
         ReaderRoot.SizeChanged += (_, _) =>
         {

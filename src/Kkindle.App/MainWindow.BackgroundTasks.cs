@@ -275,11 +275,17 @@ public partial class MainWindow
     {
         if (_backgroundTaskFlyout?.IsOpen == true)
         {
-            _backgroundTaskFlyout.Hide();
-            _backgroundTaskFlyoutAutoOpened = false;
+            DismissBackgroundTaskFlyout();
             return;
         }
         ShowBackgroundTaskFlyout(autoOpened: false);
+    }
+
+    private void DismissBackgroundTaskFlyout()
+    {
+        if (_backgroundTaskFlyout?.IsOpen != true) return;
+        _backgroundTaskFlyout.Hide();
+        _backgroundTaskFlyoutAutoOpened = false;
     }
 
     private void EnsureBackgroundTaskFlyout()
