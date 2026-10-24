@@ -384,6 +384,11 @@ public sealed class ReaderAiSourceViewModel : ObservableObject, IDisposable
     public PdfPageText? Page { get; }
     public string SourceId { get; }
     public string Content { get; }
+    public string LocationLabel => Page is { } page
+        ? $"[{SourceId}] " + UiText.Get("第 {0} 页", page.PageNumber)
+        : Chunk is { } chunk
+            ? $"[{SourceId}] " + UiText.Get("{0} · 片段 {1}", chunk.ChapterTitle, chunk.ChunkIndex + 1)
+            : $"[{SourceId}]";
     public string Label
     {
         get
@@ -397,8 +402,11 @@ public sealed class ReaderAiSourceViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void OnLanguageChanged(object? sender, EventArgs e) =>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
         OnPropertyChanged(nameof(Label));
+        OnPropertyChanged(nameof(LocationLabel));
+    }
 
     public void Dispose() =>
         UiText.LanguageChanged -= OnLanguageChanged;
@@ -431,14 +439,17 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         _reasoning = reasoning;
         CitationAction = sourceId =>
         {
-            var source = Sources.FirstOrDefault(item =>
-                string.Equals(item.SourceId, sourceId, StringComparison.OrdinalIgnoreCase));
+            var source = CitationSourceResolver(sourceId);
             if (source is not null) citationAction?.Invoke(source);
         };
     }
 
     public string Role { get; }
     public Action<string>? CitationAction { get; }
+    public Func<string, ReaderAiSourceViewModel?> CitationSourceResolver => ResolveCitation;
+
+    private ReaderAiSourceViewModel? ResolveCitation(string sourceId) => Sources.FirstOrDefault(item =>
+        string.Equals(item.SourceId, sourceId, StringComparison.OrdinalIgnoreCase));
 
     public bool IsUser => Role.Equals("user", StringComparison.OrdinalIgnoreCase);
 

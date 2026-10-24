@@ -2040,11 +2040,12 @@
             <Setter Property="Height" Value="30" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
@@ -2054,25 +2055,31 @@
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAssistantTab.active">
-            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAiReasoningToggle">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="24" />
-            <Setter Property="Padding" Value="0" />
+            <Setter Property="Padding" Value="6,2" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerAiReasoningToggle:pointerover">
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        </Style>
+        <Style Selector="Button.readerAiReasoningToggle:pressed">
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
         </Style>
         <Style Selector="Button.readerAiSendButton">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />

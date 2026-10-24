@@ -1486,6 +1486,10 @@ public partial class MainWindow
         ReaderAiEmptyState.IsVisible = true;
         ReaderAiView.IsVisible = true;
         ReaderNotesView.IsVisible = false;
+        ReaderPdfThumbnailsView.IsVisible = false;
+        SetReaderAssistantTabState(ReaderAiTabButton, selected: true);
+        SetReaderAssistantTabState(ReaderNotesTabButton, selected: false);
+        SetReaderAssistantTabState(ReaderPdfThumbnailsTabButton, selected: false);
         ReaderAiSettingsView.IsVisible = false;
         ReaderAiComposer.IsVisible = true;
         ReaderNotesExportBar.IsVisible = false;
@@ -5631,7 +5635,8 @@ public partial class MainWindow
                     targetPage,
                     pdfNavigationToken,
                     saveProgress: false,
-                    syncTocSelection: false))
+                    syncTocSelection: false,
+                    skipReloadWhenPageMatches: true))
                 {
                     return false;
                 }
@@ -7366,6 +7371,20 @@ public partial class MainWindow
                 case "pdfLayout":
                     UpdateReaderToolbar();
                     break;
+                case "pdfHistory":
+                    UpdateReaderPdfNavigationUi();
+                    break;
+                case "pdfHistoryNavigate":
+                    _ = ObserveReaderTaskAsync(NavigateReaderPdfHistoryAsync(ReadInt(root, "direction")));
+                    break;
+                case "pdfLink":
+                    _ = ObserveReaderTaskAsync(FollowReaderPdfLinkAsync(root));
+                    break;
+                case "pdfLabels":
+                    ReaderChapterText.Text = GetReaderChapterPositionLabel();
+                    ReaderPdfThumbnailsList.ItemsSource = null;
+                    UpdateReaderPdfNavigationUi();
+                    break;
                 case "pdfError":
                     ReaderStatusText.Text = UiText.Localize(ReadString(root, "message"));
                     break;
@@ -8053,8 +8072,10 @@ public partial class MainWindow
 
     private async Task ExplainReaderSelectionWithAiAsync()
     {
+        var selection = _readerPendingSelection;
         HideReaderSelectionPopup();
-        if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
+        if (string.IsNullOrWhiteSpace(selection)) return;
+        ShowReaderAiTab();
         if (!_appSettings.AiEnabled)
         {
             await ShowMessageAsync(T("AI 助手"), T("AI 已在应用设置中关闭。"));
@@ -8075,9 +8096,8 @@ public partial class MainWindow
             return;
         }
 
-        ShowReaderAiTab();
         await SendReaderAiQuestionAsync(
-            T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection),
+            T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", selection),
             ReaderAiRequestKind.SelectionExplain);
     }
 
@@ -8795,8 +8815,13 @@ public partial class MainWindow
         if (_suppressReaderTocSelectionNavigation) return;
         if (e.AddedItems.Count > 0 && e.AddedItems[0] is ReaderTocRow row)
         {
-            if (!_readerIsPdf)
-                SetReaderTocCurrentRow(row);
+            if (_readerIsPdf)
+            {
+                NavigateToReaderTocItem(row.Item);
+                return;
+            }
+
+            SetReaderTocCurrentRow(row);
             var item = row.Item;
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(
@@ -9128,7 +9153,7 @@ public partial class MainWindow
         ReaderTocPanel.IsVisible = false;
         ReaderAssistantPanel.IsVisible = _readerAssistantVisibleBeforeZen;
         if (_readerAssistantVisibleBeforeZen)
-            SetReaderAiPanelWidth(_readerAiPanelWidth);
+            SetReaderAiPanelWidth(GetReaderAssistantPanelWidth());
         else
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         ReaderAssistantToggleButton.IsVisible = true;
@@ -9596,6 +9621,7 @@ public partial class MainWindow
 
     private void UpdateReaderToolbar()
     {
+        UpdateReaderPdfNavigationUi();
         if (ReaderFlowButton is not null)
         {
             ReaderFlowButton.IsVisible = true;
@@ -9627,12 +9653,13 @@ public partial class MainWindow
             }
             _readerProgressSliderUpdating = false;
         }
-        // PDF uses these controls for page zoom, EPUB for font size.
+        // PDF zoom is performed with the pointer wheel; keep the shared controls
+        // for EPUB font sizing only.
         if (ReaderZoomOutButton is not null && ReaderZoomText is not null && ReaderZoomInButton is not null)
         {
-            ReaderZoomOutButton.IsVisible = true;
-            ReaderZoomText.IsVisible = true;
-            ReaderZoomInButton.IsVisible = true;
+            ReaderZoomOutButton.IsVisible = !_readerIsPdf;
+            ReaderZoomText.IsVisible = !_readerIsPdf;
+            ReaderZoomInButton.IsVisible = !_readerIsPdf;
             var zoomOutLabel = _readerIsPdf ? T("缩小页面") : T("减小字号");
             var zoomInLabel = _readerIsPdf ? T("放大页面") : T("增大字号");
             ReaderZoomOutButton.Content = _readerIsPdf ? "−" : "A−";
@@ -9653,6 +9680,12 @@ public partial class MainWindow
             ReaderPdfBadge.IsVisible = _readerIsPdf;
         if (ReaderPdfRotateButton is not null)
             ReaderPdfRotateButton.IsVisible = _readerIsPdf;
+        if (ReaderPdfHandToolButton is not null)
+        {
+            ReaderPdfHandToolButton.IsVisible = _readerIsPdf;
+            UpdateReaderPdfHandToolButton(
+                (CurrentReaderHost as NativePdfReaderHost)?.IsHandToolMode == true);
+        }
         if (ReaderPdfPointNoteButton is not null)
         {
             ReaderPdfPointNoteButton.IsVisible = _readerIsPdf;

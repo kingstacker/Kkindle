@@ -381,7 +381,8 @@ public partial class MainWindow
         int page,
         CancellationToken cancellationToken,
         bool saveProgress,
-        bool syncTocSelection)
+        bool syncTocSelection,
+        bool skipReloadWhenPageMatches = false)
     {
         if (syncTocSelection)
             CancelReaderPdfNavigation();
@@ -396,11 +397,18 @@ public partial class MainWindow
         HideReaderAnnotationHoverPopup();
         var targetPage = Math.Clamp(page, 1, _readerPdfPages.Count);
         var source = new Uri(_readerPdfSourcePath).AbsoluteUri + $"#page={targetPage}";
-        var loaded = host.DisplayMode == PdfReaderDisplayMode.Continuous
-            ? await host.NavigateAsync(new Uri(source), cancellationToken)
-            : await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber),
-                () => host.NavigateAsync(new Uri(source), cancellationToken), cancellationToken,
-                animate: targetPage != host.PageNumber, holdOutgoingPage: true);
+        // Multiple outline entries can target different headings on this page;
+        // keep its current render and apply the destination scroll below.
+        var loaded = skipReloadWhenPageMatches && host.PageNumber == targetPage;
+        if (loaded) host.RememberNavigationPoint();
+        if (!loaded)
+        {
+            loaded = host.DisplayMode == PdfReaderDisplayMode.Continuous
+                ? await host.NavigateAsync(new Uri(source), cancellationToken)
+                : await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber),
+                    () => host.NavigateAsync(new Uri(source), cancellationToken), cancellationToken,
+                    animate: targetPage != host.PageNumber, holdOutgoingPage: true);
+        }
         if (!loaded)
         {
             if (!string.IsNullOrWhiteSpace(host.LastError)) ReaderStatusText.Text = host.LastError;
@@ -1911,7 +1919,7 @@ public partial class MainWindow
         var visible = !ReaderAssistantPanel.IsVisible;
         ReaderAssistantPanel.IsVisible = visible;
         if (visible)
-            SetReaderAiPanelWidth(_readerAiPanelWidth);
+            SetReaderAiPanelWidth(GetReaderAssistantPanelWidth());
         else
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         ScheduleLinuxReaderTextFallbackReflow();

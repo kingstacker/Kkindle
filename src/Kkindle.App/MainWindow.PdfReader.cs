@@ -118,8 +118,9 @@ public partial class MainWindow
         var enabled = !pdf.IsPointAnnotationMode;
         pdf.SetPointAnnotationMode(enabled);
         UpdateReaderPdfPointNoteButton(enabled);
+        UpdateReaderPdfHandToolButton(pdf.IsHandToolMode);
         ShowReaderTransientStatus(enabled
-            ? T("请点击或右键点击 PDF 任意位置添加页面批注。")
+            ? T("请点击 PDF 任意位置添加页面批注。")
             : T("已取消页面批注模式。"));
     }
 
@@ -129,6 +130,26 @@ public partial class MainWindow
         ToolTip.SetTip(ReaderPdfPointNoteButton, label);
         AutomationProperties.SetName(ReaderPdfPointNoteButton, label);
         ReaderPdfPointNoteButton.Classes.Set("active", enabled);
+    }
+
+    private void ReaderPdfHandToolButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        var enabled = !pdf.IsHandToolMode;
+        pdf.SetHandToolMode(enabled);
+        UpdateReaderPdfHandToolButton(enabled);
+        UpdateReaderPdfPointNoteButton(pdf.IsPointAnnotationMode);
+        ShowReaderTransientStatus(enabled
+            ? T("抓手工具已启用，按住鼠标左键拖动页面即可移动。")
+            : T("已退出抓手工具。"));
+    }
+
+    private void UpdateReaderPdfHandToolButton(bool enabled)
+    {
+        var label = enabled ? T("退出抓手工具") : T("抓手移动页面");
+        ToolTip.SetTip(ReaderPdfHandToolButton, label);
+        AutomationProperties.SetName(ReaderPdfHandToolButton, label);
+        ReaderPdfHandToolButton.Classes.Set("active", enabled);
     }
 
     private async Task EnsureReaderPdfTextIndexAsync(CancellationToken token)
@@ -189,13 +210,22 @@ public partial class MainWindow
     private string GetPdfPagePositionLabel()
     {
         var total = Math.Max(1, _readerPdfPages.Count);
+        var pdf = CurrentReaderHost as NativePdfReaderHost;
+        string Label(int first, int last)
+        {
+            var physical = first == last ? $"{first} / {total}" : $"{first}–{last} / {total}";
+            var a = pdf?.GetPageLabel(first) ?? first.ToString();
+            var b = pdf?.GetPageLabel(last) ?? last.ToString();
+            return a == first.ToString() && b == last.ToString() ? physical
+                : T("书页 {0} · {1}", first == last ? a : $"{a}–{b}", physical);
+        }
         if (CurrentReaderHost is NativePdfReaderHost { DisplayMode: PdfReaderDisplayMode.TwoPage })
         {
             var first = (_readerPdfPage - 1) / 2 * 2 + 1;
             var last = Math.Min(total, first + 1);
-            if (last > first) return $"{first}–{last} / {total}";
+            if (last > first) return Label(first, last);
         }
-        return T("{0} / {1}", _readerPdfPage, total);
+        return Label(_readerPdfPage, _readerPdfPage);
     }
 
     private async Task MoveReaderPdfPositionAsync(int direction)

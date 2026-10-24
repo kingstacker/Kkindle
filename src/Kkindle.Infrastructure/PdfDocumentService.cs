@@ -9,9 +9,15 @@ namespace Kkindle.Infrastructure;
 // PDFium performs the crop/rotation transform for both text and rendering.
 public readonly record struct PdfTextBounds(double X, double Y, double Width, double Height);
 public sealed record PdfTextGlyph(int Offset, int Length, PdfTextBounds Bounds, double AdvanceX = 1, double AdvanceY = 0);
-public sealed record PdfPageContent(double Width, double Height, string Text, IReadOnlyList<PdfTextGlyph> Glyphs);
+public sealed record PdfPageContent(double Width, double Height, string Text, IReadOnlyList<PdfTextGlyph> Glyphs)
+{
+    public IReadOnlyList<PdfPageLink> Links { get; init; } = [];
+}
 public sealed record PdfOutlineItem(string Title, int PageNumber, int Level, double? Top = null);
-public sealed record PdfDocumentInfo(int PageCount, string Title, string Author, IReadOnlyList<PdfOutlineItem> Outline);
+public sealed record PdfDocumentInfo(int PageCount, string Title, string Author, IReadOnlyList<PdfOutlineItem> Outline)
+{
+    public IReadOnlyList<string> PageLabels { get; init; } = [];
+}
 public sealed record PdfRenderedPage(int PageNumber, PdfPageContent Content, byte[] Png);
 public sealed record PdfRasterRegion(int PageNumber, int PagePixelWidth, int PagePixelHeight,
     int Left, int Top, int Width, int Height, byte[] Pixels, int Rotation = 0);
@@ -22,7 +28,7 @@ public sealed record PdfRasterRegion(int PageNumber, int PagePixelWidth, int Pag
 /// Rendering and text extraction use the same engine and UTF-16 offset stream.
 /// No PDF JavaScript, external actions or embedded attachments are executed.
 /// </summary>
-public sealed class PdfDocumentService : IDisposable
+public sealed partial class PdfDocumentService : IDisposable
 {
     private static readonly object NativeGate = new();
     private static bool _initialized;
@@ -87,7 +93,10 @@ public sealed class PdfDocumentService : IDisposable
             var visited = new HashSet<IntPtr>();
             var pageTransforms = new Dictionary<int, PageTransform>();
             ReadOutline(IntPtr.Zero, 0, outline, visited, pageTransforms, cancellationToken);
-            return new PdfDocumentInfo(PageCount, ReadMetadata("Title"), ReadMetadata("Author"), outline);
+            return new PdfDocumentInfo(PageCount, ReadMetadata("Title"), ReadMetadata("Author"), outline)
+            {
+                PageLabels = ReadPageLabels(cancellationToken)
+            };
         }
     }
 
@@ -97,7 +106,7 @@ public sealed class PdfDocumentService : IDisposable
         {
             CheckOpen(cancellationToken);
             var page = LoadPage(pageNumber);
-            try { return ReadPageContent(page, cancellationToken); }
+            try { return ReadPageContent(page, cancellationToken) with { Links = ReadLinks(page, cancellationToken) }; }
             finally { Native.FPDF_ClosePage(page); }
         }
     }
@@ -411,7 +420,7 @@ public sealed class PdfDocumentService : IDisposable
 
     ~PdfDocumentService() => Dispose();
 
-    private static class Native
+    private static partial class Native
     {
         private const string Library = "pdfium";
         // PDFium's public ABI uses stdcall on Windows and the platform default

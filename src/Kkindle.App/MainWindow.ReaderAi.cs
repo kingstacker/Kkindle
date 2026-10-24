@@ -35,8 +35,9 @@ public partial class MainWindow
     private bool _readerAiFollowOutput = true;
     private const double ReaderAiPanelDefaultWidth = 380d;
     private const double ReaderAiPanelMinimumWidth = 280d;
-    private const double ReaderAiPanelMaximumWidth = 640d;
     private double _readerAiPanelWidth = ReaderAiPanelDefaultWidth;
+    private const double ReaderPdfThumbnailsPanelMinimumWidth = 224d;
+    private double _readerPdfThumbnailsPanelWidth = ReaderPdfThumbnailsPanelMinimumWidth;
     private bool _readerAiPanelResizing;
     private double _readerAiPanelResizeStartX;
     private double _readerAiPanelResizeStartWidth;
@@ -163,9 +164,9 @@ public partial class MainWindow
 
         ReaderAiVectorStatusDot.Fill = new SolidColorBrush(Color.Parse(
             _readerAiVectorIndicatorGreen ? "#2E8B57" : "#D6A100"));
-        var tooltip = T(_readerAiVectorIndicatorTooltip);
-        ToolTip.SetTip(ReaderAiVectorStatusDot, tooltip);
-        Avalonia.Automation.AutomationProperties.SetName(ReaderAiVectorStatusDot, tooltip);
+        var tooltip = T(_readerAiVectorIndicatorTooltip) + "\n" + T("点击设置向量模型");
+        ToolTip.SetTip(ReaderAiVectorStatusButton, tooltip);
+        Avalonia.Automation.AutomationProperties.SetName(ReaderAiVectorStatusButton, tooltip);
     }
 
     private void UpdateReaderAiLanguageText()
@@ -200,6 +201,7 @@ public partial class MainWindow
 
     private void ApplyReaderAiSettingsToControls()
     {
+        _readerAiReasoningDepth = _appSettings.ReaderAiReasoningDepth;
         ApplyReaderEmbeddingModelSelection();
         _suppressAiProviderChange = true;
         _suppressAiModelChange = true;
@@ -542,6 +544,10 @@ public partial class MainWindow
 
     private void ShowReaderAiTab()
     {
+        if (_readerZenMode) ExitReaderZenMode();
+        ReaderPdfThumbnailsView.IsVisible = false;
+        ReaderAssistantPanel.IsVisible = true;
+        SetReaderAiPanelWidth(_readerAiPanelWidth);
         UpdateReaderAiScope();
         ReaderAiView.IsVisible = true;
         ReaderNotesView.IsVisible = false;
@@ -549,10 +555,14 @@ public partial class MainWindow
         ReaderNotesExportBar.IsVisible = false;
         SetReaderAssistantTabState(ReaderAiTabButton, selected: true);
         SetReaderAssistantTabState(ReaderNotesTabButton, selected: false);
+        SetReaderAssistantTabState(ReaderPdfThumbnailsTabButton, selected: false);
+        ScheduleLinuxReaderTextFallbackReflow();
+        ScheduleReaderRelayout();
     }
 
     private void ShowReaderNotesTab()
     {
+        ReaderPdfThumbnailsView.IsVisible = false;
         if (!_readerZenMode)
         {
             ReaderAssistantPanel.IsVisible = true;
@@ -564,6 +574,9 @@ public partial class MainWindow
         ReaderNotesExportBar.IsVisible = true;
         SetReaderAssistantTabState(ReaderAiTabButton, selected: false);
         SetReaderAssistantTabState(ReaderNotesTabButton, selected: true);
+        SetReaderAssistantTabState(ReaderPdfThumbnailsTabButton, selected: false);
+        ScheduleLinuxReaderTextFallbackReflow();
+        ScheduleReaderRelayout();
     }
 
     private static void SetReaderAssistantTabState(Button button, bool selected)
@@ -571,28 +584,44 @@ public partial class MainWindow
         button.Classes.Set("active", selected);
     }
 
+    private double GetReaderAssistantPanelWidth() => ReaderPdfThumbnailsView.IsVisible
+        ? _readerPdfThumbnailsPanelWidth : _readerAiPanelWidth;
+
+    private double GetReaderAssistantPanelMinimumWidth() => ReaderPdfThumbnailsView.IsVisible
+        ? ReaderPdfThumbnailsPanelMinimumWidth : ReaderAiPanelMinimumWidth;
+
     private double GetReaderAiPanelMaximumWidth()
     {
         if (ReaderRoot.Bounds.Width <= 0)
-            return ReaderAiPanelMaximumWidth;
+            return ReaderAiPanelDefaultWidth;
 
         var tocWidth = ReaderTocPanel.IsVisible
             ? 286d
             : ReaderTocCompactPanel.IsVisible ? 52d : 0d;
         var minimumReadingWidth = 360d;
         return Math.Max(
-            ReaderAiPanelMinimumWidth,
-            Math.Min(ReaderAiPanelMaximumWidth, ReaderRoot.Bounds.Width - tocWidth - minimumReadingWidth));
+            GetReaderAssistantPanelMinimumWidth(),
+            ReaderRoot.Bounds.Width - tocWidth - minimumReadingWidth);
+    }
+
+    private void ReaderRoot_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (ReaderAssistantPanel?.IsVisible == true && !_readerZenMode)
+            SetReaderAiPanelWidth(GetReaderAssistantPanelWidth());
     }
 
     private void SetReaderAiPanelWidth(double width)
     {
         if (ReaderRoot.ColumnDefinitions.Count < 3) return;
-        _readerAiPanelWidth = Math.Clamp(
+        var panelWidth = Math.Clamp(
             width,
-            ReaderAiPanelMinimumWidth,
+            GetReaderAssistantPanelMinimumWidth(),
             GetReaderAiPanelMaximumWidth());
-        ReaderRoot.ColumnDefinitions[2].Width = new GridLength(_readerAiPanelWidth);
+        if (ReaderPdfThumbnailsView.IsVisible)
+            _readerPdfThumbnailsPanelWidth = panelWidth;
+        else
+            _readerAiPanelWidth = panelWidth;
+        ReaderRoot.ColumnDefinitions[2].Width = new GridLength(panelWidth);
     }
 
     private void ReaderAssistantResizeHandle_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -604,7 +633,7 @@ public partial class MainWindow
 
         _readerAiPanelResizing = true;
         _readerAiPanelResizeStartX = point.Position.X;
-        _readerAiPanelResizeStartWidth = _readerAiPanelWidth;
+        _readerAiPanelResizeStartWidth = GetReaderAssistantPanelWidth();
         e.Pointer.Capture(ReaderAssistantResizeHandle);
         e.Handled = true;
     }
@@ -1175,7 +1204,7 @@ public partial class MainWindow
         ReaderAiModelBox.Text = model;
     }
 
-    private void ReaderAiModelMenuItem_Click(object? sender, RoutedEventArgs e)
+    private async void ReaderAiModelMenuItem_Click(object? sender, RoutedEventArgs e)
     {
         if (_suppressAiModelChange
             || sender is not MenuItem { Tag: string model }) return;
@@ -1186,9 +1215,10 @@ public partial class MainWindow
         ApplyReaderAiModelSelectors(_readerAiSettings.Provider, model);
         ReaderAiQuestionBox?.Focus();
         e.Handled = true;
+        await SaveReaderAiPreferenceAsync(token => _aiSettingsStore.SaveModelAsync(model, token));
     }
 
-    private void ReaderAiReasoningMenuItem_Click(object? sender, RoutedEventArgs e)
+    private async void ReaderAiReasoningMenuItem_Click(object? sender, RoutedEventArgs e)
     {
         if (_suppressAiReasoningDepthChange
             || sender is not MenuItem { Tag: string depth }) return;
@@ -1198,6 +1228,25 @@ public partial class MainWindow
             item.IsChecked = string.Equals(item.Tag as string, depth, StringComparison.OrdinalIgnoreCase);
         ReaderAiQuestionBox?.Focus();
         e.Handled = true;
+        _appSettings = _appSettings with { ReaderAiReasoningDepth = depth };
+        var settings = _appSettings;
+        await SaveReaderAiPreferenceAsync(token => _appSettingsStore.SaveAsync(settings, token));
+    }
+
+    private async Task SaveReaderAiPreferenceAsync(Func<CancellationToken, Task> save)
+    {
+        try
+        {
+            await save(_lifetimeCancellation.Token);
+            HandleLocalDataChanged(LocalDataChangeKind.Settings);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ReaderAiStatusText.Text = T("AI 选项保存失败：{0}", UiText.Localize(exception.Message));
+        }
     }
 
     private void ReaderAiReasoningToggleButton_Click(object? sender, RoutedEventArgs e)

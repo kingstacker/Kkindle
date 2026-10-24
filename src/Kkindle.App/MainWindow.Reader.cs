@@ -1012,6 +1012,9 @@ public partial class MainWindow
         ReaderChapterPreviewPopup.IsOpen = false;
         ClearReaderCompactNavigationItems();
         ReaderAssistantPanel.IsVisible = false;
+        ReaderPdfThumbnailsView.IsVisible = false;
+        ReaderPdfThumbnailsList.ItemsSource = null;
+        _readerThumbnailHost = null;
         ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         ReaderContentPanel.RowDefinitions[0].Height = new GridLength(52);
         ReaderHeaderBar.IsVisible = true;

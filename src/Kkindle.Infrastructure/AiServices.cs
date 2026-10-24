@@ -117,6 +117,22 @@ public sealed class AiSettingsStore
         await SaveUnderLockAsync(settings, cancellationToken);
     }
 
+    // A quick model selection must preserve the stored endpoint and encrypted
+    // key, including keys that cannot be decrypted on the current machine.
+    public async Task SaveModelAsync(string model, CancellationToken cancellationToken = default)
+    {
+        using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
+        var persisted = new PersistedAiSettings();
+        if (File.Exists(SettingsPath))
+        {
+            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, true);
+            persisted = await JsonSerializer.DeserializeAsync<PersistedAiSettings>(stream, _jsonOptions, cancellationToken)
+                ?? persisted;
+        }
+        persisted.Model = AiConnectionSettings.NormalizeModel(persisted.Provider ?? "deepseek", model);
+        await PublishAsync(persisted, cancellationToken);
+    }
+
     private string UnprotectApiKey(string? protectedApiKey)
     {
         if (string.IsNullOrWhiteSpace(protectedApiKey)) return string.Empty;
@@ -146,6 +162,12 @@ public sealed class AiSettingsStore
                 ? string.Empty
                 : Convert.ToBase64String(_protector.Protect(Encoding.UTF8.GetBytes(settings.ApiKey.Trim())))
         };
+        await PublishAsync(persisted, cancellationToken, syncedAt);
+    }
+
+    private async Task PublishAsync(PersistedAiSettings persisted, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
+    {
+        _paths.EnsureDirectories();
         var temporaryPath = SettingsPath + ".tmp";
         await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             await JsonSerializer.SerializeAsync(stream, persisted, _jsonOptions, cancellationToken);

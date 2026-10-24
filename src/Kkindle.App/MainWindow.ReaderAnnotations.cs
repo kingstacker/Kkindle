@@ -51,11 +51,16 @@ public partial class MainWindow
             : GetReaderChapterPath();
         if (string.IsNullOrWhiteSpace(chapterPath)) return;
 
+        var pdfSelectionFragment = _readerIsPdf
+            ? _selectedReaderAnnotation?.Fragment ?? (CurrentReaderHost as NativePdfReaderHost)?.SelectionFragment
+            : null;
+
         var exact = selectedText.Length > 0
             ? ReaderAnnotations.FirstOrDefault(item =>
                 string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase)
                 && item.StartOffset == _readerPendingSelectionStartOffset
-                && item.EndOffset == _readerPendingSelectionEndOffset)
+                && item.EndOffset == _readerPendingSelectionEndOffset
+                && (!_readerIsPdf || item.Fragment == pdfSelectionFragment))
             : null;
         var existing = _selectedReaderAnnotation ?? exact;
         var annotation = existing ?? new ReaderAnnotation
@@ -76,8 +81,10 @@ public partial class MainWindow
             var overlaps = ReaderAnnotations.Any(item =>
                 item.Id != exact?.Id
                 && string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase)
-                && _readerPendingSelectionStartOffset < item.EndOffset
-                && _readerPendingSelectionEndOffset > item.StartOffset);
+                && (_readerIsPdf
+                    ? PdfTextRanges.Read(pdfSelectionFragment, _readerPendingSelectionStartOffset, _readerPendingSelectionEndOffset)
+                        .Any(a => PdfTextRanges.Read(item.Fragment, item.StartOffset, item.EndOffset).Any(b => a.Start < b.End && a.End > b.Start))
+                    : _readerPendingSelectionStartOffset < item.EndOffset && _readerPendingSelectionEndOffset > item.StartOffset));
             if (overlaps)
             {
                 ShowReaderTransientStatus(T("这段文字与已有划线重叠，请缩小选择范围"));
@@ -90,7 +97,7 @@ public partial class MainWindow
         annotation.Fragment = _readerIsPdf
             ? point is { } pdfPoint
                 ? ReaderPdfPointAnchor.Encode(pdfPoint.X, pdfPoint.Y)
-                : null
+                : pdfSelectionFragment
             : _readerCurrentFragment;
         if (selectedText.Length > 0) annotation.SelectedText = selectedText;
         // Quick style/color changes preserve notes; the editor can still
@@ -322,7 +329,6 @@ public partial class MainWindow
     {
         if (sender is not Button { Tag: ReaderAnnotation annotation }) return;
         await NavigateToReaderAnnotationAsync(annotation);
-        if (_readerIsPdf) EditReaderPdfAnnotation(annotation);
     }
 
     private async Task NavigateToReaderAnnotationAsync(ReaderAnnotation annotation)
@@ -433,7 +439,7 @@ public partial class MainWindow
         {
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard
                 ?? throw new InvalidOperationException(T("当前窗口无法访问剪贴板。"));
-            await clipboard.SetTextAsync(_readerPendingSelection);
+            await clipboard.SetTextAsync(_readerIsPdf ? PdfTextSelectionLayout.NormalizeCopy(_readerPendingSelection) : _readerPendingSelection);
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
         {

@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -4590,6 +4590,7 @@
               Margin="0"
               ZIndex="40"
               Background="{DynamicResource ReaderPageBrush}"
+              SizeChanged="ReaderRoot_SizeChanged"
               PointerMoved="ReaderRoot_PointerMoved">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="286" />
@@ -5110,6 +5111,30 @@
                                         ToolTip.Tip="{DynamicResource Ui.Auto.8B247B82F012C614}"
                                         AutomationProperties.Name="{DynamicResource Ui.Auto.8B247B82F012C614}"
                                         Click="ReaderIncreaseFontButton_Click" />
+                                <Button x:Name="ReaderPdfBackButton" Classes="readerHeader" Width="34" MinWidth="34" IsVisible="False"
+                                        ToolTip.Tip="上一页" AutomationProperties.Name="上一页" Click="ReaderPdfPreviousPageButton_Click">
+                                    <Path Width="18" Height="18" Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5" Data="M11 3L5 9L11 15 M5 9H17" />
+                                </Button>
+                                <Button x:Name="ReaderPdfForwardButton" Classes="readerHeader" Width="34" MinWidth="34" IsVisible="False"
+                                        ToolTip.Tip="下一页" AutomationProperties.Name="下一页" Click="ReaderPdfNextPageButton_Click">
+                                    <Path Width="18" Height="18" Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5" Data="M7 3L13 9L7 15 M1 9H13" />
+                                </Button>
+                                <Button x:Name="ReaderPdfThumbnailsButton" Classes="readerHeader" Width="38" MinWidth="38" IsVisible="False"
+                                        ToolTip.Tip="页面缩略图" AutomationProperties.Name="页面缩略图" Click="ReaderPdfThumbnailsButton_Click">
+                                    <Path Width="20" Height="20" Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.3" Data="M2 2H8V8H2Z M12 2H18V8H12Z M2 12H8V18H2Z M12 12H18V18H12Z" />
+                                </Button>
+                                <Button x:Name="ReaderPdfHandToolButton"
+                                        Classes="readerHeader"
+                                        Width="38"
+                                        MinWidth="38"
+                                        IsVisible="False"
+                                        ToolTip.Tip="抓手移动页面"
+                                        AutomationProperties.Name="抓手移动页面"
+                                        Click="ReaderPdfHandToolButton_Click">
+                                    <Path StrokeThickness="1.5" Height="24" Width="24" Stroke="{Binding $parent[Button].Foreground}"
+                                          StrokeLineCap="Round" StrokeJoin="Round"
+                                          Data="M18.5 8C17.67 8 17 8.67 17 9.5V11H16V5.5C16 4.67 15.33 4 14.5 4S13 4.67 13 5.5V11H12V3.5C12 2.67 11.33 2 10.5 2S9 2.67 9 3.5V11H8V5.5C8 4.67 7.33 4 6.5 4S5 4.67 5 5.5V14.75L3.78 13.53C3.2 12.95 2.25 12.95 1.66 13.53S1.08 15.06 1.66 15.65L6.34 20.33C7.09 21.08 8.11 21.5 9.17 21.5H14.5C17.26 21.5 19.5 19.26 19.5 16.5V9.5C19.5 8.67 19.33 8 18.5 8Z" />
+                                </Button>
                                 <Button x:Name="ReaderPdfFitButton"
                                         Classes="readerHeader"
                                         Width="38"
@@ -5731,13 +5756,40 @@
                                 </Style>
                             </Slider.Styles>
                         </Slider>
+                        <Button x:Name="ReaderPagePositionButton" Grid.Column="4" Classes="readerToolbar" Padding="6,2"
+                                ToolTip.Tip="跳转页码" AutomationProperties.Name="跳转页码" Click="ReaderPagePositionButton_Click">
                         <TextBlock x:Name="ReaderChapterText"
-                                   Grid.Column="4"
                                    MinWidth="44"
                                    FontSize="11"
                                    Foreground="{DynamicResource ReaderMutedBrush}"
                                    TextAlignment="Right"
                                    VerticalAlignment="Center" />
+                            <Button.Flyout>
+                                <Flyout Placement="TopEdgeAlignedRight">
+                                    <StackPanel Width="284" Spacing="10">
+                                        <TextBlock Text="跳转页面" FontSize="14" />
+                                        <Grid ColumnDefinitions="100,*,Auto" ColumnSpacing="8">
+                                            <ComboBox x:Name="ReaderPdfPageJumpKind" SelectedIndex="0" MinWidth="100">
+                                                <ComboBoxItem Content="书页码" /><ComboBoxItem Content="文件页码" />
+                                            </ComboBox>
+                                            <TextBox x:Name="ReaderPdfPageJumpBox" Grid.Column="1" PlaceholderText="如 iii、12" KeyDown="ReaderPdfPageJumpBox_KeyDown" />
+                                            <Button Grid.Column="2" Content="跳转" Click="ReaderPdfPageJumpButton_Click" />
+                                        </Grid>
+                                        <TextBlock x:Name="ReaderPdfPageJumpStatus" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                        <Expander Header="校正书页码" HorizontalAlignment="Stretch">
+                                            <StackPanel Spacing="10">
+                                                <TextBlock Text="当前页在书上是第几页？校正会应用到整本 PDF，并在下次打开时保留。" FontSize="11" TextWrapping="Wrap" />
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBox x:Name="ReaderPdfPrintedPageBox" PlaceholderText="当前页印刷页码" />
+                                                    <Button Grid.Column="1" Content="应用" Click="ReaderPdfPageMappingButton_Click" />
+                                                </Grid>
+                                                <Button Content="恢复 PDF 自带页码" Click="ReaderPdfResetPageMappingButton_Click" />
+                                            </StackPanel>
+                                        </Expander>
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
                         <Border x:Name="ReaderPdfBadge"
                                 Grid.Column="3"
                                 Padding="6,2"
@@ -5754,7 +5806,7 @@
                 </Border>
             </Grid>
 
-            <!-- AI conversation and persistent annotations. -->
+            <!-- Shared sidebar for AI, annotations, and PDF thumbnails. -->
             <Border x:Name="ReaderAssistantPanel"
                     Grid.Column="2"
                     Margin="0,38,0,0"
@@ -5775,7 +5827,7 @@
                             Background="Transparent"
                             BorderBrush="{DynamicResource ReaderBorderBrush}"
                             BorderThickness="0,0,0,1">
-                        <Grid Margin="8,2" ColumnDefinitions="*,*,Auto" ColumnSpacing="6">
+                        <Grid Margin="8,2" ColumnDefinitions="*,*,Auto,Auto" ColumnSpacing="4">
                             <Button x:Name="ReaderAiTabButton"
                                     Grid.Column="0"
                                     Classes="readerAssistantTab active"
@@ -5788,10 +5840,18 @@
                                     Content="{DynamicResource Ui.Auto.3062C477D4C1E1FA}"
                                     HorizontalAlignment="Stretch"
                                     Click="ReaderNotesTabButton_Click" />
-                            <Button Grid.Column="2"
+                            <Button x:Name="ReaderPdfThumbnailsTabButton"
+                                    Grid.Column="2"
+                                    Classes="readerAssistantTab"
+                                    Content="缩略图"
+                                    MinWidth="44"
+                                    ToolTip.Tip="页面缩略图"
+                                    IsVisible="False"
+                                    Click="ReaderPdfThumbnailsButton_Click" />
+                            <Button Grid.Column="3"
                                     Classes="icon"
-                                    Width="38"
-                                    MinWidth="38"
+                                    Width="30"
+                                    MinWidth="30"
                                     Height="34"
                                     AutomationProperties.Name="{DynamicResource Ui.Auto.2CCF650A61080689}"
                                     ToolTip.Tip="{DynamicResource Ui.Auto.2CCF650A61080689}"
@@ -5819,7 +5879,7 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:ReaderAiMessageViewModel">
                                                 <Grid HorizontalAlignment="Stretch" Margin="0,3">
-                                                    <Border MaxWidth="520"
+                                                    <Border
                                                             MinWidth="96"
                                                             Padding="10,10"
                                                             HorizontalAlignment="{Binding BubbleAlignment}"
@@ -5852,7 +5912,9 @@
                                                                 </Path.RenderTransform>
                                                             </Path>
                                                         </StackPanel>
-                                                        <TextBlock Text="{Binding Reasoning}"
+                                                        <local:KreaderMarkdownTextBlock Markdown="{Binding Reasoning}"
+                                                                   CitationAction="{Binding CitationAction}"
+                                                                   CitationSourceResolver="{Binding CitationSourceResolver}"
                                                                    IsVisible="{Binding IsReasoningVisible}"
                                                                    FontSize="12"
                                                                    Foreground="{DynamicResource ReaderMutedBrush}"
@@ -5865,9 +5927,10 @@
                                                          <local:KreaderMarkdownTextBlock Markdown="{Binding Content}"
                                                                                           IsVisible="{Binding IsAssistant}"
                                                                                           CitationAction="{Binding CitationAction}"
+                                                                                          CitationSourceResolver="{Binding CitationSourceResolver}"
                                                                                           Foreground="{DynamicResource ReaderInkBrush}"
                                                                                           FontSize="14"
-                                                                                          LineHeight="24"
+                                                                                          LineSpacing="5"
                                                                                           TextWrapping="Wrap" />
                                                          <StackPanel Spacing="4" IsVisible="{Binding HasSources}">
                                                              <Button Classes="readerAiReasoningToggle"
@@ -5892,7 +5955,7 @@
                                                                  </ItemsControl.ItemTemplate>
                                                              </ItemsControl>
                                                          </StackPanel>
-                                                         <StackPanel Orientation="Horizontal" Spacing="16" IsVisible="{Binding IsAssistant}">
+                                                         <StackPanel Orientation="Horizontal" Spacing="2" IsVisible="{Binding IsAssistant}">
                                                              <Button Content="{DynamicResource Ui.Auto.63D90D977348AB1F}" Classes="readerAiReasoningToggle" IsVisible="{Binding CanCopy}" Click="ReaderAiCopyButton_Click" />
                                                              <Button Content="{DynamicResource Ui.Auto.A3030BF8F16DC63C}" Classes="readerAiReasoningToggle" IsVisible="{Binding CanCopy}" Click="ReaderAiSaveAnswerButton_Click" />
                                                              <Button Content="{DynamicResource Ui.Auto.3221A042EA3677A8}" Classes="readerAiReasoningToggle" IsVisible="{Binding CanRetry}" Click="ReaderAiRetryButton_Click" />
@@ -5910,13 +5973,21 @@
                                 <Button x:Name="ReaderAiNewContentButton" Content="{DynamicResource Ui.Auto.07E68FA158F2077C}" Classes="readerAiQuickOption" IsVisible="False" HorizontalAlignment="Center" Click="ReaderAiNewContentButton_Click" />
                                 <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                                     <Grid Grid.Column="0" ColumnDefinitions="Auto,*" ColumnSpacing="5">
+                                        <Button x:Name="ReaderAiVectorStatusButton"
+                                                Classes="readerAiReasoningToggle"
+                                                Width="20" MinWidth="20" Height="24"
+                                                Padding="0" Cursor="Hand"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalContentAlignment="Center"
+                                                Click="ReaderAiVectorStatusButton_Click">
                                         <Ellipse x:Name="ReaderAiVectorStatusDot"
                                                  Width="7"
                                                  Height="7"
+                                                 HorizontalAlignment="Center"
                                                  VerticalAlignment="Center"
                                                  Fill="#D6A100"
-                                                 ToolTip.Tip="{DynamicResource Ui.Auto.8372A76EAD8077A9}"
-                                                 AutomationProperties.Name="{DynamicResource Ui.Auto.8372A76EAD8077A9}" />
+                                                 IsHitTestVisible="False" />
+                                        </Button>
                                         <TextBlock x:Name="ReaderAiScopeText" Grid.Column="1" Text="{DynamicResource Ui.Auto.C558C087EB70654C}" FontSize="11" Foreground="{DynamicResource ReaderMutedBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                     </Grid>
                                     <Button x:Name="ReaderAiOptionsButton"
@@ -5951,7 +6022,7 @@
                                              PlaceholderText="{DynamicResource Ui.Auto.8513176BCF21002D}"
                                              />
                                     <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="8,0,6,6">
-                                    <StackPanel x:Name="ReaderAiQuickActions" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                    <StackPanel x:Name="ReaderAiQuickActions" Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
                                         <Button Content="{DynamicResource Ui.Auto.04830193B408EEB1}" ToolTip.Tip="{DynamicResource Ui.Auto.98B4E0EFFCF15443}" Classes="readerAiReasoningToggle" Click="ReaderAiSummarizeChapterButton_Click" />
                                         <Button Content="{DynamicResource Ui.Auto.23CEC14BBCFAB6FA}" ToolTip.Tip="{DynamicResource Ui.Auto.9B4D1CC07395F4B1}" Classes="readerAiReasoningToggle" Click="ReaderAiExplainSelectionButton_Click" />
                                         <Button Content="{DynamicResource Ui.Auto.51AFFFDDE76EA35A}" ToolTip.Tip="{DynamicResource Ui.Auto.7A4BBB19D1387A93}" Classes="readerAiReasoningToggle" Click="ReaderAiSummarizeBookButton_Click" />
@@ -5968,9 +6039,12 @@
                                             AutomationProperties.Name="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
                                             ToolTip.Tip="{DynamicResource Ui.Auto.EDECF0AE6E5144F9}"
                                             Click="ReaderAiSendButton_Click">
-                                        <Path Stretch="Uniform" Height="16" Width="16" x:Name="ReaderAiSendGlyph" Fill="{Binding $parent[Button].Foreground}"
-                                              Data="M 12,3 L 18.2,9.2 L 17.3,10.1 L 12.45,5.25 L 12.45,21 L 11.55,21 L 11.55,5.25 L 6.7,10.1 L 5.8,9.2 Z"
-                                              IsHitTestVisible="False" />
+                                        <Viewbox Width="22" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                                            <Canvas Width="24" Height="24">
+                                                <Path x:Name="ReaderAiSendGlyph" Fill="{Binding $parent[Button].Foreground}"
+                                                      Data="M 12,3 L 18.2,9.2 L 17.3,10.1 L 12.45,5.25 L 12.45,21 L 11.55,21 L 11.55,5.25 L 6.7,10.1 L 5.8,9.2 Z" />
+                                            </Canvas>
+                                        </Viewbox>
                                     </Button>
                                     </Grid>
                                 </Grid>
@@ -6037,6 +6111,42 @@
                                     <TextBlock x:Name="ReaderExportStatusText" FontSize="10" Foreground="{DynamicResource ReaderMutedBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </ScrollViewer>
+                        </Grid>
+
+                        <Grid x:Name="ReaderPdfThumbnailsView" IsVisible="False">
+                            <ListBox x:Name="ReaderPdfThumbnailsList" Margin="12,12,12,8" Background="Transparent"
+                                     AutoScrollToSelectedItem="False" SelectionChanged="ReaderPdfThumbnailsList_SelectionChanged"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.Styles>
+                                    <Style Selector="ListBoxItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Template">
+                                            <ControlTemplate>
+                                                <ContentPresenter Content="{TemplateBinding Content}"
+                                                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                                  HorizontalContentAlignment="Stretch"
+                                                                  Background="Transparent"
+                                                                  Foreground="{DynamicResource ReaderInkBrush}" />
+                                            </ControlTemplate>
+                                        </Setter>
+                                    </Style>
+                                    <Style Selector="ListBoxItem:selected Border.pdfThumbnailFrame">
+                                        <Setter Property="BorderBrush" Value="Black" />
+                                    </Style>
+                                </ListBox.Styles>
+                                <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="local:PdfThumbnailItem">
+                                        <StackPanel Margin="4,10" Spacing="8" HorizontalAlignment="Stretch">
+                                            <Border Classes="pdfThumbnailFrame" Background="White" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="1" CornerRadius="0" Padding="2">
+                                                <local:PdfThumbnailPreview HorizontalAlignment="Stretch" Stretch="Uniform" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Label}" FontSize="11" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="180" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </Grid>
 
                         <ScrollViewer x:Name="ReaderAiSettingsView"

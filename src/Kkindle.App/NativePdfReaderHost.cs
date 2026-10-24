@@ -21,6 +21,10 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private sealed class CachedPage(PdfPageContent content) : IDisposable
     {
         public PdfPageContent Content { get; } = content;
+        private PdfTextSelectionLayout? _selectionLayout;
+        public PdfTextSelectionLayout SelectionLayout => _selectionLayout ??= new(Content);
+        private IReadOnlyList<PdfFootnoteReference>? _footnotes;
+        public IReadOnlyList<PdfFootnoteReference> Footnotes => _footnotes ??= PdfFootnoteLayout.Read(Content);
         public PdfRasterRegion? Raster { get; set; }
         public WriteableBitmap? Bitmap { get; set; }
         public ReaderPalette? Palette { get; set; }
@@ -50,6 +54,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private int _layoutRequest;
     private bool _disposed;
     private bool _syncingBars;
+    private bool _allowZoomOverpan;
     private Vector _pan;
     private Point? _pointerStart;
     private int _anchorOffset = -1;
@@ -68,18 +73,31 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private string _searchQuery = string.Empty;
     private (int Page, int Start, int Length)? _speechHighlight;
     private bool _pointAnnotationMode;
+    private bool _handToolMode;
+    private bool _isPanning;
+    private Point _handDragStart;
+    private Vector _handDragOrigin;
     private (Point Anchor, Rect Bounds)? _annotationCallout;
 
     public NativePdfReaderHost()
     {
         Focusable = true;
+        DetachedFromVisualTree += (_, _) => CloseFootnotePreview();
         ClipToBounds = true;
         ScrollBarAutoHide.SetIsEnabled(_vertical, true);
         ScrollBarAutoHide.SetIsEnabled(_horizontal, true);
         VisualChildren.Add(_vertical);
         VisualChildren.Add(_horizontal);
-        _vertical.ValueChanged += (_, _) => { if (!_syncingBars) SetPan(new(_pan.X, _vertical.Value)); };
-        _horizontal.ValueChanged += (_, _) => { if (!_syncingBars) SetPan(new(_horizontal.Value, _pan.Y)); };
+        _vertical.ValueChanged += (_, _) =>
+        {
+            if (!_syncingBars)
+                SetPan(new(_pan.X, _vertical.Value), allowZoomOverpan: HasZoomOverpan(new(_pan.X, _vertical.Value)));
+        };
+        _horizontal.ValueChanged += (_, _) =>
+        {
+            if (!_syncingBars)
+                SetPan(new(_horizontal.Value, _pan.Y), allowZoomOverpan: HasZoomOverpan(new(_horizontal.Value, _pan.Y)));
+        };
         // Marching ants for the picked highlight/underline: the outline dashes
         // walk while an annotation stays selected.
         _selectionDashTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
@@ -106,7 +124,14 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             RebuildLayout(preservePosition: true);
             ScheduleRender();
         };
-        PointerCaptureLost += (_, _) => { _pointerStart = null; _dragging = false; _pointerAnnotationHit = null; };
+        PointerCaptureLost += (_, _) =>
+        {
+            _pointerStart = null;
+            _dragging = false;
+            _isPanning = false;
+            _pointerAnnotationHit = null;
+            _pointerLink = null;
+        };
     }
 
     public object View => this;
@@ -120,6 +145,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     public PdfReaderFitMode FitMode { get; private set; } = PdfReaderFitMode.Width;
     public int Rotation { get; private set; }
     public bool IsPointAnnotationMode => _pointAnnotationMode;
+    public bool IsHandToolMode => _handToolMode;
     public string? LastError { get; private set; }
     public PdfPageContent? PageContent => GetPageContent(PageNumber);
     public double VisibleTop => GetVisibleTop(new Rect(Viewport));
@@ -183,7 +209,13 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         _pages.Clear();
         PageCount = count;
         PageNumber = 1;
+        Source = null;
+        _backHistory.Clear();
+        _forwardHistory.Clear();
+        PageNumberOffset = null;
         _pointAnnotationMode = false;
+        _handToolMode = false;
+        _isPanning = false;
         _sizes = Enumerable.Repeat(new Size(595, 842), count).ToArray();
         _layout = null;
         _pan = default;
@@ -194,7 +226,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         return count;
     }
 
-    public async Task<bool> NavigateAsync(Uri uri, CancellationToken cancellationToken = default)
+    public async Task<bool> NavigateAsync(Uri uri, CancellationToken cancellationToken = default, bool recordHistory = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var starting = new ReaderNavigationStartingEventArgs(uri);
@@ -202,6 +234,8 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         if (starting.Cancel || !uri.IsFile) return false;
         try
         {
+            var previous = Source is not null && string.Equals(_documentPath, uri.LocalPath, StringComparison.OrdinalIgnoreCase)
+                ? CaptureNavigationPoint() : null;
             await PrepareDocumentAsync(uri.LocalPath, cancellationToken);
             _navigation?.Cancel();
             _navigation?.Dispose();
@@ -212,6 +246,8 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             ++_rasterVersion;
             var pageNumber = Math.Clamp(ReadTargetPage(uri), 1, PageCount);
             _pointAnnotationMode = false;
+            _handToolMode = false;
+            _isPanning = false;
             LastError = null;
             var initialPages = DisplayMode == PdfReaderDisplayMode.TwoPage
                 ? Enumerable.Range((pageNumber - 1) / 2 * 2 + 1, Math.Min(2, PageCount - (pageNumber - 1) / 2 * 2)).ToArray()
@@ -231,6 +267,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             if (_disposed || version != _version) return false;
             if (LastError is not null) throw new InvalidOperationException(LastError);
             EmitPage();
+            if (recordHistory && previous is not null) AddNavigationPoint(previous);
             NavigationCompleted?.Invoke(this, new(uri, true));
             return true;
         }
@@ -368,12 +405,50 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         Emit(new { type = "pdfLayout" });
     }
 
-    public async Task SetZoomAsync(double zoom)
+    public async Task SetZoomAsync(double zoom, Point? anchor = null)
     {
         if (!double.IsFinite(zoom)) return;
         ++_layoutRequest;
         Zoom = Math.Clamp(zoom, 0.25, 8);
-        RebuildLayout(preservePosition: true);
+        if (_layout is { Pages.Length: > 0 })
+        {
+            var anchorPoint = anchor ?? new Point(Viewport.Width / 2, Viewport.Height / 2);
+            var anchorPage = VisiblePageNumbers
+                .OrderBy(pageNumber =>
+                {
+                    var bounds = GetPageBounds(pageNumber);
+                    var dx = Math.Max(0, Math.Max(bounds.Left - anchorPoint.X, anchorPoint.X - bounds.Right));
+                    var dy = Math.Max(0, Math.Max(bounds.Top - anchorPoint.Y, anchorPoint.Y - bounds.Bottom));
+                    return dx * dx + dy * dy;
+                })
+                .FirstOrDefault();
+            if (anchorPage == 0) anchorPage = Math.Clamp(PageNumber, 1, _layout.Pages.Length);
+
+            var oldPage = GetPageBounds(anchorPage);
+            var oldSize = GetUnrotatedPageSize(oldPage);
+            var local = GetPageTransform(oldPage).Invert().Transform(anchorPoint);
+            var fraction = new Point(
+                Math.Clamp(local.X / Math.Max(1, oldSize.Width), 0, 1),
+                Math.Clamp(local.Y / Math.Max(1, oldSize.Height), 0, 1));
+
+            RebuildLayout(preservePosition: false);
+            var newPage = _layout.Pages[anchorPage - 1];
+            var newSize = GetUnrotatedPageSize(newPage);
+            var anchoredPoint = GetPageTransform(newPage).Transform(new Point(
+                fraction.X * newSize.Width,
+                fraction.Y * newSize.Height));
+            var anchoredPan = new Vector(anchoredPoint.X - anchorPoint.X, anchoredPoint.Y - anchorPoint.Y);
+            var maxPan = new Vector(
+                Math.Max(0, _layout.Extent.Width - Viewport.Width),
+                Math.Max(0, _layout.Extent.Height - Viewport.Height));
+            var needsOverpan = anchoredPan.X < 0 || anchoredPan.Y < 0
+                || anchoredPan.X > maxPan.X || anchoredPan.Y > maxPan.Y;
+            SetPan(anchoredPan, render: false, allowZoomOverpan: needsOverpan);
+        }
+        else
+        {
+            RebuildLayout(preservePosition: false);
+        }
         Emit(new { type = "pdfZoom", zoom = Zoom });
         await RefreshViewportAsync();
     }
@@ -397,9 +472,9 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         Emit(new { type = "pdfLayout" });
     }
 
-    private double PagePanY => _layout is null ? 0 : Math.Max(0, _pan.Y - _layout.Pages[PageNumber - 1].Y + PdfReaderLayout.Margin);
+    private double PagePanY => _layout is null ? 0 : _pan.Y - _layout.Pages[PageNumber - 1].Y + PdfReaderLayout.Margin;
     public string CaptureViewState() => string.Create(CultureInfo.InvariantCulture,
-        $"pdf-view:{Zoom:R};{_pan.X / Math.Max(1, PageBounds.Width):R};{PagePanY / Math.Max(1, PageBounds.Height):R};{(int)DisplayMode};{(int)FitMode};{Rotation}");
+        $"pdf-view:{Zoom:R};{_pan.X / Math.Max(1, PageBounds.Width):R};{PagePanY / Math.Max(1, PageBounds.Height):R};{(int)DisplayMode};{(int)FitMode};{Rotation};{PageNumberOffset ?? 0};{(PageNumberOffset.HasValue ? 1 : 0)}");
 
     public void RestoreViewSettings(string? state)
     {
@@ -409,6 +484,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         DisplayMode = values.Length == 3 ? PdfReaderDisplayMode.SinglePage : (PdfReaderDisplayMode)(int)values[3];
         FitMode = values.Length == 3 ? PdfReaderFitMode.Width : (PdfReaderFitMode)(int)values[4];
         Rotation = values.Length > 5 ? (int)values[5] : 0;
+        PageNumberOffset = values.Length >= 8 && values[7] == 1 ? (int)values[6] : null;
     }
 
     public async Task RestoreViewStateAsync(string? state, int legacyScrollPosition = 0)
@@ -419,9 +495,10 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         if (_layout is not null)
         {
             var page = _layout.Pages[PageNumber - 1];
-            SetPan(values is null ? new(0, page.Y - PdfReaderLayout.Margin + Math.Max(0, legacyScrollPosition))
-                : new(Math.Clamp(values[1], 0, 1) * page.Width,
-                    page.Y - PdfReaderLayout.Margin + Math.Clamp(values[2], 0, 1) * page.Height), trackPage: false, render: false);
+            var pan = values is null ? new Vector(0, page.Y - PdfReaderLayout.Margin + Math.Max(0, legacyScrollPosition))
+                : new Vector(Math.Clamp(values[1], -2, 3) * page.Width,
+                    page.Y - PdfReaderLayout.Margin + Math.Clamp(values[2], -2, 3) * page.Height);
+            SetPan(pan, trackPage: false, render: false, allowZoomOverpan: HasZoomOverpan(pan));
         }
         await RefreshViewportAsync();
     }
@@ -429,7 +506,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     private static double[]? ParseViewState(string? state)
     {
         var values = state?.StartsWith("pdf-view:", StringComparison.Ordinal) == true ? state[9..].Split(';') : [];
-        if (values.Length is not (3 or 5 or 6 or 7)) return null;
+        if (values.Length is not (3 or 5 or 6 or 7 or 8)) return null;
         var parsed = new double[values.Length];
         for (var index = 0; index < values.Length; index++)
             if (!double.TryParse(values[index], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[index]) || !double.IsFinite(parsed[index])) return null;
@@ -440,11 +517,13 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         if (values.Length >= 5 && (parsed[3] != Math.Truncate(parsed[3]) || parsed[4] != Math.Truncate(parsed[4])
             || !Enum.IsDefined((PdfReaderDisplayMode)(int)parsed[3]) || !Enum.IsDefined((PdfReaderFitMode)(int)parsed[4]))) return null;
         if (values.Length >= 6 && parsed[5] is not (0 or 90 or 180 or 270)) return null;
+        if (values.Length >= 8 && (parsed[6] != Math.Truncate(parsed[6]) || Math.Abs(parsed[6]) > 1_000_000 || parsed[7] is not (0 or 1))) return null;
         return parsed;
     }
 
     private void RebuildLayout(bool preservePosition)
     {
+        CloseFootnotePreview();
         if (_sizes.Length == 0 || _disposed) return;
         var fractionX = _pan.X / Math.Max(1, PageBounds.Width);
         var fractionY = PagePanY / Math.Max(1, PageBounds.Height);
@@ -650,19 +729,23 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             _vertical.ViewportSize = Viewport.Height;
             _horizontal.ViewportSize = Viewport.Width;
             var dpi = DeviceScaling;
-            _pan = new(Math.Round(Math.Clamp(_pan.X, 0, _horizontal.Maximum) * dpi) / dpi,
-                Math.Round(Math.Clamp(_pan.Y, 0, _vertical.Maximum) * dpi) / dpi);
-            _vertical.Value = _pan.Y;
-            _horizontal.Value = _pan.X;
+            _pan = _allowZoomOverpan
+                ? new(Math.Round(_pan.X * dpi) / dpi, Math.Round(_pan.Y * dpi) / dpi)
+                : new(Math.Round(Math.Clamp(_pan.X, 0, _horizontal.Maximum) * dpi) / dpi,
+                    Math.Round(Math.Clamp(_pan.Y, 0, _vertical.Maximum) * dpi) / dpi);
+            _vertical.Value = Math.Clamp(_pan.Y, 0, _vertical.Maximum);
+            _horizontal.Value = Math.Clamp(_pan.X, 0, _horizontal.Maximum);
             _vertical.IsVisible = _vertical.Maximum > 1;
             _horizontal.IsVisible = _horizontal.Maximum > 1;
         }
         finally { _syncingBars = false; }
     }
 
-    private void SetPan(Vector pan, bool trackPage = true, bool render = true)
+    private void SetPan(Vector pan, bool trackPage = true, bool render = true, bool allowZoomOverpan = false)
     {
+        CloseFootnotePreview();
         _pan = pan;
+        _allowZoomOverpan = allowZoomOverpan;
         SyncScrollBars();
         UpdateAnnotationCallout();
         if (trackPage && DisplayMode == PdfReaderDisplayMode.Continuous && _layout is not null)
@@ -689,8 +772,39 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     public void ScrollBy(double pixels)
     {
         ScrollBarAutoHide.Show(_vertical);
-        SetPan(new(_pan.X, _pan.Y + pixels));
+        ScrollPanBy(new(0, pixels));
     }
+
+    private void ScrollPanBy(Vector delta)
+    {
+        var maxX = _horizontal.Maximum;
+        var maxY = _vertical.Maximum;
+        var pan = new Vector(
+            ApplyScrollDelta(_pan.X, delta.X, maxX),
+            ApplyScrollDelta(_pan.Y, delta.Y, maxY));
+        SetPan(pan, allowZoomOverpan: HasZoomOverpan(pan));
+    }
+
+    private bool HasZoomOverpan(Vector pan) =>
+        pan.X < 0 || pan.Y < 0 || pan.X > _horizontal.Maximum || pan.Y > _vertical.Maximum;
+
+    private static double ApplyScrollDelta(double current, double delta, double maximum)
+    {
+        if (current < 0)
+        {
+            if (delta <= 0) return current;
+            var next = current + delta;
+            return next < 0 ? next : Math.Clamp(next, 0, maximum);
+        }
+        if (current > maximum)
+        {
+            if (delta >= 0) return current;
+            var next = current + delta;
+            return next > maximum ? next : Math.Clamp(next, 0, maximum);
+        }
+        return Math.Clamp(current + delta, 0, maximum);
+    }
+
     public void ScrollToTop(double top)
     {
         if (_layout is null) return;
@@ -733,6 +847,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
 
     public void Stop()
     {
+        CloseFootnotePreview();
         _documentReady = false;
         _navigation?.Cancel();
         _viewportCancellation?.Cancel();

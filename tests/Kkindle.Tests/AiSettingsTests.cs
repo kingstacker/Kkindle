@@ -7,6 +7,28 @@ namespace Kkindle.Tests;
 
 public sealed class AiSettingsTests
 {
+    [Fact]
+    public async Task QuickModelSelectionPreservesEndpointAndUnreadableStoredKey()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            var readable = new AiSettingsStore(paths, new TestHelpers.PlaintextSecretProtector());
+            await readable.SaveAsync(new AiConnectionSettings
+            {
+                Provider = "custom", BaseUrl = "https://example.com/v1", Model = "old-model", ApiKey = "saved-key"
+            });
+            await new AiSettingsStore(paths, new UnreadableSecretProtector("crypto")).SaveModelAsync("chosen-model");
+            var restored = await readable.LoadAsync();
+            Assert.Equal("chosen-model", restored.Model);
+            Assert.Equal("custom", restored.Provider);
+            Assert.Equal("https://example.com/v1", restored.BaseUrl);
+            Assert.Equal("saved-key", restored.ApiKey);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     [Theory]
     [InlineData("crypto")]
     [InlineData("win32")]

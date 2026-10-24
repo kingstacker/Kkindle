@@ -1,274 +1,367 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Controls.Primitives;
+using Avalonia.Data;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Markdig;
+using Markdig.Extensions.EmphasisExtras;
+using Markdig.Extensions.Tables;
+using Markdig.Extensions.TaskLists;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 
 namespace Kkindle;
 
 /// <summary>
-/// Lightweight Markdown renderer for AI assistant bubbles. The WinUI
-/// reference rendered answers with MarkdownRichTextBlock; Avalonia ships no
-/// equivalent, so this TextBlock subclass rebuilds its inlines from the plain
-/// markdown text. Supports headings, lists, quotes, fenced code blocks,
-/// separators, bold/italic/strikethrough, inline code, links (rendered as underlined
-/// text), and embedded images. AI source citations such as [S1] are rendered as clickable buttons
-/// through CitationAction. Text stays selectable like the reference.
+/// Native, offline Markdown rendering for answers and reflection previews.
+/// CommonMark parsing preserves nested formatting, lists, code and tables.
+/// Citations and TeX are embedded without changing the original answer.
 /// </summary>
-public sealed class KreaderMarkdownTextBlock : TextBlock
+public sealed partial class KreaderMarkdownTextBlock : TextBlock
 {
     public static readonly StyledProperty<string?> MarkdownProperty =
         AvaloniaProperty.Register<KreaderMarkdownTextBlock, string?>(nameof(Markdown));
+    public static readonly StyledProperty<Action<string>?> CitationActionProperty =
+        AvaloniaProperty.Register<KreaderMarkdownTextBlock, Action<string>?>(nameof(CitationAction));
+    public static readonly StyledProperty<Func<string, ReaderAiSourceViewModel?>?> CitationSourceResolverProperty =
+        AvaloniaProperty.Register<KreaderMarkdownTextBlock, Func<string, ReaderAiSourceViewModel?>?>(nameof(CitationSourceResolver));
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UsePipeTables().UseTaskLists().UseEmphasisExtras(EmphasisExtraOptions.Strikethrough)
+        .UseAutoLinks().UseCjkFriendlyEmphasis().DisableHtml().Build();
+    private static readonly Regex ProtectedTokenPattern = new(@"\uE000\d+\uE001", RegexOptions.Compiled);
+    private static readonly Regex ImagePattern = new(
+        @"^\s*!\[(?<alt>[^\]]*)\]\((?<source>[^)\s\r\n]+)(?:\s*=\s*(?<width>\d+)(?:x(?<height>\d+))?)?\)\s*$",
+        RegexOptions.Compiled);
+    private readonly List<Bitmap> _markdownBitmaps = [];
+    private readonly List<Control> _embeddedBlocks = [];
+    private readonly List<(Border Border, bool Fill)> _themedBorders = [];
 
+    public KreaderMarkdownTextBlock() => TextWrapping = TextWrapping.Wrap;
     public string? Markdown
     {
         get => GetValue(MarkdownProperty);
         set => SetValue(MarkdownProperty, value);
     }
-
-    public static readonly StyledProperty<Action<string>?> CitationActionProperty =
-        AvaloniaProperty.Register<KreaderMarkdownTextBlock, Action<string>?>(nameof(CitationAction));
-
-    private static readonly Regex InlineTokenPattern = new(
-        @"(!\[[^\]\n]*\]\([^)]*\)|\[[Ss]\d+\]|\*\*[^*]+\*\*|`[^`]+`|~~[^~]+~~|\*[^*]+\*|\[[^\]\n]+\]\([^)]*\))",
-        RegexOptions.Compiled);
-    private static readonly Regex ImagePattern = new(
-        @"^\s*!\[(?<alt>[^\]]*)\]\((?<source>[^)\s\r\n]+)(?:\s*=\s*(?<width>\d+)(?:x(?<height>\d+))?)?\)\s*$",
-        RegexOptions.Compiled);
-
-    private static readonly Regex HeadingPattern = new(
-        @"^(#{1,4})\s+(.*)$",
-        RegexOptions.Compiled);
-
-    private static readonly Regex ListPattern = new(
-        @"^\s*(?:[-*+]|\d+[.)])\s+(.*)$",
-        RegexOptions.Compiled);
-
-    private static readonly Regex TaskListPattern = new(
-        @"^\s*(?:[-*+])\s+\[(?<done>[ xX])\]\s+(?<text>.*)$",
-        RegexOptions.Compiled);
-
-    private static readonly Regex QuotePattern = new(
-        @"^>\s?(.*)$",
-        RegexOptions.Compiled);
-
-    private static readonly Regex SeparatorPattern = new(
-        @"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$",
-        RegexOptions.Compiled);
-
-    private readonly List<Bitmap> _markdownBitmaps = [];
-
-    public KreaderMarkdownTextBlock()
-    {
-        TextWrapping = TextWrapping.Wrap;
-    }
-
     public Action<string>? CitationAction
     {
         get => GetValue(CitationActionProperty);
         set => SetValue(CitationActionProperty, value);
     }
+    public Func<string, ReaderAiSourceViewModel?>? CitationSourceResolver
+    {
+        get => GetValue(CitationSourceResolverProperty);
+        set => SetValue(CitationSourceResolverProperty, value);
+    }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        // TextBlock.Text and Inlines share storage. Binding the markdown to
-        // Text lets inline mutations clear the source and erase the answer.
-        if (change.Property == MarkdownProperty || change.Property == CitationActionProperty)
-            RebuildMarkdownInlines(Markdown);
+        // Text and Inlines share storage. Keep Markdown as a separate source
+        // throughout streaming updates and citation rebinding.
+        if (change.Property == MarkdownProperty || change.Property == CitationActionProperty || change.Property == CitationSourceResolverProperty)
+            RebuildMarkdownInlines();
+        else if (change.Property == BoundsProperty || change.Property == ForegroundProperty || change.Property == FontSizeProperty)
+        {
+            UpdateMathAppearance();
+            UpdateBlockAppearance();
+        }
     }
 
-    private void RebuildMarkdownInlines(string? markdown)
+    private void RebuildMarkdownInlines()
     {
-        foreach (var bitmap in _markdownBitmaps)
-            bitmap.Dispose();
+        foreach (var bitmap in _markdownBitmaps) bitmap.Dispose();
         _markdownBitmaps.Clear();
+        _markdownMath.Clear();
+        _mathViews.Clear();
+        _embeddedBlocks.Clear();
+        _themedBorders.Clear();
         Inlines = new InlineCollection();
-        if (string.IsNullOrWhiteSpace(markdown)) return;
-
-        var lines = markdown.Replace("\r\n", "\n").Split('\n');
-        var paragraph = new StringBuilder();
-        var inCodeBlock = false;
-        var codeBuilder = new StringBuilder();
-
-        void FlushParagraph()
-        {
-            if (paragraph.Length == 0) return;
-            AppendInlineMarkup(paragraph.ToString());
-            paragraph.Clear();
-        }
-
-        for (var index = 0; index < lines.Length; index++)
-        {
-            var line = lines[index];
-            var trimmed = line.Trim();
-
-            if (trimmed.StartsWith("```", StringComparison.Ordinal))
-            {
-                FlushParagraph();
-                if (!inCodeBlock)
-                {
-                    inCodeBlock = true;
-                    codeBuilder.Clear();
-                }
-                else
-                {
-                    inCodeBlock = false;
-                    AppendCodeBlock(codeBuilder.ToString());
-                    codeBuilder.Clear();
-                }
-                continue;
-            }
-
-            if (inCodeBlock)
-            {
-                codeBuilder.AppendLine(line);
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(trimmed))
-            {
-                FlushParagraph();
-                AddLineBreak();
-                continue;
-            }
-
-            if (SeparatorPattern.IsMatch(trimmed))
-            {
-                FlushParagraph();
-                AddSeparator();
-                continue;
-            }
-
-            var heading = HeadingPattern.Match(trimmed);
-            if (heading.Success)
-            {
-                FlushParagraph();
-                AddHeading(heading.Groups[2].Value, heading.Groups[1].Value.Length);
-                continue;
-            }
-
-            var quote = QuotePattern.Match(trimmed);
-            if (quote.Success)
-            {
-                FlushParagraph();
-                AppendQuote(quote.Groups[1].Value);
-                continue;
-            }
-
-            var task = TaskListPattern.Match(trimmed);
-            if (task.Success)
-            {
-                paragraph.Append(task.Groups["done"].Value is "x" or "X" ? "☑ " : "☐ ")
-                    .Append(task.Groups["text"].Value)
-                    .Append('\n');
-                continue;
-            }
-
-            var list = ListPattern.Match(trimmed);
-            if (list.Success)
-            {
-                paragraph.Append("• ").Append(list.Groups[1].Value).Append('\n');
-                continue;
-            }
-
-            paragraph.Append(line).Append('\n');
-        }
-
-        FlushParagraph();
-        if (inCodeBlock && codeBuilder.Length > 0)
-            AppendCodeBlock(codeBuilder.ToString());
+        if (string.IsNullOrWhiteSpace(Markdown)) return;
+        var document = Markdig.Markdown.Parse(ProtectMath(Markdown.ReplaceLineEndings("\n")), Pipeline);
+        RenderBlocks(document, Inlines, 0);
+        UpdateBlockAppearance();
     }
 
-    private void AppendInlineMarkup(string text)
+    private void RenderBlocks(ContainerBlock blocks, InlineCollection target, int depth)
     {
-        var matches = InlineTokenPattern.Matches(text);
-        var position = 0;
-        foreach (Match match in matches)
+        var first = true;
+        foreach (var block in blocks)
         {
-            if (match.Index > position)
-                Inlines?.Add(new Run(text[position..match.Index]));
-            var token = match.Value;
-            if (token.StartsWith("![", StringComparison.Ordinal))
+            if (block is LinkReferenceDefinitionGroup) continue;
+            if (!first) target.Add(new LineBreak());
+            first = false;
+            switch (block)
             {
-                var image = CreateMarkdownImage(token);
-                Inlines?.Add(image is null
-                    ? new Run(token)
-                    : new InlineUIContainer(image));
-            }
-            else if (Regex.IsMatch(token, @"^\[[Ss]\d+\]$", RegexOptions.CultureInvariant))
-            {
-                var sourceId = token[1..^1].ToUpperInvariant();
-                var citationButton = new Button
-                {
-                    Content = $"[{sourceId}]",
-                    Focusable = true,
-                    Padding = new Thickness(1, 0),
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                    VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center
-                };
-                citationButton.Classes.Add("readerAiCitationMarker");
-                citationButton.Click += (_, _) => CitationAction?.Invoke(sourceId);
-                Inlines?.Add(new InlineUIContainer(citationButton));
-            }
-            else if (token.StartsWith("**", StringComparison.Ordinal) && token.EndsWith("**", StringComparison.Ordinal))
-            {
-                Inlines?.Add(new Run(token[2..^2]) { FontWeight = FontWeight.Bold });
-            }
-            else if (token.StartsWith('`') && token.EndsWith('`') && token.Length >= 2)
-            {
-                Inlines?.Add(new Run(token[1..^1])
-                {
-                    FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
-                    FontSize = FontSize - 1,
-                    Background = new SolidColorBrush(Color.FromArgb(255, 242, 242, 240)),
-                    Foreground = new SolidColorBrush(Color.FromArgb(255, 36, 36, 36))
-                });
-            }
-            else if (token.StartsWith("~~", StringComparison.Ordinal) && token.EndsWith("~~", StringComparison.Ordinal))
-            {
-                Inlines?.Add(new Run(token[2..^2])
-                {
-                    TextDecorations = Avalonia.Media.TextDecorations.Strikethrough
-                });
-            }
-            else if (token.StartsWith('*') && token.EndsWith('*') && token.Length >= 2)
-            {
-                Inlines?.Add(new Run(token[1..^1]) { FontStyle = FontStyle.Italic });
-            }
-            else if (token.StartsWith('[') && token.EndsWith(')'))
-            {
-                var separator = token.IndexOf("](", StringComparison.Ordinal);
-                if (separator > 1)
-                {
-                    Inlines?.Add(new Run(token[1..separator])
+                case HeadingBlock heading:
+                    var headingSpan = new Span
                     {
-                        TextDecorations = Avalonia.Media.TextDecorations.Underline
-                    });
-                }
-                else
-                {
-                    Inlines?.Add(new Run(token));
-                }
+                        FontSize = FontSize * (heading.Level switch { 1 => 1.5, 2 => 1.3, 3 => 1.15, _ => 1.05 }),
+                        FontWeight = FontWeight.SemiBold
+                    };
+                    RenderInline(heading.Inline, headingSpan.Inlines);
+                    target.Add(headingSpan);
+                    break;
+                case ParagraphBlock paragraph:
+                    RenderInline(paragraph.Inline, target);
+                    break;
+                case ListBlock list:
+                    RenderList(list, target, depth);
+                    break;
+                case QuoteBlock quote:
+                    var quoteText = CreateBlockText();
+                    RenderBlocks(quote, quoteText.Inlines!, depth);
+                    var quoteBorder = new Border
+                    {
+                        BorderThickness = new Thickness(2, 0, 0, 0),
+                        Padding = new Thickness(10, 3, 0, 3), Child = quoteText
+                    };
+                    _themedBorders.Add((quoteBorder, false));
+                    AddBlock(quoteBorder, target);
+                    break;
+                case CodeBlock code:
+                    AddCodeBlock(code, target);
+                    break;
+                case Table table:
+                    AddTable(table, target);
+                    break;
+                case ThematicBreakBlock:
+                    var rule = new Border { Height = 1, Width = MathWidth, Margin = new Thickness(0, 7) };
+                    _themedBorders.Add((rule, true));
+                    AddBlock(rule, target);
+                    break;
+                case ContainerBlock container:
+                    RenderBlocks(container, target, depth);
+                    break;
+                case LeafBlock leaf:
+                    RenderInline(leaf.Inline, target);
+                    break;
             }
-            else
+            while (target.LastOrDefault() is LineBreak) target.RemoveAt(target.Count - 1);
+            target.Add(new LineBreak());
+        }
+        while (target.LastOrDefault() is LineBreak) target.RemoveAt(target.Count - 1);
+    }
+
+    private void RenderList(ListBlock list, InlineCollection target, int depth)
+    {
+        _ = int.TryParse(list.OrderedStart, CultureInfo.InvariantCulture, out var number);
+        foreach (var item in list.OfType<ListItemBlock>())
+        {
+            var first = true;
+            foreach (var block in item)
             {
-                Inlines?.Add(new Run(token));
+                if (block is ParagraphBlock paragraph)
+                {
+                    target.Add(new Run(new string(' ', Math.Min(depth, 12) * 3)));
+                    var task = paragraph.Inline?.FirstChild is TaskList;
+                    if (first && !task) target.Add(new Run(list.IsOrdered ? $"{number}. " : "• "));
+                    else if (!first) target.Add(new Run("   "));
+                    RenderInline(paragraph.Inline, target);
+                    target.Add(new LineBreak());
+                }
+                else if (block is ListBlock nested)
+                    RenderList(nested, target, depth + 1);
+                else if (block is ContainerBlock container)
+                    RenderBlocks(container, target, depth + 1);
+                else if (block is CodeBlock code)
+                    AddCodeBlock(code, target);
+                first = false;
             }
+            number++;
+        }
+    }
+
+    private void RenderInline(ContainerInline? container, InlineCollection target)
+    {
+        if (container is null) return;
+        foreach (var inline in container)
+        {
+            switch (inline)
+            {
+                case LiteralInline literal:
+                    AppendLiteral(literal.Content.ToString(), target);
+                    break;
+                case LineBreakInline:
+                    target.Add(new LineBreak());
+                    break;
+                case CodeInline code:
+                    target.Add(new Run(code.Content)
+                    {
+                        FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
+                        FontSize = Math.Max(10, FontSize - 1)
+                    });
+                    break;
+                case EmphasisInline emphasis:
+                    var span = new Span();
+                    if (emphasis.DelimiterChar == '~') span.TextDecorations = Avalonia.Media.TextDecorations.Strikethrough;
+                    else if (emphasis.DelimiterCount >= 2) span.FontWeight = FontWeight.Bold;
+                    else span.FontStyle = FontStyle.Italic;
+                    RenderInline(emphasis, span.Inlines);
+                    target.Add(span);
+                    break;
+                case LinkInline { IsImage: true } imageLink:
+                    var alt = InlineText(imageLink);
+                    var image = CreateMarkdownImage($"![{alt}]({imageLink.Url})");
+                    target.Add(image is null ? new Run(alt) : new InlineUIContainer(image));
+                    break;
+                case LinkInline link:
+                    var linkSpan = new Span { TextDecorations = Avalonia.Media.TextDecorations.Underline };
+                    RenderInline(link, linkSpan.Inlines);
+                    target.Add(linkSpan);
+                    break;
+                case AutolinkInline link:
+                    target.Add(new Run(link.Url) { TextDecorations = Avalonia.Media.TextDecorations.Underline });
+                    break;
+                case HtmlEntityInline entity:
+                    target.Add(new Run(entity.Transcoded.ToString()));
+                    break;
+                case TaskList task:
+                    target.Add(new Run(task.Checked ? "☑" : "☐"));
+                    break;
+                case ContainerInline nested:
+                    RenderInline(nested, target);
+                    break;
+            }
+        }
+    }
+
+    private static string InlineText(ContainerInline container) => string.Concat(container.Select(inline => inline switch
+    {
+        LiteralInline text => text.Content.ToString(),
+        ContainerInline nested => InlineText(nested),
+        _ => string.Empty
+    }));
+
+    private void AppendLiteral(string text, InlineCollection target)
+    {
+        var position = 0;
+        foreach (Match match in ProtectedTokenPattern.Matches(text))
+        {
+            if (match.Index > position) target.Add(new Run(text[position..match.Index]));
+            AppendMath(match.Value, target);
             position = match.Index + match.Length;
         }
-        if (position < text.Length)
-            Inlines?.Add(new Run(text[position..]));
+        if (position < text.Length) target.Add(new Run(text[position..]));
+    }
+
+    private void AppendCitation(string source, InlineCollection target)
+    {
+        var sourceId = source[1..^1].ToUpperInvariant();
+        var button = new Button
+        {
+            Content = $"[{sourceId}]", Focusable = true, Padding = new Thickness(1, 0),
+            VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center
+        };
+        button.Classes.Add("readerAiCitationMarker");
+        AttachCitationPreview(button, sourceId);
+        button.Click += (_, _) => CitationAction?.Invoke(sourceId);
+        target.Add(new InlineUIContainer(button));
+    }
+
+    private TextBlock CreateBlockText()
+    {
+        var text = new TextBlock { Inlines = new InlineCollection(), TextWrapping = TextWrapping.Wrap };
+        text.Bind(ForegroundProperty, new Binding(nameof(Foreground)) { Source = this });
+        text.Bind(FontSizeProperty, new Binding(nameof(FontSize)) { Source = this });
+        return text;
+    }
+
+    private void AddBlock(Control control, InlineCollection target)
+    {
+        control.MaxWidth = MathWidth;
+        control.HorizontalAlignment = HorizontalAlignment.Left;
+        _embeddedBlocks.Add(control);
+        target.Add(new InlineUIContainer(control));
+    }
+
+    private void AddCodeBlock(CodeBlock code, InlineCollection target)
+    {
+        var contents = new StackPanel { Spacing = 6 };
+        if (code is FencedCodeBlock { Info.Length: > 0 } fenced)
+        {
+            var language = new TextBlock { Text = fenced.Info, FontSize = 10, Opacity = 0.65 };
+            language.Bind(ForegroundProperty, new Binding(nameof(Foreground)) { Source = this });
+            contents.Children.Add(language);
+        }
+        var text = new SelectableTextBlock
+        {
+            Text = code.Lines.ToString(), FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
+            FontSize = Math.Max(10, FontSize - 1), TextWrapping = TextWrapping.NoWrap
+        };
+        text.Bind(ForegroundProperty, new Binding(nameof(Foreground)) { Source = this });
+        contents.Children.Add(new ScrollViewer
+        {
+            Content = text, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
+        });
+        var border = new Border { Padding = new Thickness(10), Child = contents, CornerRadius = new CornerRadius(3) };
+        _themedBorders.Add((border, true));
+        AddBlock(border, target);
+    }
+
+    private void AddTable(Table table, InlineCollection target)
+    {
+        var grid = new Grid();
+        var columns = Math.Max(1, table.ColumnDefinitions.Count);
+        for (var i = 0; i < columns; i++) grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        for (var rowIndex = 0; rowIndex < table.Count; rowIndex++)
+        {
+            if (table[rowIndex] is not TableRow row) continue;
+            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            for (var columnIndex = 0; columnIndex < row.Count; columnIndex++)
+            {
+                if (row[columnIndex] is not TableCell cell) continue;
+                var text = CreateBlockText();
+                text.MinWidth = 68;
+                text.MaxWidth = 220;
+                if (row.IsHeader) text.FontWeight = FontWeight.SemiBold;
+                if (columnIndex < table.ColumnDefinitions.Count)
+                    text.TextAlignment = table.ColumnDefinitions[columnIndex].Alignment switch
+                    {
+                        TableColumnAlign.Center => TextAlignment.Center,
+                        TableColumnAlign.Right => TextAlignment.Right,
+                        _ => TextAlignment.Left
+                    };
+                RenderBlocks(cell, text.Inlines!, 0);
+                var border = new Border { Padding = new Thickness(8, 5), BorderThickness = new Thickness(0, 0, 0, 1), Child = text };
+                _themedBorders.Add((border, row.IsHeader));
+                Grid.SetRow(border, rowIndex);
+                Grid.SetColumn(border, columnIndex);
+                grid.Children.Add(border);
+            }
+        }
+        AddBlock(new ScrollViewer
+        {
+            Content = grid, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
+        }, target);
+    }
+
+    private void UpdateBlockAppearance()
+    {
+        foreach (var block in _embeddedBlocks)
+        {
+            block.MaxWidth = MathWidth;
+            if (block is Border { Height: 1 }) block.Width = MathWidth;
+        }
+        var ink = (Foreground as ISolidColorBrush)?.Color ?? Colors.Black;
+        foreach (var (border, fill) in _themedBorders)
+        {
+            border.BorderBrush = new SolidColorBrush(ink, 0.25);
+            if (fill) border.Background = new SolidColorBrush(ink, 0.06);
+        }
     }
 
     private Image? CreateMarkdownImage(string token)
     {
         var match = ImagePattern.Match(token);
         if (!match.Success) return null;
-
-        var alt = match.Groups["alt"].Value;
         var source = match.Groups["source"].Value;
         Bitmap? bitmap = null;
         try
@@ -277,34 +370,21 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
             {
                 var comma = source.IndexOf(',');
                 if (comma < 0) return null;
-                var payload = source[(comma + 1)..];
                 var bytes = source[..comma].Contains(";base64", StringComparison.OrdinalIgnoreCase)
-                    ? Convert.FromBase64String(payload)
-                    : Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
+                    ? Convert.FromBase64String(source[(comma + 1)..])
+                    : Encoding.UTF8.GetBytes(Uri.UnescapeDataString(source[(comma + 1)..]));
                 using var stream = new MemoryStream(bytes, writable: false);
                 bitmap = new Bitmap(stream);
             }
-            else if (Uri.TryCreate(source, UriKind.Absolute, out var uri)
-                && uri.IsFile
-                && File.Exists(uri.LocalPath))
-            {
+            else if (Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.IsFile && File.Exists(uri.LocalPath))
                 bitmap = new Bitmap(uri.LocalPath);
-            }
-
             if (bitmap is null) return null;
             _markdownBitmaps.Add(bitmap);
-            var image = new Image
-            {
-                Source = bitmap,
-                Stretch = Stretch.Uniform,
-                MaxWidth = 520,
-                MaxHeight = 360
-            };
-            if (int.TryParse(match.Groups["width"].Value, out var width) && width > 0)
-                image.Width = width;
-            if (int.TryParse(match.Groups["height"].Value, out var height) && height > 0)
-                image.Height = height;
-            ToolTip.SetTip(image, alt);
+            var image = new Image { Source = bitmap, Stretch = Stretch.Uniform, MaxWidth = MathWidth, MaxHeight = 360 };
+            if (int.TryParse(match.Groups["width"].Value, out var width) && width > 0) image.Width = width;
+            if (int.TryParse(match.Groups["height"].Value, out var height) && height > 0) image.Height = height;
+            ToolTip.SetTip(image, match.Groups["alt"].Value);
+            _embeddedBlocks.Add(image);
             return image;
         }
         catch
@@ -313,77 +393,4 @@ public sealed class KreaderMarkdownTextBlock : TextBlock
             return null;
         }
     }
-
-    private void AddHeading(string text, int level)
-    {
-        var size = level switch
-        {
-            1 => 16d,
-            2 => 15d,
-            3 => 14d,
-            _ => 13d
-        };
-        Inlines?.Add(new Run(text)
-        {
-            FontSize = size,
-            FontWeight = FontWeight.SemiBold
-        });
-        AddLineBreak();
-    }
-
-    private void AppendQuote(string text)
-    {
-        var quoteSize = Math.Max(24, FontSize + 12);
-        Inlines?.Add(new Run("“")
-        {
-            Foreground = ThemeBrush("AccentBrush"),
-            FontSize = quoteSize,
-            FontWeight = FontWeight.SemiBold
-        });
-        Inlines?.Add(new Run(text)
-        {
-            Foreground = ThemeBrush("MutedInkBrush"),
-            FontStyle = FontStyle.Italic
-        });
-        Inlines?.Add(new Run("”")
-        {
-            Foreground = ThemeBrush("AccentBrush"),
-            FontSize = quoteSize,
-            FontWeight = FontWeight.SemiBold
-        });
-        AddLineBreak();
-    }
-
-    /// <summary>
-    /// Resolves a theme brush at render time, so a theme change is picked up by
-    /// the next render. Kept local instead of using AppAppearanceResources:
-    /// this file is linked into the portable test project, which compiles it
-    /// without the rest of the application.
-    /// </summary>
-    private static IBrush ThemeBrush(string key) =>
-        Application.Current?.Resources[key] as IBrush ?? Brushes.Black;
-
-    private void AppendCodeBlock(string code)
-    {
-        AddLineBreak();
-        Inlines?.Add(new Run(code.TrimEnd('\n'))
-        {
-            FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
-            FontSize = FontSize - 1,
-            Background = new SolidColorBrush(Color.FromArgb(255, 242, 242, 240)),
-            Foreground = new SolidColorBrush(Color.FromArgb(255, 36, 36, 36))
-        });
-        AddLineBreak();
-    }
-
-    private void AddSeparator()
-    {
-        Inlines?.Add(new Run("――――――――")
-        {
-            Foreground = new SolidColorBrush(Color.FromArgb(255, 213, 213, 209))
-        });
-        AddLineBreak();
-    }
-
-    private void AddLineBreak() => Inlines?.Add(new LineBreak());
 }

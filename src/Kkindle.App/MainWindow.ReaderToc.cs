@@ -908,6 +908,8 @@ public partial class MainWindow
             _readerTocExpanded ? 286d : _readerTocMinimal ? ReaderTocMinimalWidth : 0d);
         ReaderTocPanel.IsVisible = _readerTocExpanded;
         ReaderTocCompactPanel.IsVisible = _readerTocMinimal;
+        if (ReaderAssistantPanel.IsVisible && !_readerZenMode)
+            SetReaderAiPanelWidth(GetReaderAssistantPanelWidth());
         UpdateReaderToolbarAutoHide();
         // Opening the TOC changes the layout, not the availability of the
         // toolbar action. Keep its label at full opacity in both states.

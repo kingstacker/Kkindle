@@ -6,6 +6,39 @@ namespace Kkindle.TestFixtures;
 /// <summary>A deterministic PDF with text, a scan, nested outlines and a rotated crop.</summary>
 internal static class PdfFixture
 {
+    public static string WriteFootnotes(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "PDF footnotes.pdf");
+        var objects = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+            // Deliberately emit the definitions first, as real datasheets do.
+            Stream("BT /F1 10 Tf 40 130 Td (\\(2\\) Harmonics depend on board layout and components.) Tj 18 -12 Td (This continuation belongs to the same footnote.) Tj -18 -16 Td (\\(3\\) Lower VCO frequency can limit the detector.) Tj ET " +
+                "BT /F1 14 Tf 40 650 Td (Second harmonic) Tj /F1 10 Tf 1 0 0 1 148 655 Tm (\\(2\\)) Tj ET " +
+                "BT /F1 14 Tf 40 600 Td (Third harmonic) Tj /F1 10 Tf 1 0 0 1 134 605 Tm (\\(2\\)) Tj ET " +
+                "BT /F1 14 Tf 40 550 Td (Normal value \\(2\\) is not a reference.) Tj ET " +
+                "BT /F1 14 Tf 40 500 Td (Unknown note) Tj /F1 10 Tf 1 0 0 1 132 505 Tm (\\(9\\)) Tj ET")
+        };
+        using var file = File.Create(path);
+        void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));
+        WriteAscii("%PDF-1.7\n");
+        var offsets = new List<long> { 0 };
+        for (var index = 0; index < objects.Length; index++)
+        {
+            offsets.Add(file.Position);
+            WriteAscii($"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
+        }
+        var xref = file.Position;
+        WriteAscii($"xref\n0 {objects.Length + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets.Skip(1)) WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
+        WriteAscii($"trailer\n<< /Size {objects.Length + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return path;
+    }
+
     public static string Write(string directory, bool outline = true)
     {
         Directory.CreateDirectory(directory);
@@ -69,6 +102,47 @@ internal static class PdfFixture
             "<< /Type /Outlines /First 9 0 R /Last 10 0 R /Count 2 >>",
             "<< /Title (First entry) /Parent 8 0 R /Dest [4 0 R /XYZ null 600 null] /Next 10 0 R >>",
             "<< /Title (Second entry) /Parent 8 0 R /Dest [4 0 R /XYZ null 600 null] /Prev 9 0 R >>"
+        };
+        using var file = File.Create(path);
+        void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));
+        WriteAscii("%PDF-1.7\n");
+        var offsets = new List<long> { 0 };
+        for (var index = 0; index < objects.Count; index++)
+        {
+            offsets.Add(file.Position);
+            WriteAscii($"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
+        }
+        var xref = file.Position;
+        WriteAscii($"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets.Skip(1)) WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
+        WriteAscii($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return path;
+    }
+
+    public static string WriteNavigation(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "PDF navigation and columns.pdf");
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /PageLabels << /Nums [0 << /S /r >> 2 << /S /D /St 1 >>] >> >>",
+            "<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R] /Count 4 >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R /Annots [12 0 R 13 0 R 14 0 R 15 0 R] >>",
+            Stream("0 0 0 rg BT /F1 14 Tf 1 0 0 1 40 700 Tm (Left first line.) Tj 1 0 0 1 340 700 Tm (Right first line.) Tj 1 0 0 1 40 675 Tm (An inter-) Tj 1 0 0 1 340 675 Tm (Right second line.) Tj 1 0 0 1 40 650 Tm (esting example.) Tj 1 0 0 1 340 650 Tm (Right third line.) Tj 1 0 0 1 40 100 Tm (Go to note) Tj 1 0 0 1 200 100 Tm (Website) Tj 1 0 0 1 340 100 Tm (Rotated page) Tj ET"),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R /Annots [16 0 R] >>",
+            Stream("BT /F1 20 Tf 40 700 Td (Contents - return to columns) Tj ET"),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R /Annots [17 0 R] >>",
+            Stream("BT /F1 20 Tf 40 750 Td (Body page one) Tj 0 -350 Td (Footnote destination) Tj 0 -60 Td (Return to reference) Tj ET"),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 500 700] /CropBox [50 80 450 680] /Rotate 90 /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R /Annots [18 0 R] >>",
+            Stream("BT /F1 20 Tf 90 580 Td (Rotated return link) Tj ET"),
+            "<< /Type /Annot /Subtype /Link /Rect [40 90 160 115] /Border [0 0 0] /Dest [8 0 R /XYZ 40 400 null] >>",
+            "<< /Type /Annot /Subtype /Link /Rect [200 90 290 115] /A << /S /URI /URI (https://example.org/) >> >>",
+            "<< /Type /Annot /Subtype /Link /Rect [40 40 100 60] /A << /S /JavaScript /JS (app.alert) >> >>",
+            "<< /Type /Annot /Subtype /Link /Rect [340 90 490 115] /Dest [10 0 R /XYZ 90 580 null] >>",
+            "<< /Type /Annot /Subtype /Link /Rect [40 690 360 720] /A << /S /GoTo /D [4 0 R /XYZ null 700 null] >> >>",
+            "<< /Type /Annot /Subtype /Link /Rect [40 330 260 360] /Dest [4 0 R /XYZ null 700 null] >>",
+            "<< /Type /Annot /Subtype /Link /Rect [90 560 300 605] /Dest [4 0 R /Fit] >>"
         };
         using var file = File.Create(path);
         void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));

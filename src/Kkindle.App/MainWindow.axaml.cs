@@ -4352,6 +4352,7 @@ public partial class MainWindow : Window
             || DoubanCandidateOverlay.IsVisible || DoubanPreviewOverlay.IsVisible
             || ImportFormatSelectionOverlay.IsVisible || ImportConflictOverlay.IsVisible)
             return;
+        if (TryHandleReaderPdfHistoryKey(e)) return;
         if (e.Key == Key.F1)
         {
             e.Handled = true;

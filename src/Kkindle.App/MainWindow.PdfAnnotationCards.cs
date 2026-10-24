@@ -14,11 +14,11 @@ public partial class MainWindow
     private readonly List<Popup> _readerPdfAnnotationPopups = [];
     private ContextMenu? _readerPdfAnnotationMenu;
 
-    // Small context menu for a right-clicked highlight/underline/note. Editing
-    // and deleting live here instead of a full-window confirmation dialog.
+    // Right-click menu for a selected PDF annotation.
     private void ShowReaderPdfAnnotationMenu(ReaderAnnotation annotation)
     {
         HideReaderPdfAnnotationMenu();
+        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
         var menu = new ContextMenu { Classes = { "shelfViewMenu" }, Placement = PlacementMode.Pointer };
         var edit = new MenuItem { Header = T("编辑批注"), Tag = "edit" };
         edit.Click += (_, _) =>
@@ -34,13 +34,14 @@ public partial class MainWindow
         };
         menu.Items.Add(edit);
         menu.Items.Add(delete);
+
         menu.Closed += (_, _) =>
         {
             if (ReferenceEquals(_readerPdfAnnotationMenu, menu)) _readerPdfAnnotationMenu = null;
         };
         _readerPdfAnnotationMenu = menu;
-        var target = CurrentReaderHost is NativePdfReaderHost pdf && pdf.View is Control view
-            ? view
+        var target = pdf.View is Control pdfView
+            ? pdfView
             : (Control)ReaderWebViewHost;
         // Open after the current pointer event finishes: opening inline lets the
         // same right-click's release reach the new menu and light-dismiss it.
