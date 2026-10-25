@@ -5797,10 +5797,14 @@
                                                                     Spacing="5"
                                                                     IsVisible="{Binding IsThinkingRowVisible}">
                                                             <Button Classes="readerAiReasoningToggle"
-                                                                    Content="{Binding ReasoningToggleLabel}"
                                                                     IsVisible="{Binding HasReasoning}"
                                                                     HorizontalAlignment="Left"
-                                                                    Click="ReaderAiReasoningToggleButton_Click" />
+                                                                    Click="ReaderAiReasoningToggleButton_Click">
+                                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                    <TextBlock Text="{Binding ReasoningToggleGlyph}" FontSize="10" />
+                                                                    <TextBlock Text="{Binding ReasoningToggleLabel}" />
+                                                                </StackPanel>
+                                                            </Button>
                                                             <TextBlock Text="{Binding ThinkingLabel}"
                                                                        IsVisible="{Binding IsThinkingLabelVisible}"
                                                                        FontSize="11"
@@ -5833,7 +5837,7 @@
                                                                                           CitationAction="{Binding CitationAction}"
                                                                                           CitationSourceResolver="{Binding CitationSourceResolver}"
                                                                                           Foreground="{DynamicResource ReaderInkBrush}"
-                                                                                          FontSize="14"
+                                                                                          FontSize="16"
                                                                                           LineSpacing="5"
                                                                                           TextWrapping="Wrap" />
                                                          <StackPanel Spacing="4" IsVisible="{Binding HasSources}">

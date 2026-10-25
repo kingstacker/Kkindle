@@ -6,6 +6,22 @@ namespace Kkindle.Tests;
 public sealed class ReaderAiConversationTests
 {
     [Fact]
+    public void WebCitationsAreClickableButUnsafeSchemesStayPlainText()
+    {
+        var block = new KreaderMarkdownTextBlock
+        {
+            Markdown = "[Official source](https://example.org/article) [Unsafe](file:///C:/Windows/system.ini) <https://example.net/>"
+        };
+        var tree = InlineTree(block.Inlines!).ToArray();
+        var links = tree.OfType<Avalonia.Controls.Documents.InlineUIContainer>()
+            .Select(inline => inline.Child).OfType<Avalonia.Controls.HyperlinkButton>().ToArray();
+        Assert.Equal(2, links.Length);
+        Assert.Equal("https://example.org/article", links[0].NavigateUri!.AbsoluteUri);
+        Assert.Equal("https://example.net/", links[1].NavigateUri!.AbsoluteUri);
+        Assert.Contains(tree.OfType<Avalonia.Controls.Documents.Run>(), run => run.Text == "Unsafe");
+    }
+
+    [Fact]
     public void CollapsedReasoningKeepsStreamingTextWithoutRenderingIt()
     {
         using var message = new ReaderAiMessageViewModel("assistant");
