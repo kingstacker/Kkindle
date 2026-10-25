@@ -487,6 +487,8 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 
     public bool IsReasoningVisible => HasReasoning && _isReasoningExpanded;
 
+    public string DisplayedReasoning => IsReasoningVisible ? Reasoning : string.Empty;
+
     public string ReasoningToggleLabel =>
         _isReasoningExpanded ? UiText.Get("收起思考过程") : UiText.Get("展开思考过程");
 
@@ -530,6 +532,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         if (!HasReasoning) return;
         _isReasoningExpanded = !_isReasoningExpanded;
         OnPropertyChanged(nameof(IsReasoningVisible));
+        OnPropertyChanged(nameof(DisplayedReasoning));
         OnPropertyChanged(nameof(ReasoningToggleLabel));
     }
 
@@ -568,6 +571,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
 
     public void Update(string content, string reasoning, bool isStreaming)
     {
+        var wasReasoningVisible = IsReasoningVisible;
         _isStreaming = isStreaming;
         Content = content;
         Reasoning = reasoning;
@@ -577,6 +581,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsThinkingRowVisible));
         OnPropertyChanged(nameof(IsThinkingLabelVisible));
         OnPropertyChanged(nameof(IsReasoningVisible));
+        if (wasReasoningVisible || IsReasoningVisible) OnPropertyChanged(nameof(DisplayedReasoning));
         OnPropertyChanged(nameof(ReasoningToggleLabel));
         OnPropertyChanged(nameof(CanCopy));
     }

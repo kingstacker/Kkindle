@@ -259,7 +259,7 @@
     <x:String x:Key="Ui.Auto.31C1468A6EA3BBF1">保存并验证</x:String>
     <x:String x:Key="Ui.Auto.49DD2BD35DD7E743">保存批注</x:String>
     <x:String x:Key="Ui.Auto.098925F827B88E7A">允许网络功能</x:String>
-    <x:String x:Key="Ui.Auto.D65CE013C49D1834">全书概览</x:String>
+    <x:String x:Key="Ui.Auto.D65CE013C49D1834">快速概览</x:String>
     <x:String x:Key="Ui.Auto.3A5040B68ABF75F9">全选</x:String>
     <x:String x:Key="Ui.Auto.89050DD0FBDA32A3">作者</x:String>
     <x:String x:Key="Ui.Auto.A1054434857F0A98">图书分类</x:String>
@@ -1401,7 +1401,7 @@
     <x:String x:Key="Ui.Auto.0BC9551CBF9A1084">请在应用设置中允许网络功能后再发送 Kindle 邮件。</x:String>
     <x:String x:Key="Ui.Auto.2FEDF14F890E017A">请填写有效的 HTTP Base URL 和模型名称。</x:String>
     <x:String x:Key="Ui.Auto.1695A9071D272771">请检查数据目录后重启 Kkindle。</x:String>
-    <x:String x:Key="Ui.Auto.1007D63521913B9D">请概览这本书的主题、结构、主要论点和适合继续阅读的方向；如果上下文不足，请明确说明。</x:String>
+    <x:String x:Key="Ui.Auto.79C9A4504AA2765E">请根据抽样原文快速概览这本书的主题、结构、主要论点和适合继续阅读的方向；请说明覆盖范围，如果上下文不足，请明确说明。</x:String>
     <x:String x:Key="Ui.Auto.126FBF59CF043830">请求失败</x:String>
     <x:String x:Key="Ui.Auto.9D76F35F90B85965">请求失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.EE44FAF725E24592">请求已取消。</x:String>
@@ -1611,7 +1611,7 @@
     <x:String x:Key="Ui.Auto.A3628E64A4842E6F">读到这里，聊一聊</x:String>
     <x:String x:Key="Ui.Auto.5F14F7F49C437BA2">从一个问题开始，回到书中找答案。</x:String>
     <x:String x:Key="Ui.Auto.3888E344D5ED723D">解释选文</x:String>
-    <x:String x:Key="Ui.Auto.7A4BBB19D1387A93">概览全书</x:String>
+    <x:String x:Key="Ui.Auto.7A4BBB19D1387A93">快速概览</x:String>
     <x:String x:Key="Ui.Auto.3221A042EA3677A8">重新生成</x:String>
     <x:String x:Key="Ui.Auto.07E68FA158F2077C">↓ 新内容</x:String>
     <x:String x:Key="Ui.Auto.C558C087EB70654C">当前书籍 · 引用原文回答</x:String>
@@ -1621,7 +1621,7 @@
     <x:String x:Key="Ui.Auto.98B4E0EFFCF15443">总结当前章节</x:String>
     <x:String x:Key="Ui.Auto.23CEC14BBCFAB6FA">选文</x:String>
     <x:String x:Key="Ui.Auto.9B4D1CC07395F4B1">解释正文中选中的文字</x:String>
-    <x:String x:Key="Ui.Auto.51AFFFDDE76EA35A">全书</x:String>
+    <x:String x:Key="Ui.Auto.51AFFFDDE76EA35A">快速概览</x:String>
     <x:String x:Key="Ui.Auto.B94E8C2A0D642FC5">模型与思考设置 ▾</x:String>
     <x:String x:Key="Ui.Auto.4E95EEDB8847F88D">Ctrl+Enter 发送 · Enter 换行</x:String>
     <x:String x:Key="Ui.Auto.449123DD66674848">当前 PDF · 第 {0} 页</x:String>
@@ -1636,11 +1636,11 @@
     <x:String x:Key="Ui.Auto.CC849441C8991724">已停止生成，可重试；已生成的内容已保留。</x:String>
     <x:String x:Key="Ui.Auto.9AD0AAC32EA304BE">停止生成</x:String>
     <x:String x:Key="Ui.Auto.534A6E69356C32FF">发送 · Ctrl+Enter</x:String>
-    <x:String x:Key="Ui.Auto.44B6416AA99754BE">PDF 全书抽样概览：覆盖 {0}/{1} 个有文本的页面。请明确说明这是抽样，不是全文总结。</x:String>
+    <x:String x:Key="Ui.Auto.A7FE990B2999AE03">PDF 快速概览：抽样覆盖 {0}/{1} 个有文本的页面。请明确说明这是抽样，不是全文总结。</x:String>
     <x:String x:Key="Ui.Auto.671DD3C213FD3C27">PDF 问答范围：仅当前第 {0} 页，不代表全书或完整章节。</x:String>
-    <x:String x:Key="Ui.Auto.A60092A24514D620">PDF 全书概览 · 抽样 {0} 页</x:String>
+    <x:String x:Key="Ui.Auto.7C15AA5C25871689">PDF 快速概览 · 抽样 {0} 页</x:String>
     <x:String x:Key="Ui.Auto.A5A644C179F4F4A9">仅当前 PDF 第 {0} 页</x:String>
-    <x:String x:Key="Ui.Auto.A0D0ED41919E45ED">全书概览 · 跨章节抽样</x:String>
+    <x:String x:Key="Ui.Auto.AFECE1CDCAB201DD">快速概览 · 跨章节抽样</x:String>
     <x:String x:Key="Ui.Auto.B51FF3EB53C29D51">当前章节 · 原文抽样</x:String>
     <x:String x:Key="Ui.Auto.70E98FFE2B292C81">Endpoint 留空使用 AWS S3；使用 MinIO、Cloudflare R2、Wasabi 等服务时填写其 S3 Endpoint。</x:String>
     <x:String x:Key="Ui.Auto.4B8011BA01CAA32F">Kkindle-S3连接参数-{0}{1}</x:String>

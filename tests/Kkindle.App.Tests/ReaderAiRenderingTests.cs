@@ -17,6 +17,22 @@ namespace Kkindle.Ui.Tests;
 public sealed class ReaderAiRenderingTests(SettingsUiSession session)
 {
     [Fact]
+    public Task OverviewRetrievalStatusDoesNotTurnAReadyModelYellow() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Call("ApplyReaderEmbeddingModelStatus", true, true);
+        scope.Call("SetReaderAiRetrievalStatus", "本次请求未使用向量模型。");
+        var dot = scope.Get<Avalonia.Controls.Shapes.Ellipse>("ReaderAiVectorStatusDot");
+        Assert.Equal(Color.Parse("#2E8B57"), Assert.IsAssignableFrom<ISolidColorBrush>(dot.Fill).Color);
+        var tooltip = Assert.IsType<string>(ToolTip.GetTip(scope.Get<Button>("ReaderAiVectorStatusButton")));
+        Assert.Contains("本地语义模型已就绪", tooltip);
+        Assert.Contains("本次请求未使用向量模型", tooltip);
+        scope.Call("ApplyReaderEmbeddingModelStatus", false, false);
+        scope.Call("SetReaderAiRetrievalStatus", "尚未进行向量检索。");
+        Assert.Equal(Color.Parse("#D6A100"), Assert.IsAssignableFrom<ISolidColorBrush>(dot.Fill).Color);
+    });
+
+    [Fact]
     public Task VectorStatusClickOpensSettingsAtTheEmbeddingModel() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();

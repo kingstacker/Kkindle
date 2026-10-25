@@ -5816,7 +5816,7 @@
                                                                 </Path.RenderTransform>
                                                             </Path>
                                                         </StackPanel>
-                                                        <local:KreaderMarkdownTextBlock Markdown="{Binding Reasoning}"
+                                                        <local:KreaderMarkdownTextBlock Markdown="{Binding DisplayedReasoning}"
                                                                    CitationAction="{Binding CitationAction}"
                                                                    CitationSourceResolver="{Binding CitationSourceResolver}"
                                                                    IsVisible="{Binding IsReasoningVisible}"

@@ -45,7 +45,9 @@ public partial class MainWindow
         new() { Interval = TimeSpan.FromMilliseconds(60) };
     private ReaderAiMessageViewModel? _readerAiThinkingMessage;
     private bool _readerAiVectorIndicatorGreen;
-    private string _readerAiVectorIndicatorTooltip = "尚未进行向量检索。";
+    private string _readerAiVectorIndicatorTooltip = "正在检查本地语义模型…";
+    private string _readerAiRetrievalTooltip = string.Empty;
+    private int _readerEmbeddingStatusVersion;
 
     private IEnumerable<ComboBox> GetEmbeddingModelSelectors()
     {
@@ -119,6 +121,8 @@ public partial class MainWindow
 
         var package = ReaderEmbeddingModelPackages[selector.SelectedIndex];
         _embeddingService.SelectModel(package.ModelId);
+        _readerAiRetrievalTooltip = string.Empty;
+        SetReaderAiVectorIndicator(false, "正在检查本地语义模型…");
         _appSettings = AppSettings.Normalize(_appSettings with
         {
             EmbeddingModelId = package.ModelId
@@ -151,10 +155,18 @@ public partial class MainWindow
         SelectionChangedEventArgs e) =>
         await HandleReaderEmbeddingModelSelectionChangedAsync(sender);
 
-    private void SetReaderAiVectorIndicator(bool vectorUsed, string tooltipSource)
+    private void SetReaderAiVectorIndicator(bool available, string tooltipSource)
     {
-        _readerAiVectorIndicatorGreen = vectorUsed;
+        _readerAiVectorIndicatorGreen = available;
         _readerAiVectorIndicatorTooltip = tooltipSource;
+        ApplyReaderAiVectorIndicator();
+    }
+
+    // The dot describes model readiness; an overview/selection request can skip
+    // retrieval without making an installed model unavailable.
+    private void SetReaderAiRetrievalStatus(string tooltipSource)
+    {
+        _readerAiRetrievalTooltip = tooltipSource;
         ApplyReaderAiVectorIndicator();
     }
 
@@ -164,7 +176,9 @@ public partial class MainWindow
 
         ReaderAiVectorStatusDot.Fill = new SolidColorBrush(Color.Parse(
             _readerAiVectorIndicatorGreen ? "#2E8B57" : "#D6A100"));
-        var tooltip = T(_readerAiVectorIndicatorTooltip) + "\n" + T("点击设置向量模型");
+        var tooltip = T(_readerAiVectorIndicatorTooltip)
+            + (string.IsNullOrEmpty(_readerAiRetrievalTooltip) ? string.Empty : "\n" + T(_readerAiRetrievalTooltip))
+            + "\n" + T("点击设置向量模型");
         ToolTip.SetTip(ReaderAiVectorStatusButton, tooltip);
         Avalonia.Automation.AutomationProperties.SetName(ReaderAiVectorStatusButton, tooltip);
     }
@@ -246,6 +260,9 @@ public partial class MainWindow
         if (_embeddingModelDownloadBusy) return;
 
         var package = _embeddingService.SelectedPackage;
+        var statusVersion = ++_readerEmbeddingStatusVersion;
+        bool IsCurrent() => statusVersion == _readerEmbeddingStatusVersion
+            && package.ModelId == _embeddingService.SelectedPackage.ModelId;
         bool installed;
         try
         {
@@ -272,7 +289,7 @@ public partial class MainWindow
                 return;
             }
             var availability = await availabilityService.CheckAvailabilityAsync(cancellationToken);
-            if (cancellationToken.IsCancellationRequested) return;
+            if (cancellationToken.IsCancellationRequested || !IsCurrent()) return;
             ApplyReaderEmbeddingModelStatus(installed: true, available: availability.IsAvailable);
             if (!availability.IsAvailable)
                 Debug.WriteLine($"[RAG] Local embedding model is unavailable: {availability.Message}");
@@ -283,6 +300,7 @@ public partial class MainWindow
         catch (Exception exception)
         {
             Debug.WriteLine($"[RAG] Failed to check embedding model: {exception.Message}");
+            if (!IsCurrent()) return;
             ApplyReaderEmbeddingModelStatus(installed: true, available: false);
         }
     }
@@ -550,6 +568,7 @@ public partial class MainWindow
         SetReaderAiPanelWidth(_readerAiPanelWidth);
         UpdateReaderAiScope();
         ReaderAiView.IsVisible = true;
+        _ = ObserveReaderTaskAsync(RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         ReaderNotesView.IsVisible = false;
         ReaderAiComposer.IsVisible = true;
         ReaderNotesExportBar.IsVisible = false;
@@ -1333,7 +1352,7 @@ public partial class MainWindow
 
     private async void ReaderAiSummarizeBookButton_Click(object? sender, RoutedEventArgs e)
         => await SendReaderAiQuestionAsync(
-            T("请概览这本书的主题、结构、主要论点和适合继续阅读的方向；如果上下文不足，请明确说明。"),
+            T("请根据抽样原文快速概览这本书的主题、结构、主要论点和适合继续阅读的方向；请说明覆盖范围，如果上下文不足，请明确说明。"),
             ReaderAiRequestKind.BookSummary);
 
     private void ReaderAiClearButton_Click(object? sender, RoutedEventArgs e) => ClearReaderAiConversation();
@@ -1359,19 +1378,19 @@ public partial class MainWindow
         if (_readerAiBusy) return;
         if (!_appSettings.AiEnabled)
         {
-            SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
+            SetReaderAiRetrievalStatus("本次请求未使用向量模型。");
             ReaderAiStatusText.Text = T("AI 已在应用设置中关闭。");
             return;
         }
         if (!_appSettings.NetworkEnabled)
         {
-            SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
+            SetReaderAiRetrievalStatus("本次请求未使用向量模型。");
             ReaderAiStatusText.Text = T("网络访问已关闭，无法调用 AI 服务。");
             return;
         }
         if (!_readerAiSettings.IsConfigured)
         {
-            SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
+            SetReaderAiRetrievalStatus("本次请求未使用向量模型。");
             ReaderAiStatusText.Text = T("请先到设置面板的 AI 助手设置中填写 Base URL、模型和 API Key。");
             return;
         }
@@ -1399,11 +1418,12 @@ public partial class MainWindow
         var history = retryHistory ?? _readerAiConversation.ToArray();
         var answer = new StringBuilder();
         var reasoning = new StringBuilder();
+        var lastUiUpdate = Stopwatch.StartNew();
 
         try
         {
             if (retryContext is null)
-                SetReaderAiVectorIndicator(false, "尚未进行向量检索。");
+                SetReaderAiRetrievalStatus("尚未进行向量检索。");
             var context = requestContext = retryContext is not null
                 ? new UiReaderAiContext(retryContext.Text, retryContext.Sources.Select(CloneReaderAiSource).ToArray())
                 : await BuildReaderAiContextAsync(question, requestKind, token);
@@ -1427,8 +1447,16 @@ public partial class MainWindow
                 token.ThrowIfCancellationRequested();
                 answer.Append(chunk.Text);
                 reasoning.Append(chunk.Reasoning);
-                assistantMessage.Update(answer.ToString(), reasoning.ToString(), isStreaming: true);
-                QueueReaderAiScrollToEnd();
+                if (lastUiUpdate.ElapsedMilliseconds < 100) continue;
+                // Batch fast token bursts and let pending input (including Stop)
+                // run before rebuilding Markdown on the UI thread.
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    assistantMessage.Update(answer.ToString(), reasoning.ToString(), isStreaming: true);
+                    QueueReaderAiScrollToEnd();
+                }, DispatcherPriority.Background);
+                lastUiUpdate.Restart();
             }
 
             token.ThrowIfCancellationRequested();
@@ -1542,7 +1570,7 @@ public partial class MainWindow
             if (requestKind == ReaderAiRequestKind.BookSummary)
                 await EnsureReaderPdfTextIndexAsync(cancellationToken);
             RememberCurrentPdfPageText();
-            SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
+            SetReaderAiRetrievalStatus("本次请求未使用向量模型。");
             var pages = _readerPdfPages.Where(page => !string.IsNullOrWhiteSpace(page.Text))
                 .OrderBy(page => page.PageNumber).ToArray();
             // PDF chapters are not reliably available: chapter/selection actions
@@ -1551,7 +1579,7 @@ public partial class MainWindow
                 ? ReaderAiContextBuilder.SampleEvenly(pages, 16)
                 : pages.Where(page => page.PageNumber == _readerPdfPage).ToArray();
             var text = new StringBuilder().AppendLine(requestKind == ReaderAiRequestKind.BookSummary
-                ? T("PDF 全书抽样概览：覆盖 {0}/{1} 个有文本的页面。请明确说明这是抽样，不是全文总结。", selected.Count, pages.Length)
+                ? T("PDF 快速概览：抽样覆盖 {0}/{1} 个有文本的页面。请明确说明这是抽样，不是全文总结。", selected.Count, pages.Length)
                 : T("PDF 问答范围：仅当前第 {0} 页，不代表全书或完整章节。", _readerPdfPage));
             var allowance = Math.Max(1, 6000 / Math.Max(1, selected.Count));
             foreach (var page in selected)
@@ -1563,14 +1591,14 @@ public partial class MainWindow
                     .AppendLine(page.Text.Length > allowance ? page.Text[..allowance] + "…" : page.Text);
             }
             ReaderAiScopeText.Text = requestKind == ReaderAiRequestKind.BookSummary
-                ? T("PDF 全书概览 · 抽样 {0} 页", selected.Count)
+                ? T("PDF 快速概览 · 抽样 {0} 页", selected.Count)
                 : T("仅当前 PDF 第 {0} 页", _readerPdfPage);
             return new UiReaderAiContext(sources.Count == 0 ? string.Empty : text.ToString(), sources);
         }
 
         if (_readerBookCard is null || _readerBookFile is null || _readerDocument is null)
         {
-            SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
+            SetReaderAiRetrievalStatus("本次请求未使用向量模型。");
             return new UiReaderAiContext(T("（当前没有可用的书籍文本。）"), sources);
         }
 
@@ -1615,7 +1643,7 @@ public partial class MainWindow
                 retrievalResults = selected
                     .Select((chunk, index) => new ReaderRetrievalResult(chunk, 1d - index * 0.01d))
                     .ToArray();
-                SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
+                SetReaderAiRetrievalStatus("本次请求未使用向量模型。");
                 break;
             }
 
@@ -1636,8 +1664,8 @@ public partial class MainWindow
                 var overview = ReaderAiContextBuilder.BuildOverview(chunks.Where(chunk =>
                     requestKind == ReaderAiRequestKind.BookSummary || chunk.ChapterIndex == _readerChapterIndex).ToArray());
                 ReaderAiScopeText.Text = requestKind == ReaderAiRequestKind.BookSummary
-                    ? T("全书概览 · 跨章节抽样") : T("当前章节 · 原文抽样");
-                SetReaderAiVectorIndicator(false, "本次请求未使用向量模型。");
+                    ? T("快速概览 · 跨章节抽样") : T("当前章节 · 原文抽样");
+                SetReaderAiRetrievalStatus("本次请求未使用向量模型。");
                 return new UiReaderAiContext(overview.Text, overview.Sources.Select(source => new ReaderAiSourceViewModel(source)).ToArray());
             }
 
@@ -1697,8 +1725,7 @@ public partial class MainWindow
                         .ToArray();
                 }
                 var vectorSearchUsed = retrievalResults.Any(result => result.VectorRank is not null);
-                SetReaderAiVectorIndicator(
-                    vectorSearchUsed,
+                SetReaderAiRetrievalStatus(
                     vectorSearchUsed
                         ? T("本次问答使用了本地 {0} 进行语义检索。", _embeddingService.SelectedPackage.DisplayName)
                         : "本次问答未使用向量模型，使用关键词检索。");

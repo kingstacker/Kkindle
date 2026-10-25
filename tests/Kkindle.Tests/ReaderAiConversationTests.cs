@@ -6,6 +6,23 @@ namespace Kkindle.Tests;
 public sealed class ReaderAiConversationTests
 {
     [Fact]
+    public void CollapsedReasoningKeepsStreamingTextWithoutRenderingIt()
+    {
+        using var message = new ReaderAiMessageViewModel("assistant");
+        message.Update("", "First reasoning", isStreaming: true);
+        Assert.True(message.HasReasoning);
+        Assert.Empty(message.DisplayedReasoning);
+        message.Update("", "Complete reasoning", isStreaming: true);
+        message.ToggleReasoning();
+        Assert.Equal("Complete reasoning", message.DisplayedReasoning);
+        message.Update("Answer", "Updated reasoning", isStreaming: false);
+        Assert.Equal("Updated reasoning", message.DisplayedReasoning);
+        message.ToggleReasoning();
+        Assert.Empty(message.DisplayedReasoning);
+        Assert.Equal("Updated reasoning", message.Reasoning);
+    }
+
+    [Fact]
     public void MarkdownSurvivesCitationBindingAndStreamingUpdates()
     {
         var block = new KreaderMarkdownTextBlock { Markdown = "## Heading\n\n**First answer**" };
