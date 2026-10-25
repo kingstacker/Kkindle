@@ -400,9 +400,8 @@
     <x:String x:Key="Ui.Auto.63D90D977348AB1F">复制</x:String>
     <x:String x:Key="Ui.Auto.42F1A31C725F5D65">多个标签用逗号分隔</x:String>
     <x:String x:Key="Ui.Auto.7D9941284EFFD05E">字典管理</x:String>
-    <x:String x:Key="Ui.Auto.F71561B5AF0ABCED">字号</x:String>
+    <x:String x:Key="Ui.Auto.F71561B5AF0ABCED">正文字号</x:String>
     <x:String x:Key="Ui.Auto.08C4E230A0A0C905">字号、行距、正文宽度、字体与竖排</x:String>
-    <x:String x:Key="Ui.Auto.C66EF0B208DF7017">所有排版参数均为全局设置。</x:String>
     <x:String x:Key="Ui.Auto.F78C515D501BF2E0">安全弹出设备</x:String>
     <x:String x:Key="Ui.Auto.E1D76CA786897DA7">安装 KFX Input</x:String>
     <x:String x:Key="Ui.Auto.67ABB8F1EFAC16D0">宋体 SimSun</x:String>
@@ -2270,4 +2269,5 @@
     <x:String x:Key="Library.Filter.All4">全部阅读状态</x:String>
     <x:String x:Key="Library.Filter.All5">全部收藏状态</x:String>
     <x:String x:Key="Ui.Auto.FECA3F325B0C08CC">检查更新超时，请检查网络或代理设置后重试。</x:String>
+    <x:String x:Key="Ui.Reader.TocFontSize">目录字号</x:String>
 </ResourceDictionary>

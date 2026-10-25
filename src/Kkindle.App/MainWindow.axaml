@@ -4632,7 +4632,7 @@
                                                 <TextBlock Grid.Column="1"
                                                            Margin="4,9,11,9"
                                                            Text="{Binding Title}"
-                                                           FontSize="12"
+                                                           FontSize="{DynamicResource ReaderTocFontSize}"
                                                            TextWrapping="Wrap" />
                                             </Grid>
                                         </Grid>
@@ -6491,101 +6491,109 @@
                                             <TextBlock Text="{DynamicResource Ui.Reader.AnnotationNoteModeHint}" Classes="readerSettingsHint" />
                                         </StackPanel>
                                     </Border>
-                                    <StackPanel x:Name="ReaderTextLayoutPanel" Spacing="14">
+                                    <StackPanel x:Name="ReaderLayoutPanel" Spacing="14">
                                         <Border Height="1" Background="{DynamicResource ReaderBorderBrush}" />
                                         <TextBlock Text="{DynamicResource Ui.Reader.Layout}" FontSize="13" FontWeight="SemiBold" />
-                                        <TextBlock Text="{DynamicResource Ui.Auto.C66EF0B208DF7017}"
-                                                   FontSize="12"
-                                                   Foreground="{DynamicResource ReaderMutedBrush}"
-                                                   TextWrapping="Wrap" />
                                         <StackPanel Spacing="5">
                                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.F71561B5AF0ABCED}" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBlock x:Name="ReaderFontScaleValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                                <TextBlock Text="{DynamicResource Ui.Reader.TocFontSize}" FontSize="12" VerticalAlignment="Center" />
+                                                <TextBlock x:Name="ReaderTocFontSizeValueText" Grid.Column="1" Classes="readerSettingsHint" />
                                             </Grid>
-                                            <Slider x:Name="ReaderFontScaleSlider" Minimum="0.8" Maximum="1.8" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="1" ValueChanged="ReaderLayoutSettingChanged">
-                                                <Slider.Resources>
-                                                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                </Slider.Resources>
-                                            </Slider>
+                                            <Slider x:Name="ReaderTocFontSizeSlider" Minimum="12" Maximum="20" TickFrequency="1"
+                                                    IsSnapToTickEnabled="True" Value="14"
+                                                    AutomationProperties.Name="{DynamicResource Ui.Reader.TocFontSize}"
+                                                    ValueChanged="ReaderTocFontSize_ValueChanged" />
                                         </StackPanel>
-                                        <StackPanel Spacing="5">
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.6B44B7BA432ABF47}" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBlock x:Name="ReaderLineHeightValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
-                                            </Grid>
-                                            <Slider x:Name="ReaderLineHeightSlider" Minimum="1.3" Maximum="2.6" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="1.88" ValueChanged="ReaderLayoutSettingChanged">
-                                                <Slider.Resources>
-                                                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                </Slider.Resources>
-                                            </Slider>
+                                        <StackPanel x:Name="ReaderTextLayoutPanel" Spacing="14">
+                                            <StackPanel Spacing="5">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.F71561B5AF0ABCED}" FontSize="12" VerticalAlignment="Center" />
+                                                    <TextBlock x:Name="ReaderFontScaleValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                                </Grid>
+                                                <Slider x:Name="ReaderFontScaleSlider" Minimum="0.8" Maximum="1.8" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="1.4" ValueChanged="ReaderLayoutSettingChanged">
+                                                    <Slider.Resources>
+                                                        <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                    </Slider.Resources>
+                                                </Slider>
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.6B44B7BA432ABF47}" FontSize="12" VerticalAlignment="Center" />
+                                                    <TextBlock x:Name="ReaderLineHeightValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                                </Grid>
+                                                <Slider x:Name="ReaderLineHeightSlider" Minimum="1.3" Maximum="2.6" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="1.88" ValueChanged="ReaderLayoutSettingChanged">
+                                                    <Slider.Resources>
+                                                        <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                    </Slider.Resources>
+                                                </Slider>
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.598EA039C0563336}" FontSize="12" VerticalAlignment="Center" />
+                                                    <TextBlock x:Name="ReaderMaxWidthValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                                </Grid>
+                                                <Slider x:Name="ReaderMaxWidthSlider" Minimum="480" Maximum="3840" TickFrequency="20" IsSnapToTickEnabled="True" Value="1200" ValueChanged="ReaderLayoutSettingChanged">
+                                                    <Slider.Resources>
+                                                        <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                    </Slider.Resources>
+                                                </Slider>
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBlock Text="{DynamicResource Ui.Auto.93DCCA57490B4267}" FontSize="12" VerticalAlignment="Center" />
+                                                    <TextBlock x:Name="ReaderBodyPaddingValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                                </Grid>
+                                                <Slider x:Name="ReaderBodyPaddingSlider" Minimum="24" Maximum="160" TickFrequency="8" IsSnapToTickEnabled="True" Value="68" ValueChanged="ReaderLayoutSettingChanged">
+                                                    <Slider.Resources>
+                                                        <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
+                                                        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
+                                                    </Slider.Resources>
+                                                </Slider>
+                                            </StackPanel>
+                                            <StackPanel Spacing="5">
+                                                <TextBlock Text="{DynamicResource Ui.Auto.F818CA93CE983E65}" FontSize="12" />
+                                                <ComboBox x:Name="ReaderFontFamilyBox"
+                                                          Classes="readerSettingsFont"
+                                                          AutomationProperties.Name="{DynamicResource Ui.Auto.F818CA93CE983E65}"
+                                                          HorizontalAlignment="Stretch"
+                                                          SelectionChanged="ReaderFontFamilyBox_SelectionChanged">
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.97F24E62001955CC}" Tag="京华老宋体" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.709E6BFBD8FBEF3E}" Tag="Microsoft YaHei UI" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.67ABB8F1EFAC16D0}" Tag="SimSun" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.FE154AC80068C997}" Tag="SimHei" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.9BACE6A0041701EC}" Tag="KaiTi" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.94CC5EA6C71365C7}" Tag="DengXian" />
+                                                    <ComboBoxItem Content="{DynamicResource Ui.Auto.41BE03CE89F68E74}" Tag="Source Han Serif SC, Noto Serif CJK SC" />
+                                                </ComboBox>
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="ReaderVerticalWritingCheck"
+                                                      Classes="readerSettingsToggle"
+                                                      Content="{DynamicResource Ui.Auto.FA133D5DE7088336}"
+                                                      IsCheckedChanged="ReaderVerticalWritingCheck_IsCheckedChanged" />
+                                            <ToggleSwitch x:Name="ReaderParagraphIndentCheck"
+                                                      Classes="readerSettingsToggle"
+                                                      Content="{DynamicResource Ui.Auto.F7044E3D685ABD03}"
+                                                      IsCheckedChanged="ReaderParagraphIndentCheck_IsCheckedChanged" />
                                         </StackPanel>
-                                        <StackPanel Spacing="5">
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.598EA039C0563336}" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBlock x:Name="ReaderMaxWidthValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
-                                            </Grid>
-                                            <Slider x:Name="ReaderMaxWidthSlider" Minimum="480" Maximum="3840" TickFrequency="20" IsSnapToTickEnabled="True" Value="800" ValueChanged="ReaderLayoutSettingChanged">
-                                                <Slider.Resources>
-                                                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                </Slider.Resources>
-                                            </Slider>
-                                        </StackPanel>
-                                        <StackPanel Spacing="5">
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                <TextBlock Text="{DynamicResource Ui.Auto.93DCCA57490B4267}" FontSize="12" VerticalAlignment="Center" />
-                                                <TextBlock x:Name="ReaderBodyPaddingValueText" Grid.Column="1" FontSize="12" Foreground="{DynamicResource ReaderMutedBrush}" />
-                                            </Grid>
-                                            <Slider x:Name="ReaderBodyPaddingSlider" Minimum="24" Maximum="160" TickFrequency="8" IsSnapToTickEnabled="True" Value="68" ValueChanged="ReaderLayoutSettingChanged">
-                                                <Slider.Resources>
-                                                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource ReaderAccentColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource ReaderInkColor}" />
-                                                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource ReaderInkColor}" />
-                                                </Slider.Resources>
-                                            </Slider>
-                                        </StackPanel>
-                                        <StackPanel Spacing="5">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.F818CA93CE983E65}" FontSize="12" />
-                                            <ComboBox x:Name="ReaderFontFamilyBox"
-                                                      Classes="readerSettingsFont"
-                                                      AutomationProperties.Name="{DynamicResource Ui.Auto.F818CA93CE983E65}"
-                                                      HorizontalAlignment="Stretch"
-                                                      SelectionChanged="ReaderFontFamilyBox_SelectionChanged">
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.97F24E62001955CC}" Tag="京华老宋体" />
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.709E6BFBD8FBEF3E}" Tag="Microsoft YaHei UI" />
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.67ABB8F1EFAC16D0}" Tag="SimSun" />
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.FE154AC80068C997}" Tag="SimHei" />
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.9BACE6A0041701EC}" Tag="KaiTi" />
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.94CC5EA6C71365C7}" Tag="DengXian" />
-                                                <ComboBoxItem Content="{DynamicResource Ui.Auto.41BE03CE89F68E74}" Tag="Source Han Serif SC, Noto Serif CJK SC" />
-                                            </ComboBox>
-                                        </StackPanel>
-                                        <ToggleSwitch x:Name="ReaderVerticalWritingCheck"
-                                                  Classes="readerSettingsToggle"
-                                                  Content="{DynamicResource Ui.Auto.FA133D5DE7088336}"
-                                                  IsCheckedChanged="ReaderVerticalWritingCheck_IsCheckedChanged" />
-                                        <ToggleSwitch x:Name="ReaderParagraphIndentCheck"
-                                                  Classes="readerSettingsToggle"
-                                                  Content="{DynamicResource Ui.Auto.F7044E3D685ABD03}"
-                                                  IsCheckedChanged="ReaderParagraphIndentCheck_IsCheckedChanged" />
                                     </StackPanel>
                                     <TextBlock x:Name="ReaderAppearanceSaveStatus" FontSize="12" TextWrapping="Wrap" IsVisible="False" />
                                 </StackPanel>

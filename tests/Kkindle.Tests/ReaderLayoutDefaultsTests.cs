@@ -8,7 +8,7 @@ public sealed class ReaderLayoutDefaultsTests
     public void DefaultsAreHorizontalAndReadable()
     {
         var defaults = new ReaderLayoutSettings();
-        Assert.Equal(1.2, defaults.FontScale);
+        Assert.Equal(1.4, defaults.FontScale);
         Assert.Equal(1.8, defaults.LineHeight);
         Assert.Equal(1200, defaults.MaxWidth);
         Assert.Equal(24, defaults.BodyPadding);

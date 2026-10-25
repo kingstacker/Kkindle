@@ -108,9 +108,9 @@ public static class ReaderFontDefaults
 }
 
 public sealed record ReaderLayoutSettings(
-    double FontScale = 1.2,
+    double FontScale = ReaderLayoutDefaults.DefaultFontScale,
     double LineHeight = 1.8,
-    double MaxWidth = 1200,
+    double MaxWidth = ReaderLayoutDefaults.DefaultMaxWidth,
     double BodyPadding = 24,
     string FontFamily = ReaderFontDefaults.DefaultFamily,
     int FlowMode = 1,
@@ -154,7 +154,7 @@ public sealed record ReaderBookLayoutProfile(
 
 public static class ReaderLayoutDefaults
 {
-    public const double DefaultFontScale = 1.2;
+    public const double DefaultFontScale = 1.4;
     public const double DefaultLineHeight = 1.8;
     public const double DefaultMaxWidth = 1200;
     public const double DefaultBodyPadding = 24;
