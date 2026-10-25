@@ -109,7 +109,11 @@ public partial class MainWindow
 
     private async void CheckForUpdatesButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (_updateCheckInProgress) return;
+        if (_updateCheckInProgress)
+        {
+            ShowUpdateTaskHistory();
+            return;
+        }
         if (TryGetPendingUpdatePackage(out var packagePath, out var version))
             await PromptPendingUpdateInstallAsync(packagePath, version);
         else
@@ -118,6 +122,11 @@ public partial class MainWindow
 
     private async void UpdateBadgeButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        if (_updateCheckInProgress)
+        {
+            ShowUpdateTaskHistory();
+            return;
+        }
         if (_updateService is null)
         {
             await ShowMessageAsync(T("检查更新"), T("当前平台暂不支持应用内更新。"));
@@ -156,8 +165,10 @@ public partial class MainWindow
         }
 
         _updateCheckInProgress = true;
-        var updateProgressVisible = false;
-        CheckForUpdatesButton.IsEnabled = false;
+        // Keep the action responsive so it can reopen progress. Disabling it
+        // during Click leaves the pressed/disabled rectangle on screen.
+        CheckForUpdatesButton.Classes.Add("updating");
+        ToolTip.SetIsOpen(CheckForUpdatesButton, false);
         AboutUpdateStatusText.Text = T("正在检查更新…");
         try
         {
@@ -166,10 +177,10 @@ public partial class MainWindow
                 ? AppUpdateChannel.Development
                 : AppUpdateChannel.Stable;
             _updateService.ConfigureProxy(TranslationGoogleProxyBox.Text);
-            var update = await _updateService.CheckForUpdateAsync(
-                currentVersion,
-                channel,
-                _lifetimeCancellation.Token);
+            var update = await RunUpdateTaskAsync(
+                T("检查更新"),
+                (_, token) => _updateService.CheckForUpdateAsync(currentVersion, channel, token),
+                showProgress: userInitiated);
 
             // Successful lookups stamp today's date and refresh the persisted
             // badge state; failures leave both untouched so the next launch
@@ -199,11 +210,11 @@ public partial class MainWindow
             if (!_updateService.CanInstall
                 && !await ConfirmUpdateInstallAsync(currentVersion, update))
                 return;
-            if (_updateService.CanInstall) updateProgressVisible = true;
             await DownloadAndInstallAsync(update);
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            AboutUpdateStatusText.Text = T("已取消");
         }
         catch (Exception exception)
         {
@@ -213,14 +224,30 @@ public partial class MainWindow
         }
         finally
         {
-            if (updateProgressVisible)
-            {
-                TaskProgressPopupBar.IsIndeterminate = false;
-                HideTaskProgressPopup();
-            }
             _updateCheckInProgress = false;
+            CheckForUpdatesButton.Classes.Remove("updating");
             CheckForUpdatesButton.IsEnabled = _updateService is not null;
         }
+    }
+
+    private async Task<T> RunUpdateTaskAsync<T>(string title,
+        Func<BackgroundTaskContext, CancellationToken, Task<T>> operation, bool showProgress = true)
+    {
+        var task = RunTrackedTaskAsync(title, BackgroundTaskKind.Other, operation,
+            _lifetimeCancellation.Token, allowRetry: false);
+        if (showProgress) ShowUpdateTaskHistory();
+        return await task;
+    }
+
+    private void ShowUpdateTaskHistory()
+    {
+        ToolTip.SetIsOpen(CheckForUpdatesButton, false);
+        ToolTip.SetIsOpen(BackgroundTaskHistoryButton, false);
+        RefreshBackgroundTaskStatus();
+        BackgroundTaskHistoryButton.Focus();
+        // Explicitly requested progress stays open when the task finishes.
+        _backgroundTaskFlyoutAutoOpened = false;
+        ShowBackgroundTaskFlyout(autoOpened: false);
     }
 
     private async Task<bool> ConfirmUpdateInstallAsync(string currentVersion, AppUpdateInfo update)
@@ -241,30 +268,21 @@ public partial class MainWindow
             return;
         }
 
-        TaskProgressPopupBar.IsIndeterminate = false;
-        TaskProgressPopupBar.Minimum = 0;
-        TaskProgressPopupBar.Maximum = 100;
-        TaskProgressPopupBar.Value = 0;
-        TaskProgressPopupText.Text = T("正在下载 Kkindle {0}…", update.Version);
-        ShowTaskProgressPopup();
-        var progress = new Progress<AppUpdateDownloadProgress>(value =>
-        {
-            TaskProgressPopupBar.IsIndeterminate = value.TotalBytes is null;
-            if (value.TotalBytes is not null)
-                TaskProgressPopupBar.Value = value.Percentage;
-            TaskProgressPopupText.Text = value.TotalBytes is > 0
-                ? T("正在下载 Kkindle {0} · {1:0}%", update.Version, value.Percentage)
-                : T("正在下载 Kkindle {0}…", update.Version);
-        });
-        var packagePath = await _updateService.DownloadAsync(
-            update,
-            progress,
-            _lifetimeCancellation.Token);
-        TaskProgressPopupBar.IsIndeterminate = false;
-        TaskProgressPopupBar.Value = 100;
-        TaskProgressPopupText.Text = T("下载完成");
-        await MarkPendingUpdateReadyAsync(update, packagePath);
-        HideTaskProgressPopup();
+        var packagePath = await RunUpdateTaskAsync(
+            T("正在下载 Kkindle {0}…", update.Version), async (context, token) =>
+            {
+                context.ReportProgress(T("正在下载 Kkindle {0}…", update.Version), 0, 100);
+                var progress = new Progress<AppUpdateDownloadProgress>(value =>
+                    context.ReportProgress(value.TotalBytes is > 0
+                            ? T("正在下载 Kkindle {0} · {1:0}%", update.Version, value.Percentage)
+                            : T("正在下载 Kkindle {0}…", update.Version),
+                        value.TotalBytes is > 0 ? (int)value.Percentage : null,
+                        value.TotalBytes is > 0 ? 100 : null));
+                var path = await _updateService.DownloadAsync(update, progress, token);
+                await MarkPendingUpdateReadyAsync(update, path);
+                context.ReportProgress(T("下载完成"), 100, 100);
+                return path;
+            });
         await PromptPendingUpdateInstallAsync(packagePath, update.Version);
     }
 

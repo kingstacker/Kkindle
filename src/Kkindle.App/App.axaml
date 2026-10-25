@@ -1770,6 +1770,12 @@
         <Style Selector="Button.settingsRowAction:pointerover, Button.settingsRowAction:pressed">
             <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
+        <Style Selector="Grid.libraryShell Button.settingsRowAction.updating,
+                         Grid.libraryShell Button.settingsRowAction.updating:pointerover,
+                         Grid.libraryShell Button.settingsRowAction.updating:pressed">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
 
         <!-- The device card uses the same minimal vector eject mark as the
              Kindle page toolbar; it stays font-independent and centred. -->
