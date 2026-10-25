@@ -75,10 +75,21 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         await using var scope = await ReaderTestWindow.Create();
         using var host = await LoadChapter(scope, new());
         Assert.Equal(ReaderTheme.Classic, scope.Field<AppSettings>("_appSettings").ReaderAppearance.Theme);
+        Assert.Equal(1.4, scope.Field<ReaderLayoutSettings>("_readerLayout").FontScale);
+        Assert.Equal(1200, scope.Field<ReaderLayoutSettings>("_readerLayout").MaxWidth);
+        var tocTitle = scope.Get<ListBox>("ReaderTocList").GetVisualDescendants().OfType<TextBlock>()
+            .Single(text => text.Text == "纸上的时光");
+        Assert.Equal(14, tocTitle.FontSize);
         Assert.False(scope.Get<ToggleSwitch>("ReaderPaperEnabledCheck").IsChecked);
         Capture(scope.Window, "default-classic");
         scope.Call("ReaderLayoutSettingsButton_Click", null, new RoutedEventArgs());
         Assert.True(scope.Get<RadioButton>("ReaderClassicThemeOption").IsChecked);
+        Assert.Equal(14, scope.Get<Slider>("ReaderTocFontSizeSlider").Value);
+        var layoutBeforeTocChange = scope.Field<ReaderLayoutSettings>("_readerLayout");
+        scope.Get<Slider>("ReaderTocFontSizeSlider").Value = 20;
+        await ReaderTests.Render();
+        Assert.Equal(20, tocTitle.FontSize);
+        Assert.Equal(layoutBeforeTocChange, scope.Field<ReaderLayoutSettings>("_readerLayout"));
         var themes = Assert.IsType<UniformGrid>(scope.Get<RadioButton>("ReaderClassicThemeOption").Parent);
         Assert.Equal(3, themes.Children.Count);
         Assert.Equal(3, themes.Columns);
@@ -92,6 +103,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         // settings gate, as application shutdown does.
         scope.Call("ReaderLayoutSettingsCloseButton_Click", null, new RoutedEventArgs());
         Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
+        Assert.Equal(20, (await new AppSettingsStore(scope.Paths).LoadAsync()).ReaderTocFontSize);
         var restored = (await new AppSettingsStore(scope.Paths).LoadAsync()).ReaderAppearance;
         Assert.Equal(ReaderTheme.Green, restored.Theme);
         Assert.False(restored.PaperEnabled);
@@ -100,6 +112,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         using var nextBook = (NativeReaderHost)scope.Call<IReaderHost>("CreateReaderHostForCurrentFormat");
         Assert.Equal(restored, NativeField<ReaderAppearanceSettings>(nextBook, "_appearance"));
         scope.Call("ReaderLayoutSettingsButton_Click", null, new RoutedEventArgs());
+        Assert.Equal(20, scope.Get<Slider>("ReaderTocFontSizeSlider").Value);
         Assert.True(scope.Get<ToggleSwitch>("ReaderFibersEnabledCheck").IsChecked);
         scope.Get<ToggleSwitch>("ReaderPaperEnabledCheck").IsChecked = true;
         scope.Get<RadioButton>("ReaderBeigeThemeOption").IsChecked = true;
@@ -230,11 +243,15 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
             globalSettings.ReaderAppearance with { Theme = ReaderTheme.Beige });
         await scope.Field<Task>("_readerAppearanceSaveTask");
 
+        // Navigation remains global even while this book has its own layout.
+        scope.Get<Slider>("ReaderTocFontSizeSlider").Value = 18;
+        await scope.Field<Task>("_readerAppearanceSaveTask");
         Assert.Equal(globalSettings.DefaultReaderLayout, scope.Field<AppSettings>("_appSettings").DefaultReaderLayout);
         Assert.Equal(globalSettings.ReaderAppearance, scope.Field<AppSettings>("_appSettings").ReaderAppearance);
         var storedSettings = await new AppSettingsStore(scope.Paths).LoadAsync();
         Assert.Equal(globalSettings.DefaultReaderLayout, storedSettings.DefaultReaderLayout);
         Assert.Equal(globalSettings.ReaderAppearance, storedSettings.ReaderAppearance);
+        Assert.Equal(18, storedSettings.ReaderTocFontSize);
 
         var readerData = scope.Field<ReaderDataService>("_readerData");
         var storedProfile = await readerData.GetBookLayoutProfileAsync(bookId, file.Id);
@@ -281,6 +298,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         await scope.Call<Task>("LoadReaderBookProfileAsync", CancellationToken.None);
         scope.Call("ApplyReaderAppearance");
         Assert.False(scope.Field<ReaderBookLayoutProfile?>("_readerBookLayoutProfile")!.UseBookOverride);
+        Assert.Equal(18d, scope.Window.Resources["ReaderTocFontSize"]);
         Assert.Equal(
             globalSettings.ReaderAppearance.Theme,
             scope.Property<ReaderAppearanceSettings>("CurrentReaderAppearance").Theme);
@@ -310,6 +328,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         Assert.False(scope.Get<StackPanel>("ReaderBookScopePanel").IsVisible);
         Assert.False(scope.Get<StackPanel>("ReaderTextLayoutPanel").IsVisible);
         Assert.True(scope.Get<Border>("ReaderPdfAnnotationDisplayModePanel").IsVisible);
+        Assert.True(scope.Get<Slider>("ReaderTocFontSizeSlider").IsVisible);
         Assert.False(scope.Get<RadioButton>("ReaderBookScopeGlobalOption").IsVisible);
         Assert.False(scope.Get<RadioButton>("ReaderBookScopeBookOption").IsVisible);
         Assert.False(scope.Get<TextBlock>("ReaderBookScopeHint").IsVisible);

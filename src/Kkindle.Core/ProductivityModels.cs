@@ -112,6 +112,8 @@ public sealed record AppSettings
     public bool? ReaderVerticalDebugBoxesEnabled { get; init; }
     public ReaderLayoutSettings DefaultReaderLayout { get; init; } = new();
     public ReaderAppearanceSettings ReaderAppearance { get; init; } = new();
+    // Reader navigation chrome stays global, including with a per-book layout.
+    public double ReaderTocFontSize { get; init; } = ReaderTocDefaults.DefaultFontSize;
 
     public static AppSettings Normalize(AppSettings? settings)
     {
@@ -152,6 +154,7 @@ public sealed record AppSettings
             AutoBackupRetention = Math.Clamp(settings.AutoBackupRetention, 1, 30),
             DefaultReaderLayout = ReaderLayoutDefaults.Normalize(settings.DefaultReaderLayout ?? new ReaderLayoutSettings()),
             ReaderAppearance = ReaderAppearanceSettings.Normalize(settings.ReaderAppearance),
+            ReaderTocFontSize = ReaderTocDefaults.NormalizeFontSize(settings.ReaderTocFontSize),
             Translation = BookTranslationSettings.Normalize(settings.Translation),
             McpServer = McpServerSettings.Normalize(settings.McpServer)
         };

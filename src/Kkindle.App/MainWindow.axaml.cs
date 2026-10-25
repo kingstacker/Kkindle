@@ -94,6 +94,7 @@ public partial class MainWindow : Window
     private readonly EpubFootnoteResolver _footnotes;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly AiChatClient _aiChatClient;
+    private readonly ReaderWebSearchService _readerWebSearch = new();
     private readonly TranslationService _translationService;
     private readonly IEpubTranslationService _epubTranslationService;
     private readonly QueryRewriteService _queryRewriteService;
@@ -1076,6 +1077,7 @@ public partial class MainWindow : Window
         _epubTranslationService.Dispose();
         _translationService.Dispose();
         _aiChatClient.Dispose();
+        _readerWebSearch.Dispose();
         _embeddingModelDownloader.Dispose();
         _g2pwModelDownloader.Dispose();
         (_embeddingService as IDisposable)?.Dispose();

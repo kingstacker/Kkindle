@@ -74,6 +74,7 @@ public partial class MainWindow
     {
         var appearance = CurrentReaderAppearance;
         ReaderAppearanceResources.Populate(Resources, appearance);
+        ApplyReaderTocFontSize();
         ReaderAppearanceResources.PopulateControls(ReaderThemeScope.Resources, appearance);
         ReaderThemeScope.RequestedThemeVariant = ThemeVariant.Light;
         (_readerActiveHost as NativeReaderHost)?.SetAppearance(appearance);
@@ -105,6 +106,7 @@ public partial class MainWindow
                 option.IsChecked = Enum.TryParse<ReaderTheme>(option.Tag?.ToString(), out var theme) && theme == appearance.Theme;
             ReaderPaperEnabledCheck.IsChecked = appearance.PaperEnabled;
             ReaderPaperStrengthSlider.Value = appearance.PaperStrength * 100;
+            ReaderTocFontSizeSlider.Value = _appSettings.ReaderTocFontSize;
             ReaderFibersEnabledCheck.IsChecked = appearance.FibersEnabled;
             ReaderPdfAnnotationDisplayModePanel.IsVisible = _readerIsPdf;
             ReaderPdfAnnotationNotesCheck.IsChecked = appearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Pinned;
@@ -130,6 +132,21 @@ public partial class MainWindow
         var appearance = CurrentReaderAppearance;
         ReaderPaperStrengthValueText.Text = $"{appearance.PaperStrength * 100:0}%";
         ReaderPaperOptions.IsEnabled = appearance.PaperEnabled;
+        ReaderTocFontSizeValueText.Text = $"{_appSettings.ReaderTocFontSize:0} px";
+    }
+
+    private void ApplyReaderTocFontSize() =>
+        Resources["ReaderTocFontSize"] = ReaderTocDefaults.NormalizeFontSize(_appSettings.ReaderTocFontSize);
+
+    private void ReaderTocFontSize_ValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressReaderAppearanceChange) return;
+        var size = ReaderTocDefaults.NormalizeFontSize(ReaderTocFontSizeSlider.Value);
+        if (_appSettings.ReaderTocFontSize == size) return;
+        _appSettings = _appSettings with { ReaderTocFontSize = size };
+        ApplyReaderTocFontSize();
+        UpdateReaderAppearanceLabels();
+        _readerAppearanceSaveTask = SaveReaderAppearanceAsync(globalOnly: true);
     }
 
     private void ReaderThemeOption_IsCheckedChanged(object? sender, RoutedEventArgs e)
@@ -186,9 +203,9 @@ public partial class MainWindow
         _readerAppearanceSaveTask = SaveReaderAppearanceAsync();
     }
 
-    private async Task SaveReaderAppearanceAsync()
+    private async Task SaveReaderAppearanceAsync(bool globalOnly = false)
     {
-        if (ReaderUsesBookOverride)
+        if (!globalOnly && ReaderUsesBookOverride)
         {
             try
             {

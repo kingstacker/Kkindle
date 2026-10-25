@@ -1770,6 +1770,12 @@
         <Style Selector="Button.settingsRowAction:pointerover, Button.settingsRowAction:pressed">
             <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
+        <Style Selector="Grid.libraryShell Button.settingsRowAction.updating,
+                         Grid.libraryShell Button.settingsRowAction.updating:pointerover,
+                         Grid.libraryShell Button.settingsRowAction.updating:pressed">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
 
         <!-- The device card uses the same minimal vector eject mark as the
              Kindle page toolbar; it stays font-independent and centred. -->
@@ -2045,7 +2051,7 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="Normal" />
@@ -2058,7 +2064,7 @@
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAssistantTab.active">
-            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="FontWeight" Value="Bold" />
         </Style>
         <Style Selector="Button.readerAiReasoningToggle">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />

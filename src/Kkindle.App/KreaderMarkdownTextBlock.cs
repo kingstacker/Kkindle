@@ -211,12 +211,10 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
                     target.Add(image is null ? new Run(alt) : new InlineUIContainer(image));
                     break;
                 case LinkInline link:
-                    var linkSpan = new Span { TextDecorations = Avalonia.Media.TextDecorations.Underline };
-                    RenderInline(link, linkSpan.Inlines);
-                    target.Add(linkSpan);
+                    AppendWebLink(InlineText(link), link.Url, target);
                     break;
                 case AutolinkInline link:
-                    target.Add(new Run(link.Url) { TextDecorations = Avalonia.Media.TextDecorations.Underline });
+                    AppendWebLink(link.Url, link.Url, target);
                     break;
                 case HtmlEntityInline entity:
                     target.Add(new Run(entity.Transcoded.ToString()));
@@ -237,6 +235,25 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
         ContainerInline nested => InlineText(nested),
         _ => string.Empty
     }));
+
+    private void AppendWebLink(string title, string? url, InlineCollection target)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http") || uri.UserInfo.Length > 0)
+        {
+            target.Add(new Run(title));
+            return;
+        }
+        var text = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, TextDecorations = Avalonia.Media.TextDecorations.Underline };
+        text.Bind(FontSizeProperty, new Binding(nameof(FontSize)) { Source = this });
+        var button = new HyperlinkButton
+        {
+            Content = text, NavigateUri = uri, Padding = new Thickness(0),
+            MinWidth = 0, MinHeight = 0, MaxWidth = MathWidth,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTip.SetTip(button, uri.AbsoluteUri);
+        target.Add(new InlineUIContainer(button));
+    }
 
     private void AppendLiteral(string text, InlineCollection target)
     {

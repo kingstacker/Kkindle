@@ -6,6 +6,39 @@ namespace Kkindle.Tests;
 public sealed class ReaderAiConversationTests
 {
     [Fact]
+    public void WebCitationsAreClickableButUnsafeSchemesStayPlainText()
+    {
+        var block = new KreaderMarkdownTextBlock
+        {
+            Markdown = "[Official source](https://example.org/article) [Unsafe](file:///C:/Windows/system.ini) <https://example.net/>"
+        };
+        var tree = InlineTree(block.Inlines!).ToArray();
+        var links = tree.OfType<Avalonia.Controls.Documents.InlineUIContainer>()
+            .Select(inline => inline.Child).OfType<Avalonia.Controls.HyperlinkButton>().ToArray();
+        Assert.Equal(2, links.Length);
+        Assert.Equal("https://example.org/article", links[0].NavigateUri!.AbsoluteUri);
+        Assert.Equal("https://example.net/", links[1].NavigateUri!.AbsoluteUri);
+        Assert.Contains(tree.OfType<Avalonia.Controls.Documents.Run>(), run => run.Text == "Unsafe");
+    }
+
+    [Fact]
+    public void CollapsedReasoningKeepsStreamingTextWithoutRenderingIt()
+    {
+        using var message = new ReaderAiMessageViewModel("assistant");
+        message.Update("", "First reasoning", isStreaming: true);
+        Assert.True(message.HasReasoning);
+        Assert.Empty(message.DisplayedReasoning);
+        message.Update("", "Complete reasoning", isStreaming: true);
+        message.ToggleReasoning();
+        Assert.Equal("Complete reasoning", message.DisplayedReasoning);
+        message.Update("Answer", "Updated reasoning", isStreaming: false);
+        Assert.Equal("Updated reasoning", message.DisplayedReasoning);
+        message.ToggleReasoning();
+        Assert.Empty(message.DisplayedReasoning);
+        Assert.Equal("Updated reasoning", message.Reasoning);
+    }
+
+    [Fact]
     public void MarkdownSurvivesCitationBindingAndStreamingUpdates()
     {
         var block = new KreaderMarkdownTextBlock { Markdown = "## Heading\n\n**First answer**" };

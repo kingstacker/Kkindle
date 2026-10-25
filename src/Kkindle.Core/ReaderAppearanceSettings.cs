@@ -2,6 +2,17 @@ using System.Text.Json.Serialization;
 
 namespace Kkindle.Core;
 
+public static class ReaderTocDefaults
+{
+    public const double DefaultFontSize = 14;
+    public const double MinFontSize = 12;
+    public const double MaxFontSize = 20;
+
+    public static double NormalizeFontSize(double value) => double.IsFinite(value)
+        ? Math.Clamp(value, MinFontSize, MaxFontSize)
+        : DefaultFontSize;
+}
+
 public enum ReaderTheme
 {
     Classic = 0,

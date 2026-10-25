@@ -6,6 +6,26 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.1 (2026-10-25)
+
+### Added
+
+- Automatically search the web when book excerpts are insufficient, external facts need verification, or current information is required, with a fallback search provider and clickable source links.
+- Adjust the table-of-contents font size independently in Layout; default body text to 140% and maximum content width to 1200px.
+
+### Improved
+
+- Prioritize the current reading position and selection in AI answers, supplement with model knowledge when needed, and distinguish book citations from external sources.
+- Increase AI answer text to size 16, add disclosure triangles to reasoning, and show the selected sidebar tab in bold.
+- Clarify that Quick Overview samples across chapters, separate semantic model readiness from the retrieval method, and refine streaming and reasoning layout.
+- Automatically open task history for update downloads, show progress, prevent duplicate requests, and retain cancellation and failure results.
+
+### Fixed
+
+- Allow supplementary explanations when retrieved excerpts are unrelated, and preserve request context when retrying.
+- Clearly report unavailable or empty web searches without claiming that verification succeeded.
+- Restore the update button state promptly after requests finish.
+
 ## 1.1.0 (2026-10-25)
 
 ### Added
