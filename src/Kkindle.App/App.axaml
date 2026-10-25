@@ -65,6 +65,22 @@
             </Border>
         </ControlTemplate>
 
+        <ControlTemplate x:Key="ReaderTranslationActionButtonTemplate" TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{TemplateBinding CornerRadius}">
+                <ContentPresenter Content="{TemplateBinding Content}"
+                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                  Foreground="{TemplateBinding Foreground}"
+                                  Margin="0"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  HorizontalContentAlignment="Center"
+                                  VerticalContentAlignment="Center" />
+            </Border>
+        </ControlTemplate>
+
         <DataTemplate x:Key="ReaderTtsButtonTextTemplate">
             <TextBlock Text="{Binding}"
                        Foreground="{Binding $parent[Button].Foreground}"
@@ -1679,9 +1695,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
-        <!-- The setting label already provides the meaning, so the switch stays
-             compact: a thin monochrome line with a small circular thumb. Fluent's
-             accent colour must not enter the control. -->
+        <!-- Monochrome capsule switches share the reader settings' dimensions. -->
         <Style Selector="ToggleSwitch">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
@@ -1689,14 +1703,15 @@
             <Setter Property="IsThreeState" Value="False" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Grid ColumnDefinitions="24" MinHeight="24" Background="Transparent">
-                        <Border x:Name="SwitchTrack" Width="20" Height="1"
-                                Background="{TemplateBinding Background}" VerticalAlignment="Center" />
-                        <Grid x:Name="PART_MovingKnobs">
-                            <Border x:Name="SwitchThumb" Width="10" Height="10" Margin="0"
-                                    Background="#B0B0B0" CornerRadius="5"
-                                    HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        </Grid>
+                    <Grid ColumnDefinitions="36" MinHeight="28" Background="Transparent">
+                        <Border x:Name="SwitchTrack" Width="34" Height="20" CornerRadius="10"
+                                Background="{TemplateBinding Background}" VerticalAlignment="Center">
+                            <Grid x:Name="PART_MovingKnobs" Margin="3">
+                                <Border x:Name="SwitchThumb" Width="14" Height="14"
+                                        Background="{DynamicResource PaperBrush}" CornerRadius="7"
+                                        HorizontalAlignment="Left" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
                     </Grid>
                 </ControlTemplate>
             </Setter>
@@ -1707,13 +1722,12 @@
         </Style>
         <Style Selector="ToggleSwitch:checked /template/ Border#SwitchThumb">
             <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />
         </Style>
 
-        <!-- Keep the compact track, but make the labeled row the hit target. -->
+        <!-- The entire labeled row remains the hit target. -->
         <Style Selector="ToggleSwitch.settingsToggle">
             <Setter Property="MinHeight" Value="44" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -1722,18 +1736,17 @@
                 <ControlTemplate>
                     <Border x:Name="SettingsToggleRow" Background="Transparent" Padding="0,6" CornerRadius="3"
                             BorderBrush="Transparent" BorderThickness="1" MinHeight="44">
-                        <Grid ColumnDefinitions="*,24" ColumnSpacing="24">
+                        <Grid ColumnDefinitions="*,36" ColumnSpacing="24">
                             <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
                                        FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
-                            <Grid Grid.Column="1" Width="24" Height="24" VerticalAlignment="Center" Background="Transparent">
-                                <Border x:Name="SwitchTrack" Width="20" Height="1"
-                                        Background="{TemplateBinding Background}" VerticalAlignment="Center" />
-                                <Grid x:Name="PART_MovingKnobs">
-                                    <Border x:Name="SwitchThumb" Width="10" Height="10"
-                                            Background="#B0B0B0" CornerRadius="5"
+                            <Border Grid.Column="1" x:Name="SwitchTrack" Width="34" Height="20" CornerRadius="10"
+                                    Background="{TemplateBinding Background}" VerticalAlignment="Center">
+                                <Grid x:Name="PART_MovingKnobs" Margin="3">
+                                    <Border x:Name="SwitchThumb" Width="14" Height="14"
+                                            Background="{DynamicResource PaperBrush}" CornerRadius="7"
                                             HorizontalAlignment="Left" VerticalAlignment="Center" />
                                 </Grid>
-                            </Grid>
+                            </Border>
                         </Grid>
                     </Border>
                 </ControlTemplate>
@@ -1745,10 +1758,16 @@
         <Style Selector="ToggleSwitch.settingsToggle:focus-visible /template/ Border#SettingsToggleRow">
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
-        <Style Selector="ToggleSwitch.settingsToggle#AutoUpdateCheck:pointerover /template/ Border#SettingsToggleRow, ToggleSwitch.settingsToggle#DevelopmentUpdateCheck:pointerover /template/ Border#SettingsToggleRow">
+        <Style Selector="Button.settingsRowAction">
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0,6" />
+            <Setter Property="CornerRadius" Value="3" />
             <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
-        <Style Selector="ToggleSwitch.settingsToggle#AutoUpdateCheck:focus-visible /template/ Border#SettingsToggleRow, ToggleSwitch.settingsToggle#DevelopmentUpdateCheck:focus-visible /template/ Border#SettingsToggleRow">
+        <Style Selector="Button.settingsRowAction:pointerover, Button.settingsRowAction:pressed">
             <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
 
@@ -1928,6 +1947,38 @@
         <Style Selector="Grid.readerShell Button.icon:pressed">
             <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
         </Style>
+        <Style Selector="Button.readerTranslationAction">
+            <Setter Property="Template" Value="{StaticResource ReaderTranslationActionButtonTemplate}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:pointerover">
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:pressed">
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:disabled">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction:disabled:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.readerTranslationAction Path">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Stretch" Value="Uniform" />
+        </Style>
         <!-- Quiet buttons in the reader stay outlined white boxes with a
              soft grey hover (WinUI QuietButtonStyle), no scale animation. -->
         <Style Selector="Grid.readerShell Button.quiet">
@@ -1992,11 +2043,12 @@
             <Setter Property="Height" Value="30" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
@@ -2006,25 +2058,31 @@
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAssistantTab.active">
-            <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
         <Style Selector="Button.readerAiReasoningToggle">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="24" />
-            <Setter Property="Padding" Value="0" />
+            <Setter Property="Padding" Value="6,2" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
         </Style>
         <Style Selector="Button.readerAiReasoningToggle:pointerover">
+            <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        </Style>
+        <Style Selector="Button.readerAiReasoningToggle:pressed">
+            <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
         </Style>
         <Style Selector="Button.readerAiSendButton">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
@@ -2779,6 +2837,15 @@
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="MaxHeight" Value="32" />
             <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <!-- Compact tray commands in both supported UI languages. -->
+        <Style Selector="MenuItem[Header='打开 Kkindle'], MenuItem[Header='Open Kkindle'],
+                         MenuItem[Header='退出'], MenuItem[Header='Exit']">
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="MaxHeight" Value="24" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Padding" Value="8,2" />
         </Style>
         <!-- 选中某条：黑色矩形 + 白色反色文字。子菜单箭头等矢量图形同样
              只允许黑白两色，避免 Fluent 模板主题色渗入。 -->

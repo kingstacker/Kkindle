@@ -404,10 +404,8 @@ public partial class MainWindow
         if (popup.Opacity < 0.5) popup.IsVisible = false;
     }
 
-    // Black bubble anchored above the eject button, showing connection and
-    // ejection feedback (WinUI DeviceStatusPopup/DeviceStatusToast). The
-    // bubble floats in window coordinates and follows the eject button's
-    // triangle apex, clamped to the window like the reference.
+    // Device feedback bubble uses the task-history flyout's shape and spacing.
+    // It floats in window coordinates and follows the eject button.
     private void ShowDeviceStatusToast(string message)
     {
         DeviceStatusToastText.Text = message;
@@ -432,20 +430,25 @@ public partial class MainWindow
             || popupSize.Width <= 0
             || popupSize.Height <= 0)
             return;
-        // Both eject icons are 8-DIP upward triangles centred in their
-        // buttons; anchor to the triangle apex rather than the button bounds.
+        // Keep the pointer centered on the eject icon, like the task-history
+        // pointer is centered on its 24-DIP button.
         var apex = anchor.TranslatePoint(
             new Point(anchor.Bounds.Width / 2, anchor.Bounds.Height / 2 - 4),
             this);
-        if (apex is not { } apexPoint) return;
+        var anchorOrigin = anchor.TranslatePoint(new Point(0, 0), this);
+        if (apex is not { } apexPoint || anchorOrigin is not { } anchorOriginPoint) return;
 
         const double edgeMargin = 8;
-        const double pointerCenterFromLeft = 20;
-        const double pointerWidth = 12;
+        const double pointerCenterFromLeft = 12.5;
+        const double pointerWidth = 16;
+        const double taskHistoryVerticalOffset = 4;
+        const double pointerTipInset = 0.5;
         var windowWidth = Bounds.Width > 0 ? Bounds.Width : Width;
         var maxLeft = Math.Max(edgeMargin, windowWidth - popupSize.Width - edgeMargin);
         var popupLeft = Math.Clamp(apexPoint.X - pointerCenterFromLeft, edgeMargin, maxLeft);
-        var popupTop = Math.Max(edgeMargin, apexPoint.Y - popupSize.Height - 2);
+        var popupTop = Math.Max(
+            edgeMargin,
+            anchorOriginPoint.Y + taskHistoryVerticalOffset - popupSize.Height + pointerTipInset);
         var pointerLeft = Math.Clamp(
             apexPoint.X - popupLeft - pointerWidth / 2,
             0,
@@ -458,7 +461,7 @@ public partial class MainWindow
         }
         // Draw the rectangle and pointer as one contour, with no seam across the base.
         var right = popupSize.Width - 0.5;
-        var bottom = popupSize.Height - 6.5;
+        var bottom = popupSize.Height - 8.5;
         var pointerTip = popupSize.Height - 0.5;
         var pointerStart = Math.Clamp(pointerLeft, 1, Math.Max(1, right - pointerWidth - 1));
         var outline = FormattableString.Invariant(
@@ -718,7 +721,7 @@ public partial class MainWindow
             // explicitly refreshes or taps the device card (WinUI reference).
             if (_manuallyDisconnectedDeviceId is not null)
             {
-                SetDisconnectedDeviceUi(T("已断开"));
+                SetDisconnectedDeviceUi();
                 return;
             }
 
@@ -1808,7 +1811,7 @@ public partial class MainWindow
             var disconnectedMessage = isWpd
                 ? T("{0} 已停止访问，现在可以安全移除你的设备", device.Name)
                 : T("{0} 已安全弹出，现在可以安全移除你的设备", device.Name);
-            SetDisconnectedDeviceUi(T("已断开"));
+            SetDisconnectedDeviceUi();
             DeviceStorageText.Text = isWpd ? T("设备已停止访问") : T("设备已弹出");
             ShowDeviceStatusToast(disconnectedMessage);
         }

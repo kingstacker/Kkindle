@@ -7,6 +7,51 @@ namespace Kkindle.Tests.Windows;
 public sealed class KindleDeviceTests
 {
     [Fact]
+    public async Task PdfFirstPageCoverIsExtractedAndReusedByWpdMetadataCache()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(Path.Combine(root, "app"));
+        var device = new KindleDevice { RootPath = Path.Combine(root, "device"), VolumeSerial = "PDF-COVER", IsReady = true };
+        var source = Kkindle.TestFixtures.PdfFixture.Write(Path.Combine(device.RootPath, "documents"));
+        try
+        {
+            var service = new KindleDeviceService(paths, new BookMetadataService());
+            var book = Assert.Single(await service.ScanBooksAsync(device));
+            Assert.Equal("PDF 阅读测试", book.Title);
+            Assert.Equal("Kkindle Tests", book.Authors);
+            Assert.NotNull(book.CoverPath);
+            Assert.True(File.Exists(book.CoverPath));
+            Assert.Equal(".png", Path.GetExtension(book.CoverPath));
+            Assert.True(new FileInfo(book.CoverPath).Length > 100);
+            Assert.Equal(await ComputeHashAsync(source), book.Sha256);
+
+            // Reuse the same identity/path/size/mtime sidecar as an MTP scan.
+            var sidecarPath = Path.ChangeExtension(book.CoverPath, ".meta.json");
+            await File.WriteAllTextAsync(sidecarPath, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                book.Title, book.Authors, book.Sha256, IsDictionary = false
+            }));
+            var wpdBook = new KindleBook
+            {
+                RelativePath = book.RelativePath, Format = "pdf", Size = book.Size, ModifiedAt = book.ModifiedAt
+            };
+            var metadata = new CountingMetadataService();
+            var wpdService = new KindleDeviceService(paths, metadata);
+
+            Assert.False(await wpdService.EnrichWpdBookAsync(device, wpdBook, null, CancellationToken.None));
+            Assert.Equal(book.CoverPath, wpdBook.CoverPath);
+            Assert.Equal(book.Title, wpdBook.Title);
+            Assert.Equal(book.Authors, wpdBook.Authors);
+            Assert.Equal(book.Sha256, wpdBook.Sha256);
+            Assert.Equal(0, metadata.ReadCount);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PersistentScanCacheSkipsUnchangedBookHashingAndMetadata()
     {
         var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));

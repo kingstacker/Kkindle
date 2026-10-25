@@ -13,7 +13,7 @@ public sealed class ReaderAiConversationTests
         block.CitationAction = _ => { };
         Assert.NotEmpty(block.Inlines!);
         block.Markdown = "## Heading\n\n**Completed answer**";
-        Assert.Contains(block.Inlines!.OfType<Avalonia.Controls.Documents.Run>(), run => run.Text == "Completed answer");
+        Assert.Contains(InlineTree(block.Inlines!).OfType<Avalonia.Controls.Documents.Run>(), run => run.Text == "Completed answer");
         Assert.Contains("Completed answer", block.Markdown);
     }
 
@@ -25,10 +25,58 @@ public sealed class ReaderAiConversationTests
             Markdown = "- [ ] Todo\n- [x] Done\n~~Old idea~~"
         };
 
-        var runs = block.Inlines!.OfType<Avalonia.Controls.Documents.Run>().ToArray();
-        Assert.Contains(runs, run => run.Text?.Contains("☐ Todo", StringComparison.Ordinal) == true);
-        Assert.Contains(runs, run => run.Text?.Contains("☑ Done", StringComparison.Ordinal) == true);
-        Assert.Contains(runs, run => run.Text == "Old idea" && run.TextDecorations is not null);
+        var tree = InlineTree(block.Inlines!).ToArray();
+        var text = string.Concat(tree.OfType<Avalonia.Controls.Documents.Run>().Select(run => run.Text));
+        Assert.Contains("☐ Todo", text);
+        Assert.Contains("☑ Done", text);
+        Assert.Contains(tree.OfType<Avalonia.Controls.Documents.Span>(), span => span.TextDecorations is not null);
+    }
+
+    [Fact]
+    public void MathSurvivesMarkdownFormattingButCodeAndPricesStayLiteral()
+    {
+        var block = new KreaderMarkdownTextBlock
+        {
+            Markdown = "## **频率** \\(f_{PD}\\)\n\n" +
+                "\\[f_{PD}=\\frac{f_{OSC}\\times OSC\\_2X\\times MULT}{PLL\\_R\\_PRE\\times PLL\\_R}\\]\n\n" +
+                "行内 $x$，块公式 $$\\sqrt{x^2+1}$$\n\n`$literal$`，价格 $5 和 $10。 [S1]"
+        };
+        var tree = InlineTree(block.Inlines!).ToArray();
+        var controls = tree.OfType<Avalonia.Controls.Documents.InlineUIContainer>().Select(inline => inline.Child).ToArray();
+        var formulas = controls.OfType<Avalonia.Controls.Viewbox>()
+            .Select(view => Assert.IsType<CSharpMath.Avalonia.MathView>(view.Child)).ToArray();
+        Assert.Equal(4, formulas.Length);
+        Assert.All(formulas, formula => Assert.Null(formula.ErrorMessage));
+        Assert.Contains(controls.OfType<Avalonia.Controls.Button>(), button => Equals("[S1]", button.Content));
+        var text = string.Concat(tree.OfType<Avalonia.Controls.Documents.Run>().Select(run => run.Text));
+        Assert.Contains("$literal$", text);
+        Assert.Contains("$5 和 $10", text);
+        Assert.DoesNotContain("\\frac", text);
+    }
+
+    [Fact]
+    public void StreamingIncompleteMathRecoversAndNestedListsKeepNumbers()
+    {
+        var block = new KreaderMarkdownTextBlock { Markdown = @"Result \\(\\frac{1}{" };
+        block.Markdown = "3. **First**\n   - Nested *detail*\n4. Second\n\n\\(\\frac{1}{2}\\)";
+        var tree = InlineTree(block.Inlines!).ToArray();
+        var text = string.Concat(tree.OfType<Avalonia.Controls.Documents.Run>().Select(run => run.Text));
+        Assert.Contains("3. First", text);
+        Assert.Contains("   • Nested detail", text);
+        Assert.Contains("4. Second", text);
+        Assert.Single(tree.OfType<Avalonia.Controls.Documents.InlineUIContainer>(),
+            inline => inline.Child is Avalonia.Controls.Viewbox);
+    }
+
+    private static IEnumerable<Avalonia.Controls.Documents.Inline> InlineTree(
+        IEnumerable<Avalonia.Controls.Documents.Inline> inlines)
+    {
+        foreach (var inline in inlines)
+        {
+            yield return inline;
+            if (inline is Avalonia.Controls.Documents.Span span)
+                foreach (var child in InlineTree(span.Inlines)) yield return child;
+        }
     }
 
     [Fact]
@@ -47,6 +95,11 @@ public sealed class ReaderAiConversationTests
         navigated = null;
         first.CitationAction!("S99");
         Assert.Null(navigated);
+        Assert.Equal("First evidence", first.CitationSourceResolver("s1")!.Content);
+        Assert.Equal("Second evidence", second.CitationSourceResolver("S1")!.Content);
+        Assert.Null(first.CitationSourceResolver("S99"));
+        second.SetSources([new ReaderAiSourceViewModel(new PdfPageText(9, "Updated evidence"))]);
+        Assert.Equal(9, second.CitationSourceResolver("S1")!.Page!.PageNumber);
     }
 
     [Fact]

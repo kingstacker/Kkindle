@@ -27,7 +27,7 @@ internal sealed class KindleScanCacheEntry
 
 internal sealed class KindleScanCacheStore
 {
-    private const int CurrentVersion = 3;
+    private const int CurrentVersion = 4;
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CacheDocument? _document;
@@ -101,6 +101,17 @@ internal sealed class KindleScanCacheStore
         {
             await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
             var loaded = await JsonSerializer.DeserializeAsync<CacheDocument>(stream, cancellationToken: cancellationToken);
+            if (loaded is { Version: 3 })
+            {
+                // MTP scans previously skipped PDF metadata entirely, then cached
+                // the empty result. Retry those entries once without discarding
+                // covers or metadata that were already extracted successfully.
+                loaded.Entries.RemoveAll(entry =>
+                    entry.Format.Equals("pdf", StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrEmpty(entry.Sha256)
+                    && string.IsNullOrEmpty(entry.CoverPath));
+                loaded.Version = CurrentVersion;
+            }
             _document = loaded is { Version: CurrentVersion } ? loaded : new CacheDocument();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)

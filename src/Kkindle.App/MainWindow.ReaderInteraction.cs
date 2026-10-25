@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -1486,6 +1486,10 @@ public partial class MainWindow
         ReaderAiEmptyState.IsVisible = true;
         ReaderAiView.IsVisible = true;
         ReaderNotesView.IsVisible = false;
+        ReaderPdfThumbnailsView.IsVisible = false;
+        SetReaderAssistantTabState(ReaderAiTabButton, selected: true);
+        SetReaderAssistantTabState(ReaderNotesTabButton, selected: false);
+        SetReaderAssistantTabState(ReaderPdfThumbnailsTabButton, selected: false);
         ReaderAiSettingsView.IsVisible = false;
         ReaderAiComposer.IsVisible = true;
         ReaderNotesExportBar.IsVisible = false;
@@ -5631,7 +5635,8 @@ public partial class MainWindow
                     targetPage,
                     pdfNavigationToken,
                     saveProgress: false,
-                    syncTocSelection: false))
+                    syncTocSelection: false,
+                    skipReloadWhenPageMatches: true))
                 {
                     return false;
                 }
@@ -7072,14 +7077,55 @@ public partial class MainWindow
     }
 
     private Point? _readerAnnotationHoverPlacementPoint;
+    private Guid? _readerAnnotationHoverAnnotationId;
 
-    private void ShowReaderAnnotationHoverPopup(string note, Point? placementPoint)
+    private void ShowCurrentReaderPdfAnnotation()
     {
+        if (!_readerIsPdf || ReaderAnnotationInputPopup.IsOpen) return;
+        HideReaderAnnotationHoverPopup();
+        if (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned) return;
+        var annotations = ReaderAnnotations.Where(item =>
+            TryGetReaderPdfPage(item.ChapterPath, out _) && !string.IsNullOrWhiteSpace(item.Note))
+            .OrderByDescending(item => item.ChapterPath == $"pdf:page:{_readerPdfPage}").ToArray();
+        if (annotations.Length == 0 || CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        ShowReaderAnnotationHoverPopup(annotations[0].Note, null, annotations[0]);
+        ShowAdditionalReaderPdfAnnotations(pdf, annotations.Skip(1));
+    }
+
+    private void ShowReaderAnnotationHoverPopup(
+        string note,
+        Point? placementPoint,
+        ReaderAnnotation? annotation = null,
+        bool fromAnnotationClick = false)
+    {
+        if (_readerIsPdf && ReaderAnnotationInputPopup.IsOpen) return;
+        if (_readerIsPdf && _readerPdfAnnotationPopups.Count > 0) return;
+        if (_readerIsPdf
+            && (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned
+                || annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
+        _readerAnnotationHoverAnnotationId = annotation?.Id;
+        ReaderAnnotationHoverHostPopup.IsHitTestVisible = _readerIsPdf;
+        ReaderAnnotationHoverPopup.IsHitTestVisible = _readerIsPdf;
         if (placementPoint is { } point)
             _readerAnnotationHoverPlacementPoint = point;
         ReaderAnnotationHoverPopup.IsVisible = true;
+        if (_readerIsPdf
+            && CurrentReaderHost is NativePdfReaderHost pdf
+            && annotation is not null)
+        {
+            if (TryShowReaderPdfAnnotationCallout(
+                    ReaderAnnotationHoverHostPopup,
+                    pdf,
+                    annotation,
+                    _readerAnnotationHoverPlacementPoint,
+                    new Size(220, 88)))
+                return;
+            pdf.ClearAnnotationCallout();
+            HideReaderAnnotationHoverPopup();
+            return;
+        }
         if (CurrentReaderHost?.View is Control view
             && _readerAnnotationHoverPlacementPoint is { } anchor)
         {
@@ -7108,10 +7154,54 @@ public partial class MainWindow
 
     private void HideReaderAnnotationHoverPopup()
     {
+        foreach (var popup in _readerPdfAnnotationPopups)
+        {
+            popup.IsOpen = false;
+            ((ISetLogicalParent)popup).SetParent(null);
+        }
+        _readerPdfAnnotationPopups.Clear();
+        if (!ReaderAnnotationInputPopup.IsOpen && CurrentReaderHost is NativePdfReaderHost pdf)
+            pdf.ClearAnnotationCallout();
         ReaderAnnotationHoverHostPopup.IsOpen = false;
         ReaderAnnotationHoverPopup.IsVisible = false;
         ReaderAnnotationHoverNote.Text = string.Empty;
         _readerAnnotationHoverPlacementPoint = null;
+        _readerAnnotationHoverAnnotationId = null;
+        ReaderAnnotationHoverHostPopup.IsHitTestVisible = false;
+        ReaderAnnotationHoverPopup.IsHitTestVisible = false;
+    }
+
+    private void ReaderAnnotationHoverNote_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!_readerIsPdf
+            || _readerAnnotationHoverAnnotationId is not { } annotationId
+            || ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is not { } annotation)
+            return;
+
+        var properties = e.GetCurrentPoint(ReaderAnnotationHoverNote).Properties;
+        if (properties.IsRightButtonPressed)
+        {
+            e.Handled = true;
+            ShowReaderPdfAnnotationMenu(annotation);
+        }
+        else if (properties.IsLeftButtonPressed)
+        {
+            e.Handled = true;
+            EditReaderPdfAnnotation(annotation);
+            (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(annotation.Id);
+        }
+    }
+
+    private void ReaderAnnotationHoverCloseButton_Click(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (_readerIsPdf && CurrentReaderHost is NativePdfReaderHost pdf)
+        {
+            ReaderAnnotationHoverHostPopup.IsOpen = false;
+            pdf.DismissAnnotationCallout();
+            return;
+        }
+        HideReaderAnnotationHoverPopup();
     }
 
     private void HideReaderFootnotePopup()
@@ -7160,6 +7250,9 @@ public partial class MainWindow
                             _selectedReaderAnnotation = null;
                             HideReaderSelectionPopup();
                             HideReaderAnnotationInputPopup();
+                            HideReaderAnnotationHoverPopup();
+                            // Navigation emits the new page before its final pan is applied.
+                            Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
                         }
                         ReaderChapterText.Text = GetReaderChapterPositionLabel();
                         UpdateReaderToolbar();
@@ -7278,18 +7371,66 @@ public partial class MainWindow
                 case "pdfLayout":
                     UpdateReaderToolbar();
                     break;
+                case "pdfHistory":
+                    UpdateReaderPdfNavigationUi();
+                    break;
+                case "pdfHistoryNavigate":
+                    _ = ObserveReaderTaskAsync(NavigateReaderPdfHistoryAsync(ReadInt(root, "direction")));
+                    break;
+                case "pdfLink":
+                    _ = ObserveReaderTaskAsync(FollowReaderPdfLinkAsync(root));
+                    break;
+                case "pdfLabels":
+                    ReaderChapterText.Text = GetReaderChapterPositionLabel();
+                    ReaderPdfThumbnailsList.ItemsSource = null;
+                    UpdateReaderPdfNavigationUi();
+                    break;
                 case "pdfError":
                     ReaderStatusText.Text = UiText.Localize(ReadString(root, "message"));
+                    break;
+                case "annotationSelect":
+                    PdfAnnotTrace.Write($"bridge annotationSelect id={ReadString(root, "id")} isPdf={_readerIsPdf}");
+                    if (_readerIsPdf
+                        && Guid.TryParse(ReadString(root, "id"), out var selectedId))
+                    {
+                        // Highlight/underline picked with the left button so the
+                        // Delete key or a right click can remove it. Selecting
+                        // must not open the note editor.
+                        (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(selectedId);
+                        HideReaderSelectionPopup();
+                    }
                     break;
                 case "annotationClick":
                     if (Guid.TryParse(ReadString(root, "id"), out var annotationId)
                         && ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is { } clickedAnnotation)
                     {
                         if (_readerIsPdf)
+                        {
                             EditReaderPdfAnnotation(clickedAnnotation);
+                            (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(clickedAnnotation.Id);
+                        }
                         else
                             EditReaderAnnotation(clickedAnnotation);
                     }
+                    break;
+                case "annotationContextMenu":
+                    if (_readerIsPdf
+                        && Guid.TryParse(ReadString(root, "id"), out var menuId)
+                        && ReaderAnnotations.FirstOrDefault(item => item.Id == menuId) is { } menuAnnotation)
+                        ShowReaderPdfAnnotationMenu(menuAnnotation);
+                    break;
+                case "pdfAnnotationDelete":
+                    PdfAnnotTrace.Write($"bridge pdfAnnotationDelete id={ReadString(root, "id")} isPdf={_readerIsPdf}");
+                    if (_readerIsPdf && Guid.TryParse(ReadString(root, "id"), out var deleteId)
+                        && ReaderAnnotations.FirstOrDefault(item => item.Id == deleteId) is { } deleteAnnotation)
+                        _ = DeleteReaderAnnotationAsync(deleteAnnotation);
+                    break;
+                case "annotationBlankClick":
+                    if (_readerIsPdf)
+                        (CurrentReaderHost as NativePdfReaderHost)?.ClearAnnotationSelection();
+                    if (!_readerIsPdf
+                        || CurrentReaderAppearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Click)
+                        HideReaderAnnotationHoverPopup();
                     break;
                 case "pdfPointAnnotation":
                     if (_readerIsPdf
@@ -7364,7 +7505,8 @@ public partial class MainWindow
                     }
                     break;
                 case "page":
-                    if (IsReaderPaginated
+                    // PDF arrow keys turn physical pages in continuous mode too.
+                    if ((_readerIsPdf || IsReaderPaginated)
                         && root.TryGetProperty("direction", out var pageDirection)
                         && pageDirection.TryGetInt32(out var pageTurnDirection))
                     {
@@ -7435,15 +7577,20 @@ public partial class MainWindow
                     {
                         annotationPlacementPoint = new Point(Math.Max(0, annotationPx), Math.Max(0, annotationPy));
                     }
+                    var hoveredAnnotation = Guid.TryParse(ReadString(root, "id"), out var hoveredAnnotationId)
+                        ? ReaderAnnotations.FirstOrDefault(item => item.Id == hoveredAnnotationId)
+                        : null;
                     ShowReaderAnnotationHoverPopup(
                         ReadString(root, "note"),
-                        annotationPlacementPoint);
+                        annotationPlacementPoint,
+                        hoveredAnnotation);
                     break;
                 }
                 case "annotationLeave":
                     // The native host emits this from Avalonia pointer events,
                     // which stay authoritative regardless of platform.
-                    HideReaderAnnotationHoverPopup();
+                    if (!_readerIsPdf)
+                        HideReaderAnnotationHoverPopup();
                     break;
                 case "resize":
                     ScheduleReaderRelayout();
@@ -7926,8 +8073,10 @@ public partial class MainWindow
 
     private async Task ExplainReaderSelectionWithAiAsync()
     {
+        var selection = _readerPendingSelection;
         HideReaderSelectionPopup();
-        if (string.IsNullOrWhiteSpace(_readerPendingSelection)) return;
+        if (string.IsNullOrWhiteSpace(selection)) return;
+        ShowReaderAiTab();
         if (!_appSettings.AiEnabled)
         {
             await ShowMessageAsync(T("AI 助手"), T("AI 已在应用设置中关闭。"));
@@ -7948,9 +8097,8 @@ public partial class MainWindow
             return;
         }
 
-        ShowReaderAiTab();
         await SendReaderAiQuestionAsync(
-            T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", _readerPendingSelection),
+            T("请解释下面这段文字的含义、上下文和隐含前提，并给出一个简单例子：\n\n{0}", selection),
             ReaderAiRequestKind.SelectionExplain);
     }
 
@@ -8668,8 +8816,13 @@ public partial class MainWindow
         if (_suppressReaderTocSelectionNavigation) return;
         if (e.AddedItems.Count > 0 && e.AddedItems[0] is ReaderTocRow row)
         {
-            if (!_readerIsPdf)
-                SetReaderTocCurrentRow(row);
+            if (_readerIsPdf)
+            {
+                NavigateToReaderTocItem(row.Item);
+                return;
+            }
+
+            SetReaderTocCurrentRow(row);
             var item = row.Item;
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(
@@ -9001,7 +9154,7 @@ public partial class MainWindow
         ReaderTocPanel.IsVisible = false;
         ReaderAssistantPanel.IsVisible = _readerAssistantVisibleBeforeZen;
         if (_readerAssistantVisibleBeforeZen)
-            SetReaderAiPanelWidth(_readerAiPanelWidth);
+            SetReaderAiPanelWidth(GetReaderAssistantPanelWidth());
         else
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         ReaderAssistantToggleButton.IsVisible = true;
@@ -9469,6 +9622,7 @@ public partial class MainWindow
 
     private void UpdateReaderToolbar()
     {
+        UpdateReaderPdfNavigationUi();
         if (ReaderFlowButton is not null)
         {
             ReaderFlowButton.IsVisible = true;
@@ -9500,12 +9654,13 @@ public partial class MainWindow
             }
             _readerProgressSliderUpdating = false;
         }
-        // PDF uses these controls for page zoom, EPUB for font size.
+        // PDF zoom is performed with the pointer wheel; keep the shared controls
+        // for EPUB font sizing only.
         if (ReaderZoomOutButton is not null && ReaderZoomText is not null && ReaderZoomInButton is not null)
         {
-            ReaderZoomOutButton.IsVisible = true;
-            ReaderZoomText.IsVisible = true;
-            ReaderZoomInButton.IsVisible = true;
+            ReaderZoomOutButton.IsVisible = !_readerIsPdf;
+            ReaderZoomText.IsVisible = !_readerIsPdf;
+            ReaderZoomInButton.IsVisible = !_readerIsPdf;
             var zoomOutLabel = _readerIsPdf ? T("缩小页面") : T("减小字号");
             var zoomInLabel = _readerIsPdf ? T("放大页面") : T("增大字号");
             ReaderZoomOutButton.Content = _readerIsPdf ? "−" : "A−";
@@ -9526,6 +9681,12 @@ public partial class MainWindow
             ReaderPdfBadge.IsVisible = _readerIsPdf;
         if (ReaderPdfRotateButton is not null)
             ReaderPdfRotateButton.IsVisible = _readerIsPdf;
+        if (ReaderPdfHandToolButton is not null)
+        {
+            ReaderPdfHandToolButton.IsVisible = _readerIsPdf;
+            UpdateReaderPdfHandToolButton(
+                (CurrentReaderHost as NativePdfReaderHost)?.IsHandToolMode == true);
+        }
         if (ReaderPdfPointNoteButton is not null)
         {
             ReaderPdfPointNoteButton.IsVisible = _readerIsPdf;

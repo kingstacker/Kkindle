@@ -6,7 +6,9 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
+using Avalonia.VisualTree;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 using Kkindle.TestFixtures;
@@ -19,6 +21,44 @@ namespace Kkindle.Ui.Tests;
 [Trait("Category", "Slow")]
 public sealed class PdfReaderModeTests(SettingsUiSession session)
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(90)]
+    public Task FootnoteHoverOpensOriginalTextAndScrollClosesIt(int rotation) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.WriteFootnotes(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetFitModeAsync(PdfReaderFitMode.Page);
+        if (rotation != 0) await pdf.RotateClockwiseAsync();
+        await ReaderTests.Render();
+        var note = PdfFootnoteLayout.Read(pdf.PageContent!).First();
+        var anchor = pdf.GetRangeBounds(note.Offset, note.Offset + note.Marker.Length).Single();
+        var point = pdf.TranslatePoint(anchor.Center, scope.Window)!.Value;
+        scope.Window.MouseMove(point);
+        await Task.Delay(450);
+        await ReaderTests.Render();
+        var popupField = typeof(NativePdfReaderHost).GetField("_footnotePopup", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var popup = Assert.IsType<Popup>(popupField.GetValue(pdf));
+        Assert.True(popup.IsOpen);
+        Assert.Equal(anchor, popup.PlacementRect);
+        var content = Assert.IsType<StackPanel>(Assert.IsType<Border>(popup.Child).Child);
+        var original = Assert.IsType<SelectableTextBlock>(Assert.IsType<ScrollViewer>(content.Children[1]).Content);
+        Assert.Equal(note.Text, original.Text);
+        var popupRoot = TopLevel.GetTopLevel(original)!;
+        var first = original.TranslatePoint(new Point(1, 8), popupRoot)!.Value;
+        var last = original.TranslatePoint(new Point(90, 8), popupRoot)!.Value;
+        popupRoot.MouseMove(first);
+        popupRoot.MouseDown(first, MouseButton.Left);
+        popupRoot.MouseMove(last);
+        popupRoot.MouseUp(last, MouseButton.Left);
+        await Task.Delay(350);
+        await ReaderTests.Render();
+        Assert.True(popup.IsOpen);
+        pdf.ScrollBy(20);
+        Assert.Null(popupField.GetValue(pdf));
+    });
+
     [Fact]
     public Task ClearingSearchCancelsPendingIndexWaitAndNewQueryWins() => Run(async () =>
     {
@@ -127,6 +167,9 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         var annotationPoint = pdf.TranslatePoint(savedRange.Center, scope.Window)!.Value;
         scope.Window.MouseDown(annotationPoint, MouseButton.Left);
         scope.Window.MouseUp(annotationPoint, MouseButton.Left);
+        Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+        Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        scope.Call("EditReaderPdfAnnotation", annotation);
         Assert.True(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
         Assert.Equal("Right page comment", scope.Get<TextBox>("ReaderAnnotationInputBox").Text);
         await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.SinglePage);
@@ -155,7 +198,15 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         await scope.Call<Task>("SetReaderPdfDisplayModeAsync", mode);
         await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
         await pdf.SetZoomAsync(1.4);
+        // Center-anchored zoom can pan the sheet over the left edge. Reveal
+        // the outer gutter and page start before checking background and ink.
+        pdf.GetVisualChildren().OfType<ScrollBar>()
+            .Single(bar => bar.Orientation == Avalonia.Layout.Orientation.Horizontal).Value = 0;
+        var vertical = pdf.GetVisualChildren().OfType<ScrollBar>()
+            .Single(bar => bar.Orientation == Avalonia.Layout.Orientation.Vertical);
+        vertical.Value += pdf.PageBounds.Top - 16;
         pdf.ScrollBy(120);
+        Assert.All(pdf.VisiblePageNumbers, page => Assert.True(pdf.GetPageBounds(page).Left >= 12));
         foreach (var theme in new[] { ReaderTheme.Green, ReaderTheme.Beige })
         {
             scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { Theme = theme });
@@ -221,9 +272,15 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
             Capture(scope.Window, $"pdf-rotation-{mode}-{pdf.Rotation}");
             scope.Window.MouseDown(point, MouseButton.Left);
             scope.Window.MouseUp(point, MouseButton.Left);
+            // Left click only picks the highlight; the note editor opens on demand.
+            Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+            Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+            scope.Call("EditReaderPdfAnnotation", annotation);
             Assert.True(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
             Assert.Equal("Rotating comment", scope.Get<TextBox>("ReaderAnnotationInputBox").Text);
             scope.Call("HideReaderAnnotationInputPopup");
+            // The pick tint must not leak into the next turn's pixel check.
+            pdf.ClearAnnotationSelection();
             if (turn == 1)
             {
                 var state = pdf.CaptureViewState();
@@ -355,6 +412,307 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
             }
         return false;
     }
+
+    [Fact]
+    public Task LinkClickAndHistoryRestoreZoomPanAndForwardBranch() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.WriteNavigation(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetZoomAsync(1.5);
+        pdf.ScrollToTop(0.7);
+        await pdf.RefreshViewportAsync();
+        await ReaderTests.Render();
+        var before = pdf.CaptureViewState();
+        var link = Assert.Single(pdf.PageContent!.Links, l => l.PageNumber == 3);
+        var page = pdf.PageBounds;
+        var point = pdf.TranslatePoint(new Point(page.X + (link.Bounds.X + link.Bounds.Width / 2) * page.Width,
+            page.Y + (link.Bounds.Y + link.Bounds.Height / 2) * page.Height), scope.Window)!.Value;
+        scope.Window.MouseDown(point, MouseButton.Left);
+        scope.Window.MouseUp(point, MouseButton.Left);
+        for (var i = 0; i < 100 && (!pdf.CanNavigateBack || pdf.PageNumber != 3); i++) { await Task.Delay(20); await ReaderTests.Render(); }
+        Assert.Equal(3, pdf.PageNumber);
+        Assert.True(scope.Get<Button>("ReaderPdfBackButton").IsEnabled);
+        Assert.InRange(pdf.PageBounds.Y, -pdf.PageBounds.Height * 0.55, -pdf.PageBounds.Height * 0.2);
+        var destination = pdf.CaptureViewState();
+        await scope.Call<Task>("NavigateReaderPdfHistoryAsync", -1);
+        Assert.Equal(1, pdf.PageNumber);
+        Assert.Equal(before, pdf.CaptureViewState());
+        Assert.True(pdf.CanNavigateForward);
+        scope.Get<Button>("ReaderPdfBackButton").Focus();
+        scope.Window.KeyPress(Key.Right, RawInputModifiers.Alt, PhysicalKey.ArrowRight, null);
+        for (var i = 0; i < 100 && (pdf.PageNumber != 3 || !pdf.CanNavigateBack); i++) { await Task.Delay(20); await ReaderTests.Render(); }
+        Assert.Equal(3, pdf.PageNumber);
+        Assert.Equal(destination, pdf.CaptureViewState());
+        scope.Window.KeyPress(Key.Left, RawInputModifiers.Alt, PhysicalKey.ArrowLeft, null);
+        for (var i = 0; i < 100 && (pdf.PageNumber != 1 || !pdf.CanNavigateForward); i++) { await Task.Delay(20); await ReaderTests.Render(); }
+        Assert.Equal(before, pdf.CaptureViewState());
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        Assert.False(pdf.CanNavigateForward);
+        await scope.Call<Task>("NavigateReaderPdfHistoryAsync", -1);
+        Assert.Equal(before, pdf.CaptureViewState());
+    });
+
+    [Fact]
+    public Task ColumnDragCopiesCleanTextAndSavesOnlySelectedColumn() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.WriteNavigation(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetFitModeAsync(PdfReaderFitMode.Page);
+        await ReaderTests.Render();
+        var text = pdf.PageContent!.Text;
+        var start = text.IndexOf("Left first", StringComparison.Ordinal);
+        var end = text.IndexOf("esting example.", StringComparison.Ordinal) + "esting example.".Length;
+        var first = pdf.GetRangeBounds(start, start + 1).Single();
+        var last = pdf.GetRangeBounds(end - 1, end).Single();
+        var a = pdf.TranslatePoint(new Point(first.Left, first.Center.Y), scope.Window)!.Value;
+        var b = pdf.TranslatePoint(new Point(last.Right + 1, last.Center.Y), scope.Window)!.Value;
+        scope.Window.MouseDown(a, MouseButton.Left);
+        scope.Window.MouseMove(b);
+        scope.Window.MouseUp(b, MouseButton.Left);
+        Assert.DoesNotContain("Right", scope.Field<string>("_readerPendingSelection"));
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "Column note", "marker", "#FFD900");
+        var annotation = Assert.Single(scope.Window.ReaderAnnotations);
+        Assert.DoesNotContain("Right", annotation.SelectedText);
+        Assert.Equal(start, annotation.StartOffset);
+        Assert.Equal(end, annotation.EndOffset);
+        // Re-selecting and copying uses the selection's reading order.
+        scope.Window.MouseDown(a, MouseButton.Left);
+        scope.Window.MouseMove(b);
+        scope.Window.MouseUp(b, MouseButton.Left);
+        await scope.Call<Task>("PerformReaderSelectionCopyAsync");
+        Assert.Equal("Left first line. An interesting example.", await scope.Window.Clipboard!.TryGetTextAsync());
+        Capture(scope.Window, "pdf-column-selection");
+    });
+
+    [Fact]
+    public Task PdfTranslationUsesParagraphsWithoutChangingSelectionOffsets() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.Write(scope.Paths.ReaderCache));
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var text = pdf.PageContent!.Text;
+        var start = text.IndexOf("Select this", StringComparison.Ordinal);
+        var end = text.IndexOf("Notes stay", StringComparison.Ordinal);
+        pdf.SelectRange(start, end);
+        var selected = scope.Field<string>("_readerPendingSelection");
+        var selectedEnd = scope.Field<int>("_readerPendingSelectionEndOffset");
+        Assert.Contains('\n', selected);
+        // Network is disabled in this scope: inspect the source shown and used
+        // by the translation entry point without contacting an external service.
+        await scope.Call<Task>("TranslateReaderSelectionAsync", ReaderTranslationProvider.Google, 0, "");
+        const string expected = "Select this text for a note. Underline and highlight this line. Search this text again.\n\nNested section";
+        Assert.Equal(expected, scope.Get<TextBlock>("ReaderTranslationSourceText").Text);
+        Assert.Equal(expected, scope.Field<string>("_readerTranslationSource"));
+        Assert.Equal(selected, scope.Field<string>("_readerPendingSelection"));
+        Assert.Equal(start, scope.Field<int>("_readerPendingSelectionStartOffset"));
+        Assert.Equal(selectedEnd, scope.Field<int>("_readerPendingSelectionEndOffset"));
+    });
+
+    [Fact]
+    public Task ThumbnailWidthIsIndependentAndPreviewsScaleWithTheSidebar() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.WriteNavigation(scope.Paths.ReaderCache));
+        var root = scope.Get<Grid>("ReaderRoot");
+        scope.Call("ShowReaderAiTab");
+        scope.Call("SetReaderAiPanelWidth", 500d);
+        await ReaderTests.Render();
+        var aiWidth = root.ColumnDefinitions[2].ActualWidth;
+        scope.Call("ReaderPdfThumbnailsButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        await ReaderTests.Render();
+        Assert.Equal(224, root.ColumnDefinitions[2].ActualWidth);
+        var list = scope.Get<ListBox>("ReaderPdfThumbnailsList");
+        var preview = list.GetVisualDescendants().OfType<PdfThumbnailPreview>()
+            .First(p => p.DataContext is PdfThumbnailItem { PageNumber: 1 });
+        for (var i = 0; i < 100 && preview.Source is null; i++) { await Task.Delay(20); await ReaderTests.Render(); }
+        Assert.True(preview.Source is not null,
+            $"Preview bounds={preview.Bounds}, desired={preview.DesiredSize}, attached={preview.IsAttachedToVisualTree()}, tooltip={ToolTip.GetTip(preview)}");
+        var width = preview.Bounds.Width;
+        var pixels = ((Bitmap)preview.Source!).PixelSize.Width;
+        Assert.InRange(width, 140, 220);
+        scope.Call("SetReaderAiPanelWidth", 320d);
+        await ReaderTests.Render();
+        Assert.True(preview.Bounds.Width > width + 80);
+        Assert.InRange(Math.Abs(preview.Bounds.Height - preview.Bounds.Width * 1.25), 0, 1);
+        for (var i = 0; i < 100 && ((Bitmap)preview.Source!).PixelSize.Width <= pixels; i++)
+        {
+            await Task.Delay(20);
+            await ReaderTests.Render();
+        }
+        Assert.True(((Bitmap)preview.Source!).PixelSize.Width > pixels);
+        scope.Call("ShowReaderAiTab");
+        await ReaderTests.Render();
+        Assert.Equal(aiWidth, root.ColumnDefinitions[2].ActualWidth);
+        scope.Call("ReaderPdfThumbnailsButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        await ReaderTests.Render();
+        Assert.Equal(320, root.ColumnDefinitions[2].ActualWidth);
+    });
+
+    [Theory]
+    [InlineData(PdfReaderDisplayMode.Continuous, false)]
+    [InlineData(PdfReaderDisplayMode.Continuous, true)]
+    [InlineData(PdfReaderDisplayMode.SinglePage, false)]
+    [InlineData(PdfReaderDisplayMode.SinglePage, true)]
+    [InlineData(PdfReaderDisplayMode.TwoPage, false)]
+    [InlineData(PdfReaderDisplayMode.TwoPage, true)]
+    public Task ArrowKeysTurnPagesHorizontallyAndScrollVertically(PdfReaderDisplayMode mode, bool toolbarFocus) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.WriteNavigation(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetDisplayModeAsync(mode);
+        await pdf.SetZoomAsync(2);
+        await ReaderTests.Render();
+
+        Focus();
+        var y = pdf.PageBounds.Y;
+        Press(Key.Down, PhysicalKey.ArrowDown);
+        Assert.Equal(1, pdf.PageNumber);
+        Assert.Equal(y - 60, pdf.PageBounds.Y, precision: 3);
+        Press(Key.Up, PhysicalKey.ArrowUp);
+        Assert.Equal(1, pdf.PageNumber);
+        Assert.Equal(y, pdf.PageBounds.Y, precision: 3);
+
+        var nextPage = mode == PdfReaderDisplayMode.TwoPage ? 3 : 2;
+        Press(Key.Right, PhysicalKey.ArrowRight);
+        await WaitForPage(nextPage);
+        Focus();
+        Press(Key.Left, PhysicalKey.ArrowLeft);
+        await WaitForPage(1);
+        Focus();
+        Press(Key.Left, PhysicalKey.ArrowLeft);
+        await ReaderTests.Render();
+        Assert.Equal(1, pdf.PageNumber);
+
+        // Editing a question must leave the document position untouched.
+        scope.Call("ShowReaderAiTab");
+        await ReaderTests.Render();
+        var question = scope.Get<TextBox>("ReaderAiQuestionBox");
+        Assert.True(question.Focus());
+        var position = pdf.CaptureViewState();
+        Press(Key.Right, PhysicalKey.ArrowRight);
+        Press(Key.Down, PhysicalKey.ArrowDown);
+        await ReaderTests.Render();
+        Assert.Equal(position, pdf.CaptureViewState());
+
+        void Focus() => Assert.True(toolbarFocus ? scope.Get<Button>("ReaderPdfForwardButton").Focus() : pdf.Focus());
+        void Press(Key key, PhysicalKey physical) => scope.Window.KeyPress(key, RawInputModifiers.None, physical, null);
+        async Task WaitForPage(int page)
+        {
+            for (var i = 0; i < 100 && pdf.PageNumber != page; i++)
+            {
+                await Task.Delay(20);
+                await ReaderTests.Render();
+            }
+            Assert.Equal(page, pdf.PageNumber);
+            await ReaderTests.Render();
+        }
+    });
+
+    [Fact]
+    public Task ToolbarArrowsTurnAdjacentPagesInsteadOfFollowingHistory() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.WriteNavigation(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var previous = scope.Get<Button>("ReaderPdfBackButton");
+        var next = scope.Get<Button>("ReaderPdfForwardButton");
+        Assert.False(previous.IsEnabled);
+        Assert.True(next.IsEnabled);
+        // History is 1 -> 3, so a history back would incorrectly land on page 1.
+        await scope.Call<Task>("NavigatePdfPageAsync", 3, CancellationToken.None, true);
+        await ClickAndWait(previous, 2);
+        await ClickAndWait(next, 3);
+        await ClickAndWait(next, 4);
+        Assert.False(next.IsEnabled);
+        Assert.True(previous.IsEnabled);
+        await ClickAndWait(previous, 3);
+        await ClickAndWait(previous, 2);
+        await ClickAndWait(previous, 1);
+        Assert.False(previous.IsEnabled);
+        Assert.True(next.IsEnabled);
+
+        async Task ClickAndWait(Button button, int expectedPage)
+        {
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            for (var i = 0; i < 100 && pdf.PageNumber != expectedPage; i++)
+            {
+                await Task.Delay(20);
+                await ReaderTests.Render();
+            }
+            Assert.Equal(expectedPage, pdf.PageNumber);
+        }
+    });
+
+    [Fact]
+    public Task PageLabelsThumbnailJumpAndManualMappingPersist() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, PdfFixture.WriteNavigation(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        Assert.Equal("i", pdf.GetPageLabel(1));
+        Assert.Contains("书页 i", scope.Get<TextBlock>("ReaderChapterText").Text);
+        scope.Call("ReaderPdfThumbnailsButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        var list = scope.Get<ListBox>("ReaderPdfThumbnailsList");
+        Assert.Equal(4, list.ItemCount);
+        await ReaderTests.Render();
+        var sidebar = scope.Get<Control>("ReaderAssistantPanel");
+        var thumbnails = scope.Get<Control>("ReaderPdfThumbnailsView");
+        Assert.True(sidebar.IsEffectivelyVisible);
+        Assert.True(thumbnails.IsEffectivelyVisible);
+        Assert.False(scope.Get<Control>("ReaderAiView").IsVisible);
+        Assert.Null(scope.Get<Button>("ReaderPdfThumbnailsButton").Flyout);
+        Assert.Equal(2, Grid.GetColumn(sidebar));
+        Assert.True(list.Bounds.Height > 440);
+        Assert.Equal(0, list.SelectedIndex);
+        using (var thumbnail = await pdf.RenderThumbnailAsync(3, CancellationToken.None))
+        {
+            Assert.NotNull(thumbnail);
+            Assert.InRange(thumbnail.PixelSize.Width, 1, 144);
+            Assert.InRange(thumbnail.PixelSize.Height, 1, 180);
+        }
+        list.SelectedIndex = 2;
+        for (var i = 0; i < 100 && pdf.PageNumber != 3; i++) { await Task.Delay(20); await ReaderTests.Render(); }
+        Assert.Equal(3, pdf.PageNumber);
+        Assert.True(thumbnails.IsEffectivelyVisible);
+        scope.Call("ShowReaderAiTab");
+        Assert.False(thumbnails.IsVisible);
+        Assert.True(scope.Get<Control>("ReaderAiView").IsVisible);
+        scope.Call("ShowReaderNotesTab");
+        Assert.False(thumbnails.IsVisible);
+        Assert.True(scope.Get<Control>("ReaderNotesView").IsVisible);
+        scope.Call("ReaderPdfThumbnailsButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        Assert.True(thumbnails.IsVisible);
+        Assert.False(scope.Get<Control>("ReaderNotesView").IsVisible);
+        Assert.False(scope.Get<Control>("ReaderNotesExportBar").IsVisible);
+        Assert.Equal(2, list.SelectedIndex);
+        scope.Call("ReaderAssistantToggleButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        Assert.False(sidebar.IsVisible);
+        scope.Call("ReaderPdfThumbnailsButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        Assert.True(sidebar.IsVisible);
+        Assert.True(thumbnails.IsVisible);
+        scope.Call("ReaderPagePositionButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        scope.Get<TextBox>("ReaderPdfPageJumpBox").Text = "ii";
+        await scope.Call<Task>("JumpReaderPdfPageAsync");
+        Assert.Equal(2, pdf.PageNumber);
+        Assert.Equal(1, list.SelectedIndex);
+        Assert.True(sidebar.IsVisible);
+        pdf.SetPageNumberOffset(-1);
+        await scope.Call<Task>("SaveReaderProgressAsync", CancellationToken.None);
+        await scope.Call<Task>("CloseReaderAsync");
+        Assert.False(sidebar.IsVisible);
+        await scope.Call<Task>("OpenPdfReaderAsync", card, card.Book.Files[0], new SqliteBookLibraryService(scope.Paths, new BookMetadataService()).GetAbsoluteFilePath(card.Book.Files[0]));
+        pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        Assert.Equal(-1, pdf.PageNumberOffset);
+        Assert.Equal(2, pdf.PageNumber);
+        Assert.Equal("1", pdf.GetPageLabel(2));
+        Assert.Contains("书页 1", scope.Get<TextBlock>("ReaderChapterText").Text);
+        pdf.SetPageNumberOffset(null);
+        Assert.Equal("ii", pdf.GetPageLabel(2));
+    });
 
     private static void DragText(ReaderTestWindow scope, NativePdfReaderHost pdf, Rect range, int rotation)
     {

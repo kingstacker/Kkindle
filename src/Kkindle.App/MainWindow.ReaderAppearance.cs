@@ -31,7 +31,11 @@ public partial class MainWindow
         ApplyReaderAppearance();
         ReaderRoot.PropertyChanged += (_, e) =>
         {
-            if (e.Property == IsVisibleProperty) UpdateReaderTitleAppearance();
+            if (e.Property != IsVisibleProperty) return;
+
+            UpdateReaderTitleAppearance();
+            if (!ReaderRoot.IsVisible)
+                HideReaderDictionaryPopup(clearSelection: true);
         };
         ReaderRoot.SizeChanged += (_, _) =>
         {
@@ -102,6 +106,10 @@ public partial class MainWindow
             ReaderPaperEnabledCheck.IsChecked = appearance.PaperEnabled;
             ReaderPaperStrengthSlider.Value = appearance.PaperStrength * 100;
             ReaderFibersEnabledCheck.IsChecked = appearance.FibersEnabled;
+            ReaderPdfAnnotationDisplayModePanel.IsVisible = _readerIsPdf;
+            ReaderPdfAnnotationNotesCheck.IsChecked = appearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Pinned;
+            ReaderTextLayoutPanel.IsVisible = !_readerIsPdf;
+            ReaderLayoutResetButton.IsVisible = !_readerIsPdf;
             UpdateReaderAppearanceLabels();
         }
         finally { _suppressReaderAppearanceChange = false; }
@@ -113,7 +121,7 @@ public partial class MainWindow
         var height = Math.Max(0, ReaderRoot.Bounds.Height);
         ReaderLayoutSettingsOverlay.Width = width;
         ReaderLayoutSettingsOverlay.Height = height;
-        ReaderLayoutSettingsCard.Width = Math.Min(580, Math.Max(1, width - 32));
+        ReaderLayoutSettingsCard.Width = Math.Min(540, Math.Max(1, width - 32));
         ReaderLayoutSettingsCard.MaxHeight = Math.Min(760, Math.Max(1, height - 32));
     }
 
@@ -145,6 +153,18 @@ public partial class MainWindow
     {
         if (_suppressReaderAppearanceChange) return;
         ChangeReaderAppearance(CurrentReaderAppearance with { PaperStrength = ReaderPaperStrengthSlider.Value / 100 });
+    }
+
+    private void ReaderPdfAnnotationNotesCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_suppressReaderAppearanceChange) return;
+        var mode = ReaderPdfAnnotationNotesCheck.IsChecked == true
+            ? ReaderAnnotationDisplayMode.Pinned
+            : ReaderAnnotationDisplayMode.Click;
+        if (CurrentReaderAppearance.AnnotationDisplayMode == mode) return;
+        HideReaderAnnotationHoverPopup();
+        ChangeReaderAppearance(CurrentReaderAppearance with { AnnotationDisplayMode = mode });
+        ShowCurrentReaderPdfAnnotation();
     }
 
     private void ChangeReaderAppearance(ReaderAppearanceSettings appearance)
@@ -302,6 +322,7 @@ public partial class MainWindow
             ReaderBookScopeGlobalOption.IsChecked = !ReaderUsesBookOverride;
             ReaderBookScopeBookOption.IsChecked = ReaderUsesBookOverride;
             var canChooseScope = CanUseReaderBookProfile;
+            ReaderBookScopePanel.IsVisible = canChooseScope;
             ReaderBookScopeGlobalOption.IsVisible = canChooseScope;
             ReaderBookScopeBookOption.IsVisible = canChooseScope;
             if (ReaderBookScopeHint is not null)

@@ -140,7 +140,9 @@ public partial class MainWindow
 
     private BackgroundTaskCenterService CreateBackgroundTasks()
     {
-        var service = new BackgroundTaskCenterService(Path.Combine(_paths.Data, "background-tasks.json"));
+        var service = new BackgroundTaskCenterService(
+            Path.Combine(_paths.Data, "background-tasks.json"),
+            clearHistoryOnStartup: true);
         service.Changed += (_, _) => Dispatcher.UIThread.Post(() =>
         {
             RefreshBackgroundTaskStatus();
@@ -273,11 +275,17 @@ public partial class MainWindow
     {
         if (_backgroundTaskFlyout?.IsOpen == true)
         {
-            _backgroundTaskFlyout.Hide();
-            _backgroundTaskFlyoutAutoOpened = false;
+            DismissBackgroundTaskFlyout();
             return;
         }
         ShowBackgroundTaskFlyout(autoOpened: false);
+    }
+
+    private void DismissBackgroundTaskFlyout()
+    {
+        if (_backgroundTaskFlyout?.IsOpen != true) return;
+        _backgroundTaskFlyout.Hide();
+        _backgroundTaskFlyoutAutoOpened = false;
     }
 
     private void EnsureBackgroundTaskFlyout()
@@ -296,7 +304,7 @@ public partial class MainWindow
             _backgroundTaskFlyout = new Flyout
             {
                 Placement = PlacementMode.TopEdgeAlignedLeft,
-                VerticalOffset = 0,
+                VerticalOffset = 4,
                 FlyoutPresenterClasses = { "backgroundTaskFlyout" },
                 Content = new Border
                 {
@@ -336,7 +344,7 @@ public partial class MainWindow
         {
             Text = T("暂无任务记录。"), FontSize = 13,
             Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
-            Margin = new Thickness(16, 22), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+            Margin = new Thickness(16, 10), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
         });
         foreach (var task in tasks)
         {
@@ -349,7 +357,7 @@ public partial class MainWindow
                 BackgroundTaskStatus.Interrupted => T("已中断"),
                 _ => T("等待中")
             };
-            var row = new StackPanel { Spacing = 6 };
+            var row = new StackPanel { Spacing = 4 };
             var isBatchImport = task.Kind == BackgroundTaskKind.Import && task.BookTitles is { Count: > 1 };
             var names = !isBatchImport && task.BookTitles is { Count: > 0 }
                 ? string.Join("、", task.BookTitles.Select(title => "《" + title + "》")) : string.Empty;
@@ -358,22 +366,15 @@ public partial class MainWindow
                 ? task.UpdatedAtUtc.ToLocalTime().ToString("MM-dd HH:mm:ss") : string.Empty;
             var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,*,Auto"), ColumnSpacing = 6 };
             ToolTip.SetTip(heading, status + " · " + identity + (result.Length > 0 ? " · " + result : string.Empty));
-            var statusGeometry = task.Status switch
+            var statusIcon = CreateTaskHistoryIcon(task.Status switch
             {
                 BackgroundTaskStatus.Succeeded => "M 3,8 L 6,11 L 13,4",
-                BackgroundTaskStatus.Failed => "M 4,4 L 12,12 M 12,4 L 4,12",
-                BackgroundTaskStatus.Canceled => "M 8,1 A 7,7 0 1 1 8,15 A 7,7 0 1 1 8,1 M 3,3 L 13,13",
-                BackgroundTaskStatus.Interrupted => "M 5,3 V 13 M 11,3 V 13",
-                _ => "M 8,1 A 7,7 0 1 1 8,15 A 7,7 0 1 1 8,1 M 8,4 V 8 L 11,10"
-            };
-            var statusIcon = new Avalonia.Controls.Shapes.Path
-            {
-                Width = 12, Height = 12, Stretch = Avalonia.Media.Stretch.Uniform,
-                Data = Avalonia.Media.Geometry.Parse(statusGeometry),
-                Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 0.8,
-                        Fill = Avalonia.Media.Brushes.Transparent,
-                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-            };
+                BackgroundTaskStatus.Failed => "M 8,2 A 6,6 0 1 1 7.99,2 M 8,5 L 8,8 M 8,10 L 8,11",
+                BackgroundTaskStatus.Canceled => "M 3,3 L 13,13 M 13,3 L 3,13",
+                BackgroundTaskStatus.Interrupted => "M 5,3 L 5,13 M 11,3 L 11,13",
+                _ => "M 8,2 A 6,6 0 1 1 7.99,2 M 8,4 L 8,8 L 11,10"
+            });
+            statusIcon.Margin = new Thickness(4, 0);
             ToolTip.SetTip(statusIcon, status);
             Avalonia.Automation.AutomationProperties.SetName(statusIcon, status);
             heading.Children.Add(statusIcon);
@@ -393,24 +394,19 @@ public partial class MainWindow
                     || (task.CanCancel && !_displayOnlyTaskIds.Contains(task.Id)));
             if (canCancel || task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued))
             {
-                var delete = new Button
-                {
-                    Classes = { "eject" }, Width = 25, MinWidth = 25, Height = 23,
-                    Content = new Avalonia.Controls.Shapes.Path
-                    {
-                        Width = 10, Height = 10, Stretch = Avalonia.Media.Stretch.Uniform,
-                        Data = Avalonia.Media.Geometry.Parse("M 2,2 L 12,12 M 12,2 L 2,12"),
-                        Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 0.8,
-                        Fill = Avalonia.Media.Brushes.Transparent
-                    }
-                };
-                var actionLabel = canCancel ? T("取消") : T("删除");
-                ToolTip.SetTip(delete, actionLabel);
-                Avalonia.Automation.AutomationProperties.SetName(delete, actionLabel);
+                var succeeded = task.Status == BackgroundTaskStatus.Succeeded;
+                var actionLabel = canCancel ? T("取消") : succeeded ? T("已完成") : T("删除");
+                var delete = CreateTaskHistoryButton(actionLabel, canCancel
+                    ? "M 3,3 L 13,13 M 13,3 L 3,13"
+                    : succeeded ? "M 3,8 L 6,11 L 13,4"
+                    : "M 2,4 L 14,4 M 6,4 L 6,2 L 10,2 L 10,4 M 4,4 L 5,14 L 11,14 L 12,4 M 7,6 L 7,12 M 9,6 L 9,12");
                 delete.Click += async (_, _) =>
                 {
-                    if (isTransferTask) RequestTransferStop();
-                    else if (canCancel) BackgroundTasks.Cancel(task.Id);
+                    if (canCancel)
+                    {
+                        if (isTransferTask) RequestTransferStop();
+                        else BackgroundTasks.Cancel(task.Id);
+                    }
                     else await BackgroundTasks.RemoveCompletedAsync(task.Id);
                 };
                 Grid.SetColumn(delete, 4);
@@ -429,19 +425,42 @@ public partial class MainWindow
                 row.Children.Add(new ProgressBar { IsIndeterminate = true });
             if (!string.IsNullOrWhiteSpace(task.Error))
                 row.Children.Add(new TextBlock { Text = task.Error, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-            var actions = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
             if (task.CanRetry)
             {
-                var retry = new Button { Content = T("重试") };
+                var retry = CreateTaskHistoryButton(T("重试"),
+                    "M 13,7 A 5,5 0 1 0 12,11 M 13,2 L 13,7 L 8,7");
+                retry.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right;
                 retry.Click += (_, _) => BackgroundTasks.Retry(task.Id, _lifetimeCancellation.Token);
-                actions.Children.Add(retry);
+                Grid.SetColumn(retry, 3);
+                heading.Children.Add(retry);
             }
-            if (actions.Children.Count > 0) row.Children.Add(actions);
             _backgroundTaskRows.Children.Add(new Border
             {
-                Padding = new Thickness(16, 12), BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(12, 4), BorderThickness = new Thickness(0, 0, 0, 1),
                 BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"), Child = row
             });
         }
+    }
+
+    private static Avalonia.Controls.Shapes.Path CreateTaskHistoryIcon(string geometry) => new()
+    {
+        Width = 12, Height = 12, Stretch = Avalonia.Media.Stretch.Uniform,
+        Data = Avalonia.Media.Geometry.Parse(geometry),
+        Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 1,
+        Fill = Avalonia.Media.Brushes.Transparent,
+        VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+    };
+
+    private static Button CreateTaskHistoryButton(string label, string geometry)
+    {
+        var button = new Button
+        {
+            Classes = { "eject" }, Width = 25, MinWidth = 25, Height = 23, MinHeight = 23,
+            Padding = new Thickness(0), Margin = new Thickness(0),
+            Content = CreateTaskHistoryIcon(geometry)
+        };
+        ToolTip.SetTip(button, label);
+        Avalonia.Automation.AutomationProperties.SetName(button, label);
+        return button;
     }
 }

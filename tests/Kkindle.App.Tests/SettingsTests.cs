@@ -550,6 +550,8 @@ public sealed partial class SettingsTests(SettingsUiSession session)
 
         Assert.True(scope.Get<Control>("TaskHistoryActivityIcon").IsVisible);
         Assert.False(scope.Get<Control>("TaskHistoryIdleIcon").IsVisible);
+        Assert.Null(scope.Field<Flyout?>("_backgroundTaskFlyout"));
+        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
         Assert.True(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
         var center = scope.Field<Kkindle.Infrastructure.BackgroundTaskCenterService>("_backgroundTasks");
         Assert.Contains(center.GetSnapshot(), task => task.Title == "发送到 Kindle 邮箱" && task.Status == Kkindle.Core.BackgroundTaskStatus.Running);
@@ -567,12 +569,13 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         scope.Call("ShowTransferToast", "发送到 Kindle 邮箱", "已通过邮件发送 1 本书。", 100d, false, true, true);
         await Until(() => center.GetSnapshot().All(task => task.Status != Kkindle.Core.BackgroundTaskStatus.Running));
         await Render();
-        Assert.False(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
+        Assert.True(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
         Assert.True(scope.Get<Control>("SettingsSavedCapsule").IsEffectivelyVisible);
         Assert.True(scope.Get<Control>("SettingsCapsuleCheckIcon").IsVisible);
         Assert.Contains("任务完成", scope.Get<TextBlock>("SettingsSavedCapsuleText").Text);
         Assert.Contains("已通过邮件发送 1 本书", scope.Get<TextBlock>("SettingsSavedCapsuleText").Text);
         Capture(scope.Window, "transfer-task-history-completed");
+        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
         scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
         await Render();
         Assert.True(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
@@ -779,7 +782,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         public object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, args);
         public T Call<T>(string name, params object?[] args) => (T)Call(name, args)!;
 
-        public static async Task<TestWindow> Create(AppSettings? settings = null)
+        public static async Task<TestWindow> Create(AppSettings? settings = null, IBookFormatConverter? formatConverter = null)
         {
             ((Kkindle.App)Application.Current!).ApplyLanguage("zh-CN");
             var directory = Path.Combine(Path.GetTempPath(), "kkindle-settings-tests", Guid.NewGuid().ToString("N"));
@@ -793,7 +796,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
             await new AppSettingsStore(paths).SaveAsync(initial);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
             await library.InitializeAsync();
-            var window = new MainWindow(paths, library, startupSettings: initial) { Width = 1294, Height = 818 };
+            var window = new MainWindow(paths, library, formatConverter: formatConverter, startupSettings: initial) { Width = 1294, Height = 818 };
             var scope = new TestWindow(window, paths, directory);
             scope.Set("_s3SyncStoredSettings", await scope.Sync.LoadSettingsAsync());
             await scope.Field<ReaderDataService>("_readerData").InitializeAsync();

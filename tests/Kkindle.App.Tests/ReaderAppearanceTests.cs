@@ -75,7 +75,7 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         await using var scope = await ReaderTestWindow.Create();
         using var host = await LoadChapter(scope, new());
         Assert.Equal(ReaderTheme.Classic, scope.Field<AppSettings>("_appSettings").ReaderAppearance.Theme);
-        Assert.False(scope.Get<CheckBox>("ReaderPaperEnabledCheck").IsChecked);
+        Assert.False(scope.Get<ToggleSwitch>("ReaderPaperEnabledCheck").IsChecked);
         Capture(scope.Window, "default-classic");
         scope.Call("ReaderLayoutSettingsButton_Click", null, new RoutedEventArgs());
         Assert.True(scope.Get<RadioButton>("ReaderClassicThemeOption").IsChecked);
@@ -83,10 +83,10 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         Assert.Equal(3, themes.Children.Count);
         Assert.Equal(3, themes.Columns);
         scope.Get<RadioButton>("ReaderGreenThemeOption").IsChecked = true;
-        scope.Get<CheckBox>("ReaderPaperEnabledCheck").IsChecked = true;
+        scope.Get<ToggleSwitch>("ReaderPaperEnabledCheck").IsChecked = true;
         scope.Get<Slider>("ReaderPaperStrengthSlider").Value = 75;
-        scope.Get<CheckBox>("ReaderFibersEnabledCheck").IsChecked = true;
-        scope.Get<CheckBox>("ReaderPaperEnabledCheck").IsChecked = false;
+        scope.Get<ToggleSwitch>("ReaderFibersEnabledCheck").IsChecked = true;
+        scope.Get<ToggleSwitch>("ReaderPaperEnabledCheck").IsChecked = false;
         Assert.False(scope.Get<StackPanel>("ReaderPaperOptions").IsEnabled);
         // Closing the popup and immediately flushing also waits for the shared
         // settings gate, as application shutdown does.
@@ -100,8 +100,8 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         using var nextBook = (NativeReaderHost)scope.Call<IReaderHost>("CreateReaderHostForCurrentFormat");
         Assert.Equal(restored, NativeField<ReaderAppearanceSettings>(nextBook, "_appearance"));
         scope.Call("ReaderLayoutSettingsButton_Click", null, new RoutedEventArgs());
-        Assert.True(scope.Get<CheckBox>("ReaderFibersEnabledCheck").IsChecked);
-        scope.Get<CheckBox>("ReaderPaperEnabledCheck").IsChecked = true;
+        Assert.True(scope.Get<ToggleSwitch>("ReaderFibersEnabledCheck").IsChecked);
+        scope.Get<ToggleSwitch>("ReaderPaperEnabledCheck").IsChecked = true;
         scope.Get<RadioButton>("ReaderBeigeThemeOption").IsChecked = true;
         await scope.Field<Task>("_readerAppearanceSaveTask");
         await ReaderTests.Render();
@@ -306,12 +306,27 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         scope.Set("_readerBookFile", file);
         scope.Set("_readerIsPdf", true);
         scope.Call("SyncReaderBookScopeControls");
+        scope.Call("SyncReaderAppearanceControls");
+        Assert.False(scope.Get<StackPanel>("ReaderBookScopePanel").IsVisible);
+        Assert.False(scope.Get<StackPanel>("ReaderTextLayoutPanel").IsVisible);
+        Assert.True(scope.Get<Border>("ReaderPdfAnnotationDisplayModePanel").IsVisible);
         Assert.False(scope.Get<RadioButton>("ReaderBookScopeGlobalOption").IsVisible);
         Assert.False(scope.Get<RadioButton>("ReaderBookScopeBookOption").IsVisible);
         Assert.False(scope.Get<TextBlock>("ReaderBookScopeHint").IsVisible);
 
+        var notes = scope.Get<ToggleSwitch>("ReaderPdfAnnotationNotesCheck");
+        notes.IsChecked = false;
+        Assert.Equal(ReaderAnnotationDisplayMode.Click, scope.Field<AppSettings>("_appSettings").ReaderAppearance.AnnotationDisplayMode);
+        notes.IsChecked = true;
+        Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
+        Assert.Equal(ReaderAnnotationDisplayMode.Pinned, (await new AppSettingsStore(scope.Paths).LoadAsync()).ReaderAppearance.AnnotationDisplayMode);
+
         scope.Set("_readerIsPdf", false);
         scope.Call("SyncReaderBookScopeControls");
+        scope.Call("SyncReaderAppearanceControls");
+        Assert.True(scope.Get<StackPanel>("ReaderBookScopePanel").IsVisible);
+        Assert.True(scope.Get<StackPanel>("ReaderTextLayoutPanel").IsVisible);
+        Assert.False(scope.Get<Border>("ReaderPdfAnnotationDisplayModePanel").IsVisible);
         Assert.True(scope.Get<RadioButton>("ReaderBookScopeGlobalOption").IsVisible);
         Assert.True(scope.Get<RadioButton>("ReaderBookScopeBookOption").IsVisible);
     });

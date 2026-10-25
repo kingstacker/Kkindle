@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
@@ -68,6 +68,54 @@ public partial class MainWindow
     private void ReaderTocList_AttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         QueueReaderTocScrollBarAttach();
+        ScheduleReaderTocTopSpacerRepair();
+    }
+
+    private bool _readerTocTopSpacerRepairPending;
+    private bool _readerTocTopSpacerRepaired;
+
+    // The virtualizing panel keeps a spacer for the rows it believes are above
+    // the viewport. When the rail settles on the first chapter that spacer can
+    // survive and paint as an empty strip above row 0. Detect exactly that state
+    // — offset at the very top but the first row pushed down — and re-realize
+    // the source so the panel measures again from the first row.
+    private void ScheduleReaderTocTopSpacerRepair()
+    {
+        if (_readerTocTopSpacerRepairPending) return;
+        _readerTocTopSpacerRepairPending = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _readerTocTopSpacerRepairPending = false;
+            RepairReaderTocTopSpacer();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void RepairReaderTocTopSpacer()
+    {
+        if (_readerTocTopSpacerRepaired || !ReaderTocPanel.IsVisible) return;
+        if (GetReaderTocScrollViewer() is not { } scrollViewer) return;
+        if (scrollViewer.Offset.Y > 0.5) return;
+        if (ReaderTocList.ContainerFromIndex(0) is not { } firstRow) return;
+        if (firstRow.TranslatePoint(default, scrollViewer)?.Y is not { } top || top <= 2) return;
+
+        var selected = ReaderTocList.SelectedItem as ReaderTocRow;
+        var source = ReaderTocList.ItemsSource;
+        _suppressReaderTocSelectionNavigation = true;
+        try
+        {
+            ReaderTocList.SelectedItems?.Clear();
+            PdfAnnotTrace.Write($"toc spacer repair fired: firstRowTop={top:F1}");
+            _readerTocTopSpacerRepaired = true;
+            ReaderTocList.ItemsSource = null;
+            ReaderTocList.ItemsSource = source;
+            scrollViewer.Offset = default;
+            if (selected is not null && (source as IReadOnlyList<ReaderTocRow>)?.Contains(selected) == true)
+                ReaderTocList.SelectedItems?.Add(selected);
+        }
+        finally
+        {
+            _suppressReaderTocSelectionNavigation = false;
+        }
     }
 
     // ---- Folding ------------------------------------------------------
@@ -76,9 +124,18 @@ public partial class MainWindow
     // _readerTocRows is index-aligned with it and carries only presentation
     // state, so folding can never change what those features see.
     private ReaderTocRow[] _readerTocRows = [];
+    // Destination of the outline entry the reader followed from an explicit
+    // click. The rail keeps it selected instead of snapping back to the first
+    // entry that shares its page (a datasheet puts several headings on one
+    // page, sometimes with the same offset). Stored as a target string because
+    // PDF navigation rebuilds the item objects on every jump.
+    private string? _readerPinnedTocTarget;
 
     private void BuildReaderTocRows()
     {
+        // Re-realising the source is a full rebuild of the rail, so the spacer
+        // repair runs at most once per book open.
+        _readerTocTopSpacerRepaired = false;
         _readerTocRows = _readerTocItems
             .Select((item, index) => new ReaderTocRow(
                 item,
@@ -149,6 +206,7 @@ public partial class MainWindow
             // control is single-select for pointer input. Clear the old set
             // before rebuilding the folded source, otherwise recycled item
             // containers can keep painting every previously visited row.
+            if (PdfAnnotTrace.Enabled) PdfAnnotTrace.Write($"toc rows replace: {visible.Count} rows");
             ReaderTocList.SelectedItems?.Clear();
             ReaderTocList.ItemsSource = visible;
             // Replacing the source drops the selection; restore it when the
@@ -288,6 +346,8 @@ public partial class MainWindow
     private void ReaderTocScrollViewer_ScrollChangedForBar(object? sender, ScrollChangedEventArgs e)
     {
         if (e.OffsetDelta.Y != 0) ShowReaderTocScrollBar();
+        if (e.OffsetDelta.Y != 0 && _readerTocScrollViewer is { } scrollViewer && scrollViewer.Offset.Y <= 0.5)
+            ScheduleReaderTocTopSpacerRepair();
     }
 
     private void ReaderTocScrollBar_PointerEntered(object? sender, PointerEventArgs e)
@@ -813,6 +873,7 @@ public partial class MainWindow
             // Keep the body stable while a PDF destination is being resolved;
             // the PDF navigation commits the full TOC state after the page and
             // its outline offset have both settled.
+            _readerPinnedTocTarget = item.Target;
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(
                     item,
@@ -847,6 +908,8 @@ public partial class MainWindow
             _readerTocExpanded ? 286d : _readerTocMinimal ? ReaderTocMinimalWidth : 0d);
         ReaderTocPanel.IsVisible = _readerTocExpanded;
         ReaderTocCompactPanel.IsVisible = _readerTocMinimal;
+        if (ReaderAssistantPanel.IsVisible && !_readerZenMode)
+            SetReaderAiPanelWidth(GetReaderAssistantPanelWidth());
         UpdateReaderToolbarAutoHide();
         // Opening the TOC changes the layout, not the availability of the
         // toolbar action. Keep its label at full opacity in both states.

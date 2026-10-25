@@ -140,6 +140,20 @@ public partial class MainWindow
             FocusSettingsControl(MainReaderAiBaseUrlBox);
     }
 
+    private async void ReaderAiVectorStatusButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (BlockNavigationWhileTransferring()) return;
+        if (ReaderRoot.IsVisible) await CloseReaderAsync();
+        OpenSettingsExpander("Reading", SettingsAiExpander);
+        await EnsureMainReaderAiSettingsLoadedAsync();
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!MainReaderEmbeddingModelSelectorBox.IsEffectivelyVisible) return;
+            MainReaderEmbeddingModelSelectorBox.BringIntoView();
+            MainReaderEmbeddingModelSelectorBox.Focus();
+        }, DispatcherPriority.Loaded);
+    }
+
     private void SettingsCategoryButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string tag }) ShowSettingsSection(tag);

@@ -1,6 +1,7 @@
-using System.Text;
+﻿using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -46,15 +47,20 @@ public partial class MainWindow
         }
 
         var chapterPath = _readerIsPdf
-            ? $"pdf:page:{_readerPdfPage}"
+            ? _selectedReaderAnnotation?.ChapterPath ?? $"pdf:page:{_readerPdfPage}"
             : GetReaderChapterPath();
         if (string.IsNullOrWhiteSpace(chapterPath)) return;
+
+        var pdfSelectionFragment = _readerIsPdf
+            ? _selectedReaderAnnotation?.Fragment ?? (CurrentReaderHost as NativePdfReaderHost)?.SelectionFragment
+            : null;
 
         var exact = selectedText.Length > 0
             ? ReaderAnnotations.FirstOrDefault(item =>
                 string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase)
                 && item.StartOffset == _readerPendingSelectionStartOffset
-                && item.EndOffset == _readerPendingSelectionEndOffset)
+                && item.EndOffset == _readerPendingSelectionEndOffset
+                && (!_readerIsPdf || item.Fragment == pdfSelectionFragment))
             : null;
         var existing = _selectedReaderAnnotation ?? exact;
         var annotation = existing ?? new ReaderAnnotation
@@ -75,8 +81,10 @@ public partial class MainWindow
             var overlaps = ReaderAnnotations.Any(item =>
                 item.Id != exact?.Id
                 && string.Equals(item.ChapterPath, chapterPath, StringComparison.OrdinalIgnoreCase)
-                && _readerPendingSelectionStartOffset < item.EndOffset
-                && _readerPendingSelectionEndOffset > item.StartOffset);
+                && (_readerIsPdf
+                    ? PdfTextRanges.Read(pdfSelectionFragment, _readerPendingSelectionStartOffset, _readerPendingSelectionEndOffset)
+                        .Any(a => PdfTextRanges.Read(item.Fragment, item.StartOffset, item.EndOffset).Any(b => a.Start < b.End && a.End > b.Start))
+                    : _readerPendingSelectionStartOffset < item.EndOffset && _readerPendingSelectionEndOffset > item.StartOffset));
             if (overlaps)
             {
                 ShowReaderTransientStatus(T("这段文字与已有划线重叠，请缩小选择范围"));
@@ -89,7 +97,7 @@ public partial class MainWindow
         annotation.Fragment = _readerIsPdf
             ? point is { } pdfPoint
                 ? ReaderPdfPointAnchor.Encode(pdfPoint.X, pdfPoint.Y)
-                : null
+                : pdfSelectionFragment
             : _readerCurrentFragment;
         if (selectedText.Length > 0) annotation.SelectedText = selectedText;
         // Quick style/color changes preserve notes; the editor can still
@@ -151,23 +159,107 @@ public partial class MainWindow
                 ?? T("PDF 第 {0} 页 · 页面批注", _readerPdfPage)
             : _readerPendingSelection;
         ReaderAnnotationInputBox.Text = _selectedReaderAnnotation?.Note ?? string.Empty;
-        ShowReaderPopupNearSelection(
-            ReaderAnnotationInputPopup,
-            ReaderAnnotationInputPanel,
-            fallbackWidth: 320,
-            fallbackHeight: 190,
-            _readerLastSelectionPopupAnchor,
-            _readerLastSelectionPopupBottom);
+        var placedOutsidePdfPage = _readerIsPdf
+            && CurrentReaderHost is NativePdfReaderHost pdf
+            && TryShowReaderPdfAnnotationCallout(
+                ReaderAnnotationInputPopup,
+                pdf,
+                _selectedReaderAnnotation,
+                _readerLastSelectionPopupAnchor,
+                new Size(264, 152),
+                requireVisibleBounds: true);
+        if (!placedOutsidePdfPage)
+        {
+            // The PDF right gutter can disappear at fit-width/high zoom.
+            // An explicit edit must still expose a usable input control.
+            if (CurrentReaderHost is NativePdfReaderHost fallbackPdf)
+                fallbackPdf.ClearAnnotationCallout();
+            ReaderAnnotationInputPanel.IsVisible = true;
+            ReaderAnnotationInputPanel.Height = double.NaN;
+            ShowReaderPopupNearSelection(
+                ReaderAnnotationInputPopup,
+                ReaderAnnotationInputPanel,
+                fallbackWidth: 264,
+                fallbackHeight: 152,
+                _readerLastSelectionPopupAnchor,
+                _readerLastSelectionPopupBottom);
+        }
         ReaderAnnotationInputBox.Focus();
+    }
+
+    private bool TryShowReaderPdfAnnotationCallout(
+        Popup popup,
+        NativePdfReaderHost pdf,
+        ReaderAnnotation? annotation,
+        Point? fallbackAnchor,
+        Size preferredSize,
+        bool requireVisibleBounds = false)
+    {
+        var pageNumber = 0;
+        var anchor = default(Point);
+        var hasAnnotationAnchor = annotation is not null
+            && pdf.TryGetAnnotationAnchor(annotation, out pageNumber, out anchor);
+        if (!hasAnnotationAnchor)
+        {
+            if (fallbackAnchor is not { } readerAnchor
+                || ReaderWebViewHost.TranslatePoint(readerAnchor, pdf) is not { } pdfAnchor)
+                return false;
+            pageNumber = Math.Clamp(_readerPdfPage, 1, Math.Max(1, pdf.PageCount));
+            anchor = pdfAnchor;
+            if (!string.IsNullOrWhiteSpace(_readerPendingSelection)
+                && pdf.GetTextAnnotationAnchor(pageNumber, _readerPendingSelectionStartOffset,
+                    _readerPendingSelectionEndOffset) is { } selectedAnchor)
+                anchor = selectedAnchor;
+        }
+
+        if (!pdf.TryGetAnnotationCalloutBounds(pageNumber, anchor, preferredSize, out var calloutBounds))
+        {
+            if (requireVisibleBounds) return false;
+            calloutBounds = new Rect(new Point(), preferredSize);
+        }
+        var popupOrigin = pdf.TranslatePoint(calloutBounds.TopLeft, ReaderWebViewHost);
+        if (popupOrigin is null) return false;
+
+        pdf.SetAnnotationCallout(anchor, calloutBounds, movedBounds =>
+        {
+            // Keep an editor draft alive while its right margin is unavailable.
+            if (popup.Child is { } child)
+            {
+                child.IsVisible = movedBounds.Width > 0;
+                if (movedBounds.Width > 0)
+                {
+                    child.Width = movedBounds.Width;
+                    child.Height = movedBounds.Height;
+                }
+            }
+            if (movedBounds.Width > 0
+                && pdf.TranslatePoint(movedBounds.TopLeft, ReaderWebViewHost) is { } origin)
+                popup.PlacementRect = new Rect(origin, new Size(1, 1));
+        }, pageNumber, preferredSize);
+        popup.PlacementTarget = ReaderWebViewHost;
+        popup.Placement = PlacementMode.AnchorAndGravity;
+        popup.PlacementRect = new Rect(popupOrigin.Value, new Size(1, 1));
+        popup.PlacementAnchor = Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
+        popup.PlacementGravity = Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight;
+        popup.PlacementConstraintAdjustment =
+            Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.None;
+        popup.HorizontalOffset = 0;
+        popup.VerticalOffset = 0;
+        popup.IsOpen = true;
+        return true;
     }
 
     private void HideReaderAnnotationInputPopup()
     {
+        if (CurrentReaderHost is NativePdfReaderHost pdf)
+            pdf.ClearAnnotationCallout();
         ReaderAnnotationInputPopup.IsOpen = false;
     }
 
     private void ReaderAnnotationInputPopup_Closed(object? sender, EventArgs e)
     {
+        if (CurrentReaderHost is NativePdfReaderHost pdf)
+            pdf.ClearAnnotationCallout();
         // Light dismiss (clicking back into the body) closes the popup without
         // going through cancel/save; drop the pending selection so a stale
         // highlight doesn't linger behind the Closed cleanup.
@@ -237,7 +329,6 @@ public partial class MainWindow
     {
         if (sender is not Button { Tag: ReaderAnnotation annotation }) return;
         await NavigateToReaderAnnotationAsync(annotation);
-        if (_readerIsPdf) EditReaderPdfAnnotation(annotation);
     }
 
     private async Task NavigateToReaderAnnotationAsync(ReaderAnnotation annotation)
@@ -300,6 +391,7 @@ public partial class MainWindow
         await DeleteReaderAnnotationAsync(annotation);
     }
 
+
     private async Task DeleteReaderAnnotationAsync(ReaderAnnotation annotation)
     {
         var isEditing = ReferenceEquals(_selectedReaderAnnotation, annotation);
@@ -347,7 +439,7 @@ public partial class MainWindow
         {
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard
                 ?? throw new InvalidOperationException(T("当前窗口无法访问剪贴板。"));
-            await clipboard.SetTextAsync(_readerPendingSelection);
+            await clipboard.SetTextAsync(_readerIsPdf ? PdfTextSelectionLayout.NormalizeCopy(_readerPendingSelection) : _readerPendingSelection);
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
         {
@@ -465,7 +557,7 @@ public partial class MainWindow
 
     private void EditReaderPdfAnnotation(ReaderAnnotation annotation)
     {
-        if (!_readerIsPdf || !TryGetReaderPdfPage(annotation.ChapterPath, out var page) || page != _readerPdfPage) return;
+        if (!_readerIsPdf || !TryGetReaderPdfPage(annotation.ChapterPath, out var page)) return;
         _selectedReaderAnnotation = annotation;
         var isPoint = ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var pointX, out var pointY);
         _readerPendingPdfPoint = isPoint ? (pointX, pointY) : null;

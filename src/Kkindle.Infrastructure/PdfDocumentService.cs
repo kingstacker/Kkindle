@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.IO.MemoryMappedFiles;
 using System.Text;
 using SkiaSharp;
 
@@ -8,9 +9,15 @@ namespace Kkindle.Infrastructure;
 // PDFium performs the crop/rotation transform for both text and rendering.
 public readonly record struct PdfTextBounds(double X, double Y, double Width, double Height);
 public sealed record PdfTextGlyph(int Offset, int Length, PdfTextBounds Bounds, double AdvanceX = 1, double AdvanceY = 0);
-public sealed record PdfPageContent(double Width, double Height, string Text, IReadOnlyList<PdfTextGlyph> Glyphs);
+public sealed record PdfPageContent(double Width, double Height, string Text, IReadOnlyList<PdfTextGlyph> Glyphs)
+{
+    public IReadOnlyList<PdfPageLink> Links { get; init; } = [];
+}
 public sealed record PdfOutlineItem(string Title, int PageNumber, int Level, double? Top = null);
-public sealed record PdfDocumentInfo(int PageCount, string Title, string Author, IReadOnlyList<PdfOutlineItem> Outline);
+public sealed record PdfDocumentInfo(int PageCount, string Title, string Author, IReadOnlyList<PdfOutlineItem> Outline)
+{
+    public IReadOnlyList<string> PageLabels { get; init; } = [];
+}
 public sealed record PdfRenderedPage(int PageNumber, PdfPageContent Content, byte[] Png);
 public sealed record PdfRasterRegion(int PageNumber, int PagePixelWidth, int PagePixelHeight,
     int Left, int Top, int Width, int Height, byte[] Pixels, int Rotation = 0);
@@ -21,11 +28,13 @@ public sealed record PdfRasterRegion(int PageNumber, int PagePixelWidth, int Pag
 /// Rendering and text extraction use the same engine and UTF-16 offset stream.
 /// No PDF JavaScript, external actions or embedded attachments are executed.
 /// </summary>
-public sealed class PdfDocumentService : IDisposable
+public sealed partial class PdfDocumentService : IDisposable
 {
     private static readonly object NativeGate = new();
     private static bool _initialized;
     private IntPtr _document;
+    private MemoryMappedFile? _mappedFile;
+    private MemoryMappedViewAccessor? _mappedView;
 
     public PdfDocumentService(string path)
     {
@@ -34,9 +43,22 @@ public sealed class PdfDocumentService : IDisposable
         {
             VerifyRuntime();
             _document = Native.FPDF_LoadDocument(Path.GetFullPath(path), null);
+            // PDFium's Windows file loader can reject paths beyond MAX_PATH
+            // even though .NET can open them. Keep a read-only mapped view alive
+            // for the document instead of copying an entire large PDF into RAM.
+            if (_document == IntPtr.Zero && OperatingSystem.IsWindows()
+                && Native.FPDF_GetLastError() == 2 && File.Exists(path))
+            {
+                _mappedFile = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+                _mappedView = _mappedFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+                _document = Native.FPDF_LoadMemDocument64(
+                    _mappedView.SafeMemoryMappedViewHandle.DangerousGetHandle(),
+                    checked((nuint)_mappedView.Capacity), null);
+            }
             if (_document == IntPtr.Zero)
             {
                 var error = Native.FPDF_GetLastError();
+                Dispose();
                 throw new InvalidDataException(error == 4
                     ? "PDF 已加密，请先使用密码解锁文件。"
                     : $"无法读取 PDF 文件（错误 {error}）。");
@@ -69,8 +91,12 @@ public sealed class PdfDocumentService : IDisposable
             CheckOpen(cancellationToken);
             var outline = new List<PdfOutlineItem>();
             var visited = new HashSet<IntPtr>();
-            ReadOutline(IntPtr.Zero, 0, outline, visited, cancellationToken);
-            return new PdfDocumentInfo(PageCount, ReadMetadata("Title"), ReadMetadata("Author"), outline);
+            var pageTransforms = new Dictionary<int, PageTransform>();
+            ReadOutline(IntPtr.Zero, 0, outline, visited, pageTransforms, cancellationToken);
+            return new PdfDocumentInfo(PageCount, ReadMetadata("Title"), ReadMetadata("Author"), outline)
+            {
+                PageLabels = ReadPageLabels(cancellationToken)
+            };
         }
     }
 
@@ -80,7 +106,7 @@ public sealed class PdfDocumentService : IDisposable
         {
             CheckOpen(cancellationToken);
             var page = LoadPage(pageNumber);
-            try { return ReadPageContent(page, cancellationToken); }
+            try { return ReadPageContent(page, cancellationToken) with { Links = ReadLinks(page, cancellationToken) }; }
             finally { Native.FPDF_ClosePage(page); }
         }
     }
@@ -289,7 +315,8 @@ public sealed class PdfDocumentService : IDisposable
     }
 
     private void ReadOutline(IntPtr parent, int level, List<PdfOutlineItem> items,
-        HashSet<IntPtr> visited, CancellationToken cancellationToken)
+        HashSet<IntPtr> visited, Dictionary<int, PageTransform> pageTransforms,
+        CancellationToken cancellationToken)
     {
         if (level > 64) return;
         for (var node = Native.FPDFBookmark_GetFirstChild(_document, parent);
@@ -331,35 +358,44 @@ public sealed class PdfDocumentService : IDisposable
                             hasY = true;
                         }
                     }
-                    if (hasY && float.IsFinite(y))
+                    if (hasY && float.IsFinite(y)
+                        && GetOutlinePageTransform(pageIndex, pageTransforms) is { } transform)
                     {
-                        var page = Native.FPDF_LoadPage(_document, pageIndex);
-                        if (page != IntPtr.Zero)
-                        {
-                            try
-                            {
-                                var pageWidth = Native.FPDF_GetPageWidth(page);
-                                var pageHeight = Native.FPDF_GetPageHeight(page);
-                                if (pageWidth > 0 && pageHeight > 0)
-                                {
-                                    var transform = CreatePageTransform(page);
-                                    var bounds = TransformBounds(transform, 0, 0, y, y);
-                                    top = Math.Clamp(bounds.Y, 0, 1);
-                                }
-                            }
-                            finally { Native.FPDF_ClosePage(page); }
-                        }
+                        var bounds = TransformBounds(transform, 0, 0, y, y);
+                        top = Math.Clamp(bounds.Y, 0, 1);
                     }
                     items.Add(new(title, pageIndex + 1, level, top));
                     added = true;
                 }
             }
-            ReadOutline(node, title.Length > 0 ? level + 1 : level, items, visited, cancellationToken);
+            ReadOutline(node, title.Length > 0 ? level + 1 : level, items, visited, pageTransforms, cancellationToken);
             // A heading without its own destination still groups children and
             // navigates to the first child, like a container in an EPUB TOC.
             if (!added && title.Length > 0 && items.Count > itemIndex)
                 items.Insert(itemIndex, new(title, items[itemIndex].PageNumber, level, items[itemIndex].Top));
         }
+    }
+
+    // A bookmark only needs the page's user-space transform to normalise its
+    // vertical destination. Datasheets repeat the same page many times, so load
+    // and measure each page at most once per outline walk.
+    private PageTransform? GetOutlinePageTransform(int pageIndex, Dictionary<int, PageTransform> cache)
+    {
+        if (cache.TryGetValue(pageIndex, out var cached)) return cached;
+        PageTransform? transform = null;
+        var page = Native.FPDF_LoadPage(_document, pageIndex);
+        if (page != IntPtr.Zero)
+        {
+            try
+            {
+                var pageWidth = Native.FPDF_GetPageWidth(page);
+                var pageHeight = Native.FPDF_GetPageHeight(page);
+                if (pageWidth > 0 && pageHeight > 0) transform = CreatePageTransform(page);
+            }
+            finally { Native.FPDF_ClosePage(page); }
+        }
+        if (transform is { } value) cache[pageIndex] = value;
+        return transform;
     }
 
     private void CheckOpen(CancellationToken cancellationToken)
@@ -372,22 +408,26 @@ public sealed class PdfDocumentService : IDisposable
     {
         lock (NativeGate)
         {
-            if (_document == IntPtr.Zero) return;
-            Native.FPDF_CloseDocument(_document);
+            if (_document != IntPtr.Zero) Native.FPDF_CloseDocument(_document);
             _document = IntPtr.Zero;
+            _mappedView?.Dispose();
+            _mappedView = null;
+            _mappedFile?.Dispose();
+            _mappedFile = null;
         }
         GC.SuppressFinalize(this);
     }
 
     ~PdfDocumentService() => Dispose();
 
-    private static class Native
+    private static partial class Native
     {
         private const string Library = "pdfium";
         // PDFium's public ABI uses stdcall on Windows and the platform default
         // elsewhere. Winapi selects the correct convention on each runtime.
         [DllImport(Library)] internal static extern void FPDF_InitLibrary();
         [DllImport(Library)] internal static extern IntPtr FPDF_LoadDocument([MarshalAs(UnmanagedType.LPUTF8Str)] string path, [MarshalAs(UnmanagedType.LPUTF8Str)] string? password);
+        [DllImport(Library)] internal static extern IntPtr FPDF_LoadMemDocument64(IntPtr data, nuint length, [MarshalAs(UnmanagedType.LPUTF8Str)] string? password);
         [DllImport(Library)] internal static extern uint FPDF_GetLastError();
         [DllImport(Library)] internal static extern void FPDF_CloseDocument(IntPtr document);
         [DllImport(Library)] internal static extern int FPDF_GetPageCount(IntPtr document);

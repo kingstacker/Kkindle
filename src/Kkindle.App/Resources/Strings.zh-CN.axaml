@@ -170,6 +170,8 @@
     <x:String x:Key="Ui.Auto.354B28C853334568">原文</x:String>
     <x:String x:Key="Ui.Auto.80461C2DECC549DC">译文</x:String>
     <x:String x:Key="Ui.Auto.032EB48C7A431EC0">复制译文</x:String>
+    <x:String x:Key="Ui.Reader.TranslationAnnotate">添加为批注</x:String>
+    <x:String x:Key="Ui.Reader.TranslationAnnotateHint">将译文保存为当前选中文本的批注</x:String>
     <x:String x:Key="Ui.Auto.2B3BDD5F3BED9806">译文已复制</x:String>
     <x:String x:Key="Ui.Auto.7DD03B4CDE9C521A">正在翻译…</x:String>
     <x:String x:Key="Ui.Auto.271816CBA7EFC4B2">翻译已完成</x:String>
@@ -1949,6 +1951,7 @@
     <x:String x:Key="Ui.Auto.4F0250FFC63C253C">设备目录不能是链接或联接点。</x:String>
     <x:String x:Key="Ui.Auto.72E12A84E35D8A38">设备连接已变化，请确认当前设备后重试。</x:String>
     <x:String x:Key="Ui.Auto.6F89C357693CCD36">确定删除选中的 {0} 条记录吗？</x:String>
+    <x:String x:Key="Ui.Reader.SettingsAutoSave">调整后即时生效，自动保存</x:String>
     <x:String x:Key="Ui.Reader.Settings">阅读设置</x:String>
     <x:String x:Key="Ui.Reader.Appearance">主题与纸感</x:String>
     <x:String x:Key="Ui.Appearance.MainTheme">主界面主题</x:String>
@@ -1962,7 +1965,13 @@
     <x:String x:Key="Ui.Reader.Paper">启用纸感</x:String>
     <x:String x:Key="Ui.Reader.PaperStrength">纸感强度</x:String>
     <x:String x:Key="Ui.Reader.Fibers">叠加纸张纤维</x:String>
-    <x:String x:Key="Ui.Reader.PaperHint">细颗粒与轻微明暗起伏，可单独叠加纤维。设置自动保存，适用于所有书籍。</x:String>
+    <x:String x:Key="Ui.Reader.PaperHint">细颗粒与柔和明暗，让页面更接近纸张。</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteMode">显示批注便签</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNotePinned">显示</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteClick">关闭</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteModeHint">自动展开当前页批注，翻页时跟随切换。点击锚点可编辑。</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteLabel">批注</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteClose">关闭批注便签</x:String>
     <x:String x:Key="Ui.Reader.Layout">排版</x:String>
     <x:String x:Key="Ui.Auto.E39749D197606F9F">缩小页面</x:String>
     <x:String x:Key="Ui.Auto.834C7F164B44D4CD">放大页面</x:String>
@@ -2253,10 +2262,12 @@
     <x:String x:Key="Ui.Auto.DF0F9566309A4954">F1  显示本帮助</x:String>
     <x:String x:Key="Ui.Settings.Group.Network">网络连接</x:String>
     <x:String x:Key="Ui.Settings.Group.Import">导入与格式转换</x:String>
+    <x:String x:Key="Ui.Settings.Group.Update">更新</x:String>
     <x:String x:Key="Library.Filter.All0">全部作者</x:String>
     <x:String x:Key="Library.Filter.All1">全部标签</x:String>
     <x:String x:Key="Library.Filter.All2">全部格式</x:String>
     <x:String x:Key="Library.Filter.All3">全部分类</x:String>
     <x:String x:Key="Library.Filter.All4">全部阅读状态</x:String>
     <x:String x:Key="Library.Filter.All5">全部收藏状态</x:String>
+    <x:String x:Key="Ui.Auto.FECA3F325B0C08CC">检查更新超时，请检查网络或代理设置后重试。</x:String>
 </ResourceDictionary>

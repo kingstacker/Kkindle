@@ -15,6 +15,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Disabled #if regions still recognize Markdown headings in raw strings
+         as preprocessor directives. Exclude the offline Debug fixture entirely. -->
+    <Compile Remove="MainWindow.ReaderAiPreview.cs" Condition="'$(Configuration)' != 'Debug'" />
     <InternalsVisibleTo Include="Kkindle.App.Tests" />
     <ProjectReference Include="..\Kkindle.Core\Kkindle.Core.csproj" />
     <ProjectReference Include="..\Kkindle.Infrastructure\Kkindle.Infrastructure.csproj" />
@@ -24,6 +27,8 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="Sylinko.CSharpMath.Avalonia" Version="12.0.0" />
+    <PackageReference Include="Markdig" Version="1.5.0" />
     <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3">
       <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>

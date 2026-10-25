@@ -253,60 +253,6 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CardHeight));
     }
 
-    // Format conversion progress shown on the book card while the conversion
-    // popup is minimized to the background. The badge is a tap target that
-    // restores the popup, matching the WinUI card behaviour.
-    private bool _isConversionProgressVisible;
-    private double _conversionProgress;
-    private string _conversionProgressLabel = "0%";
-    private string _conversionProgressMessage = UiText.Get("正在转换…");
-
-    public bool IsConversionProgressVisible
-    {
-        get => _isConversionProgressVisible;
-        private set
-        {
-            if (!SetProperty(ref _isConversionProgressVisible, value)) return;
-            OnPropertyChanged(nameof(ConversionProgressVisibility));
-        }
-    }
-
-    public bool ConversionProgressVisibility => IsConversionProgressVisible;
-
-    public double ConversionProgress
-    {
-        get => _conversionProgress;
-        private set => SetProperty(ref _conversionProgress, value);
-    }
-
-    public string ConversionProgressLabel
-    {
-        get => _conversionProgressLabel;
-        private set => SetProperty(ref _conversionProgressLabel, value);
-    }
-
-    public string ConversionProgressMessage
-    {
-        get => _conversionProgressMessage;
-        private set => SetProperty(ref _conversionProgressMessage, value);
-    }
-
-    public void SetConversionProgress(FormatConversionProgress progress, bool showIndicator)
-    {
-        ConversionProgress = Math.Clamp(progress.Percentage, 0, 100);
-        ConversionProgressLabel = $"{progress.RoundedPercentage}%";
-        ConversionProgressMessage = UiText.Localize(progress.Message);
-        IsConversionProgressVisible = showIndicator;
-    }
-
-    public void ClearConversionProgress()
-    {
-        IsConversionProgressVisible = false;
-        ConversionProgress = 0;
-        ConversionProgressLabel = "0%";
-        ConversionProgressMessage = UiText.Get("正在转换…");
-    }
-
     private string _coverFileStamp = "";
     private string CoverFileStamp(Book book)
     {
@@ -490,7 +436,6 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
         Refresh(unloadCover: false);
         OnPropertyChanged(nameof(PresenceLabel));
         OnPropertyChanged(nameof(SyncStatusLabel));
-        OnPropertyChanged(nameof(ConversionProgressMessage));
     }
 
     public void Dispose()

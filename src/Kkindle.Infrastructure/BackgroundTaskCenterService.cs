@@ -29,11 +29,19 @@ public sealed class BackgroundTaskCenterService
     private readonly string _historyPath;
     private readonly Dictionary<Guid, TaskState> _tasks = [];
 
-    public BackgroundTaskCenterService(string historyPath)
+    public BackgroundTaskCenterService(string historyPath, bool clearHistoryOnStartup = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(historyPath);
         _historyPath = Path.GetFullPath(historyPath);
-        LoadHistory();
+        if (clearHistoryOnStartup)
+        {
+            try { File.Delete(_historyPath); }
+            catch { /* A stale file must not prevent startup with an empty in-memory history. */ }
+        }
+        else
+        {
+            LoadHistory();
+        }
     }
 
     public event EventHandler<BackgroundTaskChangedEventArgs>? Changed;

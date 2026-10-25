@@ -170,6 +170,8 @@
     <x:String x:Key="Ui.Auto.354B28C853334568">Original</x:String>
     <x:String x:Key="Ui.Auto.80461C2DECC549DC">Translation</x:String>
     <x:String x:Key="Ui.Auto.032EB48C7A431EC0">Copy translation</x:String>
+    <x:String x:Key="Ui.Reader.TranslationAnnotate">Add as note</x:String>
+    <x:String x:Key="Ui.Reader.TranslationAnnotateHint">Save the translation as a note on the selected text</x:String>
     <x:String x:Key="Ui.Auto.2B3BDD5F3BED9806">Translation copied</x:String>
     <x:String x:Key="Ui.Auto.7DD03B4CDE9C521A">Translating…</x:String>
     <x:String x:Key="Ui.Auto.271816CBA7EFC4B2">Translation complete</x:String>
@@ -1949,6 +1951,7 @@
     <x:String x:Key="Ui.Auto.4F0250FFC63C253C">The device directory cannot be a symbolic link or junction.</x:String>
     <x:String x:Key="Ui.Auto.72E12A84E35D8A38">The device connection has changed. Check the current device and try again.</x:String>
     <x:String x:Key="Ui.Auto.6F89C357693CCD36">Delete the {0} selected records?</x:String>
+    <x:String x:Key="Ui.Reader.SettingsAutoSave">Changes apply instantly and save automatically.</x:String>
     <x:String x:Key="Ui.Reader.Settings">Reading settings</x:String>
     <x:String x:Key="Ui.Reader.Appearance">Theme and paper</x:String>
     <x:String x:Key="Ui.Appearance.MainTheme">Main interface theme</x:String>
@@ -1962,7 +1965,13 @@
     <x:String x:Key="Ui.Reader.Paper">Enable paper texture</x:String>
     <x:String x:Key="Ui.Reader.PaperStrength">Paper strength</x:String>
     <x:String x:Key="Ui.Reader.Fibers">Add paper fibers</x:String>
-    <x:String x:Key="Ui.Reader.PaperHint">Fine grain and soft tonal variation, with optional fibers. Saved automatically for all books.</x:String>
+    <x:String x:Key="Ui.Reader.PaperHint">Fine grain and soft shading for a paper-like page.</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteMode">Show annotation notes</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNotePinned">Show</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteClick">Off</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteModeHint">Show notes for the current page and follow page changes. Click an anchor to edit.</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteLabel">Annotation</x:String>
+    <x:String x:Key="Ui.Reader.AnnotationNoteClose">Close annotation note</x:String>
     <x:String x:Key="Ui.Reader.Layout">Layout</x:String>
     <x:String x:Key="Ui.Auto.E39749D197606F9F">Zoom out</x:String>
     <x:String x:Key="Ui.Auto.834C7F164B44D4CD">Zoom in</x:String>
@@ -2253,10 +2262,12 @@
     <x:String x:Key="Ui.Auto.DF0F9566309A4954">F1  Show this help</x:String>
     <x:String x:Key="Ui.Settings.Group.Network">Network connection</x:String>
     <x:String x:Key="Ui.Settings.Group.Import">Import &amp; format conversion</x:String>
+    <x:String x:Key="Ui.Settings.Group.Update">Updates</x:String>
     <x:String x:Key="Library.Filter.All0">All authors</x:String>
     <x:String x:Key="Library.Filter.All1">All tags</x:String>
     <x:String x:Key="Library.Filter.All2">All formats</x:String>
     <x:String x:Key="Library.Filter.All3">All categories</x:String>
     <x:String x:Key="Library.Filter.All4">Any reading status</x:String>
     <x:String x:Key="Library.Filter.All5">Any favorite status</x:String>
+    <x:String x:Key="Ui.Auto.FECA3F325B0C08CC">Checking for updates timed out. Check your network or proxy settings and try again.</x:String>
 </ResourceDictionary>

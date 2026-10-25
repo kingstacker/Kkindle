@@ -319,18 +319,30 @@ public partial class MainWindow
             host.RestoreViewSettings(progress?.Fragment);
             await Dispatcher.UIThread.InvokeAsync(() => ReaderRoot.UpdateLayout(), DispatcherPriority.Loaded);
             var pdfSource = new Uri(path).AbsoluteUri + $"#page={_readerPdfPage}";
+            // Start the outline work before navigation: the host parses it while
+            // opening the document, so the rail fills as soon as that snapshot
+            // exists instead of waiting for the first page to render.
+            StartReaderPdfOutlineWork(host, file.Id, token);
             if (!await NavigateReaderHostAndWaitAsync(host, new Uri(pdfSource), token))
             {
                 throw new InvalidOperationException(T("PDF 阅读器页面加载失败。"));
             }
             await ApplySavedReaderPdfAnnotationsAsync(token);
+            StartReaderPdfTextIndexWork(host, file.Id, token);
             if (progress is not null)
                 await host.RestoreViewStateAsync(progress.Fragment, progress.ScrollPosition);
             token.ThrowIfCancellationRequested();
             host.Opacity = 1;
+            // The initial page message can precede both progress restoration
+            // and the library-to-reader layout. Show notes only after both settle.
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                ReaderRoot.UpdateLayout();
+                ShowCurrentReaderPdfAnnotation();
+            }, DispatcherPriority.Loaded);
             RememberCurrentPdfPageText();
             SyncReaderPdfTocSelection();
-            StartReaderPdfBackgroundWork(host, file.Id, token);
             UpdateReaderToolbar();
             await UpdateReaderBookmarkIndicatorAsync();
             await SaveReaderProgressAsync(token);
@@ -343,6 +355,7 @@ public partial class MainWindow
             if (token.IsCancellationRequested) return;
             await CloseReaderAsync();
             SetTaskStatus(T("打开 PDF 阅读器失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法打开书籍"), UiText.Localize(exception.Message));
         }
     }
 
@@ -368,7 +381,8 @@ public partial class MainWindow
         int page,
         CancellationToken cancellationToken,
         bool saveProgress,
-        bool syncTocSelection)
+        bool syncTocSelection,
+        bool skipReloadWhenPageMatches = false)
     {
         if (syncTocSelection)
             CancelReaderPdfNavigation();
@@ -383,11 +397,18 @@ public partial class MainWindow
         HideReaderAnnotationHoverPopup();
         var targetPage = Math.Clamp(page, 1, _readerPdfPages.Count);
         var source = new Uri(_readerPdfSourcePath).AbsoluteUri + $"#page={targetPage}";
-        var loaded = host.DisplayMode == PdfReaderDisplayMode.Continuous
-            ? await host.NavigateAsync(new Uri(source), cancellationToken)
-            : await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber),
-                () => host.NavigateAsync(new Uri(source), cancellationToken), cancellationToken,
-                animate: targetPage != host.PageNumber, holdOutgoingPage: true);
+        // Multiple outline entries can target different headings on this page;
+        // keep its current render and apply the destination scroll below.
+        var loaded = skipReloadWhenPageMatches && host.PageNumber == targetPage;
+        if (loaded) host.RememberNavigationPoint();
+        if (!loaded)
+        {
+            loaded = host.DisplayMode == PdfReaderDisplayMode.Continuous
+                ? await host.NavigateAsync(new Uri(source), cancellationToken)
+                : await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber),
+                    () => host.NavigateAsync(new Uri(source), cancellationToken), cancellationToken,
+                    animate: targetPage != host.PageNumber, holdOutgoingPage: true);
+        }
         if (!loaded)
         {
             if (!string.IsNullOrWhiteSpace(host.LastError)) ReaderStatusText.Text = host.LastError;
@@ -404,6 +425,7 @@ public partial class MainWindow
         UpdateReaderToolbar();
         await UpdateReaderBookmarkIndicatorAsync();
         if (saveProgress) await SaveReaderProgressAsync(cancellationToken);
+        ShowCurrentReaderPdfAnnotation();
         return true;
     }
 
@@ -444,7 +466,10 @@ public partial class MainWindow
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (_readerBookFile is not null && CurrentReaderHost is NativePdfReaderHost host)
+        {
             host.SetAnnotations(ReaderAnnotations.ToArray());
+            Avalonia.Threading.Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
+        }
         return Task.CompletedTask;
     }
 
@@ -457,6 +482,22 @@ public partial class MainWindow
             return;
         }
         var top = (CurrentReaderHost as NativePdfReaderHost)?.NavigationTop ?? 0;
+        // Several outline entries can point at the same page and even the same
+        // offset (e.g. "1 Features" and "3 Description" on a two-column
+        // datasheet). Once the reader has followed an explicit click, keep that
+        // entry selected while its destination still covers the scroll position
+        // instead of falling back to the first entry of the page.
+        if (_readerPinnedTocTarget is { } pinnedTarget
+            && _readerTocItems.FirstOrDefault(item =>
+                string.Equals(item.Target, pinnedTarget, StringComparison.OrdinalIgnoreCase)) is { } pinned
+            && pinned.ChapterIndex == _readerChapterIndex
+            && NativePdfReaderHost.ReadTargetTop(new Uri(pinned.Target)) <= top + 0.02)
+        {
+            if (!ReferenceEquals((ReaderTocList.SelectedItem as ReaderTocRow)?.Item, pinned))
+                SetReaderTocSelection(pinned);
+            return;
+        }
+        _readerPinnedTocTarget = null;
         var current = _readerTocItems.Where(item => item.ChapterIndex < _readerChapterIndex
             || item.ChapterIndex == _readerChapterIndex && NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)) <= top + 0.02)
             .OrderByDescending(item => item.ChapterIndex)
@@ -1878,7 +1919,7 @@ public partial class MainWindow
         var visible = !ReaderAssistantPanel.IsVisible;
         ReaderAssistantPanel.IsVisible = visible;
         if (visible)
-            SetReaderAiPanelWidth(_readerAiPanelWidth);
+            SetReaderAiPanelWidth(GetReaderAssistantPanelWidth());
         else
             ReaderRoot.ColumnDefinitions[2].Width = new GridLength(0);
         ScheduleLinuxReaderTextFallbackReflow();

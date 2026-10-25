@@ -13,25 +13,56 @@ public partial class MainWindow
     private bool _readerPdfIndexReady;
     private string? _readerPdfIndexError;
 
-    private void StartReaderPdfBackgroundWork(NativePdfReaderHost host, Guid fileId, CancellationToken token)
-    {
-        _readerPdfOutlineTask = LoadReaderPdfOutlineAsync(host, fileId, token);
+    // The rail is cheap (the host already parsed the outline while opening the
+    // document) so it starts before navigation. Full-text indexing stays after
+    // the first paint: it walks every page and must never hold up the reader.
+    private void StartReaderPdfOutlineWork(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
+        _readerPdfOutlineTask = ApplyReaderPdfOutlineWhenReadyAsync(host, fileId, token);
+
+    private void StartReaderPdfTextIndexWork(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
         _readerPdfIndexTask = BuildReaderPdfTextIndexAsync(host, fileId, token);
-    }
 
     private bool IsCurrentPdfSession(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
         !token.IsCancellationRequested && _readerIsPdf && _readerBookFile?.Id == fileId && ReferenceEquals(CurrentReaderHost, host);
+
+    // The host parses the outline while it opens the document, so the rail can
+    // be filled before the first page finishes rendering. Waiting for
+    // ReadDocumentInfoAsync instead would queue behind that render (PDFium is
+    // serialised process-wide) and the table of contents would only appear once
+    // the page was ready.
+    private async Task ApplyReaderPdfOutlineWhenReadyAsync(NativePdfReaderHost host, Guid fileId, CancellationToken token)
+    {
+        try
+        {
+            var waited = 0;
+            while (host.CachedDocumentInfo is null && !token.IsCancellationRequested && waited < 3000)
+            {
+                await Task.Delay(15, token);
+                waited += 15;
+            }
+        }
+        catch (OperationCanceledException) { return; }
+        await LoadReaderPdfOutlineAsync(host, fileId, token);
+    }
 
     private async Task LoadReaderPdfOutlineAsync(NativePdfReaderHost host, Guid fileId, CancellationToken token)
     {
         try
         {
-            // First paint must not wait for thousands of bookmarks or text pages.
-            await Task.Delay(60, token);
-            var info = await host.ReadDocumentInfoAsync(token);
+            // The outline is tiny next to a page raster (tens of ms) and it is
+            // what the reader shows first, so let it take the PDFium lock right
+            // away. Only the text index below waits for the first paint.
+            await Task.Delay(1, token);
+            var outlineWatch = System.Diagnostics.Stopwatch.StartNew();
+            // The host parses the outline while opening the document; taking that
+            // snapshot avoids waiting for the PDFium lock behind page rendering.
+            var info = host.CachedDocumentInfo ?? await host.ReadDocumentInfoAsync(token);
             if (!IsCurrentPdfSession(host, fileId, token)) return;
+            PdfAnnotTrace.Write($"pdf outline read: {outlineWatch.ElapsedMilliseconds}ms for {info.Outline.Count} items");
             _readerPdfEmbeddedOutline = info.Outline;
+            outlineWatch.Restart();
             RebuildReaderPdfNavigationItems();
+            PdfAnnotTrace.Write($"pdf toc rebuild: {outlineWatch.ElapsedMilliseconds}ms for {_readerTocItems.Count} items");
             ReaderTocEmptyText.IsVisible = _readerTocItems.Count == 0;
             SyncReaderPdfTocSelection();
         }
@@ -87,8 +118,9 @@ public partial class MainWindow
         var enabled = !pdf.IsPointAnnotationMode;
         pdf.SetPointAnnotationMode(enabled);
         UpdateReaderPdfPointNoteButton(enabled);
+        UpdateReaderPdfHandToolButton(pdf.IsHandToolMode);
         ShowReaderTransientStatus(enabled
-            ? T("请点击或右键点击 PDF 任意位置添加页面批注。")
+            ? T("请点击 PDF 任意位置添加页面批注。")
             : T("已取消页面批注模式。"));
     }
 
@@ -98,6 +130,26 @@ public partial class MainWindow
         ToolTip.SetTip(ReaderPdfPointNoteButton, label);
         AutomationProperties.SetName(ReaderPdfPointNoteButton, label);
         ReaderPdfPointNoteButton.Classes.Set("active", enabled);
+    }
+
+    private void ReaderPdfHandToolButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        var enabled = !pdf.IsHandToolMode;
+        pdf.SetHandToolMode(enabled);
+        UpdateReaderPdfHandToolButton(enabled);
+        UpdateReaderPdfPointNoteButton(pdf.IsPointAnnotationMode);
+        ShowReaderTransientStatus(enabled
+            ? T("抓手工具已启用，按住鼠标左键拖动页面即可移动。")
+            : T("已退出抓手工具。"));
+    }
+
+    private void UpdateReaderPdfHandToolButton(bool enabled)
+    {
+        var label = enabled ? T("退出抓手工具") : T("抓手移动页面");
+        ToolTip.SetTip(ReaderPdfHandToolButton, label);
+        AutomationProperties.SetName(ReaderPdfHandToolButton, label);
+        ReaderPdfHandToolButton.Classes.Set("active", enabled);
     }
 
     private async Task EnsureReaderPdfTextIndexAsync(CancellationToken token)
@@ -158,13 +210,22 @@ public partial class MainWindow
     private string GetPdfPagePositionLabel()
     {
         var total = Math.Max(1, _readerPdfPages.Count);
+        var pdf = CurrentReaderHost as NativePdfReaderHost;
+        string Label(int first, int last)
+        {
+            var physical = first == last ? $"{first} / {total}" : $"{first}–{last} / {total}";
+            var a = pdf?.GetPageLabel(first) ?? first.ToString();
+            var b = pdf?.GetPageLabel(last) ?? last.ToString();
+            return a == first.ToString() && b == last.ToString() ? physical
+                : T("书页 {0} · {1}", first == last ? a : $"{a}–{b}", physical);
+        }
         if (CurrentReaderHost is NativePdfReaderHost { DisplayMode: PdfReaderDisplayMode.TwoPage })
         {
             var first = (_readerPdfPage - 1) / 2 * 2 + 1;
             var last = Math.Min(total, first + 1);
-            if (last > first) return $"{first}–{last} / {total}";
+            if (last > first) return Label(first, last);
         }
-        return T("{0} / {1}", _readerPdfPage, total);
+        return Label(_readerPdfPage, _readerPdfPage);
     }
 
     private async Task MoveReaderPdfPositionAsync(int direction)

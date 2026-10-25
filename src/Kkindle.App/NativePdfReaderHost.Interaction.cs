@@ -1,6 +1,9 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
+using System.Runtime.InteropServices;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 
@@ -8,9 +11,64 @@ namespace Kkindle;
 
 public sealed partial class NativePdfReaderHost
 {
+    private static readonly Lazy<WriteableBitmap> SelectionInversionPixel = new(() =>
+    {
+        var bitmap = new WriteableBitmap(new PixelSize(1, 1), new Vector(96, 96), PixelFormats.Bgra8888, AlphaFormat.Opaque);
+        using var frame = bitmap.Lock();
+        Marshal.WriteInt32(frame.Address, -1);
+        return bitmap;
+    });
+
+    private Guid? _selectedAnnotationId;
+    private PdfPageLink? _pointerLink;
+    private IReadOnlyList<PdfTextRange>? _selectionRanges;
+    public string? SelectionFragment => PdfTextRanges.Encode(_selectionRanges);
+
+    private IReadOnlyList<Rect> GetAnnotationLocalBounds(int page, ReaderAnnotation annotation) =>
+        PdfTextRanges.Read(annotation.Fragment, annotation.StartOffset, annotation.EndOffset)
+            .SelectMany(range => GetLocalRangeBounds(page, range.Start, range.End)).ToArray();
+
+    private IReadOnlyList<Rect> GetSelectionBounds() => (_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
+        .SelectMany(range => GetRangeBounds(_selectionPage, range.Start, range.End)).ToArray();
+
+    public void SelectAnnotation(Guid id)
+    {
+        var selected = _annotations.Any(item => item.Id == id) ? id : (Guid?)null;
+        if (_selectedAnnotationId == selected)
+        {
+            Focus();
+            return;
+        }
+        _selectedAnnotationId = selected;
+        if (selected is null)
+        {
+            _selectionDashTimer.Stop();
+        }
+        else if (!_selectionDashTimer.IsEnabled)
+        {
+            _selectionDashOffset = 0;
+            _selectionDashTimer.Start();
+        }
+        InvalidateVisual();
+        Focus();
+    }
+
+    /// <summary>The highlight/underline/sticky-note currently picked with the left button.</summary>
+    public Guid? SelectedAnnotationId => _selectedAnnotationId;
+
+    /// <summary>Drops the highlight/underline selection without touching the text selection.</summary>
+    public void ClearAnnotationSelection()
+    {
+        if (_selectedAnnotationId is null) return;
+        _selectedAnnotationId = null;
+        _selectionDashTimer.Stop();
+        InvalidateVisual();
+    }
+
     public void SetAnnotations(IReadOnlyList<ReaderAnnotation> annotations)
     {
         _annotations = annotations.ToArray();
+        if (!_annotations.Any(item => item.Id == _selectedAnnotationId)) _selectedAnnotationId = null;
         ClearHover();
         InvalidateVisual();
     }
@@ -21,6 +79,7 @@ public sealed partial class NativePdfReaderHost
 
     public void ClearSelection()
     {
+        _selectionRanges = null;
         _selectionStart = _selectionEnd = 0;
         _selectionPage = PageNumber;
         InvalidateVisual();
@@ -30,13 +89,31 @@ public sealed partial class NativePdfReaderHost
     public void SetPointAnnotationMode(bool enabled)
     {
         _pointAnnotationMode = enabled;
+        if (enabled) _handToolMode = false;
         if (enabled)
         {
             ClearSelection();
         }
-        Cursor = enabled
-            ? new Cursor(StandardCursorType.Cross)
-            : new Cursor(StandardCursorType.Arrow);
+        Cursor = new Cursor(enabled
+            ? StandardCursorType.Cross
+            : _handToolMode ? StandardCursorType.Hand : StandardCursorType.Arrow);
+        InvalidateVisual();
+    }
+
+    public void SetHandToolMode(bool enabled)
+    {
+        _handToolMode = enabled;
+        if (enabled)
+        {
+            _pointAnnotationMode = false;
+            ClearSelection();
+        }
+        _pointerStart = null;
+        _pointerAnnotationHit = null;
+        _isPanning = false;
+        Cursor = new Cursor(_pointAnnotationMode
+            ? StandardCursorType.Cross
+            : enabled ? StandardCursorType.Hand : StandardCursorType.Arrow);
         InvalidateVisual();
     }
 
@@ -56,6 +133,175 @@ public sealed partial class NativePdfReaderHost
         return GetPageTransform(bounds).Transform(local);
     }
 
+    public bool TryGetAnnotationAnchor(ReaderAnnotation annotation, out int pageNumber, out Point anchor)
+    {
+        pageNumber = 0;
+        anchor = default;
+        if (!annotation.ChapterPath.StartsWith("pdf:", StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(annotation.ChapterPath[(annotation.ChapterPath.LastIndexOf(':') + 1)..], out pageNumber)
+            || pageNumber < 1
+            || pageNumber > PageCount)
+            return false;
+
+        if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out _, out _)
+            && GetPdfPointPosition(annotation) is { } point)
+        {
+            anchor = point;
+            return true;
+        }
+
+        if (GetTextAnnotationAnchor(pageNumber, annotation.StartOffset, annotation.EndOffset, annotation.Fragment) is not { } textAnchor)
+            return false;
+        anchor = textAnchor;
+        return true;
+    }
+
+    public Point? GetTextAnnotationAnchor(int pageNumber, int start, int end, string? fragment = null)
+    {
+        var bounds = PdfTextRanges.Read(fragment, start, end).SelectMany(r => GetLocalRangeBounds(pageNumber, r.Start, r.End)).ToArray();
+        if (bounds.Length == 0) return null;
+        var last = bounds[^1];
+        var point = last.Height > last.Width * 2
+            ? new Point(last.Right + 2, last.Bottom)
+            : new Point(last.Right, last.Bottom + 2);
+        return GetPageTransform(GetPageBounds(pageNumber)).Transform(point);
+    }
+
+    public bool TryGetAnnotationCalloutBounds(int pageNumber, Point anchor, Size preferredSize, out Rect bounds)
+    {
+        bounds = default;
+        if (_layout is null || pageNumber < 1 || pageNumber > PageCount
+            || preferredSize.Width <= 0 || preferredSize.Height <= 0)
+            return false;
+
+        const double inset = 8;
+        const double gap = 18;
+        var viewport = new Rect(Bounds.Size).Deflate(inset);
+        if (viewport.Height < 64) return false;
+        var page = GetPageBounds(pageNumber);
+        // A clamped card must never outlive its anchor in the visible page.
+        if (!page.Contains(anchor) || !new Rect(Viewport).Contains(anchor)) return false;
+        var left = Math.Max(viewport.Left, page.Right + gap);
+        var width = Math.Min(preferredSize.Width, viewport.Right - left);
+        if (width < 144) return false;
+        var height = Math.Min(preferredSize.Height, viewport.Height);
+        bounds = new Rect(left,
+            Math.Clamp(anchor.Y - height / 2, viewport.Top, viewport.Bottom - height),
+            width, height);
+        var candidate = bounds;
+        if (VisiblePageNumbers.Where(number => number != pageNumber)
+            .Any(number => GetPageBounds(number).Intersects(candidate))) return false;
+        return true;
+    }
+
+    private readonly List<(ReaderAnnotation Annotation, Action<Rect> Moved)> _additionalAnnotationCallouts = [];
+    private readonly List<(Point Anchor, Rect Bounds)> _additionalAnnotationConnectors = [];
+
+    public void SetAdditionalAnnotationCallouts(IEnumerable<(ReaderAnnotation Annotation, Action<Rect> Moved)> callouts)
+    {
+        _additionalAnnotationCallouts.Clear();
+        _additionalAnnotationCallouts.AddRange(callouts);
+        UpdateAnnotationCallout();
+        InvalidateVisual();
+    }
+
+    public void DismissAnnotationCallout(Guid? additionalId = null)
+    {
+        if (additionalId is { } id)
+            _additionalAnnotationCallouts.RemoveAll(item => item.Annotation.Id == id);
+        else _annotationCalloutDismissed = true;
+        UpdateAnnotationCallout();
+        InvalidateVisual();
+    }
+
+    private bool _annotationCalloutVisible;
+    private bool _annotationCalloutDismissed;
+    private Size _annotationCalloutSize;
+    private Action<Rect>? _annotationCalloutMoved;
+    private int _annotationCalloutPage;
+    private Point _annotationCalloutPagePoint;
+    private Size _annotationCalloutPageSize;
+    private Size _annotationCalloutViewportSize;
+    private int _annotationCalloutRotation;
+
+    public void SetAnnotationCallout(Point anchor, Rect bounds, Action<Rect>? moved = null, int pageNumber = 0, Size? preferredSize = null)
+    {
+        _annotationCalloutPage = pageNumber > 0 ? pageNumber : PageNumber;
+        var page = GetPageBounds(_annotationCalloutPage);
+        var size = GetUnrotatedPageSize(page);
+        var local = GetPageTransform(page).Invert().Transform(anchor);
+        // Keep the anchor in document space, never in stale screen coordinates.
+        _annotationCalloutPagePoint = new(local.X / size.Width, local.Y / size.Height);
+        _annotationCalloutPageSize = page.Size;
+        _annotationCalloutViewportSize = Bounds.Size;
+        _annotationCalloutRotation = Rotation;
+        _annotationCallout = (anchor, bounds);
+        _annotationCalloutSize = preferredSize ?? bounds.Size;
+        _annotationCalloutDismissed = false;
+        _annotationCalloutMoved = moved;
+        UpdateAnnotationCallout();
+        InvalidateVisual();
+    }
+
+    private void UpdateAnnotationCallout()
+    {
+        if (_annotationCallout is not { } callout || _layout is null
+            || _annotationCalloutPage < 1 || _annotationCalloutPage > PageCount) return;
+        var page = GetPageBounds(_annotationCalloutPage);
+        var size = GetUnrotatedPageSize(page);
+        var anchor = GetPageTransform(page).Transform(new Point(
+            _annotationCalloutPagePoint.X * size.Width,
+            _annotationCalloutPagePoint.Y * size.Height));
+        _annotationCalloutVisible = TryGetAnnotationCalloutBounds(
+            _annotationCalloutPage, anchor, _annotationCalloutSize, out var bounds);
+        _annotationCalloutVisible &= !_annotationCalloutDismissed;
+        if (!_annotationCalloutVisible) bounds = callout.Bounds;
+        _annotationCalloutPageSize = page.Size;
+        _annotationCalloutViewportSize = Bounds.Size;
+        _annotationCalloutRotation = Rotation;
+        _annotationCallout = (anchor, bounds);
+        _additionalAnnotationConnectors.Clear();
+        var cards = new List<(Point Anchor, Rect Bounds, Action<Rect>? Moved, bool Primary)>();
+        if (_annotationCalloutVisible) cards.Add((anchor, bounds, _annotationCalloutMoved, true));
+        else _annotationCalloutMoved?.Invoke(default);
+        foreach (var item in _additionalAnnotationCallouts)
+        {
+            if (TryGetAnnotationAnchor(item.Annotation, out var number, out var point)
+                && TryGetAnnotationCalloutBounds(number, point, new Size(220, 88), out var cardBounds))
+                cards.Add((point, cardBounds, item.Moved, false));
+            else item.Moved(default);
+        }
+        cards.Sort((a, b) => a.Anchor.Y.CompareTo(b.Anchor.Y));
+        var available = new Rect(Viewport).Deflate(8);
+        var height = cards.Count == 0 ? 88 : Math.Min(88, Math.Max(1,
+            (available.Height - 8 * (cards.Count - 1)) / cards.Count));
+        var nextTop = available.Top;
+        for (var index = 0; index < cards.Count; index++)
+        {
+            var card = cards[index];
+            var remaining = cards.Count - index;
+            var top = Math.Clamp(card.Anchor.Y - height / 2, nextTop,
+                Math.Max(nextTop, available.Bottom - remaining * height - (remaining - 1) * 8));
+            var positioned = cards.Count == 1 ? card.Bounds
+                : new Rect(card.Bounds.X, top, card.Bounds.Width, height);
+            nextTop = positioned.Bottom + 8;
+            if (card.Primary) _annotationCallout = (card.Anchor, positioned);
+            else _additionalAnnotationConnectors.Add((card.Anchor, positioned));
+            card.Moved?.Invoke(positioned);
+        }
+    }
+
+    public void ClearAnnotationCallout()
+    {
+        foreach (var item in _additionalAnnotationCallouts) item.Moved(default);
+        _additionalAnnotationCallouts.Clear();
+        _additionalAnnotationConnectors.Clear();
+        if (_annotationCallout is null) return;
+        _annotationCallout = null;
+        _annotationCalloutMoved = null;
+        InvalidateVisual();
+    }
+
     public void ScrollToPdfPoint(double x, double y)
     {
         if (_layout is null || PageNumber < 1 || PageNumber > _layout.Pages.Length)
@@ -67,13 +313,14 @@ public sealed partial class NativePdfReaderHost
             Math.Clamp(y, 0, 1) * size.Height);
         var position = GetPageTransform(page).Transform(local);
         SetPan(new(
-            position.X - Viewport.Width * 0.2,
-            position.Y - Viewport.Height * 0.25),
+            _pan.X + position.X - Viewport.Width * 0.2,
+            _pan.Y + position.Y - Viewport.Height * 0.25),
             trackPage: false);
     }
 
     public void SelectRange(int start, int end)
     {
+        _selectionRanges = null;
         var text = PageContent?.Text ?? string.Empty;
         start = Math.Clamp(start, 0, text.Length);
         end = Math.Clamp(end, start, text.Length);
@@ -238,11 +485,15 @@ public sealed partial class NativePdfReaderHost
         context.FillRectangle(new SolidColorBrush(_palette.Sidebar), new Rect(Bounds.Size));
         if (_layout is null) return;
         if (Math.Abs(DeviceScaling - _layoutDpi) > 0.001) ScheduleRender();
-        foreach (var pageNumber in VisiblePageNumbers)
+        var visiblePages = VisiblePageNumbers.ToArray();
+        // Paint every shadow below every sheet. When pages are close together,
+        // a later page's shadow must never tint an earlier page's paper.
+        foreach (var pageNumber in visiblePages)
+            DrawPageShadow(context, GetPageBounds(pageNumber));
+
+        foreach (var pageNumber in visiblePages)
         {
             var page = GetPageBounds(pageNumber);
-            var shadow = page.Translate(new Vector(0, 2));
-            context.FillRectangle(new SolidColorBrush(Color.FromArgb(22, 0, 0, 0)), shadow.Inflate(1));
             context.DrawRectangle(new SolidColorBrush(_palette.Page), new Pen(new SolidColorBrush(_palette.Border), 0.5), page);
             if (_pages.TryGetValue(pageNumber, out var cached) && cached.Bitmap is { } bitmap && cached.Raster is { } raster
                 && raster.Rotation == Rotation && cached.Palette == _palette)
@@ -267,23 +518,111 @@ public sealed partial class NativePdfReaderHost
                     var size = GetUnrotatedPageSize(page);
                     var point = new Point(pointX * size.Width, pointY * size.Height);
                     DrawPointAnnotation(context, point, color);
+                    if (_selectedAnnotationId == annotation.Id)
+                        context.DrawEllipse(
+                            new SolidColorBrush(Color.FromArgb(28, 66, 133, 210)),
+                            SelectionPen(),
+                            point, 8.5, 8.5);
                     continue;
                 }
                 if (annotation.EndOffset <= annotation.StartOffset) continue;
-                foreach (var rect in GetLocalRangeBounds(pageNumber, annotation.StartOffset, annotation.EndOffset))
+                var isSelected = _selectedAnnotationId == annotation.Id;
+                foreach (var rect in GetAnnotationLocalBounds(pageNumber, annotation))
+                {
                     DrawAnnotation(context, rect, annotation.UnderlineStyle, color);
+                    if (isSelected)
+                        context.DrawRectangle(
+                            new SolidColorBrush(Color.FromArgb(24, 66, 133, 210)),
+                            SelectionPen(),
+                            rect.Inflate(2));
+                }
             }
             if (_searchPage == pageNumber)
                 for (var index = 0; index < _search.Count; index++)
                     foreach (var rect in GetLocalRangeBounds(pageNumber, _search[index].Start, _search[index].Start + _search[index].Length))
                         context.FillRectangle(new SolidColorBrush(Color.FromArgb(index == _searchIndex ? (byte)140 : (byte)70, 255, 200, 50)), rect.Inflate(1));
-            if (_selectionPage == pageNumber)
-                foreach (var rect in GetLocalRangeBounds(pageNumber, _selectionStart, _selectionEnd))
-                    context.FillRectangle(new SolidColorBrush(Color.FromArgb(85, 66, 133, 210)), rect.Inflate(1));
             if (_speechHighlight is { } speech && speech.Page == pageNumber)
                 foreach (var rect in GetLocalRangeBounds(pageNumber, speech.Start, speech.Start + speech.Length))
                     context.FillRectangle(new SolidColorBrush(Color.FromArgb(65, 100, 160, 95)), rect.Inflate(1));
+            if (_selectionPage == pageNumber)
+            {
+                var selection = new GeometryGroup { FillRule = FillRule.NonZero };
+                foreach (var rect in (_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
+                    .SelectMany(range => GetLocalRangeBounds(pageNumber, range.Start, range.End)))
+                    selection.Children.Add(new RectangleGeometry(rect.Inflate(1)));
+                if (selection.Children.Count > 0)
+                {
+                    // Invert the original page pixels, preserving PDF glyphs and antialiasing.
+                    // Draw once through the union so overlapping line boxes never invert twice.
+                    using var selectionClip = context.PushGeometryClip(selection);
+                    using var inversion = context.PushRenderOptions(new RenderOptions { BitmapBlendingMode = BitmapBlendingMode.Difference });
+                    context.DrawImage(SelectionInversionPixel.Value, selection.Bounds);
+                }
+            }
         }
+
+        if (_annotationCalloutVisible && _annotationCallout is { } callout)
+            DrawAnnotationCalloutConnector(context, callout.Anchor, callout.Bounds, _palette.Ink);
+        foreach (var additional in _additionalAnnotationConnectors)
+            DrawAnnotationCalloutConnector(context, additional.Anchor, additional.Bounds, _palette.Ink);
+    }
+
+    private static void DrawAnnotationCalloutConnector(DrawingContext context, Point anchor, Rect bounds, Color color)
+    {
+        var connector = new Pen(
+            new SolidColorBrush(Color.FromArgb(190, color.R, color.G, color.B)),
+            1.35,
+            DashStyle.Dash);
+        Point endpoint;
+        Point firstBend;
+        Point secondBend;
+        if (anchor.X <= bounds.Left)
+        {
+            endpoint = new(bounds.Left, FindCalloutPort(anchor.Y, bounds.Top, bounds.Bottom));
+            // Turn only in the page gutter, never vertically through body text.
+            var elbowX = endpoint.X - 9;
+            firstBend = new(elbowX, anchor.Y);
+            secondBend = new(elbowX, endpoint.Y);
+        }
+        else if (anchor.X >= bounds.Right)
+        {
+            endpoint = new(bounds.Right, FindCalloutPort(anchor.Y, bounds.Top, bounds.Bottom));
+            var elbowX = anchor.X + (endpoint.X - anchor.X) * 0.68;
+            firstBend = new(elbowX, anchor.Y);
+            secondBend = new(elbowX, endpoint.Y);
+        }
+        else if (anchor.Y <= bounds.Top)
+        {
+            endpoint = new(FindCalloutPort(anchor.X, bounds.Left, bounds.Right), bounds.Top);
+            var elbowY = anchor.Y + (endpoint.Y - anchor.Y) * 0.68;
+            firstBend = new(anchor.X, elbowY);
+            secondBend = new(endpoint.X, elbowY);
+        }
+        else
+        {
+            endpoint = new(FindCalloutPort(anchor.X, bounds.Left, bounds.Right), bounds.Bottom);
+            var elbowY = anchor.Y + (endpoint.Y - anchor.Y) * 0.68;
+            firstBend = new(anchor.X, elbowY);
+            secondBend = new(endpoint.X, elbowY);
+        }
+
+        context.DrawLine(connector, anchor, firstBend);
+        context.DrawLine(connector, firstBend, secondBend);
+        context.DrawLine(connector, secondBend, endpoint);
+        context.DrawEllipse(Brushes.White, new Pen(new SolidColorBrush(color), 1), anchor, 2, 2);
+    }
+
+    private static double FindCalloutPort(double anchor, double start, double end)
+    {
+        var margin = Math.Min(22, (end - start) / 3);
+        var minimum = start + margin;
+        var maximum = end - margin;
+        var port = Math.Clamp(anchor, minimum, maximum);
+        if (Math.Abs(port - anchor) >= 18) return port;
+
+        var upper = Math.Clamp((start + end) / 2 - 24, minimum, maximum);
+        var lower = Math.Clamp((start + end) / 2 + 24, minimum, maximum);
+        return Math.Abs(upper - anchor) >= Math.Abs(lower - anchor) ? upper : lower;
     }
 
     private static void DrawAnnotation(DrawingContext context, Rect rect, string style, Color color)
@@ -322,6 +661,80 @@ public sealed partial class NativePdfReaderHost
         }
     }
 
+    // Marching ants: the dash offset is advanced by _selectionDashTimer.
+    private Pen SelectionPen() => new(
+        new SolidColorBrush(Color.FromArgb(235, 66, 133, 210)),
+        1.2,
+        new DashStyle([4, 3], _selectionDashOffset));
+
+    // A drawing context has no blur, so use narrow linear gradients around
+    // the page. Their spread stays inside the reader's page gutter, avoiding
+    // the stacked dark bands made by overlapping page-sized rectangles.
+    private void DrawPageShadow(DrawingContext context, Rect page)
+    {
+        const double spread = 7;
+        const byte edgeAlpha = 28;
+
+        context.DrawRectangle(CreatePageShadowGradient(horizontal: false, darkAtStart: false, edgeAlpha), null,
+            new Rect(page.Left, page.Top - spread, page.Width, spread));
+        context.DrawRectangle(CreatePageShadowGradient(horizontal: false, darkAtStart: true, edgeAlpha), null,
+            new Rect(page.Left, page.Bottom, page.Width, spread));
+        context.DrawRectangle(CreatePageShadowGradient(horizontal: true, darkAtStart: false, edgeAlpha), null,
+            new Rect(page.Left - spread, page.Top, spread, page.Height));
+        context.DrawRectangle(CreatePageShadowGradient(horizontal: true, darkAtStart: true, edgeAlpha), null,
+            new Rect(page.Right, page.Top, spread, page.Height));
+
+        context.DrawRectangle(CreatePageShadowCornerGradient(edgeAlpha, 1, 1), null,
+            new Rect(page.Left - spread, page.Top - spread, spread, spread));
+        context.DrawRectangle(CreatePageShadowCornerGradient(edgeAlpha, 0, 1), null,
+            new Rect(page.Right, page.Top - spread, spread, spread));
+        context.DrawRectangle(CreatePageShadowCornerGradient(edgeAlpha, 1, 0), null,
+            new Rect(page.Left - spread, page.Bottom, spread, spread));
+        context.DrawRectangle(CreatePageShadowCornerGradient(edgeAlpha, 0, 0), null,
+            new Rect(page.Right, page.Bottom, spread, spread));
+    }
+
+    private static LinearGradientBrush CreatePageShadowGradient(bool horizontal, bool darkAtStart, byte edgeAlpha)
+    {
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = horizontal
+                ? new RelativePoint(0, 0.5, RelativeUnit.Relative)
+                : new RelativePoint(0.5, 0, RelativeUnit.Relative),
+            EndPoint = horizontal
+                ? new RelativePoint(1, 0.5, RelativeUnit.Relative)
+                : new RelativePoint(0.5, 1, RelativeUnit.Relative)
+        };
+        SetPageShadowStops(brush, edgeAlpha, darkAtStart);
+        return brush;
+    }
+
+    private static RadialGradientBrush CreatePageShadowCornerGradient(byte edgeAlpha, double centerX, double centerY)
+    {
+        var corner = new RelativePoint(centerX, centerY, RelativeUnit.Relative);
+        var brush = new RadialGradientBrush
+        {
+            Center = corner,
+            GradientOrigin = corner,
+            RadiusX = new RelativeScalar(1, RelativeUnit.Relative),
+            RadiusY = new RelativeScalar(1, RelativeUnit.Relative)
+        };
+        SetPageShadowStops(brush, edgeAlpha, darkAtStart: true);
+        return brush;
+    }
+
+    private static void SetPageShadowStops(GradientBrush brush, byte edgeAlpha, bool darkAtStart)
+    {
+        var transparent = Color.FromArgb(0, 0, 0, 0);
+        var soft = Color.FromArgb((byte)(edgeAlpha * 0.3), 0, 0, 0);
+        var middle = Color.FromArgb((byte)(edgeAlpha * 0.7), 0, 0, 0);
+        var edge = Color.FromArgb(edgeAlpha, 0, 0, 0);
+        brush.GradientStops.Add(new GradientStop(darkAtStart ? edge : transparent, 0));
+        brush.GradientStops.Add(new GradientStop(darkAtStart ? middle : soft, 0.4));
+        brush.GradientStops.Add(new GradientStop(darkAtStart ? soft : middle, 0.8));
+        brush.GradientStops.Add(new GradientStop(darkAtStart ? transparent : edge, 1));
+    }
+
     private static void DrawPointAnnotation(DrawingContext context, Point point, Color color)
     {
         var brush = new SolidColorBrush(color == Colors.Black
@@ -332,7 +745,7 @@ public sealed partial class NativePdfReaderHost
     }
 
     private int PageAtPoint(Point point) => VisiblePageNumbers.FirstOrDefault(page => GetPageBounds(page).Contains(point));
-    private int HitOffset(int pageNumber, Point point, bool nearest)
+    private int HitOffset(int pageNumber, Point point, bool nearest, bool readingOrder = false)
     {
         var content = GetPageContent(pageNumber);
         if (content is null || !nearest && !GetPageBounds(pageNumber).Contains(point)) return -1;
@@ -354,7 +767,9 @@ public sealed partial class NativePdfReaderHost
         var bestBounds = GetLocalGlyphBounds(pageNumber, best.Bounds, page);
         var after = (point.X - bestBounds.Center.X) * best.AdvanceX
             + (point.Y - bestBounds.Center.Y) * best.AdvanceY > 0;
-        return best.Offset + (after ? best.Length : 0);
+        return readingOrder && _pages.TryGetValue(pageNumber, out var cached)
+            ? cached.SelectionLayout.IndexAtOffset(best.Offset) + (after ? 1 : 0)
+            : best.Offset + (after ? best.Length : 0);
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -363,24 +778,60 @@ public sealed partial class NativePdfReaderHost
         var point = e.GetPosition(this);
         var page = PageAtPoint(point);
         var properties = e.GetCurrentPoint(this).Properties;
+        if (properties.IsXButton1Pressed || properties.IsXButton2Pressed)
+        {
+            Emit(new { type = "pdfHistoryNavigate", direction = properties.IsXButton1Pressed ? -1 : 1 });
+            e.Handled = true;
+            return;
+        }
+                if (PdfAnnotTrace.Enabled && page > 0)
+        {
+            var dump = string.Join("; ", AnnotationsForPage(page).Select(a =>
+                a.StartOffset < a.EndOffset
+                    ? $"{a.Id.ToString()[..8]} {a.StartOffset}-{a.EndOffset} [{(GetRangeBounds(page, a.StartOffset, a.EndOffset).FirstOrDefault())}]"
+                    : $"{a.Id.ToString()[..8]} point {a.Fragment} [{GetPdfPointPosition(a)}]"));
+            PdfAnnotTrace.Write($"page {page} annotations: {dump}");
+        }
+        if (PdfAnnotTrace.Enabled)
+            PdfAnnotTrace.Write($"press right={properties.IsRightButtonPressed} left={properties.IsLeftButtonPressed} source={e.Source?.GetType().Name} page={page} point={point.X:F1},{point.Y:F1} sourceIsHost={e.Source == this}");
         if (e.Source != this) return;
+        CloseFootnotePreview();
         if (properties.IsRightButtonPressed)
         {
-            if (page > 0)
+            if (page > 0 && AnnotationAt(point) is { } annotation)
             {
-                if (AnnotationAt(point) is { } annotation)
-                    Emit(new { type = "annotationClick", id = annotation.Id });
-                else
-                    EmitPointAnnotation(page, point);
+                // Right-clicking an annotation opens the shared PDF tools menu
+                // with its edit/delete actions; empty space opens the same tools.
+                PdfAnnotTrace.Write($"right-click hit annotation {annotation.Id} ({annotation.SelectedText})");
+                SelectAnnotation(annotation.Id);
+                Emit(new { type = "annotationContextMenu", id = annotation.Id, x = point.X, y = point.Y });
+            }
+            else
+            {
+                ClearAnnotationSelection();
+                Emit(new { type = "annotationBlankClick" });
             }
             e.Handled = true;
             return;
         }
         if (!properties.IsLeftButtonPressed) return;
         Focus();
+        if (_handToolMode)
+        {
+            _handDragStart = point;
+            _handDragOrigin = _pan;
+            _pointerStart = point;
+            _isPanning = true;
+            _dragging = false;
+            _pointerAnnotationHit = null;
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
         if (page == 0)
         {
             ClearSelection();
+            Emit(new { type = "annotationBlankClick" });
             return;
         }
         ActivatePage(page);
@@ -395,13 +846,27 @@ public sealed partial class NativePdfReaderHost
             e.Handled = true;
             return;
         }
+        // A press that lands on a highlight/underline still starts a normal
+        // drag so text can be re-selected over existing markings. The press is
+        // resolved as an annotation pick on release when no drag happened.
+        _pointerAnnotationHit = AnnotationAt(point)?.Id;
+        _pointerLink = _pointerAnnotationHit is null ? LinkAt(point) : null;
+        _pointerClickCount = e.ClickCount;
+        if (_pointerAnnotationHit is { } doubleHit && e.ClickCount >= 2)
+        {
+            Emit(new { type = "annotationClick", id = doubleHit });
+            _pointerStart = null;
+            _pointerAnnotationHit = null;
+            e.Handled = true;
+            return;
+        }
         _selectionPage = page;
-        _anchorOffset = HitOffset(page, point, false);
+        _anchorOffset = HitOffset(page, point, false, readingOrder: true);
         _pointerStart = point;
         _dragging = false;
         if (_anchorOffset >= 0 && e.ClickCount >= 2 && PageContent is { } content)
         {
-            var start = Math.Min(_anchorOffset, Math.Max(0, content.Text.Length - 1));
+            var start = Math.Min(HitOffset(page, point, false), Math.Max(0, content.Text.Length - 1));
             var end = start;
             while (start > 0 && !char.IsWhiteSpace(content.Text[start - 1])) start--;
             while (end < content.Text.Length && !char.IsWhiteSpace(content.Text[end])) end++;
@@ -416,25 +881,41 @@ public sealed partial class NativePdfReaderHost
     {
         base.OnPointerMoved(e);
         var point = e.GetPosition(this);
+        if (_isPanning)
+        {
+            var delta = point - _handDragStart;
+            var pan = _handDragOrigin - new Vector(delta.X, delta.Y);
+            SetPan(pan, allowZoomOverpan: HasZoomOverpan(pan));
+            return;
+        }
         if (_pointerStart is { } start && _anchorOffset >= 0)
         {
             _dragging |= Math.Abs(point.X - start.X) + Math.Abs(point.Y - start.Y) > 3;
             if (_dragging)
             {
-                var hit = HitOffset(_selectionPage, point, true);
-                if (hit >= 0) { _selectionStart = Math.Min(_anchorOffset, hit); _selectionEnd = Math.Max(_anchorOffset, hit); InvalidateVisual(); }
+                var hit = HitOffset(_selectionPage, point, true, readingOrder: true);
+                if (hit >= 0 && _pages.TryGetValue(_selectionPage, out var selectedPage))
+                {
+                    _selectionRanges = selectedPage.SelectionLayout.GetRanges(Math.Min(_anchorOffset, hit), Math.Max(_anchorOffset, hit));
+                    _selectionStart = _selectionRanges.Count > 0 ? _selectionRanges.Min(r => r.Start) : 0;
+                    _selectionEnd = _selectionRanges.Count > 0 ? _selectionRanges.Max(r => r.End) : 0;
+                    InvalidateVisual();
+                }
             }
             return;
         }
         var annotation = AnnotationAt(point);
         var page = PageAtPoint(point);
-        Cursor = new Cursor(_pointAnnotationMode
-            ? StandardCursorType.Cross
-            : annotation is not null
-                ? StandardCursorType.Hand
-                : page > 0 && HitOffset(page, point, false) >= 0
-                    ? StandardCursorType.Ibeam
-                    : StandardCursorType.Arrow);
+        UpdateFootnoteHover(point, annotation is null && !_handToolMode && !_pointAnnotationMode);
+        Cursor = new Cursor(_handToolMode
+            ? StandardCursorType.Hand
+            : _pointAnnotationMode
+                ? StandardCursorType.Cross
+                : annotation is not null || LinkAt(point) is not null
+                    ? StandardCursorType.Hand
+                    : page > 0 && HitOffset(page, point, false) >= 0
+                        ? StandardCursorType.Ibeam
+                        : StandardCursorType.Arrow);
         if (annotation is not null && !string.IsNullOrWhiteSpace(annotation.Note))
         {
             if (_hoveredAnnotation != annotation.Id)
@@ -449,32 +930,67 @@ public sealed partial class NativePdfReaderHost
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        if (_isPanning)
+        {
+            _isPanning = false;
+            _pointerStart = null;
+            e.Pointer.Capture(null);
+            Cursor = new Cursor(_handToolMode ? StandardCursorType.Hand : StandardCursorType.Arrow);
+            e.Handled = true;
+            return;
+        }
         if (_pointerStart is null) return;
         var dragged = _dragging;
+        // Read the pending pick before releasing the capture: CaptureLost
+        // clears it, since losing capture cancels the click.
+        var annotationHit = _pointerAnnotationHit;
+        var link = _pointerLink;
+        _pointerLink = null;
+        if (PdfAnnotTrace.Enabled) PdfAnnotTrace.Write($"release dragged={dragged} hit={annotationHit}");
         _pointerStart = null;
         _dragging = false;
+        _pointerAnnotationHit = null;
         e.Pointer.Capture(null);
-        if (dragged) SelectRange(_selectionStart, _selectionEnd);
-        else if (AnnotationAt(e.GetPosition(this)) is { } annotation) Emit(new { type = "annotationClick", id = annotation.Id });
-        else ClearSelection();
+        if (dragged) EmitSelection();
+        else if (annotationHit is { } hitId)
+        {
+            // Single click picks the highlight/underline so Delete (see
+            // HandleReaderKey) or a right click can remove it.
+            SelectAnnotation(hitId);
+            Emit(new { type = "annotationSelect", id = hitId });
+        }
+        else if (link is not null) FollowLink(link);
+        else
+        {
+            _selectedAnnotationId = null;
+            ClearSelection();
+            Emit(new { type = "annotationBlankClick" });
+        }
         e.Handled = true;
     }
 
-    protected override void OnPointerExited(PointerEventArgs e) { base.OnPointerExited(e); ClearHover(); }
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        ClearHover();
+        ScheduleFootnotePreview(false);
+    }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
+        if (_footnotePopup?.Child?.IsPointerOver == true) return;
+        CloseFootnotePreview();
         e.Handled = true;
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
-            _ = SetZoomAsync(Zoom + Math.Sign(e.Delta.Y) * 0.1);
+            _ = SetZoomAsync(Zoom + Math.Sign(e.Delta.Y) * 0.1, e.GetPosition(this));
             return;
         }
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift) || Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y))
         {
             ScrollBarAutoHide.Show(_horizontal);
-            SetPan(new(_pan.X - (e.Delta.X != 0 ? e.Delta.X : e.Delta.Y) * 60, _pan.Y));
+            ScrollPanBy(new(-(e.Delta.X != 0 ? e.Delta.X : e.Delta.Y) * 60, 0));
             return;
         }
         var direction = -Math.Sign(e.Delta.Y);
@@ -493,6 +1009,20 @@ public sealed partial class NativePdfReaderHost
 
     internal void HandleReaderKey(KeyEventArgs e)
     {
+        if (e.Handled) return;
+        if (e.KeyModifiers == KeyModifiers.Alt && e.Key is Key.Left or Key.Right
+            || e.KeyModifiers == KeyModifiers.None && e.Key == Key.Back)
+        {
+            Emit(new { type = "pdfHistoryNavigate", direction = e.Key == Key.Right ? 1 : -1 });
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None && _selectedAnnotationId is { } id)
+        {
+            Emit(new { type = "pdfAnnotationDelete", id });
+            e.Handled = true;
+            return;
+        }
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
         {
             if (e.Key == Key.A) { SelectRange(0, PageContent?.Text.Length ?? 0); e.Handled = true; }
@@ -501,6 +1031,7 @@ public sealed partial class NativePdfReaderHost
         }
         else if (e.Key == Key.Escape)
         {
+            CloseFootnotePreview();
             if (_pointAnnotationMode)
             {
                 _pointAnnotationMode = false;
@@ -539,7 +1070,7 @@ public sealed partial class NativePdfReaderHost
                     + (marker.Y - point.Y) * (marker.Y - point.Y) <= 100)
                 return annotation;
             if (annotation.EndOffset > annotation.StartOffset
-                && GetRangeBounds(page, annotation.StartOffset, annotation.EndOffset)
+                && GetAnnotationLocalBounds(page, annotation).Select(rect => rect.TransformToAABB(GetPageTransform(GetPageBounds(page))))
                     .Any(rect => rect.Inflate(4).Contains(point)))
                 return annotation;
         }
@@ -553,14 +1084,21 @@ public sealed partial class NativePdfReaderHost
         Emit(new { type = "annotationLeave" });
     }
 
+    internal string GetSelectedTextForTranslation() =>
+        _pages.TryGetValue(_selectionPage, out var page)
+            ? page.SelectionLayout.GetTranslationText(_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
+            : string.Empty;
+
     private void EmitSelection()
     {
         var text = GetPageContent(_selectionPage)?.Text ?? string.Empty;
         var start = Math.Clamp(_selectionStart, 0, text.Length);
         var end = Math.Clamp(_selectionEnd, start, text.Length);
-        var rects = GetRangeBounds(_selectionPage, start, end);
+        var rects = GetSelectionBounds();
         var placement = rects.Count > 0 ? rects[0] : PageBounds;
-        Emit(new { type = "selection", text = text[start..end], startOffset = start, endOffset = end,
+        var selectedText = _pages.TryGetValue(_selectionPage, out var selectedPage)
+            ? selectedPage.SelectionLayout.GetText(_selectionRanges ?? [new(start, end)]) : text[start..end];
+        Emit(new { type = "selection", text = selectedText, startOffset = start, endOffset = end,
             prefix = text[Math.Max(0, start - 16)..start], suffix = text[end..Math.Min(text.Length, end + 16)],
             x = Math.Clamp(placement.Left, 0, Bounds.Width), y = Math.Clamp(placement.Top, 0, Bounds.Height),
             bottom = Math.Clamp(placement.Bottom, 0, Bounds.Height) });
