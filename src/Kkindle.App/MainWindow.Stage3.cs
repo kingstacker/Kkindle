@@ -721,7 +721,7 @@ public partial class MainWindow
             // explicitly refreshes or taps the device card (WinUI reference).
             if (_manuallyDisconnectedDeviceId is not null)
             {
-                SetDisconnectedDeviceUi(T("已断开"));
+                SetDisconnectedDeviceUi();
                 return;
             }
 
@@ -1811,7 +1811,7 @@ public partial class MainWindow
             var disconnectedMessage = isWpd
                 ? T("{0} 已停止访问，现在可以安全移除你的设备", device.Name)
                 : T("{0} 已安全弹出，现在可以安全移除你的设备", device.Name);
-            SetDisconnectedDeviceUi(T("已断开"));
+            SetDisconnectedDeviceUi();
             DeviceStorageText.Text = isWpd ? T("设备已停止访问") : T("设备已弹出");
             ShowDeviceStatusToast(disconnectedMessage);
         }

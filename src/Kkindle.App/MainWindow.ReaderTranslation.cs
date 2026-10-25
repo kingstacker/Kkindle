@@ -40,6 +40,13 @@ public partial class MainWindow
     {
         var source = (_readerPendingSelection ?? string.Empty).Trim();
         if (source.Length == 0) return;
+        if (_readerIsPdf)
+        {
+            var paragraphText = (CurrentReaderHost as NativePdfReaderHost)?.GetSelectedTextForTranslation();
+            source = string.IsNullOrWhiteSpace(paragraphText)
+                ? PdfTextSelectionLayout.NormalizeCopy(source)
+                : paragraphText;
+        }
 
         // Keep the selection alive while replacing an earlier translation
         // result. The next selection event will replace it naturally.

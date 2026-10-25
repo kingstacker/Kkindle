@@ -16,6 +16,7 @@ public sealed class UpdateService : IDisposable
     private const string LatestReleaseUrl = "https://api.github.com/repos/kingstacker/Kkindle/releases/latest";
     private const string DevelopmentReleasesUrl = "https://api.github.com/repos/kingstacker/Kkindle/releases?per_page=100";
     private const long MaximumChecksumFileSize = 1024 * 1024;
+    private const string CheckTimeoutMessage = "检查更新超时，请检查网络或代理设置后重试。";
     private static readonly Regex VersionPattern = new(
         "^[vV]?(?<major>0|[1-9][0-9]*)\\.(?<minor>0|[1-9][0-9]*)\\.(?<patch>0|[1-9][0-9]*)(?:\\.(?<revision>0|[1-9][0-9]*))?(?:-(?<prerelease>[0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -28,6 +29,8 @@ public sealed class UpdateService : IDisposable
     private string? _proxyAddress;
     private readonly bool _ownsHttpClient;
     private readonly string _downloadRoot;
+    private readonly TimeSpan _checkTimeout;
+    private readonly TimeSpan _metadataRequestTimeout;
 
     public UpdateService(IAppUpdateInstaller installer)
         : this(
@@ -42,12 +45,16 @@ public sealed class UpdateService : IDisposable
         IAppUpdateInstaller installer,
         HttpClient httpClient,
         string downloadRoot,
-        bool ownsHttpClient = false)
+        bool ownsHttpClient = false,
+        TimeSpan? checkTimeout = null,
+        TimeSpan? metadataRequestTimeout = null)
     {
         _installer = installer ?? throw new ArgumentNullException(nameof(installer));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _downloadRoot = Path.GetFullPath(downloadRoot);
         _ownsHttpClient = ownsHttpClient;
+        _checkTimeout = checkTimeout ?? TimeSpan.FromSeconds(10);
+        _metadataRequestTimeout = metadataRequestTimeout ?? TimeSpan.FromSeconds(3);
         if (!_httpClient.DefaultRequestHeaders.UserAgent.Any())
             _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Kkindle-Updater", "1.0"));
         _httpClient.DefaultRequestHeaders.Accept.Add(
@@ -82,7 +89,17 @@ public sealed class UpdateService : IDisposable
         CancellationToken cancellationToken = default)
     {
         var current = SemanticVersion.Parse(currentVersion, "当前应用版本");
-        var release = await GetLatestReleaseAsync(channel, current, cancellationToken);
+        using var checkCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        checkCancellation.CancelAfter(_checkTimeout);
+        GitHubRelease? release;
+        try
+        {
+            release = await GetLatestReleaseAsync(channel, current, checkCancellation.Token);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(CheckTimeoutMessage, exception);
+        }
 
         if (release is null
             || release.Draft
@@ -223,42 +240,64 @@ public sealed class UpdateService : IDisposable
         if (channel == AppUpdateChannel.Development)
             return await GetLatestDevelopmentReleaseAsync(current, cancellationToken);
 
-        if (await TryGetReleaseFromMirrorAsync(MirrorManifestUrl, cancellationToken) is { } mirroredRelease)
+        if (await TryGetReleaseFromManifestAsync(MirrorManifestUrl, cancellationToken) is { } mirroredRelease)
             return mirroredRelease;
 
-        using (var manifestResponse = await _httpClient.GetAsync(LatestManifestUrl, cancellationToken))
-        {
-            if (manifestResponse.IsSuccessStatusCode)
-                return await DeserializeReleaseAsync(manifestResponse, cancellationToken);
-        }
+        if (await TryGetReleaseFromManifestAsync(LatestManifestUrl, cancellationToken) is { } manifestRelease)
+            return manifestRelease;
 
-        using (var pageResponse = await _httpClient.GetAsync(
-            LatestReleasePageUrl,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken))
+        try
         {
-            if (pageResponse.IsSuccessStatusCode
-                && TryCreateReleaseFromRedirect(pageResponse.RequestMessage?.RequestUri) is { } redirectedRelease)
+            var redirectedRelease = await GetMetadataAsync(
+                LatestReleasePageUrl,
+                (response, _) => Task.FromResult(TryCreateReleaseFromRedirect(response.RequestMessage?.RequestUri)),
+                cancellationToken);
+            if (redirectedRelease is not null)
                 return redirectedRelease;
         }
+        catch (Exception exception) when (IsRecoverableMetadataFailure(exception))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
 
-        using var apiResponse = await _httpClient.GetAsync(LatestReleaseUrl, cancellationToken);
-        apiResponse.EnsureSuccessStatusCode();
-        return await DeserializeReleaseAsync(apiResponse, cancellationToken);
+        return await GetMetadataAsync(LatestReleaseUrl, DeserializeReleaseAsync, cancellationToken);
     }
 
-    private async Task<GitHubRelease?> TryGetReleaseFromMirrorAsync(
+    // Metadata has a short deadline that includes reading/parsing the body.
+    // Installer downloads keep the HTTP client's longer timeout.
+    private async Task<T> GetMetadataAsync<T>(
+        string url,
+        Func<HttpResponseMessage, CancellationToken, Task<T>> readResponse,
+        CancellationToken cancellationToken)
+    {
+        using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestCancellation.CancelAfter(_metadataRequestTimeout);
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                url, HttpCompletionOption.ResponseHeadersRead, requestCancellation.Token);
+            response.EnsureSuccessStatusCode();
+            return await readResponse(response, requestCancellation.Token);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(CheckTimeoutMessage, exception);
+        }
+    }
+
+    private static bool IsRecoverableMetadataFailure(Exception exception) =>
+        exception is HttpRequestException or OperationCanceledException or TimeoutException
+            or JsonException or InvalidDataException or IOException;
+
+    private async Task<GitHubRelease?> TryGetReleaseFromManifestAsync(
         string manifestUrl,
         CancellationToken cancellationToken)
     {
         try
         {
-            using var response = await _httpClient.GetAsync(manifestUrl, cancellationToken);
-            if (!response.IsSuccessStatusCode) return null;
-            return await DeserializeReleaseAsync(response, cancellationToken);
+            return await GetMetadataAsync(manifestUrl, DeserializeReleaseAsync, cancellationToken);
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException
-            or JsonException or InvalidDataException or IOException)
+        catch (Exception exception) when (IsRecoverableMetadataFailure(exception))
         {
             if (cancellationToken.IsCancellationRequested) throw;
             return null;
@@ -272,18 +311,20 @@ public sealed class UpdateService : IDisposable
         // 墙内拉不到 api.github.com：开发版先读自建镜像清单
         // （kkindle.stacker.beauty/update-manifest-dev.json，由 VPS 定时同步 GitHub 生成），
         // 只有镜像不可用 / 清单里的版本不比当前新 / 清单里没有本平台安装包时才回退 GitHub API。
-        if (await TryGetReleaseFromMirrorAsync(MirrorDevelopmentManifestUrl, cancellationToken)
+        if (await TryGetReleaseFromManifestAsync(MirrorDevelopmentManifestUrl, cancellationToken)
                 is { } mirroredRelease
             && HasUsableDevelopmentPackage(mirroredRelease, current))
             return mirroredRelease;
 
-        using var response = await _httpClient.GetAsync(DevelopmentReleasesUrl, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var releases = await JsonSerializer.DeserializeAsync<GitHubRelease[]>(
-            responseStream,
-            cancellationToken: cancellationToken)
-            ?? [];
+        var releases = await GetMetadataAsync(
+            DevelopmentReleasesUrl,
+            async (response, token) =>
+            {
+                await using var responseStream = await response.Content.ReadAsStreamAsync(token);
+                return await JsonSerializer.DeserializeAsync<GitHubRelease[]>(
+                    responseStream, cancellationToken: token) ?? [];
+            },
+            cancellationToken);
 
         GitHubRelease? latestRelease = null;
         SemanticVersion latestVersion = default;

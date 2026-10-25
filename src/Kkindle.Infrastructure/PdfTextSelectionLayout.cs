@@ -26,7 +26,8 @@ public sealed class PdfTextSelectionLayout
     }
     private readonly PdfPageContent _page;
     private readonly bool _usesColumns;
-    private readonly double _paragraphGap;
+    private readonly bool _hasHorizontalLayout;
+    private readonly double _paragraphGap = 1;
     public IReadOnlyList<PdfTextGlyph> Glyphs { get; }
     public PdfTextSelectionLayout(PdfPageContent page)
     {
@@ -55,6 +56,8 @@ public sealed class PdfTextSelectionLayout
             else lines.Add(new([glyph]));
             previousGlyph = glyph;
         }
+        _paragraphGap = ParagraphGap([lines]);
+        _hasHorizontalLayout = true;
         var segments = new List<Line>();
         var gutters = new List<(double Left, double Right)>();
         void AddGutter(double left, double right)
@@ -130,14 +133,19 @@ public sealed class PdfTextSelectionLayout
         Flush();
         Glyphs = ordered;
         _usesColumns = true;
-        var spacing = segments.GroupBy(l => l.Left >= split).SelectMany(column =>
+        _paragraphGap = ParagraphGap(segments.GroupBy(l => l.Left >= split));
+    }
+
+    private static double ParagraphGap(IEnumerable<IEnumerable<Line>> columns)
+    {
+        var spacing = columns.SelectMany(column =>
         {
             var rows = column.OrderBy(l => l.Top).ToArray();
             return rows.Zip(rows.Skip(1), (a, b) =>
                 (Gap: b.Top - a.Top, Height: Math.Max(a.Bottom - a.Top, b.Bottom - b.Top)))
                 .Where(row => row.Gap > row.Height * 0.8).Select(row => row.Gap);
-        }).OrderBy(d => d).ToArray();
-        _paragraphGap = spacing.Length == 0 ? 1 : spacing[(spacing.Length - 1) / 2] * 1.6;
+        }).Order().ToArray();
+        return spacing.Length == 0 ? 1 : spacing[(spacing.Length - 1) / 2] * 1.6;
     }
 
     public int IndexAtOffset(int offset) => Enumerable.Range(0, Glyphs.Count)
@@ -156,10 +164,16 @@ public sealed class PdfTextSelectionLayout
         return result;
     }
 
-    public string GetText(IEnumerable<PdfTextRange> ranges)
+    public string GetText(IEnumerable<PdfTextRange> ranges) => GetText(ranges, detectParagraphs: false);
+
+    /// <summary>Join visual line wraps while retaining geometric paragraph breaks.</summary>
+    public string GetTranslationText(IEnumerable<PdfTextRange> ranges) =>
+        NormalizeCopy(GetText(ranges, detectParagraphs: true));
+
+    private string GetText(IEnumerable<PdfTextRange> ranges, bool detectParagraphs)
     {
         var selected = ranges.ToArray();
-        if (!_usesColumns)
+        if (!_usesColumns && (!detectParagraphs || !_hasHorizontalLayout))
             return string.Join("\n", selected.Select(r => _page.Text[Math.Clamp(r.Start, 0, _page.Text.Length)..Math.Clamp(r.End, r.Start, _page.Text.Length)]));
         var builder = new StringBuilder();
         var sorted = selected.OrderBy(r => r.Start).ToArray();
@@ -188,7 +202,9 @@ public sealed class PdfTextSelectionLayout
                 else
                 {
                     var paragraph = glyph.Bounds.Y < p.Bounds.Y
-                        || glyph.Bounds.Y - p.Bounds.Y > _paragraphGap;
+                        || glyph.Bounds.Y - p.Bounds.Y > _paragraphGap
+                        || detectParagraphs && (gap.Contains("\n\n", StringComparison.Ordinal)
+                            || gap.Contains("\r\n\r\n", StringComparison.Ordinal));
                     builder.Append(paragraph ? "\n\n" : "\n");
                 }
             }

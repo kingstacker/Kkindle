@@ -46,6 +46,7 @@ public sealed class PdfNavigationTests
             var text = layout.GetText(ranges);
             Assert.DoesNotContain("Right", text);
             Assert.Equal("Left first line. An interesting example.", PdfTextSelectionLayout.NormalizeCopy(text));
+            Assert.Equal("Left first line. An interesting example.", layout.GetTranslationText(ranges));
             var fragment = PdfTextRanges.Encode(ranges);
             Assert.Equal(ranges, PdfTextRanges.Read(fragment, ranges.Min(r => r.Start), ranges.Max(r => r.End)));
         }
@@ -101,4 +102,59 @@ public sealed class PdfNavigationTests
     [InlineData("well-known\nterm", "well-known term")]
     public void CopyRepairsLineWrapsAndPreservesParagraphs(string source, string expected) =>
         Assert.Equal(expected, PdfTextSelectionLayout.NormalizeCopy(source));
+
+    [Theory]
+    [InlineData("\r\n")]
+    [InlineData("\n")]
+    public void TranslationJoinsWrappedLinesAndKeepsGeometricParagraphs(string newline)
+    {
+        var lines = new[]
+        {
+            "I wrote the original edition when I was a teacher at the",
+            "Swan School of English, Oxford. I would like to repeat my",
+            "thanks to my former colleagues and students.",
+            "For the fifth edition, I would like to thank Rebecca",
+            "Winthrop and Chris Capper."
+        };
+        var text = string.Join(newline, lines);
+        var glyphs = new List<PdfTextGlyph>();
+        var offset = 0;
+        for (var row = 0; row < lines.Length; row++)
+        {
+            for (var column = 0; column < lines[row].Length; column++)
+                if (lines[row][column] != ' ')
+                    glyphs.Add(new(offset + column, 1,
+                        new(0.08 + column * 0.009, 0.1 + row * 0.02 + (row >= 3 ? 0.025 : 0), 0.007, 0.01)));
+            offset += lines[row].Length + newline.Length;
+        }
+        var layout = new PdfTextSelectionLayout(new(612, 792, text, glyphs));
+        PdfTextRange[] whole = [new(0, text.Length)];
+        Assert.Equal(text, layout.GetText(whole)); // Stored offsets and copied source stay intact.
+        Assert.Equal(string.Join(' ', lines.Take(3)) + "\n\n" + string.Join(' ', lines.Skip(3)),
+            layout.GetTranslationText(whole));
+        var start = text.IndexOf("Swan", StringComparison.Ordinal);
+        var end = text.IndexOf("For the fifth", StringComparison.Ordinal);
+        Assert.Equal(string.Join(' ', lines.Skip(1).Take(2)), layout.GetTranslationText([new(start, end)]));
+    }
+
+    [Fact]
+    public void TranslationWithoutGlyphsRepairsWrapsAndKeepsExplicitParagraphs()
+    {
+        const string text = "An inter-\r\nesting example.\r\n\r\nAnother paragraph.";
+        var layout = new PdfTextSelectionLayout(new(612, 792, text, []));
+        Assert.Equal("An interesting example.\n\nAnother paragraph.", layout.GetTranslationText([new(0, text.Length)]));
+    }
+
+    [Fact]
+    public void TranslationKeepsExplicitParagraphsEvenWithRegularLineSpacing()
+    {
+        const string text = "First paragraph.\r\n\r\nSecond paragraph.";
+        var glyphs = text.Select((value, offset) => (value, offset))
+            .Where(item => !char.IsWhiteSpace(item.value))
+            .Select(item => new PdfTextGlyph(item.offset, 1,
+                new(0.08 + (item.offset < 16 ? item.offset : item.offset - 20) * 0.009,
+                    item.offset < 16 ? 0.1 : 0.12, 0.007, 0.01))).ToArray();
+        var layout = new PdfTextSelectionLayout(new(612, 792, text, glyphs));
+        Assert.Equal("First paragraph.\n\nSecond paragraph.", layout.GetTranslationText([new(0, text.Length)]));
+    }
 }

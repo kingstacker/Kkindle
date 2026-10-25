@@ -107,11 +107,9 @@ public partial class MainWindow
             ReaderPaperStrengthSlider.Value = appearance.PaperStrength * 100;
             ReaderFibersEnabledCheck.IsChecked = appearance.FibersEnabled;
             ReaderPdfAnnotationDisplayModePanel.IsVisible = _readerIsPdf;
-            foreach (var option in new[] { ReaderPdfAnnotationPinnedOption, ReaderPdfAnnotationClickOption })
-            {
-                option.IsChecked = Enum.TryParse<ReaderAnnotationDisplayMode>(option.Tag?.ToString(), out var mode)
-                    && mode == appearance.AnnotationDisplayMode;
-            }
+            ReaderPdfAnnotationNotesCheck.IsChecked = appearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Pinned;
+            ReaderTextLayoutPanel.IsVisible = !_readerIsPdf;
+            ReaderLayoutResetButton.IsVisible = !_readerIsPdf;
             UpdateReaderAppearanceLabels();
         }
         finally { _suppressReaderAppearanceChange = false; }
@@ -123,7 +121,7 @@ public partial class MainWindow
         var height = Math.Max(0, ReaderRoot.Bounds.Height);
         ReaderLayoutSettingsOverlay.Width = width;
         ReaderLayoutSettingsOverlay.Height = height;
-        ReaderLayoutSettingsCard.Width = Math.Min(580, Math.Max(1, width - 32));
+        ReaderLayoutSettingsCard.Width = Math.Min(540, Math.Max(1, width - 32));
         ReaderLayoutSettingsCard.MaxHeight = Math.Min(760, Math.Max(1, height - 32));
     }
 
@@ -157,11 +155,12 @@ public partial class MainWindow
         ChangeReaderAppearance(CurrentReaderAppearance with { PaperStrength = ReaderPaperStrengthSlider.Value / 100 });
     }
 
-    private void ReaderPdfAnnotationDisplayModeOption_IsCheckedChanged(object? sender, RoutedEventArgs e)
+    private void ReaderPdfAnnotationNotesCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
     {
-        if (_suppressReaderAppearanceChange
-            || sender is not RadioButton { IsChecked: true } option
-            || !Enum.TryParse<ReaderAnnotationDisplayMode>(option.Tag?.ToString(), out var mode)) return;
+        if (_suppressReaderAppearanceChange) return;
+        var mode = ReaderPdfAnnotationNotesCheck.IsChecked == true
+            ? ReaderAnnotationDisplayMode.Pinned
+            : ReaderAnnotationDisplayMode.Click;
         if (CurrentReaderAppearance.AnnotationDisplayMode == mode) return;
         HideReaderAnnotationHoverPopup();
         ChangeReaderAppearance(CurrentReaderAppearance with { AnnotationDisplayMode = mode });
@@ -323,6 +322,7 @@ public partial class MainWindow
             ReaderBookScopeGlobalOption.IsChecked = !ReaderUsesBookOverride;
             ReaderBookScopeBookOption.IsChecked = ReaderUsesBookOverride;
             var canChooseScope = CanUseReaderBookProfile;
+            ReaderBookScopePanel.IsVisible = canChooseScope;
             ReaderBookScopeGlobalOption.IsVisible = canChooseScope;
             ReaderBookScopeBookOption.IsVisible = canChooseScope;
             if (ReaderBookScopeHint is not null)

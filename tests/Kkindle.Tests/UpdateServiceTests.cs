@@ -564,6 +564,149 @@ public sealed class UpdateServiceTests
         Assert.Equal(1, requests);
     }
 
+    [Theory]
+    [InlineData(AppUpdateChannel.Stable)]
+    [InlineData(AppUpdateChannel.Development)]
+    public async Task StalledMirrorTimesOutAndFallsBack(AppUpdateChannel channel)
+    {
+        var requests = new List<string>();
+        using var client = new HttpClient(new AsyncStubHandler(async (request, token) =>
+        {
+            requests.Add(request.RequestUri!.Host);
+            if (request.RequestUri.Host == "kkindle.stacker.beauty")
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return JsonResponse(channel == AppUpdateChannel.Development
+                ? "[]"
+                : """{"tag_name":"v1.0.0"}""");
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath(),
+            metadataRequestTimeout: TimeSpan.FromMilliseconds(100));
+
+        var update = await service.CheckForUpdateAsync("1.0.0", channel).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Null(update);
+        Assert.Equal(new[] { "kkindle.stacker.beauty", channel == AppUpdateChannel.Development
+            ? "api.github.com" : "github.com" }, requests);
+    }
+
+    [Theory]
+    [InlineData("http")]
+    [InlineData("timeout")]
+    [InlineData("json")]
+    public async Task StableChannelContinuesToApiWhenEarlierSourcesFail(string failure)
+    {
+        var requests = new List<string>();
+        using var client = new HttpClient(new AsyncStubHandler(async (request, token) =>
+        {
+            requests.Add(request.RequestUri!.Host);
+            if (request.RequestUri.Host == "api.github.com")
+                return JsonResponse("""{"tag_name":"v1.0.0"}""");
+            if (failure == "timeout")
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            if (failure == "json") return JsonResponse("{broken");
+            throw new HttpRequestException("offline");
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath(),
+            metadataRequestTimeout: TimeSpan.FromMilliseconds(100));
+
+        Assert.Null(await service.CheckForUpdateAsync("1.0.0").WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(new[] { "kkindle.stacker.beauty", "github.com", "github.com", "api.github.com" }, requests);
+    }
+
+    [Theory]
+    [InlineData(AppUpdateChannel.Stable)]
+    [InlineData(AppUpdateChannel.Development)]
+    public async Task TotalCheckDeadlineStopsFallbackAndReportsTimeout(AppUpdateChannel channel)
+    {
+        var requests = 0;
+        using var client = new HttpClient(new AsyncStubHandler(async (_, token) =>
+        {
+            requests++;
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return JsonResponse("{}");
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath(),
+            checkTimeout: TimeSpan.FromMilliseconds(100), metadataRequestTimeout: TimeSpan.FromSeconds(5));
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
+            service.CheckForUpdateAsync("1.0.0", channel).WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal("检查更新超时，请检查网络或代理设置后重试。", exception.Message);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task StalledFinalSourceReportsTimeout()
+    {
+        using var client = new HttpClient(new AsyncStubHandler(async (request, token) =>
+        {
+            if (request.RequestUri!.Host == "kkindle.stacker.beauty")
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return JsonResponse("[]");
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath(),
+            metadataRequestTimeout: TimeSpan.FromMilliseconds(100));
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
+            service.CheckForUpdateAsync("1.0.0", AppUpdateChannel.Development).WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal("检查更新超时，请检查网络或代理设置后重试。", exception.Message);
+    }
+
+    [Fact]
+    public async Task MetadataDeadlineAlsoCoversStalledResponseBody()
+    {
+        var requests = 0;
+        using var client = new HttpClient(new StubHandler(_ =>
+        {
+            requests++;
+            return requests == 1
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledReadStream()) }
+                : JsonResponse("""{"tag_name":"v1.0.0"}""");
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath(),
+            metadataRequestTimeout: TimeSpan.FromMilliseconds(100));
+
+        Assert.Null(await service.CheckForUpdateAsync("1.0.0").WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(2, requests);
+    }
+
+    [Fact]
+    public async Task CallerCancellationWhileWaitingDoesNotFallBackOrReportTimeout()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var requests = 0;
+        using var client = new HttpClient(new AsyncStubHandler(async (_, token) =>
+        {
+            requests++;
+            cancellation.Cancel();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return JsonResponse("{}");
+        }));
+        using var service = new UpdateService(new TestInstaller(), client, Path.GetTempPath());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.CheckForUpdateAsync("1.0.0", cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, requests);
+    }
+
+    private sealed class StalledReadStream : MemoryStream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+    }
+
+    private sealed class AsyncStubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responseFactory)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken) => responseFactory(request, cancellationToken);
+    }
+
     private static AppUpdateInfo CreateUpdate(long packageSize) => new(
         "1.2.0",
         "v1.2.0",

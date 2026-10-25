@@ -1084,6 +1084,11 @@ public sealed partial class NativePdfReaderHost
         Emit(new { type = "annotationLeave" });
     }
 
+    internal string GetSelectedTextForTranslation() =>
+        _pages.TryGetValue(_selectionPage, out var page)
+            ? page.SelectionLayout.GetTranslationText(_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
+            : string.Empty;
+
     private void EmitSelection()
     {
         var text = GetPageContent(_selectionPage)?.Text ?? string.Empty;

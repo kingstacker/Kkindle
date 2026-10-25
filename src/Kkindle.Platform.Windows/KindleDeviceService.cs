@@ -351,7 +351,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
         return firstSegment.Equals("dictionaries", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<bool> EnrichWpdBookAsync(
+    internal async Task<bool> EnrichWpdBookAsync(
         KindleDevice device,
         KindleBook book,
         WpdKindleAccess.WpdSession? session,
@@ -359,7 +359,7 @@ public sealed class KindleDeviceService : IKindleDeviceService
     {
         SetFallbackMetadata(book);
         if (_coverCacheDirectory is null || book.Size <= 0 || book.Size > MaximumMetadataFileSize) return false;
-        if (book.Format is not ("epub" or "mobi" or "azw" or "azw3" or "kfx")) return false;
+        if (book.Format is not ("epub" or "pdf" or "mobi" or "azw" or "azw3" or "kfx")) return false;
         // A sidecar from a previous scan already owns the hash, title,
         // authors and cover for this exact size+mtime. Skip the MTP copy.
         if (TryApplyCachedWpdMetadata(device, book, out var cachedIsDictionary))

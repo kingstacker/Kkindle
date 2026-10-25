@@ -149,9 +149,6 @@ public partial class MainWindow : Window
     private bool _conversionInProgress;
     private bool _automaticReaderFormatGenerationInProgress;
     private CancellationTokenSource? _conversionCancellation;
-    private BookCardViewModel? _conversionCard;
-    private bool _conversionMinimized;
-    private FormatConversionProgress _conversionLastProgress = new(0, T("正在转换…"));
     private TaskCompletionSource<DoubanBookCandidate?>? _doubanCandidateCompletion;
     private TaskCompletionSource<DoubanUpdateChoices?>? _doubanApplyCompletion;
     private DoubanBookCandidate? _doubanSelectedCandidate;
@@ -3205,15 +3202,11 @@ public partial class MainWindow : Window
         }
 
         _conversionInProgress = true;
-        _conversionCard = card;
-        _conversionMinimized = false;
         _conversionCancellation?.Dispose();
         _conversionCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         var initialProgress = new FormatConversionProgress(
             0,
             T("准备将 {0} 转换为 {1}…", sourceFile.Format.ToUpperInvariant(), target.ToUpperInvariant()));
-        _conversionLastProgress = initialProgress;
-        ShowBookConversionPopup(card.Title, sourceFile.Format, target, initialProgress);
         SetTaskStatus(UiText.Localize(initialProgress.Message));
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "KkindleConversions", Guid.NewGuid().ToString("N"));
         var temporaryOutput = Path.Combine(
@@ -3223,33 +3216,28 @@ public partial class MainWindow : Window
         {
             await RunTrackedTaskAsync(T("格式转换"), BackgroundTaskKind.FormatConversion, async (context, token) =>
             {
-            Directory.CreateDirectory(temporaryDirectory);
-            try
-            {
-            var progress = new Progress<FormatConversionProgress>(value =>
-            {
-                context.ReportProgress(T("正在转换格式"), value.RoundedPercentage, 100);
-                ApplyBookConversionProgress(value);
-            });
-            await _formatConverter.ConvertAsync(
-                sourcePath,
-                temporaryOutput,
-                progress,
-                token,
-                new FormatConversionMetadata(card.Book.Title, card.Book.Authors));
-            ApplyBookConversionProgress(new FormatConversionProgress(100, T("正在写入书库…")));
-            await _library.AddFileToBookAsync(card.Book.Id, temporaryOutput, token);
-            await RefreshLibraryAsync();
-            return true;
-            }
-            finally
-            {
-                try { if (Directory.Exists(temporaryDirectory)) Directory.Delete(temporaryDirectory, recursive: true); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
-            }, _conversionCancellation.Token);
-            ApplyBookConversionProgress(new FormatConversionProgress(100, T("转换完成。")));
+                context.ReportBooks([card.Title]);
+                context.ReportProgress(UiText.Localize(initialProgress.Message), 0, 100);
+                Directory.CreateDirectory(temporaryDirectory);
+                var progress = new Progress<FormatConversionProgress>(value =>
+                {
+                    if (token.IsCancellationRequested) return;
+                    context.ReportProgress(T("{0} → {1}：{2}", sourceFile.Format.ToUpperInvariant(),
+                        target.ToUpperInvariant(), UiText.Localize(value.Message)), value.RoundedPercentage, 100);
+                    SetTaskStatus(T("格式转换：{0}%", value.RoundedPercentage));
+                });
+                await _formatConverter.ConvertAsync(
+                    sourcePath,
+                    temporaryOutput,
+                    progress,
+                    token,
+                    new FormatConversionMetadata(card.Book.Title, card.Book.Authors));
+                context.ReportProgress(T("正在写入书库…"), 100, 100);
+                await _library.AddFileToBookAsync(card.Book.Id, temporaryOutput, token);
+                await RefreshLibraryAsync();
+                context.ReportProgress(T("已为《{0}》添加 {1} 格式。", card.Title, target.ToUpperInvariant()), 100, 100);
+                return true;
+            }, _conversionCancellation.Token, allowRetry: false);
             SetTaskStatus(T("已为《{0}》添加 {1} 格式。", card.Title, target.ToUpperInvariant()));
         }
         catch (OperationCanceledException)
@@ -3259,10 +3247,6 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             SetTaskStatus(T("格式转换失败：{0}", UiText.Localize(exception.Message)));
-            ApplyBookConversionProgress(new FormatConversionProgress(
-                _conversionLastProgress.Percentage,
-                T("格式转换失败。")));
-            await ShowMessageAsync(T("格式转换失败"), UiText.Localize(exception.Message));
         }
         finally
         {
@@ -3274,10 +3258,6 @@ public partial class MainWindow : Window
             catch
             {
             }
-            BookConversionPopup.IsVisible = false;
-            _conversionCard?.ClearConversionProgress();
-            _conversionCard = null;
-            _conversionMinimized = false;
             _conversionInProgress = false;
             _conversionCancellation?.Dispose();
             _conversionCancellation = null;
@@ -3397,70 +3377,6 @@ public partial class MainWindow : Window
     private sealed record AutomaticReaderFormatGenerationResult(
         int GeneratedCount,
         IReadOnlyList<string> Failures);
-
-    private void ShowBookConversionPopup(string title, string sourceFormat, string targetFormat, FormatConversionProgress progress)
-    {
-        BookConversionPopupTitleText.Text = T("转换《{0}》", title);
-        BookConversionPopupFormatText.Text = $"Calibre · {sourceFormat.ToUpperInvariant()} → {targetFormat.ToUpperInvariant()}";
-        BookConversionPopup.IsVisible = true;
-        ApplyBookConversionProgress(progress);
-    }
-
-    private void ApplyBookConversionProgress(FormatConversionProgress progress)
-    {
-        _conversionLastProgress = progress;
-        if (!_conversionInProgress) return;
-        var percentage = Math.Clamp(progress.Percentage, 0, 100);
-        BookConversionPopupProgress.Value = percentage;
-        BookConversionPopupPercentageText.Text = $"{progress.RoundedPercentage}%";
-        BookConversionPopupMessageText.Text = GetBookConversionPopupMessage(progress);
-        _conversionCard?.SetConversionProgress(progress, _conversionMinimized);
-        SetTaskStatus(T("格式转换：{0}%", progress.RoundedPercentage));
-    }
-
-    private static string GetBookConversionPopupMessage(FormatConversionProgress progress)
-    {
-        if (progress.Percentage <= 0 || progress.Percentage >= 100)
-            return UiText.Localize(progress.Message);
-        return T("Calibre 正在转换…");
-    }
-
-    private void MinimizeBookConversionPopup()
-    {
-        if (!_conversionInProgress) return;
-        _conversionMinimized = true;
-        _conversionCard?.SetConversionProgress(_conversionLastProgress, showIndicator: true);
-        BookConversionPopup.IsVisible = false;
-        SetTaskStatus(T("格式转换已在后台进行：{0}%（点击书籍卡片可恢复进度）", _conversionLastProgress.RoundedPercentage));
-    }
-
-    private void RestoreBookConversionPopup()
-    {
-        if (!_conversionInProgress) return;
-        _conversionMinimized = false;
-        _conversionCard?.SetConversionProgress(_conversionLastProgress, showIndicator: false);
-        BookConversionPopup.IsVisible = true;
-        ApplyBookConversionProgress(_conversionLastProgress);
-    }
-
-    private void BookConversionPopup_Tapped(object? sender, TappedEventArgs e)
-    {
-        if (e.Source is Button) return;
-        e.Handled = true;
-        MinimizeBookConversionPopup();
-    }
-
-    private void BookConversionProgressIndicator_Tapped(object? sender, TappedEventArgs e)
-    {
-        if (sender is not Control { DataContext: BookCardViewModel card }) return;
-        if (!_conversionInProgress || _conversionCard?.Book.Id != card.Book.Id) return;
-        e.Handled = true;
-        _conversionCard = card;
-        RestoreBookConversionPopup();
-    }
-
-    private void BookConversionCancelButton_Click(object? sender, RoutedEventArgs e) =>
-        _conversionCancellation?.Cancel();
 
     private async Task MatchDoubanAsync(BookCardViewModel card)
     {

@@ -6,6 +6,26 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.0 (2026-10-25)
+
+### Added
+
+- Improved native PDF reading, table-of-contents and page navigation, with annotation cards that follow scrolling and zooming, and selectable, deletable highlights.
+- Save reading translations as annotations and improve line-wrap and paragraph handling for selected PDF text.
+
+### Improved
+
+- Redesigned reading settings with consistent capsule switches, font selection and icon actions, showing layout and PDF annotation options appropriate to each format.
+- Added an Updates group to About & Updates with consistent headings, full-row interactions and hover feedback.
+- Unified conversion progress, results and cancellation in task history, and refined device feedback and task popups.
+- Preserve local dictionary HTML styling and refine AI conversations, translation actions and popup dismissal.
+
+### Fixed
+
+- Bound update checks with overall and per-request timeouts for prompt feedback when the network is unavailable.
+- Restore PDF cover extraction in Kindle device libraries and retry PDF metadata skipped by older caches.
+- Fix PDF opening from long paths, reading state and same-page table-of-contents navigation.
+
 ## 1.0.14 (2026-10-22)
 
 ### Added

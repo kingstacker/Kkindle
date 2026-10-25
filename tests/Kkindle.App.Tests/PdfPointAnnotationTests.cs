@@ -315,7 +315,7 @@ public sealed class PdfPointAnnotationTests(SettingsUiSession session)
         Assert.True(hover.IsOpen);
         Assert.Equal(annotation.Note, scope.Get<TextBlock>("ReaderAnnotationHoverNote").Text);
         AssertAttached(hover);
-        scope.Get<RadioButton>("ReaderPdfAnnotationClickOption").IsChecked = true;
+        scope.Get<ToggleSwitch>("ReaderPdfAnnotationNotesCheck").IsChecked = false;
         Assert.False(hover.IsOpen);
         scope.Call("ShowReaderAnnotationHoverPopup", annotation.Note, null, annotation, true);
         Assert.False(hover.IsOpen);
@@ -323,7 +323,7 @@ public sealed class PdfPointAnnotationTests(SettingsUiSession session)
         await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
         await ReaderTests.Render();
         Assert.False(hover.IsOpen);
-        scope.Get<RadioButton>("ReaderPdfAnnotationPinnedOption").IsChecked = true;
+        scope.Get<ToggleSwitch>("ReaderPdfAnnotationNotesCheck").IsChecked = true;
         await ReaderTests.Render();
         Assert.True(hover.IsOpen);
         AssertAttached(hover);

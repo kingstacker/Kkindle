@@ -7505,7 +7505,8 @@ public partial class MainWindow
                     }
                     break;
                 case "page":
-                    if (IsReaderPaginated
+                    // PDF arrow keys turn physical pages in continuous mode too.
+                    if ((_readerIsPdf || IsReaderPaginated)
                         && root.TryGetProperty("direction", out var pageDirection)
                         && pageDirection.TryGetInt32(out var pageTurnDirection))
                     {
