@@ -6784,7 +6784,8 @@
                                   Data="M 12,5 C 9,3 6,3 2,4 V 20 C 6,19 9,19 12,21 C 15,19 18,19 22,20 V 4 C 18,3 15,3 12,5 V 21 M 5,8 H 9 M 5,12 H 9 M 15,8 H 19 M 15,12 H 19" />
                         </Button>
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button ToolTip.Tip="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
+                        <Button x:Name="ReaderSelectionAiButton"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
                                 AutomationProperties.Name="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
                                 Classes="readerSelectionAction"
                                 Click="ReaderSelectionAiButton_Click">

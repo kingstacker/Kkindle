@@ -411,9 +411,7 @@ public sealed class ReaderAiRenderingTests(SettingsUiSession session)
         scope.Set("_readerPendingSelection", "Reference path frequency");
         scope.Call("ShowReaderSelectionPopup", new Point(30, 120), 140d);
         await ReaderTests.Render();
-        var popup = scope.Get<Border>("ReaderSelectionPopupBar");
-        var explain = popup.GetVisualDescendants().OfType<Button>()
-            .Single(button => Equals(button.Content, "AI 解释"));
+        var explain = scope.Get<Button>("ReaderSelectionAiButton");
         explain.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await ReaderTests.Render();
         Assert.True(scope.Get<Control>("ReaderAssistantPanel").IsVisible);
