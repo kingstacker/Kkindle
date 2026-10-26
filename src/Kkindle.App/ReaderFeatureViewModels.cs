@@ -11,6 +11,22 @@ namespace Kkindle;
 
 public sealed record ReaderSearchHighlightRange(int Start, int Length);
 
+public sealed class ReaderAiImageViewModel : ObservableObject, IDisposable
+{
+    private bool _isSelected;
+    public ReaderAiImageViewModel(AiImageAttachment attachment)
+    {
+        Attachment = attachment;
+        using var stream = new MemoryStream(attachment.Data, writable: false);
+        Preview = Avalonia.Media.Imaging.Bitmap.DecodeToWidth(stream, 240);
+    }
+
+    public AiImageAttachment Attachment { get; }
+    public Avalonia.Media.Imaging.Bitmap Preview { get; }
+    public bool IsSelected { get => _isSelected; set => SetProperty(ref _isSelected, value); }
+    public void Dispose() => Preview.Dispose();
+}
+
 public sealed class ReaderSearchResultViewModel : ObservableObject
 {
     private static readonly IBrush SearchResultBorderBrush = new SolidColorBrush(Colors.Black);
@@ -444,6 +460,17 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         };
     }
 
+    public ObservableCollection<ReaderAiImageViewModel> Images { get; } = [];
+    public bool HasImages => Images.Count > 0;
+
+    public void SetImages(IEnumerable<AiImageAttachment> images)
+    {
+        foreach (var image in Images) image.Dispose();
+        Images.Clear();
+        foreach (var image in images) Images.Add(new ReaderAiImageViewModel(image));
+        OnPropertyChanged(nameof(HasImages));
+    }
+
     public string Role { get; }
     public Action<string>? CitationAction { get; }
     public Func<string, ReaderAiSourceViewModel?> CitationSourceResolver => ResolveCitation;
@@ -603,5 +630,7 @@ public sealed class ReaderAiMessageViewModel : ObservableObject, IDisposable
         foreach (var source in Sources) source.Dispose();
         Sources.Clear();
         RetryAction = null;
+        foreach (var image in Images) image.Dispose();
+        Images.Clear();
     }
 }

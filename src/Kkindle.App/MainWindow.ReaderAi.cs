@@ -1320,7 +1320,7 @@ public partial class MainWindow
             return;
         }
         var question = ReaderAiQuestionBox.Text?.Trim() ?? string.Empty;
-        if (question.Length == 0) return;
+        if (question.Length == 0 && ReaderAiDraftImages.Count == 0) return;
         await SendReaderAiQuestionAsync(question, clearDraft: true);
     }
 
@@ -1330,7 +1330,7 @@ public partial class MainWindow
         e.Handled = true;
         if (_readerAiBusy) return;
         var question = ReaderAiQuestionBox.Text?.Trim() ?? string.Empty;
-        if (question.Length == 0) return;
+        if (question.Length == 0 && ReaderAiDraftImages.Count == 0) return;
         await SendReaderAiQuestionAsync(question, clearDraft: true);
     }
 
@@ -1369,12 +1369,22 @@ public partial class MainWindow
         _readerAiFollowOutput = true;
     }
 
-    private async Task SendReaderAiQuestionAsync(
+    private Task SendReaderAiQuestionAsync(
         string question,
         ReaderAiRequestKind requestKind = ReaderAiRequestKind.BookQuestion,
         bool clearDraft = false,
         UiReaderAiContext? retryContext = null,
         IReadOnlyList<AiConversationTurn>? retryHistory = null)
+        => SendReaderAiQuestionCoreAsync(question, requestKind, clearDraft, retryContext, retryHistory,
+            clearDraft ? ReaderAiDraftImages.Select(item => item.Attachment).ToArray() : []);
+
+    private async Task SendReaderAiQuestionCoreAsync(
+        string question,
+        ReaderAiRequestKind requestKind,
+        bool clearDraft,
+        UiReaderAiContext? retryContext,
+        IReadOnlyList<AiConversationTurn>? retryHistory,
+        IReadOnlyList<AiImageAttachment> images)
     {
         if (_readerAiBusy) return;
         if (!_appSettings.AiEnabled)
@@ -1396,7 +1406,12 @@ public partial class MainWindow
             return;
         }
 
-        if (clearDraft) ReaderAiQuestionBox.Text = string.Empty;
+        if (string.IsNullOrWhiteSpace(question) && images.Count > 0) question = T("请分析这些图片。");
+        if (clearDraft)
+        {
+            ReaderAiQuestionBox.Text = string.Empty;
+            ClearReaderAiDraftImages();
+        }
         foreach (var message in ReaderAiMessages) message.CanRetry = false;
         _readerAiBusy = true;
         SetReaderAiBusyState(true);
@@ -1406,6 +1421,7 @@ public partial class MainWindow
         _readerAiCancellation = aiCancellation;
         var token = aiCancellation.Token;
         var userMessage = new ReaderAiMessageViewModel("user", question);
+        userMessage.SetImages(images);
         var assistantMessage = new ReaderAiMessageViewModel("assistant", citationAction: HandleReaderAiCitation);
         ReaderAiMessages.Add(userMessage);
         ReaderAiMessages.Add(assistantMessage);
@@ -1435,7 +1451,7 @@ public partial class MainWindow
             var hasBookEvidence = context.Sources.Count > 0 && !string.IsNullOrWhiteSpace(context.Text);
             if (!hasBookEvidence && requiresBookEvidence)
                 throw new InvalidOperationException(T("没有可用的书籍文本；扫描版 PDF 需要先进行文字识别。"));
-            if (!requiresBookEvidence && context.WebSearch is null)
+            if (!requiresBookEvidence && context.WebSearch is null && images.Count == 0)
             {
                 ReaderAiStatusText.Text = T("正在判断是否需要联网搜索…");
                 var webSearch = await BuildReaderAiWebContextAsync(question, context, hasBookEvidence, history, token);
@@ -1465,7 +1481,8 @@ public partial class MainWindow
                 prompt,
                 history,
                 _readerAiReasoningDepth,
-                token);
+                token,
+                images: images);
             await foreach (var chunk in chunks)
             {
                 token.ThrowIfCancellationRequested();
@@ -1490,7 +1507,7 @@ public partial class MainWindow
             QueueReaderAiScrollToEnd();
             _readerAiConversation.Clear();
             _readerAiConversation.AddRange(history);
-            _readerAiConversation.Add(new AiConversationTurn("user", question));
+            _readerAiConversation.Add(new AiConversationTurn("user", question) { Images = images });
             _readerAiConversation.Add(new AiConversationTurn("assistant", finalAnswer));
             ReaderAiStatusText.Text = T("已完成 · {0:HH:mm}", DateTime.Now);
         }
@@ -1522,15 +1539,20 @@ public partial class MainWindow
                 if (requestContext is not null && (!requiresBookEvidence || requestContext.Sources.Count > 0))
                 {
                     assistantMessage.RetryAction = () => _ = ObserveReaderTaskAsync(
-                        SendReaderAiQuestionAsync(
+                        SendReaderAiQuestionCoreAsync(
                             question,
                             requestKind,
-                            retryContext: requestContext,
-                            retryHistory: history));
+                            false,
+                            requestContext,
+                            history,
+                            images));
                     assistantMessage.CanRetry = true;
                 }
-                else if (string.IsNullOrWhiteSpace(ReaderAiQuestionBox.Text))
+                else if (string.IsNullOrWhiteSpace(ReaderAiQuestionBox.Text) && ReaderAiDraftImages.Count == 0)
+                {
                     ReaderAiQuestionBox.Text = question;
+                    foreach (var image in images) ReaderAiDraftImages.Add(new ReaderAiImageViewModel(image));
+                }
                 ReaderAiQuestionBox.Focus();
             }
             if (!ReaderAiMessages.Contains(assistantMessage)) assistantMessage.Dispose();
@@ -1552,7 +1574,8 @@ public partial class MainWindow
         IReadOnlyList<AiConversationTurn> history, CancellationToken cancellationToken)
     {
         var plan = await ReaderWebSearchPlanner.PlanAsync(_aiChatClient, _readerAiSettings,
-            question, context.SelectedText, context.Text, hasBookEvidence, history, cancellationToken);
+            question, context.SelectedText, context.Text, hasBookEvidence,
+            history.Select(turn => turn with { Images = null }).ToArray(), cancellationToken);
         if (!plan.Search) return new UiReaderAiWebContext("", []);
         ReaderAiStatusText.Text = T("正在联网搜索：{0}", plan.Query);
         try

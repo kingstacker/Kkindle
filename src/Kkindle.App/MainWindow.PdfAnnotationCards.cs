@@ -81,7 +81,7 @@ public partial class MainWindow
             Grid.SetRow(scroll, 1);
             content.Children.Add(scroll);
             var card = new Border { Width = 220, Padding = new Thickness(8),
-                CornerRadius = new CornerRadius(0), BorderThickness = new Thickness(1.25), Child = content,
+                CornerRadius = new CornerRadius(0), BorderThickness = new Thickness(1), Child = content,
                 Background = (IBrush)Resources["ReaderPageBrush"]!, BorderBrush = (IBrush)Resources["ReaderAccentBrush"]!,
                 IsVisible = false };
             var popup = new Popup { Child = card, PlacementTarget = ReaderWebViewHost,

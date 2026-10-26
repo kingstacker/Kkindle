@@ -5793,6 +5793,14 @@
                                                             CornerRadius="4">
                                                         <StackPanel Spacing="10">
                                                         <TextBlock Text="{Binding RoleLabel}" FontSize="11" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                                        <ItemsControl ItemsSource="{Binding Images}" IsVisible="{Binding HasImages}">
+                                                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="local:ReaderAiImageViewModel">
+                                                                    <Image Source="{Binding Preview}" MaxWidth="220" Height="120" Stretch="Uniform" Margin="0,0,6,0" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
                                                         <StackPanel Orientation="Horizontal"
                                                                     Spacing="5"
                                                                     IsVisible="{Binding IsThinkingRowVisible}">
@@ -5916,8 +5924,32 @@
                                     <Button x:Name="ReaderAiClearButton" Grid.Column="2" Content="{DynamicResource Ui.Auto.1EF3DE06B32E521B}" Classes="readerAiReasoningToggle" Click="ReaderAiClearButton_Click" />
                                 </Grid>
                                 <Border Grid.Row="2" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="1" CornerRadius="0" Background="{DynamicResource ReaderPageBrush}">
-                                <Grid RowDefinitions="Auto,Auto" ClipToBounds="True">
+                                <Grid RowDefinitions="Auto,Auto,Auto" ClipToBounds="True">
+                                    <StackPanel Grid.Row="0">
+                                        <ItemsControl ItemsSource="{Binding ReaderAiDraftImages}" Margin="8,0,8,0">
+                                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="local:ReaderAiImageViewModel">
+                                                    <Border Classes="readerAiDraftImage" Classes.selected="{Binding IsSelected}" Margin="0,8,6,0" Padding="2"
+                                                            Background="Transparent" PointerPressed="ReaderAiDraftImage_PointerPressed">
+                                                        <Grid>
+                                                            <Image Source="{Binding Preview}" Width="78" Height="64" Stretch="Uniform" />
+                                                            <Button Content="×" Tag="{Binding}" Classes="readerAiReasoningToggle" Width="14" Height="14" MinWidth="14" MinHeight="14" Padding="0" Margin="2"
+                                                                    FontSize="10" BorderThickness="0" Background="{DynamicResource ReaderPageBrush}" Foreground="{DynamicResource ReaderInkBrush}"
+                                                                    HorizontalContentAlignment="Center"
+                                                                    HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip.Tip="移除图片" AutomationProperties.Name="移除图片"
+                                                                    Click="ReaderAiRemoveImageButton_Click" />
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock x:Name="ReaderAiImageStatus" Foreground="{DynamicResource ReaderMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="8,0" />
+                                    </StackPanel>
                                     <TextBox x:Name="ReaderAiQuestionBox"
+                                             Grid.Row="1"
+                                             PastingFromClipboard="ReaderAiQuestionBox_PastingFromClipboard"
+                                             ToolTip.Tip="支持粘贴图片 · Ctrl+V"
                                              Classes="readerMinimalField readerAiQuestionInput"
                                              MinHeight="68"
                                              MaxHeight="160"
@@ -5929,7 +5961,7 @@
                                              TextWrapping="Wrap"
                                              PlaceholderText="{DynamicResource Ui.Auto.8513176BCF21002D}"
                                              />
-                                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="8,0,6,6">
+                                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="8,0,6,6">
                                     <StackPanel x:Name="ReaderAiQuickActions" Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
                                         <Button Content="{DynamicResource Ui.Auto.04830193B408EEB1}" ToolTip.Tip="{DynamicResource Ui.Auto.98B4E0EFFCF15443}" Classes="readerAiReasoningToggle" Click="ReaderAiSummarizeChapterButton_Click" />
                                         <Button Content="{DynamicResource Ui.Auto.23CEC14BBCFAB6FA}" ToolTip.Tip="{DynamicResource Ui.Auto.9B4D1CC07395F4B1}" Classes="readerAiReasoningToggle" Click="ReaderAiExplainSelectionButton_Click" />
@@ -7066,12 +7098,12 @@
                         Padding="8"
                         Background="{DynamicResource ReaderPageBrush}"
                         BorderBrush="{DynamicResource ReaderAccentBrush}"
-                        BorderThickness="1.25"
+                        BorderThickness="1"
                         CornerRadius="0"
                         IsHitTestVisible="False"
                         IsVisible="False">
                     <Grid RowDefinitions="Auto,*">
-                        <Grid ColumnDefinitions="*,Auto" Margin="2,0,0,6">
+                        <Grid x:Name="ReaderAnnotationHoverHeading" ColumnDefinitions="*,Auto" Margin="2,0,0,6">
                             <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
                                 <Border Width="7" Height="7" CornerRadius="4" Background="{DynamicResource ReaderAccentBrush}" />
                                 <TextBlock Text="{DynamicResource Ui.Reader.AnnotationNoteLabel}"

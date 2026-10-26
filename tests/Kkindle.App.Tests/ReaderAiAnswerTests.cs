@@ -3,6 +3,12 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Avalonia.Controls;
+using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
+using Avalonia.VisualTree;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 using Xunit;
@@ -12,6 +18,59 @@ namespace Kkindle.Ui.Tests;
 [Collection("Settings UI")]
 public sealed class ReaderAiAnswerTests(SettingsUiSession session)
 {
+    [Fact]
+    public Task ClipboardImageCanBePreviewedRemovedSentAloneAndRetried() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Get<Control>("LibraryRoot").IsVisible = false;
+        scope.Get<Control>("ReaderRoot").IsVisible = true;
+        scope.Call("ShowReaderAiTab");
+        await ReaderTests.Render();
+        var handler = ConfigureAi(scope);
+        var input = scope.Get<TextBox>("ReaderAiQuestionBox");
+        const string pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        using var bitmap = new Bitmap(new MemoryStream(Convert.FromBase64String(pixel)));
+        await scope.Window.Clipboard!.SetBitmapAsync(bitmap);
+        // Exercise the same paste event used by Ctrl+V and the text context menu.
+        input.RaiseEvent(new RoutedEventArgs(TextBox.PastingFromClipboardEvent));
+        for (var i = 0; i < 100 && scope.Window.ReaderAiDraftImages.Count == 0; i++) await Task.Delay(10);
+        var image = Assert.Single(scope.Window.ReaderAiDraftImages);
+        await ReaderTests.Render();
+        var remove = scope.Window.GetVisualDescendants().OfType<Button>().Single(button => ReferenceEquals(button.Tag, image));
+        Assert.True(remove.IsEffectivelyVisible);
+        remove.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.Empty(scope.Window.ReaderAiDraftImages);
+
+        // Headless clipboard returns the same bitmap instance rather than a
+        // newly decoded OS bitmap, so give the next paste its own instance.
+        using var nextBitmap = new Bitmap(new MemoryStream(Convert.FromBase64String(pixel)));
+        await scope.Window.Clipboard!.SetBitmapAsync(nextBitmap);
+        await scope.Call<Task>("PasteReaderAiClipboardAsync");
+        Assert.True(scope.Window.ReaderAiDraftImages.Count == 1, scope.Get<TextBlock>("ReaderAiImageStatus").Text);
+        input.Text = string.Empty;
+        scope.Get<Button>("ReaderAiSendButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        for (var i = 0; i < 100 && scope.Field<bool>("_readerAiBusy"); i++) await Task.Delay(10);
+        Assert.Empty(scope.Window.ReaderAiDraftImages);
+        Assert.NotEmpty(scope.Window.ReaderAiMessages);
+        Assert.Single(scope.Window.ReaderAiMessages.First().Images);
+        Assert.Contains("data:image/png;base64,", Assert.Single(handler.Requests));
+        Assert.Empty(handler.PlanRequests);
+        var answer = scope.Window.ReaderAiMessages.Last();
+        Assert.True(answer.CanRetry);
+        answer.RetryAction!();
+        for (var i = 0; i < 100 && (handler.Requests.Count < 2 || scope.Field<bool>("_readerAiBusy")); i++) await Task.Delay(10);
+        Assert.Equal(handler.Requests[0], handler.Requests[1]);
+
+        input.Text = "AB";
+        input.SelectionStart = 1;
+        input.SelectionEnd = 2;
+        await scope.Window.Clipboard!.SetTextAsync("普通文字");
+        await scope.Call<Task>("PasteReaderAiClipboardAsync");
+        Assert.Equal("A普通文字", input.Text);
+        scope.Call("ClearReaderAiConversation");
+        Assert.Empty(scope.Window.ReaderAiDraftImages);
+    });
+
     [Theory]
     [InlineData("BookQuestion")]
     [InlineData("SelectionExplain")]

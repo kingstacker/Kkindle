@@ -184,7 +184,10 @@ public sealed class AiSettingsStore
     }
 }
 
-public sealed record AiConversationTurn(string Role, string Content);
+public sealed record AiConversationTurn(string Role, string Content)
+{
+    public IReadOnlyList<AiImageAttachment>? Images { get; init; }
+}
 
 public sealed record AiStreamChunk(string Text, string Reasoning);
 
@@ -283,7 +286,8 @@ public sealed class AiChatClient : IDisposable
         string question,
         IReadOnlyList<AiConversationTurn> history,
         string reasoningDepth = "auto",
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        IReadOnlyList<AiImageAttachment>? images = null)
     {
         if (!settings.IsConfigured) throw new InvalidOperationException("请先配置 AI 服务、模型和 API Key。");
 
@@ -295,7 +299,7 @@ public sealed class AiChatClient : IDisposable
                 question,
                 history,
                 reasoningDepth,
-                image: null,
+                images,
                 cancellationToken: cancellationToken))
             {
                 yield return chunk;
@@ -309,7 +313,7 @@ public sealed class AiChatClient : IDisposable
             question,
             history,
             reasoningDepth,
-            image: null,
+            images,
             cancellationToken: cancellationToken))
         {
             yield return chunk;
@@ -339,7 +343,7 @@ public sealed class AiChatClient : IDisposable
                 question,
                 history,
                 reasoningDepth,
-                image,
+                [image],
                 cancellationToken))
             {
                 yield return chunk;
@@ -353,7 +357,7 @@ public sealed class AiChatClient : IDisposable
             question,
             history,
             reasoningDepth,
-            image,
+            [image],
             cancellationToken))
         {
             yield return chunk;
@@ -366,26 +370,16 @@ public sealed class AiChatClient : IDisposable
         string question,
         IReadOnlyList<AiConversationTurn> history,
         string reasoningDepth,
-        AiImageAttachment? image,
+        IReadOnlyList<AiImageAttachment>? images,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var messages = new List<object> { new { role = "system", content = instructions } };
         messages.AddRange(history.TakeLast(8).Select(turn => (object)new
         {
             role = turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ? "assistant" : "user",
-            content = Limit(turn.Content, 3500)
+            content = BuildImageContent(Limit(turn.Content, 3500), turn.Images, responses: false)
         }));
-        object userContent = image is null
-            ? question
-            : new object[]
-            {
-                new { type = "text", text = question },
-                new
-                {
-                    type = "image_url",
-                    image_url = new { url = image.DataUri, detail = image.Detail }
-                }
-            };
+        var userContent = BuildImageContent(question, images, responses: false);
         messages.Add(new { role = "user", content = userContent });
 
         var request = new Dictionary<string, object?>
@@ -433,7 +427,7 @@ public sealed class AiChatClient : IDisposable
         string question,
         IReadOnlyList<AiConversationTurn> history,
         string reasoningDepth,
-        AiImageAttachment? image,
+        IReadOnlyList<AiImageAttachment>? images,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var conversation = new StringBuilder();
@@ -444,20 +438,17 @@ public sealed class AiChatClient : IDisposable
         }
         conversation.Append("读者：").Append(question);
 
-        object input = image is null
-            ? conversation.ToString()
-            : new object[]
+        object input = conversation.ToString();
+        if (images is { Count: > 0 } || history.TakeLast(8).Any(turn => turn.Images is { Count: > 0 }))
+        {
+            var turns = history.TakeLast(8).Select(turn => (object)new
             {
-                new
-                {
-                    role = "user",
-                    content = new object[]
-                    {
-                        new { type = "input_text", text = conversation.ToString() },
-                        new { type = "input_image", image_url = image.DataUri, detail = image.Detail }
-                    }
-                }
-            };
+                role = turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ? "assistant" : "user",
+                content = BuildImageContent(Limit(turn.Content, 3500), turn.Images, responses: true)
+            }).ToList();
+            turns.Add(new { role = "user", content = BuildImageContent(question, images, responses: true) });
+            input = turns;
+        }
         var request = new Dictionary<string, object?>
         {
             ["model"] = settings.Model,
@@ -498,6 +489,17 @@ public sealed class AiChatClient : IDisposable
             throw new InvalidDataException("OpenAI 返回了无法识别的 Responses API 流式响应。");
         if (!completed)
             throw new InvalidDataException("AI 响应意外中断，未收到完整结束事件，请重试。");
+    }
+
+    private static object BuildImageContent(string text, IReadOnlyList<AiImageAttachment>? images, bool responses)
+    {
+        if (images is not { Count: > 0 }) return text;
+        var content = new List<object> { new { type = responses ? "input_text" : "text", text } };
+        foreach (var image in images)
+            content.Add(responses
+                ? (object)new { type = "input_image", image_url = image.DataUri, detail = image.Detail }
+                : new { type = "image_url", image_url = new { url = image.DataUri, detail = image.Detail } });
+        return content;
     }
 
     private static void AddChatReasoningOption(Dictionary<string, object?> request, string reasoningDepth)

@@ -2066,6 +2066,13 @@
         <Style Selector="Button.readerAssistantTab.active">
             <Setter Property="FontWeight" Value="Bold" />
         </Style>
+        <Style Selector="Border.readerAiDraftImage">
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="Border.readerAiDraftImage.selected">
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderInkBrush}" />
+        </Style>
         <Style Selector="Button.readerAiReasoningToggle">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="MinWidth" Value="0" />

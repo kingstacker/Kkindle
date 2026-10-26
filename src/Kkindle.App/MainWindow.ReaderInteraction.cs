@@ -1382,6 +1382,7 @@ public partial class MainWindow
         ReaderAiNewContentButton.IsVisible = false;
         _readerAiConversation.Clear();
         _readerAiFollowOutput = true;
+        ClearReaderAiDraftImages();
         foreach (var message in ReaderAiMessages)
             message.Dispose();
         ReaderAiMessages.Clear();
@@ -7105,6 +7106,7 @@ public partial class MainWindow
             && (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned
                 || annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
+        ReaderAnnotationHoverHeading.IsVisible = _readerIsPdf;
         _readerAnnotationHoverSequence++;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
         _readerAnnotationHoverAnnotationId = annotation?.Id;
@@ -7130,32 +7132,40 @@ public partial class MainWindow
             HideReaderAnnotationHoverPopup();
             return;
         }
-        ReaderAnnotationHoverPopup.Width = 220;
-        ReaderAnnotationHoverPopup.Height = Math.Min(measureHeight(220),
-            Math.Max(68, ReaderWebViewHost.Bounds.Height - 24));
-        if (CurrentReaderHost?.View is Control view
-            && _readerAnnotationHoverPlacementPoint is { } anchor)
+        var viewport = (CurrentReaderHost?.View as Control)?.Bounds.Size ?? ReaderWebViewHost.Bounds.Size;
+        var visibleBands = CurrentReaderHost is NativeReaderHost epub && annotation is not null
+            ? epub.GetAnnotationBounds(annotation).Select(rect => rect.Intersect(new Rect(viewport)))
+                .Where(rect => rect.Width > 0 && rect.Height > 0).ToArray()
+            : [];
+        var quote = visibleBands.Length > 0
+            ? visibleBands.Aggregate((left, right) => left.Union(right))
+            : new Rect(_readerAnnotationHoverPlacementPoint ?? new Point(8, 8), new Size(1, 1));
+        var cardBounds = ReaderAnnotationCardLayout.PlaceEpub(quote, viewport, measureHeight);
+        ReaderAnnotationHoverPopup.Width = cardBounds.Width;
+        ReaderAnnotationHoverPopup.Height = cardBounds.Height;
+        if (CurrentReaderHost?.View is Control view)
         {
             ReaderAnnotationHoverHostPopup.PlacementTarget = view;
             ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
-            ReaderAnnotationHoverHostPopup.PlacementRect = new Rect(anchor.X, anchor.Y, 1, 1);
+            ReaderAnnotationHoverHostPopup.PlacementRect = new Rect(cardBounds.Position, new Size(1, 1));
             ReaderAnnotationHoverHostPopup.PlacementAnchor =
                 Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
             ReaderAnnotationHoverHostPopup.PlacementGravity =
                 Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight;
             ReaderAnnotationHoverHostPopup.PlacementConstraintAdjustment =
-                Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipX
-                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY
-                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideX
-                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY;
+                Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.None;
         }
         else
         {
             ReaderAnnotationHoverHostPopup.PlacementTarget = ReaderWebViewHost;
-            ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.Pointer;
+            ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
+            ReaderAnnotationHoverHostPopup.PlacementRect = new Rect(cardBounds.Position, new Size(1, 1));
+            ReaderAnnotationHoverHostPopup.PlacementAnchor = Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
+            ReaderAnnotationHoverHostPopup.PlacementGravity = Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight;
+            ReaderAnnotationHoverHostPopup.PlacementConstraintAdjustment = Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.None;
         }
-        ReaderAnnotationHoverHostPopup.HorizontalOffset = 12;
-        ReaderAnnotationHoverHostPopup.VerticalOffset = 14;
+        ReaderAnnotationHoverHostPopup.HorizontalOffset = 0;
+        ReaderAnnotationHoverHostPopup.VerticalOffset = 0;
         ReaderAnnotationHoverHostPopup.IsOpen = true;
     }
 
@@ -7200,19 +7210,10 @@ public partial class MainWindow
         }
     }
 
-    private async void ReaderAnnotationHoverPopup_PointerExited(object? sender, PointerEventArgs e)
-    {
-        await HideReaderAnnotationHoverAfterPointerLeaveAsync();
-    }
-
-    private async Task HideReaderAnnotationHoverAfterPointerLeaveAsync()
+    private void ReaderAnnotationHoverPopup_PointerExited(object? sender, PointerEventArgs e)
     {
         if (_readerIsPdf) return;
-        var sequence = _readerAnnotationHoverSequence;
-        // Allow moving from the underline into a long note to scroll its text.
-        await Task.Delay(180);
-        if (sequence == _readerAnnotationHoverSequence && !ReaderAnnotationHoverPopup.IsPointerOver)
-            HideReaderAnnotationHoverPopup();
+        HideReaderAnnotationHoverPopup();
     }
 
     private void ReaderAnnotationHoverCloseButton_Click(object? sender, RoutedEventArgs e)
@@ -7618,7 +7619,7 @@ public partial class MainWindow
                     // The native host emits this from Avalonia pointer events,
                     // which stay authoritative regardless of platform.
                     if (!_readerIsPdf)
-                        _ = HideReaderAnnotationHoverAfterPointerLeaveAsync();
+                        HideReaderAnnotationHoverPopup();
                     break;
                 case "resize":
                     ScheduleReaderRelayout();

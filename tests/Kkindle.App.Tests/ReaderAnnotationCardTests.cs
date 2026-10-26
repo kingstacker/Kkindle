@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.VisualTree;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
@@ -14,6 +15,57 @@ namespace Kkindle.Ui.Tests;
 [Trait("Category", "Slow")]
 public sealed class ReaderAnnotationCardTests(SettingsUiSession session)
 {
+    [Theory]
+    [InlineData(1, false, false)]
+    [InlineData(1, true, false)]
+    [InlineData(0, false, false)]
+    [InlineData(1, false, true)]
+    public Task EpubHoverUsesTheWholeQuoteAndOnlyDisplaysTheNote(int flow, bool spread, bool vertical) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var host = await ReaderAppearanceTests.LoadChapter(scope,
+            new(FlowMode: flow, TwoPageMode: spread, VerticalWriting: vertical));
+        var annotation = new ReaderAnnotation { StartOffset = 12, EndOffset = 110, Note = "只显示批注正文，不遮挡选文。" };
+        scope.Window.ReaderAnnotations.Add(annotation);
+        host.SetAnnotations([annotation]);
+        var bands = host.GetAnnotationBounds(annotation);
+        Assert.NotEmpty(bands);
+        var first = bands[0];
+        var last = bands[^1];
+        var popup = scope.Get<Popup>("ReaderAnnotationHoverHostPopup");
+        scope.Call("ShowReaderAnnotationHoverPopup", annotation.Note, first.Center, annotation, false);
+        await ReaderTests.Render();
+        var position = popup.PlacementRect!.Value.Position;
+        scope.Call("ShowReaderAnnotationHoverPopup", annotation.Note, last.Center, annotation, false);
+        await ReaderTests.Render();
+        Assert.Equal(position, popup.PlacementRect!.Value.Position);
+        var card = scope.Get<Border>("ReaderAnnotationHoverPopup");
+        Assert.Equal(new Thickness(1), card.BorderThickness);
+        var actualPosition = card.TranslatePoint(default, host)!.Value;
+        Assert.InRange(Math.Abs(actualPosition.X - position.X), 0, 1);
+        Assert.InRange(Math.Abs(actualPosition.Y - position.Y), 0, 1);
+        Assert.False(scope.Get<Grid>("ReaderAnnotationHoverHeading").IsVisible);
+        var bounds = new Rect(actualPosition, card.Bounds.Size);
+        Assert.All(bands, band => Assert.False(bounds.Intersects(band), $"Card {bounds} overlaps quote {band}"));
+        Assert.InRange(bounds.Left, 0, host.Bounds.Width - bounds.Width);
+        Assert.InRange(bounds.Top, 0, host.Bounds.Height - bounds.Height);
+        Capture(card, $"epub-note-only-{flow}-{spread}-{vertical}");
+        // The actual host emits hover/leave from pointer movement.
+        scope.Call("HideReaderAnnotationHoverPopup");
+        var events = new List<string>();
+        host.WebMessageReceived += (_, e) => { events.Add(e.Body!); scope.Call("HandleReaderBridgeMessage", e.Body); };
+        var point = host.TranslatePoint(first.Center, scope.Window)!.Value;
+        scope.Window.MouseMove(point);
+        await ReaderTests.Render();
+        Assert.True(popup.IsOpen, string.Join(" | ", events));
+        scope.Window.MouseMove(host.TranslatePoint(new Point(1, 1), scope.Window)!.Value);
+        await Task.Delay(220);
+        await ReaderTests.Render();
+        Assert.False(popup.IsOpen, string.Join(" | ", events));
+        scope.Set("_readerActiveHost", null);
+        scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
+    });
+
     [Fact]
     public Task EpubPreviewGrowsAndLongNotesRemainScrollable() => Run(async () =>
     {
