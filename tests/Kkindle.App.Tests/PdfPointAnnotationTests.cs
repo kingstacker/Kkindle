@@ -37,7 +37,7 @@ public sealed class PdfPointAnnotationTests(SettingsUiSession session)
         scope.Window.MouseUp(screenPoint, MouseButton.Right);
         Assert.False(scope.Get<Control>("ConfirmationOverlay").IsVisible);
         Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
-        var menu = scope.Field<ContextMenu?>("_readerPdfAnnotationMenu");
+        var menu = scope.Field<ContextMenu?>("_readerAnnotationMenu");
         Assert.NotNull(menu);
         var deleteItem = Assert.Single(menu!.Items.OfType<MenuItem>(), item => (string?)item.Tag == "delete");
         deleteItem.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));

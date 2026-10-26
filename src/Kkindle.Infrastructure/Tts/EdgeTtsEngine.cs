@@ -14,6 +14,8 @@ namespace Kkindle.Infrastructure;
 public sealed class EdgeTtsEngine : ITtsEngine
 {
     public const string DefaultExecutableName = "edge-tts";
+    public const string MinimumVersion = "7.3.1";
+    internal const string PackageRequirement = "edge-tts>=" + MinimumVersion;
     public const string InstallationMessage =
         "未检测到 edge-tts。\n\n"
         + "Debian/Ubuntu 可以执行：\n"
@@ -35,6 +37,9 @@ public sealed class EdgeTtsEngine : ITtsEngine
         new("zh-CN-XiaoyiNeural", "晓伊", "zh-CN"),
         new("zh-CN-YunxiNeural", "云希", "zh-CN"),
         new("zh-CN-YunjianNeural", "云健", "zh-CN"),
+        new(TtsSelectionVoicePolicy.EnglishVoice, "Aria · English (United States)", "en-US"),
+        new("en-US-GuyNeural", "Guy · English (United States)", "en-US"),
+        new(TtsSelectionVoicePolicy.MixedVoice, "Ava · Multilingual (United States)", "en-US"),
     ];
 
     private readonly object _gate = new();
@@ -112,6 +117,16 @@ public sealed class EdgeTtsEngine : ITtsEngine
 
             var version = FirstNonEmptyLine(result.StandardOutput, result.StandardError)
                 ?? "未知版本";
+            // Older releases use Microsoft's retired WebSocket authentication
+            // and can list voices successfully while synthesis fails with 403.
+            if (!IsCompatibleVersion(version))
+            {
+                return new TtsAvailability(
+                    false,
+                    $"edge-tts 需要更新至 {MinimumVersion} 或更高版本（当前：{version}）。",
+                    executable,
+                    version);
+            }
             lock (_gate) _resolvedExecutable = executable;
             return new TtsAvailability(
                 true,
@@ -129,6 +144,14 @@ public sealed class EdgeTtsEngine : ITtsEngine
                 false,
                 $"检测 edge-tts 失败：{exception.Message}");
         }
+    }
+
+    internal static bool IsCompatibleVersion(string versionOutput)
+    {
+        var match = Regex.Match(versionOutput, @"(?:^|\s)(\d+\.\d+\.\d+)(?:\s|$)");
+        return match.Success
+            && Version.TryParse(match.Groups[1].Value, out var version)
+            && version >= Version.Parse(MinimumVersion);
     }
 
     public async Task<IReadOnlyList<TtsVoiceInfo>> GetVoicesAsync(

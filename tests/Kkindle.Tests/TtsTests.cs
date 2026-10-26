@@ -6,6 +6,112 @@ namespace Kkindle.Tests;
 
 public sealed class TtsTests
 {
+    [Theory]
+    [InlineData("edge-tts 7.2.8", false)]
+    [InlineData("edge-tts 7.3.0", false)]
+    [InlineData("edge-tts 7.3.1", true)]
+    [InlineData("7.3.2", true)]
+    [InlineData("edge-tts 8.0.0", true)]
+    [InlineData("unknown", false)]
+    public void EngineRequiresCurrentWebSocketAuthentication(string version, bool expected)
+        => Assert.Equal(expected, EdgeTtsEngine.IsCompatibleVersion(version));
+
+    [Theory]
+    [InlineData("你好。", "en-US-GuyNeural", TtsOptions.DefaultVoice)]
+    [InlineData("你好。", "zh-CN-YunxiNeural", "zh-CN-YunxiNeural")]
+    [InlineData("word", TtsOptions.DefaultVoice, TtsSelectionVoicePolicy.EnglishVoice)]
+    [InlineData("This is a sentence.", "en-GB-SoniaNeural", TtsSelectionVoicePolicy.EnglishVoice)]
+    [InlineData("An American voice.", "en-US-GuyNeural", "en-US-GuyNeural")]
+    [InlineData("你好，hello。", TtsOptions.DefaultVoice, TtsSelectionVoicePolicy.MixedVoice)]
+    [InlineData("你好，hello。", "en-US-GuyNeural", TtsSelectionVoicePolicy.MixedVoice)]
+    [InlineData("你好，hello。", "en-US-AndrewMultilingualNeural", "en-US-AndrewMultilingualNeural")]
+    public void SelectionMatchesChineseOrAmericanEnglishVoice(string text, string preferred, string expected)
+        => Assert.Equal(expected, TtsSelectionVoicePolicy.SelectVoice(text, preferred));
+
+    [Fact]
+    public void ReaderVoiceListIncludesChineseAndAmericanEnglishOnly()
+    {
+        Assert.True(TtsSelectionVoicePolicy.IsSupportedVoice(new("zh-CN-XiaoxiaoNeural", "Chinese")));
+        Assert.True(TtsSelectionVoicePolicy.IsSupportedVoice(new("en-US-AriaNeural", "American")));
+        Assert.False(TtsSelectionVoicePolicy.IsSupportedVoice(new("en-GB-SoniaNeural", "British")));
+        Assert.Contains(EdgeTtsEngine.PresetVoices, voice => voice.Id == TtsSelectionVoicePolicy.EnglishVoice);
+        Assert.Contains(EdgeTtsEngine.PresetVoices, voice => voice.Id == TtsSelectionVoicePolicy.MixedVoice);
+    }
+
+    [Theory]
+    [InlineData("en-US-AriaNeural", "American English")]
+    [InlineData("zh-CN-XiaoxiaoNeural", "声音试听")]
+    public void VoicePreviewUsesTheSelectedLanguage(string voice, string expected)
+        => Assert.Contains(expected, TtsService.GetPreviewText(voice));
+
+    [Theory]
+    [InlineData("word")]
+    [InlineData("Only this sentence.")]
+    [InlineData("只读这句话。")]
+    [InlineData("中英混合 hello。")]
+    public async Task SelectionReadsOnlyItsTextWithoutAdvancingOrPrefetchingAnotherChapter(string text)
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new FakeEngine();
+            var player = new FakePlayer();
+            var fullDocument = new ReaderTtsDocument("book:chapter", "Unselected beginning. " + text + " Unselected ending.",
+                0, (_, _) => throw new InvalidOperationException("Full-document highlight used for selection"), () => { });
+            var advanceCount = 0;
+            var prefetchCount = 0;
+            var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var started = false;
+            using var service = new TtsService(engine, new TtsCacheManager(root), player, () => fullDocument,
+                _ => { advanceCount++; return Task.FromResult(true); },
+                prefetchDocumentAccessor: _ => { prefetchCount++; return Task.FromResult<ReaderTtsDocument?>(fullDocument); });
+            service.StateChanged += (_, args) =>
+            {
+                if (args.State == TtsPlaybackState.Generating) started = true;
+                if (started && args.State == TtsPlaybackState.Stopped) finished.TrySetResult();
+            };
+            var settings = new TtsSettings { AutoAdvance = true, Voice = TtsSelectionVoicePolicy.SelectVoice(text, null) };
+            var selection = fullDocument with { Text = text, Highlight = (_, _) => Task.CompletedTask };
+            await service.StartSelectionAsync(selection, settings);
+            await finished.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var request = Assert.Single(engine.Requests);
+            Assert.Equal(text, request.Text);
+            Assert.Equal(settings.Voice, request.Options.Voice);
+            Assert.Equal(1, player.PlayCount);
+            Assert.Equal(0, advanceCount);
+            Assert.Equal(0, prefetchCount);
+            Assert.True(settings.AutoAdvance);
+            Assert.Equal(TtsPlaybackState.Stopped, service.State);
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task NewSelectionCancelsThePreviousGenerationAndCanBeStopped()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new FakeEngine { BlockGeneration = true };
+            var player = new FakePlayer();
+            var document = new ReaderTtsDocument("book:chapter", "Whole chapter.", 0,
+                (_, _) => Task.CompletedTask, () => { });
+            using var service = new TtsService(engine, new TtsCacheManager(root), player, () => document);
+            await service.StartSelectionAsync(document with { Text = "First selection." }, new TtsSettings());
+            await engine.GenerationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            engine.BlockGeneration = false;
+            var played = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            service.StateChanged += (_, args) => { if (args.State == TtsPlaybackState.Playing) played.TrySetResult(); };
+            await service.StartSelectionAsync(document with { Text = "Second selection." }, new TtsSettings());
+            await played.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await service.StopAsync();
+            Assert.Equal(["First selection.", "Second selection."], engine.Requests.Select(request => request.Text));
+            Assert.Equal(1, player.PlayCount);
+            Assert.Equal(TtsPlaybackState.Stopped, service.State);
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
     [Fact]
     public void TextSnapshotMapsTtsOffsetsBackToBodyText()
     {
@@ -427,6 +533,9 @@ public sealed class TtsTests
     private sealed class FakeEngine : ITtsEngine
     {
         private int _synthesisCount;
+        public System.Collections.Concurrent.ConcurrentQueue<(string Text, TtsOptions Options)> Requests { get; } = new();
+        public bool BlockGeneration { get; set; }
+        public TaskCompletionSource GenerationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int SynthesisCount => Volatile.Read(ref _synthesisCount);
 
@@ -448,6 +557,12 @@ public sealed class TtsTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Interlocked.Increment(ref _synthesisCount);
+            Requests.Enqueue((text, options));
+            if (BlockGeneration)
+            {
+                GenerationStarted.TrySetResult();
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
             var path = Path.Combine(
                 Path.GetTempPath(),
                 "kkindle-fake-" + Guid.NewGuid().ToString("N") + ".mp3");

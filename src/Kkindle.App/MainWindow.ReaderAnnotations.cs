@@ -283,12 +283,6 @@ public partial class MainWindow
     private async void ReaderAnnotationInputSaveButton_Click(object? sender, RoutedEventArgs e)
         => await SaveReaderAnnotationAsync(ReaderAnnotationInputBox.Text ?? string.Empty);
 
-    private async void ReaderSelectionDeleteButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (_selectedReaderAnnotation is { } annotation)
-            await DeleteReaderAnnotationAsync(annotation);
-    }
-
     private void ReaderAnnotationInputBox_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)

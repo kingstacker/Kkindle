@@ -12,10 +12,14 @@ public partial class MainWindow
         : null;
 
     private void ReaderSelectionHighlightFlyout_Opened(object? sender, EventArgs e)
-        => RefreshReaderMarkerColorPreview();
+    {
+        ReaderSelectionHighlightMenuButton.Classes.Set("active", true);
+        RefreshReaderMarkerColorPreview();
+    }
 
     private void ReaderSelectionHighlightFlyout_Closed(object? sender, EventArgs e)
     {
+        ReaderSelectionHighlightMenuButton.Classes.Set("active", false);
         ReaderMarkerPaletteFlyout?.Hide();
         StopReaderSelectionHighlightPointerTracking();
     }

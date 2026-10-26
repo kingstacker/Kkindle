@@ -225,11 +225,11 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
         var installArguments = new List<string>();
         if (pipxUsesModule)
         {
-            installArguments.AddRange(["pipx", "install", "edge-tts", "--force"]);
+            installArguments.AddRange(["pipx", "install", EdgeTtsEngine.PackageRequirement, "--force"]);
         }
         else
         {
-            installArguments.AddRange(["install", "edge-tts", "--force"]);
+            installArguments.AddRange(["install", EdgeTtsEngine.PackageRequirement, "--force"]);
         }
 
         // Do not let pipx select its own default interpreter here. Windows

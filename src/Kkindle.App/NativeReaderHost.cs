@@ -2683,6 +2683,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         Focus();
         StopSelectionAutoPageTurn();
         var point = e.GetCurrentPoint(this);
+        if (point.Properties.IsRightButtonPressed)
+        {
+            if (MapPointToPage(point.Position) is { } annotationMap
+                && TryGetAnnotationAt(annotationMap.Page,
+                    new Point(annotationMap.Local.X, annotationMap.Local.Y), out var annotation))
+            {
+                ClearAnnotationHover();
+                Emit(new { type = "annotationContextMenu", id = annotation.Id, x = point.Position.X, y = point.Position.Y });
+            }
+            e.Handled = true;
+            return;
+        }
         if (!point.Properties.IsLeftButtonPressed)
         {
             return;
