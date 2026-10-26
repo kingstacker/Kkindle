@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using Kkindle.Core;
@@ -301,8 +302,10 @@ public sealed class EpubTranslationServiceTests
         }
     }
 
-    [Fact]
-    public async Task TranslatesWholeBookThroughGoogleFreeEndpointWithSegmentBatching()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TranslatesWholeBookThroughGoogleFreeEndpointWithSegmentBatching(bool legacy)
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -317,7 +320,9 @@ public sealed class EpubTranslationServiceTests
                 httpHandler: new TestHelpers.StubHttpMessageHandler(request =>
                 {
                     requestCount++;
-                    Assert.Equal("translate.googleapis.com", request.RequestUri?.Host);
+                    if (legacy && request.RequestUri?.Host == "translate.googleapis.com")
+                        return new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                    Assert.Equal(legacy ? "clients5.google.com" : "translate.googleapis.com", request.RequestUri?.Host);
                     var query = request.RequestUri!.Query;
                     var queryStart = query.IndexOf("q=", StringComparison.Ordinal);
                     Assert.True(queryStart >= 0);
@@ -329,7 +334,7 @@ public sealed class EpubTranslationServiceTests
                     return new HttpResponseMessage
                     {
                         Content = new StringContent(
-                            $"[[[{encoded}]]]",
+                            legacy ? $"[[{encoded},\"en\"]]" : $"[[[{encoded}]]]",
                             Encoding.UTF8,
                             "application/json")
                     };
@@ -347,7 +352,7 @@ public sealed class EpubTranslationServiceTests
                 });
 
             Assert.Single(result.OutputPaths);
-            Assert.Equal(1, requestCount);
+            Assert.Equal(legacy ? 2 : 1, requestCount);
             var markup = ReadArchiveEntry(result.OutputPaths[0], "OEBPS/chapter.xhtml");
             Assert.Contains("你好", markup);
             Assert.Contains("世界", markup);
@@ -359,8 +364,10 @@ public sealed class EpubTranslationServiceTests
         }
     }
 
-    [Fact]
-    public async Task TranslatesWholeBookThroughBingFreeEndpointUsingTemporaryPageCredentials()
+    [Theory]
+    [InlineData("cn.bing.com")]
+    [InlineData("www.bing.com")]
+    public async Task TranslatesWholeBookThroughBingFreeEndpointUsingTemporaryPageCredentials(string pageHost)
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -379,6 +386,7 @@ public sealed class EpubTranslationServiceTests
                     {
                         return new HttpResponseMessage
                         {
+                            RequestMessage = new HttpRequestMessage(HttpMethod.Get, $"https://{pageHost}/translator"),
                             Content = new StringContent(
                                 "window._G={IG:\"test-impression\"}; data-iid=\"translator.5025\"; "
                                 + "var params_AbusePreventionHelper = [12345, \"test-token\", 3600000];",
@@ -388,6 +396,9 @@ public sealed class EpubTranslationServiceTests
                     }
 
                     Assert.Equal(HttpMethod.Post, request.Method);
+                    Assert.Equal(pageHost, request.RequestUri!.Host);
+                    Assert.Equal($"https://{pageHost}/translator", request.Headers.Referrer!.AbsoluteUri);
+                    Assert.Equal($"https://{pageHost}", Assert.Single(request.Headers.GetValues("Origin")));
                     Assert.Contains("IID=translator.5025", request.RequestUri!.Query);
                     var form = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
                     Assert.Contains("token=test-token", form);
@@ -431,6 +442,33 @@ public sealed class EpubTranslationServiceTests
         {
             TestHelpers.TryDelete(root);
         }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("[[[\" \"]]]")]
+    public async Task EmptyGoogleBookTranslationShowsRecoveryAdvice(string responseBody)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var sourcePath = Path.Combine(root, "empty.epub");
+            CreateEpub(sourcePath);
+            using var service = new EpubTranslationService(
+                new AppPaths(Path.Combine(root, "app")), new TestHelpers.PlaintextSecretProtector(),
+                httpHandler: new TestHelpers.StubHttpMessageHandler(_ => new HttpResponseMessage
+                {
+                    Content = new StringContent(responseBody)
+                }));
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.TranslateAsync(
+                sourcePath, Path.Combine(root, "translations"), new BookTranslationSettings
+                {
+                    Provider = BookTranslationProvider.GoogleFree, SourceLanguage = "en", TargetLanguage = "zh-CN"
+                }));
+            Assert.Contains("空结果", error.Message);
+            Assert.Contains("代理设置", error.Message);
+        }
+        finally { TestHelpers.TryDelete(root); }
     }
 
     private static void CreateEpub(string path)

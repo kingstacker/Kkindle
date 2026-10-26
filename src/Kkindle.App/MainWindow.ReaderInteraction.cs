@@ -7078,6 +7078,7 @@ public partial class MainWindow
 
     private Point? _readerAnnotationHoverPlacementPoint;
     private Guid? _readerAnnotationHoverAnnotationId;
+    private int _readerAnnotationHoverSequence;
 
     private void ShowCurrentReaderPdfAnnotation()
     {
@@ -7104,13 +7105,15 @@ public partial class MainWindow
             && (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned
                 || annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
+        _readerAnnotationHoverSequence++;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
         _readerAnnotationHoverAnnotationId = annotation?.Id;
-        ReaderAnnotationHoverHostPopup.IsHitTestVisible = _readerIsPdf;
-        ReaderAnnotationHoverPopup.IsHitTestVisible = _readerIsPdf;
+        ReaderAnnotationHoverHostPopup.IsHitTestVisible = true;
+        ReaderAnnotationHoverPopup.IsHitTestVisible = true;
         if (placementPoint is { } point)
             _readerAnnotationHoverPlacementPoint = point;
         ReaderAnnotationHoverPopup.IsVisible = true;
+        var measureHeight = ReaderAnnotationCardLayout.CreateMeasure(ReaderAnnotationHoverPopup, ReaderAnnotationHoverNote);
         if (_readerIsPdf
             && CurrentReaderHost is NativePdfReaderHost pdf
             && annotation is not null)
@@ -7120,12 +7123,16 @@ public partial class MainWindow
                     pdf,
                     annotation,
                     _readerAnnotationHoverPlacementPoint,
-                    new Size(220, 88)))
+                    new Size(220, measureHeight(220)),
+                    measureHeight: measureHeight))
                 return;
             pdf.ClearAnnotationCallout();
             HideReaderAnnotationHoverPopup();
             return;
         }
+        ReaderAnnotationHoverPopup.Width = 220;
+        ReaderAnnotationHoverPopup.Height = Math.Min(measureHeight(220),
+            Math.Max(68, ReaderWebViewHost.Bounds.Height - 24));
         if (CurrentReaderHost?.View is Control view
             && _readerAnnotationHoverPlacementPoint is { } anchor)
         {
@@ -7154,6 +7161,7 @@ public partial class MainWindow
 
     private void HideReaderAnnotationHoverPopup()
     {
+        _readerAnnotationHoverSequence++;
         foreach (var popup in _readerPdfAnnotationPopups)
         {
             popup.IsOpen = false;
@@ -7190,6 +7198,21 @@ public partial class MainWindow
             EditReaderPdfAnnotation(annotation);
             (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(annotation.Id);
         }
+    }
+
+    private async void ReaderAnnotationHoverPopup_PointerExited(object? sender, PointerEventArgs e)
+    {
+        await HideReaderAnnotationHoverAfterPointerLeaveAsync();
+    }
+
+    private async Task HideReaderAnnotationHoverAfterPointerLeaveAsync()
+    {
+        if (_readerIsPdf) return;
+        var sequence = _readerAnnotationHoverSequence;
+        // Allow moving from the underline into a long note to scroll its text.
+        await Task.Delay(180);
+        if (sequence == _readerAnnotationHoverSequence && !ReaderAnnotationHoverPopup.IsPointerOver)
+            HideReaderAnnotationHoverPopup();
     }
 
     private void ReaderAnnotationHoverCloseButton_Click(object? sender, RoutedEventArgs e)
@@ -7247,12 +7270,17 @@ public partial class MainWindow
                         RememberCurrentPdfPageText();
                         if (_readerPdfPage != previousPdfPage)
                         {
-                            _selectedReaderAnnotation = null;
                             HideReaderSelectionPopup();
-                            HideReaderAnnotationInputPopup();
-                            HideReaderAnnotationHoverPopup();
-                            // Navigation emits the new page before its final pan is applied.
-                            Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
+                            // Continuous scrolling can change the current page
+                            // while the edited annotation's page is still visible.
+                            // Explicit navigation closes the editor itself.
+                            if (!ReaderAnnotationInputPopup.IsOpen)
+                            {
+                                _selectedReaderAnnotation = null;
+                                HideReaderAnnotationHoverPopup();
+                                // Navigation emits the page before its final pan.
+                                Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
+                            }
                         }
                         ReaderChapterText.Text = GetReaderChapterPositionLabel();
                         UpdateReaderToolbar();
@@ -7590,7 +7618,7 @@ public partial class MainWindow
                     // The native host emits this from Avalonia pointer events,
                     // which stay authoritative regardless of platform.
                     if (!_readerIsPdf)
-                        HideReaderAnnotationHoverPopup();
+                        _ = HideReaderAnnotationHoverAfterPointerLeaveAsync();
                     break;
                 case "resize":
                     ScheduleReaderRelayout();

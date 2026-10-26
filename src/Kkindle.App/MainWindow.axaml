@@ -7061,13 +7061,13 @@
                    IsHitTestVisible="False">
                 <Border x:Name="ReaderAnnotationHoverPopup"
                         PointerPressed="ReaderAnnotationHoverNote_PointerPressed"
+                        PointerExited="ReaderAnnotationHoverPopup_PointerExited"
                         Width="220"
-                        Height="88"
                         Padding="8"
                         Background="{DynamicResource ReaderPageBrush}"
                         BorderBrush="{DynamicResource ReaderAccentBrush}"
                         BorderThickness="1.25"
-                        CornerRadius="8"
+                        CornerRadius="0"
                         IsHitTestVisible="False"
                         IsVisible="False">
                     <Grid RowDefinitions="Auto,*">
@@ -7094,7 +7094,6 @@
                                     Click="ReaderAnnotationHoverCloseButton_Click" />
                         </Grid>
                         <ScrollViewer Grid.Row="1"
-                                      MaxHeight="90"
                                   HorizontalScrollBarVisibility="Disabled"
                                       VerticalScrollBarVisibility="Auto"
                                       PointerPressed="ReaderAnnotationHoverNote_PointerPressed">

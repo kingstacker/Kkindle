@@ -193,7 +193,8 @@ public partial class MainWindow
         ReaderAnnotation? annotation,
         Point? fallbackAnchor,
         Size preferredSize,
-        bool requireVisibleBounds = false)
+        bool requireVisibleBounds = false,
+        Func<double, double>? measureHeight = null)
     {
         var pageNumber = 0;
         var anchor = default(Point);
@@ -212,7 +213,7 @@ public partial class MainWindow
                 anchor = selectedAnchor;
         }
 
-        if (!pdf.TryGetAnnotationCalloutBounds(pageNumber, anchor, preferredSize, out var calloutBounds))
+        if (!pdf.TryGetAnnotationCalloutBounds(pageNumber, anchor, preferredSize, out var calloutBounds, measureHeight))
         {
             if (requireVisibleBounds) return false;
             calloutBounds = new Rect(new Point(), preferredSize);
@@ -235,7 +236,7 @@ public partial class MainWindow
             if (movedBounds.Width > 0
                 && pdf.TranslatePoint(movedBounds.TopLeft, ReaderWebViewHost) is { } origin)
                 popup.PlacementRect = new Rect(origin, new Size(1, 1));
-        }, pageNumber, preferredSize);
+        }, pageNumber, preferredSize, measureHeight);
         popup.PlacementTarget = ReaderWebViewHost;
         popup.Placement = PlacementMode.AnchorAndGravity;
         popup.PlacementRect = new Rect(popupOrigin.Value, new Size(1, 1));

@@ -60,10 +60,11 @@ public partial class MainWindow
 
     private void ShowAdditionalReaderPdfAnnotations(NativePdfReaderHost pdf, IEnumerable<ReaderAnnotation> annotations)
     {
-        var callouts = new List<(ReaderAnnotation Annotation, Action<Rect> Moved)>();
+        var callouts = new List<(ReaderAnnotation Annotation, Action<Rect> Moved, Func<double, double> MeasureHeight)>();
         foreach (var annotation in annotations)
         {
-            var text = new TextBlock { Text = annotation.Note, FontSize = 14, TextWrapping = TextWrapping.Wrap };
+            var text = new TextBlock { Text = annotation.Note, FontSize = 14, LineHeight = 20,
+                FontFamily = ReaderAnnotationHoverNote.FontFamily, TextWrapping = TextWrapping.Wrap };
             text.Foreground = (IBrush)Resources["ReaderInkBrush"]!;
             var close = new Button { Content = "×", Width = 24, Height = 24, Padding = new Thickness(0),
                 FontSize = 18, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
@@ -79,8 +80,8 @@ public partial class MainWindow
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             Grid.SetRow(scroll, 1);
             content.Children.Add(scroll);
-            var card = new Border { Width = 220, Height = 88, Padding = new Thickness(8),
-                CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1.25), Child = content,
+            var card = new Border { Width = 220, Padding = new Thickness(8),
+                CornerRadius = new CornerRadius(0), BorderThickness = new Thickness(1.25), Child = content,
                 Background = (IBrush)Resources["ReaderPageBrush"]!, BorderBrush = (IBrush)Resources["ReaderAccentBrush"]!,
                 IsVisible = false };
             var popup = new Popup { Child = card, PlacementTarget = ReaderWebViewHost,
@@ -125,7 +126,7 @@ public partial class MainWindow
                 card.Width = bounds.Width;
                 if (pdf.TranslatePoint(bounds.TopLeft, ReaderWebViewHost) is { } origin)
                     popup.PlacementRect = new Rect(origin, new Size(1, 1));
-            }));
+            }, ReaderAnnotationCardLayout.CreateMeasure(card, text)));
             popup.IsOpen = true;
         }
         pdf.SetAdditionalAnnotationCallouts(callouts);
