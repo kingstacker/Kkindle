@@ -5829,18 +5829,24 @@
                                                             </Path>
                                                         </StackPanel>
                                                         <local:KreaderMarkdownTextBlock Markdown="{Binding DisplayedReasoning}"
+                                                                   IsFollowUpEnabled="True"
+                                                                   FollowUpRequested="ReaderAiText_FollowUpRequested"
                                                                    CitationAction="{Binding CitationAction}"
                                                                    CitationSourceResolver="{Binding CitationSourceResolver}"
                                                                    IsVisible="{Binding IsReasoningVisible}"
                                                                    FontSize="12"
                                                                    Foreground="{DynamicResource ReaderMutedBrush}"
                                                                    TextWrapping="Wrap" />
-                                                        <TextBlock Text="{Binding Content}"
+                                                        <local:KreaderSelectableTextBlock Text="{Binding Content}"
+                                                                   IsFollowUpEnabled="True"
+                                                                   FollowUpRequested="ReaderAiText_FollowUpRequested"
                                                                    IsVisible="{Binding IsUser}"
                                                                    Foreground="{DynamicResource ReaderInkBrush}"
                                                                    FontSize="14"
                                                                    TextWrapping="Wrap" />
                                                          <local:KreaderMarkdownTextBlock Markdown="{Binding Content}"
+                                                                                          IsFollowUpEnabled="True"
+                                                                                          FollowUpRequested="ReaderAiText_FollowUpRequested"
                                                                                           IsVisible="{Binding IsAssistant}"
                                                                                           CitationAction="{Binding CitationAction}"
                                                                                           CitationSourceResolver="{Binding CitationSourceResolver}"

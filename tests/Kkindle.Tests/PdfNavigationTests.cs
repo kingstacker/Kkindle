@@ -104,6 +104,41 @@ public sealed class PdfNavigationTests
         Assert.Equal(expected, PdfTextSelectionLayout.NormalizeCopy(source));
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DottedBordersDoNotEnterMultilineSelection(bool vertical)
+    {
+        var left = new[] { "Left first line.", "Left second line.", "Left third line." };
+        var right = new[] { "First line keeps...", "next line intact.", "Final sentence." };
+        var text = string.Join("\r\n", left.Concat(right)) + "\r\n" + new string('.', 32);
+        var ruleStart = text.Length - 32;
+        var glyphs = new List<PdfTextGlyph>();
+        var offset = 0;
+        foreach (var (lines, x) in new[] { (left, 0.08), (right, 0.55) })
+        {
+            for (var row = 0; row < lines.Length; row++)
+            {
+                for (var column = 0; column < lines[row].Length; column++)
+                    if (lines[row][column] != ' ')
+                        glyphs.Add(new(offset + column, 1, new(x + column * 0.009, 0.1 + row * 0.025, 0.007, 0.012)));
+                offset += lines[row].Length + 2;
+            }
+        }
+        for (var i = 0; i < 32; i++)
+            glyphs.Add(new(ruleStart + i, 1, new(vertical ? 0.49 : 0.08 + i * 0.025,
+                vertical ? 0.08 + i * 0.003 : 0.2, 0.002, 0.002)));
+        var layout = new PdfTextSelectionLayout(new(612, 792, text, glyphs));
+        var startOffset = text.IndexOf(right[0], StringComparison.Ordinal);
+        var endOffset = ruleStart - 2;
+        var ranges = layout.GetRanges(layout.IndexAtOffset(startOffset), layout.IndexAtOffset(endOffset - 1) + 1);
+        Assert.Equal(string.Join(' ', right), PdfTextSelectionLayout.NormalizeCopy(layout.GetText(ranges)));
+        Assert.Equal(startOffset, ranges.Min(range => range.Start));
+        Assert.Equal(endOffset, ranges.Max(range => range.End));
+        Assert.DoesNotContain(layout.Glyphs, glyph => glyph.Offset >= ruleStart);
+        Assert.DoesNotContain(ranges, range => range.End > ruleStart);
+    }
+
+    [Theory]
     [InlineData("\r\n")]
     [InlineData("\n")]
     public void TranslationJoinsWrappedLinesAndKeepsGeometricParagraphs(string newline)

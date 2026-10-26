@@ -723,6 +723,16 @@ public partial class MainWindow
             : T("当前书籍 · 引用原文回答");
     }
 
+    private void ReaderAiText_FollowUpRequested(object? sender, ReaderAiFollowUpEventArgs e)
+    {
+        e.Handled = true;
+        var quote = string.Join("\n", e.Text.Trim().ReplaceLineEndings("\n").Split('\n').Select(line => "> " + line));
+        var draft = ReaderAiQuestionBox.Text ?? string.Empty;
+        ReaderAiQuestionBox.Text = T("针对这段对话：\n{0}\n\n{1}", quote, draft);
+        ReaderAiQuestionBox.CaretIndex = ReaderAiQuestionBox.Text.Length;
+        ReaderAiQuestionBox.Focus();
+    }
+
     private async void ReaderAiCopyButton_Click(object? sender, RoutedEventArgs e)
     {
         if ((sender as Control)?.DataContext is not ReaderAiMessageViewModel message) return;
