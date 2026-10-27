@@ -27,6 +27,12 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
     private readonly IMetadataService _metadata;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
     private readonly SemaphoreSlim _pdfCoverGate = new(1, 1);
+    private readonly object _trashRecoveryLogGate = new();
+
+    internal const string PurgeStagingFolderName = "purge-staging";
+    internal const string PurgeManifestFileName = "manifest.json";
+    internal const string PurgeBodyFileName = "body";
+    internal const string PurgeCoverFilePrefix = "cover";
 
     public event EventHandler<LocalDataChangedEventArgs>? DataChanged;
 
@@ -171,6 +177,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         await EnsureDefaultCollectionAsync(connection, cancellationToken);
         await ReaderAnnotationCascade.EnsureAsync(connection, cancellationToken);
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
+        await RecoverPendingPurgeStagingAsync(connection, cancellationToken);
         await PreserveTrashDisplayInfosAsync(connection, cancellationToken);
     }
 
@@ -1313,57 +1320,114 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             await using var connection = await OpenConnectionAsync(cancellationToken);
             var entry = await ReadTrashEntryAsync(connection, trashItemId, cancellationToken)
                 ?? throw new FileNotFoundException("回收站项目不存在，可能已被其他设备处理。");
-            DeletePath(ResolveDataPath(entry.TrashPath));
-            if (!string.IsNullOrWhiteSpace(entry.TrashCoverPath))
-                DeletePath(ResolveDataPath(entry.TrashCoverPath));
 
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            var stagingDirectory = GetPurgeStagingDirectory(entry.Id);
+            if (Directory.Exists(stagingDirectory))
+            {
+                await RecoverPurgeStagingDirectoryAsync(connection, stagingDirectory, cancellationToken);
+                if (Directory.Exists(stagingDirectory))
+                    throw new IOException("上一次永久清理的暂存内容无法自动恢复。");
+            }
+
+            var bodySource = ResolveDataPath(entry.TrashPath);
+            var coverSource = string.IsNullOrWhiteSpace(entry.TrashCoverPath)
+                ? null
+                : ResolveDataPath(entry.TrashCoverPath);
+            var manifest = new LibraryTrashPurgeManifest
+            {
+                TrashItemId = entry.Id,
+                TrashPath = entry.TrashPath,
+                TrashCoverPath = entry.TrashCoverPath,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            var stagedBody = GetPurgeStagedBodyPath(stagingDirectory);
+            var stagedCover = coverSource is null ? null : GetPurgeStagedCoverPath(stagingDirectory, coverSource);
+            var bodyMoved = false;
+            var coverMoved = false;
+
             try
             {
-                if (entry.Kind == LibraryTrashItemKind.Book)
-                {
-                    if (ShouldDeleteAnnotationsWhenDeletingBook()
-                        && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
-                        await DeletePurgeReaderRowsAsync(
-                            connection,
-                            transaction,
-                            "DELETE FROM ReaderAnnotations WHERE BookId = $bookId;",
-                            "$bookId",
-                            entry.BookId,
-                            cancellationToken);
-                    if (await TableExistsAsync(connection, transaction, "ReaderBookReflections", cancellationToken))
-                        await DeletePurgeReaderRowsAsync(
-                            connection,
-                            transaction,
-                            "DELETE FROM ReaderBookReflections WHERE BookId = $bookId;",
-                            "$bookId",
-                            entry.BookId,
-                            cancellationToken);
-                }
-                else if (entry.BookFileId is { } purgedFileId
-                    && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
-                {
-                    await DeletePurgeReaderRowsAsync(
-                        connection,
-                        transaction,
-                        "DELETE FROM ReaderAnnotations WHERE BookFileId = $bookFileId;",
-                        "$bookFileId",
-                        purgedFileId,
-                        cancellationToken);
-                }
-
-                var delete = connection.CreateCommand();
-                delete.Transaction = transaction;
-                delete.CommandText = "DELETE FROM LibraryTrash WHERE Id = $id;";
-                delete.Parameters.AddWithValue("$id", trashItemId.ToString());
-                await delete.ExecuteNonQueryAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                Directory.CreateDirectory(stagingDirectory);
+                await WritePurgeManifestAsync(stagingDirectory, manifest, cancellationToken);
+                bodyMoved = MovePath(bodySource, stagedBody);
+                if (coverSource is not null && stagedCover is not null)
+                    coverMoved = MovePath(coverSource, stagedCover);
             }
             catch
             {
-                await transaction.RollbackAsync(CancellationToken.None);
+                RestoreStagedPurgePath(stagedCover, coverSource, "封面", coverMoved);
+                RestoreStagedPurgePath(stagedBody, bodySource, "书籍内容", bodyMoved);
+                TryDeletePurgeStagingDirectory(stagingDirectory, "准备永久清理失败后的回滚");
                 throw;
             }
+
+            try
+            {
+                await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    if (entry.Kind == LibraryTrashItemKind.Book)
+                    {
+                        if (ShouldDeleteAnnotationsWhenDeletingBook()
+                            && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                            await DeletePurgeReaderRowsAsync(
+                                connection,
+                                transaction,
+                                "DELETE FROM ReaderAnnotations WHERE BookId = $bookId;",
+                                "$bookId",
+                                entry.BookId,
+                                cancellationToken);
+                        if (await TableExistsAsync(connection, transaction, "ReaderBookReflections", cancellationToken))
+                            await DeletePurgeReaderRowsAsync(
+                                connection,
+                                transaction,
+                                "DELETE FROM ReaderBookReflections WHERE BookId = $bookId;",
+                                "$bookId",
+                                entry.BookId,
+                                cancellationToken);
+                    }
+                    else if (entry.BookFileId is { } purgedFileId
+                        && await TableExistsAsync(connection, transaction, "ReaderAnnotations", cancellationToken))
+                    {
+                        await DeletePurgeReaderRowsAsync(
+                            connection,
+                            transaction,
+                            "DELETE FROM ReaderAnnotations WHERE BookFileId = $bookFileId;",
+                            "$bookFileId",
+                            purgedFileId,
+                            cancellationToken);
+                    }
+
+                    var delete = connection.CreateCommand();
+                    delete.Transaction = transaction;
+                    delete.CommandText = "DELETE FROM LibraryTrash WHERE Id = $id;";
+                    delete.Parameters.AddWithValue("$id", trashItemId.ToString());
+                    await delete.ExecuteNonQueryAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    try
+                    {
+                        await transaction.RollbackAsync(CancellationToken.None);
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        LogLibraryTrashRecovery("永久清理数据库回滚失败。", rollbackException);
+                    }
+                    throw;
+                }
+            }
+            catch
+            {
+                var coverRestored = RestoreStagedPurgePath(stagedCover, coverSource, "封面", coverMoved);
+                var bodyRestored = RestoreStagedPurgePath(stagedBody, bodySource, "书籍内容", bodyMoved);
+                if (coverRestored && bodyRestored)
+                    TryDeletePurgeStagingDirectory(stagingDirectory, "永久清理失败后的回滚");
+                throw;
+            }
+
+            TryDeletePurgeStagingDirectory(stagingDirectory, "永久清理完成后的清理");
             NotifyDataChanged();
         }
         finally { _databaseGate.Release(); }
@@ -1556,13 +1620,15 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         EnsureMoveTargetAvailable(targetDirectory);
         if (targetCover is not null) EnsureMoveTargetAvailable(targetCover);
 
-        MovePath(sourceDirectory, targetDirectory);
-        if (sourceCover is not null && targetCover is not null)
-            MovePath(sourceCover, targetCover);
-        book.UpdatedAt = DateTimeOffset.UtcNow;
-
+        var directoryMoved = false;
+        var coverMoved = false;
         try
         {
+            directoryMoved = MovePath(sourceDirectory, targetDirectory);
+            if (sourceCover is not null && targetCover is not null)
+                coverMoved = MovePath(sourceCover, targetCover);
+            book.UpdatedAt = DateTimeOffset.UtcNow;
+
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             try
             {
@@ -1589,15 +1655,21 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             }
             catch
             {
-                await transaction.RollbackAsync(CancellationToken.None);
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+                catch (Exception rollbackException)
+                {
+                    LogLibraryTrashRecovery("恢复书籍的数据库回滚失败。", rollbackException);
+                }
                 throw;
             }
         }
         catch
         {
-            MovePathBack(targetDirectory, sourceDirectory);
-            if (sourceCover is not null && targetCover is not null)
-                MovePathBack(targetCover, sourceCover);
+            RollbackMovedPath(targetCover, sourceCover, coverMoved, "恢复书籍封面");
+            RollbackMovedPath(targetDirectory, sourceDirectory, directoryMoved, "恢复书籍内容");
             throw;
         }
     }
@@ -1617,10 +1689,11 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         var sourcePath = ResolveDataPath(entry.TrashPath);
         var targetPath = ResolveDataPath(entry.OriginalPath);
         EnsureMoveTargetAvailable(targetPath);
-        MovePath(sourcePath, targetPath);
+        var fileMoved = false;
 
         try
         {
+            fileMoved = MovePath(sourcePath, targetPath);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             try
             {
@@ -1636,13 +1709,20 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             }
             catch
             {
-                await transaction.RollbackAsync(CancellationToken.None);
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+                catch (Exception rollbackException)
+                {
+                    LogLibraryTrashRecovery("恢复格式文件的数据库回滚失败。", rollbackException);
+                }
                 throw;
             }
         }
         catch
         {
-            MovePathBack(targetPath, sourcePath);
+            RollbackMovedPath(targetPath, sourcePath, fileMoved, "恢复格式文件");
             throw;
         }
     }
@@ -2825,21 +2905,272 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         };
     }
 
+    private async Task RecoverPendingPurgeStagingAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var stagingRoot = Path.Combine(_paths.Trash, PurgeStagingFolderName);
+        if (!Directory.Exists(stagingRoot)) return;
+
+        try
+        {
+            foreach (var directory in Directory.EnumerateDirectories(stagingRoot).ToArray())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await RecoverPurgeStagingDirectoryAsync(connection, directory, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LogLibraryTrashRecovery("扫描永久清理暂存目录失败。", exception);
+        }
+    }
+
+    private async Task RecoverPurgeStagingDirectoryAsync(
+        SqliteConnection connection,
+        string stagingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var manifestPath = Path.Combine(stagingDirectory, PurgeManifestFileName);
+        if (!File.Exists(manifestPath))
+        {
+            LogLibraryTrashRecovery($"永久清理暂存目录缺少清单：{stagingDirectory}");
+            return;
+        }
+
+        LibraryTrashPurgeManifest? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<LibraryTrashPurgeManifest>(
+                await File.ReadAllTextAsync(manifestPath, cancellationToken),
+                TrashJsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            LogLibraryTrashRecovery($"永久清理清单损坏，已跳过：{manifestPath}", exception);
+            return;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LogLibraryTrashRecovery($"读取永久清理清单失败，已跳过：{manifestPath}", exception);
+            return;
+        }
+
+        if (!IsValidPurgeManifest(manifest, stagingDirectory, out var validationError))
+        {
+            LogLibraryTrashRecovery($"永久清理清单无效，已跳过：{manifestPath}；{validationError}");
+            return;
+        }
+
+        var entry = await ReadTrashEntryAsync(connection, manifest!.TrashItemId, cancellationToken);
+        if (entry is null)
+        {
+            TryDeletePurgeStagingDirectory(stagingDirectory, "数据库已提交后的启动恢复");
+            return;
+        }
+
+        var originalBody = ResolveDataPath(manifest.TrashPath);
+        var originalCover = string.IsNullOrWhiteSpace(manifest.TrashCoverPath)
+            ? null
+            : ResolveDataPath(manifest.TrashCoverPath);
+        var stagedBody = GetPurgeStagedBodyPath(stagingDirectory);
+        var stagedCover = originalCover is null
+            ? null
+            : GetPurgeStagedCoverPath(stagingDirectory, originalCover);
+
+        var coverRestored = RestoreStagedPathIfPresent(stagedCover, originalCover, "封面");
+        var bodyRestored = RestoreStagedPathIfPresent(stagedBody, originalBody, "书籍内容");
+        if (coverRestored && bodyRestored)
+            TryDeletePurgeStagingDirectory(stagingDirectory, "数据库未提交时的启动恢复");
+        else
+            LogLibraryTrashRecovery($"永久清理暂存内容未能完全恢复：{stagingDirectory}");
+    }
+
+    private bool IsValidPurgeManifest(
+        LibraryTrashPurgeManifest? manifest,
+        string stagingDirectory,
+        out string error)
+    {
+        error = string.Empty;
+        if (manifest is null)
+        {
+            error = "清单为空";
+            return false;
+        }
+        if (manifest.Version != 1)
+        {
+            error = $"不支持的版本 {manifest.Version}";
+            return false;
+        }
+        if (manifest.TrashItemId == Guid.Empty
+            || !Guid.TryParseExact(Path.GetFileName(stagingDirectory), "N", out var directoryId)
+            || directoryId != manifest.TrashItemId)
+        {
+            error = "回收站 ID 与目录不一致";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(manifest.TrashPath))
+        {
+            error = "书籍内容路径为空";
+            return false;
+        }
+
+        try
+        {
+            _ = ResolveDataPath(manifest.TrashPath);
+            if (!string.IsNullOrWhiteSpace(manifest.TrashCoverPath))
+                _ = ResolveDataPath(manifest.TrashCoverPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            error = exception.Message;
+            return false;
+        }
+    }
+
+    private string GetPurgeStagingDirectory(Guid trashItemId) =>
+        Path.Combine(_paths.Trash, PurgeStagingFolderName, trashItemId.ToString("N"));
+
+    private static string GetPurgeStagedBodyPath(string stagingDirectory) =>
+        Path.Combine(stagingDirectory, PurgeBodyFileName);
+
+    private static string GetPurgeStagedCoverPath(string stagingDirectory, string originalCoverPath) =>
+        Path.Combine(stagingDirectory, PurgeCoverFilePrefix + Path.GetExtension(originalCoverPath));
+
+    private static async Task WritePurgeManifestAsync(
+        string stagingDirectory,
+        LibraryTrashPurgeManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(stagingDirectory);
+        var manifestPath = Path.Combine(stagingDirectory, PurgeManifestFileName);
+        var temporaryPath = manifestPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            var json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(temporaryPath, json, new UTF8Encoding(false), cancellationToken);
+            SettingsFile.Publish(temporaryPath, manifestPath);
+        }
+        finally
+        {
+            TryDeleteFile(temporaryPath);
+        }
+    }
+
+    private bool RestoreStagedPurgePath(
+        string? stagedPath,
+        string? originalPath,
+        string label,
+        bool wasMoved)
+    {
+        if (!wasMoved) return true;
+        return RestoreStagedPathIfPresent(stagedPath, originalPath, label);
+    }
+
+    private bool RestoreStagedPathIfPresent(
+        string? stagedPath,
+        string? originalPath,
+        string label)
+    {
+        if (stagedPath is null || originalPath is null
+            || (!File.Exists(stagedPath) && !Directory.Exists(stagedPath)))
+            return true;
+
+        try
+        {
+            if (File.Exists(originalPath) || Directory.Exists(originalPath))
+            {
+                LogLibraryTrashRecovery($"{label}恢复目标已存在，暂存内容保持在：{stagedPath}");
+                return false;
+            }
+            MovePath(stagedPath, originalPath);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            LogLibraryTrashRecovery($"{label}暂存内容恢复失败：{stagedPath} -> {originalPath}", exception);
+            return false;
+        }
+    }
+
+    private void RollbackMovedPath(
+        string? movedSource,
+        string? rollbackTarget,
+        bool wasMoved,
+        string operation)
+    {
+        if (!wasMoved || movedSource is null || rollbackTarget is null
+            || (!File.Exists(movedSource) && !Directory.Exists(movedSource)))
+            return;
+
+        try
+        {
+            MovePath(movedSource, rollbackTarget);
+        }
+        catch (Exception exception)
+        {
+            LogLibraryTrashRecovery($"{operation}回滚失败：{movedSource} -> {rollbackTarget}", exception);
+        }
+    }
+
+    private bool TryDeletePurgeStagingDirectory(string stagingDirectory, string operation)
+    {
+        try
+        {
+            DeletePath(stagingDirectory);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            LogLibraryTrashRecovery($"{operation}失败，将在下次启动时继续处理：{stagingDirectory}", exception);
+            return false;
+        }
+    }
+
+    private void LogLibraryTrashRecovery(string message, Exception? exception = null)
+    {
+        try
+        {
+            Directory.CreateDirectory(_paths.Logs);
+            var line = $"[{DateTimeOffset.UtcNow:O}] {message}";
+            if (exception is not null)
+                line += Environment.NewLine + exception;
+            line += Environment.NewLine;
+            lock (_trashRecoveryLogGate)
+            {
+                File.AppendAllText(
+                    Path.Combine(_paths.Logs, "library-trash-recovery.log"),
+                    line,
+                    new UTF8Encoding(false));
+            }
+        }
+        catch
+        {
+            // Recovery logging must never replace the original data error.
+        }
+    }
+
     private static void EnsureMoveTargetAvailable(string path)
     {
         if (File.Exists(path) || Directory.Exists(path))
             throw new IOException($"恢复目标已存在：{path}");
     }
 
-    private static void MovePath(string source, string destination)
+    private static bool MovePath(string source, string destination)
     {
-        if (!File.Exists(source) && !Directory.Exists(source)) return;
+        if (!File.Exists(source) && !Directory.Exists(source)) return false;
         EnsureMoveTargetAvailable(destination);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         if (File.Exists(source))
             File.Move(source, destination);
         else
             Directory.Move(source, destination);
+        return true;
     }
 
     private static void MovePathBack(string source, string destination)
@@ -2903,4 +3234,13 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         public string? TrashCoverPath { get; init; }
         public string? OriginalCoverPath { get; init; }
     }
+}
+
+internal sealed class LibraryTrashPurgeManifest
+{
+    public int Version { get; init; } = 1;
+    public Guid TrashItemId { get; init; }
+    public string TrashPath { get; init; } = string.Empty;
+    public string? TrashCoverPath { get; init; }
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }

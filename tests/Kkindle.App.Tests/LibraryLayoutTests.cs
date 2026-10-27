@@ -339,8 +339,41 @@ public sealed partial class SettingsTests
 
         scope.Get<MenuItem>("LibraryCollectionsViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
-        Assert.Equal("Collections", (await new AppSettingsStore(scope.Paths).LoadAsync()).LibraryViewMode);
+        Assert.Equal("List", (await new AppSettingsStore(scope.Paths).LoadAsync()).LibraryViewMode);
         Assert.False(scope.Get<Border>("SettingsSavedCapsule").IsVisible);
+    });
+
+    [Fact]
+    public Task LibraryViewAndSortRestoreFromSettings() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create(new AppSettings
+        {
+            UiLanguage = "zh-CN",
+            OnboardingCompleted = true,
+            NetworkEnabled = false,
+            AutoUpdateCheckEnabled = false,
+            AutoConnectDevice = false,
+            LibraryViewMode = "List",
+            LibrarySortMode = nameof(LibrarySortMode.TitleAscending)
+        });
+
+        Assert.True(scope.Get<ListBox>("BookList").IsVisible);
+        Assert.False(scope.Get<ListBox>("BookGrid").IsVisible);
+        Assert.Equal(LibrarySortMode.TitleAscending, scope.Window.ViewModel.SortMode);
+        Assert.Equal((int)LibrarySortMode.TitleAscending, scope.Get<ComboBox>("LibrarySortBox").SelectedIndex);
+    });
+
+    [Fact]
+    public Task LibraryViewAndSortPersist() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Get<MenuItem>("LibraryListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        scope.Get<ComboBox>("LibrarySortBox").SelectedIndex = (int)LibrarySortMode.AuthorAscending;
+        Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
+
+        var saved = await new AppSettingsStore(scope.Paths).LoadAsync();
+        Assert.Equal("List", saved.LibraryViewMode);
+        Assert.Equal(nameof(LibrarySortMode.AuthorAscending), saved.LibrarySortMode);
     });
 
     [Fact]

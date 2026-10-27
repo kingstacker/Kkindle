@@ -86,7 +86,29 @@ public partial class MainWindow
     private void InitializeDeviceShelfControls()
     {
         _deviceShelfControlsReady = true;
-        SetDeviceBookView(true);
+        RestoreDeviceShelfState();
+    }
+
+    private void RestoreDeviceShelfState()
+    {
+        SetDeviceBookView(
+            !_appSettings.DeviceLibraryViewMode.Equals("List", StringComparison.OrdinalIgnoreCase),
+            persist: false);
+        SelectComboBoxItemByTag(DeviceBookSortBox, _appSettings.DeviceBookSortMode);
+        ApplyDeviceBookFilter();
+    }
+
+    private static void SelectComboBoxItemByTag(ComboBox comboBox, string? value)
+    {
+        for (var index = 0; index < comboBox.Items.Count; index++)
+        {
+            if (comboBox.Items[index] is ComboBoxItem item
+                && string.Equals(item.Tag?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+            {
+                comboBox.SelectedIndex = index;
+                return;
+            }
+        }
     }
 
     private void DeviceToolbar_SizeChanged(object? sender, SizeChangedEventArgs e)
@@ -104,18 +126,12 @@ public partial class MainWindow
     }
 
     private void DeviceViewToggleButton_Click(object? sender, RoutedEventArgs e) =>
-        DeviceViewToggleButton.ContextMenu?.Open(DeviceViewToggleButton);
-
-    private void DeviceViewMenuItem_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem { Tag: "Grid" }) SetDeviceBookView(true);
-        else if (sender is MenuItem { Tag: "List" }) SetDeviceBookView(false);
-    }
+        SetDeviceBookView(!_deviceGridView);
 
     private void RefreshDeviceShelfLanguage()
     {
         if (!_deviceShelfControlsReady) return;
-        SetDeviceBookView(_deviceGridView);
+        SetDeviceBookView(_deviceGridView, persist: false);
         // Refresh the ComboBox's cached selected content after the language resources change.
         _deviceShelfControlsReady = false;
         try { RestoreComboBoxSelection(DeviceBookSortBox, DeviceBookSortBox.SelectedIndex); }

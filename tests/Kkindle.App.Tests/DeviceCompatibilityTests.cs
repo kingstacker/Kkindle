@@ -51,6 +51,39 @@ public sealed partial class SettingsTests
     });
 
     [Fact]
+    public Task DeviceShelfScansBooksOnceWhenOpenedOrManuallyRefreshed() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var kindle = Reader(scope, "KINDLE", ReaderDeviceProfiles.Kindle);
+        var service = new ReaderService
+        {
+            Devices = [kindle],
+            BooksReader = _ => Task.FromResult<IReadOnlyList<KindleBook>>(
+            [
+                new KindleBook
+                {
+                    RelativePath = "documents/one.epub",
+                    Title = "只扫描一次",
+                    Format = "epub"
+                }
+            ])
+        };
+        await UseReaderServiceAsync(scope, service);
+
+        await scope.Call<Task>("OpenKindlePageAsync");
+        if (scope.Field<Task?>("_deviceWarmTask") is { } warm)
+            await warm;
+
+        Assert.Equal(1, service.ScanRequests);
+        Assert.Single(scope.Window.DeviceBooks);
+
+        await scope.Call<Task>("RefreshDevicesManuallyAsync");
+
+        Assert.Equal(2, service.ScanRequests);
+        Assert.Single(scope.Window.DeviceBooks);
+    });
+
+    [Fact]
     public Task DeviceCompatibilityDiscardsAnEarlierScanAfterMultipleReadersConnect() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -267,11 +300,19 @@ public sealed partial class SettingsTests
         public Func<IProgress<KindleScanProgress>?, Task<IReadOnlyList<KindleBook>>>? ProgressiveBooksReader { get; init; }
         public int RemovedBooks { get; private set; }
         public int ContentRequests { get; private set; }
+        public int ScanRequests { get; private set; }
         public int ResourceRequests { get; private set; }
         public Task<IReadOnlyList<KindleDevice>> DetectDevicesAsync(CancellationToken cancellationToken = default) => Task.FromResult(Devices);
         public Task<IReadOnlyList<KindleBook>> ScanBooksAsync(KindleDevice device, CancellationToken cancellationToken = default)
-        { ContentRequests++; return BooksReader?.Invoke(device) ?? Task.FromResult<IReadOnlyList<KindleBook>>([]); }
-        public Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(KindleDevice device, IProgress<KindleScanProgress>? progress = null, CancellationToken cancellationToken = default) => ProgressiveBooksReader?.Invoke(progress) ?? ScanBooksAsync(device, cancellationToken);
+        { ContentRequests++; ScanRequests++; return BooksReader?.Invoke(device) ?? Task.FromResult<IReadOnlyList<KindleBook>>([]); }
+        public Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(KindleDevice device, IProgress<KindleScanProgress>? progress = null, CancellationToken cancellationToken = default)
+        {
+            ContentRequests++;
+            ScanRequests++;
+            return ProgressiveBooksReader?.Invoke(progress)
+                ?? BooksReader?.Invoke(device)
+                ?? Task.FromResult<IReadOnlyList<KindleBook>>([]);
+        }
         public Task<IReadOnlyList<KindleDeviceResource>> ScanResourcesAsync(KindleDevice device, KindleResourceKind kind, CancellationToken cancellationToken = default)
         { ContentRequests++; ResourceRequests++; return Task.FromResult<IReadOnlyList<KindleDeviceResource>>([]); }
         public Task<IReadOnlyList<KindleClipping>> ReadClippingsAsync(KindleDevice device, CancellationToken cancellationToken = default, int maxItems = int.MaxValue)

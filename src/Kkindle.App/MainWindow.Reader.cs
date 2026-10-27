@@ -1073,9 +1073,7 @@ public partial class MainWindow
                 CalculateReaderProgressPercent(),
                 0,
                 DateTimeOffset.UtcNow);
-            try { await _readerData.SaveProgressAsync(pdfProgress, cancellationToken); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-            catch { }
+            await _readerProgressRecovery.SaveAsync(pdfProgress, cancellationToken);
             return;
         }
 
@@ -1113,17 +1111,7 @@ public partial class MainWindow
             ContentPosition = contentPosition
         };
 
-        try
-        {
-            await _readerData.SaveProgressAsync(progress, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch
-        {
-            // Progress is best-effort and must not make a readable chapter fail.
-        }
+        await _readerProgressRecovery.SaveAsync(progress, cancellationToken);
     }
 
     private static bool UriEquals(Uri? left, Uri right) =>

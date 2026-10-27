@@ -1965,12 +1965,6 @@
                             </ComboBox>
                         <Button x:Name="DeviceBookSortButton" Classes="quiet libraryToolbar" Tag="DeviceBookSortBox" Click="ShelfSortButton_Click" ToolTip.Tip="{DynamicResource Ui.Auto.A96C9A854190874D}" AutomationProperties.Name="{DynamicResource Ui.Auto.A96C9A854190874D}"><Path Classes="libraryGlyph" Data="M 7,3 V 21 M 3,7 L 7,3 L 11,7 M 17,3 V 21 M 13,17 L 17,21 L 21,17" /></Button></Grid></Border>
                         <Button x:Name="DeviceViewToggleButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.EE20B1318E9AFE1B}" AutomationProperties.Name="{DynamicResource Ui.Auto.EE20B1318E9AFE1B}" Click="DeviceViewToggleButton_Click">
-                            <Button.ContextMenu>
-                                <ContextMenu Classes="shelfViewMenu" Placement="BottomEdgeAlignedRight">
-                                    <MenuItem x:Name="DeviceGridViewMenuItem" Header="{DynamicResource Ui.Auto.A35441DB5CD16882}" Tag="Grid" ToggleType="Radio" Click="DeviceViewMenuItem_Click" />
-                                    <MenuItem x:Name="DeviceListViewMenuItem" Header="{DynamicResource Ui.Auto.D56220435194BC1E}" Tag="List" ToggleType="Radio" Click="DeviceViewMenuItem_Click" />
-                                </ContextMenu>
-                            </Button.ContextMenu>
                             <Path x:Name="DeviceViewToggleIcon" Classes="libraryGlyph" />
                         </Button>
                         <Button x:Name="RefreshDeviceBooksButton" Classes="quiet libraryToolbar" ToolTip.Tip="{DynamicResource Ui.Auto.4470BFD2C729D4A2}" AutomationProperties.Name="{DynamicResource Ui.Auto.4470BFD2C729D4A2}" Click="RefreshDevicesButton_Click">

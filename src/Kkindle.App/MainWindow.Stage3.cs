@@ -546,13 +546,16 @@ public partial class MainWindow
         _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(cancellationToken);
         SetTaskStatus(T("正在初始化阅读数据…"));
         await _readerData.InitializeAsync(cancellationToken);
+        await _readerProgressRecovery.InitializeAsync(cancellationToken);
         SetTaskStatus(T("正在初始化同步记录…"));
         await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken, _s3SyncStoredSettings.DeviceId);
         SetTaskStatus(T("正在初始化设备设置…"));
         await _deviceModelStore.InitializeAsync(cancellationToken);
         SetTaskStatus(T("正在读取应用设置…"));
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
-        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode));
+        ViewModel.SortMode = ParseLibrarySortMode(_appSettings.LibrarySortMode);
+        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode), persist: false);
+        RestoreDeviceShelfState();
         ApplyMainAppearance();
         ApplyReaderAppearance();
         SyncReaderAppearanceControls();
@@ -1275,7 +1278,7 @@ public partial class MainWindow
     {
         if (BlockNavigationWhileTransferring()) return;
         ShowStage3Page(DevicePage);
-        await RefreshDevicesAsync(scanBooks: true);
+        await RefreshDevicesAsync(scanBooks: false);
         if (CurrentDevice is not null && (!_deviceBooksLoaded || _deviceBooksDirty))
         {
             _deviceBooksDirty = false;
@@ -1286,9 +1289,12 @@ public partial class MainWindow
     private async void KindleBooksButton_Click(object? sender, RoutedEventArgs e) => await OpenKindlePageAsync();
 
     private async void RefreshDevicesButton_Click(object? sender, RoutedEventArgs e)
+        => await RefreshDevicesManuallyAsync();
+
+    private async Task RefreshDevicesManuallyAsync()
     {
         _manuallyDisconnectedDeviceId = null;
-        await RefreshDevicesAsync(scanBooks: DevicePage.IsVisible);
+        await RefreshDevicesAsync(scanBooks: false);
         if (DevicePage.IsVisible && CurrentDevice is not null)
             await RefreshDeviceBooksAsync();
     }
@@ -1309,7 +1315,7 @@ public partial class MainWindow
         DeviceBookSelectionText.Text = selected.Count == 0 ? string.Empty : T("已选择 {0} 本书", selected.Count);
     }
 
-    private void SetDeviceBookView(bool gridView)
+    private void SetDeviceBookView(bool gridView, bool persist = true)
     {
         _deviceGridView = gridView;
         DeviceBookGridScroll.IsVisible = gridView;
@@ -1317,9 +1323,9 @@ public partial class MainWindow
         var viewDescription = $"{T("切换视图")} · {T(gridView ? "网格视图" : "列表视图")}";
         ToolTip.SetTip(DeviceViewToggleButton, viewDescription);
         DeviceViewToggleIcon.Data = Geometry.Parse(gridView ? LibraryGridGlyphData : LibraryListGlyphData);
-        DeviceGridViewMenuItem.IsChecked = gridView;
-        DeviceListViewMenuItem.IsChecked = !gridView;
         AutomationProperties.SetName(DeviceViewToggleButton, viewDescription);
+        if (persist)
+            ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void DeviceBookSearchBox_TextChanged(object? sender, TextChangedEventArgs e)
@@ -1344,16 +1350,27 @@ public partial class MainWindow
         if (!_deviceShelfControlsReady) return;
         ClearDeviceBookSelection();
         ApplyDeviceBookFilter();
+        if (ReferenceEquals(sender, DeviceBookSortBox))
+            ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void ClearDeviceBookFiltersButton_Click(object? sender, RoutedEventArgs e)
     {
-        DeviceBookSearchBox.Text = string.Empty;
-        DeviceBookFormatFilterBox.SelectedIndex = 0;
-        DeviceBookPresenceFilterBox.SelectedIndex = 0;
-        DeviceBookSortBox.SelectedIndex = 0;
+        _deviceShelfControlsReady = false;
+        try
+        {
+            DeviceBookSearchBox.Text = string.Empty;
+            DeviceBookFormatFilterBox.SelectedIndex = 0;
+            DeviceBookPresenceFilterBox.SelectedIndex = 0;
+            DeviceBookSortBox.SelectedIndex = 0;
+        }
+        finally
+        {
+            _deviceShelfControlsReady = true;
+        }
         ClearDeviceBookSelection();
         ApplyDeviceBookFilter();
+        ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void ApplyDeviceBookFilter()
@@ -6337,7 +6354,10 @@ public partial class MainWindow
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
             SendToKindleWebEnabled = SendToKindleWebEnabledCheck.IsChecked != false,
             GridGalleryDisplay = GridGalleryDisplayCheck.IsChecked == true,
-            LibraryViewMode = _libraryViewMode.ToString(),
+            LibraryViewMode = _lastNonCollectionLibraryViewMode.ToString(),
+            LibrarySortMode = ViewModel.SortMode.ToString(),
+            DeviceLibraryViewMode = _deviceGridView ? "Grid" : "List",
+            DeviceBookSortMode = (DeviceBookSortBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "title",
             ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
             ShowUnearnedReadingMedals = _showUnearnedReadingMedals,
@@ -6573,6 +6593,7 @@ public partial class MainWindow
             _lastS3SyncAt = null;
             await _library.InitializeAsync(_lifetimeCancellation.Token);
             await _readerData.InitializeAsync(_lifetimeCancellation.Token);
+            await _readerProgressRecovery.InitializeAsync(_lifetimeCancellation.Token);
             await _s3SyncService.InitializeDeletionTrackingAsync(_lifetimeCancellation.Token, _s3SyncStoredSettings.DeviceId);
             _appSettings = await _appSettingsStore.LoadAsync(_lifetimeCancellation.Token);
             LoadReaderVerticalDebugBoxesSetting();

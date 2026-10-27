@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Kkindle.Core;
 using SkiaSharp;
@@ -10,6 +11,65 @@ namespace Kkindle.Ui.Tests;
 
 public sealed partial class SettingsTests
 {
+    [Fact]
+    public Task SwitchingLibraryViewsKeepsCoversAndCloudOnlyBooksVisible() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var coverPath = Path.Combine(scope.Paths.Data, "switch-cover.png");
+        using (var bitmap = new SKBitmap(32, 48))
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.CornflowerBlue);
+            using var stream = File.Create(coverPath);
+            bitmap.Encode(stream, SKEncodedImageFormat.Png, 100);
+        }
+
+        var cards = Enumerable.Range(0, 24).Select(index => new BookCardViewModel(new Book
+        {
+            Id = Guid.NewGuid(), Title = $"Switch book {index}", Authors = "Test",
+            CoverPath = "switch-cover.png",
+            Files = [new BookFile { Id = Guid.NewGuid(), Format = "epub", RelativePath = $"missing-{index}.epub" }]
+        }, scope.Paths.Data)).ToArray();
+        cards[1].SetSyncStatus(BookSyncStatus.NotDownloaded);
+        cards[^1].SetSyncStatus(BookSyncStatus.NotDownloaded);
+        foreach (var card in cards) scope.Window.ViewModel.Books.Add(card);
+        await Render();
+        await Until(() => cards[1].CoverImage is not null);
+
+        scope.Get<MenuItem>("LibraryListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        await Render();
+        var list = scope.Get<ListBox>("BookList");
+        Assert.Contains(cards[1], list.ItemsSource!.Cast<object>());
+        var cloudRow = Assert.Single(list.GetVisualDescendants().OfType<Border>(),
+            row => row.Classes.Contains("bookRow") && ReferenceEquals(row.DataContext, cards[1]));
+        Assert.True(cloudRow.IsEffectivelyVisible);
+        Assert.True(cards[1].SyncNotDownloadedVisibility);
+        await Until(() => cards[1].CoverImage is not null);
+
+        var listViewer = Assert.Single(list.GetVisualDescendants().OfType<ScrollViewer>());
+        listViewer.Offset = new Vector(0, listViewer.Extent.Height);
+        await Render();
+        var lastCloudRow = Assert.Single(list.GetVisualDescendants().OfType<Border>(),
+            row => row.Classes.Contains("bookRow") && ReferenceEquals(row.DataContext, cards[^1]));
+        Assert.True(lastCloudRow.IsEffectivelyVisible);
+        Assert.True(cards[^1].SyncNotDownloadedVisibility);
+        await Until(() => cards[^1].CoverImage is not null);
+        scope.Get<Button>("LibraryViewToggleButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Render();
+        scope.Get<Button>("LibraryViewToggleButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Render();
+        var grid = scope.Get<ListBox>("BookGrid");
+        var visibleCards = grid.GetVisualDescendants().OfType<Grid>()
+            .Where(control => control.Width == 154 && control.DataContext is BookCardViewModel)
+            .Select(control => (BookCardViewModel)control.DataContext!).Distinct().ToArray();
+        Assert.NotEmpty(visibleCards);
+        await Until(() => visibleCards.All(card => card.CoverImage is not null));
+        Assert.Contains(cards[1], visibleCards);
+        var gridCard = Assert.Single(grid.GetVisualDescendants().OfType<Grid>(),
+            control => control.Width == 154 && ReferenceEquals(control.DataContext, cards[1]));
+        Assert.Contains(gridCard.GetVisualDescendants().OfType<Image>(), image => ReferenceEquals(image.Source, cards[1].CoverImage));
+    });
+
     [Fact]
     public Task LibraryRefreshKeepsCardSelectionAndCoverAndShowsAsyncDetailCover() => Run(async () =>
     {

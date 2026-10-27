@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Kkindle.Core;
+using Kkindle.Infrastructure;
 using Xunit;
 
 namespace Kkindle.Ui.Tests;
@@ -39,18 +40,9 @@ public sealed partial class SettingsTests
 
         var viewButton = scope.Get<Button>("DeviceViewToggleButton");
         viewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.True(viewButton.ContextMenu!.IsOpen);
-        Assert.True(scope.Get<MenuItem>("DeviceGridViewMenuItem").IsChecked);
-        await Render();
-        var selectedView = scope.Get<MenuItem>("DeviceGridViewMenuItem");
-        var selectedViewText = selectedView.GetVisualDescendants().OfType<TextBlock>().Single();
-        Assert.NotEqual(
-            Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(selectedView.Background).Color,
-            Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(selectedViewText.Foreground).Color);
-        Capture(scope.Window, $"{language}-{width}-kindle-view-menu");
-        viewButton.ContextMenu.Close();
-        scope.Get<MenuItem>("DeviceListViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Null(viewButton.ContextMenu);
         Assert.True(scope.Get<ScrollViewer>("DeviceBookListScroll").IsVisible);
+        await Render();
         Assert.Equal(3, scope.Window.VisibleDeviceBooks.Count);
         await Render();
         Assert.Equal(gridToolbarBounds, GetToolbarControlBounds(scope.Get<StackPanel>("DeviceToolbarActions"), scope.Window));
@@ -67,7 +59,7 @@ public sealed partial class SettingsTests
         scope.Get<ComboBox>("DeviceBookFormatFilterBox").SelectedIndex = 2;
         Assert.Single(scope.Window.VisibleDeviceBooks);
         Assert.Equal("pdf", scope.Window.VisibleDeviceBooks[0].Book.Format);
-        scope.Get<MenuItem>("DeviceGridViewMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        viewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.True(scope.Get<ScrollViewer>("DeviceBookGridScroll").IsVisible);
         Assert.Single(scope.Window.VisibleDeviceBooks);
         scope.Get<Button>("DeviceBookFilterButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -93,4 +85,36 @@ public sealed partial class SettingsTests
         var toolbarRight = toolbar.TranslatePoint(default, scope.Window)!.Value.X + toolbar.Bounds.Width;
         Assert.InRange(Math.Abs(toolbarRight - actionsPosition.X - actions.Bounds.Width), 0, 1);
     }
+
+    [Fact]
+    public Task DeviceLibraryViewAndSortRestoreFromSettings() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create(new AppSettings
+        {
+            UiLanguage = "zh-CN",
+            OnboardingCompleted = true,
+            NetworkEnabled = false,
+            AutoUpdateCheckEnabled = false,
+            AutoConnectDevice = false,
+            DeviceLibraryViewMode = "List",
+            DeviceBookSortMode = "author"
+        });
+
+        Assert.True(scope.Get<ScrollViewer>("DeviceBookListScroll").IsVisible);
+        Assert.False(scope.Get<ScrollViewer>("DeviceBookGridScroll").IsVisible);
+        Assert.Equal("author", (scope.Get<ComboBox>("DeviceBookSortBox").SelectedItem as ComboBoxItem)?.Tag);
+    });
+
+    [Fact]
+    public Task DeviceLibraryViewAndSortPersist() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Get<Button>("DeviceViewToggleButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        scope.Get<ComboBox>("DeviceBookSortBox").SelectedIndex = 2;
+        Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
+
+        var saved = await new AppSettingsStore(scope.Paths).LoadAsync();
+        Assert.Equal("List", saved.DeviceLibraryViewMode);
+        Assert.Equal("modified", saved.DeviceBookSortMode);
+    });
 }

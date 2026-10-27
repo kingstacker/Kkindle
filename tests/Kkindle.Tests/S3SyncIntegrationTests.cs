@@ -780,6 +780,43 @@ public sealed partial class S3SyncIntegrationTests
         Assert.Equal(0, (await b.SyncAsync()).SettingsApplied);
     }
 
+    [Fact]
+    public async Task CleanupFailureMarksSyncPartialUntilTheNextSuccessfulCleanup()
+    {
+        var bucket = new MemoryBucket();
+        await using var device = await Device.CreateAsync(bucket);
+        var retiredDeviceId = Guid.NewGuid().ToString("N");
+        var retiredKey = $"{device.Settings.Prefix}/devices/{retiredDeviceId}/snapshot.bin";
+        var retiredAt = DateTime.UtcNow.AddDays(-366);
+        bucket.Objects[retiredKey] = MemoryBucket.Encode(new S3SyncSnapshot
+        {
+            DeviceId = retiredDeviceId,
+            CreatedAt = new DateTimeOffset(retiredAt, TimeSpan.Zero)
+        });
+        bucket.ModifiedTimes[retiredKey] = retiredAt;
+        var failedOnce = false;
+        bucket.BeforeDelete = (key, _) =>
+        {
+            if (key == retiredKey && !failedOnce)
+            {
+                failedOnce = true;
+                throw new IOException("simulated cleanup failure");
+            }
+            return Task.CompletedTask;
+        };
+
+        var partial = await device.SyncAsync();
+
+        Assert.True(partial.IsPartial);
+        Assert.Contains(retiredKey, bucket.Objects.Keys);
+
+        bucket.BeforeDelete = null;
+        var resumed = await device.SyncAsync();
+
+        Assert.False(resumed.IsPartial);
+        Assert.DoesNotContain(retiredKey, bucket.Objects.Keys);
+    }
+
     private sealed class InlineProgress(Action<string> report) : IProgress<string>
     {
         public void Report(string value) => report(value);
@@ -904,6 +941,7 @@ public sealed partial class S3SyncIntegrationTests
         public ConcurrentDictionary<string, DateTime> ModifiedTimes { get; } = new(StringComparer.Ordinal);
         public Func<string, CancellationToken, Task>? BeforeGet;
         public Func<string, byte[], Task>? BeforePut;
+        public Func<string, CancellationToken, Task>? BeforeDelete;
         public S3SyncSnapshot Snapshot(string key) => Decode(Objects[key]);
         public static byte[] Encode(S3SyncSnapshot snapshot)
         {
@@ -943,11 +981,12 @@ public sealed partial class S3SyncIntegrationTests
             return new GetObjectResponse { ContentLength = bytes.Length, ResponseStream = new MemoryStream(bytes, false), HttpStatusCode = HttpStatusCode.OK };
         }
 
-        public override Task<DeleteObjectResponse> DeleteObjectAsync(DeleteObjectRequest request, CancellationToken cancellationToken = default)
+        public override async Task<DeleteObjectResponse> DeleteObjectAsync(DeleteObjectRequest request, CancellationToken cancellationToken = default)
         {
+            if (bucket.BeforeDelete is { } before) await before(request.Key, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             bucket.Objects.TryRemove(request.Key, out _);
-            return Task.FromResult(new DeleteObjectResponse { HttpStatusCode = HttpStatusCode.NoContent });
+            return new DeleteObjectResponse { HttpStatusCode = HttpStatusCode.NoContent };
         }
 
         public override async Task<PutObjectResponse> PutObjectAsync(PutObjectRequest request, CancellationToken cancellationToken = default)

@@ -612,7 +612,9 @@ public sealed partial class S3SyncService
                 databaseResult.Changed || settingsChanged,
                 warning.Length == 0 ? null : warning)
             {
-                IsPartial = uploadWarning is not null || databaseResult.IsPartial
+                IsPartial = uploadWarning is not null
+                    || cleanupWarning is not null
+                    || databaseResult.IsPartial
             };
         }
         finally

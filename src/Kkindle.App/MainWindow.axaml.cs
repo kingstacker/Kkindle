@@ -84,6 +84,7 @@ public partial class MainWindow : Window
     private readonly FontLibraryService _fontLibrary;
     private readonly DictionaryService _dictionaryService;
     private readonly ReaderDataService _readerData;
+    private readonly ReaderProgressRecoveryService _readerProgressRecovery;
     private readonly EpubBookContentService _bookContent;
     private readonly EmbeddingModelDownloadService _embeddingModelDownloader;
     private readonly G2PWModelDownloadService _g2pwModelDownloader;
@@ -136,11 +137,13 @@ public partial class MainWindow : Window
     private bool _updatingFilterControls;
     private bool _updatingDetails;
     private LibraryViewMode _libraryViewMode = LibraryViewMode.Grid;
+    private LibraryViewMode _lastNonCollectionLibraryViewMode = LibraryViewMode.Grid;
     private VirtualizingWrapPanel? _bookGridPanel;
     private BookCardViewModel? _selectedCard;
     private BookCardViewModel? _multiSelectAnchor;
     private readonly HashSet<Guid> _selectedBookIds = [];
     private readonly HashSet<BookCardViewModel> _visibleBookCards = [];
+    private readonly Dictionary<Control, BookCardViewModel> _bookCardControls = [];
     private readonly HashSet<BookCardViewModel> _pdfCoverRequests = [];
     private TaskCompletionSource<bool>? _confirmationCompletion;
     private TaskCompletionSource<BookRemovalChoice>? _bookRemovalCompletion;
@@ -212,6 +215,7 @@ public partial class MainWindow : Window
         _fontLibrary = new FontLibraryService(paths);
         _dictionaryService = new DictionaryService(paths, _formatConverter);
         _readerData = new ReaderDataService(paths);
+        _readerProgressRecovery = new ReaderProgressRecoveryService(paths, _readerData);
         _bookContent = new EpubBookContentService(_readerData);
         _embeddingModelDownloader = new EmbeddingModelDownloadService(paths);
         _g2pwModelDownloader = new G2PWModelDownloadService(
@@ -257,6 +261,7 @@ public partial class MainWindow : Window
             ? new UpdateService(updateInstaller)
             : null;
         ViewModel = new LibraryViewModel(library, paths.Data);
+        ViewModel.SortMode = ParseLibrarySortMode(_appSettings.LibrarySortMode);
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
@@ -459,7 +464,7 @@ public partial class MainWindow : Window
         UpdateMaximizeGlyph();
         UpdateWindowShadowMargin();
         SetSidebarActive(AllBooksButton);
-        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode));
+        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode), persist: false);
         InitializeDeviceShelfControls();
         UpdateLibraryUi();
         ConfigureStage3Timer();
@@ -1328,10 +1333,12 @@ public partial class MainWindow : Window
         TaskStatusText.Text = UiText.Localize(message);
     }
 
-    private void SetLibraryViewMode(LibraryViewMode mode)
+    private void SetLibraryViewMode(LibraryViewMode mode, bool persist = true)
     {
         if (mode == LibraryViewMode.Collections && _selectedCard is not null)
             ClearSelectedBook();
+        if (mode != LibraryViewMode.Collections)
+            _lastNonCollectionLibraryViewMode = mode;
         _libraryViewMode = mode;
         BookGrid.IsVisible = mode == LibraryViewMode.Grid;
         BookList.IsVisible = mode == LibraryViewMode.List;
@@ -1346,8 +1353,15 @@ public partial class MainWindow : Window
             _ => LibraryGridGlyphData
         });
         UpdateLibraryUi();
-        ScheduleAppSettingsAutoSave(showSavedStatus: false);
+        if (persist && mode != LibraryViewMode.Collections)
+            ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
+
+    private static LibrarySortMode ParseLibrarySortMode(string? value) =>
+        Enum.TryParse<LibrarySortMode>(value, ignoreCase: true, out var mode)
+        && Enum.IsDefined(mode)
+            ? mode
+            : LibrarySortMode.UpdatedDescending;
 
     private static LibraryViewMode ParseLibraryViewMode(string? value)
     {
@@ -1367,9 +1381,27 @@ public partial class MainWindow : Window
 
     private void BookCard_AttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        if (sender is not Control control || control.DataContext is not BookCardViewModel card)
-            return;
+        if (sender is not Control control) return;
+        control.DataContextChanged += BookCard_DataContextChanged;
+        UpdateBookCardControl(control);
+    }
 
+    private void BookCard_DataContextChanged(object? sender, EventArgs e)
+    {
+        if (sender is Control control) UpdateBookCardControl(control);
+    }
+
+    private void UpdateBookCardControl(Control control)
+    {
+        var card = control.DataContext as BookCardViewModel;
+        if (_bookCardControls.TryGetValue(control, out var previous))
+        {
+            if (ReferenceEquals(previous, card)) return;
+            ReleaseBookCardControl(control, previous);
+        }
+        if (card is null) return;
+
+        _bookCardControls[control] = card;
         _visibleBookCards.Add(card);
         card.LoadCover();
         if (card.CoverImage is null
@@ -1381,9 +1413,18 @@ public partial class MainWindow : Window
 
     private void BookCard_DetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        if (sender is not Control control || control.DataContext is not BookCardViewModel card)
-            return;
+        if (sender is not Control control) return;
+        control.DataContextChanged -= BookCard_DataContextChanged;
+        if (_bookCardControls.TryGetValue(control, out var card))
+            ReleaseBookCardControl(control, card);
+    }
 
+    private void ReleaseBookCardControl(Control control, BookCardViewModel card)
+    {
+        _bookCardControls.Remove(control);
+        // Grid and list can both retain a visual for the same card. One
+        // view recycling its visual must not release the other view's cover.
+        if (_bookCardControls.ContainsValue(card)) return;
         _visibleBookCards.Remove(card);
         // The detail pane may still be displaying this card after its grid
         // container was virtualized away. Keep that one bitmap alive until
@@ -4172,7 +4213,6 @@ public partial class MainWindow : Window
         ViewModel.CollectionFilterId = null;
         ViewModel.CollectionFilterName = null;
         ViewModel.RefreshView();
-        SetLibraryViewMode(LibraryViewMode.Grid);
     }
 
     private async void SearchBox_TextChanged(object? sender, TextChangedEventArgs e)
@@ -4461,6 +4501,8 @@ public partial class MainWindow : Window
             : (LibrarySortMode)LibrarySortBox.SelectedIndex;
         ViewModel.RefreshView();
         UpdateLibraryUi();
+        if (ReferenceEquals(sender, LibrarySortBox))
+            ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void ClearFiltersButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -4487,12 +4529,12 @@ public partial class MainWindow : Window
             FavoritesFilterBox.SelectedIndex = -1;
             LibrarySortBox.SelectedIndex = 0;
             ViewModel.RefreshView();
-            SetLibraryViewMode(LibraryViewMode.Grid);
         }
         finally
         {
             _updatingFilterControls = false;
         }
+        ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void BookList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
