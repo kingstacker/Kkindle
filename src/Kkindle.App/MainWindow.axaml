@@ -5891,7 +5891,7 @@
                                     </ItemsControl>
                                 </StackPanel>
                             </ScrollViewer>
-                            <Border x:Name="ReaderAiTurnNavigation" Width="26" Padding="0,8"
+                            <Border x:Name="ReaderAiTurnNavigation" Classes="readerAiTurnNavigation" Width="26" Padding="0,8"
                                     HorizontalAlignment="Left" VerticalAlignment="Center"
                                     MaxHeight="{Binding Bounds.Height, ElementName=ReaderAiScrollViewer}"
                                     Background="Transparent" ClipToBounds="True" IsVisible="False" ZIndex="22">
