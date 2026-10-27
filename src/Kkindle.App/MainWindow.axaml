@@ -5731,7 +5731,7 @@
                             Background="Transparent"
                             BorderBrush="{DynamicResource ReaderBorderBrush}"
                             BorderThickness="0,0,0,1">
-                        <Grid Margin="8,2" ColumnDefinitions="*,*,Auto,Auto" ColumnSpacing="4">
+                        <Grid x:Name="ReaderAssistantTabsGrid" Margin="8,2" ColumnDefinitions="*,*,Auto,Auto" ColumnSpacing="2">
                             <Button x:Name="ReaderAiTabButton"
                                     Grid.Column="0"
                                     Classes="readerAssistantTab active"
@@ -5748,7 +5748,7 @@
                                     Grid.Column="2"
                                     Classes="readerAssistantTab"
                                     Content="缩略图"
-                                    MinWidth="44"
+                                    HorizontalAlignment="Stretch"
                                     ToolTip.Tip="页面缩略图"
                                     IsVisible="False"
                                     Click="ReaderPdfThumbnailsButton_Click" />
@@ -5891,6 +5891,14 @@
                                     </ItemsControl>
                                 </StackPanel>
                             </ScrollViewer>
+                            <Border x:Name="ReaderAiTurnNavigation" Width="26" Padding="0,8"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                                    MaxHeight="{Binding Bounds.Height, ElementName=ReaderAiScrollViewer}"
+                                    Background="Transparent" ClipToBounds="True" IsVisible="False" ZIndex="22">
+                                <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" MaxHeight="280">
+                                    <StackPanel x:Name="ReaderAiTurnMarkers" Spacing="2" />
+                                </ScrollViewer>
+                            </Border>
                             <Grid x:Name="ReaderAiComposer" Grid.Row="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="10" Margin="20,8,20,16" SizeChanged="ReaderAiComposer_SizeChanged">
                                 <Button x:Name="ReaderAiNewContentButton" Content="{DynamicResource Ui.Auto.07E68FA158F2077C}" Classes="readerAiQuickOption" IsVisible="False" HorizontalAlignment="Center" Click="ReaderAiNewContentButton_Click" />
                                 <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">

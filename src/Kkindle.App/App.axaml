@@ -2075,6 +2075,36 @@
         <Style Selector="Button.readerAssistantTab.active">
             <Setter Property="FontWeight" Value="Bold" />
         </Style>
+        <Style Selector="Button.readerAiTurnMarker">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="Height" Value="12" />
+            <Setter Property="MinHeight" Value="12" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.readerAiTurnMarker Border.readerAiTurnLine">
+            <Setter Property="Width" Value="10" />
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource ReaderMutedBrush}" />
+            <Setter Property="Opacity" Value="0.55" />
+        </Style>
+        <Style Selector="Button.readerAiTurnMarker:pointerover Border.readerAiTurnLine">
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Background" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Button.readerAiTurnMarker.active Border.readerAiTurnLine">
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="2" />
+            <Setter Property="Background" Value="{DynamicResource ReaderInkBrush}" />
+            <Setter Property="Opacity" Value="1" />
+        </Style>
         <Style Selector="Border.readerAiDraftImage">
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="1" />

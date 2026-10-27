@@ -1224,6 +1224,7 @@
     <x:String x:Key="Ui.Auto.283EA644251E1EB8">Format conversion: {0}%</x:String>
     <x:String x:Key="Ui.Auto.30FDBC552B7102C2">Check for updates failed: {0}</x:String>
     <x:String x:Key="Ui.Auto.4F38C80B86DFB035">A device task is in progress; the device will disconnect automatically when it finishes.</x:String>
+    <x:String x:Key="Ui.Auto.06B2117D58CC6295">Downloading</x:String>
     <x:String x:Key="Ui.Auto.55C420F2315CE061">Downloading Kkindle {0} · {1:0}%</x:String>
     <x:String x:Key="Ui.Auto.18E62101DF71C67E">Downloading Kkindle {0}...</x:String>
     <x:String x:Key="Ui.Auto.F3E3DED66EB64DB3">Downloading {0:0}%</x:String>

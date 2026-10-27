@@ -701,6 +701,7 @@ public partial class MainWindow
 
     private void ReaderAiScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
+        UpdateReaderAiTurnNavigationSelection();
         // Extent/viewport changes are layout-only and must not flip follow mode.
         // If layout also changes the offset (for example, while the user scrolls
         // away as a streamed answer grows), the offset delta is still meaningful.

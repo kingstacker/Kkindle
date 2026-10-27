@@ -394,11 +394,9 @@ public partial class MainWindow
                     || (task.CanCancel && !_displayOnlyTaskIds.Contains(task.Id)));
             if (canCancel || task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued))
             {
-                var succeeded = task.Status == BackgroundTaskStatus.Succeeded;
-                var actionLabel = canCancel ? T("取消") : succeeded ? T("已完成") : T("删除");
+                var actionLabel = canCancel ? T("取消") : T("删除");
                 var delete = CreateTaskHistoryButton(actionLabel, canCancel
                     ? "M 3,3 L 13,13 M 13,3 L 3,13"
-                    : succeeded ? "M 3,8 L 6,11 L 13,4"
                     : "M 2,4 L 14,4 M 6,4 L 6,2 L 10,2 L 10,4 M 4,4 L 5,14 L 11,14 L 12,4 M 7,6 L 7,12 M 9,6 L 9,12");
                 delete.Click += async (_, _) =>
                 {
@@ -413,13 +411,24 @@ public partial class MainWindow
                 heading.Children.Add(delete);
             }
             row.Children.Add(heading);
-            if (!string.IsNullOrWhiteSpace(task.Stage) && task.Status != BackgroundTaskStatus.Succeeded)
-                row.Children.Add(new TextBlock { Text = task.Stage, FontSize = 12,
-                    Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-            if (task.ProgressTotal is > 0 && task.Status is BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued)
+            var stage = task.Status != BackgroundTaskStatus.Succeeded && task.Stage != task.Title
+                ? task.Stage : null;
+            var hasProgress = task.ProgressTotal is > 0
+                && task.Status is BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued;
+            if (hasProgress)
             {
-                row.Children.Add(new TextBlock { Text = T("进度：{0}/{1}", task.ProgressCurrent ?? 0, task.ProgressTotal), FontSize = 12 });
-                row.Children.Add(new ProgressBar { Maximum = task.ProgressTotal.Value, Value = task.ProgressCurrent ?? 0 });
+                var current = Math.Clamp(task.ProgressCurrent ?? 0, 0, task.ProgressTotal!.Value);
+                var progressText = task.ProgressTotal == 100
+                    ? $"{current}%"
+                    : T("进度：{0}/{1}", current, task.ProgressTotal);
+                stage = string.IsNullOrWhiteSpace(stage) ? progressText : stage + " · " + progressText;
+            }
+            if (!string.IsNullOrWhiteSpace(stage))
+                row.Children.Add(new TextBlock { Text = stage, FontSize = 12,
+                    Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+            if (hasProgress)
+            {
+                row.Children.Add(new ProgressBar { Maximum = task.ProgressTotal!.Value, Value = task.ProgressCurrent ?? 0 });
             }
             else if (task.Status is BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued)
                 row.Children.Add(new ProgressBar { IsIndeterminate = true });

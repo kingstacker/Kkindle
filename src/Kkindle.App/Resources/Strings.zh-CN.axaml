@@ -1224,6 +1224,7 @@
     <x:String x:Key="Ui.Auto.283EA644251E1EB8">格式转换：{0}%</x:String>
     <x:String x:Key="Ui.Auto.30FDBC552B7102C2">检查更新失败：{0}</x:String>
     <x:String x:Key="Ui.Auto.4F38C80B86DFB035">检测到设备任务正在进行，完成后将自动断开设备。</x:String>
+    <x:String x:Key="Ui.Auto.06B2117D58CC6295">正在下载</x:String>
     <x:String x:Key="Ui.Auto.55C420F2315CE061">正在下载 Kkindle {0} · {1:0}%</x:String>
     <x:String x:Key="Ui.Auto.18E62101DF71C67E">正在下载 Kkindle {0}…</x:String>
     <x:String x:Key="Ui.Auto.F3E3DED66EB64DB3">正在下载 {0:0}%</x:String>

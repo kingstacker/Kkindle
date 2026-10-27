@@ -272,6 +272,7 @@ public partial class MainWindow : Window
             AttachInstantMenuHover(readerMoreMenu);
         InitializeBookTranslationControls();
         InitializeReaderEmbeddingModelSelectors();
+        InitializeReaderAiTurnNavigation();
         // AcceptsReturn lets the TextBox handle Enter before a normal bubbled
         // handler can see it. Observe the tunneling phase, including an event
         // already marked handled, so Ctrl+Enter always reaches the AI sender

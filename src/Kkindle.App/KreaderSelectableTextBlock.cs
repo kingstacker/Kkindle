@@ -34,7 +34,8 @@ public class KreaderSelectableTextBlock : SelectableTextBlock
 
     public KreaderSelectableTextBlock()
     {
-        SelectionBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#665B9BD5"));
+        this.Bind(SelectionBrushProperty, new DynamicResourceExtension("InkBrush"));
+        this.Bind(SelectionForegroundBrushProperty, new DynamicResourceExtension("PaperBrush"));
         var copy = new MenuItem { Header = UiText.Get("复制") };
         var followUp = new MenuItem { Header = UiText.Get("追问") };
         var selectAll = new MenuItem { Header = UiText.Get("全选") };

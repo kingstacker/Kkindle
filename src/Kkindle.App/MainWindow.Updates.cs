@@ -269,13 +269,11 @@ public partial class MainWindow
         }
 
         var packagePath = await RunUpdateTaskAsync(
-            T("正在下载 Kkindle {0}…", update.Version), async (context, token) =>
+            $"Kkindle {update.Version}", async (context, token) =>
             {
-                context.ReportProgress(T("正在下载 Kkindle {0}…", update.Version), 0, 100);
+                context.ReportProgress(T("正在下载"), 0, 100);
                 var progress = new Progress<AppUpdateDownloadProgress>(value =>
-                    context.ReportProgress(value.TotalBytes is > 0
-                            ? T("正在下载 Kkindle {0} · {1:0}%", update.Version, value.Percentage)
-                            : T("正在下载 Kkindle {0}…", update.Version),
+                    context.ReportProgress(T("正在下载"),
                         value.TotalBytes is > 0 ? (int)value.Percentage : null,
                         value.TotalBytes is > 0 ? 100 : null));
                 var path = await _updateService.DownloadAsync(update, progress, token);
