@@ -6,6 +6,25 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.2 (2026-10-27)
+
+### Added
+
+- Navigate AI conversations with turn markers, hover previews, click-to-jump actions and a current-turn indicator; markers retract toward the edge when the pointer leaves.
+- Paste, preview and remove images in AI conversations, preserving image context in history and retries.
+- Read PDF and EPUB selections aloud with voice matching for Chinese, English and mixed text.
+
+### Improved
+
+- Select, copy and ask follow-up questions about AI response text, with black-and-white selection colors.
+- Unify selection action icons and annotation menus, and balance the widths and spacing of the AI, Highlights & Notes and Thumbnails tabs.
+- Remove repeated update-download text and progress information, and use a clear delete icon for task-history removal.
+
+### Fixed
+
+- Correct PDF rectangular annotation, annotation-card and EPUB annotation-popup interactions.
+- Improve translation response parsing reliability and line-break handling when copying PDF selections.
+
 ## 1.1.1 (2026-10-25)
 
 ### Added
