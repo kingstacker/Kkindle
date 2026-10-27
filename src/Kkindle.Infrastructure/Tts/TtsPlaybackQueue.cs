@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
@@ -10,12 +11,15 @@ namespace Kkindle.Infrastructure;
 /// </summary>
 public sealed class TtsPlaybackQueue : IDisposable
 {
+    private static readonly TimeSpan DefaultStopTimeout = TimeSpan.FromSeconds(2);
     private readonly ITtsEngine _engine;
     private readonly TtsCacheManager _cache;
-    private readonly SemaphoreSlim _generationSlots;
+    private readonly int _maxConcurrentGenerations;
+    private SemaphoreSlim _generationSlots;
     private readonly ConcurrentDictionary<
         string,
         Lazy<Task<TtsResult>>> _inflight = new(StringComparer.Ordinal);
+    private readonly HashSet<Task<TtsResult>> _activeTasks = [];
     private readonly object _gate = new();
     private CancellationTokenSource _sessionCancellation = new();
     private bool _disposed;
@@ -27,8 +31,8 @@ public sealed class TtsPlaybackQueue : IDisposable
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _generationSlots = new SemaphoreSlim(
-            Math.Clamp(maxConcurrentGenerations, 1, 2));
+        _maxConcurrentGenerations = Math.Clamp(maxConcurrentGenerations, 1, 2);
+        _generationSlots = new SemaphoreSlim(_maxConcurrentGenerations);
     }
 
     public CancellationToken SessionToken
@@ -43,15 +47,21 @@ public sealed class TtsPlaybackQueue : IDisposable
     /// Cancels all pending work from the previous run and starts a fresh
     /// session. Completed cache files are never removed.
     /// </summary>
-    public async Task<CancellationToken> BeginSessionAsync()
+    public Task<CancellationToken> BeginSessionAsync(
+        CancellationToken cancellationToken = default)
+        => BeginSessionAsync(DefaultStopTimeout, cancellationToken);
+
+    public async Task<CancellationToken> BeginSessionAsync(
+        TimeSpan stopTimeout,
+        CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        await StopAsync().ConfigureAwait(false);
+        await StopAsync(stopTimeout).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
 
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            _sessionCancellation.Dispose();
             _sessionCancellation = new CancellationTokenSource();
             return _sessionCancellation.Token;
         }
@@ -61,7 +71,6 @@ public sealed class TtsPlaybackQueue : IDisposable
         TtsQueueItem item,
         CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(item);
         var options = TtsOptions.Normalize(item.Options);
         var cachePath = _cache.GetCachePath(
@@ -75,8 +84,15 @@ public sealed class TtsPlaybackQueue : IDisposable
         var lazy = new Lazy<Task<TtsResult>>(
             () => GenerateAsync(item with { Options = options }, token),
             LazyThreadSafetyMode.ExecutionAndPublication);
-        var actual = _inflight.GetOrAdd(cachePath, lazy);
-        var task = actual.Value;
+        Lazy<Task<TtsResult>> actual;
+        Task<TtsResult> task;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            actual = _inflight.GetOrAdd(cachePath, lazy);
+            task = actual.Value;
+            _activeTasks.Add(task);
+        }
         _ = RemoveWhenCompleteAsync(cachePath, actual, task);
         return task;
     }
@@ -107,11 +123,12 @@ public sealed class TtsPlaybackQueue : IDisposable
         TtsQueueItem item,
         CancellationToken cancellationToken)
     {
+        var generationSlots = Volatile.Read(ref _generationSlots);
         var acquired = false;
         string? temporaryPath = null;
         try
         {
-            await _generationSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await generationSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
             acquired = true;
 
             var cached = await _cache.FindAsync(
@@ -169,31 +186,54 @@ public sealed class TtsPlaybackQueue : IDisposable
             _cache.DeleteTemporaryFile(temporaryPath);
             if (acquired)
             {
-                try { _generationSlots.Release(); }
+                try { generationSlots.Release(); }
                 catch (ObjectDisposedException) { }
             }
         }
     }
 
-    public async Task StopAsync()
+    public Task StopAsync() => StopAsync(DefaultStopTimeout);
+
+    public async Task StopAsync(TimeSpan timeout)
     {
+        ValidateTimeout(timeout);
+        var startedAt = Stopwatch.GetTimestamp();
         CancellationTokenSource cancellation;
         KeyValuePair<string, Lazy<Task<TtsResult>>>[] pending;
         lock (_gate)
         {
             cancellation = _sessionCancellation;
-            cancellation.Cancel();
             pending = _inflight
                 .ToArray();
         }
+        try { cancellation.Cancel(); }
+        catch (ObjectDisposedException) { }
 
         var tasks = pending
             .Select(pair => pair.Value.Value)
             .ToArray();
 
+        var tasksCompleted = true;
         if (tasks.Length > 0)
         {
-            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            try
+            {
+                var remaining = RemainingTimeout(timeout, startedAt);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    tasksCompleted = false;
+                }
+                else
+                {
+                    await Task.WhenAll(tasks)
+                        .WaitAsync(remaining)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (TimeoutException)
+            {
+                tasksCompleted = false;
+            }
             catch (OperationCanceledException) { }
             catch
             {
@@ -202,13 +242,28 @@ public sealed class TtsPlaybackQueue : IDisposable
             }
         }
 
-        // Remove canceled entries synchronously before a new session can ask
-        // for the same cache key. The conditional remove prevents an older
-        // completion from deleting a request that a new session inserted.
+        // Detach this session even if a provider ignores cancellation. New
+        // sessions must not inherit a permanently pending cache entry.
         foreach (var pair in pending)
+            RemoveIfCurrent(pair.Key, pair.Value);
+
+        if (!tasksCompleted)
         {
-            if (pair.Value.IsValueCreated && pair.Value.Value.IsCompleted)
-                RemoveIfCurrent(pair.Key, pair.Value);
+            // A provider that ignores cancellation may keep its old generation
+            // slot forever. Give the next session a fresh pair of slots while
+            // the abandoned task is allowed to unwind on its own.
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    Volatile.Write(
+                        ref _generationSlots,
+                        new SemaphoreSlim(_maxConcurrentGenerations));
+                }
+            }
+            // In-flight providers still hold this semaphore until they return.
+            // Let it become collectible with those tasks instead of disposing
+            // a synchronization primitive they may release later.
         }
     }
 
@@ -217,8 +272,15 @@ public sealed class TtsPlaybackQueue : IDisposable
         Lazy<Task<TtsResult>> lazy,
         Task<TtsResult> task)
     {
-        await ObserveAsync(task).ConfigureAwait(false);
-        RemoveIfCurrent(key, lazy);
+        try
+        {
+            await ObserveAsync(task).ConfigureAwait(false);
+        }
+        finally
+        {
+            RemoveIfCurrent(key, lazy);
+            lock (_gate) _activeTasks.Remove(task);
+        }
     }
 
     private bool RemoveIfCurrent(string key, Lazy<Task<TtsResult>> lazy)
@@ -233,16 +295,52 @@ public sealed class TtsPlaybackQueue : IDisposable
         }
     }
 
+    /// <summary>
+    /// Observes every generation that was active when the queue was disposed.
+    /// A provider that ignores cancellation may delay this indefinitely; in
+    /// that case its owner must remain alive rather than being disposed under it.
+    /// </summary>
+    public async Task WaitForIdleAsync()
+    {
+        Task<TtsResult>[] tasks;
+        lock (_gate) tasks = _activeTasks.ToArray();
+        if (tasks.Length == 0) return;
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
+
+    private static TimeSpan RemainingTimeout(
+        TimeSpan timeout,
+        long startedAt)
+    {
+        if (timeout == Timeout.InfiniteTimeSpan)
+            return Timeout.InfiniteTimeSpan;
+
+        var remaining = timeout - Stopwatch.GetElapsedTime(startedAt);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+    }
+
+    private static void ValidateTimeout(TimeSpan timeout)
+    {
+        if (timeout != Timeout.InfiniteTimeSpan && timeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+    }
+
     public void Dispose()
     {
+        CancellationTokenSource cancellation;
         lock (_gate)
         {
             if (_disposed) return;
             _disposed = true;
-            _sessionCancellation.Cancel();
+            cancellation = _sessionCancellation;
         }
 
-        _generationSlots.Dispose();
-        _sessionCancellation.Dispose();
+        try { cancellation.Cancel(); }
+        catch (ObjectDisposedException) { }
+
+        // Semaphores and cancellation tokens remain alive until active
+        // generations have observed the cancellation. They are managed objects
+        // and can be reclaimed with the queue if a provider never returns.
     }
 }

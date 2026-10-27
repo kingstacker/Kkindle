@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 
@@ -31,6 +32,7 @@ public sealed class TtsStateChangedEventArgs : EventArgs
 public sealed class TtsService : IDisposable
 {
     public const string PreviewText = "你好，这是声音试听。";
+    private static readonly TimeSpan DefaultStopTimeout = TimeSpan.FromSeconds(2);
 
     public static string GetPreviewText(string voice)
         => TtsSelectionVoicePolicy.IsAmericanEnglishVoice(voice)
@@ -52,10 +54,16 @@ public sealed class TtsService : IDisposable
 
     private TtsSettings _settings = new();
     private TtsAvailability? _availability;
+    private CancellationTokenSource? _startCancellation;
     private Task? _loopTask;
+    private readonly List<Task> _loopTasks = [];
+    private Task? _startupTask;
     private CancellationToken _sessionToken;
+    private int _startGeneration;
     private int _generation;
     private bool _disposed;
+    private int _activePreviewCount;
+    private TaskCompletionSource? _previewsIdle;
     private TtsPlaybackState _state = TtsPlaybackState.Stopped;
     private string? _message;
     private string? _environmentMessage;
@@ -344,95 +352,124 @@ public sealed class TtsService : IDisposable
         TtsSettings settings,
         CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        var normalized = TtsSettings.Normalize(settings);
-        if (_engine is null || _player is null)
+        TaskCompletionSource? idleSignal = null;
+        lock (_gate)
         {
-            throw new InvalidOperationException(
-                "当前平台没有配置 TTS 引擎或音频播放器。");
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_activePreviewCount++ == 0)
+            {
+                _previewsIdle = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            }
         }
 
-        await _previewGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        var markedInProgress = false;
-        string? temporaryPath = null;
         try
         {
-            // StartAsync holds this gate while it prepares a session. Taking it
-            // here prevents a preview from racing an in-flight start, while the
-            // short-lived flag below prevents a new start during playback.
-            await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var normalized = TtsSettings.Normalize(settings);
+            if (_engine is null || _player is null)
+            {
+                throw new InvalidOperationException(
+                    "当前平台没有配置 TTS 引擎或音频播放器。");
+            }
+
+            await _previewGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var markedInProgress = false;
+            string? temporaryPath = null;
             try
             {
-                lock (_gate)
+                // StartAsync holds this gate while it prepares a session. Taking
+                // it here prevents a preview from racing an in-flight start,
+                // while the short-lived flag blocks a new start during playback.
+                await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
                 {
-                    ObjectDisposedException.ThrowIf(_disposed, this);
-                    if (_loopTask is { IsCompleted: false }
-                        || _state is TtsPlaybackState.Generating
-                            or TtsPlaybackState.Playing
-                            or TtsPlaybackState.Paused
-                            or TtsPlaybackState.AdvancingChapter)
+                    lock (_gate)
                     {
-                        throw new InvalidOperationException(
-                            "请先停止听书，再试听声音。");
-                    }
+                        ObjectDisposedException.ThrowIf(_disposed, this);
+                        if (_loopTask is { IsCompleted: false }
+                            || _startCancellation is not null
+                            || _state is TtsPlaybackState.Generating
+                                or TtsPlaybackState.Playing
+                                or TtsPlaybackState.Paused
+                                or TtsPlaybackState.AdvancingChapter)
+                        {
+                            throw new InvalidOperationException(
+                                "请先停止听书，再试听声音。");
+                        }
 
-                    _previewInProgress = true;
-                    markedInProgress = true;
+                        _previewInProgress = true;
+                        markedInProgress = true;
+                    }
                 }
+                finally
+                {
+                    _lifecycle.Release();
+                }
+
+                var availability = await EnsureEnvironmentReadyAsync(
+                        cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                if (!availability.IsAvailable)
+                {
+                    throw new InvalidOperationException(availability.Message);
+                }
+
+                if (!_player.IsAvailable)
+                {
+                    throw new InvalidOperationException(
+                        _player.UnavailableReason ?? "当前平台没有可用的音频输出。");
+                }
+
+                var generated = await _engine.SynthesizeAsync(
+                        GetPreviewText(normalized.Voice),
+                        normalized.ToOptions(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                temporaryPath = generated.AudioPath;
+                if (!generated.IsSuccess
+                    || string.IsNullOrWhiteSpace(generated.AudioPath))
+                {
+                    throw new InvalidOperationException(
+                        generated.ErrorMessage ?? "声音试听失败。");
+                }
+
+                await _player.PlayAsync(
+                        generated.AudioPath,
+                        cancellationToken)
+                    .ConfigureAwait(false);
             }
             finally
             {
-                _lifecycle.Release();
-            }
+                _cache.DeleteTemporaryFile(temporaryPath);
+                if (markedInProgress)
+                {
+                    lock (_gate) _previewInProgress = false;
+                }
 
-            var availability = await EnsureEnvironmentReadyAsync(
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            if (!availability.IsAvailable)
-            {
-                throw new InvalidOperationException(availability.Message);
+                try { _previewGate.Release(); }
+                catch (ObjectDisposedException) { }
             }
-
-            if (!_player.IsAvailable)
-            {
-                throw new InvalidOperationException(
-                    _player.UnavailableReason ?? "当前平台没有可用的音频输出。");
-            }
-
-            var generated = await _engine.SynthesizeAsync(
-                    GetPreviewText(normalized.Voice),
-                    normalized.ToOptions(),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            temporaryPath = generated.AudioPath;
-            if (!generated.IsSuccess || string.IsNullOrWhiteSpace(generated.AudioPath))
-            {
-                throw new InvalidOperationException(
-                    generated.ErrorMessage ?? "声音试听失败。");
-            }
-
-            await _player.PlayAsync(
-                    generated.AudioPath,
-                    cancellationToken)
-                .ConfigureAwait(false);
         }
         finally
         {
-            _cache.DeleteTemporaryFile(temporaryPath);
-            if (markedInProgress)
+            lock (_gate)
             {
-                lock (_gate) _previewInProgress = false;
+                _activePreviewCount = Math.Max(0, _activePreviewCount - 1);
+                if (_activePreviewCount == 0)
+                {
+                    idleSignal = _previewsIdle;
+                    _previewsIdle = null;
+                }
             }
 
-            try { _previewGate.Release(); }
-            catch (ObjectDisposedException) { }
+            idleSignal?.TrySetResult();
         }
     }
 
     public Task StartAsync(
         TtsSettings settings,
         CancellationToken cancellationToken = default)
-        => StartCoreAsync(settings, null, cancellationToken);
+        => TrackStartupAsync(StartCoreAsync(settings, null, cancellationToken));
 
     /// <summary>Reads a fixed selection and stops, regardless of chapter continuation settings.</summary>
     public async Task StartSelectionAsync(
@@ -446,7 +483,35 @@ public sealed class TtsService : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         var selectionSettings = settings.Clone();
         selectionSettings.AutoAdvance = false;
-        await StartCoreAsync(selectionSettings, selection, cancellationToken).ConfigureAwait(false);
+        await TrackStartupAsync(
+                StartCoreAsync(selectionSettings, selection, cancellationToken))
+            .ConfigureAwait(false);
+    }
+
+    private Task TrackStartupAsync(Task startupTask)
+    {
+        lock (_gate)
+        {
+            if (!startupTask.IsCompleted)
+                _startupTask = startupTask;
+        }
+        return AwaitStartupAsync(startupTask);
+    }
+
+    private async Task AwaitStartupAsync(Task startupTask)
+    {
+        try
+        {
+            await startupTask.ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_startupTask, startupTask))
+                    _startupTask = null;
+            }
+        }
     }
 
     private async Task StartCoreAsync(
@@ -457,13 +522,21 @@ public sealed class TtsService : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         var normalized = TtsSettings.Normalize(settings);
 
+        CancellationTokenSource startupCancellation;
+        int startupGeneration;
         await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             lock (_gate)
             {
+                ObjectDisposedException.ThrowIf(_disposed, this);
                 if (_previewInProgress) return;
-                if (_loopTask is { IsCompleted: false }) return;
+                if (_loopTask is { IsCompleted: false }
+                    || _startCancellation is not null)
+                {
+                    return;
+                }
+
                 _settings = normalized;
                 _message = null;
                 _segmentIndex = 0;
@@ -472,52 +545,110 @@ public sealed class TtsService : IDisposable
                 _currentDocumentKey = null;
                 _currentSegmentIndex = -1;
                 _requestedSegmentIndex = -1;
+                startupCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                _startCancellation = startupCancellation;
+                startupGeneration = ++_startGeneration;
             }
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
 
+        var startupToken = startupCancellation.Token;
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_engine is null || _queue is null || _player is null)
             {
+                startupToken.ThrowIfCancellationRequested();
                 SetState(
                     TtsPlaybackState.Error,
                     "当前平台没有配置 TTS 引擎或音频播放器。",
                     0,
-                    0);
+                    0,
+                    expectedStartGeneration: startupGeneration,
+                    expectedStartupCancellation: startupCancellation);
                 return;
             }
 
             var availability = await EnsureEnvironmentReadyAsync(
-                    cancellationToken: cancellationToken)
+                    cancellationToken: startupToken)
                 .ConfigureAwait(false);
+            startupToken.ThrowIfCancellationRequested();
             if (!availability.IsAvailable)
             {
                 SetState(
                     TtsPlaybackState.Error,
                     availability.Message,
                     0,
-                    0);
+                    0,
+                    expectedStartGeneration: startupGeneration,
+                    expectedStartupCancellation: startupCancellation);
                 return;
             }
 
             if (!_player.IsAvailable)
             {
+                startupToken.ThrowIfCancellationRequested();
                 SetState(
                     TtsPlaybackState.Error,
                     _player.UnavailableReason ?? "当前平台没有可用的音频输出。",
                     0,
-                    0);
+                    0,
+                    expectedStartGeneration: startupGeneration,
+                    expectedStartupCancellation: startupCancellation);
                 return;
             }
 
-            _sessionToken = await _queue.BeginSessionAsync().ConfigureAwait(false);
-            var generation = ++_generation;
+            var sessionToken = await _queue.BeginSessionAsync(
+                    DefaultStopTimeout,
+                    startupToken)
+                .ConfigureAwait(false);
+            startupToken.ThrowIfCancellationRequested();
+
+            int generation;
             lock (_gate)
             {
-                if (_disposed) return;
-                _loopTask = RunAsync(generation, normalized, _sessionToken, selection, cancellationToken);
+                if (_disposed
+                    || startupGeneration != _startGeneration
+                    || !ReferenceEquals(_startCancellation, startupCancellation))
+                {
+                    return;
+                }
+
+                _sessionToken = sessionToken;
+                generation = ++_generation;
+                var loopTask = RunAsync(
+                    generation,
+                    normalized,
+                    sessionToken,
+                    selection,
+                    cancellationToken);
+                _loopTask = loopTask;
+                _loopTasks.Add(loopTask);
+                _ = RemoveLoopTaskWhenCompleteAsync(loopTask);
             }
+        }
+        catch (OperationCanceledException) when (startupToken.IsCancellationRequested)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+        }
+        catch when (startupToken.IsCancellationRequested
+            && !IsStartupCurrent(startupGeneration, startupCancellation))
+        {
+            // Stop invalidated startup while an external installer or provider
+            // was completing. Its late exception must not become a reader error.
         }
         finally
         {
-            _lifecycle.Release();
+            lock (_gate)
+            {
+                if (ReferenceEquals(_startCancellation, startupCancellation))
+                    _startCancellation = null;
+            }
+            startupCancellation.Dispose();
         }
     }
 
@@ -575,37 +706,110 @@ public sealed class TtsService : IDisposable
         return Task.CompletedTask;
     }
 
-    public async Task StopAsync()
+    public Task StopAsync() => StopAsync(DefaultStopTimeout);
+
+    public async Task StopAsync(TimeSpan timeout)
     {
-        await _lifecycle.WaitAsync().ConfigureAwait(false);
-        try
+        ValidateStopTimeout(timeout);
+        var startedAt = Stopwatch.GetTimestamp();
+        CancellationTokenSource? startup;
+        Task? loop;
+        int stopGeneration;
+        int stopStartGeneration;
+        lock (_gate)
         {
-            Task? loop;
-            lock (_gate)
-            {
-                loop = _loopTask;
-                _requestedSegmentIndex = -1;
-            }
+            startup = _startCancellation;
+            _startCancellation = null;
+            stopStartGeneration = ++_startGeneration;
+            loop = _loopTask;
+            _loopTask = null;
+            _requestedSegmentIndex = -1;
+            stopGeneration = ++_generation;
+        }
 
-            if (_queue is not null)
-                await _queue.StopAsync().ConfigureAwait(false);
-            try { _player?.Stop(); }
+        try { startup?.Cancel(); }
+        catch { }
+
+        try { _player?.Stop(); }
+        catch { }
+
+        if (_queue is not null)
+        {
+            try
+            {
+                await _queue.StopAsync(RemainingStopTimeout(timeout, startedAt))
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // Queue generation failures are isolated. Player and loop
+                // cancellation below still release the active reader session.
+            }
+        }
+
+        if (loop is not null)
+        {
+            try
+            {
+                var remaining = RemainingStopTimeout(timeout, startedAt);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    // The caller receives a bounded stop. The canceled loop
+                    // owns its own cleanup and cannot publish through the
+                    // generation guard after a new session starts.
+                }
+                else
+                {
+                    await loop.WaitAsync(remaining).ConfigureAwait(false);
+                }
+            }
+            catch (TimeoutException) { }
+            catch (OperationCanceledException) { }
             catch { }
-
-            if (loop is not null)
-            {
-                try { await loop.ConfigureAwait(false); }
-                catch (OperationCanceledException) { }
-                catch { }
-            }
-
-            ClearCurrentHighlight();
-            SetState(TtsPlaybackState.Stopped, null, 0, 0);
         }
-        finally
+
+        ClearCurrentHighlight();
+        SetState(
+            TtsPlaybackState.Stopped,
+            null,
+            0,
+            0,
+            stopGeneration,
+            stopStartGeneration);
+    }
+
+    private bool IsStartupCurrent(
+        int generation,
+        CancellationTokenSource cancellation)
+    {
+        lock (_gate)
         {
-            _lifecycle.Release();
+            return !_disposed
+                && generation == _startGeneration
+                && ReferenceEquals(_startCancellation, cancellation);
         }
+    }
+
+    private bool IsGenerationCurrent(int generation)
+    {
+        lock (_gate) return !_disposed && generation == _generation;
+    }
+
+    private static TimeSpan RemainingStopTimeout(
+        TimeSpan timeout,
+        long startedAt)
+    {
+        if (timeout == Timeout.InfiniteTimeSpan)
+            return Timeout.InfiniteTimeSpan;
+
+        var remaining = timeout - Stopwatch.GetElapsedTime(startedAt);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+    }
+
+    private static void ValidateStopTimeout(TimeSpan timeout)
+    {
+        if (timeout != Timeout.InfiniteTimeSpan && timeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeout));
     }
 
     private async Task RunAsync(
@@ -630,8 +834,10 @@ public sealed class TtsService : IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 var document = selection ?? await ResolveReadableDocumentAsync(
                         cancellationToken,
-                        allowAdvance: firstDocument || settings.AutoAdvance)
+                        allowAdvance: firstDocument || settings.AutoAdvance,
+                        generation: generation)
                     .ConfigureAwait(false);
+                if (!IsGenerationCurrent(generation)) return;
                 if (document is null || string.IsNullOrWhiteSpace(document.Text))
                 {
                     // Reaching the end after skipping image-only chapters is
@@ -653,7 +859,7 @@ public sealed class TtsService : IDisposable
                     ? FindStartingSegment(segments, document.StartOffset)
                     : 0;
                 firstDocument = false;
-                SetCurrentChapter(document, segments, startIndex);
+                SetCurrentChapter(document, segments, startIndex, generation);
 
                 var documentChanged = false;
                 var nextChapterPrefetchStarted = false;
@@ -669,7 +875,7 @@ public sealed class TtsService : IDisposable
                         break;
                     }
 
-                    SetCurrentSegment(index, segments.Count);
+                    SetCurrentSegment(index, segments.Count, generation);
                     var segment = segments[index];
                     var options = settings.ToOptions();
                     var item = new TtsQueueItem(
@@ -682,7 +888,8 @@ public sealed class TtsService : IDisposable
                         TtsPlaybackState.Generating,
                         null,
                         index + 1,
-                        segments.Count);
+                        segments.Count,
+                        generation);
                     var audioTask = _queue!.GetOrCreateAsync(
                         item,
                         cancellationToken);
@@ -714,13 +921,14 @@ public sealed class TtsService : IDisposable
                     }
 
                     var result = await audioTask.ConfigureAwait(false);
+                    if (!IsGenerationCurrent(generation)) return;
                     if (!result.IsSuccess || string.IsNullOrWhiteSpace(result.AudioPath))
                     {
                         throw new InvalidOperationException(
                             result.ErrorMessage ?? "TTS 没有生成音频。");
                     }
 
-                    if (TryTakeRequestedSegment(out var requestedIndex))
+                    if (TryTakeRequestedSegment(generation, out var requestedIndex))
                     {
                         index = requestedIndex - 1;
                         continue;
@@ -735,6 +943,7 @@ public sealed class TtsService : IDisposable
                         break;
                     }
 
+                    if (!IsGenerationCurrent(generation)) return;
                     var highlightDocument = selection ?? current;
                     var highlight = highlightDocument.MapHighlight?.Invoke(
                         segment.Start,
@@ -749,7 +958,8 @@ public sealed class TtsService : IDisposable
                         TtsPlaybackState.Playing,
                         null,
                         index + 1,
-                        segments.Count);
+                        segments.Count,
+                        generation);
                     try
                     {
                         await _player!.PlayAsync(
@@ -759,13 +969,13 @@ public sealed class TtsService : IDisposable
                     }
                     catch (OperationCanceledException)
                         when (!cancellationToken.IsCancellationRequested
-                            && HasPendingSegmentRequest())
+                            && HasPendingSegmentRequest(generation))
                     {
                         // SkipSegmentAsync intentionally stops only the
                         // current player, leaving the service session alive.
                     }
 
-                    if (TryTakeRequestedSegment(out requestedIndex))
+                    if (TryTakeRequestedSegment(generation, out requestedIndex))
                     {
                         index = requestedIndex - 1;
                     }
@@ -782,7 +992,8 @@ public sealed class TtsService : IDisposable
                     TtsPlaybackState.AdvancingChapter,
                     null,
                     segments.Count,
-                    segments.Count);
+                    segments.Count,
+                    generation);
                 if (!await _advanceChapterAsync(cancellationToken)
                         .ConfigureAwait(false))
                 {
@@ -790,26 +1001,33 @@ public sealed class TtsService : IDisposable
                 }
             }
 
-            SetState(TtsPlaybackState.Stopped, null, 0, 0);
+            SetState(TtsPlaybackState.Stopped, null, 0, 0, generation);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            SetState(TtsPlaybackState.Stopped, null, 0, 0);
+            SetState(TtsPlaybackState.Stopped, null, 0, 0, generation);
         }
         catch (Exception exception)
         {
             try { _player?.Stop(); }
             catch { }
-            SetState(TtsPlaybackState.Error, exception.Message, 0, 0);
+            SetState(
+                TtsPlaybackState.Error,
+                exception.Message,
+                0,
+                0,
+                generation);
         }
         finally
         {
-            if (selection is not null)
+            var generationIsCurrent = false;
+            lock (_gate) generationIsCurrent = generation == _generation;
+            if (generationIsCurrent && selection is not null)
             {
                 try { selection.ClearHighlight(); }
                 catch { }
             }
-            ClearCurrentHighlight();
+            if (generationIsCurrent) ClearCurrentHighlight();
             lock (_gate)
             {
                 if (generation == _generation)
@@ -826,7 +1044,8 @@ public sealed class TtsService : IDisposable
 
     private async Task<ReaderTtsDocument?> ResolveReadableDocumentAsync(
         CancellationToken cancellationToken,
-        bool allowAdvance)
+        bool allowAdvance,
+        int generation)
     {
         var document = _documentAccessor();
         if (document is not null && !string.IsNullOrWhiteSpace(document.Text))
@@ -842,7 +1061,12 @@ public sealed class TtsService : IDisposable
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            SetState(TtsPlaybackState.AdvancingChapter, null, 0, 0);
+            SetState(
+                TtsPlaybackState.AdvancingChapter,
+                null,
+                0,
+                0,
+                generation);
             if (!await _advanceChapterAsync(cancellationToken).ConfigureAwait(false))
             {
                 return null;
@@ -904,10 +1128,14 @@ public sealed class TtsService : IDisposable
     private void SetCurrentChapter(
         ReaderTtsDocument document,
         IReadOnlyList<TtsTextSegment> segments,
-        int startIndex)
+        int startIndex,
+        int generation)
     {
         lock (_gate)
         {
+            if (_disposed || generation != _generation)
+                return;
+
             _currentDocumentKey = document.Key;
             _currentSegments = segments;
             _currentSegmentIndex = startIndex;
@@ -916,25 +1144,39 @@ public sealed class TtsService : IDisposable
         }
     }
 
-    private void SetCurrentSegment(int index, int count)
+    private void SetCurrentSegment(int index, int count, int generation)
     {
         lock (_gate)
         {
+            if (_disposed || generation != _generation)
+                return;
+
             _currentSegmentIndex = index;
             _segmentIndex = index + 1;
             _segmentCount = count;
         }
     }
 
-    private bool HasPendingSegmentRequest()
-    {
-        lock (_gate) return _requestedSegmentIndex >= 0;
-    }
-
-    private bool TryTakeRequestedSegment(out int index)
+    private bool HasPendingSegmentRequest(int generation)
     {
         lock (_gate)
         {
+            return !_disposed
+                && generation == _generation
+                && _requestedSegmentIndex >= 0;
+        }
+    }
+
+    private bool TryTakeRequestedSegment(int generation, out int index)
+    {
+        lock (_gate)
+        {
+            if (_disposed || generation != _generation)
+            {
+                index = -1;
+                return false;
+            }
+
             index = _requestedSegmentIndex;
             _requestedSegmentIndex = -1;
             return index >= 0;
@@ -958,11 +1200,25 @@ public sealed class TtsService : IDisposable
         TtsPlaybackState state,
         string? message,
         int segmentIndex,
-        int segmentCount)
+        int segmentCount,
+        int? expectedGeneration = null,
+        int? expectedStartGeneration = null,
+        CancellationTokenSource? expectedStartupCancellation = null)
     {
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposed
+                || (expectedGeneration.HasValue
+                    && expectedGeneration.Value != _generation)
+                || (expectedStartGeneration.HasValue
+                    && expectedStartGeneration.Value != _startGeneration)
+                || (expectedStartupCancellation is not null
+                    && !ReferenceEquals(
+                        expectedStartupCancellation,
+                        _startCancellation)))
+            {
+                return;
+            }
             _state = state;
             _message = message;
             _segmentIndex = segmentIndex;
@@ -1022,20 +1278,72 @@ public sealed class TtsService : IDisposable
         catch { }
     }
 
+    private async Task RemoveLoopTaskWhenCompleteAsync(Task task)
+    {
+        try { await task.ConfigureAwait(false); }
+        catch { }
+
+        lock (_gate) _loopTasks.Remove(task);
+    }
+
     public void Dispose()
     {
+        CancellationTokenSource? startup;
+        Task[] pendingOperations;
+        Task previewsIdle;
         lock (_gate)
         {
             if (_disposed) return;
             _disposed = true;
+            startup = _startCancellation;
+            _startCancellation = null;
+            _startGeneration++;
+            _generation++;
+            _loopTask = null;
+            _requestedSegmentIndex = -1;
+
+            pendingOperations = _loopTasks
+                .Concat(_startupTask is null ? [] : [_startupTask])
+                .Where(task => !task.IsCompleted)
+                .Distinct()
+                .ToArray();
+            previewsIdle = _activePreviewCount == 0
+                ? Task.CompletedTask
+                : _previewsIdle!.Task;
         }
 
+        try { startup?.Cancel(); }
+        catch { }
         try { _player?.Stop(); }
         catch { }
-        _queue?.Dispose();
-        _player?.Dispose();
-        _engine?.Dispose();
-        _lifecycle.Dispose();
-        _previewGate.Dispose();
+        try { _queue?.Dispose(); }
+        catch { }
+
+        _ = CompleteDisposeAsync(pendingOperations, previewsIdle);
+    }
+
+    private async Task CompleteDisposeAsync(
+        IReadOnlyList<Task> pendingOperations,
+        Task previewsIdle)
+    {
+        try { await Task.WhenAll(pendingOperations).ConfigureAwait(false); }
+        catch { }
+        try { await previewsIdle.ConfigureAwait(false); }
+        catch { }
+
+        if (_queue is not null)
+        {
+            try { await _queue.WaitForIdleAsync().ConfigureAwait(false); }
+            catch { }
+        }
+
+        try { _player?.Dispose(); }
+        catch { }
+        try { _engine?.Dispose(); }
+        catch { }
+        try { _lifecycle.Dispose(); }
+        catch { }
+        try { _previewGate.Dispose(); }
+        catch { }
     }
 }

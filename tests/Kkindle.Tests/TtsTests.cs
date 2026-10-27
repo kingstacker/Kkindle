@@ -113,6 +113,142 @@ public sealed class TtsTests
     }
 
     [Fact]
+    public async Task PlaybackQueueStopIsBoundedAndNewSessionStartsWhenProviderIgnoresCancellation()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new IgnoringCancellationEngine("Blocked selection.");
+            using var queue = new TtsPlaybackQueue(
+                engine,
+                new TtsCacheManager(root));
+            Task<TtsResult>? blockedTask = null;
+            try
+            {
+                var blockedToken = await queue.BeginSessionAsync(
+                    TimeSpan.FromMilliseconds(100));
+                blockedTask = queue.GetOrCreateAsync(
+                    QueueItem("Blocked selection."),
+                    blockedToken);
+                await engine.BlockedStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+                await queue.StopAsync(TimeSpan.FromMilliseconds(100))
+                    .WaitAsync(TimeSpan.FromSeconds(1));
+
+                var nextToken = await queue.BeginSessionAsync(
+                        TimeSpan.FromMilliseconds(100))
+                    .WaitAsync(TimeSpan.FromSeconds(1));
+                var nextResult = await queue.GetOrCreateAsync(
+                        QueueItem("Second selection."),
+                        nextToken)
+                    .WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(nextResult.IsSuccess);
+                Assert.Equal(2, engine.RequestCount);
+            }
+            finally
+            {
+                engine.ReleaseBlocked();
+                if (blockedTask is not null)
+                {
+                    try { await blockedTask.WaitAsync(TimeSpan.FromSeconds(2)); }
+                    catch (OperationCanceledException) { }
+                }
+            }
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task ServiceStopIsBoundedWhenProviderIgnoresCancellationAndNextSelectionStarts()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new IgnoringCancellationEngine("Blocked selection.");
+            var document = new ReaderTtsDocument(
+                "book:chapter",
+                "Whole chapter.",
+                0,
+                (_, _) => Task.CompletedTask,
+                () => { });
+            var player = new FakePlayer();
+            using var service = new TtsService(
+                engine,
+                new TtsCacheManager(root),
+                player,
+                () => document);
+            try
+            {
+                await service.StartSelectionAsync(
+                    document with { Text = "Blocked selection." },
+                    new TtsSettings());
+                await engine.BlockedStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+                await service.StopAsync(TimeSpan.FromMilliseconds(100))
+                    .WaitAsync(TimeSpan.FromSeconds(1));
+                Assert.Equal(TtsPlaybackState.Stopped, service.State);
+
+                var secondPlaying = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                service.StateChanged += (_, args) =>
+                {
+                    if (args.State == TtsPlaybackState.Playing)
+                        secondPlaying.TrySetResult();
+                };
+                await service.StartSelectionAsync(
+                    document with { Text = "Second selection." },
+                    new TtsSettings());
+                await secondPlaying.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                var playbackDeadline = DateTime.UtcNow.AddSeconds(3);
+                while (player.PlayCount == 0 && DateTime.UtcNow < playbackDeadline)
+                    await Task.Delay(10);
+                Assert.Equal(1, player.PlayCount);
+                Assert.Equal(2, engine.RequestCount);
+            }
+            finally
+            {
+                engine.ReleaseBlocked();
+                await service.StopAsync(TimeSpan.FromSeconds(1));
+            }
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task StoppingDuringEnvironmentSetupSuppressesLateSetupCompletion()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var setup = new IgnoringCancellationEnvironmentSetup();
+            using var service = new TtsService(
+                new FakeEngine(),
+                new TtsCacheManager(root),
+                new FakePlayer(),
+                () => null,
+                environmentSetup: setup);
+            try
+            {
+                var start = service.StartAsync(new TtsSettings());
+                await setup.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+                await service.StopAsync(TimeSpan.FromMilliseconds(100))
+                    .WaitAsync(TimeSpan.FromSeconds(1));
+                setup.Release();
+                await start.WaitAsync(TimeSpan.FromSeconds(2));
+
+                Assert.Equal(TtsPlaybackState.Stopped, service.State);
+                Assert.Null(service.Message);
+            }
+            finally
+            {
+                setup.Release();
+            }
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
     public void TextSnapshotMapsTtsOffsetsBackToBodyText()
     {
         var snapshot = new ReaderTtsTextSnapshot(
@@ -530,6 +666,13 @@ public sealed class TtsTests
         }
     }
 
+    private static TtsQueueItem QueueItem(string text)
+        => new(
+            "book",
+            "chapter",
+            new TtsTextSegment(0, text.Length, text),
+            new TtsOptions());
+
     private sealed class FakeEngine : ITtsEngine
     {
         private int _synthesisCount;
@@ -573,6 +716,81 @@ public sealed class TtsTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class IgnoringCancellationEngine(string blockedText) : ITtsEngine
+    {
+        private int _requestCount;
+        public TaskCompletionSource BlockedStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SecondStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource BlockedRelease { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int RequestCount => Volatile.Read(ref _requestCount);
+        public string Id => TtsSettings.DefaultProvider;
+        public bool IsAvailable => true;
+
+        public Task<TtsAvailability> CheckAvailabilityAsync(
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new TtsAvailability(true, "fake"));
+
+        public Task<IReadOnlyList<TtsVoiceInfo>> GetVoicesAsync(
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<TtsVoiceInfo>>([]);
+
+        public async Task<TtsResult> SynthesizeAsync(
+            string text,
+            TtsOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _requestCount);
+            if (string.Equals(text, blockedText, StringComparison.Ordinal))
+            {
+                BlockedStarted.TrySetResult();
+                await BlockedRelease.Task;
+            }
+            else if (string.Equals(
+                         text,
+                         "Second selection.",
+                         StringComparison.Ordinal))
+            {
+                SecondStarted.TrySetResult();
+            }
+
+            var path = Path.Combine(
+                Path.GetTempPath(),
+                "kkindle-ignore-cancel-" + Guid.NewGuid().ToString("N") + ".mp3");
+            await File.WriteAllBytesAsync(path, [1]);
+            return TtsResult.Success(path);
+        }
+
+        public void ReleaseBlocked() => BlockedRelease.TrySetResult();
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class IgnoringCancellationEnvironmentSetup : ITtsEnvironmentSetup
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<TtsSetupResult> EnsureReadyAsync(
+            IProgress<TtsSetupProgress>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await _release.Task;
+            return new TtsSetupResult(true, "ready");
+        }
+
+        public void Release() => _release.TrySetResult();
     }
 
     private sealed class FakePlayer : ITtsAudioPlayer

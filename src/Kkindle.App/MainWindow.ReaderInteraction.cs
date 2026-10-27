@@ -5994,7 +5994,13 @@ public partial class MainWindow
         }
         else if (intent == ReaderNavigationIntent.Annotation && _readerPendingAnnotation is { } pending)
         {
-            nativeReader.ScrollToOffset(Math.Max(0, pending.StartOffset));
+            var startOffset = nativeReader.TryGetAnnotationRange(
+                pending,
+                out var relocatedStart,
+                out _)
+                ? relocatedStart
+                : Math.Max(0, pending.StartOffset);
+            nativeReader.ScrollToOffset(startOffset);
             _readerPendingAnnotation = null;
         }
         else if (intent == ReaderNavigationIntent.Bookmark)
@@ -6240,7 +6246,13 @@ public partial class MainWindow
         cancellationToken.ThrowIfCancellationRequested();
         if (host is NativeReaderHost nativeReader)
         {
-            nativeReader.ScrollToOffset(Math.Max(0, annotation.StartOffset));
+            var startOffset = nativeReader.TryGetAnnotationRange(
+                annotation,
+                out var relocatedStart,
+                out _)
+                ? relocatedStart
+                : Math.Max(0, annotation.StartOffset);
+            nativeReader.ScrollToOffset(startOffset);
             await UpdateReaderScrollStateAsync(host);
         }
     }
@@ -6256,8 +6268,9 @@ public partial class MainWindow
 
         if (host is NativeReaderHost nativeReader)
         {
-            // Annotation offsets are body-textContent coordinates; the native
-            // loader reproduces the same stream, so they apply directly.
+            // Resolve saved quote/context at paint and navigation time. The
+            // native loader normally reproduces the same stream, but edited or
+            // reparsed EPUB content can move a previously valid offset.
             var nativeAnnotations = await _readerData.GetAnnotationsAsync(
                 _readerBookFile.Id,
                 cancellationToken,
