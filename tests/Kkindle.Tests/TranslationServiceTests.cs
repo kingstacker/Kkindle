@@ -39,8 +39,10 @@ public sealed class TranslationServiceTests
         Assert.Equal("你好，世界", result);
     }
 
-    [Fact]
-    public async Task FallsBackToLegacyGoogleEndpointWhenPrimaryIsRateLimited()
+    [Theory]
+    [InlineData("[\"你好，世界\"]")]
+    [InlineData("[[\"你好，世界\",\"en\"]]")]
+    public async Task FallsBackToLegacyGoogleEndpointWhenPrimaryIsRateLimited(string responseBody)
     {
         var requests = new List<HttpRequestMessage>();
         using var aiClient = new AiChatClient();
@@ -57,7 +59,7 @@ public sealed class TranslationServiceTests
 
             Assert.Equal("clients5.google.com", request.RequestUri?.Host);
             Assert.Contains("dict-chrome-ex", request.RequestUri?.Query);
-            return JsonResponse("[\"你好，世界\"]");
+            return JsonResponse(responseBody);
         }, aiClient);
 
         var result = await service.TranslateAsync(
@@ -67,6 +69,41 @@ public sealed class TranslationServiceTests
 
         Assert.Equal("你好，世界", result);
         Assert.Equal(2, requests.Count);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("[null]")]
+    [InlineData("[[]]")]
+    [InlineData("[\"\"]")]
+    [InlineData("[[\" \",\"en\"]]")]
+    [InlineData("[[[\" \"]]]")]
+    public async Task EmptyGoogleResponsesExplainHowToRetry(string responseBody)
+    {
+        using var aiClient = new AiChatClient();
+        using var service = CreateService(_ => JsonResponse(responseBody), aiClient);
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.TranslateAsync("Hello", ReaderTranslationProvider.Google, "zh-CN"));
+        Assert.Contains("空结果", error.Message);
+        Assert.Contains("代理设置", error.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GoogleConnectionErrorsExplainNetworkAndProxySettings(bool timeout)
+    {
+        using var aiClient = new AiChatClient();
+        using var service = CreateService(_ => throw (timeout
+            ? new TaskCanceledException("timeout") : new HttpRequestException("connection failed")), aiClient);
+        var error = await Record.ExceptionAsync(() =>
+            service.TranslateAsync("Hello", ReaderTranslationProvider.Google, "zh-CN"));
+        Assert.NotNull(error);
+        Assert.Contains(timeout ? "超时" : "无法连接", error.Message);
+        Assert.Contains("代理设置", error.Message);
     }
 
     [Fact]
@@ -107,6 +144,34 @@ public sealed class TranslationServiceTests
 
         Assert.Equal("你好，世界", result);
         Assert.Equal(2, requests.Count);
+    }
+
+    [Theory]
+    [InlineData("cn.bing.com")]
+    [InlineData("www.bing.com")]
+    public async Task BingPostsToTheFinalTranslatorPageHost(string pageHost)
+    {
+        using var aiClient = new AiChatClient();
+        using var service = CreateService(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = new HttpRequestMessage(HttpMethod.Get, $"https://{pageHost}/translator"),
+                    Content = new StringContent("var params_AbusePreventionHelper = [178894, \"regional-token\", 3600000];")
+                };
+
+            // A POST to the pre-redirect host becomes an empty GET on the
+            // regional site, although the server still returns HTTP 200.
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(pageHost, request.RequestUri!.Host);
+            Assert.Equal($"https://{pageHost}/translator", request.Headers.Referrer!.AbsoluteUri);
+            Assert.Equal($"https://{pageHost}", Assert.Single(request.Headers.GetValues("Origin")));
+            Assert.Contains("token=regional-token", request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return JsonResponse("[{\"translations\":[{\"text\":\"你好\",\"to\":\"zh-Hans\"}]}]");
+        }, aiClient);
+
+        Assert.Equal("你好", await service.TranslateAsync("Hello", ReaderTranslationProvider.Bing, "zh-CN"));
     }
 
     [Fact]

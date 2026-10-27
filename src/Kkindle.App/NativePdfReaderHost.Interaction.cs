@@ -167,7 +167,8 @@ public sealed partial class NativePdfReaderHost
         return GetPageTransform(GetPageBounds(pageNumber)).Transform(point);
     }
 
-    public bool TryGetAnnotationCalloutBounds(int pageNumber, Point anchor, Size preferredSize, out Rect bounds)
+    public bool TryGetAnnotationCalloutBounds(int pageNumber, Point anchor, Size preferredSize, out Rect bounds,
+        Func<double, double>? measureHeight = null)
     {
         bounds = default;
         if (_layout is null || pageNumber < 1 || pageNumber > PageCount
@@ -184,7 +185,7 @@ public sealed partial class NativePdfReaderHost
         var left = Math.Max(viewport.Left, page.Right + gap);
         var width = Math.Min(preferredSize.Width, viewport.Right - left);
         if (width < 144) return false;
-        var height = Math.Min(preferredSize.Height, viewport.Height);
+        var height = Math.Min(measureHeight?.Invoke(width) ?? preferredSize.Height, viewport.Height);
         bounds = new Rect(left,
             Math.Clamp(anchor.Y - height / 2, viewport.Top, viewport.Bottom - height),
             width, height);
@@ -194,10 +195,11 @@ public sealed partial class NativePdfReaderHost
         return true;
     }
 
-    private readonly List<(ReaderAnnotation Annotation, Action<Rect> Moved)> _additionalAnnotationCallouts = [];
+    private readonly List<(ReaderAnnotation Annotation, Action<Rect> Moved, Func<double, double> MeasureHeight)> _additionalAnnotationCallouts = [];
     private readonly List<(Point Anchor, Rect Bounds)> _additionalAnnotationConnectors = [];
 
-    public void SetAdditionalAnnotationCallouts(IEnumerable<(ReaderAnnotation Annotation, Action<Rect> Moved)> callouts)
+    public void SetAdditionalAnnotationCallouts(
+        IEnumerable<(ReaderAnnotation Annotation, Action<Rect> Moved, Func<double, double> MeasureHeight)> callouts)
     {
         _additionalAnnotationCallouts.Clear();
         _additionalAnnotationCallouts.AddRange(callouts);
@@ -217,6 +219,7 @@ public sealed partial class NativePdfReaderHost
     private bool _annotationCalloutVisible;
     private bool _annotationCalloutDismissed;
     private Size _annotationCalloutSize;
+    private Func<double, double>? _annotationCalloutMeasureHeight;
     private Action<Rect>? _annotationCalloutMoved;
     private int _annotationCalloutPage;
     private Point _annotationCalloutPagePoint;
@@ -224,7 +227,8 @@ public sealed partial class NativePdfReaderHost
     private Size _annotationCalloutViewportSize;
     private int _annotationCalloutRotation;
 
-    public void SetAnnotationCallout(Point anchor, Rect bounds, Action<Rect>? moved = null, int pageNumber = 0, Size? preferredSize = null)
+    public void SetAnnotationCallout(Point anchor, Rect bounds, Action<Rect>? moved = null, int pageNumber = 0,
+        Size? preferredSize = null, Func<double, double>? measureHeight = null)
     {
         _annotationCalloutPage = pageNumber > 0 ? pageNumber : PageNumber;
         var page = GetPageBounds(_annotationCalloutPage);
@@ -237,6 +241,7 @@ public sealed partial class NativePdfReaderHost
         _annotationCalloutRotation = Rotation;
         _annotationCallout = (anchor, bounds);
         _annotationCalloutSize = preferredSize ?? bounds.Size;
+        _annotationCalloutMeasureHeight = measureHeight;
         _annotationCalloutDismissed = false;
         _annotationCalloutMoved = moved;
         UpdateAnnotationCallout();
@@ -253,7 +258,7 @@ public sealed partial class NativePdfReaderHost
             _annotationCalloutPagePoint.X * size.Width,
             _annotationCalloutPagePoint.Y * size.Height));
         _annotationCalloutVisible = TryGetAnnotationCalloutBounds(
-            _annotationCalloutPage, anchor, _annotationCalloutSize, out var bounds);
+            _annotationCalloutPage, anchor, _annotationCalloutSize, out var bounds, _annotationCalloutMeasureHeight);
         _annotationCalloutVisible &= !_annotationCalloutDismissed;
         if (!_annotationCalloutVisible) bounds = callout.Bounds;
         _annotationCalloutPageSize = page.Size;
@@ -267,24 +272,34 @@ public sealed partial class NativePdfReaderHost
         foreach (var item in _additionalAnnotationCallouts)
         {
             if (TryGetAnnotationAnchor(item.Annotation, out var number, out var point)
-                && TryGetAnnotationCalloutBounds(number, point, new Size(220, 88), out var cardBounds))
+                && TryGetAnnotationCalloutBounds(number, point, new Size(220, 68), out var cardBounds, item.MeasureHeight))
                 cards.Add((point, cardBounds, item.Moved, false));
             else item.Moved(default);
         }
         cards.Sort((a, b) => a.Anchor.Y.CompareTo(b.Anchor.Y));
         var available = new Rect(Viewport).Deflate(8);
-        var height = cards.Count == 0 ? 88 : Math.Min(88, Math.Max(1,
-            (available.Height - 8 * (cards.Count - 1)) / cards.Count));
+        // Preserve each note's measured height whenever the cards fit. Only
+        // share the available height when necessary; each card can then scroll.
+        var heightBudget = Math.Max(cards.Count, available.Height - 8 * (cards.Count - 1));
+        var totalHeight = cards.Sum(card => card.Bounds.Height);
+        var minimumHeight = cards.Count == 0 ? 0 : Math.Min(64, heightBudget / cards.Count);
+        var minimumTotal = cards.Sum(card => Math.Min(minimumHeight, card.Bounds.Height));
+        var heights = cards.Select(card => totalHeight <= heightBudget ? card.Bounds.Height
+            : Math.Min(minimumHeight, card.Bounds.Height)
+                + Math.Max(0, card.Bounds.Height - minimumHeight)
+                    * Math.Max(0, heightBudget - minimumTotal) / Math.Max(1, totalHeight - minimumTotal)).ToArray();
+        var remainingHeight = heights.Sum() + 8 * Math.Max(0, cards.Count - 1);
         var nextTop = available.Top;
         for (var index = 0; index < cards.Count; index++)
         {
             var card = cards[index];
-            var remaining = cards.Count - index;
+            var height = heights[index];
             var top = Math.Clamp(card.Anchor.Y - height / 2, nextTop,
-                Math.Max(nextTop, available.Bottom - remaining * height - (remaining - 1) * 8));
+                Math.Max(nextTop, available.Bottom - remainingHeight));
             var positioned = cards.Count == 1 ? card.Bounds
                 : new Rect(card.Bounds.X, top, card.Bounds.Width, height);
             nextTop = positioned.Bottom + 8;
+            remainingHeight -= height + 8;
             if (card.Primary) _annotationCallout = (card.Anchor, positioned);
             else _additionalAnnotationConnectors.Add((card.Anchor, positioned));
             card.Moved?.Invoke(positioned);
@@ -299,6 +314,7 @@ public sealed partial class NativePdfReaderHost
         if (_annotationCallout is null) return;
         _annotationCallout = null;
         _annotationCalloutMoved = null;
+        _annotationCalloutMeasureHeight = null;
         InvalidateVisual();
     }
 

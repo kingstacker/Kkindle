@@ -5731,7 +5731,7 @@
                             Background="Transparent"
                             BorderBrush="{DynamicResource ReaderBorderBrush}"
                             BorderThickness="0,0,0,1">
-                        <Grid Margin="8,2" ColumnDefinitions="*,*,Auto,Auto" ColumnSpacing="4">
+                        <Grid x:Name="ReaderAssistantTabsGrid" Margin="8,2" ColumnDefinitions="*,*,Auto,Auto" ColumnSpacing="2">
                             <Button x:Name="ReaderAiTabButton"
                                     Grid.Column="0"
                                     Classes="readerAssistantTab active"
@@ -5748,7 +5748,7 @@
                                     Grid.Column="2"
                                     Classes="readerAssistantTab"
                                     Content="缩略图"
-                                    MinWidth="44"
+                                    HorizontalAlignment="Stretch"
                                     ToolTip.Tip="页面缩略图"
                                     IsVisible="False"
                                     Click="ReaderPdfThumbnailsButton_Click" />
@@ -5793,6 +5793,14 @@
                                                             CornerRadius="4">
                                                         <StackPanel Spacing="10">
                                                         <TextBlock Text="{Binding RoleLabel}" FontSize="11" Foreground="{DynamicResource ReaderMutedBrush}" />
+                                                        <ItemsControl ItemsSource="{Binding Images}" IsVisible="{Binding HasImages}">
+                                                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="local:ReaderAiImageViewModel">
+                                                                    <Image Source="{Binding Preview}" MaxWidth="220" Height="120" Stretch="Uniform" Margin="0,0,6,0" />
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
                                                         <StackPanel Orientation="Horizontal"
                                                                     Spacing="5"
                                                                     IsVisible="{Binding IsThinkingRowVisible}">
@@ -5821,18 +5829,24 @@
                                                             </Path>
                                                         </StackPanel>
                                                         <local:KreaderMarkdownTextBlock Markdown="{Binding DisplayedReasoning}"
+                                                                   IsFollowUpEnabled="True"
+                                                                   FollowUpRequested="ReaderAiText_FollowUpRequested"
                                                                    CitationAction="{Binding CitationAction}"
                                                                    CitationSourceResolver="{Binding CitationSourceResolver}"
                                                                    IsVisible="{Binding IsReasoningVisible}"
                                                                    FontSize="12"
                                                                    Foreground="{DynamicResource ReaderMutedBrush}"
                                                                    TextWrapping="Wrap" />
-                                                        <TextBlock Text="{Binding Content}"
+                                                        <local:KreaderSelectableTextBlock Text="{Binding Content}"
+                                                                   IsFollowUpEnabled="True"
+                                                                   FollowUpRequested="ReaderAiText_FollowUpRequested"
                                                                    IsVisible="{Binding IsUser}"
                                                                    Foreground="{DynamicResource ReaderInkBrush}"
                                                                    FontSize="14"
                                                                    TextWrapping="Wrap" />
                                                          <local:KreaderMarkdownTextBlock Markdown="{Binding Content}"
+                                                                                          IsFollowUpEnabled="True"
+                                                                                          FollowUpRequested="ReaderAiText_FollowUpRequested"
                                                                                           IsVisible="{Binding IsAssistant}"
                                                                                           CitationAction="{Binding CitationAction}"
                                                                                           CitationSourceResolver="{Binding CitationSourceResolver}"
@@ -5877,6 +5891,14 @@
                                     </ItemsControl>
                                 </StackPanel>
                             </ScrollViewer>
+                            <Border x:Name="ReaderAiTurnNavigation" Classes="readerAiTurnNavigation" Width="26" Padding="0,8"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                                    MaxHeight="{Binding Bounds.Height, ElementName=ReaderAiScrollViewer}"
+                                    Background="Transparent" ClipToBounds="True" IsVisible="False" ZIndex="22">
+                                <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" MaxHeight="280">
+                                    <StackPanel x:Name="ReaderAiTurnMarkers" Spacing="2" />
+                                </ScrollViewer>
+                            </Border>
                             <Grid x:Name="ReaderAiComposer" Grid.Row="1" RowDefinitions="Auto,Auto,Auto" RowSpacing="10" Margin="20,8,20,16" SizeChanged="ReaderAiComposer_SizeChanged">
                                 <Button x:Name="ReaderAiNewContentButton" Content="{DynamicResource Ui.Auto.07E68FA158F2077C}" Classes="readerAiQuickOption" IsVisible="False" HorizontalAlignment="Center" Click="ReaderAiNewContentButton_Click" />
                                 <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
@@ -5916,8 +5938,32 @@
                                     <Button x:Name="ReaderAiClearButton" Grid.Column="2" Content="{DynamicResource Ui.Auto.1EF3DE06B32E521B}" Classes="readerAiReasoningToggle" Click="ReaderAiClearButton_Click" />
                                 </Grid>
                                 <Border Grid.Row="2" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="1" CornerRadius="0" Background="{DynamicResource ReaderPageBrush}">
-                                <Grid RowDefinitions="Auto,Auto" ClipToBounds="True">
+                                <Grid RowDefinitions="Auto,Auto,Auto" ClipToBounds="True">
+                                    <StackPanel Grid.Row="0">
+                                        <ItemsControl ItemsSource="{Binding ReaderAiDraftImages}" Margin="8,0,8,0">
+                                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="local:ReaderAiImageViewModel">
+                                                    <Border Classes="readerAiDraftImage" Classes.selected="{Binding IsSelected}" Margin="0,8,6,0" Padding="2"
+                                                            Background="Transparent" PointerPressed="ReaderAiDraftImage_PointerPressed">
+                                                        <Grid>
+                                                            <Image Source="{Binding Preview}" Width="78" Height="64" Stretch="Uniform" />
+                                                            <Button Content="×" Tag="{Binding}" Classes="readerAiReasoningToggle" Width="14" Height="14" MinWidth="14" MinHeight="14" Padding="0" Margin="2"
+                                                                    FontSize="10" BorderThickness="0" Background="{DynamicResource ReaderPageBrush}" Foreground="{DynamicResource ReaderInkBrush}"
+                                                                    HorizontalContentAlignment="Center"
+                                                                    HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip.Tip="移除图片" AutomationProperties.Name="移除图片"
+                                                                    Click="ReaderAiRemoveImageButton_Click" />
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock x:Name="ReaderAiImageStatus" Foreground="{DynamicResource ReaderMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="8,0" />
+                                    </StackPanel>
                                     <TextBox x:Name="ReaderAiQuestionBox"
+                                             Grid.Row="1"
+                                             PastingFromClipboard="ReaderAiQuestionBox_PastingFromClipboard"
+                                             ToolTip.Tip="支持粘贴图片 · Ctrl+V"
                                              Classes="readerMinimalField readerAiQuestionInput"
                                              MinHeight="68"
                                              MaxHeight="160"
@@ -5929,7 +5975,7 @@
                                              TextWrapping="Wrap"
                                              PlaceholderText="{DynamicResource Ui.Auto.8513176BCF21002D}"
                                              />
-                                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="8,0,6,6">
+                                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="8,0,6,6">
                                     <StackPanel x:Name="ReaderAiQuickActions" Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
                                         <Button Content="{DynamicResource Ui.Auto.04830193B408EEB1}" ToolTip.Tip="{DynamicResource Ui.Auto.98B4E0EFFCF15443}" Classes="readerAiReasoningToggle" Click="ReaderAiSummarizeChapterButton_Click" />
                                         <Button Content="{DynamicResource Ui.Auto.23CEC14BBCFAB6FA}" ToolTip.Tip="{DynamicResource Ui.Auto.9B4D1CC07395F4B1}" Classes="readerAiReasoningToggle" Click="ReaderAiExplainSelectionButton_Click" />
@@ -6637,14 +6683,23 @@
                         BorderThickness="1"
                         CornerRadius="0">
                     <StackPanel Orientation="Horizontal" Spacing="0">
-                        <Button Content="{DynamicResource Ui.Auto.63D90D977348AB1F}"
+                        <Button ToolTip.Tip="{DynamicResource Ui.Auto.63D90D977348AB1F}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.63D90D977348AB1F}"
                                 Classes="readerSelectionAction"
-                                Click="ReaderSelectionCopyButton_Click" />
+                                Click="ReaderSelectionCopyButton_Click">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 9,9 H 20 V 21 H 9 Z M 5,15 H 3 V 3 H 15 V 5" />
+                        </Button>
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
                         <Button x:Name="ReaderSelectionHighlightMenuButton"
-                                Content="{DynamicResource Ui.Auto.830CB845237C81B5}"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.830CB845237C81B5}"
+                                ToolTip.ServiceEnabled="False"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.830CB845237C81B5}"
                                 Classes="readerSelectionAction"
+                                Width="40"
                                 PointerEntered="ReaderSelectionHighlightMenuButton_PointerEntered">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 6,3 V 10 A 6,6 0 0,0 18,10 V 3 M 4,21 H 20" />
                             <Button.Flyout>
                                 <MenuFlyout FlyoutPresenterClasses="readerMenu" ShowMode="Transient"
                                             Placement="Bottom"
@@ -6712,39 +6767,57 @@
                             </Button.Flyout>
                         </Button>
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button Content="{DynamicResource Ui.Auto.85C5C1F5567B4D67}"
+                        <Button ToolTip.Tip="{DynamicResource Ui.Auto.85C5C1F5567B4D67}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.85C5C1F5567B4D67}"
                                 Classes="readerSelectionAction"
-                                Click="ReaderSelectionAnnotateButton_Click" />
+                                Click="ReaderSelectionAnnotateButton_Click">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 21,11 V 17 H 8 L 3,21 V 3 H 14 M 10,14 L 11,10 L 19,2 L 22,5 L 14,13 Z" />
+                        </Button>
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button Content="{DynamicResource Ui.Auto.44CE7AE909BBB28B}"
+                        <Button ToolTip.Tip="{DynamicResource Ui.Auto.44CE7AE909BBB28B}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.44CE7AE909BBB28B}"
                                 Classes="readerSelectionAction"
-                                Click="ReaderSelectionSearchButton_Click" />
+                                Click="ReaderSelectionSearchButton_Click">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 17,10 A 7,7 0 1,1 3,10 A 7,7 0 1,1 17,10 M 15,15 L 21,21" />
+                        </Button>
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
                         <Button x:Name="ReaderSelectionDictionaryButton"
-                                Content="{DynamicResource Ui.Auto.5935BB8194ABA677}"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.5935BB8194ABA677}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.5935BB8194ABA677}"
                                 Classes="readerSelectionAction"
-                                Click="ReaderSelectionDictionaryButton_Click" />
+                                Click="ReaderSelectionDictionaryButton_Click">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 12,5 C 9,3 6,3 2,4 V 20 C 6,19 9,19 12,21 C 15,19 18,19 22,20 V 4 C 18,3 15,3 12,5 V 21 M 5,8 H 9 M 5,12 H 9 M 15,8 H 19 M 15,12 H 19" />
+                        </Button>
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
-                        <Button Content="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
+                        <Button x:Name="ReaderSelectionAiButton"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.A264DF6D2A1F209D}"
                                 Classes="readerSelectionAction"
-                                Click="ReaderSelectionAiButton_Click" />
+                                Click="ReaderSelectionAiButton_Click">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 12,3 L 14.5,9.5 L 21,12 L 14.5,14.5 L 12,21 L 9.5,14.5 L 3,12 L 9.5,9.5 Z M 20,2 V 6 M 18,4 H 22" />
+                        </Button>
                         <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
                         <Button x:Name="ReaderSelectionTranslationButton"
-                                Content="{DynamicResource Ui.Auto.A52A08335185F048}"
+                                ToolTip.Tip="{DynamicResource Ui.Auto.A52A08335185F048}"
+                                AutomationProperties.Name="{DynamicResource Ui.Auto.A52A08335185F048}"
                                 Classes="readerSelectionAction"
-                                Click="ReaderSelectionTranslationButton_Click" />
-                        <Rectangle x:Name="ReaderSelectionDeleteSeparator"
-                                   Width="1"
-                                   Height="18"
-                                   Margin="2,0"
-                                   Fill="{DynamicResource ReaderBorderBrush}"
-                                   VerticalAlignment="Center"
-                                   IsVisible="False" />
-                        <Button x:Name="ReaderSelectionDeleteButton"
-                                Content="{DynamicResource Ui.Auto.2F9DAA828907B93F}"
+                                Click="ReaderSelectionTranslationButton_Click">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 2,5 H 14 M 7,2 V 5 M 12,5 C 11,10 7,14 3,16 M 5,8 C 7,11 9,13 12,14 M 13,22 L 17.5,11 L 22,22 M 15,18 H 20" />
+                        </Button>
+                        <Rectangle Width="1" Height="18" Margin="2,0" Fill="{DynamicResource ReaderBorderBrush}" VerticalAlignment="Center" />
+                        <Button x:Name="ReaderSelectionSpeakButton"
+                                ToolTip.Tip="{DynamicResource Ui.Reader.SpeakSelection}"
+                                AutomationProperties.Name="{DynamicResource Ui.Reader.SpeakSelection}"
                                 Classes="readerSelectionAction"
-                                IsVisible="False"
-                                Click="ReaderSelectionDeleteButton_Click" />
+                                Click="ReaderSelectionSpeakButton_Click">
+                            <Path Classes="libraryGlyph" Stroke="{Binding $parent[Button].Foreground}"
+                                  Data="M 11,4 L 6,8 H 2 V 16 H 6 L 11,20 Z M 15,8 C 18,10 18,14 15,16 M 18,4 C 24,8 24,16 18,20" />
+                        </Button>
                     </StackPanel>
                 </Border>
             </Popup>
@@ -7061,17 +7134,17 @@
                    IsHitTestVisible="False">
                 <Border x:Name="ReaderAnnotationHoverPopup"
                         PointerPressed="ReaderAnnotationHoverNote_PointerPressed"
+                        PointerExited="ReaderAnnotationHoverPopup_PointerExited"
                         Width="220"
-                        Height="88"
                         Padding="8"
                         Background="{DynamicResource ReaderPageBrush}"
                         BorderBrush="{DynamicResource ReaderAccentBrush}"
-                        BorderThickness="1.25"
-                        CornerRadius="8"
+                        BorderThickness="1"
+                        CornerRadius="0"
                         IsHitTestVisible="False"
                         IsVisible="False">
                     <Grid RowDefinitions="Auto,*">
-                        <Grid ColumnDefinitions="*,Auto" Margin="2,0,0,6">
+                        <Grid x:Name="ReaderAnnotationHoverHeading" ColumnDefinitions="*,Auto" Margin="2,0,0,6">
                             <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
                                 <Border Width="7" Height="7" CornerRadius="4" Background="{DynamicResource ReaderAccentBrush}" />
                                 <TextBlock Text="{DynamicResource Ui.Reader.AnnotationNoteLabel}"
@@ -7094,7 +7167,6 @@
                                     Click="ReaderAnnotationHoverCloseButton_Click" />
                         </Grid>
                         <ScrollViewer Grid.Row="1"
-                                      MaxHeight="90"
                                   HorizontalScrollBarVisibility="Disabled"
                                       VerticalScrollBarVisibility="Auto"
                                       PointerPressed="ReaderAnnotationHoverNote_PointerPressed">

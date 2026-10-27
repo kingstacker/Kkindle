@@ -913,10 +913,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         var httpClient = GetGoogleHttpClient(settings.GoogleProxyAddress);
-        using var response = await httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+        using var response = await GoogleTranslationResponse.SendAsync(httpClient, request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
@@ -927,7 +924,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 cancellationToken);
         }
         EnsureSuccess(response, body, "Google 免费翻译");
-        return ParseGoogleTranslation(body);
+        return GoogleTranslationResponse.Parse(body);
     }
 
     private async Task<string> TranslateWithGoogleLegacyAsync(
@@ -943,13 +940,10 @@ public sealed class EpubTranslationService : IEpubTranslationService
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Referrer = new Uri("https://translate.google.com/");
-        using var response = await httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+        using var response = await GoogleTranslationResponse.SendAsync(httpClient, request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         EnsureSuccess(response, body, "Google 免费翻译备用接口");
-        return ParseGoogleTranslation(body);
+        return GoogleTranslationResponse.Parse(body);
     }
 
     private async Task<string> TranslateWithBingAsync(
@@ -973,7 +967,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
         CancellationToken cancellationToken)
     {
         var endpoint =
-            $"https://www.bing.com/ttranslatev3?isVertical=1&IG={Uri.EscapeDataString(session.Ig)}"
+            $"{session.Host}/ttranslatev3?isVertical=1&IG={Uri.EscapeDataString(session.Ig)}"
             + $"&IID={Uri.EscapeDataString(session.Iid)}";
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
@@ -987,7 +981,8 @@ public sealed class EpubTranslationService : IEpubTranslationService
                 ["tryFetchingGenderDebiasedTranslations"] = "true"
             })
         };
-        request.Headers.Referrer = new Uri(BingTranslatorUrl);
+        request.Headers.Referrer = new Uri($"{session.Host}/translator");
+        request.Headers.TryAddWithoutValidation("Origin", session.Host);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         using var response = await _httpClient.SendAsync(
             request,
@@ -1033,7 +1028,9 @@ public sealed class EpubTranslationService : IEpubTranslationService
             if (ig.Length == 0 || string.IsNullOrWhiteSpace(iid) || !abuse.Success)
                 throw new InvalidDataException("Bing 翻译页面缺少临时访问参数。 ");
 
+            var pageUri = response.RequestMessage?.RequestUri ?? request.RequestUri!;
             _bingSession = new BingSession(
+                pageUri.GetLeftPart(UriPartial.Authority),
                 ig,
                 iid!,
                 abuse.Groups["key"].Value,
@@ -1471,31 +1468,6 @@ public sealed class EpubTranslationService : IEpubTranslationService
 
         translations = values;
         return true;
-    }
-
-    private static string ParseGoogleTranslation(string body)
-    {
-        using var document = JsonDocument.Parse(body);
-        var root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0)
-            throw new InvalidDataException("Google 翻译返回的数据格式无法识别。 ");
-        if (root[0].ValueKind == JsonValueKind.String)
-        {
-            var text = root[0].GetString();
-            if (!string.IsNullOrWhiteSpace(text)) return text;
-            throw new InvalidDataException("Google 翻译返回了空结果。 ");
-        }
-        if (root[0].ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException("Google 翻译返回的数据格式无法识别。 ");
-        var builder = new StringBuilder();
-        foreach (var item in root[0].EnumerateArray())
-        {
-            if (item.ValueKind == JsonValueKind.Array
-                && item.GetArrayLength() > 0
-                && item[0].ValueKind == JsonValueKind.String)
-                builder.Append(item[0].GetString());
-        }
-        return builder.ToString();
     }
 
     private static string? ParseBingTranslation(string body)
@@ -1997,6 +1969,7 @@ public sealed class EpubTranslationService : IEpubTranslationService
     }
 
     private sealed record BingSession(
+        string Host,
         string Ig,
         string Iid,
         string Key,

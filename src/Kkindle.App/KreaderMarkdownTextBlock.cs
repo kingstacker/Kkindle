@@ -23,7 +23,7 @@ namespace Kkindle;
 /// CommonMark parsing preserves nested formatting, lists, code and tables.
 /// Citations and TeX are embedded without changing the original answer.
 /// </summary>
-public sealed partial class KreaderMarkdownTextBlock : TextBlock
+public sealed partial class KreaderMarkdownTextBlock : KreaderSelectableTextBlock
 {
     public static readonly StyledProperty<string?> MarkdownProperty =
         AvaloniaProperty.Register<KreaderMarkdownTextBlock, string?>(nameof(Markdown));
@@ -75,6 +75,9 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
 
     private void RebuildMarkdownInlines()
     {
+        CloseSelectionPopup();
+        ContextMenu?.Close();
+        ClearSelection();
         foreach (var bitmap in _markdownBitmaps) bitmap.Dispose();
         _markdownBitmaps.Clear();
         _markdownMath.Clear();
@@ -122,7 +125,7 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
                         Padding = new Thickness(10, 3, 0, 3), Child = quoteText
                     };
                     _themedBorders.Add((quoteBorder, false));
-                    AddBlock(quoteBorder, target);
+                    AddBlock(quoteBorder, target, GetCopyText(quoteText.Inlines!));
                     break;
                 case CodeBlock code:
                     AddCodeBlock(code, target);
@@ -208,6 +211,7 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
                 case LinkInline { IsImage: true } imageLink:
                     var alt = InlineText(imageLink);
                     var image = CreateMarkdownImage($"![{alt}]({imageLink.Url})");
+                    image?.SetValue(InlineCopyTextProperty, alt);
                     target.Add(image is null ? new Run(alt) : new InlineUIContainer(image));
                     break;
                 case LinkInline link:
@@ -252,6 +256,7 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
             VerticalAlignment = VerticalAlignment.Center
         };
         ToolTip.SetTip(button, uri.AbsoluteUri);
+        button.SetValue(InlineCopyTextProperty, title);
         target.Add(new InlineUIContainer(button));
     }
 
@@ -278,19 +283,21 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
         button.Classes.Add("readerAiCitationMarker");
         AttachCitationPreview(button, sourceId);
         button.Click += (_, _) => CitationAction?.Invoke(sourceId);
+        button.SetValue(InlineCopyTextProperty, $"[{sourceId}]");
         target.Add(new InlineUIContainer(button));
     }
 
     private TextBlock CreateBlockText()
     {
-        var text = new TextBlock { Inlines = new InlineCollection(), TextWrapping = TextWrapping.Wrap };
+        var text = new KreaderSelectableTextBlock { Inlines = new InlineCollection(), TextWrapping = TextWrapping.Wrap };
         text.Bind(ForegroundProperty, new Binding(nameof(Foreground)) { Source = this });
         text.Bind(FontSizeProperty, new Binding(nameof(FontSize)) { Source = this });
         return text;
     }
 
-    private void AddBlock(Control control, InlineCollection target)
+    private void AddBlock(Control control, InlineCollection target, string? copyText = null)
     {
+        control.SetValue(InlineCopyTextProperty, copyText);
         control.MaxWidth = MathWidth;
         control.HorizontalAlignment = HorizontalAlignment.Left;
         _embeddedBlocks.Add(control);
@@ -306,7 +313,7 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
             language.Bind(ForegroundProperty, new Binding(nameof(Foreground)) { Source = this });
             contents.Children.Add(language);
         }
-        var text = new SelectableTextBlock
+        var text = new KreaderSelectableTextBlock
         {
             Text = code.Lines.ToString(), FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
             FontSize = Math.Max(10, FontSize - 1), TextWrapping = TextWrapping.NoWrap
@@ -319,17 +326,19 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
         });
         var border = new Border { Padding = new Thickness(10), Child = contents, CornerRadius = new CornerRadius(3) };
         _themedBorders.Add((border, true));
-        AddBlock(border, target);
+        AddBlock(border, target, text.Text);
     }
 
     private void AddTable(Table table, InlineCollection target)
     {
         var grid = new Grid();
+        var copyRows = new List<string>();
         var columns = Math.Max(1, table.ColumnDefinitions.Count);
         for (var i = 0; i < columns; i++) grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
         for (var rowIndex = 0; rowIndex < table.Count; rowIndex++)
         {
             if (table[rowIndex] is not TableRow row) continue;
+            var copyCells = new List<string>();
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             for (var columnIndex = 0; columnIndex < row.Count; columnIndex++)
             {
@@ -346,18 +355,20 @@ public sealed partial class KreaderMarkdownTextBlock : TextBlock
                         _ => TextAlignment.Left
                     };
                 RenderBlocks(cell, text.Inlines!, 0);
+                copyCells.Add(GetCopyText(text.Inlines!));
                 var border = new Border { Padding = new Thickness(8, 5), BorderThickness = new Thickness(0, 0, 0, 1), Child = text };
                 _themedBorders.Add((border, row.IsHeader));
                 Grid.SetRow(border, rowIndex);
                 Grid.SetColumn(border, columnIndex);
                 grid.Children.Add(border);
             }
+            copyRows.Add(string.Join('\t', copyCells));
         }
         AddBlock(new ScrollViewer
         {
             Content = grid, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
-        }, target);
+        }, target, string.Join(Environment.NewLine, copyRows));
     }
 
     private void UpdateBlockAppearance()

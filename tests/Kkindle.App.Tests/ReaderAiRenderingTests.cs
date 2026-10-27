@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.VisualTree;
@@ -16,6 +17,177 @@ namespace Kkindle.Ui.Tests;
 [Collection("Settings UI")]
 public sealed class ReaderAiRenderingTests(SettingsUiSession session)
 {
+    [Fact]
+    public Task MouseSelectionCopiesFormattedAnswerAndQuotesItWithoutLosingDraft() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Get<Control>("LibraryRoot").IsVisible = false;
+        scope.Get<Control>("ReaderRoot").IsVisible = true;
+        scope.Call("ShowReaderAiTab");
+        scope.Get<Control>("ReaderAiEmptyState").IsVisible = false;
+        using var answer = new ReaderAiMessageViewModel("assistant", "名词加 -s 表示**复数**。\n\n动词加 -s 表示**单数**，两者含义不同。");
+        scope.Window.ReaderAiMessages.Add(answer);
+        await ReaderTests.Render();
+        var text = scope.Get<Control>("ReaderAssistantPanel").GetVisualDescendants()
+            .OfType<KreaderMarkdownTextBlock>().Single(block => block.Markdown == answer.Content);
+        var selected = $"名词加 -s 表示复数。{Environment.NewLine}{Environment.NewLine}动词加 -s 表示单数";
+        DragSelection(scope.Window, text, 0, selected.Length);
+        await ReaderTests.Render();
+        Assert.Equal(selected, text.SelectedText);
+        var output = Environment.GetEnvironmentVariable("KKINDLE_READER_ARTIFACTS");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            using var frame = scope.Window.CaptureRenderedFrame();
+            frame!.Save(Path.Combine(output, "ai-selection.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+        }
+        var copy = scope.Window.GetVisualDescendants().OfType<Button>().Single(button => Equals(button.Content, "复制") && button.Classes.Contains("readerAiSelectionAction"));
+        var copyPoint = copy.TranslatePoint(new Point(copy.Bounds.Width / 2, copy.Bounds.Height / 2), scope.Window)!.Value;
+        scope.Window.MouseDown(copyPoint, MouseButton.Left);
+        scope.Window.MouseUp(copyPoint, MouseButton.Left);
+        await ReaderTests.Render();
+        Assert.Equal(selected, await scope.Window.Clipboard!.TryGetTextAsync());
+
+        var draft = scope.Get<TextBox>("ReaderAiQuestionBox");
+        draft.Text = "为什么会这样？";
+        scope.Set("_readerPendingSelection", "书籍原有选区");
+        scope.Set("_readerAiBusy", true);
+        DragSelection(scope.Window, text, 0, selected.Length);
+        await ReaderTests.Render();
+        var followUp = scope.Window.GetVisualDescendants().OfType<Button>().Single(button => Equals(button.Content, "追问"));
+        var followUpPoint = followUp.TranslatePoint(new Point(followUp.Bounds.Width / 2, followUp.Bounds.Height / 2), scope.Window)!.Value;
+        scope.Window.MouseDown(followUpPoint, MouseButton.Left);
+        scope.Window.MouseUp(followUpPoint, MouseButton.Left);
+        await ReaderTests.Render();
+        Assert.Equal("针对这段对话：\n> 名词加 -s 表示复数。\n> \n> 动词加 -s 表示单数\n\n为什么会这样？", draft.Text);
+        Assert.Same(draft, scope.Window.FocusManager!.GetFocusedElement());
+        Assert.Equal(draft.Text.Length, draft.CaretIndex);
+        Assert.Equal("书籍原有选区", scope.Field<string>("_readerPendingSelection"));
+        Assert.Single(scope.Window.ReaderAiMessages);
+        scope.Set("_readerAiBusy", false);
+    });
+
+    [Fact]
+    public Task UserReasoningQuotesTablesAndCodeSupportSelectionContextActions() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Get<Control>("LibraryRoot").IsVisible = false;
+        scope.Get<Control>("ReaderRoot").IsVisible = true;
+        scope.Call("ShowReaderAiTab");
+        scope.Get<Control>("ReaderAiEmptyState").IsVisible = false;
+        using var user = new ReaderAiMessageViewModel("user", "我的原始问题");
+        using var answer = new ReaderAiMessageViewModel("assistant");
+        answer.Update("> 引用中的**重点**\n\n| 参数 | 值 |\n| --- | --- |\n| 名称 | 内容 |\n\n```text\nkeeps\n```", "思考中的选文", false);
+        answer.ToggleReasoning();
+        scope.Window.ReaderAiMessages.Add(user);
+        scope.Window.ReaderAiMessages.Add(answer);
+        await ReaderTests.Render();
+        var panel = scope.Get<Control>("ReaderAssistantPanel");
+        foreach (var expected in new[] { "我的原始问题", "思考中的选文", "引用中的重点", "名称", "keeps" })
+        {
+            var text = panel.GetVisualDescendants().OfType<KreaderSelectableTextBlock>()
+                .SingleOrDefault(block => block.IsEffectivelyVisible && (block.Inlines?.Text ?? block.Text)?.Trim() == expected);
+            Assert.True(text is not null, $"Missing {expected}: {string.Join(" / ", panel.GetVisualDescendants().OfType<KreaderSelectableTextBlock>().Select(block => block.Inlines?.Text ?? block.Text))}");
+            Assert.True(text.IsFollowUpEnabled, expected);
+            text.Focus();
+            text.SelectAll();
+            text.ContextMenu!.Open(text);
+            await ReaderTests.Render();
+            var items = text.ContextMenu.Items.OfType<MenuItem>().ToArray();
+            Assert.True(items.Single(item => Equals(item.Header, "复制")).IsEnabled, $"Menu lost selection for {expected}: {text.SelectedText}");
+            items.Single(item => Equals(item.Header, "复制")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await ReaderTests.Render();
+            Assert.Equal(text.SelectedText, await scope.Window.Clipboard!.TryGetTextAsync());
+            items.Single(item => Equals(item.Header, "追问")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Contains("> " + expected, scope.Get<TextBox>("ReaderAiQuestionBox").Text);
+            text.ContextMenu.Close();
+            scope.Get<TextBox>("ReaderAiQuestionBox").Text = string.Empty;
+        }
+    });
+
+    [Fact]
+    public Task KeyboardCopyIncludesReadableCitationsFormulasAndEmbeddedBlocks() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Get<Control>("LibraryRoot").IsVisible = false;
+        scope.Get<Control>("ReaderRoot").IsVisible = true;
+        scope.Call("ShowReaderAiTab");
+        scope.Get<Control>("ReaderAiEmptyState").IsVisible = false;
+        using var answer = new ReaderAiMessageViewModel("assistant", """
+            **开头** [S1] [文档](https://example.com) $x^2$
+
+            > 引用中的**重点**
+
+            | 参数 | 值 |
+            | --- | --- |
+            | 名称 | 内容 |
+
+            ```text
+            keeps
+            ```
+
+            末尾
+            """);
+        scope.Window.ReaderAiMessages.Add(answer);
+        await ReaderTests.Render();
+        var text = scope.Get<Control>("ReaderAssistantPanel").GetVisualDescendants()
+            .OfType<KreaderMarkdownTextBlock>().Single(block => block.Markdown == answer.Content);
+        text.Focus();
+        text.SelectAll();
+        scope.Window.KeyPress(Key.C, RawInputModifiers.Control, PhysicalKey.C, "c");
+        await ReaderTests.Render();
+        var copied = await scope.Window.Clipboard!.TryGetTextAsync();
+        Assert.StartsWith("开头 [S1] 文档 $x^2$", copied);
+        Assert.Contains("引用中的重点", copied);
+        Assert.Contains("名称\t内容", copied);
+        Assert.Contains("keeps", copied);
+        Assert.EndsWith("末尾", copied);
+        Assert.DoesNotContain("\uFFFC", copied);
+        text.ContextMenu!.Open(text);
+        text.ContextMenu.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "追问"))
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Contains("> 开头 [S1] 文档 $x^2$", scope.Get<TextBox>("ReaderAiQuestionBox").Text);
+    });
+
+    [Fact]
+    public Task UpdatingAnswerDismissesOldSelectionActions() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        scope.Get<Control>("LibraryRoot").IsVisible = false;
+        scope.Get<Control>("ReaderRoot").IsVisible = true;
+        scope.Call("ShowReaderAiTab");
+        scope.Get<Control>("ReaderAiEmptyState").IsVisible = false;
+        using var answer = new ReaderAiMessageViewModel("assistant", "可以选择的旧回答");
+        scope.Window.ReaderAiMessages.Add(answer);
+        await ReaderTests.Render();
+        var text = scope.Get<Control>("ReaderAssistantPanel").GetVisualDescendants()
+            .OfType<KreaderMarkdownTextBlock>().Single(block => block.Markdown == answer.Content);
+        DragSelection(scope.Window, text, 0, 4);
+        await ReaderTests.Render();
+        Assert.Contains(scope.Window.GetVisualDescendants().OfType<Button>(), button => Equals(button.Content, "追问"));
+        answer.Update("更新后的回答", string.Empty, false);
+        await ReaderTests.Render();
+        Assert.DoesNotContain(scope.Window.GetVisualDescendants().OfType<Button>(), button => Equals(button.Content, "追问"));
+        Assert.True(string.IsNullOrEmpty(text.SelectedText));
+    });
+
+    private static void DragSelection(Window window, SelectableTextBlock text, int start, int end)
+    {
+        Point Position(int index)
+        {
+            var rect = text.TextLayout.HitTestTextPosition(index);
+            return text.TranslatePoint(new Point(rect.X + 0.1, rect.Y + rect.Height / 2), window)!.Value;
+        }
+        var first = Position(start);
+        var last = Position(end);
+        Assert.Same(text, window.InputHitTest(first));
+        window.MouseMove(first);
+        window.MouseDown(first, MouseButton.Left);
+        window.MouseMove(last, RawInputModifiers.LeftMouseButton);
+        Assert.True(!string.IsNullOrEmpty(text.SelectedText), $"No selection before release: {text.SelectionStart}/{text.SelectionEnd}; text={text.Inlines?.Text ?? text.Text}, first={first}, last={last}, focused={window.FocusManager!.GetFocusedElement()}");
+        window.MouseUp(last, MouseButton.Left);
+    }
+
     [Fact]
     public Task OverviewRetrievalStatusDoesNotTurnAReadyModelYellow() => Run(async () =>
     {
@@ -239,9 +411,7 @@ public sealed class ReaderAiRenderingTests(SettingsUiSession session)
         scope.Set("_readerPendingSelection", "Reference path frequency");
         scope.Call("ShowReaderSelectionPopup", new Point(30, 120), 140d);
         await ReaderTests.Render();
-        var popup = scope.Get<Border>("ReaderSelectionPopupBar");
-        var explain = popup.GetVisualDescendants().OfType<Button>()
-            .Single(button => Equals(button.Content, "AI 解释"));
+        var explain = scope.Get<Button>("ReaderSelectionAiButton");
         explain.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await ReaderTests.Render();
         Assert.True(scope.Get<Control>("ReaderAssistantPanel").IsVisible);

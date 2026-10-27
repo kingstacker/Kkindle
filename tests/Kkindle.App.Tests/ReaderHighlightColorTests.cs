@@ -109,7 +109,9 @@ public sealed class ReaderHighlightColorTests(SettingsUiSession session)
         var annotationId = Assert.Single(scope.Window.ReaderAnnotations).Id;
 
         var button = scope.Get<Button>("ReaderSelectionHighlightMenuButton");
-        var deleteSeparator = scope.Get<Control>("ReaderSelectionDeleteSeparator");
+        var selectionActions = ((Panel)scope.Get<Border>("ReaderSelectionPopupBar").Child!).Children.OfType<Button>().ToArray();
+        Assert.Equal(8, selectionActions.Length);
+        Assert.DoesNotContain(selectionActions, action => ToolTip.GetTip(action) as string is "删除" or "Delete");
         var flyout = Assert.IsType<MenuFlyout>(button.Flyout);
         Assert.Equal(6, flyout.Items.OfType<MenuItem>().Count());
         Assert.Single(flyout.Items.OfType<MenuItem>(), item => item.Tag as string == "marker");
@@ -121,13 +123,13 @@ public sealed class ReaderHighlightColorTests(SettingsUiSession session)
         {
             var before = Assert.Single(scope.Window.ReaderAnnotations).Color;
             await ShowStyles(start); // Re-selecting the same range edits the existing note.
-            Assert.False(deleteSeparator.IsVisible);
             Assert.Equal(language == "zh-CN" ? "荧光标记" : "Highlight", scope.Get<TextBlock>("ReaderSelectionMarkerLabel").Text);
             Assert.Equal(Color.Parse(before), Assert.IsAssignableFrom<ISolidColorBrush>(scope.Get<Border>("ReaderSelectionMarkerColorPreview").Background).Color);
             if (item == items[^1]) CaptureMenu(TopLevel.GetTopLevel(picker), language + "-" + theme + "-row");
             Click(picker);
             await ReaderTests.Render();
             Assert.True(flyout.IsOpen);
+            Assert.Contains("active", button.Classes);
             Assert.True(palette.IsOpen);
             Assert.True(scope.Get<Popup>("ReaderSelectionHostPopup").IsOpen);
             Assert.False(string.IsNullOrWhiteSpace(scope.Field<string?>("_readerPendingSelection")));
@@ -148,6 +150,7 @@ public sealed class ReaderHighlightColorTests(SettingsUiSession session)
             Assert.Equal("Keep this note", saved.Note);
             Assert.False(palette.IsOpen);
             Assert.False(flyout.IsOpen);
+            Assert.DoesNotContain("active", button.Classes);
         }
 
         var lastColor = Assert.IsType<string>(items[^1].Tag);
@@ -173,15 +176,38 @@ public sealed class ReaderHighlightColorTests(SettingsUiSession session)
         Assert.Empty(scope.Window.ReaderAnnotations.Single(item => item.Id == annotationId).Note);
 
         var deleteTarget = scope.Window.ReaderAnnotations.Single(item => item.Id == annotationId);
+        host.WebMessageReceived += (_, args) => scope.Call("HandleReaderBridgeMessage", args.Body);
         scope.Call("EditReaderAnnotation", deleteTarget);
-        var deleteButton = scope.Get<Button>("ReaderSelectionDeleteButton");
-        Assert.True(deleteButton.IsVisible);
-        Assert.True(deleteSeparator.IsVisible);
-        Assert.Equal(language == "zh-CN" ? "删除" : "Delete", deleteButton.Content?.ToString());
-        scope.Call("ReaderSelectionDeleteButton_Click", deleteButton, new Avalonia.Interactivity.RoutedEventArgs());
+        await ReaderTests.Render();
+        var bounds = host.GetAnnotationBounds(deleteTarget)[0];
+        var point = host.TranslatePoint(bounds.Center, scope.Window)!.Value;
+        scope.Window.MouseDown(point, MouseButton.Right);
+        scope.Window.MouseUp(point, MouseButton.Right);
+        await ReaderTests.Render();
+        var menu = scope.Field<ContextMenu?>("_readerAnnotationMenu");
+        Assert.NotNull(menu);
+        Assert.True(menu.IsOpen);
+        Assert.False(scope.Get<Popup>("ReaderSelectionHostPopup").IsOpen);
+        var editItem = Assert.Single(menu.Items.OfType<MenuItem>(), item => item.Tag as string == "edit");
+        editItem.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.True(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        Assert.Equal(deleteTarget.Id, scope.Field<ReaderAnnotation>("_selectedReaderAnnotation").Id);
+        scope.Call("CloseReaderAnnotationInputPopup");
+
+        scope.Window.MouseDown(point, MouseButton.Right);
+        scope.Window.MouseUp(point, MouseButton.Right);
+        await ReaderTests.Render();
+        menu = scope.Field<ContextMenu>("_readerAnnotationMenu");
+        var deleteItem = Assert.Single(menu.Items.OfType<MenuItem>(), item => item.Tag as string == "delete");
+        Assert.Equal(language == "zh-CN" ? "删除批注" : "Delete annotation", deleteItem.Header);
+        deleteItem.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         for (var attempt = 0; attempt < 500 && scope.Window.ReaderAnnotations.Any(item => item.Id == annotationId); attempt++)
             await Task.Delay(10);
         Assert.DoesNotContain(scope.Window.ReaderAnnotations, item => item.Id == annotationId);
+        Assert.Contains(scope.Window.ReaderAnnotations, item => item.Id == second.Id);
+        var persistedNotes = await reopened.GetAnnotationsAsync(file.Id);
+        Assert.DoesNotContain(persistedNotes, item => item.Id == annotationId);
+        Assert.Contains(persistedNotes, item => item.Id == second.Id);
 
         scope.Set("_readerActiveHost", null);
         scope.Set("_readerBookCard", null);

@@ -100,6 +100,8 @@ public partial class MainWindow
                 || !ReferenceEquals(_readerTranslationCancellation, cancellation))
                 return;
 
+            if (string.IsNullOrWhiteSpace(result))
+                throw new InvalidDataException("翻译返回了空结果，请重试或切换翻译引擎。");
             ReaderTranslationResultText.Text = result;
             ReaderTranslationStatusText.Text = T("翻译已完成");
             ReaderTranslationCopyButton.IsEnabled = result.Length > 0;
@@ -113,8 +115,8 @@ public partial class MainWindow
             if (requestSequence != _readerTranslationRequestSequence
                 || !ReferenceEquals(_readerTranslationCancellation, cancellation))
                 return;
-            ReaderTranslationResultText.Text = string.Empty;
-            ReaderTranslationStatusText.Text = T("翻译失败：{0}", UiText.Localize(exception.Message));
+            ReaderTranslationResultText.Text = T("翻译失败：{0}", UiText.Localize(exception.Message));
+            ReaderTranslationStatusText.Text = T("请重试或切换翻译引擎。");
             ReaderTranslationCopyButton.IsEnabled = false;
             ReaderTranslationAnnotateButton.IsEnabled = false;
         }

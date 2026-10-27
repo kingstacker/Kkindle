@@ -1058,6 +1058,8 @@ public partial class MainWindow
     private PixelPoint? _readerFootnoteAnchorScreenPoint;
     private DispatcherTimer? _readerFootnoteHoverTimer;
     private DispatcherTimer? _readerSelectionHighlightPointerTimer;
+    private const int ReaderSelectionToolTipDurationMs = 800;
+    private long? _readerSelectionHighlightToolTipHoverTick;
     private long _readerSelectionHighlightOpenedTick;
     private int _readerSelectionHighlightOutsideTicks;
     private bool _readerLinuxTextFallbackUpdating;
@@ -1382,6 +1384,7 @@ public partial class MainWindow
         ReaderAiNewContentButton.IsVisible = false;
         _readerAiConversation.Clear();
         _readerAiFollowOutput = true;
+        ClearReaderAiDraftImages();
         foreach (var message in ReaderAiMessages)
             message.Dispose();
         ReaderAiMessages.Clear();
@@ -7078,6 +7081,7 @@ public partial class MainWindow
 
     private Point? _readerAnnotationHoverPlacementPoint;
     private Guid? _readerAnnotationHoverAnnotationId;
+    private int _readerAnnotationHoverSequence;
 
     private void ShowCurrentReaderPdfAnnotation()
     {
@@ -7104,13 +7108,16 @@ public partial class MainWindow
             && (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned
                 || annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
+        ReaderAnnotationHoverHeading.IsVisible = _readerIsPdf;
+        _readerAnnotationHoverSequence++;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
         _readerAnnotationHoverAnnotationId = annotation?.Id;
-        ReaderAnnotationHoverHostPopup.IsHitTestVisible = _readerIsPdf;
-        ReaderAnnotationHoverPopup.IsHitTestVisible = _readerIsPdf;
+        ReaderAnnotationHoverHostPopup.IsHitTestVisible = true;
+        ReaderAnnotationHoverPopup.IsHitTestVisible = true;
         if (placementPoint is { } point)
             _readerAnnotationHoverPlacementPoint = point;
         ReaderAnnotationHoverPopup.IsVisible = true;
+        var measureHeight = ReaderAnnotationCardLayout.CreateMeasure(ReaderAnnotationHoverPopup, ReaderAnnotationHoverNote);
         if (_readerIsPdf
             && CurrentReaderHost is NativePdfReaderHost pdf
             && annotation is not null)
@@ -7120,40 +7127,53 @@ public partial class MainWindow
                     pdf,
                     annotation,
                     _readerAnnotationHoverPlacementPoint,
-                    new Size(220, 88)))
+                    new Size(220, measureHeight(220)),
+                    measureHeight: measureHeight))
                 return;
             pdf.ClearAnnotationCallout();
             HideReaderAnnotationHoverPopup();
             return;
         }
-        if (CurrentReaderHost?.View is Control view
-            && _readerAnnotationHoverPlacementPoint is { } anchor)
+        var viewport = (CurrentReaderHost?.View as Control)?.Bounds.Size ?? ReaderWebViewHost.Bounds.Size;
+        var visibleBands = CurrentReaderHost is NativeReaderHost epub && annotation is not null
+            ? epub.GetAnnotationBounds(annotation).Select(rect => rect.Intersect(new Rect(viewport)))
+                .Where(rect => rect.Width > 0 && rect.Height > 0).ToArray()
+            : [];
+        var quote = visibleBands.Length > 0
+            ? visibleBands.Aggregate((left, right) => left.Union(right))
+            : new Rect(_readerAnnotationHoverPlacementPoint ?? new Point(8, 8), new Size(1, 1));
+        var cardBounds = ReaderAnnotationCardLayout.PlaceEpub(quote, viewport, measureHeight);
+        ReaderAnnotationHoverPopup.Width = cardBounds.Width;
+        ReaderAnnotationHoverPopup.Height = cardBounds.Height;
+        if (CurrentReaderHost?.View is Control view)
         {
             ReaderAnnotationHoverHostPopup.PlacementTarget = view;
             ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
-            ReaderAnnotationHoverHostPopup.PlacementRect = new Rect(anchor.X, anchor.Y, 1, 1);
+            ReaderAnnotationHoverHostPopup.PlacementRect = new Rect(cardBounds.Position, new Size(1, 1));
             ReaderAnnotationHoverHostPopup.PlacementAnchor =
                 Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
             ReaderAnnotationHoverHostPopup.PlacementGravity =
                 Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight;
             ReaderAnnotationHoverHostPopup.PlacementConstraintAdjustment =
-                Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipX
-                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY
-                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideX
-                | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY;
+                Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.None;
         }
         else
         {
             ReaderAnnotationHoverHostPopup.PlacementTarget = ReaderWebViewHost;
-            ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.Pointer;
+            ReaderAnnotationHoverHostPopup.Placement = Avalonia.Controls.PlacementMode.AnchorAndGravity;
+            ReaderAnnotationHoverHostPopup.PlacementRect = new Rect(cardBounds.Position, new Size(1, 1));
+            ReaderAnnotationHoverHostPopup.PlacementAnchor = Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft;
+            ReaderAnnotationHoverHostPopup.PlacementGravity = Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight;
+            ReaderAnnotationHoverHostPopup.PlacementConstraintAdjustment = Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.None;
         }
-        ReaderAnnotationHoverHostPopup.HorizontalOffset = 12;
-        ReaderAnnotationHoverHostPopup.VerticalOffset = 14;
+        ReaderAnnotationHoverHostPopup.HorizontalOffset = 0;
+        ReaderAnnotationHoverHostPopup.VerticalOffset = 0;
         ReaderAnnotationHoverHostPopup.IsOpen = true;
     }
 
     private void HideReaderAnnotationHoverPopup()
     {
+        _readerAnnotationHoverSequence++;
         foreach (var popup in _readerPdfAnnotationPopups)
         {
             popup.IsOpen = false;
@@ -7173,8 +7193,7 @@ public partial class MainWindow
 
     private void ReaderAnnotationHoverNote_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!_readerIsPdf
-            || _readerAnnotationHoverAnnotationId is not { } annotationId
+        if (_readerAnnotationHoverAnnotationId is not { } annotationId
             || ReaderAnnotations.FirstOrDefault(item => item.Id == annotationId) is not { } annotation)
             return;
 
@@ -7182,14 +7201,20 @@ public partial class MainWindow
         if (properties.IsRightButtonPressed)
         {
             e.Handled = true;
-            ShowReaderPdfAnnotationMenu(annotation);
+            ShowReaderAnnotationMenu(annotation);
         }
-        else if (properties.IsLeftButtonPressed)
+        else if (_readerIsPdf && properties.IsLeftButtonPressed)
         {
             e.Handled = true;
             EditReaderPdfAnnotation(annotation);
             (CurrentReaderHost as NativePdfReaderHost)?.SelectAnnotation(annotation.Id);
         }
+    }
+
+    private void ReaderAnnotationHoverPopup_PointerExited(object? sender, PointerEventArgs e)
+    {
+        if (_readerIsPdf) return;
+        HideReaderAnnotationHoverPopup();
     }
 
     private void ReaderAnnotationHoverCloseButton_Click(object? sender, RoutedEventArgs e)
@@ -7247,12 +7272,17 @@ public partial class MainWindow
                         RememberCurrentPdfPageText();
                         if (_readerPdfPage != previousPdfPage)
                         {
-                            _selectedReaderAnnotation = null;
                             HideReaderSelectionPopup();
-                            HideReaderAnnotationInputPopup();
-                            HideReaderAnnotationHoverPopup();
-                            // Navigation emits the new page before its final pan is applied.
-                            Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
+                            // Continuous scrolling can change the current page
+                            // while the edited annotation's page is still visible.
+                            // Explicit navigation closes the editor itself.
+                            if (!ReaderAnnotationInputPopup.IsOpen)
+                            {
+                                _selectedReaderAnnotation = null;
+                                HideReaderAnnotationHoverPopup();
+                                // Navigation emits the page before its final pan.
+                                Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
+                            }
                         }
                         ReaderChapterText.Text = GetReaderChapterPositionLabel();
                         UpdateReaderToolbar();
@@ -7414,10 +7444,9 @@ public partial class MainWindow
                     }
                     break;
                 case "annotationContextMenu":
-                    if (_readerIsPdf
-                        && Guid.TryParse(ReadString(root, "id"), out var menuId)
+                    if (Guid.TryParse(ReadString(root, "id"), out var menuId)
                         && ReaderAnnotations.FirstOrDefault(item => item.Id == menuId) is { } menuAnnotation)
-                        ShowReaderPdfAnnotationMenu(menuAnnotation);
+                        ShowReaderAnnotationMenu(menuAnnotation);
                     break;
                 case "pdfAnnotationDelete":
                     PdfAnnotTrace.Write($"bridge pdfAnnotationDelete id={ReadString(root, "id")} isPdf={_readerIsPdf}");
@@ -7772,9 +7801,6 @@ public partial class MainWindow
             return;
         }
 
-        var showDeleteAction = _selectedReaderAnnotation is not null;
-        ReaderSelectionDeleteSeparator.IsVisible = showDeleteAction;
-        ReaderSelectionDeleteButton.IsVisible = showDeleteAction;
         // Remember where the selection sits so the annotation input window can
         // open at the same spot after the bar hands off to it.
         _readerLastSelectionPopupAnchor = placementPoint;
@@ -7782,8 +7808,8 @@ public partial class MainWindow
         ShowReaderPopupNearSelection(
             ReaderSelectionHostPopup,
             ReaderSelectionPopupBar,
-            fallbackWidth: 430,
-            fallbackHeight: 38,
+            fallbackWidth: 321,
+            fallbackHeight: 40,
             placementPoint,
             selectionBottom);
     }
@@ -7860,16 +7886,15 @@ public partial class MainWindow
 
     private void HideReaderSelectionPopup()
     {
+        if (ReaderSelectionPopupBar.Child is Panel actions)
+            foreach (var button in actions.Children.OfType<Button>())
+                ToolTip.SetIsOpen(button, false);
         HideReaderTranslationPopup(clearSelection: false);
         HideReaderDictionaryPopup(clearSelection: false);
         ReaderMarkerPaletteFlyout?.Hide();
         StopReaderSelectionHighlightPointerTracking();
         if (ReaderSelectionHighlightMenuButton?.Flyout is PopupFlyoutBase { IsOpen: true } flyout)
             flyout.Hide();
-        if (ReaderSelectionDeleteSeparator is not null)
-            ReaderSelectionDeleteSeparator.IsVisible = false;
-        if (ReaderSelectionDeleteButton is not null)
-            ReaderSelectionDeleteButton.IsVisible = false;
         if (ReaderSelectionHostPopup is not null)
             ReaderSelectionHostPopup.IsOpen = false;
     }
@@ -7950,10 +7975,30 @@ public partial class MainWindow
         }
     }
 
+    private void InitializeReaderSelectionToolTips()
+    {
+        if (ReaderSelectionPopupBar.Child is not Panel actions) return;
+        foreach (var button in actions.Children.OfType<Button>())
+        {
+            IDisposable? hideTimer = null;
+            button.PropertyChanged += (_, e) =>
+            {
+                if (e.Property != ToolTip.IsOpenProperty) return;
+                hideTimer?.Dispose();
+                hideTimer = null;
+                if (ToolTip.GetIsOpen(button))
+                    hideTimer = DispatcherTimer.RunOnce(
+                        () => ToolTip.SetIsOpen(button, false),
+                        TimeSpan.FromMilliseconds(ReaderSelectionToolTipDurationMs));
+            };
+        }
+    }
+
     private void StartReaderSelectionHighlightPointerTracking()
     {
         StopReaderSelectionHighlightPointerTracking();
         _readerSelectionHighlightOpenedTick = Environment.TickCount64;
+        _readerSelectionHighlightToolTipHoverTick = _readerSelectionHighlightOpenedTick;
         _readerSelectionHighlightOutsideTicks = 0;
         _readerSelectionHighlightPointerTimer ??= new DispatcherTimer
         {
@@ -7967,6 +8012,27 @@ public partial class MainWindow
     private void StopReaderSelectionHighlightPointerTracking()
     {
         _readerSelectionHighlightPointerTimer?.Stop();
+        UpdateReaderSelectionHighlightToolTip(false);
+    }
+
+    private void UpdateReaderSelectionHighlightToolTip(bool pointerOverButton)
+    {
+        if (!pointerOverButton)
+        {
+            _readerSelectionHighlightToolTipHoverTick = null;
+            ToolTip.SetIsOpen(ReaderSelectionHighlightMenuButton, false);
+            return;
+        }
+
+        // The menu's overlay clears IsPointerOver on the anchor button. Use
+        // the same screen-pointer tracking that keeps this hover menu open.
+        _readerSelectionHighlightToolTipHoverTick ??= Environment.TickCount64;
+        var elapsed = Environment.TickCount64 - _readerSelectionHighlightToolTipHoverTick.Value;
+        var delay = ToolTip.GetShowDelay(ReaderSelectionHighlightMenuButton);
+        // Keep the hover start after dismissal so a stationary pointer cannot
+        // repeatedly reopen the tooltip through the menu overlay.
+        ToolTip.SetIsOpen(ReaderSelectionHighlightMenuButton,
+            elapsed >= delay && elapsed < delay + ReaderSelectionToolTipDurationMs);
     }
 
     private void ReaderSelectionHighlightPointerTimer_Tick(object? sender, EventArgs e)
@@ -7980,6 +8046,7 @@ public partial class MainWindow
         // the pointer crosses into it; light dismiss closes the palette.
         if (ReaderMarkerPaletteFlyout is { IsOpen: true })
         {
+            UpdateReaderSelectionHighlightToolTip(false);
             _readerSelectionHighlightOutsideTicks = 0;
             return;
         }
@@ -7987,6 +8054,7 @@ public partial class MainWindow
             return;
 
         var buttonRect = GetReaderScreenRect(ReaderSelectionHighlightMenuButton);
+        UpdateReaderSelectionHighlightToolTip(ContainsReaderScreenPoint(buttonRect, screenPoint));
         var presenter = ReaderSelectionHighlightSolidItem
             .GetVisualAncestors()
             .OfType<MenuFlyoutPresenter>()
@@ -8123,6 +8191,9 @@ public partial class MainWindow
         {
             case "copy":
                 _ = ObserveReaderTaskAsync(PerformReaderSelectionCopyAsync());
+                break;
+            case "speak":
+                _ = ObserveReaderTaskAsync(SpeakReaderSelectionAsync());
                 break;
             case "highlight":
                 if (root.TryGetProperty("style", out var styleElement)

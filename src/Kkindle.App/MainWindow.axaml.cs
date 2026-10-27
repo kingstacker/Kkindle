@@ -265,12 +265,14 @@ public partial class MainWindow : Window
         ApplyMainAppearance();
         InitializeReaderAppearance();
         InitializeReaderToolbarAutoHide();
+        InitializeReaderSelectionToolTips();
         // Keep the reader's nested menu on the same hover branch and chevron
         // state as the book-library context menu.
         if (ReaderMoreButton.Flyout is MenuFlyout readerMoreMenu)
             AttachInstantMenuHover(readerMoreMenu);
         InitializeBookTranslationControls();
         InitializeReaderEmbeddingModelSelectors();
+        InitializeReaderAiTurnNavigation();
         // AcceptsReturn lets the TextBox handle Enter before a normal bubbled
         // handler can see it. Observe the tunneling phase, including an event
         // already marked handled, so Ctrl+Enter always reaches the AI sender

@@ -32,6 +32,11 @@ public sealed class TtsService : IDisposable
 {
     public const string PreviewText = "你好，这是声音试听。";
 
+    public static string GetPreviewText(string voice)
+        => TtsSelectionVoicePolicy.IsAmericanEnglishVoice(voice)
+            ? "Hello, this is an American English voice preview."
+            : PreviewText;
+
     private readonly ITtsEngine? _engine;
     private readonly TtsCacheManager _cache;
     private readonly TtsPlaybackQueue? _queue;
@@ -395,7 +400,7 @@ public sealed class TtsService : IDisposable
             }
 
             var generated = await _engine.SynthesizeAsync(
-                    PreviewText,
+                    GetPreviewText(normalized.Voice),
                     normalized.ToOptions(),
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -424,14 +429,35 @@ public sealed class TtsService : IDisposable
         }
     }
 
-    public async Task StartAsync(
+    public Task StartAsync(
         TtsSettings settings,
         CancellationToken cancellationToken = default)
+        => StartCoreAsync(settings, null, cancellationToken);
+
+    /// <summary>Reads a fixed selection and stops, regardless of chapter continuation settings.</summary>
+    public async Task StartSelectionAsync(
+        ReaderTtsDocument selection,
+        TtsSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        if (string.IsNullOrWhiteSpace(selection.Text)) return;
+        await StopAsync().ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        var selectionSettings = settings.Clone();
+        selectionSettings.AutoAdvance = false;
+        await StartCoreAsync(selectionSettings, selection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task StartCoreAsync(
+        TtsSettings settings,
+        ReaderTtsDocument? selection,
+        CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var normalized = TtsSettings.Normalize(settings);
 
-        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             lock (_gate)
@@ -486,7 +512,7 @@ public sealed class TtsService : IDisposable
             lock (_gate)
             {
                 if (_disposed) return;
-                _loopTask = RunAsync(generation, normalized, _sessionToken);
+                _loopTask = RunAsync(generation, normalized, _sessionToken, selection, cancellationToken);
             }
         }
         finally
@@ -585,8 +611,12 @@ public sealed class TtsService : IDisposable
     private async Task RunAsync(
         int generation,
         TtsSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken sessionToken,
+        ReaderTtsDocument? selection,
+        CancellationToken callerToken)
     {
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken, callerToken);
+        var cancellationToken = linkedCancellation.Token;
         try
         {
             var availability = await CheckEnvironmentAsync(cancellationToken)
@@ -598,7 +628,7 @@ public sealed class TtsService : IDisposable
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var document = await ResolveReadableDocumentAsync(
+                var document = selection ?? await ResolveReadableDocumentAsync(
                         cancellationToken,
                         allowAdvance: firstDocument || settings.AutoAdvance)
                     .ConfigureAwait(false);
@@ -672,6 +702,7 @@ public sealed class TtsService : IDisposable
                     // preserves first-sentence latency while allowing the
                     // next chapter to be ready when the transition arrives.
                     if (!nextChapterPrefetchStarted
+                        && selection is null
                         && settings.PrefetchCount > 0
                         && _prefetchDocumentAccessor is not null)
                     {
@@ -704,11 +735,12 @@ public sealed class TtsService : IDisposable
                         break;
                     }
 
-                    var highlight = current.MapHighlight?.Invoke(
+                    var highlightDocument = selection ?? current;
+                    var highlight = highlightDocument.MapHighlight?.Invoke(
                         segment.Start,
                         segment.Length)
                         ?? (segment.Start, segment.Length);
-                    await current.Highlight(
+                    await highlightDocument.Highlight(
                             highlight.Start,
                             highlight.Length)
                         .ConfigureAwait(false);
@@ -739,7 +771,11 @@ public sealed class TtsService : IDisposable
                     }
                 }
 
-                if (documentChanged) continue;
+                if (documentChanged)
+                {
+                    if (selection is not null) break;
+                    continue;
+                }
                 if (!settings.AutoAdvance || _advanceChapterAsync is null) break;
 
                 SetState(
@@ -768,6 +804,11 @@ public sealed class TtsService : IDisposable
         }
         finally
         {
+            if (selection is not null)
+            {
+                try { selection.ClearHighlight(); }
+                catch { }
+            }
             ClearCurrentHighlight();
             lock (_gate)
             {

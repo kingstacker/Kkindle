@@ -84,6 +84,7 @@ public sealed partial class KreaderMarkdownTextBlock
         };
         AutomationProperties.SetName(view, latex);
         ToolTip.SetTip(view, source);
+        view.SetValue(InlineCopyTextProperty, source);
         _mathViews.Add((formula, view));
         target.Add(new InlineUIContainer(view) { BaselineAlignment = BaselineAlignment.Center });
     }

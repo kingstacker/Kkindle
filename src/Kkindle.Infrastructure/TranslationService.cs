@@ -27,7 +27,6 @@ public sealed class TranslationService : IDisposable
     private const int MaxOnlineChunkLength = 900;
     private const string BingHost = "https://www.bing.com";
     private const string BingTranslatorPage = $"{BingHost}/translator";
-    private const string BingTranslationEndpoint = $"{BingHost}/ttranslatev3";
     private const string BingIid = "translator.5024.1";
     private const string GoogleTranslationEndpoint = "https://translate.googleapis.com/translate_a/single";
     private const string GoogleLegacyTranslationEndpoint = "https://clients5.google.com/translate_a/t";
@@ -185,10 +184,7 @@ public sealed class TranslationService : IDisposable
         request.Headers.Referrer = new Uri("https://translate.google.com/");
 
         var httpClient = GetGoogleHttpClient(googleProxyAddress);
-        using var response = await httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseContentRead,
-            cancellationToken);
+        using var response = await GoogleTranslationResponse.SendAsync(httpClient, request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -204,7 +200,7 @@ public sealed class TranslationService : IDisposable
                 $"Google 翻译请求失败（HTTP {(int)response.StatusCode}）。");
         }
 
-        return ParseGoogleTranslation(body);
+        return GoogleTranslationResponse.Parse(body);
     }
 
     private async Task<string> TranslateGoogleLegacyChunkAsync(
@@ -225,10 +221,7 @@ public sealed class TranslationService : IDisposable
         request.Headers.Referrer = new Uri("https://translate.google.com/");
 
         var httpClient = GetGoogleHttpClient(googleProxyAddress);
-        using var response = await httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseContentRead,
-            cancellationToken);
+        using var response = await GoogleTranslationResponse.SendAsync(httpClient, request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -236,7 +229,7 @@ public sealed class TranslationService : IDisposable
                 $"Google 翻译备用接口请求失败（HTTP {(int)response.StatusCode}）。");
         }
 
-        return ParseGoogleTranslation(body);
+        return GoogleTranslationResponse.Parse(body);
     }
 
     private async Task<string> TranslateBingChunkAsync(
@@ -258,12 +251,12 @@ public sealed class TranslationService : IDisposable
 
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
-                $"{BingTranslationEndpoint}?isVertical=1&IG={credentials.ImpressionGuid}&IID={BingIid}")
+                $"{credentials.Host}/ttranslatev3?isVertical=1&IG={credentials.ImpressionGuid}&IID={BingIid}")
             {
                 Content = new FormUrlEncodedContent(fields)
             };
-            request.Headers.Referrer = new Uri(BingTranslatorPage);
-            request.Headers.TryAddWithoutValidation("Origin", BingHost);
+            request.Headers.Referrer = new Uri($"{credentials.Host}/translator");
+            request.Headers.TryAddWithoutValidation("Origin", credentials.Host);
 
             using var response = await _httpClient.SendAsync(
                 request,
@@ -318,7 +311,12 @@ public sealed class TranslationService : IDisposable
                     $"无法打开必应翻译页面（HTTP {(int)response.StatusCode}）。");
             }
 
-            _bingCredentials = ParseBingCredentials(html);
+            // Bing redirects the page to a regional host on some networks. Posting
+            // to the original host then follows a 302 as a GET and loses the form.
+            // Keep the token, cookies, Origin and POST on the page's final host.
+            var pageUri = response.RequestMessage?.RequestUri ?? request.RequestUri!;
+            var host = pageUri.GetLeftPart(UriPartial.Authority);
+            _bingCredentials = ParseBingCredentials(html, host);
             return _bingCredentials;
         }
         finally
@@ -360,7 +358,7 @@ public sealed class TranslationService : IDisposable
         return result.Trim();
     }
 
-    private static BingCredentials ParseBingCredentials(string html)
+    private static BingCredentials ParseBingCredentials(string html, string host)
     {
         var match = BingCredentialsPattern.Match(html);
         if (!match.Success
@@ -383,52 +381,11 @@ public sealed class TranslationService : IDisposable
         var expiresAt = DateTimeOffset.UtcNow.AddMilliseconds(
             Math.Max(60_000L, lifetime - 60_000L));
         return new BingCredentials(
+            host,
             key,
             match.Groups["token"].Value,
             Guid.NewGuid().ToString("N").ToUpperInvariant(),
             expiresAt);
-    }
-
-    private static string ParseGoogleTranslation(string body)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(body);
-            var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Array
-                || root.GetArrayLength() == 0
-                || (root[0].ValueKind != JsonValueKind.Array
-                    && root[0].ValueKind != JsonValueKind.String))
-            {
-                throw new InvalidDataException("Google 翻译返回了无法识别的结果。");
-            }
-
-            if (root[0].ValueKind == JsonValueKind.String)
-            {
-                var text = root[0].GetString();
-                if (!string.IsNullOrWhiteSpace(text)) return text;
-                throw new InvalidDataException("Google 翻译返回了空结果。");
-            }
-
-            var result = new StringBuilder();
-            foreach (var segment in root[0].EnumerateArray())
-            {
-                if (segment.ValueKind == JsonValueKind.Array
-                    && segment.GetArrayLength() > 0
-                    && segment[0].ValueKind == JsonValueKind.String)
-                {
-                    result.Append(segment[0].GetString());
-                }
-            }
-
-            if (result.Length == 0)
-                throw new InvalidDataException("Google 翻译返回了空结果。");
-            return result.ToString();
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException("Google 翻译返回了无法识别的结果。", exception);
-        }
     }
 
     private static string ParseBingTranslation(string body)
@@ -577,6 +534,7 @@ public sealed class TranslationService : IDisposable
     }
 
     private sealed record BingCredentials(
+        string Host,
         long Key,
         string Token,
         string ImpressionGuid,

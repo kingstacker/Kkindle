@@ -31,6 +31,8 @@ public partial class MainWindow
         var pdf = _readerIsPdf ? CurrentReaderHost as NativePdfReaderHost : null;
         ReaderPdfBackButton.IsVisible = ReaderPdfForwardButton.IsVisible = ReaderPdfThumbnailsButton.IsVisible = pdf is not null;
         ReaderPdfThumbnailsTabButton.IsVisible = pdf is not null;
+        ReaderAssistantTabsGrid.ColumnDefinitions[2].Width = pdf is not null
+            ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
         ReaderPdfBackButton.IsEnabled = pdf is { PageNumber: > 1 };
         ReaderPdfForwardButton.IsEnabled = pdf is not null && pdf.PageNumber < pdf.PageCount;
         ReaderPagePositionButton.IsEnabled = pdf is not null;

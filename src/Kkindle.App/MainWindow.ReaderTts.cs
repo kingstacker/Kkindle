@@ -7,6 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Kkindle.Core;
+using Kkindle.Infrastructure;
 using System.Text.Json;
 
 namespace Kkindle;
@@ -59,17 +60,11 @@ public partial class MainWindow
     private long _readerTtsHighlightVersion;
     private string? _readerTtsNotice;
     private Task? _readerTtsEnvironmentTask;
+    private CancellationTokenSource? _readerSelectionTtsCancellation;
     private DispatcherTimer? _readerTtsFloatingCollapseTimer;
     private DispatcherTimer? _readerTtsFloatingAutoHideTimer;
     private DispatcherTimer? _readerTtsButtonBreathingTimer;
     private double _readerTtsButtonBreathingPhase;
-
-    private static bool IsZhCnVoice(TtsVoiceInfo voice)
-    {
-        var culture = voice.Culture?.Replace('_', '-');
-        return string.Equals(culture, "zh-CN", StringComparison.OrdinalIgnoreCase)
-            || voice.Id.StartsWith("zh-CN-", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static bool IsReaderTtsActiveState(TtsPlaybackState state)
         => state is TtsPlaybackState.Generating
@@ -141,6 +136,9 @@ public partial class MainWindow
 
     private void CancelReaderTtsContinuation()
     {
+        _readerSelectionTtsCancellation?.Cancel();
+        _readerSelectionTtsCancellation?.Dispose();
+        _readerSelectionTtsCancellation = null;
         _readerTtsResumeAfterNavigation = false;
         Interlocked.Increment(ref _readerTtsNavigationRequestVersion);
         _readerTtsFloatingRequested = false;
@@ -712,7 +710,7 @@ public partial class MainWindow
             : T("试听");
         ReaderTtsPreviewSampleText.Text = T(
             "试听内容：{0}",
-            TtsService.PreviewText);
+            TtsService.GetPreviewText(_readerTtsSettings.Voice));
         ReaderTtsRefreshVoicesButton.Content = T("刷新语音");
         ReaderTtsSpeedLabelText.Text = T("语速");
         ReaderTtsVolumeLabelText.Text = T("音量");
@@ -746,7 +744,7 @@ public partial class MainWindow
         ReaderTtsPreviousSegmentButton.IsEnabled = _readerTts.CanSkipPrevious;
         ReaderTtsNextSegmentButton.IsEnabled = _readerTts.CanSkipNext;
         ReaderTtsStatusText.Text = _readerTtsPreviewInProgress
-            ? T("正在试听：{0}", TtsService.PreviewText)
+            ? T("正在试听：{0}", TtsService.GetPreviewText(_readerTtsSettings.Voice))
             : state switch
             {
                 TtsPlaybackState.Generating => T(
@@ -1361,7 +1359,7 @@ public partial class MainWindow
             _readerTtsPreviewInProgress = true;
             _readerTtsNotice = T(
                 "正在试听：{0}",
-                TtsService.PreviewText);
+                TtsService.GetPreviewText(_readerTtsSettings.Voice));
             UpdateReaderTtsUi();
 
             await _readerTts.PreviewAsync(
@@ -1397,13 +1395,10 @@ public partial class MainWindow
         {
             var voices = await _readerTts.GetVoicesAsync(ReaderToken);
             if (request != _readerTtsVoicesRequest) return;
-            // The reader is currently configured for Simplified Chinese.
-            // Keep the engine result unfiltered so other providers can expose
-            // their full catalog later, but only show zh-CN voices here.
-            var zhCnVoices = voices
-                .Where(IsZhCnVoice)
+            var supportedVoices = voices
+                .Where(TtsSelectionVoicePolicy.IsSupportedVoice)
                 .ToArray();
-            var items = zhCnVoices
+            var items = supportedVoices
                 .Select(voice => new ComboBoxItem
                 {
                     Content = string.IsNullOrWhiteSpace(voice.Culture)
@@ -1512,6 +1507,54 @@ public partial class MainWindow
             _readerTtsNotice = T(
                 "启动听书失败：{0}",
                 UiText.Localize(exception.Message));
+            UpdateReaderTtsUi();
+        }
+    }
+
+    private async void ReaderSelectionSpeakButton_Click(object? sender, RoutedEventArgs e)
+        => await SpeakReaderSelectionAsync();
+
+    private async Task SpeakReaderSelectionAsync()
+    {
+        var text = (_readerPendingSelection ?? string.Empty).Trim();
+        if (_readerIsPdf)
+            text = PdfTextSelectionLayout.NormalizeCopy(text);
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var document = GetCurrentReaderTtsDocument();
+        if (document is null) return;
+
+        CancelReaderTtsContinuation();
+        // Keep this alive for playback; the next reader action or reader close
+        // cancels and disposes it.
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ReaderToken);
+        _readerSelectionTtsCancellation = cancellation;
+        HideReaderSelectionPopup();
+        try
+        {
+            // Preserve the live selection. PDF columns can have discontinuous
+            // source offsets, so selection sentence offsets cannot be used as
+            // full-page highlight offsets.
+            var selection = new ReaderTtsDocument(
+                document.Key, text, 0,
+                (_, _) => Task.CompletedTask,
+                () => { },
+                BookKey: document.BookKey,
+                ChapterKey: document.ChapterKey);
+            var settings = _readerTtsSettings.Clone();
+            settings.Voice = TtsSelectionVoicePolicy.SelectVoice(text, settings.Voice);
+            _readerTtsNotice = null;
+            _readerTtsFloatingRequested = true;
+            ShowReaderTtsFloatingPanelTemporarily();
+            await _readerTts.StartSelectionAsync(selection, settings, cancellation.Token);
+            UpdateReaderTtsUi();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _readerTtsNotice = T("启动听书失败：{0}", UiText.Localize(exception.Message));
+            ReaderStatusText.Text = _readerTtsNotice;
             UpdateReaderTtsUi();
         }
     }

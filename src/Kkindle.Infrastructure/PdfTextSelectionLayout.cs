@@ -32,14 +32,15 @@ public sealed class PdfTextSelectionLayout
     public PdfTextSelectionLayout(PdfPageContent page)
     {
         _page = page;
-        if (page.Glyphs.Count < 2 || page.Glyphs.Count(g => Math.Abs(g.AdvanceY) > Math.Abs(g.AdvanceX)) > page.Glyphs.Count / 4)
+        var textGlyphs = ExcludeDottedRules(page);
+        if (textGlyphs.Count < 2 || textGlyphs.Count(g => Math.Abs(g.AdvanceY) > Math.Abs(g.AdvanceX)) > textGlyphs.Count / 4)
         {
-            Glyphs = page.Glyphs;
+            Glyphs = textGlyphs;
             return;
         }
         var lines = new List<Line>();
         PdfTextGlyph? previousGlyph = null;
-        foreach (var glyph in page.Glyphs)
+        foreach (var glyph in textGlyphs)
         {
             var last = lines.LastOrDefault();
             // Preserve PDFium's line breaks. Comparing against an expanding
@@ -109,7 +110,7 @@ public sealed class PdfTextSelectionLayout
             .OrderByDescending(group => group.Length).FirstOrDefault();
         if (alignedGutters is not { Length: >= 2 })
         {
-            Glyphs = page.Glyphs;
+            Glyphs = textGlyphs;
             return;
         }
         var split = (alignedGutters.Max(g => g.Left) + alignedGutters.Min(g => g.Right)) / 2;
@@ -134,6 +135,25 @@ public sealed class PdfTextSelectionLayout
         Glyphs = ordered;
         _usesColumns = true;
         _paragraphGap = ParagraphGap(segments.GroupBy(l => l.Left >= split));
+    }
+
+    private static IReadOnlyList<PdfTextGlyph> ExcludeDottedRules(PdfPageContent page)
+    {
+        // PDFium exposes dotted borders as long text-only runs of periods,
+        // including vertical rules whose dots otherwise interleave body lines.
+        // Keep the source text and its annotation offsets unchanged.
+        var rules = Regex.Matches(page.Text, @"(?m)^[\t ]*\.{8,}(?:[\t ]+\.{8,})*[\t ]*\r?$");
+        if (rules.Count == 0) return page.Glyphs;
+        var glyphs = new List<PdfTextGlyph>(page.Glyphs.Count);
+        var ruleIndex = 0;
+        foreach (var glyph in page.Glyphs)
+        {
+            while (ruleIndex < rules.Count && glyph.Offset >= rules[ruleIndex].Index + rules[ruleIndex].Length)
+                ruleIndex++;
+            if (ruleIndex < rules.Count && glyph.Offset >= rules[ruleIndex].Index) continue;
+            glyphs.Add(glyph);
+        }
+        return glyphs;
     }
 
     private static double ParagraphGap(IEnumerable<IEnumerable<Line>> columns)
