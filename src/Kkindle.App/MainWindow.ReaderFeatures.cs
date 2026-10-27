@@ -333,14 +333,6 @@ public partial class MainWindow
                 await host.RestoreViewStateAsync(progress.Fragment, progress.ScrollPosition);
             token.ThrowIfCancellationRequested();
             host.Opacity = 1;
-            // The initial page message can precede both progress restoration
-            // and the library-to-reader layout. Show notes only after both settle.
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                token.ThrowIfCancellationRequested();
-                ReaderRoot.UpdateLayout();
-                ShowCurrentReaderPdfAnnotation();
-            }, DispatcherPriority.Loaded);
             RememberCurrentPdfPageText();
             SyncReaderPdfTocSelection();
             UpdateReaderToolbar();
@@ -425,7 +417,6 @@ public partial class MainWindow
         UpdateReaderToolbar();
         await UpdateReaderBookmarkIndicatorAsync();
         if (saveProgress) await SaveReaderProgressAsync(cancellationToken);
-        ShowCurrentReaderPdfAnnotation();
         return true;
     }
 
@@ -468,7 +459,7 @@ public partial class MainWindow
         if (_readerBookFile is not null && CurrentReaderHost is NativePdfReaderHost host)
         {
             host.SetAnnotations(ReaderAnnotations.ToArray());
-            Avalonia.Threading.Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
+            HideReaderAnnotationHoverPopup();
         }
         return Task.CompletedTask;
     }

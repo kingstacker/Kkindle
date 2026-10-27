@@ -327,25 +327,16 @@ public sealed class ReaderAppearanceTests(SettingsUiSession session)
         scope.Call("SyncReaderAppearanceControls");
         Assert.False(scope.Get<StackPanel>("ReaderBookScopePanel").IsVisible);
         Assert.False(scope.Get<StackPanel>("ReaderTextLayoutPanel").IsVisible);
-        Assert.True(scope.Get<Border>("ReaderPdfAnnotationDisplayModePanel").IsVisible);
         Assert.True(scope.Get<Slider>("ReaderTocFontSizeSlider").IsVisible);
         Assert.False(scope.Get<RadioButton>("ReaderBookScopeGlobalOption").IsVisible);
         Assert.False(scope.Get<RadioButton>("ReaderBookScopeBookOption").IsVisible);
         Assert.False(scope.Get<TextBlock>("ReaderBookScopeHint").IsVisible);
-
-        var notes = scope.Get<ToggleSwitch>("ReaderPdfAnnotationNotesCheck");
-        notes.IsChecked = false;
-        Assert.Equal(ReaderAnnotationDisplayMode.Click, scope.Field<AppSettings>("_appSettings").ReaderAppearance.AnnotationDisplayMode);
-        notes.IsChecked = true;
-        Assert.True(await scope.Call<Task<bool>>("FlushAppSettingsAsync"));
-        Assert.Equal(ReaderAnnotationDisplayMode.Pinned, (await new AppSettingsStore(scope.Paths).LoadAsync()).ReaderAppearance.AnnotationDisplayMode);
 
         scope.Set("_readerIsPdf", false);
         scope.Call("SyncReaderBookScopeControls");
         scope.Call("SyncReaderAppearanceControls");
         Assert.True(scope.Get<StackPanel>("ReaderBookScopePanel").IsVisible);
         Assert.True(scope.Get<StackPanel>("ReaderTextLayoutPanel").IsVisible);
-        Assert.False(scope.Get<Border>("ReaderPdfAnnotationDisplayModePanel").IsVisible);
         Assert.True(scope.Get<RadioButton>("ReaderBookScopeGlobalOption").IsVisible);
         Assert.True(scope.Get<RadioButton>("ReaderBookScopeBookOption").IsVisible);
     });

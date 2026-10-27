@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
@@ -81,6 +82,88 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         Assert.Equal(3, scope.Field<NativePdfReaderHost>("_readerActiveHost").PageNumber);
         await scope.Field<Task>("_readerPdfOutlineTask");
         AssertCurrent(scope, "Scanned page");
+    });
+
+    [Fact]
+    public Task DraggingDiagramLabelsKeepsCopiedTextAndSavedAnnotationWithinOneColumn() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, path: PdfFixture.WriteDiagramLabels(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var text = pdf.PageContent!.Text;
+        var labelOffsets = new[] { text.IndexOf("Warm", StringComparison.Ordinal), text.IndexOf("Cold", StringComparison.Ordinal), text.LastIndexOf("Warm", StringComparison.Ordinal) };
+        var airOffsets = new[] { text.IndexOf("air", StringComparison.Ordinal), text.IndexOf("air", text.IndexOf("air", StringComparison.Ordinal) + 3, StringComparison.Ordinal), text.LastIndexOf("air", StringComparison.Ordinal) };
+        for (var column = 0; column < 3; column++)
+        foreach (var reverse in new[] { false, true })
+        {
+            scope.Call("HideReaderSelectionPopup");
+            pdf.ClearSelection();
+            await ReaderTests.Render();
+            var top = pdf.GetRangeBounds(labelOffsets[column], labelOffsets[column] + 4).Single();
+            var bottom = pdf.GetRangeBounds(airOffsets[column], airOffsets[column] + 3).Single();
+            var first = pdf.TranslatePoint(new Point(top.Left + 0.1, top.Center.Y), scope.Window)!.Value;
+            var last = pdf.TranslatePoint(new Point(bottom.Right - 0.1, bottom.Center.Y), scope.Window)!.Value;
+            scope.Window.MouseDown(reverse ? last : first, MouseButton.Left);
+            scope.Window.MouseMove(reverse ? first : last);
+            scope.Window.MouseUp(reverse ? first : last, MouseButton.Left);
+            await ReaderTests.Render();
+            Capture(scope.Window, $"pdf-diagram-label-{column}-{reverse}");
+            Assert.True(scope.Field<string?>("_readerPendingSelection") is not null,
+                $"Missing selection in column {column}, reverse={reverse}; first={first}, last={last}, source={text}");
+            Assert.Equal(column == 1 ? "Cold air" : "Warm air",
+                PdfTextSelectionLayout.NormalizeCopy(scope.Field<string>("_readerPendingSelection")));
+            if (column != 2 || !reverse)
+            {
+                await scope.Call<Task>("PerformReaderSelectionCopyAsync");
+                Assert.Equal(column == 1 ? "Cold air" : "Warm air", await scope.Window.Clipboard!.TryGetTextAsync());
+            }
+        }
+        Capture(scope.Window, "pdf-diagram-label-selection");
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "One diagram label", null, null);
+        var annotation = Assert.Single(scope.Window.ReaderAnnotations);
+        var ranges = PdfTextRanges.Read(annotation.Fragment, annotation.StartOffset, annotation.EndOffset);
+        Assert.Equal(7, ranges.Sum(range => range.End - range.Start));
+        Assert.Equal("Warm air", PdfTextSelectionLayout.NormalizeCopy(annotation.SelectedText));
+    });
+
+    [Fact]
+    public Task TableDragCopiesOnlyTheSelectedColumnAndSavesItsExactRanges() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, path: PdfFixture.WriteTable(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var text = pdf.PageContent!.Text;
+        var start = text.IndexOf("Positive ramp", StringComparison.Ordinal);
+        var end = text.IndexOf("Recalibrate each cycle", StringComparison.Ordinal) + "Recalibrate each cycle".Length;
+        const string expected = "Positive ramp Two’s complement = 2³⁰\nNegative ramp Recalibrate each cycle";
+        foreach (var reverse in new[] { false, true })
+        {
+            scope.Call("HideReaderSelectionPopup");
+            pdf.ClearSelection();
+            await ReaderTests.Render();
+            var top = pdf.GetRangeBounds(start, start + 1).Single();
+            var bottom = pdf.GetRangeBounds(end - 1, end).Single();
+            var first = pdf.TranslatePoint(new Point(top.Left + 0.1, top.Center.Y), scope.Window)!.Value;
+            var last = pdf.TranslatePoint(new Point(bottom.Right - 0.1, bottom.Center.Y), scope.Window)!.Value;
+            scope.Window.MouseDown(reverse ? last : first, MouseButton.Left);
+            scope.Window.MouseMove(reverse ? first : last);
+            scope.Window.MouseUp(reverse ? first : last, MouseButton.Left);
+            await ReaderTests.Render();
+            Assert.Equal(expected, scope.Field<string>("_readerPendingSelection"));
+            if (!reverse)
+            {
+                Capture(scope.Window, "pdf-table-column-selection");
+                await scope.Call<Task>("PerformReaderSelectionCopyAsync");
+                Assert.Equal(expected, await scope.Window.Clipboard!.TryGetTextAsync());
+            }
+        }
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "Table description", null, null);
+        var annotation = Assert.Single(scope.Window.ReaderAnnotations);
+        Assert.Equal(expected, annotation.SelectedText);
+        var ranges = PdfTextRanges.Read(annotation.Fragment, annotation.StartOffset, annotation.EndOffset);
+        var layout = new PdfTextSelectionLayout(pdf.PageContent);
+        Assert.Equal(expected, layout.GetCopyText(ranges));
+        Assert.DoesNotContain("RAMP", layout.GetText(ranges));
     });
 
     [Theory]
@@ -304,9 +387,9 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         });
     });
 
-    private static async Task<BookCardViewModel> Open(ReaderTestWindow scope, bool outline = true)
+    private static async Task<BookCardViewModel> Open(ReaderTestWindow scope, bool outline = true, string? path = null)
     {
-        var path = PdfFixture.Write(scope.Paths.ReaderCache, outline);
+        path ??= PdfFixture.Write(scope.Paths.ReaderCache, outline);
         var library = new SqliteBookLibraryService(scope.Paths, new BookMetadataService());
         await library.ImportAsync([path]);
         var book = Assert.Single(await library.SearchAsync());

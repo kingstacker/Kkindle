@@ -31,6 +31,17 @@ public sealed partial class NativePdfReaderHost
     private IReadOnlyList<Rect> GetSelectionBounds() => (_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
         .SelectMany(range => GetRangeBounds(_selectionPage, range.Start, range.End)).ToArray();
 
+    public IReadOnlyList<Rect> GetAnnotationBounds(ReaderAnnotation annotation)
+    {
+        if (!TryGetAnnotationAnchor(annotation, out var page, out _)) return [];
+        if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out _, out _)
+            && GetPdfPointPosition(annotation) is { } marker)
+            return [new Rect(marker.X - 10, marker.Y - 10, 20, 20)];
+        var transform = GetPageTransform(GetPageBounds(page));
+        return GetAnnotationLocalBounds(page, annotation)
+            .Select(rect => rect.TransformToAABB(transform)).ToArray();
+    }
+
     public void SelectAnnotation(Guid id)
     {
         var selected = _annotations.Any(item => item.Id == id) ? id : (Guid?)null;
@@ -912,7 +923,7 @@ public sealed partial class NativePdfReaderHost
                 var hit = HitOffset(_selectionPage, point, true, readingOrder: true);
                 if (hit >= 0 && _pages.TryGetValue(_selectionPage, out var selectedPage))
                 {
-                    _selectionRanges = selectedPage.SelectionLayout.GetRanges(Math.Min(_anchorOffset, hit), Math.Max(_anchorOffset, hit));
+                    _selectionRanges = selectedPage.SelectionLayout.GetDragRanges(_anchorOffset, hit);
                     _selectionStart = _selectionRanges.Count > 0 ? _selectionRanges.Min(r => r.Start) : 0;
                     _selectionEnd = _selectionRanges.Count > 0 ? _selectionRanges.Max(r => r.End) : 0;
                     InvalidateVisual();
@@ -1099,6 +1110,11 @@ public sealed partial class NativePdfReaderHost
         _hoveredAnnotation = null;
         Emit(new { type = "annotationLeave" });
     }
+
+    internal string GetSelectedTextForCopy() =>
+        _pages.TryGetValue(_selectionPage, out var page)
+            ? page.SelectionLayout.GetCopyText(_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
+            : string.Empty;
 
     internal string GetSelectedTextForTranslation() =>
         _pages.TryGetValue(_selectionPage, out var page)

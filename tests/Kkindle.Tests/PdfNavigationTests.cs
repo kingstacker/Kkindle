@@ -6,6 +6,91 @@ namespace Kkindle.Tests;
 
 public sealed class PdfNavigationTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void TableSelectionKeepsCellsRowsAndSuperscripts(bool filledRules, bool form)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Kkindle-PdfTable-" + Guid.NewGuid());
+        try
+        {
+            using var document = new PdfDocumentService(PdfFixture.WriteTable(directory, filledRules, form));
+            var page = document.ReadPage(1);
+            Assert.Equal(8, page.Rulings.Count);
+            var layout = new PdfTextSelectionLayout(page);
+            int Start(string value) => layout.IndexAtOffset(page.Text.IndexOf(value, StringComparison.Ordinal));
+            int End(string value) => layout.IndexAtOffset(page.Text.IndexOf(value, StringComparison.Ordinal) + value.Length - 1) + 1;
+            var descriptionStart = Start("Positive ramp");
+            var descriptionEnd = End("Recalibrate each cycle");
+            var expected = "Positive ramp Two’s complement = 2³⁰\nNegative ramp Recalibrate each cycle";
+            foreach (var reverse in new[] { false, true })
+            {
+                var ranges = reverse ? layout.GetDragRanges(descriptionEnd, descriptionStart) : layout.GetDragRanges(descriptionStart, descriptionEnd);
+                Assert.Equal(expected, layout.GetCopyText(ranges));
+                Assert.DoesNotContain("RAMP", layout.GetText(ranges));
+                var fragment = PdfTextRanges.Encode(ranges);
+                Assert.NotNull(fragment);
+                var restored = PdfTextRanges.Read(fragment, ranges.Min(r => r.Start), ranges.Max(r => r.End));
+                Assert.Equal(expected, new PdfTextSelectionLayout(document.ReadPage(1)).GetCopyText(restored));
+            }
+            Assert.Equal("RAMP0_INC\t1677722\tPositive ramp Two’s complement = 2³⁰\nRAMP1_INC\t1072064102\tNegative ramp Recalibrate each cycle",
+                layout.GetCopyText(layout.GetDragRanges(Start("RAMP0_INC"), descriptionEnd)));
+            Assert.Equal("1677722\n1072064102", layout.GetCopyText(layout.GetDragRanges(Start("1677722"), End("1072064102"))));
+            Assert.Equal("RAMP0_INC\t1677722", layout.GetCopyText(layout.GetDragRanges(Start("RAMP0_INC"), End("1677722"))));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    public void DraggingOneDiagramLabelExcludesNeighboringLabels(int column, bool reverse)
+    {
+        var page = DiagramLabels();
+        var layout = new PdfTextSelectionLayout(page);
+        var start = layout.IndexAtOffset(column * 5);
+        var end = layout.IndexAtOffset(16 + column * 4 + 2) + 1;
+        var ranges = reverse ? layout.GetDragRanges(end, start) : layout.GetDragRanges(start, end);
+        Assert.Equal(column == 1 ? "Cold air" : "Warm air",
+            PdfTextSelectionLayout.NormalizeCopy(layout.GetText(ranges)));
+        Assert.Equal(7, ranges.Sum(range => range.End - range.Start));
+        Assert.Equal(ranges, PdfTextRanges.Read(PdfTextRanges.Encode(ranges),
+            ranges.Min(range => range.Start), ranges.Max(range => range.End)));
+        var firstWord = layout.GetDragRanges(start, layout.IndexAtOffset(column * 5 + 3) + 1);
+        Assert.Equal(column == 1 ? "Cold" : "Warm", layout.GetText(firstWord));
+    }
+
+    [Fact]
+    public void DraggingAcrossDiagramColumnsCanStillSelectAllLabels()
+    {
+        var page = DiagramLabels();
+        var layout = new PdfTextSelectionLayout(page);
+        var ranges = layout.GetDragRanges(0, layout.Glyphs.Count);
+        Assert.Equal("Warm Cold Warm air air air", PdfTextSelectionLayout.NormalizeCopy(layout.GetText(ranges)));
+    }
+
+    private static PdfPageContent DiagramLabels()
+    {
+        const string text = "Warm Cold Warm\r\nair air air";
+        var glyphs = new List<PdfTextGlyph>();
+        // Match the screenshot's proportions: neighboring labels have less
+        // whitespace than a normal page gutter, and the second row is centered.
+        for (var column = 0; column < 3; column++)
+        {
+            for (var i = 0; i < 4; i++)
+                glyphs.Add(new(column * 5 + i, 1, new(0.54 + column * 0.12 + i * 0.018, 0.15, 0.017, 0.014)));
+            for (var i = 0; i < 3; i++)
+                glyphs.Add(new(16 + column * 4 + i, 1, new(0.558 + column * 0.12 + i * 0.011, 0.175, 0.01, 0.014)));
+        }
+        return new(306, 505, text, glyphs.OrderBy(glyph => glyph.Offset).ToArray());
+    }
+
     [Fact]
     public void ReadsPageLabelsLinksAndRotatedDestinations()
     {
@@ -43,6 +128,8 @@ public sealed class PdfNavigationTests
             var endOffset = page.Text.IndexOf("esting example.", StringComparison.Ordinal) + "esting example.".Length - 1;
             var end = layout.IndexAtOffset(endOffset) + 1;
             var ranges = layout.GetRanges(start, end);
+            Assert.Equal(ranges, layout.GetDragRanges(start, end));
+            Assert.Equal(ranges, layout.GetDragRanges(end, start));
             var text = layout.GetText(ranges);
             Assert.DoesNotContain("Right", text);
             Assert.Equal("Left first line. An interesting example.", PdfTextSelectionLayout.NormalizeCopy(text));
@@ -89,6 +176,8 @@ public sealed class PdfNavigationTests
         var start = layout.IndexAtOffset(text.IndexOf(right[0], StringComparison.Ordinal));
         var end = layout.IndexAtOffset(text.Length - 1) + 1;
         var ranges = layout.GetRanges(start, end);
+        Assert.Equal(ranges, layout.GetDragRanges(start, end));
+        Assert.Equal(ranges, layout.GetDragRanges(end, start));
         Assert.Equal(string.Join(' ', right), PdfTextSelectionLayout.NormalizeCopy(layout.GetText(ranges)));
         Assert.Equal(glyphs.Where(g => g.Offset >= text.IndexOf(right[0], StringComparison.Ordinal)).Select(g => g.Offset).Order(),
             glyphs.Where(g => ranges.Any(r => g.Offset >= r.Start && g.Offset < r.End)).Select(g => g.Offset).Order());

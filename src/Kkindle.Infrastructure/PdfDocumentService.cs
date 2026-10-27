@@ -12,6 +12,7 @@ public sealed record PdfTextGlyph(int Offset, int Length, PdfTextBounds Bounds, 
 public sealed record PdfPageContent(double Width, double Height, string Text, IReadOnlyList<PdfTextGlyph> Glyphs)
 {
     public IReadOnlyList<PdfPageLink> Links { get; init; } = [];
+    public IReadOnlyList<PdfTextBounds> Rulings { get; init; } = [];
 }
 public sealed record PdfOutlineItem(string Title, int PageNumber, int Level, double? Top = null);
 public sealed record PdfDocumentInfo(int PageCount, string Title, string Author, IReadOnlyList<PdfOutlineItem> Outline)
@@ -248,12 +249,89 @@ public sealed partial class PdfDocumentService : IDisposable
                         (cos * transform.XY + sin * transform.YY) / DeviceUnits));
                 }
             }
-            return new(width, height, text.ToString(), glyphs);
+            return new(width, height, text.ToString(), glyphs)
+            {
+                Rulings = includeGeometry ? ReadRulings(page, transform, cancellationToken) : []
+            };
         }
         finally { Native.FPDFText_ClosePage(textPage); }
     }
 
     private const double DeviceUnits = 100_000d;
+
+    private static IReadOnlyList<PdfTextBounds> ReadRulings(IntPtr page, PageTransform transform, CancellationToken token)
+    {
+        var result = new List<PdfTextBounds>();
+        var remaining = 100_000;
+        var width = Native.FPDF_GetPageWidth(page);
+        var height = Native.FPDF_GetPageHeight(page);
+        void ReadObject(IntPtr obj, PdfObjectMatrix parent, int depth)
+        {
+            if (obj == IntPtr.Zero || depth > 8 || --remaining < 0) return;
+            if (remaining % 256 == 0) token.ThrowIfCancellationRequested();
+            if (Native.FPDFPageObj_GetMatrix(obj, out var matrix) == 0) return;
+            var combined = parent.Compose(matrix);
+            var type = Native.FPDFPageObj_GetType(obj);
+            if (type == 5) // Form objects have their own coordinate space.
+            {
+                for (var i = 0; i < Native.FPDFFormObj_CountObjects(obj) && remaining > 0; i++)
+                    ReadObject(Native.FPDFFormObj_GetObject(obj, i), combined, depth + 1);
+                return;
+            }
+            if (type != 2 || Native.FPDFPath_GetDrawMode(obj, out var fill, out var stroke) == 0) return;
+            (double X, double Y)? previous = null, first = null;
+            var points = new List<(double X, double Y)>();
+            void Add((double X, double Y) a, (double X, double Y) b)
+            {
+                var x = Math.Min(a.X, b.X);
+                var y = Math.Min(a.Y, b.Y);
+                var w = Math.Abs(a.X - b.X);
+                var h = Math.Abs(a.Y - b.Y);
+                if (w < 0.5 / width && h > 4 / height || h < 0.5 / height && w > 4 / width)
+                    result.Add(new(x, y, w, h));
+            }
+            var segmentCount = Native.FPDFPath_CountSegments(obj);
+            for (var i = 0; i < segmentCount && --remaining > 0; i++)
+            {
+                if (remaining % 256 == 0) token.ThrowIfCancellationRequested();
+                var segment = Native.FPDFPath_GetPathSegment(obj, i);
+                if (Native.FPDFPathSegment_GetPoint(segment, out var x, out var y) == 0) continue;
+                var local = combined.Apply(x, y);
+                var device = transform.ToDevice(local.X, local.Y);
+                var point = (X: device.X / DeviceUnits, Y: device.Y / DeviceUnits);
+                points.Add(point);
+                var segmentType = Native.FPDFPathSegment_GetType(segment);
+                if (segmentType == 2) first = point; // MOVETO
+                else if (stroke != 0 && segmentType == 0 && previous is { } p) Add(p, point); // LINETO
+                if (stroke != 0 && Native.FPDFPathSegment_GetClose(segment) != 0 && first is { } start) Add(point, start);
+                previous = point;
+            }
+            // Many datasheets draw rules as narrow filled rectangles rather
+            // than stroked paths. Use their center lines, ignoring broad fills.
+            if (fill != 0 && stroke == 0 && points.Count >= 4)
+            {
+                var left = points.Min(p => p.X);
+                var right = points.Max(p => p.X);
+                var top = points.Min(p => p.Y);
+                var bottom = points.Max(p => p.Y);
+                if ((right - left) * width <= 1) Add(((left + right) / 2, top), ((left + right) / 2, bottom));
+                else if ((bottom - top) * height <= 1) Add((left, (top + bottom) / 2), (right, (top + bottom) / 2));
+            }
+        }
+        for (var i = 0; i < Native.FPDFPage_CountObjects(page) && remaining > 0; i++)
+            ReadObject(Native.FPDFPage_GetObject(page, i), new(1, 0, 0, 1, 0, 0), 0);
+        return result;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct PdfObjectMatrix(float A, float B, float C, float D, float E, float F)
+    {
+        public (double X, double Y) Apply(double x, double y) => (A * x + C * y + E, B * x + D * y + F);
+        public PdfObjectMatrix Compose(PdfObjectMatrix m) => new(
+            A * m.A + C * m.B, B * m.A + D * m.B,
+            A * m.C + C * m.D, B * m.C + D * m.D,
+            A * m.E + C * m.F + E, B * m.E + D * m.F + F);
+    }
 
     private readonly record struct PageTransform(
         double OffsetX,
@@ -435,6 +513,18 @@ public sealed partial class PdfDocumentService : IDisposable
         [DllImport(Library)] internal static extern void FPDF_ClosePage(IntPtr page);
         [DllImport(Library)] internal static extern double FPDF_GetPageWidth(IntPtr page);
         [DllImport(Library)] internal static extern double FPDF_GetPageHeight(IntPtr page);
+        [DllImport(Library)] internal static extern int FPDFPage_CountObjects(IntPtr page);
+        [DllImport(Library)] internal static extern IntPtr FPDFPage_GetObject(IntPtr page, int index);
+        [DllImport(Library)] internal static extern int FPDFPageObj_GetType(IntPtr obj);
+        [DllImport(Library)] internal static extern int FPDFPageObj_GetMatrix(IntPtr obj, out PdfObjectMatrix matrix);
+        [DllImport(Library)] internal static extern int FPDFFormObj_CountObjects(IntPtr obj);
+        [DllImport(Library)] internal static extern IntPtr FPDFFormObj_GetObject(IntPtr obj, int index);
+        [DllImport(Library)] internal static extern int FPDFPath_GetDrawMode(IntPtr obj, out int fillMode, out int stroke);
+        [DllImport(Library)] internal static extern int FPDFPath_CountSegments(IntPtr obj);
+        [DllImport(Library)] internal static extern IntPtr FPDFPath_GetPathSegment(IntPtr obj, int index);
+        [DllImport(Library)] internal static extern int FPDFPathSegment_GetPoint(IntPtr segment, out float x, out float y);
+        [DllImport(Library)] internal static extern int FPDFPathSegment_GetType(IntPtr segment);
+        [DllImport(Library)] internal static extern int FPDFPathSegment_GetClose(IntPtr segment);
         [DllImport(Library)] internal static extern IntPtr FPDFBitmap_CreateEx(int width, int height, int format, IntPtr buffer, int stride);
         [DllImport(Library)] internal static extern void FPDFBitmap_Destroy(IntPtr bitmap);
         [DllImport(Library)] internal static extern void FPDFBitmap_FillRect(IntPtr bitmap, int left, int top, int width, int height, uint color);

@@ -434,7 +434,8 @@ public partial class MainWindow
         {
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard
                 ?? throw new InvalidOperationException(T("当前窗口无法访问剪贴板。"));
-            await clipboard.SetTextAsync(_readerIsPdf ? PdfTextSelectionLayout.NormalizeCopy(_readerPendingSelection) : _readerPendingSelection);
+            await clipboard.SetTextAsync(CurrentReaderHost is NativePdfReaderHost pdf
+                ? pdf.GetSelectedTextForCopy() : _readerPendingSelection);
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
         {

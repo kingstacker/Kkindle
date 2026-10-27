@@ -7083,19 +7083,6 @@ public partial class MainWindow
     private Guid? _readerAnnotationHoverAnnotationId;
     private int _readerAnnotationHoverSequence;
 
-    private void ShowCurrentReaderPdfAnnotation()
-    {
-        if (!_readerIsPdf || ReaderAnnotationInputPopup.IsOpen) return;
-        HideReaderAnnotationHoverPopup();
-        if (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned) return;
-        var annotations = ReaderAnnotations.Where(item =>
-            TryGetReaderPdfPage(item.ChapterPath, out _) && !string.IsNullOrWhiteSpace(item.Note))
-            .OrderByDescending(item => item.ChapterPath == $"pdf:page:{_readerPdfPage}").ToArray();
-        if (annotations.Length == 0 || CurrentReaderHost is not NativePdfReaderHost pdf) return;
-        ShowReaderAnnotationHoverPopup(annotations[0].Note, null, annotations[0]);
-        ShowAdditionalReaderPdfAnnotations(pdf, annotations.Skip(1));
-    }
-
     private void ShowReaderAnnotationHoverPopup(
         string note,
         Point? placementPoint,
@@ -7103,12 +7090,10 @@ public partial class MainWindow
         bool fromAnnotationClick = false)
     {
         if (_readerIsPdf && ReaderAnnotationInputPopup.IsOpen) return;
-        if (_readerIsPdf && _readerPdfAnnotationPopups.Count > 0) return;
         if (_readerIsPdf
-            && (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned
-                || annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
+            && (annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
-        ReaderAnnotationHoverHeading.IsVisible = _readerIsPdf;
+        ReaderAnnotationHoverHeading.IsVisible = false;
         _readerAnnotationHoverSequence++;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
         _readerAnnotationHoverAnnotationId = annotation?.Id;
@@ -7118,31 +7103,19 @@ public partial class MainWindow
             _readerAnnotationHoverPlacementPoint = point;
         ReaderAnnotationHoverPopup.IsVisible = true;
         var measureHeight = ReaderAnnotationCardLayout.CreateMeasure(ReaderAnnotationHoverPopup, ReaderAnnotationHoverNote);
-        if (_readerIsPdf
-            && CurrentReaderHost is NativePdfReaderHost pdf
-            && annotation is not null)
-        {
-            if (TryShowReaderPdfAnnotationCallout(
-                    ReaderAnnotationHoverHostPopup,
-                    pdf,
-                    annotation,
-                    _readerAnnotationHoverPlacementPoint,
-                    new Size(220, measureHeight(220)),
-                    measureHeight: measureHeight))
-                return;
-            pdf.ClearAnnotationCallout();
-            HideReaderAnnotationHoverPopup();
-            return;
-        }
         var viewport = (CurrentReaderHost?.View as Control)?.Bounds.Size ?? ReaderWebViewHost.Bounds.Size;
-        var visibleBands = CurrentReaderHost is NativeReaderHost epub && annotation is not null
-            ? epub.GetAnnotationBounds(annotation).Select(rect => rect.Intersect(new Rect(viewport)))
-                .Where(rect => rect.Width > 0 && rect.Height > 0).ToArray()
-            : [];
+        var bands = annotation is null ? [] : CurrentReaderHost switch
+        {
+            NativeReaderHost epub => epub.GetAnnotationBounds(annotation),
+            NativePdfReaderHost pdf => pdf.GetAnnotationBounds(annotation),
+            _ => Array.Empty<Rect>()
+        };
+        var visibleBands = bands.Select(rect => rect.Intersect(new Rect(viewport)))
+            .Where(rect => rect.Width > 0 && rect.Height > 0).ToArray();
         var quote = visibleBands.Length > 0
             ? visibleBands.Aggregate((left, right) => left.Union(right))
             : new Rect(_readerAnnotationHoverPlacementPoint ?? new Point(8, 8), new Size(1, 1));
-        var cardBounds = ReaderAnnotationCardLayout.PlaceEpub(quote, viewport, measureHeight);
+        var cardBounds = ReaderAnnotationCardLayout.Place(quote, viewport, measureHeight);
         ReaderAnnotationHoverPopup.Width = cardBounds.Width;
         ReaderAnnotationHoverPopup.Height = cardBounds.Height;
         if (CurrentReaderHost?.View is Control view)
@@ -7174,12 +7147,6 @@ public partial class MainWindow
     private void HideReaderAnnotationHoverPopup()
     {
         _readerAnnotationHoverSequence++;
-        foreach (var popup in _readerPdfAnnotationPopups)
-        {
-            popup.IsOpen = false;
-            ((ISetLogicalParent)popup).SetParent(null);
-        }
-        _readerPdfAnnotationPopups.Clear();
         if (!ReaderAnnotationInputPopup.IsOpen && CurrentReaderHost is NativePdfReaderHost pdf)
             pdf.ClearAnnotationCallout();
         ReaderAnnotationHoverHostPopup.IsOpen = false;
@@ -7213,19 +7180,12 @@ public partial class MainWindow
 
     private void ReaderAnnotationHoverPopup_PointerExited(object? sender, PointerEventArgs e)
     {
-        if (_readerIsPdf) return;
         HideReaderAnnotationHoverPopup();
     }
 
     private void ReaderAnnotationHoverCloseButton_Click(object? sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (_readerIsPdf && CurrentReaderHost is NativePdfReaderHost pdf)
-        {
-            ReaderAnnotationHoverHostPopup.IsOpen = false;
-            pdf.DismissAnnotationCallout();
-            return;
-        }
         HideReaderAnnotationHoverPopup();
     }
 
@@ -7280,8 +7240,6 @@ public partial class MainWindow
                             {
                                 _selectedReaderAnnotation = null;
                                 HideReaderAnnotationHoverPopup();
-                                // Navigation emits the page before its final pan.
-                                Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
                             }
                         }
                         ReaderChapterText.Text = GetReaderChapterPositionLabel();
@@ -7457,9 +7415,7 @@ public partial class MainWindow
                 case "annotationBlankClick":
                     if (_readerIsPdf)
                         (CurrentReaderHost as NativePdfReaderHost)?.ClearAnnotationSelection();
-                    if (!_readerIsPdf
-                        || CurrentReaderAppearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Click)
-                        HideReaderAnnotationHoverPopup();
+                    HideReaderAnnotationHoverPopup();
                     break;
                 case "pdfPointAnnotation":
                     if (_readerIsPdf
@@ -7618,8 +7574,14 @@ public partial class MainWindow
                 case "annotationLeave":
                     // The native host emits this from Avalonia pointer events,
                     // which stay authoritative regardless of platform.
-                    if (!_readerIsPdf)
-                        HideReaderAnnotationHoverPopup();
+                    var hoverSequence = _readerAnnotationHoverSequence;
+                    // Let the pointer cross the gap into the scrollable preview.
+                    DispatcherTimer.RunOnce(() =>
+                    {
+                        if (hoverSequence == _readerAnnotationHoverSequence
+                            && !ReaderAnnotationHoverPopup.IsPointerOver)
+                            HideReaderAnnotationHoverPopup();
+                    }, TimeSpan.FromMilliseconds(150));
                     break;
                 case "resize":
                     ScheduleReaderRelayout();

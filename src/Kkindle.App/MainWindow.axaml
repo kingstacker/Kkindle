@@ -6531,16 +6531,6 @@
                                         </StackPanel>
                                         <TextBlock Text="{DynamicResource Ui.Reader.PaperHint}" Classes="readerSettingsHint" />
                                     </StackPanel>
-                                    <Border x:Name="ReaderPdfAnnotationDisplayModePanel" IsVisible="False"
-                                            BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="0,1,0,0" Padding="0,18,0,0">
-                                        <StackPanel Spacing="6">
-                                            <TextBlock Text="PDF" Classes="readerSettingsSection" />
-                                            <ToggleSwitch x:Name="ReaderPdfAnnotationNotesCheck" Classes="readerSettingsToggle"
-                                                          Content="{DynamicResource Ui.Reader.AnnotationNoteMode}"
-                                                          IsCheckedChanged="ReaderPdfAnnotationNotesCheck_IsCheckedChanged" />
-                                            <TextBlock Text="{DynamicResource Ui.Reader.AnnotationNoteModeHint}" Classes="readerSettingsHint" />
-                                        </StackPanel>
-                                    </Border>
                                     <StackPanel x:Name="ReaderLayoutPanel" Spacing="14">
                                         <Border Height="1" Background="{DynamicResource ReaderBorderBrush}" />
                                         <TextBlock Text="{DynamicResource Ui.Reader.Layout}" FontSize="13" FontWeight="SemiBold" />
