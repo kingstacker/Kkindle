@@ -5639,7 +5639,7 @@ public partial class MainWindow
                     pdfNavigationToken,
                     saveProgress: false,
                     syncTocSelection: false,
-                    skipReloadWhenPageMatches: true))
+                    destination: pdfTarget))
                 {
                     return false;
                 }
@@ -5651,22 +5651,17 @@ public partial class MainWindow
                     return false;
                 }
 
-                // Finish the body navigation first. The PDF host emits a scroll
-                // message synchronously, so the pending request suppresses the
-                // automatic TOC follower until this exact destination is in
-                // place. The TOC is then updated once, at the end.
-                pdf.ScrollToTop(NativePdfReaderHost.ReadTargetTop(pdfTarget));
-                var targetOffset = NativePdfReaderHost.ReadTargetOffset(pdfTarget);
-                if (targetOffset >= 0)
-                {
-                    pdf.ScrollToOffset(targetOffset);
-                }
+                // The host resolves and renders the complete destination while
+                // the outgoing snapshot is still covering the page. Commit the
+                // TOC only after that transition has reached its final position.
                 pdfNavigationToken.ThrowIfCancellationRequested();
                 if (!IsCurrentReaderPdfTocNavigation(requestVersion, pdfNavigationToken))
                     return false;
 
                 _readerPdfPage = pdf.PageNumber;
                 _readerChapterIndex = _readerPdfPage - 1;
+                _readerPinnedTocTarget = item.Target;
+                _readerPinnedTocNavigationTop = pdf.NavigationTop;
                 SetReaderTocSelection(item);
                 ReaderChapterText.Text = GetReaderChapterPositionLabel();
                 UpdateReaderToolbar();
@@ -6119,6 +6114,11 @@ public partial class MainWindow
         if (row is not null && ShouldScrollReaderTocRowIntoView(row))
             ReaderTocList.ScrollIntoView(row);
         SetReaderCompactSelectedItem(item);
+        if (_readerIsPdf && ReaderPreviousButton is not null && ReaderNextButton is not null)
+        {
+            ReaderPreviousButton.IsEnabled = index > 0;
+            ReaderNextButton.IsEnabled = index >= 0 && index + 1 < _readerTocItems.Count;
+        }
     }
 
     private void SetReaderTocSelectionForChapter(int chapterIndex)
@@ -6201,6 +6201,15 @@ public partial class MainWindow
         return targetIndex >= 0 && targetIndex < chapterItems.Length
             ? chapterItems[targetIndex]
             : null;
+    }
+
+    private int GetReaderFooterTocIndex()
+    {
+        if ((ReaderTocList.SelectedItem as ReaderTocRow)?.Item is { } selected
+            && (_readerIsPdf || selected.ChapterIndex == _readerChapterIndex)
+            && FindReaderTocIndex(selected) is var index && index >= 0)
+            return index;
+        return _readerIsPdf ? -1 : GetCurrentReaderTocIndex();
     }
 
     private int GetCurrentReaderTocIndex()
@@ -9740,13 +9749,9 @@ public partial class MainWindow
                 (CurrentReaderHost as NativePdfReaderHost)?.IsPointAnnotationMode == true);
         }
         if (ReaderPreviousButton is not null)
-            ReaderPreviousButton.IsEnabled = _readerIsPdf
-                ? (CurrentReaderHost as NativePdfReaderHost)?.CanGoPrevious == true
-                : GetCurrentReaderTocIndex() > 0;
+            ReaderPreviousButton.IsEnabled = GetReaderFooterTocIndex() > 0;
         if (ReaderNextButton is not null)
-            ReaderNextButton.IsEnabled = _readerIsPdf
-                ? (CurrentReaderHost as NativePdfReaderHost)?.CanGoNext == true
-                : GetCurrentReaderTocIndex() is var tocIndex
+            ReaderNextButton.IsEnabled = GetReaderFooterTocIndex() is var tocIndex
                     && tocIndex >= 0
                     && tocIndex + 1 < _readerTocItems.Count;
         UpdateReaderSearchCount();

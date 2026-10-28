@@ -239,7 +239,8 @@ public partial class MainWindow
             var token = ReaderToken;
             try
             {
-                await NavigatePdfPageAsync(page, token);
+                await NavigatePdfPageCoreAsync(page, token, saveProgress: true, syncTocSelection: true,
+                    preserveVerticalPosition: pdf.DisplayMode == PdfReaderDisplayMode.TwoPage);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {

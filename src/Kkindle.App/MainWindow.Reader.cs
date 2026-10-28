@@ -727,13 +727,7 @@ public partial class MainWindow
     {
         direction = Math.Sign(direction);
         if (direction == 0) return;
-        if (_readerIsPdf)
-        {
-            await MoveReaderPdfPositionAsync(direction);
-            return;
-        }
-
-        var currentIndex = GetCurrentReaderTocIndex();
+        var currentIndex = GetReaderFooterTocIndex();
         var targetIndex = currentIndex + direction;
         if (currentIndex < 0 || targetIndex < 0 || targetIndex >= _readerTocItems.Count)
         {

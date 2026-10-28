@@ -130,6 +130,7 @@ public partial class MainWindow
     // page, sometimes with the same offset). Stored as a target string because
     // PDF navigation rebuilds the item objects on every jump.
     private string? _readerPinnedTocTarget;
+    private double? _readerPinnedTocNavigationTop;
 
     private void BuildReaderTocRows()
     {
@@ -873,7 +874,6 @@ public partial class MainWindow
             // Keep the body stable while a PDF destination is being resolved;
             // the PDF navigation commits the full TOC state after the page and
             // its outline offset have both settled.
-            _readerPinnedTocTarget = item.Target;
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(
                     item,

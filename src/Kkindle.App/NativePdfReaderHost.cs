@@ -152,6 +152,8 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
     // ScrollToTop aligns destinations inside this margin. Sample the same
     // edge when following the outline, including after zooming or rotating.
     internal double NavigationTop => GetVisibleTop(new Rect(Viewport).Deflate(PdfReaderLayout.Margin));
+    internal double NavigationBottom => Math.Clamp(PageBounds.Intersect(new Rect(Viewport))
+        .TransformToAABB(GetPageTransform(PageBounds).Invert()).Bottom / Math.Max(1, GetUnrotatedPageSize(PageBounds).Height), 0, 1);
     public Rect PageBounds => GetPageBounds(PageNumber);
     public bool CanGoPrevious => GetAdjacentPage(-1) != PageNumber;
     public bool CanGoNext => GetAdjacentPage(1) != PageNumber;
@@ -226,7 +228,8 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         return count;
     }
 
-    public async Task<bool> NavigateAsync(Uri uri, CancellationToken cancellationToken = default, bool recordHistory = true)
+    public async Task<bool> NavigateAsync(Uri uri, CancellationToken cancellationToken = default, bool recordHistory = true,
+        bool preserveVerticalPosition = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var starting = new ReaderNavigationStartingEventArgs(uri);
@@ -256,12 +259,16 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
             token.ThrowIfCancellationRequested();
             if (_disposed || version != _version) return false;
             Source = uri;
-            ActivatePage(pageNumber);
+            // The old layout has no geometry for a different spread yet.
+            // Publish the destination only after layout and pan are resolved.
+            ActivatePage(pageNumber, emitPage: false);
             RebuildLayout(preservePosition: false);
             ClearSearch();
             ClearSelection();
             _speechHighlight = null;
-            ScrollToTop(ReadTargetTop(uri));
+            ScrollToTop(ReadTargetTop(uri), preserveVerticalPosition);
+            var targetOffset = ReadTargetOffset(uri);
+            if (targetOffset >= 0) ScrollToOffset(targetOffset);
             await RefreshViewportAsync(token);
             token.ThrowIfCancellationRequested();
             if (_disposed || version != _version) return false;
@@ -757,7 +764,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         if (render) ScheduleRender();
     }
 
-    private void ActivatePage(int page)
+    private void ActivatePage(int page, bool emitPage = true)
     {
         page = Math.Clamp(page, 1, Math.Max(1, PageCount));
         if (PageNumber == page) return;
@@ -766,7 +773,7 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         ClearSelection();
         _speechHighlight = null;
         RebuildSearch(_searchQuery);
-        EmitPage();
+        if (emitPage) EmitPage();
     }
 
     public void ScrollBy(double pixels)
@@ -805,19 +812,33 @@ public sealed partial class NativePdfReaderHost : Control, IReaderHost, IReaderP
         return Math.Clamp(current + delta, 0, maximum);
     }
 
-    public void ScrollToTop(double top)
+    public void ScrollToTop(double top, bool preserveVerticalPosition = false)
     {
         if (_layout is null) return;
         var page = _layout.Pages[PageNumber - 1];
         top = Math.Clamp(top, 0, 1);
         var margin = PdfReaderLayout.Margin;
-        SetPan(Rotation switch
+        var x = _pan.X;
+        if (DisplayMode == PdfReaderDisplayMode.TwoPage)
+        {
+            // A destination on the other sheet must enter the viewport even
+            // when zoom has made the spread wider than the reader surface.
+            var start = page.Left - margin;
+            var end = page.Right + margin - Viewport.Width;
+            x = start <= end ? start : Math.Clamp(x, end, start);
+        }
+        Vector pan = Rotation switch
         {
             90 => new(page.Right + margin - top * page.Width - Viewport.Width, page.Y - margin),
-            180 => new(_pan.X, page.Bottom + margin - top * page.Height - Viewport.Height),
+            180 => new(x, page.Bottom + margin - top * page.Height - Viewport.Height),
             270 => new(page.X - margin + top * page.Width, page.Y - margin),
-            _ => new(_pan.X, page.Y - margin + top * page.Height)
-        }, trackPage: false);
+            _ => new(x, page.Y - margin + top * page.Height)
+        };
+        // Ordinary spread turns keep the sheet at the same vertical position.
+        // In particular, a restored/zoom-anchored offset must not snap back to
+        // the centered fit position when the next equal-sized spread appears.
+        if (preserveVerticalPosition) pan = new(Math.Clamp(pan.X, 0, _horizontal.Maximum), _pan.Y);
+        SetPan(pan, trackPage: false, allowZoomOverpan: preserveVerticalPosition && _allowZoomOverpan);
     }
 
     private void EmitPage()

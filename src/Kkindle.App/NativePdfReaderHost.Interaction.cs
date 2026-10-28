@@ -879,19 +879,11 @@ public sealed partial class NativePdfReaderHost
         _pointerAnnotationHit = AnnotationAt(point)?.Id;
         _pointerLink = _pointerAnnotationHit is null ? LinkAt(point) : null;
         _pointerClickCount = e.ClickCount;
-        if (_pointerAnnotationHit is { } doubleHit && e.ClickCount >= 2)
-        {
-            Emit(new { type = "annotationClick", id = doubleHit });
-            _pointerStart = null;
-            _pointerAnnotationHit = null;
-            e.Handled = true;
-            return;
-        }
         _selectionPage = page;
         _anchorOffset = HitOffset(page, point, false, readingOrder: true);
         _pointerStart = point;
         _dragging = false;
-        if (_anchorOffset >= 0 && e.ClickCount >= 2 && PageContent is { } content)
+        if (_pointerAnnotationHit is null && _anchorOffset >= 0 && e.ClickCount >= 2 && PageContent is { } content)
         {
             var start = Math.Min(HitOffset(page, point, false), Math.Max(0, content.Text.Length - 1));
             var end = start;
@@ -971,6 +963,7 @@ public sealed partial class NativePdfReaderHost
         // Read the pending pick before releasing the capture: CaptureLost
         // clears it, since losing capture cancels the click.
         var annotationHit = _pointerAnnotationHit;
+        var clickCount = _pointerClickCount;
         var link = _pointerLink;
         _pointerLink = null;
         if (PdfAnnotTrace.Enabled) PdfAnnotTrace.Write($"release dragged={dragged} hit={annotationHit}");
@@ -981,6 +974,15 @@ public sealed partial class NativePdfReaderHost
         if (dragged) EmitSelection();
         else if (annotationHit is { } hitId)
         {
+            // Wait until release to distinguish a double-click from a drag
+            // beginning on an existing marking. Opening the editor on press
+            // steals capture and leaves no live text selection to copy.
+            if (clickCount >= 2)
+            {
+                Emit(new { type = "annotationClick", id = hitId });
+                e.Handled = true;
+                return;
+            }
             // Single click picks the highlight/underline so Delete (see
             // HandleReaderKey) or a right click can remove it.
             SelectAnnotation(hitId);

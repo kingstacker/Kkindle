@@ -33,8 +33,8 @@ public partial class MainWindow
         ReaderPdfThumbnailsTabButton.IsVisible = pdf is not null;
         ReaderAssistantTabsGrid.ColumnDefinitions[2].Width = pdf is not null
             ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
-        ReaderPdfBackButton.IsEnabled = pdf is { PageNumber: > 1 };
-        ReaderPdfForwardButton.IsEnabled = pdf is not null && pdf.PageNumber < pdf.PageCount;
+        ReaderPdfBackButton.IsEnabled = pdf?.CanGoPrevious == true;
+        ReaderPdfForwardButton.IsEnabled = pdf?.CanGoNext == true;
         ReaderPagePositionButton.IsEnabled = pdf is not null;
         if (!ReferenceEquals(pdf, _readerThumbnailHost))
         {
@@ -84,14 +84,12 @@ public partial class MainWindow
 
     private async void ReaderPdfPreviousPageButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is NativePdfReaderHost { PageNumber: > 1 } pdf)
-            await ObserveReaderTaskAsync(NavigatePdfPageAsync(pdf.PageNumber - 1, ReaderToken));
+        await ObserveReaderTaskAsync(MoveReaderPdfPositionAsync(-1));
     }
 
     private async void ReaderPdfNextPageButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is NativePdfReaderHost pdf && pdf.PageNumber < pdf.PageCount)
-            await ObserveReaderTaskAsync(NavigatePdfPageAsync(pdf.PageNumber + 1, ReaderToken));
+        await ObserveReaderTaskAsync(MoveReaderPdfPositionAsync(1));
     }
 
     private async Task NavigateReaderPdfHistoryAsync(int direction)

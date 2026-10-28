@@ -110,7 +110,7 @@ internal static class PdfFixture
         return path;
     }
 
-    public static string Write(string directory, bool outline = true)
+    public static string Write(string directory, bool outline = true, bool offsetScannedOutline = false)
     {
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "PDF 阅读测试.pdf");
@@ -132,7 +132,7 @@ internal static class PdfFixture
             "<< /Title (Cover) /Parent 12 0 R /Dest [4 0 R /Fit] /Next 14 0 R >>",
             "<< /Title (Chapter Two) /Parent 12 0 R /Dest [6 0 R /XYZ null 600 null] /Prev 13 0 R /Next 16 0 R /First 15 0 R /Last 15 0 R /Count 1 >>",
             "<< /Title (Nested section) /Parent 14 0 R /A << /S /GoTo /D [6 0 R /XYZ null 240 null] >> >>",
-            "<< /Title (Scanned page) /Parent 12 0 R /Dest [8 0 R /Fit] /Prev 14 0 R >>",
+            $"<< /Title (Scanned page) /Parent 12 0 R /Dest [8 0 R {(offsetScannedOutline ? "/XYZ null 500 null" : "/Fit")}] /Prev 14 0 R >>",
             "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 26 >>\nstream\nEEDDCC99BBAA557788CC9966>\nendstream",
             $"<< /Title <{title}> /Author (Kkindle Tests) >>"
         };

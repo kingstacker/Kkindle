@@ -53,8 +53,9 @@ public sealed class ReaderTests(SettingsUiSession session)
             Capture(scope.Window, "toc-expanded");
             AssertViewportFilled(list);
 
-            var scrollViewer = list.GetVisualDescendants().OfType<ScrollViewer>().First();
-            scrollViewer.Offset = new Vector(0, scrollViewer.Extent.Height);
+            // The virtualized extent changes as wrapped rows are measured.
+            // Request the final row rather than using an earlier size estimate.
+            list.ScrollIntoView(rows[^1]);
             await Render();
             Assert.NotNull(list.ContainerFromItem(rows[^1]));
             scope.Call("ReaderTocToggle_Click", new Button { DataContext = rows[4] }, new RoutedEventArgs());

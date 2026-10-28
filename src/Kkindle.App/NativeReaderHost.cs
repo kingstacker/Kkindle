@@ -96,6 +96,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private readonly Dictionary<string, int> _fragmentPagesByRequest = new(StringComparer.Ordinal);
     private string[] _navigationFragments = [];
+    private (ChapterLayout Layout, int Page, double ScrollOffset, string Fragment)? _navigationTarget;
     private int? _pendingRestoreOffset;
     private int? _pendingRestorePage;
     private double? _pendingRestoreRatio;
@@ -239,6 +240,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _relayoutTimer?.Stop();
         _viewportReadingAnchor = null;
         _viewportReadingState = null;
+        _navigationTarget = null;
         _preserveViewportPosition = false;
         StopSelectionAutoPageTurn();
         lock (_engineGate)
@@ -447,6 +449,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// <summary>Chapter-boundary positioning: the first page or the last full page.</summary>
     public void SeekToBoundary(bool toEnd)
     {
+        _navigationTarget = null;
         if (_layout is null || _layout.Pages.Count == 0)
         {
             _pendingSeekToEnd = toEnd;
@@ -472,6 +475,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public void ScrollToOffset(int offset)
     {
+        _navigationTarget = null;
         if (_layout is null)
         {
             _pendingRestoreOffset = offset;
@@ -511,6 +515,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public void ScrollToFragment(string fragmentId)
     {
+        _navigationTarget = null;
         fragmentId = NormalizeFragment(fragmentId);
         if (_layout is null)
         {
@@ -530,11 +535,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             page -= page % 2;
         }
 
-        if (page >= 0 && page != _pageIndex)
+        if (page >= 0)
         {
-            _pageIndex = page;
-            _bitmapDirty = true;
-            InvalidateVisual();
+            if (page != _pageIndex)
+            {
+                _pageIndex = page;
+                _bitmapDirty = true;
+                InvalidateVisual();
+            }
+            // The clicked heading may be below the first line or on the
+            // second sheet of this spread. Keep that explicit destination
+            // until the viewport moves, even if no physical page turn occurs.
+            _navigationTarget = (_layout, _pageIndex, _scrollOffset, fragmentId);
             EmitScroll();
         }
     }
@@ -546,6 +558,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// </summary>
     public void SeekToPixelScroll(double pixelScroll)
     {
+        _navigationTarget = null;
         if (IsScroll)
         {
             SetScrollOffset(pixelScroll);
@@ -567,6 +580,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public void SeekToRatio(double ratio)
     {
+        _navigationTarget = null;
         if (_layout is null || _layout.Pages.Count == 0)
         {
             return;
@@ -1042,6 +1056,15 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         if (_layout is null || _layout.Pages.Count == 0 || _content is null) return null;
 
+        if (_navigationTarget is { } target)
+        {
+            if (ReferenceEquals(target.Layout, _layout) && target.Page == _pageIndex
+                && Math.Abs(target.ScrollOffset - _scrollOffset) < 0.001
+                && _navigationFragments.Contains(target.Fragment, StringComparer.Ordinal))
+                return target.Fragment;
+            _navigationTarget = null;
+        }
+
         // Follow the leading visible text, including a partially scrolled
         // page. Later anchors on this page or the second page of a spread
         // must not move the TOC ahead of the reader.
@@ -1082,6 +1105,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public bool RestoreContentPosition(ReaderContentPosition? position)
     {
+        _navigationTarget = null;
         if (_disposed || ReaderContentPosition.Validate(position) is not { } valid) return false;
         _pendingFragment = null;
         _pendingSeekToEnd = false;
@@ -1583,6 +1607,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private Task<bool> NavigateCore(string chapterPath, string? fragment, ViewportReadingAnchor? readingAnchor = null)
     {
+        _navigationTarget = null;
         _composePending = true;
         _relayoutTimer?.Stop();
         _viewportReadingAnchor = null;

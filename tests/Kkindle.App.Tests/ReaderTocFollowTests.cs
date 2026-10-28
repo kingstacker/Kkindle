@@ -50,6 +50,37 @@ public sealed class ReaderTocFollowTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task FooterContinuesAfterAnExplicitHeadingInsideTheCurrentSpread() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var host = await LoadBook(scope, new(TwoPageMode: true));
+        var items = scope.Field<IReadOnlyList<EpubReaderNavigationItem>>("_readerTocItems");
+        var layout = NativeField<ChapterLayout>(host, "_layout");
+        Assert.Equal(1, layout.GetPageIndexOfFragment("volume"));
+        Assert.True(await scope.Call<Task<bool>>("NavigateToReaderItemAsync", items[1],
+            CancellationToken.None, ReaderNavigationIntent.Toc, null));
+        await scope.Call<Task>("UpdateReaderScrollStateAsync", host);
+        AssertCurrent(scope, "上部", "volume");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", 1);
+        AssertCurrent(scope, "一", "one");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", 1);
+        AssertCurrent(scope, "二", "chapter-二");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", 1);
+        AssertCurrent(scope, "三", "three");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", 1);
+        AssertCurrent(scope, "下部", "other");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", -1);
+        AssertCurrent(scope, "三", "three");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", -1);
+        AssertCurrent(scope, "二", "chapter-二");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", -1);
+        AssertCurrent(scope, "一", "one");
+        host.SeekToBoundary(toEnd: false);
+        AssertCurrent(scope, "封面", "cover");
+        Detach(scope);
+    });
+
+    [Fact]
     public Task ReadingPositionRefreshAndLayoutChangesKeepTheCurrentSubchapter() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
