@@ -6,6 +6,26 @@ the Chinese changelog when the language is English.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.3 (2026-10-29)
+
+### Added
+
+- Search the library by title, author, or pinyin, with improved indexing for Chinese book titles and authors.
+- Recover reading progress and reading time after interruptions, and roll back or recover interrupted backup imports.
+- Show clearer Kindle device-library scan states, detect duplicate books, and retry individual transfer failures.
+
+### Improved
+
+- Unify Settings and Reading Settings with a square black-and-white interface, minimal line-and-dot switches, and a clearer reset icon with matching scale animation.
+- Improve PDF selection, table and diagram copying, spread navigation, and annotation-card positioning during scrolling and zooming.
+- Strengthen S3 synchronization with local-file cleanup, retries, concurrency consistency, and clearer status feedback.
+
+### Fixed
+
+- Fix EPUB/PDF reader lifecycle, annotation relocation, virtualized table-of-contents navigation, and spread-switch issues.
+- Fix stale state during chapter changes, bookmark and position recovery, device connection, and book deletion flows.
+- Close recovery gaps in backup, synchronization, and reading data after abnormal exits.
+
 ## 1.1.2 (2026-10-27)
 
 ### Added

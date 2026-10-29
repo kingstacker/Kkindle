@@ -175,58 +175,9 @@ jobs:
           retention-days: 7
           compression-level: 0
 
-  macos:
-    name: Build ad-hoc macOS packages
-    needs: [prepare, validate]
-    runs-on: macos-15
-    timeout-minutes: 45
-    env:
-      DEV_VERSION: ${{ needs.prepare.outputs.version }}
-      APPLE_SIGNING_IDENTITY: "-"
-      APPLE_REQUIRE_NOTARIZATION: "0"
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.400
-      - name: Build Apple Silicon package
-        run: bash scripts/build-macos-release.sh "$DEV_VERSION" artifacts/development-macos osx-arm64
-      - name: Build Intel package
-        run: bash scripts/build-macos-release.sh "$DEV_VERSION" artifacts/development-macos osx-x64
-      - name: Validate and launch Apple Silicon package
-        shell: bash
-        run: |
-          set -euo pipefail
-          validation_root="$RUNNER_TEMP/kkindle-macos-development"
-          mkdir -p "$validation_root"
-          tar -xzf "artifacts/development-macos/Kkindle-${DEV_VERSION}-osx-arm64.tar.gz" -C "$validation_root"
-          plutil -lint "$validation_root/Kkindle.app/Contents/Info.plist"
-          codesign --verify --deep --strict "$validation_root/Kkindle.app"
-          codesign -dv --verbose=4 "$validation_root/Kkindle.app" 2>&1 \
-            | grep -q 'Signature=adhoc'
-          "$validation_root/Kkindle.app/Contents/MacOS/Kkindle" \
-            > "$RUNNER_TEMP/kkindle-macos-development.log" 2>&1 &
-          pid=$!
-          trap 'kill "$pid" 2>/dev/null || true' EXIT
-          sleep 12
-          if ! kill -0 "$pid" 2>/dev/null; then
-            cat "$RUNNER_TEMP/kkindle-macos-development.log"
-            echo "Kkindle exited during the macOS smoke test." >&2
-            exit 1
-          fi
-          kill "$pid" 2>/dev/null || true
-          wait "$pid" 2>/dev/null || true
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Kkindle-${{ needs.prepare.outputs.version }}-macos
-          path: artifacts/development-macos/*
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-
   publish:
     name: Publish development GitHub Release
-    needs: [prepare, windows, linux, macos]
+    needs: [prepare, windows, linux]
     if: ${{ github.ref_name == 'dev' || github.ref_name == 'develop' || startsWith(github.ref_name, 'dev/') }}
     runs-on: ubuntu-24.04
     env:

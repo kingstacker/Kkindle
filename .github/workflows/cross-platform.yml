@@ -1,4 +1,4 @@
-name: Cross-platform validation
+name: Linux validation
 
 on:
   push:
@@ -19,10 +19,6 @@ jobs:
             os: ubuntu-24.04
             head: src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj
             package_command: bash scripts/build-linux-release.sh 0.0.0 artifacts/validation linux-x64
-          - name: macOS
-            os: macos-15
-            head: src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj
-            package_command: bash scripts/build-macos-release.sh 0.0.0 artifacts/validation osx-arm64
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -49,8 +45,6 @@ jobs:
           name: ui-test-diagnostics-${{ matrix.name }}
           path: |
             artifacts/test-results/ui
-            ~/Library/Logs/DiagnosticReports/*testhost*
-            ~/Library/Logs/DiagnosticReports/*dotnet*
           if-no-files-found: ignore
       - name: Build native package
         run: ${{ matrix.package_command }}
@@ -76,21 +70,3 @@ jobs:
         run: |
           dpkg-deb --info artifacts/validation/kkindle_0.0.0_amd64.deb
           dpkg-deb --contents artifacts/validation/kkindle_0.0.0_amd64.deb | grep 'usr/bin/kkindle'
-      - name: Verify macOS application signature
-        if: runner.os == 'macOS'
-        run: |
-          tar -xzf artifacts/validation/Kkindle-0.0.0-osx-arm64.tar.gz -C artifacts/validation
-          plutil -lint artifacts/validation/Kkindle.app/Contents/Info.plist
-          codesign --verify --deep --strict artifacts/validation/Kkindle.app
-          artifacts/validation/Kkindle.app/Contents/MacOS/Kkindle \
-            > "$RUNNER_TEMP/kkindle-macos.log" 2>&1 &
-          pid=$!
-          trap 'kill "$pid" 2>/dev/null || true' EXIT
-          sleep 12
-          if ! kill -0 "$pid" 2>/dev/null; then
-            cat "$RUNNER_TEMP/kkindle-macos.log"
-            echo "Kkindle exited during the macOS smoke test." >&2
-            exit 1
-          fi
-          kill "$pid" 2>/dev/null || true
-          wait "$pid" 2>/dev/null || true
