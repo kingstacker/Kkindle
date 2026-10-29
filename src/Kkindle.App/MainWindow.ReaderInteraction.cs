@@ -1118,7 +1118,6 @@ public partial class MainWindow
     private bool _readerTocMinimalBeforeZen;
     private long _readerActiveSeconds;
     private DispatcherTimer? _readerStatsTimer;
-    private readonly SemaphoreSlim _readerStatsFlushGate = new(1, 1);
     private int _readerTransientStatusSequence;
     private bool _readerContinuousLocked;
     private int _readerContinuousDirection;
@@ -5639,7 +5638,7 @@ public partial class MainWindow
                     pdfNavigationToken,
                     saveProgress: false,
                     syncTocSelection: false,
-                    skipReloadWhenPageMatches: true))
+                    destination: pdfTarget))
                 {
                     return false;
                 }
@@ -5651,22 +5650,17 @@ public partial class MainWindow
                     return false;
                 }
 
-                // Finish the body navigation first. The PDF host emits a scroll
-                // message synchronously, so the pending request suppresses the
-                // automatic TOC follower until this exact destination is in
-                // place. The TOC is then updated once, at the end.
-                pdf.ScrollToTop(NativePdfReaderHost.ReadTargetTop(pdfTarget));
-                var targetOffset = NativePdfReaderHost.ReadTargetOffset(pdfTarget);
-                if (targetOffset >= 0)
-                {
-                    pdf.ScrollToOffset(targetOffset);
-                }
+                // The host resolves and renders the complete destination while
+                // the outgoing snapshot is still covering the page. Commit the
+                // TOC only after that transition has reached its final position.
                 pdfNavigationToken.ThrowIfCancellationRequested();
                 if (!IsCurrentReaderPdfTocNavigation(requestVersion, pdfNavigationToken))
                     return false;
 
                 _readerPdfPage = pdf.PageNumber;
                 _readerChapterIndex = _readerPdfPage - 1;
+                _readerPinnedTocTarget = item.Target;
+                _readerPinnedTocNavigationTop = pdf.NavigationTop;
                 SetReaderTocSelection(item);
                 ReaderChapterText.Text = GetReaderChapterPositionLabel();
                 UpdateReaderToolbar();
@@ -5994,7 +5988,13 @@ public partial class MainWindow
         }
         else if (intent == ReaderNavigationIntent.Annotation && _readerPendingAnnotation is { } pending)
         {
-            nativeReader.ScrollToOffset(Math.Max(0, pending.StartOffset));
+            var startOffset = nativeReader.TryGetAnnotationRange(
+                pending,
+                out var relocatedStart,
+                out _)
+                ? relocatedStart
+                : Math.Max(0, pending.StartOffset);
+            nativeReader.ScrollToOffset(startOffset);
             _readerPendingAnnotation = null;
         }
         else if (intent == ReaderNavigationIntent.Bookmark)
@@ -6113,6 +6113,11 @@ public partial class MainWindow
         if (row is not null && ShouldScrollReaderTocRowIntoView(row))
             ReaderTocList.ScrollIntoView(row);
         SetReaderCompactSelectedItem(item);
+        if (_readerIsPdf && ReaderPreviousButton is not null && ReaderNextButton is not null)
+        {
+            ReaderPreviousButton.IsEnabled = index > 0;
+            ReaderNextButton.IsEnabled = index >= 0 && index + 1 < _readerTocItems.Count;
+        }
     }
 
     private void SetReaderTocSelectionForChapter(int chapterIndex)
@@ -6197,6 +6202,15 @@ public partial class MainWindow
             : null;
     }
 
+    private int GetReaderFooterTocIndex()
+    {
+        if ((ReaderTocList.SelectedItem as ReaderTocRow)?.Item is { } selected
+            && (_readerIsPdf || selected.ChapterIndex == _readerChapterIndex)
+            && FindReaderTocIndex(selected) is var index && index >= 0)
+            return index;
+        return _readerIsPdf ? -1 : GetCurrentReaderTocIndex();
+    }
+
     private int GetCurrentReaderTocIndex()
     {
         if (_readerTocItems.Count == 0) return -1;
@@ -6240,7 +6254,13 @@ public partial class MainWindow
         cancellationToken.ThrowIfCancellationRequested();
         if (host is NativeReaderHost nativeReader)
         {
-            nativeReader.ScrollToOffset(Math.Max(0, annotation.StartOffset));
+            var startOffset = nativeReader.TryGetAnnotationRange(
+                annotation,
+                out var relocatedStart,
+                out _)
+                ? relocatedStart
+                : Math.Max(0, annotation.StartOffset);
+            nativeReader.ScrollToOffset(startOffset);
             await UpdateReaderScrollStateAsync(host);
         }
     }
@@ -6256,8 +6276,9 @@ public partial class MainWindow
 
         if (host is NativeReaderHost nativeReader)
         {
-            // Annotation offsets are body-textContent coordinates; the native
-            // loader reproduces the same stream, so they apply directly.
+            // Resolve saved quote/context at paint and navigation time. The
+            // native loader normally reproduces the same stream, but edited or
+            // reparsed EPUB content can move a previously valid offset.
             var nativeAnnotations = await _readerData.GetAnnotationsAsync(
                 _readerBookFile.Id,
                 cancellationToken,
@@ -6707,39 +6728,32 @@ public partial class MainWindow
         if (!IsActive || !ReaderRoot.IsVisible) return;
         _readerActiveSeconds++;
         if (_readerActiveSeconds % 30 == 0)
-            _ = FlushReaderActiveSecondsAsync();
+            _ = ObserveReadingTimeFlushAsync();
+    }
+
+    private async Task ObserveReadingTimeFlushAsync()
+    {
+        try { await FlushReaderActiveSecondsAsync(); }
+        catch (Exception exception)
+        {
+            ReaderStatusText.Text = T("阅读时长保存失败，请检查存储空间或文件权限：{0}", UiText.Localize(exception.Message));
+        }
     }
 
     private async Task FlushReaderActiveSecondsAsync()
     {
-        await _readerStatsFlushGate.WaitAsync();
-        try
+        var card = _readerBookCard;
+        var file = _readerBookFile;
+        if (card is null || file is null) return;
+        var seconds = Interlocked.Exchange(ref _readerActiveSeconds, 0);
+        if (seconds <= 0)
         {
-            if (_readerBookCard is null || _readerBookFile is null || _readerActiveSeconds <= 0) return;
-            var activeSeconds = Interlocked.Exchange(ref _readerActiveSeconds, 0);
-            if (activeSeconds <= 0) return;
-            try
-            {
-                await _readerData.AddReadingTimeAsync(
-                    _readerBookCard.Book.Id,
-                    _readerBookFile.Id,
-                    activeSeconds,
-                    CalculateReaderProgressPercent(),
-                    _readerChapterIndex,
-                    _readerDocument?.Chapters.Count ?? (_readerIsPdf ? _readerPdfPages.Count : 0),
-                    CancellationToken.None);
-            }
-            catch
-            {
-                // Keep unsaved seconds pending so the next periodic flush or
-                // reader close can retry instead of silently losing time.
-                Interlocked.Add(ref _readerActiveSeconds, activeSeconds);
-            }
+            await _readerReadingTimeRecovery.InitializeAsync();
+            return;
         }
-        finally
-        {
-            _readerStatsFlushGate.Release();
-        }
+        await _readerReadingTimeRecovery.SaveAsync(card.Book.Id, file.Id, seconds,
+            CalculateReaderProgressPercent(), _readerChapterIndex,
+            _readerDocument?.Chapters.Count ?? (_readerIsPdf ? _readerPdfPages.Count : 0), CancellationToken.None);
     }
 
     private void UpdateReaderZoomLabel()
@@ -7083,19 +7097,6 @@ public partial class MainWindow
     private Guid? _readerAnnotationHoverAnnotationId;
     private int _readerAnnotationHoverSequence;
 
-    private void ShowCurrentReaderPdfAnnotation()
-    {
-        if (!_readerIsPdf || ReaderAnnotationInputPopup.IsOpen) return;
-        HideReaderAnnotationHoverPopup();
-        if (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned) return;
-        var annotations = ReaderAnnotations.Where(item =>
-            TryGetReaderPdfPage(item.ChapterPath, out _) && !string.IsNullOrWhiteSpace(item.Note))
-            .OrderByDescending(item => item.ChapterPath == $"pdf:page:{_readerPdfPage}").ToArray();
-        if (annotations.Length == 0 || CurrentReaderHost is not NativePdfReaderHost pdf) return;
-        ShowReaderAnnotationHoverPopup(annotations[0].Note, null, annotations[0]);
-        ShowAdditionalReaderPdfAnnotations(pdf, annotations.Skip(1));
-    }
-
     private void ShowReaderAnnotationHoverPopup(
         string note,
         Point? placementPoint,
@@ -7103,12 +7104,10 @@ public partial class MainWindow
         bool fromAnnotationClick = false)
     {
         if (_readerIsPdf && ReaderAnnotationInputPopup.IsOpen) return;
-        if (_readerIsPdf && _readerPdfAnnotationPopups.Count > 0) return;
         if (_readerIsPdf
-            && (CurrentReaderAppearance.AnnotationDisplayMode != ReaderAnnotationDisplayMode.Pinned
-                || annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
+            && (annotation is null || !TryGetReaderPdfPage(annotation.ChapterPath, out _))) return;
         ReaderAnnotationHoverNote.Text = note ?? string.Empty;
-        ReaderAnnotationHoverHeading.IsVisible = _readerIsPdf;
+        ReaderAnnotationHoverHeading.IsVisible = false;
         _readerAnnotationHoverSequence++;
         ReaderAnnotationHoverNote.IsVisible = !string.IsNullOrWhiteSpace(note);
         _readerAnnotationHoverAnnotationId = annotation?.Id;
@@ -7118,31 +7117,19 @@ public partial class MainWindow
             _readerAnnotationHoverPlacementPoint = point;
         ReaderAnnotationHoverPopup.IsVisible = true;
         var measureHeight = ReaderAnnotationCardLayout.CreateMeasure(ReaderAnnotationHoverPopup, ReaderAnnotationHoverNote);
-        if (_readerIsPdf
-            && CurrentReaderHost is NativePdfReaderHost pdf
-            && annotation is not null)
-        {
-            if (TryShowReaderPdfAnnotationCallout(
-                    ReaderAnnotationHoverHostPopup,
-                    pdf,
-                    annotation,
-                    _readerAnnotationHoverPlacementPoint,
-                    new Size(220, measureHeight(220)),
-                    measureHeight: measureHeight))
-                return;
-            pdf.ClearAnnotationCallout();
-            HideReaderAnnotationHoverPopup();
-            return;
-        }
         var viewport = (CurrentReaderHost?.View as Control)?.Bounds.Size ?? ReaderWebViewHost.Bounds.Size;
-        var visibleBands = CurrentReaderHost is NativeReaderHost epub && annotation is not null
-            ? epub.GetAnnotationBounds(annotation).Select(rect => rect.Intersect(new Rect(viewport)))
-                .Where(rect => rect.Width > 0 && rect.Height > 0).ToArray()
-            : [];
+        var bands = annotation is null ? [] : CurrentReaderHost switch
+        {
+            NativeReaderHost epub => epub.GetAnnotationBounds(annotation),
+            NativePdfReaderHost pdf => pdf.GetAnnotationBounds(annotation),
+            _ => Array.Empty<Rect>()
+        };
+        var visibleBands = bands.Select(rect => rect.Intersect(new Rect(viewport)))
+            .Where(rect => rect.Width > 0 && rect.Height > 0).ToArray();
         var quote = visibleBands.Length > 0
             ? visibleBands.Aggregate((left, right) => left.Union(right))
             : new Rect(_readerAnnotationHoverPlacementPoint ?? new Point(8, 8), new Size(1, 1));
-        var cardBounds = ReaderAnnotationCardLayout.PlaceEpub(quote, viewport, measureHeight);
+        var cardBounds = ReaderAnnotationCardLayout.Place(quote, viewport, measureHeight);
         ReaderAnnotationHoverPopup.Width = cardBounds.Width;
         ReaderAnnotationHoverPopup.Height = cardBounds.Height;
         if (CurrentReaderHost?.View is Control view)
@@ -7174,12 +7161,6 @@ public partial class MainWindow
     private void HideReaderAnnotationHoverPopup()
     {
         _readerAnnotationHoverSequence++;
-        foreach (var popup in _readerPdfAnnotationPopups)
-        {
-            popup.IsOpen = false;
-            ((ISetLogicalParent)popup).SetParent(null);
-        }
-        _readerPdfAnnotationPopups.Clear();
         if (!ReaderAnnotationInputPopup.IsOpen && CurrentReaderHost is NativePdfReaderHost pdf)
             pdf.ClearAnnotationCallout();
         ReaderAnnotationHoverHostPopup.IsOpen = false;
@@ -7213,19 +7194,12 @@ public partial class MainWindow
 
     private void ReaderAnnotationHoverPopup_PointerExited(object? sender, PointerEventArgs e)
     {
-        if (_readerIsPdf) return;
         HideReaderAnnotationHoverPopup();
     }
 
     private void ReaderAnnotationHoverCloseButton_Click(object? sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (_readerIsPdf && CurrentReaderHost is NativePdfReaderHost pdf)
-        {
-            ReaderAnnotationHoverHostPopup.IsOpen = false;
-            pdf.DismissAnnotationCallout();
-            return;
-        }
         HideReaderAnnotationHoverPopup();
     }
 
@@ -7280,8 +7254,6 @@ public partial class MainWindow
                             {
                                 _selectedReaderAnnotation = null;
                                 HideReaderAnnotationHoverPopup();
-                                // Navigation emits the page before its final pan.
-                                Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
                             }
                         }
                         ReaderChapterText.Text = GetReaderChapterPositionLabel();
@@ -7457,9 +7429,7 @@ public partial class MainWindow
                 case "annotationBlankClick":
                     if (_readerIsPdf)
                         (CurrentReaderHost as NativePdfReaderHost)?.ClearAnnotationSelection();
-                    if (!_readerIsPdf
-                        || CurrentReaderAppearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Click)
-                        HideReaderAnnotationHoverPopup();
+                    HideReaderAnnotationHoverPopup();
                     break;
                 case "pdfPointAnnotation":
                     if (_readerIsPdf
@@ -7618,8 +7588,14 @@ public partial class MainWindow
                 case "annotationLeave":
                     // The native host emits this from Avalonia pointer events,
                     // which stay authoritative regardless of platform.
-                    if (!_readerIsPdf)
-                        HideReaderAnnotationHoverPopup();
+                    var hoverSequence = _readerAnnotationHoverSequence;
+                    // Let the pointer cross the gap into the scrollable preview.
+                    DispatcherTimer.RunOnce(() =>
+                    {
+                        if (hoverSequence == _readerAnnotationHoverSequence
+                            && !ReaderAnnotationHoverPopup.IsPointerOver)
+                            HideReaderAnnotationHoverPopup();
+                    }, TimeSpan.FromMilliseconds(150));
                     break;
                 case "resize":
                     ScheduleReaderRelayout();
@@ -9765,13 +9741,9 @@ public partial class MainWindow
                 (CurrentReaderHost as NativePdfReaderHost)?.IsPointAnnotationMode == true);
         }
         if (ReaderPreviousButton is not null)
-            ReaderPreviousButton.IsEnabled = _readerIsPdf
-                ? (CurrentReaderHost as NativePdfReaderHost)?.CanGoPrevious == true
-                : GetCurrentReaderTocIndex() > 0;
+            ReaderPreviousButton.IsEnabled = GetReaderFooterTocIndex() > 0;
         if (ReaderNextButton is not null)
-            ReaderNextButton.IsEnabled = _readerIsPdf
-                ? (CurrentReaderHost as NativePdfReaderHost)?.CanGoNext == true
-                : GetCurrentReaderTocIndex() is var tocIndex
+            ReaderNextButton.IsEnabled = GetReaderFooterTocIndex() is var tocIndex
                     && tocIndex >= 0
                     && tocIndex + 1 < _readerTocItems.Count;
         UpdateReaderSearchCount();

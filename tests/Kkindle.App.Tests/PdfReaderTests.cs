@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
@@ -56,6 +57,23 @@ public sealed class PdfReaderTests(SettingsUiSession session)
     });
 
     [Fact]
+    public Task PdfFooterMovesBetweenOutlineEntriesInTwoPageMode() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.TwoPage);
+        AssertCurrent(scope, "Cover");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", 1);
+        Assert.Equal(2, pdf.PageNumber);
+        AssertCurrent(scope, "Chapter Two");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", 1);
+        AssertCurrent(scope, "Nested section");
+        await scope.Call<Task>("MoveReaderFooterTocAsync", -1);
+        AssertCurrent(scope, "Chapter Two");
+    });
+
+    [Fact]
     public Task PdfOpensWithFirstPageCoverAndFollowsItsNestedOutline() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
@@ -83,6 +101,88 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         AssertCurrent(scope, "Scanned page");
     });
 
+    [Fact]
+    public Task DraggingDiagramLabelsKeepsCopiedTextAndSavedAnnotationWithinOneColumn() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, path: PdfFixture.WriteDiagramLabels(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var text = pdf.PageContent!.Text;
+        var labelOffsets = new[] { text.IndexOf("Warm", StringComparison.Ordinal), text.IndexOf("Cold", StringComparison.Ordinal), text.LastIndexOf("Warm", StringComparison.Ordinal) };
+        var airOffsets = new[] { text.IndexOf("air", StringComparison.Ordinal), text.IndexOf("air", text.IndexOf("air", StringComparison.Ordinal) + 3, StringComparison.Ordinal), text.LastIndexOf("air", StringComparison.Ordinal) };
+        for (var column = 0; column < 3; column++)
+        foreach (var reverse in new[] { false, true })
+        {
+            scope.Call("HideReaderSelectionPopup");
+            pdf.ClearSelection();
+            await ReaderTests.Render();
+            var top = pdf.GetRangeBounds(labelOffsets[column], labelOffsets[column] + 4).Single();
+            var bottom = pdf.GetRangeBounds(airOffsets[column], airOffsets[column] + 3).Single();
+            var first = pdf.TranslatePoint(new Point(top.Left + 0.1, top.Center.Y), scope.Window)!.Value;
+            var last = pdf.TranslatePoint(new Point(bottom.Right - 0.1, bottom.Center.Y), scope.Window)!.Value;
+            scope.Window.MouseDown(reverse ? last : first, MouseButton.Left);
+            scope.Window.MouseMove(reverse ? first : last);
+            scope.Window.MouseUp(reverse ? first : last, MouseButton.Left);
+            await ReaderTests.Render();
+            Capture(scope.Window, $"pdf-diagram-label-{column}-{reverse}");
+            Assert.True(scope.Field<string?>("_readerPendingSelection") is not null,
+                $"Missing selection in column {column}, reverse={reverse}; first={first}, last={last}, source={text}");
+            Assert.Equal(column == 1 ? "Cold air" : "Warm air",
+                PdfTextSelectionLayout.NormalizeCopy(scope.Field<string>("_readerPendingSelection")));
+            if (column != 2 || !reverse)
+            {
+                await scope.Call<Task>("PerformReaderSelectionCopyAsync");
+                Assert.Equal(column == 1 ? "Cold air" : "Warm air", await scope.Window.Clipboard!.TryGetTextAsync());
+            }
+        }
+        Capture(scope.Window, "pdf-diagram-label-selection");
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "One diagram label", null, null);
+        var annotation = Assert.Single(scope.Window.ReaderAnnotations);
+        var ranges = PdfTextRanges.Read(annotation.Fragment, annotation.StartOffset, annotation.EndOffset);
+        Assert.Equal(7, ranges.Sum(range => range.End - range.Start));
+        Assert.Equal("Warm air", PdfTextSelectionLayout.NormalizeCopy(annotation.SelectedText));
+    });
+
+    [Fact]
+    public Task TableDragCopiesOnlyTheSelectedColumnAndSavesItsExactRanges() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, path: PdfFixture.WriteTable(scope.Paths.ReaderCache));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var text = pdf.PageContent!.Text;
+        var start = text.IndexOf("Positive ramp", StringComparison.Ordinal);
+        var end = text.IndexOf("Recalibrate each cycle", StringComparison.Ordinal) + "Recalibrate each cycle".Length;
+        const string expected = "Positive ramp Two’s complement = 2³⁰\nNegative ramp Recalibrate each cycle";
+        foreach (var reverse in new[] { false, true })
+        {
+            scope.Call("HideReaderSelectionPopup");
+            pdf.ClearSelection();
+            await ReaderTests.Render();
+            var top = pdf.GetRangeBounds(start, start + 1).Single();
+            var bottom = pdf.GetRangeBounds(end - 1, end).Single();
+            var first = pdf.TranslatePoint(new Point(top.Left + 0.1, top.Center.Y), scope.Window)!.Value;
+            var last = pdf.TranslatePoint(new Point(bottom.Right - 0.1, bottom.Center.Y), scope.Window)!.Value;
+            scope.Window.MouseDown(reverse ? last : first, MouseButton.Left);
+            scope.Window.MouseMove(reverse ? first : last);
+            scope.Window.MouseUp(reverse ? first : last, MouseButton.Left);
+            await ReaderTests.Render();
+            Assert.Equal(expected, scope.Field<string>("_readerPendingSelection"));
+            if (!reverse)
+            {
+                Capture(scope.Window, "pdf-table-column-selection");
+                await scope.Call<Task>("PerformReaderSelectionCopyAsync");
+                Assert.Equal(expected, await scope.Window.Clipboard!.TryGetTextAsync());
+            }
+        }
+        await scope.Call<Task>("SaveReaderAnnotationAsync", "Table description", null, null);
+        var annotation = Assert.Single(scope.Window.ReaderAnnotations);
+        Assert.Equal(expected, annotation.SelectedText);
+        var ranges = PdfTextRanges.Read(annotation.Fragment, annotation.StartOffset, annotation.EndOffset);
+        var layout = new PdfTextSelectionLayout(pdf.PageContent);
+        Assert.Equal(expected, layout.GetCopyText(ranges));
+        Assert.DoesNotContain("RAMP", layout.GetText(ranges));
+    });
+
     [Theory]
     [InlineData(PdfReaderFitMode.Page, 0.9)]
     [InlineData(PdfReaderFitMode.Width, 0.25)]
@@ -108,6 +208,176 @@ public sealed class PdfReaderTests(SettingsUiSession session)
             if (heading >= 0)
                 Assert.InRange(pdf.GetRangeBounds(heading, heading + item.Title.Length).First().Top, 0, 100);
         }
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task TwoPageTurnsKeepTheRestoredVerticalPosition(bool keyboard) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, path: PdfFixture.WriteLong(scope.Paths.ReaderCache, 4));
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.TwoPage);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.RestoreViewStateAsync("pdf-view:0.8;0;0;2;1;0;0;0");
+        var before = pdf.PageBounds;
+        foreach (var direction in new[] { 1, -1 })
+        {
+            if (keyboard)
+                await scope.Call<Task>("TurnReaderPageAsync", direction, false);
+            else
+                await scope.Call<Task>("MoveReaderPdfPositionAsync", direction);
+            await ReaderTests.Render();
+            Assert.Equal(direction == 1 ? 3 : 1, pdf.PageNumber);
+            Assert.Equal(before, pdf.PageBounds);
+        }
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task TwoPageTurnsPublishOnlyTheDestinationLayout(bool keyboard) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.TwoPage);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        var reportedBounds = new List<Rect>();
+        var targetPage = 3;
+        pdf.WebMessageReceived += (_, e) =>
+        {
+            using var message = System.Text.Json.JsonDocument.Parse(e.Body!);
+            var root = message.RootElement;
+            if (root.GetProperty("type").GetString() == "pdfPage"
+                && root.GetProperty("page").GetInt32() == targetPage)
+                reportedBounds.Add(pdf.PageBounds);
+        };
+        foreach (var direction in new[] { 1, -1 })
+        {
+            targetPage = direction == 1 ? 3 : 1;
+            reportedBounds.Clear();
+            if (keyboard)
+                await scope.Call<Task>("TurnReaderPageAsync", direction, false);
+            else
+                await scope.Call<Task>("MoveReaderPdfPositionAsync", direction);
+            Assert.Equal(targetPage, pdf.PageNumber);
+            Assert.NotEmpty(reportedBounds);
+            Assert.All(reportedBounds, bounds => Assert.Equal(pdf.PageBounds, bounds));
+        }
+    });
+
+    [Fact]
+    public Task TwoPageOutlineIsAtItsFinalPositionBeforeTheAnimationRevealsIt() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.TwoPage);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetZoomAsync(3);
+        await scope.Call<Task>("NavigatePdfPageAsync", 3, CancellationToken.None, true);
+        var item = scope.Field<IReadOnlyList<EpubReaderNavigationItem>>("_readerTocItems")[2];
+        var target = NativePdfReaderHost.ReadTargetTop(new Uri(item.Target));
+        var navigation = scope.Call<Task<bool>>("NavigateToReaderItemAsync", item,
+            CancellationToken.None, ReaderNavigationIntent.Toc, null);
+        var observedIncomingFrame = false;
+        var incomingTops = new List<double>();
+        for (var attempt = 0; attempt < 50 && !navigation.IsCompleted; attempt++)
+        {
+            await ReaderTests.Render();
+            if (pdf.PageNumber == 2 && pdf.RenderingTask.IsCompleted
+                && scope.Get<Image>("ReaderNativeTransitionSnapshot").IsVisible)
+            {
+                observedIncomingFrame = true;
+                incomingTops.Add(pdf.NavigationTop);
+            }
+        }
+        Assert.True(await navigation.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(observedIncomingFrame);
+        Assert.All(incomingTops, top => Assert.InRange(top, target - 0.01, target + 0.01));
+        Assert.Contains(2, pdf.VisiblePageNumbers);
+        Assert.InRange(pdf.GetPageBounds(2).Left, 15, 17);
+        AssertCurrent(scope, item.Title);
+        Assert.InRange(pdf.NavigationTop, target - 0.01, target + 0.01);
+        var cover = scope.Field<IReadOnlyList<EpubReaderNavigationItem>>("_readerTocItems")[0];
+        Assert.True(await scope.Call<Task<bool>>("NavigateToReaderItemAsync", cover,
+            CancellationToken.None, ReaderNavigationIntent.Toc, null));
+        Assert.Contains(1, pdf.VisiblePageNumbers);
+        Assert.InRange(pdf.GetPageBounds(1).Left, 15, 17);
+    });
+
+    [Fact]
+    public Task TwoPageTurnSnapshotKeepsTheOutgoingPageInPlace() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.TwoPage);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetFitModeAsync(PdfReaderFitMode.Page);
+        await ReaderTests.Render();
+        var area = scope.Get<Grid>("ReaderReadingArea");
+        using var before = CapturePixels(area);
+        var surface = scope.Call<ReaderTransitionSurface>("BuildReaderNativeTransitionSurface", pdf);
+        var release = new TaskCompletionSource<bool>();
+        var transition = ReaderTransitionPlayer.RunAsync(surface, 0, 1, () => release.Task,
+            CancellationToken.None, holdOutgoingPage: true);
+        try
+        {
+            await ReaderTests.Render();
+            using var held = CapturePixels(area);
+            Assert.Equal(before.Bytes, held.Bytes);
+        }
+        finally
+        {
+            release.SetResult(true);
+            await transition;
+        }
+    });
+
+    private static SkiaSharp.SKBitmap CapturePixels(Control control)
+    {
+        using var image = new RenderTargetBitmap(new PixelSize((int)Math.Ceiling(control.Bounds.Width),
+            (int)Math.Ceiling(control.Bounds.Height)));
+        image.Render(control);
+        using var stream = new MemoryStream();
+        image.Save(stream, PngBitmapEncoderOptions.Default);
+        return SkiaSharp.SKBitmap.Decode(stream.ToArray());
+    }
+
+    [Fact]
+    public Task TwoPageTurnsFollowFirstHeadingOnFullyVisibleLeftPage() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope, path: PdfFixture.Write(scope.Paths.ReaderCache, offsetScannedOutline: true));
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.TwoPage);
+        await pdf.SetFitModeAsync(PdfReaderFitMode.Page);
+        var toc = scope.Field<IReadOnlyList<EpubReaderNavigationItem>>("_readerTocItems");
+        Assert.True(NativePdfReaderHost.ReadTargetTop(new Uri(toc[3].Target)) > 0.02);
+        await scope.Call<Task>("MoveReaderPdfPositionAsync", 1);
+        Assert.Equal(new[] { 3, 4 }, pdf.VisiblePageNumbers);
+        AssertCurrent(scope, "Scanned page");
+        await scope.Call<Task>("MoveReaderPdfPositionAsync", -1);
+        AssertCurrent(scope, "Cover");
+    });
+
+    [Fact]
+    public Task TwoPageFitKeepsClickedOutlineAtClampedDestinationAndFollowsLaterMovement() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        using var card = await Open(scope);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await scope.Call<Task>("SetReaderPdfDisplayModeAsync", PdfReaderDisplayMode.TwoPage);
+        await pdf.SetFitModeAsync(PdfReaderFitMode.Page);
+        var toc = scope.Field<IReadOnlyList<EpubReaderNavigationItem>>("_readerTocItems");
+        var item = toc[2];
+        Assert.True(await scope.Call<Task<bool>>("NavigateToReaderItemAsync", item, CancellationToken.None, ReaderNavigationIntent.Toc, null));
+        Assert.True(pdf.NavigationTop + 0.02 < NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)));
+        await pdf.RefreshViewportAsync();
+        await ReaderTests.Render();
+        scope.Call("SyncReaderPdfTocSelection");
+        AssertCurrent(scope, item.Title);
+        await scope.Call<Task>("NavigatePdfPageAsync", 3, CancellationToken.None, true);
+        AssertCurrent(scope, "Scanned page");
     });
 
     [Fact]
@@ -304,9 +574,9 @@ public sealed class PdfReaderTests(SettingsUiSession session)
         });
     });
 
-    private static async Task<BookCardViewModel> Open(ReaderTestWindow scope, bool outline = true)
+    private static async Task<BookCardViewModel> Open(ReaderTestWindow scope, bool outline = true, string? path = null)
     {
-        var path = PdfFixture.Write(scope.Paths.ReaderCache, outline);
+        path ??= PdfFixture.Write(scope.Paths.ReaderCache, outline);
         var library = new SqliteBookLibraryService(scope.Paths, new BookMetadataService());
         await library.ImportAsync([path]);
         var book = Assert.Single(await library.SearchAsync());

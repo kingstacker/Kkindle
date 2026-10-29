@@ -452,9 +452,8 @@ public sealed partial class S3SyncService
                 cancellationToken);
             if (restoredEntityKeys.Count > 0)
             {
-                local.Tombstones = local.Tombstones
-                    .Where(tombstone => !restoredEntityKeys.Contains(VersionKey(tombstone.EntityType, tombstone.Key)))
-                    .ToList();
+                // Retain dominated tombstones as acknowledgements. Dropping
+                // them makes another device's old deletion look unseen later.
                 local.LocalDeletionTimes = local.LocalDeletionTimes
                     .Where(entry => !restoredEntityKeys.Contains(entry.Key))
                     .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
@@ -463,10 +462,6 @@ public sealed partial class S3SyncService
                     .Where(tombstone => !restoredEntityKeys.Contains(VersionKey(tombstone.EntityType, tombstone.Key)))
                     .ToList();
                 state.Tombstones = local.Tombstones;
-                foreach (var remote in remoteSnapshots)
-                    remote.Tombstones = (remote.Tombstones ?? [])
-                        .Where(tombstone => !restoredEntityKeys.Contains(VersionKey(tombstone.EntityType, tombstone.Key)))
-                        .ToList();
             }
             LiftRemoteDeletionVersionsOverUnchangedLocalRows(
                 local,
@@ -612,7 +607,9 @@ public sealed partial class S3SyncService
                 databaseResult.Changed || settingsChanged,
                 warning.Length == 0 ? null : warning)
             {
-                IsPartial = uploadWarning is not null || databaseResult.IsPartial
+                IsPartial = uploadWarning is not null
+                    || cleanupWarning is not null
+                    || databaseResult.IsPartial
             };
         }
         finally
@@ -708,10 +705,14 @@ public sealed partial class S3SyncService
         var tombstones = local.Tombstones.ToDictionary(
             tombstone => VersionKey(tombstone.EntityType, tombstone.Key),
             StringComparer.OrdinalIgnoreCase);
+        var previouslyObservedDeletions = BuildTombstoneIndex(previousLocal.Tombstones ?? []);
         foreach (var remoteTombstone in remoteSnapshots.SelectMany(snapshot => snapshot.Tombstones ?? []))
         {
             var key = VersionKey(remoteTombstone.EntityType, remoteTombstone.Key);
             if (!unchangedKeys.Contains(key)) continue;
+            if (previouslyObservedDeletions.TryGetValue(key, out var observedDeletion)
+                && observedDeletion >= remoteTombstone.DeletedAt)
+                continue;
             var observedVersion = remoteVersions.GetValueOrDefault(key, DateTimeOffset.MinValue);
             var deletionVersion = Max(remoteTombstone.DeletedAt, observedVersion).AddTicks(1);
             if (tombstones.TryGetValue(key, out var localTombstone))
@@ -761,6 +762,7 @@ public sealed partial class S3SyncService
             .ToDictionary(group => group.Key, group => group.Max(item => item.DeletedAt), StringComparer.OrdinalIgnoreCase);
         var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var updatedBookVersions = new Dictionary<Guid, DateTimeOffset>();
+        var updatedFileVersions = new Dictionary<Guid, DateTimeOffset>();
 
         var localBooksById = local.Books.ToDictionary(item => item.Id);
         var localFilesByBook = local.Files.ToLookup(item => item.BookId);
@@ -786,6 +788,8 @@ public sealed partial class S3SyncService
             restoreVersion = GetVersionAfter(book.UpdatedAt, restoreVersion);
             book.UpdatedAt = restoreVersion;
             updatedBookVersions[book.Id] = restoreVersion;
+            foreach (var file in localFilesByBook[book.Id])
+                updatedFileVersions[file.Id] = GetVersionAfter(file.ModifiedAt, restoreVersion);
         }
 
         foreach (var file in local.Files)
@@ -797,6 +801,8 @@ public sealed partial class S3SyncService
                 continue;
 
             resolved.Add(fileKey);
+            updatedFileVersions[file.Id] = GetVersionAfter(
+                updatedFileVersions.GetValueOrDefault(file.Id, file.ModifiedAt), deletedAt);
             if (updatedBookVersions.ContainsKey(file.BookId)) continue;
             var book = localBooksById.GetValueOrDefault(file.BookId);
             if (book is null) continue;
@@ -807,7 +813,7 @@ public sealed partial class S3SyncService
 
         if (resolved.Count == 0) return resolved;
         foreach (var file in local.Files)
-            if (updatedBookVersions.TryGetValue(file.BookId, out var version))
+            if (updatedFileVersions.TryGetValue(file.Id, out var version))
                 file.ModifiedAt = version;
 
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
@@ -815,12 +821,29 @@ public sealed partial class S3SyncService
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         foreach (var (bookId, updatedAt) in updatedBookVersions)
         {
+            using var read = CreateCommand(connection, transaction, "SELECT UpdatedAt FROM Books WHERE Id = $id;");
+            AddParameter(read, "$id", bookId.ToString());
+            if (await read.ExecuteScalarAsync(cancellationToken) is not string current
+                || ParseTimestamp(current) >= updatedAt)
+                continue;
             using var update = CreateCommand(connection, transaction, """
                 UPDATE Books SET UpdatedAt = $updatedAt
-                WHERE Id = $bookId AND julianday(UpdatedAt) < julianday($updatedAt);
+                WHERE Id = $bookId;
                 """);
             AddParameter(update, "$updatedAt", updatedAt.ToString("O"));
             AddParameter(update, "$bookId", bookId.ToString());
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+        foreach (var (fileId, updatedAt) in updatedFileVersions)
+        {
+            using var read = CreateCommand(connection, transaction, "SELECT SyncUpdatedAt FROM BookFiles WHERE Id = $id;");
+            AddParameter(read, "$id", fileId.ToString());
+            if (await read.ExecuteScalarAsync(cancellationToken) is not string current
+                || ParseTimestamp(current) >= updatedAt)
+                continue;
+            using var update = CreateCommand(connection, transaction, "UPDATE BookFiles SET SyncUpdatedAt = $updatedAt WHERE Id = $id;");
+            AddParameter(update, "$id", fileId.ToString());
+            AddParameter(update, "$updatedAt", updatedAt.ToString("O"));
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
 

@@ -108,8 +108,6 @@ public partial class MainWindow
             ReaderPaperStrengthSlider.Value = appearance.PaperStrength * 100;
             ReaderTocFontSizeSlider.Value = _appSettings.ReaderTocFontSize;
             ReaderFibersEnabledCheck.IsChecked = appearance.FibersEnabled;
-            ReaderPdfAnnotationDisplayModePanel.IsVisible = _readerIsPdf;
-            ReaderPdfAnnotationNotesCheck.IsChecked = appearance.AnnotationDisplayMode == ReaderAnnotationDisplayMode.Pinned;
             ReaderTextLayoutPanel.IsVisible = !_readerIsPdf;
             ReaderLayoutResetButton.IsVisible = !_readerIsPdf;
             UpdateReaderAppearanceLabels();
@@ -170,18 +168,6 @@ public partial class MainWindow
     {
         if (_suppressReaderAppearanceChange) return;
         ChangeReaderAppearance(CurrentReaderAppearance with { PaperStrength = ReaderPaperStrengthSlider.Value / 100 });
-    }
-
-    private void ReaderPdfAnnotationNotesCheck_IsCheckedChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_suppressReaderAppearanceChange) return;
-        var mode = ReaderPdfAnnotationNotesCheck.IsChecked == true
-            ? ReaderAnnotationDisplayMode.Pinned
-            : ReaderAnnotationDisplayMode.Click;
-        if (CurrentReaderAppearance.AnnotationDisplayMode == mode) return;
-        HideReaderAnnotationHoverPopup();
-        ChangeReaderAppearance(CurrentReaderAppearance with { AnnotationDisplayMode = mode });
-        ShowCurrentReaderPdfAnnotation();
     }
 
     private void ChangeReaderAppearance(ReaderAppearanceSettings appearance)

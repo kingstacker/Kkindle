@@ -7,7 +7,7 @@ internal static class ReaderAnnotationCardLayout
 {
     // Prefer below the complete visible selection, then above. Limit long notes
     // to the available space and scroll them rather than covering the quote.
-    internal static Rect PlaceEpub(Rect quote, Size viewport, Func<double, double> measure)
+    internal static Rect Place(Rect quote, Size viewport, Func<double, double> measure)
     {
         const double gap = 8;
         var width = Math.Min(220, Math.Max(1, viewport.Width - 2 * gap));

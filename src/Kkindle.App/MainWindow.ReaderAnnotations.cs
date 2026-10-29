@@ -63,7 +63,16 @@ public partial class MainWindow
                 && (!_readerIsPdf || item.Fragment == pdfSelectionFragment))
             : null;
         var existing = _selectedReaderAnnotation ?? exact;
-        var annotation = existing ?? new ReaderAnnotation
+        // Never mutate the live list until the database write succeeds.
+        var annotation = existing is not null ? new ReaderAnnotation
+        {
+            Id = existing.Id, BookId = existing.BookId, BookFileId = existing.BookFileId,
+            ChapterPath = existing.ChapterPath, Fragment = existing.Fragment,
+            StartOffset = existing.StartOffset, EndOffset = existing.EndOffset,
+            SelectedText = existing.SelectedText, Prefix = existing.Prefix, Suffix = existing.Suffix,
+            Color = existing.Color, UnderlineStyle = existing.UnderlineStyle, Note = existing.Note,
+            CreatedAt = existing.CreatedAt, UpdatedAt = existing.UpdatedAt
+        } : new ReaderAnnotation
         {
             BookId = _readerBookCard.Book.Id,
             BookFileId = _readerBookFile.Id,
@@ -434,7 +443,8 @@ public partial class MainWindow
         {
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard
                 ?? throw new InvalidOperationException(T("当前窗口无法访问剪贴板。"));
-            await clipboard.SetTextAsync(_readerIsPdf ? PdfTextSelectionLayout.NormalizeCopy(_readerPendingSelection) : _readerPendingSelection);
+            await clipboard.SetTextAsync(CurrentReaderHost is NativePdfReaderHost pdf
+                ? pdf.GetSelectedTextForCopy() : _readerPendingSelection);
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
         {

@@ -53,8 +53,9 @@ public sealed class ReaderTests(SettingsUiSession session)
             Capture(scope.Window, "toc-expanded");
             AssertViewportFilled(list);
 
-            var scrollViewer = list.GetVisualDescendants().OfType<ScrollViewer>().First();
-            scrollViewer.Offset = new Vector(0, scrollViewer.Extent.Height);
+            // The virtualized extent changes as wrapped rows are measured.
+            // Request the final row rather than using an earlier size estimate.
+            list.ScrollIntoView(rows[^1]);
             await Render();
             Assert.NotNull(list.ContainerFromItem(rows[^1]));
             scope.Call("ReaderTocToggle_Click", new Button { DataContext = rows[4] }, new RoutedEventArgs());
@@ -305,6 +306,53 @@ public sealed class ReaderTests(SettingsUiSession session)
         scope.Set("_readerActiveHost", null);
     });
 
+    [Fact]
+    public Task ReleasingReaderHostsHandlesSharedActiveAndPreloadInstancesOnlyOnce() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var host = new ControlledReaderHost();
+        scope.Set("_readerActiveHost", host);
+        scope.Set("_readerPreloadHost", host);
+        var activeSlot = scope.Get<ContentControl>("ReaderActiveHostSlot");
+        var preloadSlot = scope.Get<ContentControl>("ReaderPreloadHostSlot");
+        activeSlot.Content = host.View;
+        preloadSlot.Content = host.View;
+
+        scope.Call("ReleaseReaderHosts");
+
+        Assert.Null(scope.Field<object?>("_readerActiveHost"));
+        Assert.Null(scope.Field<object?>("_readerPreloadHost"));
+        Assert.Null(activeSlot.Content);
+        Assert.Null(preloadSlot.Content);
+        Assert.Equal(1, host.StopCount);
+        Assert.Equal(1, host.DisposeCount);
+    });
+
+    [Fact]
+    public Task ReleasingReaderHostsStopsAndDisposesDistinctInstances() => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var active = new ControlledReaderHost();
+        var preload = new ControlledReaderHost();
+        scope.Set("_readerActiveHost", active);
+        scope.Set("_readerPreloadHost", preload);
+        var activeSlot = scope.Get<ContentControl>("ReaderActiveHostSlot");
+        var preloadSlot = scope.Get<ContentControl>("ReaderPreloadHostSlot");
+        activeSlot.Content = active.View;
+        preloadSlot.Content = preload.View;
+
+        scope.Call("ReleaseReaderHosts");
+
+        Assert.Null(scope.Field<object?>("_readerActiveHost"));
+        Assert.Null(scope.Field<object?>("_readerPreloadHost"));
+        Assert.Null(activeSlot.Content);
+        Assert.Null(preloadSlot.Content);
+        Assert.Equal(1, active.StopCount);
+        Assert.Equal(1, active.DisposeCount);
+        Assert.Equal(1, preload.StopCount);
+        Assert.Equal(1, preload.DisposeCount);
+    });
+
     private static T NativeField<T>(NativeReaderHost host, string name) =>
         (T)typeof(NativeReaderHost).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(host)!;
 
@@ -362,7 +410,8 @@ internal sealed class ControlledReaderHost(Uri? source = null) : IReaderHost
     public void CompleteNavigation() => NavigationCompleted?.Invoke(this, new(Source, true));
     public Task<string?> InvokeScriptAsync(string script) => Task.FromResult<string?>(null);
     public void Stop() => StopCount++;
-    public void Dispose() { }
+    public int DisposeCount { get; private set; }
+    public void Dispose() => DisposeCount++;
 }
 
 internal sealed class ReaderTestWindow(MainWindow window, AppPaths paths, string directory) : IAsyncDisposable

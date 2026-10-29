@@ -6,6 +6,77 @@ namespace Kkindle.TestFixtures;
 /// <summary>A deterministic PDF with text, a scan, nested outlines and a rotated crop.</summary>
 internal static class PdfFixture
 {
+    public static string WriteTable(string directory, bool filledRules = true, bool form = false)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"PDF table-{filledRules}-{form}.pdf");
+        var content = new StringBuilder("0 0 0 rg 0 0 0 RG 0.3 w ");
+        foreach (var y in new[] { 740, 700, 650, 600 })
+            content.Append(filledRules ? $"40 {y} 530 0.3 re f " : $"40 {y} m 570 {y} l S ");
+        foreach (var x in new[] { 40, 150, 280, 570 })
+            content.Append(filledRules ? $"{x} 600 0.3 140 re f " : $"{x} 600 m {x} 740 l S ");
+        content.Append("BT /F1 10 Tf 1 0 0 1 45 720 Tm (FIELD) Tj 1 0 0 1 155 720 Tm (PROGRAMMING) Tj " +
+            "1 0 0 1 285 720 Tm (DESCRIPTION) Tj " +
+            "1 0 0 1 45 680 Tm (RAMP0_INC) Tj 1 0 0 1 155 680 Tm (1677722) Tj " +
+            "1 0 0 1 285 680 Tm (Positive ramp) Tj 1 0 0 1 285 666 Tm (Two's complement = 2) Tj " +
+            "/F1 6 Tf 4 Ts (30) Tj 0 Ts /F1 10 Tf " +
+            "1 0 0 1 45 630 Tm (RAMP1_INC) Tj 1 0 0 1 155 630 Tm (1072064102) Tj " +
+            "1 0 0 1 285 630 Tm (Negative ramp) Tj 1 0 0 1 285 616 Tm (Recalibrate each cycle) Tj ET");
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R >> /XObject << /Table 6 0 R >> >> /Contents 5 0 R >>",
+            Stream(form ? "q 1 0 0 1 5 10 cm /Table Do Q" : content.ToString())
+        };
+        objects.Add($"<< /Type /XObject /Subtype /Form /BBox [0 0 600 800] /Matrix [0.9 0 0 0.9 20 30] /Resources << /Font << /F1 3 0 R >> >> /Length {Encoding.ASCII.GetByteCount(content.ToString())} >>\nstream\n{content}\nendstream");
+        using var file = File.Create(path);
+        void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));
+        WriteAscii("%PDF-1.7\n");
+        var offsets = new List<long> { 0 };
+        for (var index = 0; index < objects.Count; index++)
+        {
+            offsets.Add(file.Position);
+            WriteAscii($"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
+        }
+        var xref = file.Position;
+        WriteAscii($"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets.Skip(1)) WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
+        WriteAscii($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return path;
+    }
+
+    public static string WriteDiagramLabels(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "PDF diagram labels.pdf");
+        var objects = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 306 505] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+            // Emit complete rows, reproducing PDFium's interleaved label order.
+            Stream("BT /F1 10 Tf 166 423 Td (Warm) Tj 40 0 Td (Cold) Tj 34 0 Td (Warm) Tj " +
+                "-67 -12 Td (air) Tj 38 0 Td (air) Tj 37 0 Td (air) Tj ET")
+        };
+        using var file = File.Create(path);
+        void WriteAscii(string text) => file.Write(Encoding.ASCII.GetBytes(text));
+        WriteAscii("%PDF-1.7\n");
+        var offsets = new List<long> { 0 };
+        for (var index = 0; index < objects.Length; index++)
+        {
+            offsets.Add(file.Position);
+            WriteAscii($"{index + 1} 0 obj\n{objects[index]}\nendobj\n");
+        }
+        var xref = file.Position;
+        WriteAscii($"xref\n0 {objects.Length + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets.Skip(1)) WriteAscii(offset.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n \n");
+        WriteAscii($"trailer\n<< /Size {objects.Length + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return path;
+    }
+
     public static string WriteFootnotes(string directory)
     {
         Directory.CreateDirectory(directory);
@@ -39,7 +110,7 @@ internal static class PdfFixture
         return path;
     }
 
-    public static string Write(string directory, bool outline = true)
+    public static string Write(string directory, bool outline = true, bool offsetScannedOutline = false)
     {
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "PDF 阅读测试.pdf");
@@ -61,7 +132,7 @@ internal static class PdfFixture
             "<< /Title (Cover) /Parent 12 0 R /Dest [4 0 R /Fit] /Next 14 0 R >>",
             "<< /Title (Chapter Two) /Parent 12 0 R /Dest [6 0 R /XYZ null 600 null] /Prev 13 0 R /Next 16 0 R /First 15 0 R /Last 15 0 R /Count 1 >>",
             "<< /Title (Nested section) /Parent 14 0 R /A << /S /GoTo /D [6 0 R /XYZ null 240 null] >> >>",
-            "<< /Title (Scanned page) /Parent 12 0 R /Dest [8 0 R /Fit] /Prev 14 0 R >>",
+            $"<< /Title (Scanned page) /Parent 12 0 R /Dest [8 0 R {(offsetScannedOutline ? "/XYZ null 500 null" : "/Fit")}] /Prev 14 0 R >>",
             "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 26 >>\nstream\nEEDDCC99BBAA557788CC9966>\nendstream",
             $"<< /Title <{title}> /Author (Kkindle Tests) >>"
         };

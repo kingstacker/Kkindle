@@ -65,7 +65,7 @@ public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposabl
     public Task RestoringAFragmentKeepsItsSectionVisibleAfterResizing(int flow, bool spread, bool vertical) => Run(async () =>
     {
         var settings = new ReaderLayoutSettings(FlowMode: flow, TwoPageMode: spread, VerticalWriting: vertical);
-        using var host = await LoadChapter(settings);
+        using var host = await LoadChapter(settings, inlineAnchors: true);
         var layout = Layout(host);
         var fragment = layout.FragmentPages.First(pair => pair.Value > 3 && (!spread || pair.Value % 2 == 1)).Key;
         var offset = Content(host).FragmentTextOffsets[fragment];
@@ -441,20 +441,22 @@ public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposabl
         return path;
     }
 
-    private async Task<string> WriteTextChapter()
+    private async Task<string> WriteTextChapter(bool inlineAnchors = false)
     {
         Directory.CreateDirectory(_directory);
         var path = Path.Combine(_directory, "chapter.xhtml");
         var body = string.Concat(Enumerable.Range(0, 36).Select(index =>
-            $"<h2 id='section-{index}'>第{index}节</h2><p>" +
-            string.Concat(Enumerable.Repeat("春风吹过山林，读书应当记住眼前这一行文字。", 24)) + "</p>"));
+            $"<h2 id='section-{index}'>第{index}节</h2>" +
+            (inlineAnchors
+                ? string.Concat(Enumerable.Range(0, 24).Select(line => $"<p id='inline-{index}-{line}'>春风吹过山林，读书应当记住眼前这一行文字。</p>"))
+                : "<p>" + string.Concat(Enumerable.Repeat("春风吹过山林，读书应当记住眼前这一行文字。", 24)) + "</p>")));
         await File.WriteAllTextAsync(path, "<html><body>" + body + "</body></html>");
         return path;
     }
 
-    private async Task<NativeReaderHost> LoadChapter(ReaderLayoutSettings settings)
+    private async Task<NativeReaderHost> LoadChapter(ReaderLayoutSettings settings, bool inlineAnchors = false)
     {
-        var host = await LoadNativeChapter(await WriteTextChapter(), settings);
+        var host = await LoadNativeChapter(await WriteTextChapter(inlineAnchors), settings);
         Assert.True(host.PageCount > 8);
         return host;
     }

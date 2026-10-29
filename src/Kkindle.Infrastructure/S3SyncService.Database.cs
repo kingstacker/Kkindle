@@ -22,7 +22,7 @@ public sealed partial class S3SyncService
         using var pragma = connection.CreateCommand();
         pragma.CommandText = """
             PRAGMA foreign_keys = ON;
-            PRAGMA synchronous = NORMAL;
+            PRAGMA synchronous = FULL;
             PRAGMA cache_size = -65536;
             PRAGMA temp_store = MEMORY;
             PRAGMA busy_timeout = 5000;
@@ -54,6 +54,9 @@ public sealed partial class S3SyncService
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
+        await BookFileSyncVersion.EnsureAsync(connection, cancellationToken);
+        await ReaderRecoveryEpoch.EnsureAsync(connection, null, cancellationToken);
+        await EnsureLocalCleanupSchemaAsync(connection, cancellationToken);
         await ReaderReadingHistory.EnsureAsync(connection, cancellationToken);
         await ReadingMaterialBookSchema.EnsureAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -276,8 +279,6 @@ public sealed partial class S3SyncService
             Tombstones = tombstones.ToList()
         };
 
-        var bookUpdatedAt = new Dictionary<Guid, DateTimeOffset>();
-
         using (var command = CreateCommand(connection, transaction, 
             """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
@@ -295,7 +296,6 @@ public sealed partial class S3SyncService
                 var createdAt = ParseTimestamp(reader.GetString(17));
                 var updatedAt = ParseTimestamp(reader.GetString(18));
                 var coverPath = NullableString(reader, 19);
-                bookUpdatedAt[id] = updatedAt;
                 snapshot.Books.Add(new S3SyncBook
                 {
                     Id = id,
@@ -326,7 +326,7 @@ public sealed partial class S3SyncService
 
         using (var command = CreateCommand(connection, transaction, 
             """
-            SELECT Id, BookId, Format, RelativePath, Size, Sha256
+            SELECT Id, BookId, Format, RelativePath, Size, Sha256, SyncUpdatedAt
             FROM BookFiles;
             """
             ))
@@ -346,7 +346,7 @@ public sealed partial class S3SyncService
                     FileName = Path.GetFileName(relativePath.Replace('\\', '/')),
                     Size = reader.GetInt64(4),
                     Sha256 = reader.GetString(5),
-                    ModifiedAt = bookUpdatedAt.GetValueOrDefault(bookId, snapshot.CreatedAt)
+                    ModifiedAt = ParseTimestamp(reader.GetString(6))
                 });
             }
         }
@@ -665,12 +665,10 @@ public sealed partial class S3SyncService
             }
         }
         snapshot.Books = books;
-        var bookUpdatedAt = books.ToDictionary(book => book.Id, book => book.UpdatedAt);
-
-        // Files have no UpdatedAt and can be renamed; a full scan is both
-        // cheaper and safer than trying to infer changes.
+        // Paths are device-local and can be renamed; scan files independently
+        // of the book metadata watermark.
         using (var command = CreateCommand(connection, transaction, """
-            SELECT Id, BookId, Format, RelativePath, Size, Sha256
+            SELECT Id, BookId, Format, RelativePath, Size, Sha256, SyncUpdatedAt
             FROM BookFiles;
             """))
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
@@ -690,7 +688,7 @@ public sealed partial class S3SyncService
                     FileName = Path.GetFileName(relativePath.Replace('\\', '/')),
                     Size = reader.GetInt64(4),
                     Sha256 = reader.GetString(5),
-                    ModifiedAt = bookUpdatedAt.GetValueOrDefault(bookId, snapshot.CreatedAt)
+                    ModifiedAt = ParseTimestamp(reader.GetString(6))
                 });
             }
         }
@@ -1326,7 +1324,7 @@ public sealed partial class S3SyncService
         {
             if (duplicateBooksMerged > 0)
                 warnings.Add(UiText.Get("已自动合并 {0} 本重复书籍。", duplicateBooksMerged));
-            DeleteScheduledPaths(pathsToDelete, warnings);
+            var cleanupPending = await CleanupPendingLocalFilesAsync(warnings, cancellationToken);
             return new DatabaseMergeResult(
                 0,
                 0,
@@ -1334,6 +1332,7 @@ public sealed partial class S3SyncService
                 duplicateBooksMerged > 0 || readingHistoryMerged,
                 warnings.Count == 0 ? null : string.Join(" ", warnings.Distinct()))
             {
+                IsPartial = cleanupPending,
                 RemoteBookIds = new HashSet<Guid>(),
                 RemoteOnlyFileHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             };
@@ -1847,8 +1846,8 @@ public sealed partial class S3SyncService
                 if (currentFileIds.Contains(prepared.LocalFileId)) continue;
                 var command = commandCache.Get(
                     """
-                    INSERT OR IGNORE INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256)
-                    VALUES ($id, $bookId, $format, $relativePath, $size, $sha256);
+                    INSERT OR IGNORE INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256, SyncUpdatedAt)
+                    VALUES ($id, $bookId, $format, $relativePath, $size, $sha256, $syncUpdatedAt);
                     """
                     );
                 AddParameter(command, "$id", prepared.LocalFileId.ToString());
@@ -1857,12 +1856,23 @@ public sealed partial class S3SyncService
                 AddParameter(command, "$relativePath", prepared.RelativePath);
                 AddParameter(command, "$size", prepared.Source.Size);
                 AddParameter(command, "$sha256", prepared.Source.Sha256.ToLowerInvariant());
+                AddParameter(command, "$syncUpdatedAt", prepared.Source.ModifiedAt.ToString("O"));
                 changed |= await command.ExecuteNonQueryAsync(cancellationToken) > 0;
                 locallyKnownFiles[prepared.LocalFileId] = prepared.LocalBookId;
             }
 
             foreach (var prepared in preparedFilesByLocalId.Values)
             {
+                var versionCommand = commandCache.Get("""
+                    UPDATE BookFiles SET SyncUpdatedAt = $syncUpdatedAt
+                    WHERE Id = $id AND BookId = $bookId
+                        AND julianday(SyncUpdatedAt) < julianday($syncUpdatedAt);
+                    """);
+                AddParameter(versionCommand, "$syncUpdatedAt", prepared.Source.ModifiedAt.ToString("O"));
+                AddParameter(versionCommand, "$id", prepared.LocalFileId.ToString());
+                AddParameter(versionCommand, "$bookId", prepared.LocalBookId.ToString());
+                changed |= await versionCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
+
                 if (!currentFileIds.Contains(prepared.LocalFileId)
                     || string.Equals(
                         currentLocal.LocalFilePaths.GetValueOrDefault(prepared.LocalFileId),
@@ -2237,6 +2247,7 @@ public sealed partial class S3SyncService
                 transaction,
                 pathsToDelete,
                 cancellationToken);
+            await EnqueueLocalCleanupAsync(connection, transaction, pathsToDelete, cancellationToken);
             await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             synchronizedFileMoves.Clear();
@@ -2250,7 +2261,7 @@ public sealed partial class S3SyncService
             throw;
         }
 
-        DeleteScheduledPaths(pathsToDelete, warnings);
+        isPartial |= await CleanupPendingLocalFilesAsync(warnings, cancellationToken);
 
         return new DatabaseMergeResult(
             booksAdded,
@@ -2806,6 +2817,7 @@ public sealed partial class S3SyncService
         ICollection<string> pathsToDelete,
         CancellationToken cancellationToken)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await using var connection = await OpenDatabaseConnectionAsync(cancellationToken);
         await EnsureDeletionTrackingSchemaAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -2817,6 +2829,8 @@ public sealed partial class S3SyncService
             pathsToDelete,
             commandCache,
             cancellationToken);
+        await RemoveReferencedScheduledPathsAsync(connection, transaction, pathsToDelete, cancellationToken);
+        await EnqueueLocalCleanupAsync(connection, transaction, pathsToDelete, cancellationToken);
         await SuppressDeletionTrackingAsync(connection, transaction, false, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return merged;
@@ -3381,6 +3395,8 @@ public sealed partial class S3SyncService
                 WHERE lower(replace(RelativePath, '\', '/')) = lower(replace($path, '\', '/'))
                 UNION ALL
                 SELECT 1 FROM Books
+                WHERE lower(replace(CoverPath, '\', '/')) = lower(replace($path, '\', '/'))
+                UNION ALL SELECT 1 FROM ReadingMaterialBooks
                 WHERE lower(replace(CoverPath, '\', '/')) = lower(replace($path, '\', '/')));
             """);
         AddParameter(command, "$path", relativePath);
@@ -3419,24 +3435,6 @@ public sealed partial class S3SyncService
         paths.Clear();
         foreach (var path in unreferenced)
             paths.Add(path);
-    }
-
-    private void DeleteScheduledPaths(
-        IEnumerable<string> paths,
-        ICollection<string> warnings)
-    {
-        foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                if (File.Exists(path)) File.Delete(path);
-                TryDeleteEmptyParentDirectories(path);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                warnings.Add(UiText.Get("无法删除重复书籍留下的本地文件：{0}", UiText.Localize(exception.Message)));
-            }
-        }
     }
 
     private void TryDeleteEmptyParentDirectories(string filePath)

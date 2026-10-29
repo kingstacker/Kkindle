@@ -33,6 +33,8 @@ public partial class MainWindow
     private const int MaxReadingMaterials = 5_000;
     private const int DevicePageSize = 200;
     private readonly DispatcherTimer _stage3Timer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly DispatcherTimer _deviceChangeDebounceTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
+    private bool _deviceChangePending;
     private readonly DispatcherTimer _taskSpinnerTimer = new(DispatcherPriority.Render)
     {
         Interval = TimeSpan.FromMilliseconds(50)
@@ -52,6 +54,10 @@ public partial class MainWindow
     // list (its Count == 0 fast path would skip the rescan).
     private bool _deviceBooksDirty;
     private bool _deviceBooksLoaded;
+    private bool _deviceBooksShowingCache;
+    private bool _deviceBookScanFailed;
+    private readonly Dictionary<KindleBookCardViewModel, (string Stamp, PinyinSearchIndex Index)> _devicePinyinIndexes = [];
+    private bool _devicePinyinIndexBuilding;
     private IReadOnlyList<LibraryBookMatch> _libraryMatchRecords = [];
     private BookLibraryComparisonResult? _libraryPresenceComparison;
     private Task? _deviceWarmTask;
@@ -71,6 +77,7 @@ public partial class MainWindow
     private readonly Dictionary<(string DeviceKey, KindleResourceKind Kind), IReadOnlyList<KindleDeviceResource>> _deviceResourceCache = [];
     private readonly Dictionary<string, IReadOnlyList<KindleClipping>> _deviceClippingCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _backupBusy;
+    private bool _backupImportInProgress;
     private bool _s3SyncBusy;
     private bool _s3SyncExitInProgress;
     private bool _allowWindowCloseForS3Sync;
@@ -239,6 +246,7 @@ public partial class MainWindow
 
     private void ConfigureStage3Timer()
     {
+        _deviceChangeDebounceTimer.Tick += DeviceChangeDebounceTimer_Tick;
         _stage3Timer.Tick += async (_, _) =>
         {
             if (!_stage3Ready || _kindle is null || _deviceEjectInProgress) return;
@@ -546,13 +554,17 @@ public partial class MainWindow
         _s3SyncStoredSettings = await _s3SyncService.LoadSettingsAsync(cancellationToken);
         SetTaskStatus(T("正在初始化阅读数据…"));
         await _readerData.InitializeAsync(cancellationToken);
+        await _readerProgressRecovery.InitializeAsync(cancellationToken);
+        await _readerReadingTimeRecovery.InitializeAsync(cancellationToken);
         SetTaskStatus(T("正在初始化同步记录…"));
         await _s3SyncService.InitializeDeletionTrackingAsync(cancellationToken, _s3SyncStoredSettings.DeviceId);
         SetTaskStatus(T("正在初始化设备设置…"));
         await _deviceModelStore.InitializeAsync(cancellationToken);
         SetTaskStatus(T("正在读取应用设置…"));
         _appSettings = await _appSettingsStore.LoadAsync(cancellationToken);
-        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode));
+        ViewModel.SortMode = ParseLibrarySortMode(_appSettings.LibrarySortMode);
+        SetLibraryViewMode(ParseLibraryViewMode(_appSettings.LibraryViewMode), persist: false);
+        RestoreDeviceShelfState();
         ApplyMainAppearance();
         ApplyReaderAppearance();
         SyncReaderAppearanceControls();
@@ -575,6 +587,9 @@ public partial class MainWindow
         DevicePageDeviceText.Text = T("正在检查设备…");
         DevicePageStatusText.Text = T("正在读取设备连接状态。");
         _stage3Ready = true;
+        if (_deviceChangePending) _deviceChangeDebounceTimer.Start();
+        // Device discovery can proceed while an automatic backup is prepared.
+        var initialDeviceRefresh = RefreshDevicesAsync(scanBooks: false, cancellationToken);
         await RunAutoBackupIfNeededAsync(cancellationToken);
         if (_s3SyncStoredSettings.Settings.Enabled
             && _s3SyncStoredSettings.Settings.AutomaticSyncEnabled
@@ -583,7 +598,7 @@ public partial class MainWindow
         {
             _ = Dispatcher.UIThread.InvokeAsync(() => RunLifecycleS3SyncAsync());
         }
-        await RefreshDevicesAsync(scanBooks: false, cancellationToken);
+        await initialDeviceRefresh;
 
         // Startup layout can raise harmless change events. Equality checks in
         // the scheduler filter those without cancelling real user edits.
@@ -793,7 +808,8 @@ public partial class MainWindow
             UpdateDeviceResourceCapabilities();
             DevicePageDeviceText.Text = $"{_deviceDisplayName} · {device.ConnectionLabel}";
             DeviceNameButton.IsEnabled = true;
-            DevicePageStatusText.Text = changed ? T("设备已连接，正在准备设备信息…") : T("设备已连接。");
+            if (changed || (!_deviceBookScanFailed && _deviceBookScanTask is not { IsCompleted: false }))
+                DevicePageStatusText.Text = changed ? T("设备已连接，正在准备设备信息…") : T("设备已连接。");
             KindleStatusText.Text = _deviceDisplayName;
             KindleConnectionText.Text = T("已连接");
             KindleConnectionText.IsVisible = false;
@@ -805,7 +821,8 @@ public partial class MainWindow
             SetEjectButtonsEnabled(true);
             if (changed) ShowDeviceStatusToast(T("{0} 已连接", displayName));
             if (changed)
-                _deviceWarmTask = TrackDeviceOperationAsync(() => WarmDeviceCachesAsync(device, !scanBooks, cancellationToken));
+                _deviceWarmTask = TrackDeviceOperationAsync(() => WarmDeviceCachesAsync(
+                    device, !scanBooks && !DeviceResourcePage.IsVisible && !ReadingMaterialsPage.IsVisible, cancellationToken));
             if (scanBooks && (changed || !_deviceBooksLoaded || _deviceBooksDirty))
                 await RefreshDeviceBooksAsync(cancellationToken);
             if (changed && DeviceResourcePage.IsVisible) await RefreshDeviceResourcesAsync();
@@ -865,6 +882,7 @@ public partial class MainWindow
         _deviceBookScanTask = null;
         foreach (var book in DeviceBooks) book.Dispose();
         DeviceBooks.Clear();
+        _devicePinyinIndexes.Clear();
         _deviceCardsByPath.Clear();
         _libraryPresenceComparison = null;
         _filteredDeviceBooks = [];
@@ -873,6 +891,8 @@ public partial class MainWindow
         _devicePageCount = 1;
         UpdateDeviceBookPaginationUi();
         _deviceBooksLoaded = false;
+        _deviceBookScanFailed = false;
+        SetDeviceBooksShowingCache(false);
         _deviceWarmTask = null;
         _deviceResourceCache.Clear();
         _deviceClippingCache.Clear();
@@ -893,6 +913,7 @@ public partial class MainWindow
         KindleConnectionText.Text = detail ?? string.Empty;
         KindleConnectionText.IsVisible = !string.IsNullOrWhiteSpace(detail);
         DeviceStorageText.Text = T("无存储信息");
+        DeviceBookEmptyText.Text = T("无设备书籍");
         _deviceUsedRatio = 0;
         UpdateDeviceStorageBar();
         SetEjectButtonsEnabled(false);
@@ -964,6 +985,7 @@ public partial class MainWindow
         if (_kindle is null || CurrentDevice is not { } device) return;
 
         var scanGeneration = ++_deviceBookScanGeneration;
+        _deviceBookScanFailed = false;
 
         DevicePageStatusText.Text = T("正在扫描设备书籍…");
         DeviceBookEmptyText.Text = T("正在读取设备书库…");
@@ -971,6 +993,22 @@ public partial class MainWindow
             DeviceBookEmptyState.IsVisible = true;
         try
         {
+            if (DeviceBooks.Count == 0)
+            {
+                IReadOnlyList<KindleBook> cached = [];
+                try { cached = await _kindle.GetCachedBooksAsync(device, cancellationToken); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    Debug.WriteLine($"Device book cache could not be read: {exception}");
+                }
+                if (!IsCurrentDevice(device) || scanGeneration != _deviceBookScanGeneration) return;
+                if (cached.Count > 0)
+                {
+                    SetDeviceBooksShowingCache(true);
+                    ReplaceDeviceBookCards(cached, resetPage: true);
+                    DevicePageStatusText.Text = T("正在核对设备书库，暂时显示上次记录。");
+                }
+            }
             var progress = new Progress<KindleScanProgress>(update =>
             {
                 if (scanGeneration != _deviceBookScanGeneration || !IsCurrentDevice(device)) return;
@@ -983,6 +1021,7 @@ public partial class MainWindow
             // queued partial updates before applying the authoritative final
             // snapshot so a late callback cannot resurrect a dictionary entry.
             _deviceBookScanGeneration++;
+            SetDeviceBooksShowingCache(false);
             ReplaceDeviceBookCards(books, resetPage: true);
             _libraryPresenceComparison = null;
             RefreshLibraryPresenceState();
@@ -997,9 +1036,9 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            if (scanGeneration == _deviceBookScanGeneration)
-                _deviceBookScanGeneration++;
-            if (!IsCurrentDevice(device)) return;
+            if (scanGeneration != _deviceBookScanGeneration || !IsCurrentDevice(device)) return;
+            _deviceBookScanGeneration++;
+            _deviceBookScanFailed = true;
             if (DeviceBooks.Count == 0)
             {
                 DeviceBookEmptyText.Text = T("扫描失败：{0}", UiText.Localize(exception.Message));
@@ -1011,13 +1050,18 @@ public partial class MainWindow
                 // Keep the fallback cards already published by the progressive
                 // scan. A failed enrichment pass must not turn a visible
                 // device library back into an empty state.
-                DevicePageStatusText.Text = T("设备信息已读取部分内容：{0}", UiText.Localize(exception.Message));
+                DevicePageStatusText.Text = _deviceBooksShowingCache
+                    ? T("设备书库核对失败，当前列表仅供查看；请重试：{0}", UiText.Localize(exception.Message))
+                    : T("设备信息已读取部分内容：{0}", UiText.Localize(exception.Message));
             }
         }
     }
 
     private void ApplyDeviceBookScanProgress(KindleScanProgress progress)
     {
+        DevicePageStatusText.Text = progress.Stage == KindleScanStage.Enumerated && progress.Total == 0
+            ? T("已读取设备书库，正在整理…")
+            : T("正在读取设备书籍：{0} / {1}，并补充书籍信息…", progress.Processed, progress.Total);
         if (progress.Stage == KindleScanStage.Enumerated)
         {
             ReplaceDeviceBookCards(progress.Books, resetPage: true);
@@ -1068,6 +1112,14 @@ public partial class MainWindow
         }
     }
 
+    private void SetDeviceBooksShowingCache(bool showing)
+    {
+        _deviceBooksShowingCache = showing;
+        DeviceBookGridItems.IsHitTestVisible = !showing;
+        DeviceBookListItems.IsHitTestVisible = !showing;
+        if (showing) ClearDeviceBookSelection();
+    }
+
     private KindleBookCardViewModel? FindDeviceBookCard(string relativePath)
     {
         if (_deviceCardsByPath.Count != DeviceBooks.Count)
@@ -1097,6 +1149,7 @@ public partial class MainWindow
         {
             if (incoming.ContainsKey(NormalizeDeviceBookPath(old.Book.RelativePath))) continue;
             DeviceBooks.Remove(old);
+            _devicePinyinIndexes.Remove(old);
             _deviceCardsByPath.Remove(NormalizeDeviceBookPath(old.Book.RelativePath));
             old.Dispose();
         }
@@ -1162,40 +1215,10 @@ public partial class MainWindow
         if (_kindle is null || !IsCurrentDevice(device)) return;
         try
         {
-            var cacheKey = BuildDeviceCacheKey(device);
-            var persisted = await _kindleAuxiliaryCacheStore.GetAsync(device.Identity, cancellationToken);
-            if (!IsCurrentDevice(device)) return;
-            if (persisted is not null)
-            {
-                _deviceResourceCache[(cacheKey, KindleResourceKind.Font)] = persisted.Fonts;
-                _deviceResourceCache[(cacheKey, KindleResourceKind.Dictionary)] = persisted.Dictionaries;
-                _deviceClippingCache[device.Identity] = persisted.Clippings;
-            }
-
-            // Refresh all four device data sets once per connection. Page switches
-            // then use these identity-bound snapshots instead of reopening Kindle.
+            // Prepare the book shelf; fonts, dictionaries and notes are read
+            // when their respective pages are opened.
             if (preloadBooks && !_deviceBooksLoaded)
                 await RefreshDeviceBooksAsync(cancellationToken);
-            if (!IsCurrentDevice(device)) return;
-            IReadOnlyList<KindleDeviceResource> fonts = device.Profile.SupportsResource(KindleResourceKind.Font)
-                ? await _kindle.ScanResourcesAsync(device, KindleResourceKind.Font, cancellationToken) : [];
-            if (!IsCurrentDevice(device)) return;
-            IReadOnlyList<KindleDeviceResource> dictionaries = device.Profile.SupportsResource(KindleResourceKind.Dictionary)
-                ? await _kindle.ScanResourcesAsync(device, KindleResourceKind.Dictionary, cancellationToken) : [];
-            if (!IsCurrentDevice(device)) return;
-            IReadOnlyList<KindleClipping> clippings = device.CanReadNotes
-                ? await _kindle.ReadClippingsAsync(device, cancellationToken, MaxReadingMaterials + 1) : [];
-            if (!IsCurrentDevice(device)) return;
-            _deviceResourceCache[(cacheKey, KindleResourceKind.Font)] = fonts;
-            _deviceResourceCache[(cacheKey, KindleResourceKind.Dictionary)] = dictionaries;
-            _deviceClippingCache[device.Identity] = clippings;
-            await _kindleAuxiliaryCacheStore.SaveAsync(device.Identity, new KindleDeviceAuxiliaryCacheSnapshot
-            {
-                Fonts = fonts.ToList(),
-                Dictionaries = dictionaries.ToList(),
-                Clippings = clippings.ToList(),
-                UpdatedAt = DateTimeOffset.UtcNow
-            }, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1275,7 +1298,7 @@ public partial class MainWindow
     {
         if (BlockNavigationWhileTransferring()) return;
         ShowStage3Page(DevicePage);
-        await RefreshDevicesAsync(scanBooks: true);
+        await RefreshDevicesAsync(scanBooks: false);
         if (CurrentDevice is not null && (!_deviceBooksLoaded || _deviceBooksDirty))
         {
             _deviceBooksDirty = false;
@@ -1286,9 +1309,16 @@ public partial class MainWindow
     private async void KindleBooksButton_Click(object? sender, RoutedEventArgs e) => await OpenKindlePageAsync();
 
     private async void RefreshDevicesButton_Click(object? sender, RoutedEventArgs e)
+        => await RefreshDevicesManuallyAsync();
+
+    private async Task RefreshDevicesManuallyAsync()
     {
         _manuallyDisconnectedDeviceId = null;
-        await RefreshDevicesAsync(scanBooks: DevicePage.IsVisible);
+        if (CurrentDevice is null)
+        {
+            DevicePageStatusText.Text = T("正在检测设备，请确认设备已连接并解锁…");
+        }
+        await RefreshDevicesAsync(scanBooks: false);
         if (DevicePage.IsVisible && CurrentDevice is not null)
             await RefreshDeviceBooksAsync();
     }
@@ -1309,7 +1339,7 @@ public partial class MainWindow
         DeviceBookSelectionText.Text = selected.Count == 0 ? string.Empty : T("已选择 {0} 本书", selected.Count);
     }
 
-    private void SetDeviceBookView(bool gridView)
+    private void SetDeviceBookView(bool gridView, bool persist = true)
     {
         _deviceGridView = gridView;
         DeviceBookGridScroll.IsVisible = gridView;
@@ -1317,9 +1347,9 @@ public partial class MainWindow
         var viewDescription = $"{T("切换视图")} · {T(gridView ? "网格视图" : "列表视图")}";
         ToolTip.SetTip(DeviceViewToggleButton, viewDescription);
         DeviceViewToggleIcon.Data = Geometry.Parse(gridView ? LibraryGridGlyphData : LibraryListGlyphData);
-        DeviceGridViewMenuItem.IsChecked = gridView;
-        DeviceListViewMenuItem.IsChecked = !gridView;
         AutomationProperties.SetName(DeviceViewToggleButton, viewDescription);
+        if (persist)
+            ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void DeviceBookSearchBox_TextChanged(object? sender, TextChangedEventArgs e)
@@ -1344,16 +1374,27 @@ public partial class MainWindow
         if (!_deviceShelfControlsReady) return;
         ClearDeviceBookSelection();
         ApplyDeviceBookFilter();
+        if (ReferenceEquals(sender, DeviceBookSortBox))
+            ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void ClearDeviceBookFiltersButton_Click(object? sender, RoutedEventArgs e)
     {
-        DeviceBookSearchBox.Text = string.Empty;
-        DeviceBookFormatFilterBox.SelectedIndex = 0;
-        DeviceBookPresenceFilterBox.SelectedIndex = 0;
-        DeviceBookSortBox.SelectedIndex = 0;
+        _deviceShelfControlsReady = false;
+        try
+        {
+            DeviceBookSearchBox.Text = string.Empty;
+            DeviceBookFormatFilterBox.SelectedIndex = 0;
+            DeviceBookPresenceFilterBox.SelectedIndex = 0;
+            DeviceBookSortBox.SelectedIndex = 0;
+        }
+        finally
+        {
+            _deviceShelfControlsReady = true;
+        }
         ClearDeviceBookSelection();
         ApplyDeviceBookFilter();
+        ScheduleAppSettingsAutoSave(showSavedStatus: false);
     }
 
     private void ApplyDeviceBookFilter()
@@ -1370,10 +1411,14 @@ public partial class MainWindow
         IEnumerable<KindleBookCardViewModel> filtered = DeviceBooks;
         if (query.Length > 0)
         {
+            var pinyinQuery = PinyinSearchIndex.NormalizeQuery(query);
+            if (pinyinQuery.Length > 0) ScheduleDevicePinyinIndexes();
             filtered = filtered.Where(card =>
                 card.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase)
                 || card.Authors.Contains(query, StringComparison.CurrentCultureIgnoreCase)
-                || card.FileName.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+                || card.FileName.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || pinyinQuery.Length > 0 && _devicePinyinIndexes.TryGetValue(card, out var indexed)
+                    && indexed.Stamp == DevicePinyinStamp(card) && indexed.Index.Matches(pinyinQuery));
         }
         if (format.Length > 0)
             filtered = filtered.Where(card => card.Book.Format.Equals(format, StringComparison.OrdinalIgnoreCase));
@@ -1402,6 +1447,43 @@ public partial class MainWindow
             .Take(DevicePageSize));
         UpdateDeviceBookPaginationUi();
         UpdateDeviceBookEmptyState();
+    }
+
+    private static string DevicePinyinStamp(KindleBookCardViewModel card) =>
+        $"{card.Book.Title}\u001f{card.Book.Authors}\u001f{card.Book.FileName}";
+
+    private void ScheduleDevicePinyinIndexes()
+    {
+        if (_devicePinyinIndexBuilding) return;
+        var pending = DeviceBooks.Select(card => (Card: card, Stamp: DevicePinyinStamp(card),
+                Title: card.Book.Title, Authors: card.Book.Authors, FileName: card.Book.FileName))
+            .Where(item => !_devicePinyinIndexes.TryGetValue(item.Card, out var old) || old.Stamp != item.Stamp)
+            .ToArray();
+        if (pending.Length == 0) return;
+        _devicePinyinIndexBuilding = true;
+        _ = BuildDevicePinyinIndexesAsync(pending);
+    }
+
+    private async Task BuildDevicePinyinIndexesAsync((KindleBookCardViewModel Card, string Stamp, string Title, string Authors, string FileName)[] pending)
+    {
+        try
+        {
+            var built = await Task.Run(() => pending.Select(item =>
+                (item.Card, item.Stamp, Index: PinyinSearchIndex.Create(item.Title, item.Authors, item.FileName))).ToArray());
+            if (_lifetimeCancellation.IsCancellationRequested) return;
+            var current = DeviceBooks.ToHashSet();
+            foreach (var item in built)
+                if (current.Contains(item.Card) && DevicePinyinStamp(item.Card) == item.Stamp)
+                    _devicePinyinIndexes[item.Card] = (item.Stamp, item.Index);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Device pinyin index failed: {exception}");
+            return;
+        }
+        finally { _devicePinyinIndexBuilding = false; }
+        if (PinyinSearchIndex.NormalizeQuery(DeviceBookSearchBox.Text).Length > 0)
+            ApplyDeviceBookFilter(resetPage: false);
     }
 
     private void UpdateDeviceBookPaginationUi()
@@ -1436,10 +1518,14 @@ public partial class MainWindow
     {
         DeviceBookEmptyState.IsVisible = _filteredDeviceBooks.Count == 0;
         if (_filteredDeviceBooks.Count > 0) return;
-        DeviceBookEmptyText.Text = DeviceBooks.Count > 0
+        DeviceBookEmptyText.Text = DeviceBooks.Count > 0 && _devicePinyinIndexBuilding
+            ? T("正在准备拼音搜索…")
+            : DeviceBooks.Count > 0
             ? T("没有符合当前搜索或筛选条件的书籍。")
             : CurrentDevice is null
-                ? T("连接设备后扫描书籍。")
+                ? T("无设备书籍")
+                : _deviceBookScanFailed
+                ? T("设备书库扫描失败。")
                 : T("设备中没有可识别的书籍。");
     }
 
@@ -1494,7 +1580,7 @@ public partial class MainWindow
 
     private void DeviceBookGrid_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!_deviceGridView
+        if (_deviceBooksShowingCache || !_deviceGridView
             || !e.GetCurrentPoint(DeviceBookGridScroll).Properties.IsLeftButtonPressed)
             return;
         _deviceRubberBandPressedOnCard = IsDeviceBookCardSource(e.Source);
@@ -2186,21 +2272,68 @@ public partial class MainWindow
 
     private async Task SendSelectedBooksToKindleCoreAsync()
     {
-        var cards = GetSelectedCards();
+        IReadOnlyList<BookCardViewModel> cards = GetSelectedCards().ToArray();
+        List<BookCardViewModel>? ownedCards = null;
+        try
+        {
+            while (true)
+            {
+                var failures = await SendBooksToKindleBatchAsync(cards);
+                if (failures.Count == 0 || _lifetimeCancellation.IsCancellationRequested) return;
+                var details = string.Join(Environment.NewLine, failures.Select(item => T("《{0}》：{1}", item.Title, item.Reason)));
+                if (!await ConfirmAsync(T("部分书籍发送失败"),
+                        T("以下 {0} 本书发送失败：", failures.Count) + Environment.NewLine + Environment.NewLine + details,
+                        T("重试失败项"), _lifetimeCancellation.Token, allowDiagnosticAutoConfirm: false, cancelText: T("关闭"))) return;
+
+                var retryCards = new List<BookCardViewModel>();
+                foreach (var failure in failures)
+                {
+                    var book = await _library.GetBookAsync(failure.BookId, _lifetimeCancellation.Token);
+                    if (book is not null) retryCards.Add(new BookCardViewModel(book, _paths.Data));
+                }
+                if (ownedCards is not null) foreach (var owned in ownedCards) owned.Dispose();
+                ownedCards = retryCards;
+                if (retryCards.Count == 0)
+                {
+                    SetTaskStatus(T("失败的书籍已不在电脑书库，无法重试。"));
+                    return;
+                }
+                if (retryCards.Count < failures.Count)
+                    await ShowMessageAsync(T("部分书籍无法重试"), T("有 {0} 本失败的书籍已不在电脑书库。", failures.Count - retryCards.Count));
+                cards = retryCards;
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            LogSendDiagnostic("SendSelectedBooksToKindleCoreAsync", exception);
+            SetTaskStatus(T("发送失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("发送失败"), UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            if (ownedCards is not null) foreach (var owned in ownedCards) owned.Dispose();
+        }
+    }
+
+    private sealed record DeviceSendFailure(Guid BookId, string Title, string Reason);
+
+    private async Task<IReadOnlyList<DeviceSendFailure>> SendBooksToKindleBatchAsync(IReadOnlyList<BookCardViewModel> cards)
+    {
         if (cards.Count == 0)
         {
             SetTaskStatus(T("请先选择至少一本书。"));
-            return;
+            return [];
         }
         if (_kindle is null)
         {
             SetTaskStatus(T("当前启动头未提供设备平台服务。"));
-            return;
+            return [];
         }
         if (_isTransferring)
         {
             ShowSettingsCapsule(T("已有发送任务正在进行中。"), 2400);
-            return;
+            return [];
         }
 
         await RefreshDevicesAsync(scanBooks: false, _lifetimeCancellation.Token);
@@ -2208,18 +2341,29 @@ public partial class MainWindow
         {
             SetTaskStatus(T("请先连接并解锁设备。"));
             ShowSettingsCapsule(T("未检测到设备，请连接并解锁设备。"), 3200);
-            return;
+            return [];
         }
 
         var sent = 0;
         var skipped = 0;
+        var failures = new List<DeviceSendFailure>();
         var titleLines = string.Join(Environment.NewLine, cards.Take(3).Select(card => T("《{0}》", card.Title)));
         if (cards.Count > 3) titleLines += T("{0}…等 {1} 本", Environment.NewLine, cards.Count);
         if (!await ConfirmAsync(
                 T("发送到设备：{0} 本书", cards.Count),
                 T("将以下书籍发送到 {0}：{1}{1}{2}", _deviceDisplayName ?? device.Name, Environment.NewLine, titleLines)
                     + DeviceTransferDescription(device)))
-            return;
+            return [];
+
+        var duplicateDecision = await ChooseDeviceDuplicatesAsync(device, cards);
+        if (duplicateDecision is null) return [];
+        var skippedDuplicates = cards.Count - duplicateDecision.Count;
+        cards = duplicateDecision;
+        if (cards.Count == 0)
+        {
+            SetTaskStatus(T("已跳过设备中可能已有的书籍，没有发送。"));
+            return [];
+        }
 
         _isTransferring = true;
         _transferStopRequested = false;
@@ -2332,6 +2476,7 @@ public partial class MainWindow
                 catch (Exception exception)
                 {
                     skipped++;
+                    failures.Add(new DeviceSendFailure(card.Book.Id, card.Title, UiText.Localize(exception.Message)));
                     ShowTransferToast(
                         T("发送到设备"),
                         T("《{0}》发送失败：{1}", card.Title, UiText.Localize(exception.Message)),
@@ -2347,10 +2492,12 @@ public partial class MainWindow
             acceptProgressUpdates = false;
             var completionMessage = _transferStopRequested
                 ? T("已完成当前书籍，发送已停止：成功 {0} 本，失败 {1} 本。", sent, skipped)
+                : skippedDuplicates > 0
+                    ? T("发送完成：成功 {0} 本，跳过可能已有 {1} 本，失败 {2} 本。", sent, skippedDuplicates, skipped)
                 : skipped > 0
                     ? T("发送完成：成功 {0} 本，失败 {1} 本。", sent, skipped)
                     : T("已发送 {0} 本书到 {1}。", sent, device.Name);
-            ShowTransferToast(T("发送到设备"), completionMessage, progress: 100, autoHide: true, completed: true);
+            ShowTransferToast(T("发送到设备"), completionMessage, progress: 100, autoHide: true, completed: skipped == 0);
             SetTaskStatus(completionMessage);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -2379,6 +2526,7 @@ public partial class MainWindow
             HideTaskProgressPopup();
             await RefreshDeviceBooksAfterTransferAsync(device, _lifetimeCancellation.Token);
         }
+        return failures;
     }
 
     private async Task SendSelectedBooksByEmailAsync()
@@ -2565,6 +2713,13 @@ public partial class MainWindow
             if (!await ConfirmAsync(T("发送到设备"), T("将《{0}》发送到 {1}？", card.Title, _deviceDisplayName ?? device.Name)
                 + DeviceTransferDescription(device)))
                 return;
+            var duplicateDecision = await ChooseDeviceDuplicatesAsync(device, [card]);
+            if (duplicateDecision is null) return;
+            if (duplicateDecision.Count == 0)
+            {
+                SetTaskStatus(T("已跳过设备中可能已有的书籍，没有发送。"));
+                return;
+            }
             _isTransferring = true;
             _transferStopRequested = false;
             SetTransferNavigationEnabled(false);
@@ -2748,6 +2903,7 @@ public partial class MainWindow
 
     private async Task ExportDeviceBooksToLibraryAsync(IReadOnlyList<KindleBookCardViewModel> cards)
     {
+        if (_deviceBooksShowingCache) return;
         // A single export owns the device read and subsequent library import
         // as one unit. Without this gate, two card gestures can overlap after
         // the first await and race while importing their output.
@@ -2977,7 +3133,7 @@ public partial class MainWindow
 
     private async Task DeleteSelectedDeviceBooksCoreAsync(IReadOnlyList<KindleBookCardViewModel> selected)
     {
-        if (selected.Count == 0 || _kindle is null || CurrentDevice is not { } device) return;
+        if (_deviceBooksShowingCache || selected.Count == 0 || _kindle is null || CurrentDevice is not { } device) return;
         if (!await ConfirmAsync(T("从设备删除书籍"), T("确定从 {0} 删除选中的 {1} 本书吗？电脑书库不受影响。", device.Name, selected.Count))) return;
 
         var removed = 0;
@@ -3017,6 +3173,7 @@ public partial class MainWindow
     private async void DeleteDeviceBookButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: KindleBookCardViewModel card }
+            || _deviceBooksShowingCache
             || _kindle is null
             || CurrentDevice is not { } device) return;
         if (!await ConfirmAsync(T("从设备删除书籍"), T("确定从 {0} 删除《{1}》吗？电脑书库中的文件不会受影响。", device.Name, card.Title))) return;
@@ -3713,6 +3870,7 @@ public partial class MainWindow
             _deviceResourceCache[(cacheKey, resourceKind)] = resources;
             if (resourceKind != _deviceResourceKind) return;
             ApplyDeviceResources(resources, device);
+            await PersistDeviceAuxiliaryCacheBestEffortAsync(device);
         }
         catch (Exception exception)
         {
@@ -6337,7 +6495,10 @@ public partial class MainWindow
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
             SendToKindleWebEnabled = SendToKindleWebEnabledCheck.IsChecked != false,
             GridGalleryDisplay = GridGalleryDisplayCheck.IsChecked == true,
-            LibraryViewMode = _libraryViewMode.ToString(),
+            LibraryViewMode = _lastNonCollectionLibraryViewMode.ToString(),
+            LibrarySortMode = ViewModel.SortMode.ToString(),
+            DeviceLibraryViewMode = _deviceGridView ? "Grid" : "List",
+            DeviceBookSortMode = (DeviceBookSortBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "title",
             ShowSyncStatusIcon = ShowSyncStatusIconCheck.IsChecked != false,
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
             ShowUnearnedReadingMedals = _showUnearnedReadingMedals,
@@ -6535,7 +6696,7 @@ public partial class MainWindow
             await ShowMessageAsync(T("请稍候"), T("云端同步正在进行，请完成后再导入备份。"));
             return;
         }
-        if (_readerDocument is not null || _readerIsPdf)
+        if (_readerDocument is not null || _readerIsPdf || _bookOpenInProgress > 0 || _readerCloseInProgress != 0)
         {
             await ShowMessageAsync(T("请先返回书库"), T("导入备份前请先关闭阅读器，避免正在保存的阅读记录被打断。"));
             return;
@@ -6556,6 +6717,12 @@ public partial class MainWindow
             await ShowMessageAsync(T("请稍候"), T("云端同步正在进行，请完成后再导入备份。"));
             return;
         }
+        if (_readerDocument is not null || _readerIsPdf || _bookOpenInProgress > 0 || _readerCloseInProgress != 0)
+        {
+            await ShowMessageAsync(T("请先返回书库"), T("导入备份前请先关闭阅读器，避免正在保存的阅读记录被打断。"));
+            return;
+        }
+        _backupImportInProgress = true;
         _backupBusy = true;
         ShowTaskProgressPopup();
         TaskProgressPopupBar.IsIndeterminate = true;
@@ -6573,6 +6740,8 @@ public partial class MainWindow
             _lastS3SyncAt = null;
             await _library.InitializeAsync(_lifetimeCancellation.Token);
             await _readerData.InitializeAsync(_lifetimeCancellation.Token);
+            await _readerProgressRecovery.InitializeAsync(_lifetimeCancellation.Token);
+            await _readerReadingTimeRecovery.InitializeAsync(_lifetimeCancellation.Token);
             await _s3SyncService.InitializeDeletionTrackingAsync(_lifetimeCancellation.Token, _s3SyncStoredSettings.DeviceId);
             _appSettings = await _appSettingsStore.LoadAsync(_lifetimeCancellation.Token);
             LoadReaderVerticalDebugBoxesSetting();
@@ -6595,6 +6764,7 @@ public partial class MainWindow
         }
         finally
         {
+            _backupImportInProgress = false;
             _backupBusy = false;
             TaskProgressPopupBar.IsIndeterminate = false;
             HideTaskProgressPopup();

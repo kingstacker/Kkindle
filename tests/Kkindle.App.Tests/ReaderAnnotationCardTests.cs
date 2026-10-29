@@ -100,7 +100,7 @@ public sealed class ReaderAnnotationCardTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task PdfCardsUseContentHeightAndRewrapWhenTheGutterNarrows() => Run(async () =>
+    public Task PdfHoverUsesContentHeightAndLongNotesRemainScrollable() => Run(async () =>
     {
         await using var scope = await ReaderTestWindow.Create();
         using var pdf = new NativePdfReaderHost();
@@ -125,29 +125,110 @@ public sealed class ReaderAnnotationCardTests(SettingsUiSession session)
         var shorter = Note(0.45, "短批注");
         scope.Window.ReaderAnnotations.Add(longer);
         scope.Window.ReaderAnnotations.Add(shorter);
-        scope.Call("ShowCurrentReaderPdfAnnotation");
+        var popup = scope.Get<Popup>("ReaderAnnotationHoverHostPopup");
+        Assert.False(popup.IsOpen);
+        scope.Call("ShowReaderAnnotationHoverPopup", shorter.Note, null, shorter, false);
         await ReaderTests.Render();
         var primary = scope.Get<Border>("ReaderAnnotationHoverPopup");
-        var secondary = (Border)Assert.Single(scope.Field<List<Popup>>("_readerPdfAnnotationPopups")).Child!;
+        var shortHeight = primary.Height;
+        scope.Call("ShowReaderAnnotationHoverPopup", longer.Note, null, longer, false);
+        await ReaderTests.Render();
         Assert.True(primary.IsVisible);
-        Assert.True(secondary.IsVisible);
+        Assert.False(scope.Get<Grid>("ReaderAnnotationHoverHeading").IsVisible);
         Assert.Equal(new CornerRadius(0), primary.CornerRadius);
-        Assert.Equal(new CornerRadius(0), secondary.CornerRadius);
-        Capture(primary, "pdf-annotation-adaptive");
-        Assert.True(primary.Height > secondary.Height + 80,
-            $"Primary {primary.Bounds}; secondary {secondary.Bounds}");
+        Assert.True(primary.Height > shortHeight + 80);
         var scroll = primary.GetVisualDescendants().OfType<ScrollViewer>().Single();
-        Assert.True(scroll.Extent.Height <= scroll.Viewport.Height + 1,
-            $"Card {primary.Bounds}; text {scroll.Extent}; viewport {scroll.Viewport}");
-
-        Assert.True(pdf.TryGetAnnotationAnchor(longer, out var page, out var anchor));
-        var measure = ReaderAnnotationCardLayout.CreateMeasure(primary, scope.Get<TextBlock>("ReaderAnnotationHoverNote"));
-        Assert.True(pdf.TryGetAnnotationCalloutBounds(page, anchor, new Size(220, 68), out var wide, measure));
-        Assert.True(pdf.TryGetAnnotationCalloutBounds(page, anchor, new Size(150, 68), out var narrow, measure));
-        Assert.True(narrow.Height > wide.Height);
+        Assert.True(scroll.Extent.Height <= scroll.Viewport.Height + 1);
+        longer.Note = string.Join('\n', Enumerable.Repeat(longer.Note, 20));
+        scope.Call("ShowReaderAnnotationHoverPopup", longer.Note, null, longer, false);
+        await ReaderTests.Render();
+        Assert.True(scroll.Extent.Height > scroll.Viewport.Height);
+        scroll.Offset = new Vector(0, scroll.Extent.Height);
+        await ReaderTests.Render();
+        Assert.True(scroll.Offset.Y > 0);
+        Capture(primary, "pdf-annotation-hover");
         scope.Call("HideReaderAnnotationHoverPopup");
         scope.Set("_readerActiveHost", null);
         scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
+    });
+
+    [Theory]
+    [InlineData(false, ReaderAnnotationDisplayMode.Pinned)]
+    [InlineData(true, ReaderAnnotationDisplayMode.Click)]
+    public Task PdfNotesOnlyAppearOnHoverIncludingWithoutAGutter(bool pointNote, ReaderAnnotationDisplayMode savedMode) => Run(async () =>
+    {
+        await using var scope = await ReaderTestWindow.Create();
+        var path = PdfFixture.Write(scope.Paths.ReaderCache);
+        var library = new SqliteBookLibraryService(scope.Paths, new BookMetadataService());
+        await library.ImportAsync([path]);
+        var book = Assert.Single(await library.SearchAsync());
+        using var bookCard = new BookCardViewModel(book, scope.Paths.Data);
+        scope.Call("ChangeReaderAppearance", new ReaderAppearanceSettings { AnnotationDisplayMode = savedMode });
+        await scope.Call<Task>("OpenPdfReaderAsync", bookCard, book.Files[0], library.GetAbsoluteFilePath(book.Files[0]));
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        var pdf = scope.Field<NativePdfReaderHost>("_readerActiveHost");
+        await pdf.SetFitModeAsync(PdfReaderFitMode.Width);
+        await pdf.SetZoomAsync(1);
+        await ReaderTests.Render();
+        var annotation = new ReaderAnnotation
+        {
+            BookId = book.Id, BookFileId = book.Files[0].Id, ChapterPath = "pdf:page:2",
+            StartOffset = 0, EndOffset = pointNote ? 0 : 6,
+            Fragment = pointNote ? ReaderPdfPointAnchor.Encode(0.5, 0.12) : null,
+            Note = "鼠标悬停时显示这条批注"
+        };
+        var other = new ReaderAnnotation
+        {
+            BookId = book.Id, BookFileId = book.Files[0].Id, ChapterPath = "pdf:page:2",
+            Fragment = ReaderPdfPointAnchor.Encode(0.7, 0.2), Note = "另一条批注"
+        };
+        var data = scope.Field<ReaderDataService>("_readerData");
+        await data.SaveAnnotationAsync(annotation, CancellationToken.None);
+        await data.SaveAnnotationAsync(other, CancellationToken.None);
+        await scope.Call<Task>("RefreshReaderAnnotationsAsync", CancellationToken.None);
+        await scope.Call<Task>("ApplySavedReaderPdfAnnotationsAsync", CancellationToken.None);
+        await ReaderTests.Render();
+        var popup = scope.Get<Popup>("ReaderAnnotationHoverHostPopup");
+        Assert.False(popup.IsOpen);
+        void Hover(ReaderAnnotation item)
+        {
+            var hit = pdf.GetAnnotationBounds(item)[0];
+            scope.Window.MouseMove(pdf.TranslatePoint(hit.Center, scope.Window)!.Value);
+        }
+        Hover(annotation);
+        await ReaderTests.Render();
+        Assert.True(popup.IsOpen);
+        Assert.Equal(annotation.Note, scope.Get<TextBlock>("ReaderAnnotationHoverNote").Text);
+        var card = scope.Get<Border>("ReaderAnnotationHoverPopup");
+        Assert.False(scope.Get<Grid>("ReaderAnnotationHoverHeading").IsVisible);
+        var actual = card.TranslatePoint(default, pdf)!.Value;
+        var bounds = new Rect(actual, card.Bounds.Size);
+        Assert.All(pdf.GetAnnotationBounds(annotation), band => Assert.False(bounds.Intersects(band)));
+        Assert.InRange(bounds.Left, 0, pdf.Bounds.Width - bounds.Width);
+        Assert.InRange(bounds.Top, 0, pdf.Bounds.Height - bounds.Height);
+        // Moving directly to another annotation replaces the preview.
+        Hover(other);
+        await ReaderTests.Render();
+        Assert.Equal(other.Note, scope.Get<TextBlock>("ReaderAnnotationHoverNote").Text);
+        scope.Window.MouseMove(pdf.TranslatePoint(new Point(2, 2), scope.Window)!.Value);
+        await Task.Delay(220);
+        await ReaderTests.Render();
+        Assert.False(popup.IsOpen);
+        Hover(annotation);
+        await ReaderTests.Render();
+        Assert.True(popup.IsOpen);
+        pdf.ScrollBy(60);
+        await Task.Delay(220);
+        await ReaderTests.Render();
+        Assert.False(popup.IsOpen);
+        await scope.Call<Task>("NavigatePdfPageAsync", 3, CancellationToken.None, true);
+        await scope.Call<Task>("NavigatePdfPageAsync", 2, CancellationToken.None, true);
+        await ReaderTests.Render();
+        Assert.False(popup.IsOpen);
+        await scope.Call<Task>("CloseReaderAsync");
+        await scope.Call<Task>("OpenBookCoreAsync", bookCard, book.Files[0], true);
+        await ReaderTests.Render();
+        Assert.False(popup.IsOpen);
     });
 
     private static void Capture(Control card, string name)

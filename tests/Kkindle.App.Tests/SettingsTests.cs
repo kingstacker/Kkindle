@@ -803,6 +803,11 @@ public sealed partial class SettingsTests(SettingsUiSession session)
             scope.Call("PopulateSettingsControls");
             window.Show();
             await Render();
+            // The desktop startup initializes these controls after the first
+            // library page loads. Mirror that boundary so view/sort tests
+            // exercise the same interactive state as the real window.
+            scope.Call("SetupFilterControls");
+            scope.Set("_filterControlsReady", true);
             scope.Set("_stage3Ready", true);
             scope.Set("_appSettingsStartupSettled", true);
             scope.Call("ConfigureAppSettingsAutoSave");

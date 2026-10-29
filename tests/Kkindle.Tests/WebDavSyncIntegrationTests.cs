@@ -65,6 +65,7 @@ public sealed class WebDavSyncIntegrationTests
         Assert.Equal("来自设备 B", Assert.Single(await a.Reader.GetAllAnnotationsAsync()).Note);
         Assert.Equal(objectPuts, server.Requests.Count(request => request.Method == "PUT" && request.Path.Contains("/objects/", StringComparison.Ordinal)));
 
+        await b.Reader.DeleteAnnotationAsync(remoteAnnotation.Id);
         await b.DeleteAllBooksAsync();
         await b.SyncAsync();
         await a.SyncAsync();

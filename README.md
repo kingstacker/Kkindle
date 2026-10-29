@@ -21,11 +21,11 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 
 ## Download
 
-Download the latest Windows, Linux, or macOS package from the [official site](https://kkindle.stacker.beauty/#downloads); it automatically selects the latest stable release.
+Download the latest Windows or Linux package from the [official site](https://kkindle.stacker.beauty/#downloads); it automatically selects the latest stable release.
 
 Backup download: [GitHub Releases](https://github.com/kingstacker/Kkindle/releases).
 
-Calibre is required separately for format conversion. macOS packages are available, but target-device validation is still in progress.
+Calibre is required separately for format conversion. Official GitHub releases currently provide Windows and Linux packages; the macOS source target remains available for local builds.
 
 ## Cloud sync
 

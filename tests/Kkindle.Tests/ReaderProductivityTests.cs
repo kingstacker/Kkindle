@@ -324,10 +324,8 @@ public sealed class ReaderProductivityTests
             [
                 new BookContentChunkDraft(0, 0, "第一章", "text/one.xhtml", 0, 1000,
                     chapter[..1000]),
-                // Simulate an older index whose normalized overlap retained a
-                // stale numeric offset. Text context must still identify it as
-                // the same visible result as the first chunk.
-                new BookContentChunkDraft(0, 1, "第一章", "text/one.xhtml", 1200, 1600,
+                // Both chunks refer to the same physical occurrence.
+                new BookContentChunkDraft(0, 1, "第一章", "text/one.xhtml", 840, 1240,
                     chapter[840..]),
                 new BookContentChunkDraft(1, 0, "第一章副本", "text/duplicate.xhtml", 0, 400,
                     chapter[840..]),
@@ -337,8 +335,9 @@ public sealed class ReaderProductivityTests
 
             var results = await service.SearchBookAsync(bookId, "月份", 20);
 
-            Assert.Equal(2, results.Count);
+            Assert.Equal(3, results.Count);
             Assert.Single(results, result => result.ChapterPath == "text/one.xhtml");
+            Assert.Single(results, result => result.ChapterPath == "text/duplicate.xhtml");
             Assert.Single(results, result => result.ChapterPath == "text/two.xhtml");
         }
         finally { TestHelpers.TryDelete(root); }

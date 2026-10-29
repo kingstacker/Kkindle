@@ -155,10 +155,12 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         Assert.Equal("pdf:page:2", annotation.ChapterPath);
         await ReaderTests.Render();
         Capture(scope.Window, "pdf-two-pages");
-        await scope.Call<Task>("MoveReaderFooterTocAsync", 1);
+        scope.Call("ReaderPdfNextPageButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        for (var i = 0; i < 100 && pdf.PageNumber != 3; i++) await Task.Delay(20);
         Assert.Equal(new[] { 3, 4 }, pdf.VisiblePageNumbers);
         Assert.False(pdf.CanGoNext);
-        await scope.Call<Task>("MoveReaderFooterTocAsync", -1);
+        scope.Call("ReaderPdfPreviousPageButton_Click", null, new Avalonia.Interactivity.RoutedEventArgs());
+        for (var i = 0; i < 100 && pdf.PageNumber != 1; i++) await Task.Delay(20);
         Assert.Equal(new[] { 1, 2 }, pdf.VisiblePageNumbers);
         await scope.Call<Task>("NavigateToReaderAnnotationAsync", annotation);
         Assert.Equal(2, pdf.PageNumber);
@@ -481,9 +483,23 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         scope.Window.MouseDown(a, MouseButton.Left);
         scope.Window.MouseMove(b);
         scope.Window.MouseUp(b, MouseButton.Left);
+        Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        Assert.Equal("Left first line. An interesting example.", pdf.GetSelectedTextForCopy());
         await scope.Call<Task>("PerformReaderSelectionCopyAsync");
         Assert.Equal("Left first line. An interesting example.", await scope.Window.Clipboard!.TryGetTextAsync());
         Capture(scope.Window, "pdf-column-selection");
+
+        // A real double-click still edits the marking, but only after release.
+        var pickedPoint = pdf.TranslatePoint(pdf.GetRangeBounds(start + 5, start + 6).Single().Center, scope.Window)!.Value;
+        scope.Window.MouseDown(pickedPoint, MouseButton.Left);
+        scope.Window.MouseUp(pickedPoint, MouseButton.Left);
+        Assert.Equal(annotation.Id, pdf.SelectedAnnotationId);
+        Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        scope.Window.MouseDown(pickedPoint, MouseButton.Left);
+        Assert.False(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        scope.Window.MouseUp(pickedPoint, MouseButton.Left);
+        Assert.True(scope.Get<Popup>("ReaderAnnotationInputPopup").IsOpen);
+        Assert.Equal("Column note", scope.Get<TextBox>("ReaderAnnotationInputBox").Text);
     });
 
     [Fact]
@@ -598,7 +614,9 @@ public sealed class PdfReaderModeTests(SettingsUiSession session)
         await ReaderTests.Render();
         Assert.Equal(position, pdf.CaptureViewState());
 
-        void Focus() => Assert.True(toolbarFocus ? scope.Get<Button>("ReaderPdfForwardButton").Focus() : pdf.Focus());
+        void Focus() => Assert.True(toolbarFocus
+            ? scope.Get<Button>(pdf.CanGoNext ? "ReaderPdfForwardButton" : "ReaderPdfBackButton").Focus()
+            : pdf.Focus());
         void Press(Key key, PhysicalKey physical) => scope.Window.KeyPress(key, RawInputModifiers.None, physical, null);
         async Task WaitForPage(int page)
         {

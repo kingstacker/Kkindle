@@ -58,6 +58,9 @@ public sealed record AppSettings
     // The library surface is restored before the first window is shown so a
     // restart does not unexpectedly fall back to the grid view.
     public string LibraryViewMode { get; init; } = "Grid";
+    public string LibrarySortMode { get; init; } = nameof(Kkindle.Core.LibrarySortMode.UpdatedDescending);
+    public string DeviceLibraryViewMode { get; init; } = "Grid";
+    public string DeviceBookSortMode { get; init; } = "title";
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool AutoGenerateAzw3OnImport { get; init; }
     public int AutoBackupRetention { get; init; } = 5;
@@ -130,6 +133,22 @@ public sealed record AppSettings
             libraryViewMode = libraryViewMode.Equals("List", StringComparison.OrdinalIgnoreCase)
                 ? "List"
                 : "Collections";
+        var librarySortMode = Enum.GetNames<global::Kkindle.Core.LibrarySortMode>()
+            .FirstOrDefault(name => name.Equals(
+                (settings.LibrarySortMode ?? string.Empty).Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            ?? nameof(global::Kkindle.Core.LibrarySortMode.UpdatedDescending);
+        var deviceLibraryViewMode = (settings.DeviceLibraryViewMode ?? string.Empty).Trim();
+        if (!deviceLibraryViewMode.Equals("Grid", StringComparison.OrdinalIgnoreCase)
+            && !deviceLibraryViewMode.Equals("List", StringComparison.OrdinalIgnoreCase))
+            deviceLibraryViewMode = "Grid";
+        else
+            deviceLibraryViewMode = deviceLibraryViewMode.Equals("List", StringComparison.OrdinalIgnoreCase)
+                ? "List"
+                : "Grid";
+        var deviceBookSortMode = (settings.DeviceBookSortMode ?? string.Empty).Trim().ToLowerInvariant();
+        if (deviceBookSortMode is not ("title" or "author" or "modified" or "size"))
+            deviceBookSortMode = "title";
         return settings with
         {
             UiLanguage = UiText.NormalizeLanguage(settings.UiLanguage),
@@ -142,6 +161,9 @@ public sealed record AppSettings
                 : settings.DefaultDeviceModel.Trim(),
             PreferredOpenFormat = preferred,
             LibraryViewMode = libraryViewMode,
+            LibrarySortMode = librarySortMode,
+            DeviceLibraryViewMode = deviceLibraryViewMode,
+            DeviceBookSortMode = deviceBookSortMode,
             ReaderAiReasoningDepth = reasoningDepth,
             CalibrePath = (settings.CalibrePath ?? string.Empty).Trim(),
             EmbeddingModelId = string.IsNullOrWhiteSpace(settings.EmbeddingModelId)

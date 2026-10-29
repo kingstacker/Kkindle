@@ -3,12 +3,68 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input.Platform;
 using Kkindle.Core;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Kkindle.Ui.Tests;
 
 public sealed partial class SettingsTests
 {
+    [Fact]
+    public Task BatchDeleteFailureRefreshesTheBooksAlreadyMovedToTrash() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        var cards = scope.Window.ViewModel.Books.ToArray();
+        Assert.Equal(2, cards.Length);
+        var first = cards[0].Book.Id;
+        var blocked = cards[1].Book.Id;
+        foreach (var card in cards) scope.Field<HashSet<Guid>>("_selectedBookIds").Add(card.Book.Id);
+        await using var db = new SqliteConnection($"Data Source={scope.Paths.Database}");
+        await db.OpenAsync();
+        using var command = db.CreateCommand();
+        command.CommandText = $"CREATE TRIGGER BlockDelete BEFORE DELETE ON Books WHEN OLD.Id='{blocked}' BEGIN SELECT RAISE(FAIL, 'blocked'); END;";
+        await command.ExecuteNonQueryAsync();
+        var removal = scope.Call<Task>("DeleteSelectedBooksAsync");
+        await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        scope.Get<Button>("ConfirmationOkButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => scope.Get<Control>("MessageOverlay").IsVisible);
+        Assert.Contains("1", scope.Get<TextBlock>("MessageBodyText").Text);
+        scope.Call("CompleteMessage");
+        await removal;
+        var library = scope.Field<IBookLibraryService>("_library");
+        Assert.Null(await library.GetBookAsync(first));
+        Assert.NotNull(await library.GetBookAsync(blocked));
+        Assert.DoesNotContain(scope.Window.ViewModel.Books, card => card.Book.Id == first);
+        Assert.Contains(scope.Window.ViewModel.Books, card => card.Book.Id == blocked);
+        Assert.DoesNotContain(first, scope.Field<HashSet<Guid>>("_selectedBookIds"));
+    });
+
+    [Fact]
+    public Task FailedDetailsSaveCannotLeakIntoLaterFavoriteChange() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        var card = scope.Window.ViewModel.Books[0];
+        var originalTitle = card.Book.Title;
+        scope.Call("SelectBook", card);
+        scope.Get<TextBox>("DetailTitleText").Text = "unsaved title";
+        await using var db = new SqliteConnection($"Data Source={scope.Paths.Database}");
+        await db.OpenAsync();
+        using var command = db.CreateCommand();
+        command.CommandText = "CREATE TRIGGER BlockMetadata BEFORE UPDATE ON Books BEGIN SELECT RAISE(FAIL, 'blocked'); END;";
+        await command.ExecuteNonQueryAsync();
+        await scope.Call<Task>("SaveDetailsAsync");
+        Assert.Equal(originalTitle, card.Book.Title);
+        command.CommandText = "DROP TRIGGER BlockMetadata;";
+        await command.ExecuteNonQueryAsync();
+        await scope.Call<Task>("ToggleFavoriteAsync", card);
+        var saved = await scope.Field<IBookLibraryService>("_library").GetBookAsync(card.Book.Id);
+        Assert.NotNull(saved);
+        Assert.Equal(originalTitle, saved.Title);
+        Assert.True(saved.IsFavorite);
+    });
+
     [Theory]
     [InlineData("zh-CN")]
     [InlineData("en-US")]
@@ -65,10 +121,10 @@ public sealed partial class SettingsTests
 
     [Theory]
     [InlineData("zh-CN", "ConfirmationCancelButton")]
-    [InlineData("zh-CN", "ConfirmationKeepFilesButton")]
+    [InlineData("en-US", "ConfirmationCancelButton")]
     [InlineData("zh-CN", "ConfirmationOkButton")]
-    [InlineData("en-US", "ConfirmationKeepFilesButton")]
-    public Task RemovingLastFormatOffersCancelKeepFilesAndTrash(string language, string action) => Run(async () =>
+    [InlineData("en-US", "ConfirmationOkButton")]
+    public Task RemovingLastFormatOffersCancelAndRecoverableTrash(string language, string action) => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
         await SeedLayoutLibrary(scope);
@@ -83,14 +139,12 @@ public sealed partial class SettingsTests
         var removal = scope.Call<Task>("DeleteFileAsync", file);
         await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
         await Render();
-        var keep = scope.Get<Button>("ConfirmationKeepFilesButton");
+        var cancel = scope.Get<Button>("ConfirmationCancelButton");
         var delete = scope.Get<Button>("ConfirmationOkButton");
-        Assert.True(keep.IsEffectivelyVisible);
-        Assert.Equal(language == "en-US" ? "Keep files" : "保留文件", keep.Content);
+        Assert.True(cancel.IsEffectivelyVisible);
+        Assert.Null(scope.Window.FindControl<Button>("ConfirmationKeepFilesButton"));
         Assert.Equal(language == "en-US" ? "Delete file" : "删除文件", delete.Content);
-        Assert.Equal(delete.Background, keep.Background);
-        Assert.Equal(delete.Foreground, keep.Foreground);
-        AssertWithinWindow(keep, scope.Window);
+        AssertWithinWindow(cancel, scope.Window);
         AssertWithinWindow(delete, scope.Window);
         Assert.Contains(language == "en-US" ? "restored" : "可恢复",
             scope.Get<TextBlock>("ConfirmationMessageText").Text!);
@@ -102,7 +156,6 @@ public sealed partial class SettingsTests
         scope.Get<Button>(action).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await removal.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(scope.Get<Control>("ConfirmationOverlay").IsVisible);
-        Assert.False(keep.IsVisible);
         if (action == "ConfirmationCancelButton")
         {
             Assert.NotNull(await library.GetBookAsync(card.Book.Id));
@@ -113,20 +166,12 @@ public sealed partial class SettingsTests
         {
             Assert.Null(await library.GetBookAsync(card.Book.Id));
             Assert.DoesNotContain(scope.Window.ViewModel.Books, item => item.Book.Id == card.Book.Id);
-            if (action == "ConfirmationKeepFilesButton")
-            {
-                Assert.True(File.Exists(path));
-                Assert.Empty(await library.GetTrashItemsAsync());
-            }
-            else
-            {
-                Assert.False(File.Exists(path));
-                var trash = Assert.Single(await library.GetTrashItemsAsync());
-                Assert.Equal(LibraryTrashItemKind.Book, trash.Kind);
-                await library.RestoreTrashItemAsync(trash.Id);
-                Assert.NotNull(await library.GetBookAsync(card.Book.Id));
-                Assert.True(File.Exists(path));
-            }
+            Assert.False(File.Exists(path));
+            var trash = Assert.Single(await library.GetTrashItemsAsync());
+            Assert.Equal(LibraryTrashItemKind.Book, trash.Kind);
+            await library.RestoreTrashItemAsync(trash.Id);
+            Assert.NotNull(await library.GetBookAsync(card.Book.Id));
+            Assert.True(File.Exists(path));
         }
     });
 
@@ -147,7 +192,7 @@ public sealed partial class SettingsTests
 
         var removal = scope.Call<Task>("DeleteFileAsync", pdf);
         await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
-        Assert.False(scope.Get<Button>("ConfirmationKeepFilesButton").IsVisible);
+        Assert.Null(scope.Window.FindControl<Button>("ConfirmationKeepFilesButton"));
         Assert.Contains("PDF", scope.Get<TextBlock>("ConfirmationMessageText").Text!);
         Assert.Contains("回收站", scope.Get<TextBlock>("ConfirmationMessageText").Text!);
         scope.Get<Button>("ConfirmationOkButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -162,7 +207,7 @@ public sealed partial class SettingsTests
 
         scope.Get<ListBox>("BookGrid").SelectedItem = scope.Window.ViewModel.Books.Single(item => item.Book.Id == bookId);
         var lastRemoval = scope.Call<Task>("DeleteFileAsync", epub);
-        await Until(() => scope.Get<Button>("ConfirmationKeepFilesButton").IsVisible);
+        await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
         scope.Get<Button>("ConfirmationCancelButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await lastRemoval.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.NotNull(await library.GetBookAsync(bookId));

@@ -25,6 +25,9 @@ public sealed class PdfTextSelectionLayout
         }
     }
     private readonly PdfPageContent _page;
+    private readonly List<Line> _dragRuns = [];
+    private readonly Dictionary<int, Line> _dragRunAtOffset = [];
+    private readonly Dictionary<int, PdfTableGrid.Cell> _cellAtOffset = [];
     private readonly bool _usesColumns;
     private readonly bool _hasHorizontalLayout;
     private readonly double _paragraphGap = 1;
@@ -33,9 +36,18 @@ public sealed class PdfTextSelectionLayout
     {
         _page = page;
         var textGlyphs = ExcludeDottedRules(page);
+        var tables = PdfTableGrid.Read(page);
+        foreach (var glyph in textGlyphs)
+        {
+            var x = glyph.Bounds.X + glyph.Bounds.Width / 2;
+            var y = glyph.Bounds.Y + glyph.Bounds.Height / 2;
+            var cell = tables.SelectMany(t => t.Cells).FirstOrDefault(c => x > c.Bounds.X && x < c.Bounds.X + c.Bounds.Width
+                && y > c.Bounds.Y && y < c.Bounds.Y + c.Bounds.Height);
+            if (cell is not null) _cellAtOffset[glyph.Offset] = cell;
+        }
         if (textGlyphs.Count < 2 || textGlyphs.Count(g => Math.Abs(g.AdvanceY) > Math.Abs(g.AdvanceX)) > textGlyphs.Count / 4)
         {
-            Glyphs = textGlyphs;
+            Glyphs = OrderTableCells(textGlyphs);
             return;
         }
         var lines = new List<Line>();
@@ -59,6 +71,27 @@ public sealed class PdfTextSelectionLayout
         }
         _paragraphGap = ParagraphGap([lines]);
         _hasHorizontalLayout = true;
+        // A diagram can contain several local columns inside one page column.
+        // Keep those runs for pointer selection without changing stored offsets
+        // or imposing a different reading order on the entire page.
+        foreach (var line in lines)
+        {
+            Line? run = null;
+            PdfTextGlyph? previous = null;
+            foreach (var glyph in line.Glyphs.OrderBy(g => g.Bounds.X))
+            {
+                if (run is null || previous is { } p
+                    && (glyph.Bounds.X - p.Bounds.X - p.Bounds.Width) * page.Width
+                        > (line.Bottom - line.Top) * page.Height * 1.25)
+                {
+                    run = new([]);
+                    _dragRuns.Add(run);
+                }
+                run.Add(glyph);
+                _dragRunAtOffset[glyph.Offset] = run;
+                previous = glyph;
+            }
+        }
         var segments = new List<Line>();
         var gutters = new List<(double Left, double Right)>();
         void AddGutter(double left, double right)
@@ -110,7 +143,7 @@ public sealed class PdfTextSelectionLayout
             .OrderByDescending(group => group.Length).FirstOrDefault();
         if (alignedGutters is not { Length: >= 2 })
         {
-            Glyphs = textGlyphs;
+            Glyphs = OrderTableCells(textGlyphs);
             return;
         }
         var split = (alignedGutters.Max(g => g.Left) + alignedGutters.Min(g => g.Right)) / 2;
@@ -132,9 +165,26 @@ public sealed class PdfTextSelectionLayout
             else band.Add(line);
         }
         Flush();
-        Glyphs = ordered;
+        Glyphs = OrderTableCells(ordered);
         _usesColumns = true;
         _paragraphGap = ParagraphGap(segments.GroupBy(l => l.Left >= split));
+    }
+
+    private IReadOnlyList<PdfTextGlyph> OrderTableCells(IReadOnlyList<PdfTextGlyph> glyphs)
+    {
+        if (_cellAtOffset.Count == 0) return glyphs;
+        var tableGlyphs = glyphs.Where(g => _cellAtOffset.ContainsKey(g.Offset))
+            .GroupBy(g => _cellAtOffset[g.Offset].Table).ToDictionary(g => g.Key, g => g
+                .OrderBy(glyph => _cellAtOffset[glyph.Offset].Bounds.Y)
+                .ThenBy(glyph => _cellAtOffset[glyph.Offset].Bounds.X).ThenBy(glyph => glyph.Offset).ToArray());
+        var emitted = new HashSet<PdfTableGrid>();
+        var result = new List<PdfTextGlyph>(glyphs.Count);
+        foreach (var glyph in glyphs)
+        {
+            if (!_cellAtOffset.TryGetValue(glyph.Offset, out var cell)) result.Add(glyph);
+            else if (emitted.Add(cell.Table)) result.AddRange(tableGlyphs[cell.Table]);
+        }
+        return result;
     }
 
     private static IReadOnlyList<PdfTextGlyph> ExcludeDottedRules(PdfPageContent page)
@@ -172,9 +222,61 @@ public sealed class PdfTextSelectionLayout
         .FirstOrDefault(i => Glyphs[i].Offset <= offset && Glyphs[i].Offset + Glyphs[i].Length > offset, -1);
 
     public IReadOnlyList<PdfTextRange> GetRanges(int start, int end)
+        => BuildRanges(Glyphs.Skip(Math.Max(0, start)).Take(Math.Max(0, end - start)));
+
+    /// <summary>Select an aligned local block without sweeping through adjacent diagram labels.</summary>
+    public IReadOnlyList<PdfTextRange> GetDragRanges(int anchor, int extent)
+    {
+        var start = Math.Min(anchor, extent);
+        var end = Math.Max(anchor, extent);
+        if (start >= 0 && end <= Glyphs.Count && start < end
+            && (_cellAtOffset.ContainsKey(Glyphs[start].Offset) || _cellAtOffset.ContainsKey(Glyphs[end - 1].Offset)))
+        {
+            if (_cellAtOffset.TryGetValue(Glyphs[start].Offset, out var firstCell)
+                && _cellAtOffset.TryGetValue(Glyphs[end - 1].Offset, out var lastCell)
+                && ReferenceEquals(firstCell.Table, lastCell.Table)
+                && Math.Abs(firstCell.Bounds.X - lastCell.Bounds.X) < 0.75 / _page.Width
+                && Math.Abs(firstCell.Bounds.Width - lastCell.Bounds.Width) < 0.75 / _page.Width)
+                return BuildRanges(Glyphs.Skip(start).Take(end - start).Where(g => _cellAtOffset.TryGetValue(g.Offset, out var cell)
+                    && ReferenceEquals(cell.Table, firstCell.Table)
+                    && Math.Abs(cell.Bounds.X - firstCell.Bounds.X) < 0.75 / _page.Width
+                    && Math.Abs(cell.Bounds.Width - firstCell.Bounds.Width) < 0.75 / _page.Width));
+            return GetRanges(start, end);
+        }
+        if (start < 0 || end > Glyphs.Count || start == end
+            || !_dragRunAtOffset.TryGetValue(Glyphs[start].Offset, out var first)
+            || !_dragRunAtOffset.TryGetValue(Glyphs[end - 1].Offset, out var last)
+            || ReferenceEquals(first, last)
+            || Math.Min(first.Right, last.Right) <= Math.Max(first.Left, last.Left)
+            || Math.Abs((first.Top + first.Bottom - last.Top - last.Bottom) / 2)
+                < Math.Max(first.Bottom - first.Top, last.Bottom - last.Top) * 0.8)
+            return GetRanges(start, end);
+
+        var top = Math.Min(first.Top, last.Top);
+        var bottom = Math.Max(first.Bottom, last.Bottom);
+        var left = Math.Min(first.Left, last.Left);
+        var right = Math.Max(first.Right, last.Right);
+        var rows = _dragRuns.Where(run => (run.Top + run.Bottom) / 2 >= top
+            && (run.Top + run.Bottom) / 2 <= bottom).ToArray();
+        var leftEdge = rows.Where(run => run.Right < left)
+            .Select(run => (run.Right + left) / 2).DefaultIfEmpty(double.NegativeInfinity).Max();
+        var rightEdge = rows.Where(run => run.Left > right)
+            .Select(run => (run.Left + right) / 2).DefaultIfEmpty(double.PositiveInfinity).Min();
+        // With no neighboring runs, ordinary multiline selection needs no clipping.
+        // A line spanning a proposed gutter is also evidence against a local block.
+        if (double.IsNegativeInfinity(leftEdge) && double.IsPositiveInfinity(rightEdge)
+            || rows.Any(run => run.Left < rightEdge && run.Right > leftEdge
+                && (run.Left < leftEdge || run.Right > rightEdge)))
+            return GetRanges(start, end);
+        var included = rows.Where(run => run.Left >= leftEdge && run.Right <= rightEdge)
+            .SelectMany(run => run.Glyphs).Select(glyph => glyph.Offset).ToHashSet();
+        return BuildRanges(Glyphs.Skip(start).Take(end - start).Where(glyph => included.Contains(glyph.Offset)));
+    }
+
+    private IReadOnlyList<PdfTextRange> BuildRanges(IEnumerable<PdfTextGlyph> glyphs)
     {
         var result = new List<PdfTextRange>();
-        foreach (var glyph in Glyphs.Skip(Math.Max(0, start)).Take(Math.Max(0, end - start)).OrderBy(g => g.Offset))
+        foreach (var glyph in glyphs.OrderBy(g => g.Offset))
         {
             if (result.Count > 0 && glyph.Offset >= result[^1].End
                 && string.IsNullOrWhiteSpace(_page.Text[result[^1].End..glyph.Offset]))
@@ -186,6 +288,13 @@ public sealed class PdfTextSelectionLayout
 
     public string GetText(IEnumerable<PdfTextRange> ranges) => GetText(ranges, detectParagraphs: false);
 
+    public string GetCopyText(IEnumerable<PdfTextRange> ranges)
+    {
+        var selected = ranges.ToArray();
+        var includesCells = _cellAtOffset.Keys.Any(offset => selected.Any(r => offset >= r.Start && offset < r.End));
+        return NormalizeCopy(GetText(selected), preserveLineBreaks: includesCells);
+    }
+
     /// <summary>Join visual line wraps while retaining geometric paragraph breaks.</summary>
     public string GetTranslationText(IEnumerable<PdfTextRange> ranges) =>
         NormalizeCopy(GetText(ranges, detectParagraphs: true));
@@ -193,7 +302,7 @@ public sealed class PdfTextSelectionLayout
     private string GetText(IEnumerable<PdfTextRange> ranges, bool detectParagraphs)
     {
         var selected = ranges.ToArray();
-        if (!_usesColumns && (!detectParagraphs || !_hasHorizontalLayout))
+        if (!_usesColumns && _cellAtOffset.Count == 0 && (!detectParagraphs || !_hasHorizontalLayout))
             return string.Join("\n", selected.Select(r => _page.Text[Math.Clamp(r.Start, 0, _page.Text.Length)..Math.Clamp(r.End, r.Start, _page.Text.Length)]));
         var builder = new StringBuilder();
         var sorted = selected.OrderBy(r => r.Start).ToArray();
@@ -205,18 +314,36 @@ public sealed class PdfTextSelectionLayout
             return index >= 0 && glyph.Offset < sorted[index].End;
         }
         PdfTextGlyph? previous = null;
+        PdfTextGlyph? exponentBase = null;
         foreach (var glyph in Glyphs.Where(Includes))
         {
+            var superscript = false;
             if (previous is { } p)
             {
+                var previousCell = _cellAtOffset.GetValueOrDefault(p.Offset);
+                var currentCell = _cellAtOffset.GetValueOrDefault(glyph.Offset);
+                var baseline = exponentBase ?? p;
+                // PDFium sometimes inserts a native line break before raised
+                // exponents. Keep their meaning and position inside the cell.
+                superscript = previousCell is not null && ReferenceEquals(previousCell, currentCell)
+                    && baseline.Length == 1 && char.IsAsciiDigit(_page.Text[baseline.Offset])
+                    && glyph.Length == 1 && char.IsAsciiDigit(_page.Text[glyph.Offset])
+                    && glyph.Bounds.Height < baseline.Bounds.Height * 0.85
+                    && glyph.Bounds.Y + glyph.Bounds.Height < baseline.Bounds.Y + baseline.Bounds.Height * 0.8
+                    && glyph.Bounds.X >= p.Bounds.X
+                    && (glyph.Bounds.X - p.Bounds.X - p.Bounds.Width) * _page.Width < baseline.Bounds.Height * _page.Height;
+                exponentBase = superscript ? baseline : null;
                 var sameLine = Math.Abs(p.Bounds.Y + p.Bounds.Height / 2 - glyph.Bounds.Y - glyph.Bounds.Height / 2)
                     < Math.Max(p.Bounds.Height, glyph.Bounds.Height) * 0.8;
                 var gapStart = p.Offset + p.Length;
                 var gap = glyph.Offset >= gapStart ? _page.Text[gapStart..glyph.Offset] : string.Empty;
-                if (sameLine && glyph.Bounds.X >= p.Bounds.X)
+                if (previousCell is not null && currentCell is not null && !ReferenceEquals(previousCell, currentCell))
+                    builder.Append(ReferenceEquals(previousCell.Table, currentCell.Table)
+                        && Math.Abs(previousCell.Bounds.Y - currentCell.Bounds.Y) < 0.75 / _page.Height ? '\t' : '\n');
+                else if (sameLine && glyph.Bounds.X >= p.Bounds.X)
                 {
-                    if (gap.Length > 0 && string.IsNullOrWhiteSpace(gap)
-                        || glyph.Offset != gapStart && (glyph.Bounds.X - p.Bounds.X - p.Bounds.Width) * _page.Width > Math.Max(p.Bounds.Height, glyph.Bounds.Height) * _page.Height * 0.3)
+                    if (!superscript && (gap.Length > 0 && string.IsNullOrWhiteSpace(gap)
+                        || glyph.Offset != gapStart && (glyph.Bounds.X - p.Bounds.X - p.Bounds.Width) * _page.Width > Math.Max(p.Bounds.Height, glyph.Bounds.Height) * _page.Height * 0.3))
                         builder.Append(' ');
                 }
                 else
@@ -225,19 +352,21 @@ public sealed class PdfTextSelectionLayout
                         || glyph.Bounds.Y - p.Bounds.Y > _paragraphGap
                         || detectParagraphs && (gap.Contains("\n\n", StringComparison.Ordinal)
                             || gap.Contains("\r\n\r\n", StringComparison.Ordinal));
-                    builder.Append(paragraph ? "\n\n" : "\n");
+                    builder.Append(previousCell is not null && ReferenceEquals(previousCell, currentCell) ? " " : paragraph ? "\n\n" : "\n");
                 }
             }
-            builder.Append(_page.Text.AsSpan(glyph.Offset, glyph.Length));
+            if (superscript) builder.Append("⁰¹²³⁴⁵⁶⁷⁸⁹"[_page.Text[glyph.Offset] - '0']);
+            else builder.Append(_page.Text.AsSpan(glyph.Offset, glyph.Length));
             previous = glyph;
         }
         return builder.ToString();
     }
 
-    public static string NormalizeCopy(string text)
+    public static string NormalizeCopy(string text, bool preserveLineBreaks = false)
     {
         text = text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\u00ad", "");
         text = Regex.Replace(text, @"(?<=[A-Za-z])-[ \t]*\n[ \t]*(?=[a-z])", "");
+        if (preserveLineBreaks) return text.Trim();
         return Regex.Replace(text, @"(?<=[^\n])\n(?=[^\n])", m =>
             IsCjk(text[m.Index - 1]) && IsCjk(text[m.Index + 1]) ? "" : " ").Trim();
     }

@@ -31,6 +31,17 @@ public sealed partial class NativePdfReaderHost
     private IReadOnlyList<Rect> GetSelectionBounds() => (_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
         .SelectMany(range => GetRangeBounds(_selectionPage, range.Start, range.End)).ToArray();
 
+    public IReadOnlyList<Rect> GetAnnotationBounds(ReaderAnnotation annotation)
+    {
+        if (!TryGetAnnotationAnchor(annotation, out var page, out _)) return [];
+        if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out _, out _)
+            && GetPdfPointPosition(annotation) is { } marker)
+            return [new Rect(marker.X - 10, marker.Y - 10, 20, 20)];
+        var transform = GetPageTransform(GetPageBounds(page));
+        return GetAnnotationLocalBounds(page, annotation)
+            .Select(rect => rect.TransformToAABB(transform)).ToArray();
+    }
+
     public void SelectAnnotation(Guid id)
     {
         var selected = _annotations.Any(item => item.Id == id) ? id : (Guid?)null;
@@ -868,19 +879,11 @@ public sealed partial class NativePdfReaderHost
         _pointerAnnotationHit = AnnotationAt(point)?.Id;
         _pointerLink = _pointerAnnotationHit is null ? LinkAt(point) : null;
         _pointerClickCount = e.ClickCount;
-        if (_pointerAnnotationHit is { } doubleHit && e.ClickCount >= 2)
-        {
-            Emit(new { type = "annotationClick", id = doubleHit });
-            _pointerStart = null;
-            _pointerAnnotationHit = null;
-            e.Handled = true;
-            return;
-        }
         _selectionPage = page;
         _anchorOffset = HitOffset(page, point, false, readingOrder: true);
         _pointerStart = point;
         _dragging = false;
-        if (_anchorOffset >= 0 && e.ClickCount >= 2 && PageContent is { } content)
+        if (_pointerAnnotationHit is null && _anchorOffset >= 0 && e.ClickCount >= 2 && PageContent is { } content)
         {
             var start = Math.Min(HitOffset(page, point, false), Math.Max(0, content.Text.Length - 1));
             var end = start;
@@ -912,7 +915,7 @@ public sealed partial class NativePdfReaderHost
                 var hit = HitOffset(_selectionPage, point, true, readingOrder: true);
                 if (hit >= 0 && _pages.TryGetValue(_selectionPage, out var selectedPage))
                 {
-                    _selectionRanges = selectedPage.SelectionLayout.GetRanges(Math.Min(_anchorOffset, hit), Math.Max(_anchorOffset, hit));
+                    _selectionRanges = selectedPage.SelectionLayout.GetDragRanges(_anchorOffset, hit);
                     _selectionStart = _selectionRanges.Count > 0 ? _selectionRanges.Min(r => r.Start) : 0;
                     _selectionEnd = _selectionRanges.Count > 0 ? _selectionRanges.Max(r => r.End) : 0;
                     InvalidateVisual();
@@ -960,6 +963,7 @@ public sealed partial class NativePdfReaderHost
         // Read the pending pick before releasing the capture: CaptureLost
         // clears it, since losing capture cancels the click.
         var annotationHit = _pointerAnnotationHit;
+        var clickCount = _pointerClickCount;
         var link = _pointerLink;
         _pointerLink = null;
         if (PdfAnnotTrace.Enabled) PdfAnnotTrace.Write($"release dragged={dragged} hit={annotationHit}");
@@ -970,6 +974,15 @@ public sealed partial class NativePdfReaderHost
         if (dragged) EmitSelection();
         else if (annotationHit is { } hitId)
         {
+            // Wait until release to distinguish a double-click from a drag
+            // beginning on an existing marking. Opening the editor on press
+            // steals capture and leaves no live text selection to copy.
+            if (clickCount >= 2)
+            {
+                Emit(new { type = "annotationClick", id = hitId });
+                e.Handled = true;
+                return;
+            }
             // Single click picks the highlight/underline so Delete (see
             // HandleReaderKey) or a right click can remove it.
             SelectAnnotation(hitId);
@@ -1099,6 +1112,11 @@ public sealed partial class NativePdfReaderHost
         _hoveredAnnotation = null;
         Emit(new { type = "annotationLeave" });
     }
+
+    internal string GetSelectedTextForCopy() =>
+        _pages.TryGetValue(_selectionPage, out var page)
+            ? page.SelectionLayout.GetCopyText(_selectionRanges ?? [new(_selectionStart, _selectionEnd)])
+            : string.Empty;
 
     internal string GetSelectedTextForTranslation() =>
         _pages.TryGetValue(_selectionPage, out var page)

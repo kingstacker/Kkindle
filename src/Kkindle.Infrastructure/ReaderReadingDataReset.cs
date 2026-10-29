@@ -35,7 +35,7 @@ internal static class ReaderReadingDataReset
         .FirstOrDefault();
 
     public static async Task<ReadingDataReset?> ReadAsync(
-        SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)
+        SqliteConnection connection, SqliteTransaction? transaction, CancellationToken cancellationToken)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -68,6 +68,12 @@ internal static class ReaderReadingDataReset
         command.Parameters.AddWithValue("$key", MetadataKey);
         command.Parameters.AddWithValue("$value", JsonSerializer.Serialize(reset));
         await command.ExecuteNonQueryAsync(cancellationToken);
+        using (var applied = connection.CreateCommand())
+        {
+            applied.Transaction = transaction;
+            applied.CommandText = "DELETE FROM ReaderReadingTimeRecoveryApplied;";
+            await applied.ExecuteNonQueryAsync(cancellationToken);
+        }
 
         // The generation replaces per-row deletions for a reset. Clear both
         // pre-reset journal entries and those produced by the DELETE triggers;
@@ -103,6 +109,7 @@ public sealed partial class ReaderDataService
             var reset = new ReadingDataReset(checked((previous?.Generation ?? 0) + 1), Guid.NewGuid());
             await ReaderReadingDataReset.ApplyAsync(connection, transaction, reset, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            if (CachedRecoveryContext is { } context) CachedRecoveryContext = context with { Reset = reset };
             NotifyDataChanged(LocalDataChangeKind.ReadingDataReset);
         }
         finally

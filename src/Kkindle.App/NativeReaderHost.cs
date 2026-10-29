@@ -96,6 +96,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private readonly Dictionary<string, int> _fragmentPagesByRequest = new(StringComparer.Ordinal);
     private string[] _navigationFragments = [];
+    private (ChapterLayout Layout, int Page, double ScrollOffset, string Fragment)? _navigationTarget;
     private int? _pendingRestoreOffset;
     private int? _pendingRestorePage;
     private double? _pendingRestoreRatio;
@@ -124,6 +125,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private int _annotationHoverBandsPage = -1;
     private ChapterLayout? _annotationHoverBandsLayout;
     private int _annotationHoverBandsVersion = -1;
+    private readonly Dictionary<Guid, (int Start, int End, string Signature)>
+        _annotationRanges = new();
+    private ChapterContent? _annotationRangesContent;
+    private int _annotationRangesVersion = -1;
     private List<(int Start, int Length)>? _searchHits;
     private int? _focusSearchHit;
     private (int Start, int Length)? _speechHighlight;
@@ -235,6 +240,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _relayoutTimer?.Stop();
         _viewportReadingAnchor = null;
         _viewportReadingState = null;
+        _navigationTarget = null;
         _preserveViewportPosition = false;
         StopSelectionAutoPageTurn();
         lock (_engineGate)
@@ -443,6 +449,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// <summary>Chapter-boundary positioning: the first page or the last full page.</summary>
     public void SeekToBoundary(bool toEnd)
     {
+        _navigationTarget = null;
         if (_layout is null || _layout.Pages.Count == 0)
         {
             _pendingSeekToEnd = toEnd;
@@ -468,6 +475,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public void ScrollToOffset(int offset)
     {
+        _navigationTarget = null;
         if (_layout is null)
         {
             _pendingRestoreOffset = offset;
@@ -507,6 +515,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public void ScrollToFragment(string fragmentId)
     {
+        _navigationTarget = null;
         fragmentId = NormalizeFragment(fragmentId);
         if (_layout is null)
         {
@@ -526,11 +535,18 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             page -= page % 2;
         }
 
-        if (page >= 0 && page != _pageIndex)
+        if (page >= 0)
         {
-            _pageIndex = page;
-            _bitmapDirty = true;
-            InvalidateVisual();
+            if (page != _pageIndex)
+            {
+                _pageIndex = page;
+                _bitmapDirty = true;
+                InvalidateVisual();
+            }
+            // The clicked heading may be below the first line or on the
+            // second sheet of this spread. Keep that explicit destination
+            // until the viewport moves, even if no physical page turn occurs.
+            _navigationTarget = (_layout, _pageIndex, _scrollOffset, fragmentId);
             EmitScroll();
         }
     }
@@ -542,6 +558,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// </summary>
     public void SeekToPixelScroll(double pixelScroll)
     {
+        _navigationTarget = null;
         if (IsScroll)
         {
             SetScrollOffset(pixelScroll);
@@ -563,6 +580,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public void SeekToRatio(double ratio)
     {
+        _navigationTarget = null;
         if (_layout is null || _layout.Pages.Count == 0)
         {
             return;
@@ -702,6 +720,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _annotations.Clear();
         _annotations.AddRange(annotations);
         _annotationsVersion++;
+        _annotationRanges.Clear();
+        _annotationRangesContent = _content;
+        _annotationRangesVersion = _annotationsVersion;
         _hoveredAnnotationId = null;
         _bitmapDirty = true;
         InvalidateVisual();
@@ -715,7 +736,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// </summary>
     public IReadOnlyList<Rect> GetAnnotationBounds(ReaderAnnotation annotation)
     {
-        if (_layout is null || annotation.EndOffset <= annotation.StartOffset)
+        if (_layout is null
+            || !TryGetAnnotationRange(annotation, out var start, out var end)
+            || end <= start)
             return [];
 
         var bounds = new List<Rect>();
@@ -723,8 +746,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         {
             var bands = _layout.GetOverlayRects(
                 pageIndex,
-                annotation.StartOffset,
-                annotation.EndOffset - annotation.StartOffset);
+                start,
+                end - start);
             var origin = PageOrigin(pageIndex);
             foreach (var band in bands)
             {
@@ -737,6 +760,261 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         return bounds;
+    }
+
+    /// <summary>
+    /// Resolves an annotation against the current chapter text. EPUB
+    /// annotations persist both an offset and a quote with surrounding
+    /// context; when the content has been reparsed or edited, the stored
+    /// offset may no longer identify the same passage. Prefer the exact
+    /// stored range, then a trimmed quote, then the quoted context, and
+    /// finally the nearest occurrence scored by the saved prefix/suffix.
+    /// </summary>
+    public bool TryGetAnnotationRange(
+        ReaderAnnotation annotation,
+        out int start,
+        out int end)
+    {
+        start = 0;
+        end = 0;
+        var content = _content;
+        if (content is null
+            || string.IsNullOrEmpty(content.BodyText)
+            || annotation is null)
+        {
+            return false;
+        }
+
+        if (!ReferenceEquals(_annotationRangesContent, content)
+            || _annotationRangesVersion != _annotationsVersion)
+        {
+            _annotationRanges.Clear();
+            _annotationRangesContent = content;
+            _annotationRangesVersion = _annotationsVersion;
+        }
+
+        var signature = AnnotationSignature(annotation);
+        if (_annotationRanges.TryGetValue(annotation.Id, out var cached)
+            && string.Equals(cached.Signature, signature, StringComparison.Ordinal))
+        {
+            start = cached.Start;
+            end = cached.End;
+            return end > start;
+        }
+
+        if (!TryResolveAnnotationRange(
+                content.BodyText,
+                annotation,
+                out start,
+                out end)
+            || end <= start)
+        {
+            return false;
+        }
+
+        _annotationRanges[annotation.Id] = (start, end, signature);
+        return true;
+    }
+
+    private static bool TryResolveAnnotationRange(
+        string body,
+        ReaderAnnotation annotation,
+        out int start,
+        out int end)
+    {
+        start = 0;
+        end = 0;
+        if (body.Length == 0) return false;
+
+        var originalStart = Math.Clamp(annotation.StartOffset, 0, body.Length);
+        var originalEnd = Math.Clamp(annotation.EndOffset, originalStart, body.Length);
+        var quote = annotation.SelectedText ?? string.Empty;
+        var leadingWhitespace = 0;
+        while (leadingWhitespace < quote.Length
+            && char.IsWhiteSpace(quote[leadingWhitespace]))
+        {
+            leadingWhitespace++;
+        }
+
+        var quoteEnd = quote.Length;
+        while (quoteEnd > leadingWhitespace
+            && char.IsWhiteSpace(quote[quoteEnd - 1]))
+        {
+            quoteEnd--;
+        }
+
+        var trimmedQuote = quote[leadingWhitespace..quoteEnd];
+
+        if (originalEnd > originalStart)
+        {
+            var originalText = body[originalStart..originalEnd];
+            if (string.Equals(
+                    originalText,
+                    quote,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                start = originalStart;
+                end = originalEnd;
+                return true;
+            }
+
+            if (trimmedQuote.Length > 0)
+            {
+                var originalLeading = 0;
+                while (originalLeading < originalText.Length
+                    && char.IsWhiteSpace(originalText[originalLeading]))
+                {
+                    originalLeading++;
+                }
+
+                var originalTrailing = originalText.Length;
+                while (originalTrailing > originalLeading
+                    && char.IsWhiteSpace(originalText[originalTrailing - 1]))
+                {
+                    originalTrailing--;
+                }
+
+                if (string.Equals(
+                        originalText[originalLeading..originalTrailing],
+                        trimmedQuote,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    start = originalStart + originalLeading;
+                    end = originalStart + originalTrailing;
+                    return true;
+                }
+            }
+        }
+
+        if (trimmedQuote.Length == 0)
+        {
+            if (originalEnd > originalStart)
+            {
+                start = originalStart;
+                end = originalEnd;
+                return true;
+            }
+
+            return false;
+        }
+
+        var prefix = annotation.Prefix ?? string.Empty;
+        if (prefix.Length > 72) prefix = prefix[^72..];
+        var suffix = annotation.Suffix ?? string.Empty;
+        if (suffix.Length > 72) suffix = suffix[..72];
+
+        var context = prefix + trimmedQuote + suffix;
+        var contextAt = body.IndexOf(context, StringComparison.OrdinalIgnoreCase);
+        if (contextAt >= 0)
+        {
+            var candidateStart = contextAt + prefix.Length;
+            if (MatchesAt(body, candidateStart, trimmedQuote))
+            {
+                start = candidateStart;
+                end = candidateStart + trimmedQuote.Length;
+                return true;
+            }
+        }
+
+        var bestAt = -1;
+        var bestScore = int.MinValue;
+        var bestDistance = int.MaxValue;
+        var searchAt = 0;
+        while (searchAt <= body.Length - trimmedQuote.Length)
+        {
+            var at = body.IndexOf(
+                trimmedQuote,
+                searchAt,
+                StringComparison.OrdinalIgnoreCase);
+            if (at < 0) break;
+
+            var beforeStart = Math.Max(0, at - 72);
+            var before = body[beforeStart..at];
+            var afterEnd = Math.Min(body.Length, at + trimmedQuote.Length + 72);
+            var after = body[(at + trimmedQuote.Length)..afterEnd];
+            var score = CommonSuffixLength(before, prefix)
+                + CommonPrefixLength(after, suffix);
+            var distance = Math.Abs(at - originalStart);
+            if (score > bestScore
+                || score == bestScore && distance < bestDistance)
+            {
+                bestAt = at;
+                bestScore = score;
+                bestDistance = distance;
+            }
+
+            searchAt = at + Math.Max(1, trimmedQuote.Length);
+        }
+
+        if (bestAt >= 0)
+        {
+            start = bestAt;
+            end = bestAt + trimmedQuote.Length;
+            return true;
+        }
+
+        if (originalEnd > originalStart)
+        {
+            start = originalStart;
+            end = originalEnd;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string AnnotationSignature(ReaderAnnotation annotation) =>
+        string.Join(
+            "\u001f",
+            annotation.StartOffset.ToString(CultureInfo.InvariantCulture),
+            annotation.EndOffset.ToString(CultureInfo.InvariantCulture),
+            annotation.SelectedText ?? string.Empty,
+            annotation.Prefix ?? string.Empty,
+            annotation.Suffix ?? string.Empty);
+
+    private static bool MatchesAt(string body, int at, string value) =>
+        at >= 0
+        && at + value.Length <= body.Length
+        && body.AsSpan(at, value.Length).Equals(
+            value.AsSpan(),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static int CommonPrefixLength(string left, string right)
+    {
+        var count = 0;
+        while (count < left.Length
+            && count < right.Length
+            && string.Compare(
+                left,
+                count,
+                right,
+                count,
+                1,
+                StringComparison.OrdinalIgnoreCase) == 0)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private static int CommonSuffixLength(string left, string right)
+    {
+        var count = 0;
+        while (count < left.Length
+            && count < right.Length
+            && string.Compare(
+                left,
+                left.Length - count - 1,
+                right,
+                right.Length - count - 1,
+                1,
+                StringComparison.OrdinalIgnoreCase) == 0)
+        {
+            count++;
+        }
+
+        return count;
     }
 
     public void SetSearchHighlights(List<(int Start, int Length)>? hits, int? focusIndex)
@@ -778,6 +1056,15 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     {
         if (_layout is null || _layout.Pages.Count == 0 || _content is null) return null;
 
+        if (_navigationTarget is { } target)
+        {
+            if (ReferenceEquals(target.Layout, _layout) && target.Page == _pageIndex
+                && Math.Abs(target.ScrollOffset - _scrollOffset) < 0.001
+                && _navigationFragments.Contains(target.Fragment, StringComparer.Ordinal))
+                return target.Fragment;
+            _navigationTarget = null;
+        }
+
         // Follow the leading visible text, including a partially scrolled
         // page. Later anchors on this page or the second page of a spread
         // must not move the TOC ahead of the reader.
@@ -818,6 +1105,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public bool RestoreContentPosition(ReaderContentPosition? position)
     {
+        _navigationTarget = null;
         if (_disposed || ReaderContentPosition.Validate(position) is not { } valid) return false;
         _pendingFragment = null;
         _pendingSeekToEnd = false;
@@ -1319,6 +1607,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private Task<bool> NavigateCore(string chapterPath, string? fragment, ViewportReadingAnchor? readingAnchor = null)
     {
+        _navigationTarget = null;
         _composePending = true;
         _relayoutTimer?.Stop();
         _viewportReadingAnchor = null;
@@ -1818,17 +2107,6 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             return EstimatePageCounts(
                 chapterPaths, settings, width, height, cancellationToken, null, knownChapter);
         }
-    }
-
-    private bool SameChapter(ReaderAnnotation annotation)
-    {
-        if (_content is null)
-        {
-            return false;
-        }
-
-        return annotation.EndOffset > annotation.StartOffset
-            && annotation.EndOffset <= Math.Max(1, _content.BodyText.Length);
     }
 
     private void ApplyPendingPosition()
@@ -2400,15 +2678,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var overlays = new List<TypesetAnnotationOverlay>();
         foreach (var annotation in _annotations)
         {
-            if (annotation.EndOffset <= annotation.StartOffset)
+            if (!TryGetAnnotationRange(annotation, out var start, out var end)
+                || end <= start)
             {
                 continue;
             }
 
             var bands = _layout.GetOverlayRects(
                 page.Index,
-                annotation.StartOffset,
-                annotation.EndOffset - annotation.StartOffset);
+                start,
+                end - start);
             if (bands.Count == 0)
             {
                 continue;
@@ -3115,15 +3394,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             var page = _layout.Pages[pageIndex];
             foreach (var candidate in _annotations)
             {
-                if (candidate.EndOffset <= candidate.StartOffset)
+                if (!TryGetAnnotationRange(candidate, out var start, out var end)
+                    || end <= start)
                 {
                     continue;
                 }
 
                 var rects = _layout.GetOverlayRects(
                     page.Index,
-                    candidate.StartOffset,
-                    candidate.EndOffset - candidate.StartOffset);
+                    start,
+                    end - start);
                 if (rects.Count > 0)
                 {
                     bands.Add((candidate, rects));

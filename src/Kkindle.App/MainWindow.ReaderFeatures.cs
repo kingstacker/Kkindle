@@ -333,14 +333,6 @@ public partial class MainWindow
                 await host.RestoreViewStateAsync(progress.Fragment, progress.ScrollPosition);
             token.ThrowIfCancellationRequested();
             host.Opacity = 1;
-            // The initial page message can precede both progress restoration
-            // and the library-to-reader layout. Show notes only after both settle.
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                token.ThrowIfCancellationRequested();
-                ReaderRoot.UpdateLayout();
-                ShowCurrentReaderPdfAnnotation();
-            }, DispatcherPriority.Loaded);
             RememberCurrentPdfPageText();
             SyncReaderPdfTocSelection();
             UpdateReaderToolbar();
@@ -382,7 +374,8 @@ public partial class MainWindow
         CancellationToken cancellationToken,
         bool saveProgress,
         bool syncTocSelection,
-        bool skipReloadWhenPageMatches = false)
+        Uri? destination = null,
+        bool preserveVerticalPosition = false)
     {
         if (syncTocSelection)
             CancelReaderPdfNavigation();
@@ -396,19 +389,16 @@ public partial class MainWindow
         HideReaderSelectionPopup();
         HideReaderAnnotationHoverPopup();
         var targetPage = Math.Clamp(page, 1, _readerPdfPages.Count);
-        var source = new Uri(_readerPdfSourcePath).AbsoluteUri + $"#page={targetPage}";
-        // Multiple outline entries can target different headings on this page;
-        // keep its current render and apply the destination scroll below.
-        var loaded = skipReloadWhenPageMatches && host.PageNumber == targetPage;
-        if (loaded) host.RememberNavigationPoint();
-        if (!loaded)
-        {
-            loaded = host.DisplayMode == PdfReaderDisplayMode.Continuous
-                ? await host.NavigateAsync(new Uri(source), cancellationToken)
-                : await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber),
-                    () => host.NavigateAsync(new Uri(source), cancellationToken), cancellationToken,
-                    animate: targetPage != host.PageNumber, holdOutgoingPage: true);
-        }
+        var source = destination ?? new Uri(new Uri(_readerPdfSourcePath).AbsoluteUri + $"#page={targetPage}");
+        // An outline can target the other page in the currently visible spread.
+        // Resolve its full destination without playing a spread-turn animation.
+        var sameSpread = host.DisplayMode == PdfReaderDisplayMode.TwoPage
+            && (targetPage - 1) / 2 == (host.PageNumber - 1) / 2;
+        var loaded = host.DisplayMode == PdfReaderDisplayMode.Continuous
+            ? await host.NavigateAsync(source, cancellationToken)
+            : await RunReaderContentTransitionAsync(host, host, Math.Sign(targetPage - host.PageNumber),
+                () => host.NavigateAsync(source, cancellationToken, preserveVerticalPosition: preserveVerticalPosition), cancellationToken,
+                animate: targetPage != host.PageNumber && !sameSpread, holdOutgoingPage: true);
         if (!loaded)
         {
             if (!string.IsNullOrWhiteSpace(host.LastError)) ReaderStatusText.Text = host.LastError;
@@ -425,7 +415,6 @@ public partial class MainWindow
         UpdateReaderToolbar();
         await UpdateReaderBookmarkIndicatorAsync();
         if (saveProgress) await SaveReaderProgressAsync(cancellationToken);
-        ShowCurrentReaderPdfAnnotation();
         return true;
     }
 
@@ -468,7 +457,7 @@ public partial class MainWindow
         if (_readerBookFile is not null && CurrentReaderHost is NativePdfReaderHost host)
         {
             host.SetAnnotations(ReaderAnnotations.ToArray());
-            Avalonia.Threading.Dispatcher.UIThread.Post(ShowCurrentReaderPdfAnnotation);
+            HideReaderAnnotationHoverPopup();
         }
         return Task.CompletedTask;
     }
@@ -481,24 +470,35 @@ public partial class MainWindow
         {
             return;
         }
-        var top = (CurrentReaderHost as NativePdfReaderHost)?.NavigationTop ?? 0;
+        var pdf = CurrentReaderHost as NativePdfReaderHost;
+        var top = pdf?.NavigationTop ?? 0;
         // Several outline entries can point at the same page and even the same
         // offset (e.g. "1 Features" and "3 Description" on a two-column
         // datasheet). Once the reader has followed an explicit click, keep that
-        // entry selected while its destination still covers the scroll position
-        // instead of falling back to the first entry of the page.
+        // entry selected at the position reached by the jump. Fit-to-page may
+        // clamp that position before the requested destination reaches the top.
         if (_readerPinnedTocTarget is { } pinnedTarget
             && _readerTocItems.FirstOrDefault(item =>
                 string.Equals(item.Target, pinnedTarget, StringComparison.OrdinalIgnoreCase)) is { } pinned
             && pinned.ChapterIndex == _readerChapterIndex
-            && NativePdfReaderHost.ReadTargetTop(new Uri(pinned.Target)) <= top + 0.02)
+            && _readerPinnedTocNavigationTop is { } landedTop && Math.Abs(top - landedTop) <= 0.02)
         {
             if (!ReferenceEquals((ReaderTocList.SelectedItem as ReaderTocRow)?.Item, pinned))
                 SetReaderTocSelection(pinned);
             return;
         }
         _readerPinnedTocTarget = null;
-        var current = _readerTocItems.Where(item => item.ChapterIndex < _readerChapterIndex
+        _readerPinnedTocNavigationTop = null;
+        // A whole page can fit without its first heading reaching the viewport
+        // top. In that case the first heading on the active page represents the
+        // spread; the right-hand page must not override the left-hand page.
+        var firstOnPage = pdf is { DisplayMode: not PdfReaderDisplayMode.Continuous, NavigationBottom: >= 0.98 }
+            && top <= 0.02
+            ? _readerTocItems.Where(item => item.ChapterIndex == _readerChapterIndex)
+                .OrderBy(item => NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)))
+                .ThenBy(item => item.Level).FirstOrDefault()
+            : null;
+        var current = firstOnPage ?? _readerTocItems.Where(item => item.ChapterIndex < _readerChapterIndex
             || item.ChapterIndex == _readerChapterIndex && NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)) <= top + 0.02)
             .OrderByDescending(item => item.ChapterIndex)
             .ThenByDescending(item => NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)))
@@ -1228,16 +1228,9 @@ public partial class MainWindow
                     }
                     finally { _readerWholeSearchGate.Release(); }
                 }, searchToken);
-                // The same visible excerpt can come from duplicate EPUB spine
-                // entries or legacy chunks with different paths/offsets. At this
-                // final presentation boundary, identical title + snippet means an
-                // identical user-facing result and must only be shown once.
                 var distinct = EpubReaderSearchPolicy
                     .FilterAndOrder(document, results)
                     .Select(result => new ReaderSearchResultViewModel(result, query))
-                    .DistinctBy(
-                        item => $"{item.Title}\u001f{item.Excerpt}",
-                        StringComparer.CurrentCultureIgnoreCase)
                         .ToArray();
                 foreach (var item in distinct)
                     pendingResults.Add(item);

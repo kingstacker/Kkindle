@@ -21,6 +21,8 @@ public partial class MainWindow
     private BookFile? _readerBookFile;
     private int _readerChapterIndex;
     private bool _readerShowingPreload;
+    private static readonly TimeSpan ReaderCloseCheckpointTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ReaderCloseHostStopTimeout = TimeSpan.FromSeconds(2);
     private CancellationTokenSource? _readerSessionCancellation;
     private CancellationTokenSource? _readerNavigationCancellation;
     private CancellationTokenSource? _readerPdfNavigationCancellation;
@@ -232,23 +234,9 @@ public partial class MainWindow
         if (_readerActiveHost is not null && !IsReaderHostTypeCompatible(_readerActiveHost))
         {
             CancelReaderChapterPreload();
-            _readerLoadedHostSources.Clear();
-            // Each format owns its rendering and text geometry.
-            ReaderActiveHostSlot.Content = null;
-            _readerActiveHost.NavigationStarting -= ReaderHost_NavigationStarting;
-            _readerActiveHost.NavigationCompleted -= ReaderHost_NavigationCompleted;
-            _readerActiveHost.WebMessageReceived -= ReaderHost_WebMessageReceived;
-            (_readerActiveHost as IDisposable)?.Dispose();
-            _readerActiveHost = null;
-            if (_readerPreloadHost is not null)
-            {
-                ReaderPreloadHostSlot.Content = null;
-                _readerPreloadHost.NavigationStarting -= ReaderHost_NavigationStarting;
-                _readerPreloadHost.NavigationCompleted -= ReaderHost_NavigationCompleted;
-                _readerPreloadHost.WebMessageReceived -= ReaderHost_WebMessageReceived;
-                (_readerPreloadHost as IDisposable)?.Dispose();
-                _readerPreloadHost = null;
-            }
+            // Each format owns its rendering and text geometry, so never reuse
+            // an EPUB surface for PDF content or the reverse.
+            ReleaseReaderHosts();
         }
 
         if (_readerActiveHost is null)
@@ -739,13 +727,7 @@ public partial class MainWindow
     {
         direction = Math.Sign(direction);
         if (direction == 0) return;
-        if (_readerIsPdf)
-        {
-            await MoveReaderPdfPositionAsync(direction);
-            return;
-        }
-
-        var currentIndex = GetCurrentReaderTocIndex();
+        var currentIndex = GetReaderFooterTocIndex();
         var targetIndex = currentIndex + direction;
         if (currentIndex < 0 || targetIndex < 0 || targetIndex >= _readerTocItems.Count)
         {
@@ -919,51 +901,118 @@ public partial class MainWindow
         Interlocked.Increment(ref _readerProgressSaveSequence);
         try
         {
-            CancelReaderTtsContinuation();
-            await _readerTts.StopAsync();
-            ReaderTtsPopup.IsOpen = false;
-        // Return-to-bookshelf is the authoritative checkpoint. Wait for a
-        // page turn and any side-panel reflow to settle, then read the native
-        // WebView position directly instead of trusting the last asynchronous
-        // bridge scroll event (which can still contain the chapter origin).
-        await _readerPageTurnGate.WaitAsync();
-        try
-        {
-            await _readerLayoutGate.WaitAsync();
             try
             {
-                if (!_readerIsPdf && CurrentReaderHost is { } currentHost)
-                    await UpdateReaderScrollStateAsync(currentHost);
+                CancelReaderTtsContinuation();
+                await _readerTts.StopAsync(ReaderCloseHostStopTimeout)
+                    .WaitAsync(ReaderCloseHostStopTimeout + TimeSpan.FromMilliseconds(500));
             }
-            finally
+            catch
             {
-                _readerLayoutGate.Release();
+                // A provider that ignores cancellation must not keep the
+                // reader surface alive after the user returns to the library.
             }
-            await SaveReaderProgressAsync(CancellationToken.None);
+            ReaderTtsPopup.IsOpen = false;
+
+            await SaveReaderCheckpointBeforeCloseAsync();
+            await SaveReaderPreferencesBeforeCloseAsync();
+
+            StopReaderStatsTimer();
+            // Reading time is accounted by the active-seconds flush (the stats
+            // timer), matching the WinUI reference: time only accrues while the
+            // window is active and the reader is visible.
+            try
+            {
+                var flush = FlushReaderActiveSecondsAsync();
+                try { await flush.WaitAsync(ReaderCloseCheckpointTimeout); }
+                catch (TimeoutException) { _ = ObserveLateReadingTimeFlushAsync(flush); }
+            }
+            catch (Exception exception)
+            {
+                await ShowMessageAsync(T("阅读时长保存失败"), T("阅读时长保存失败，请检查存储空间或文件权限：{0}", UiText.Localize(exception.Message)));
+            }
         }
         finally
         {
-            _readerPageTurnGate.Release();
+            try
+            {
+                await CleanupReaderAfterCloseAsync();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _readerCloseInProgress, 0);
+            }
         }
+    }
+
+    private async Task ObserveLateReadingTimeFlushAsync(Task flush)
+    {
+        try { await flush; }
+        catch (Exception exception)
+        {
+            if (!_lifetimeCancellation.IsCancellationRequested)
+                await ShowMessageAsync(T("阅读时长保存失败"), T("阅读时长保存失败，请检查存储空间或文件权限：{0}", UiText.Localize(exception.Message)));
+        }
+    }
+
+    private async Task SaveReaderCheckpointBeforeCloseAsync()
+    {
+        var pageTurnGateEntered = false;
+        var layoutGateEntered = false;
         try
         {
-            await _readerAppearanceSaveTask;
-            await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
+            // Return-to-bookshelf is the authoritative checkpoint. Wait for a
+            // page turn and side-panel reflow to settle, then read the native
+            // position directly instead of trusting a stale bridge event.
+            pageTurnGateEntered = await _readerPageTurnGate
+                .WaitAsync(ReaderCloseCheckpointTimeout);
+            if (!pageTurnGateEntered) return;
+
+            layoutGateEntered = await _readerLayoutGate
+                .WaitAsync(ReaderCloseCheckpointTimeout);
+            if (!layoutGateEntered) return;
+
+            if (!_readerIsPdf && CurrentReaderHost is { } currentHost)
+            {
+                await UpdateReaderScrollStateAsync(currentHost)
+                    .WaitAsync(ReaderCloseCheckpointTimeout);
+            }
+
+            await SaveReaderProgressAsync(CancellationToken.None)
+                .WaitAsync(ReaderCloseCheckpointTimeout);
+        }
+        catch
+        {
+            // Progress capture is best effort. A broken host or a locked
+            // database must not skip UI restoration and resource disposal.
+        }
+        finally
+        {
+            if (layoutGateEntered) _readerLayoutGate.Release();
+            if (pageTurnGateEntered) _readerPageTurnGate.Release();
+        }
+    }
+
+    private async Task SaveReaderPreferencesBeforeCloseAsync()
+    {
+        try
+        {
+            await _readerAppearanceSaveTask.WaitAsync(ReaderCloseCheckpointTimeout);
+            await SaveCurrentReaderPreferencesAsync(CancellationToken.None)
+                .WaitAsync(ReaderCloseCheckpointTimeout);
         }
         catch
         {
             // Returning to the bookshelf must still complete if the settings
             // file is temporarily unavailable.
         }
-        StopReaderStatsTimer();
-        // Reading time is accounted by the active-seconds flush (the stats
-        // timer), matching the WinUI reference: time only accrues while the
-        // window is active and the reader is visible.
-        await FlushReaderActiveSecondsAsync();
+    }
+
+    private async Task CleanupReaderAfterCloseAsync()
+    {
         ExitReaderZenMode();
         Interlocked.Exchange(ref _readerPendingKeyboardNavigation, 0);
         CancelReaderChapterPreload();
-        _readerLoadedHostSources.Clear();
         _readerNavigationCancellation?.Cancel();
         _readerNavigationCancellation?.Dispose();
         _readerNavigationCancellation = null;
@@ -982,17 +1031,7 @@ public partial class MainWindow
         _readerAiCancellation?.Cancel();
         _readerAiCancellation?.Dispose();
         _readerAiCancellation = null;
-        _readerActiveHost?.Stop();
-        _readerPreloadHost?.Stop();
-        if (_readerActiveHost is NativePdfReaderHost pdfHost)
-        {
-            ReaderActiveHostSlot.Content = null;
-            pdfHost.NavigationStarting -= ReaderHost_NavigationStarting;
-            pdfHost.NavigationCompleted -= ReaderHost_NavigationCompleted;
-            pdfHost.WebMessageReceived -= ReaderHost_WebMessageReceived;
-            pdfHost.Dispose();
-            _readerActiveHost = null;
-        }
+        ReleaseReaderHosts();
         ReaderRoot.IsVisible = false;
         LibraryRoot.IsVisible = true;
         WindowBrandText.IsVisible = false;
@@ -1044,16 +1083,62 @@ public partial class MainWindow
         _readerPendingSelectionEndOffset = 0;
         _readerPendingSelectionPrefix = string.Empty;
         _readerPendingSelectionSuffix = string.Empty;
-        await RefreshReadingMaterialsIfDirtyAsync();
+        try
+        {
+            await RefreshReadingMaterialsIfDirtyAsync()
+                .WaitAsync(ReaderCloseCheckpointTimeout);
+        }
+        catch
+        {
+            // A refresh failure must not leave the cleared reader session tied
+            // to the library or prevent the window from becoming usable.
+        }
         _readerDocument = null;
         _readerBookCard = null;
         _readerBookFile = null;
-        await Task.CompletedTask;
-        }
-        finally
+    }
+
+    private void ReleaseReaderHosts()
+    {
+        var activeHost = _readerActiveHost;
+        var preloadHost = _readerPreloadHost;
+        _readerActiveHost = null;
+        _readerPreloadHost = null;
+        _readerShowingPreload = false;
+        _readerLoadedHostSources.Clear();
+
+
+        // Clear both visual slots before disposing. The active and preload
+        // references can point at the same host in tests or diagnostic
+        // configurations; releasing the active slot alone would leave the
+        // second ContentControl holding a disposed view.
+        ReaderActiveHostSlot.Content = null;
+        ReaderPreloadHostSlot.Content = null;
+        ReleaseReaderHost(activeHost, ReaderActiveHostSlot);
+        if (!ReferenceEquals(activeHost, preloadHost))
+            ReleaseReaderHost(preloadHost, ReaderPreloadHostSlot);
+    }
+
+    private void ReleaseReaderHost(IReaderHost? host, ContentControl slot)
+    {
+        if (host is null)
         {
-            Interlocked.Exchange(ref _readerCloseInProgress, 0);
+            slot.Content = null;
+            return;
         }
+
+        try { host.Stop(); }
+        catch { }
+        try
+        {
+            host.NavigationStarting -= ReaderHost_NavigationStarting;
+            host.NavigationCompleted -= ReaderHost_NavigationCompleted;
+            host.WebMessageReceived -= ReaderHost_WebMessageReceived;
+        }
+        catch { }
+        slot.Content = null;
+        try { host.Dispose(); }
+        catch { }
     }
 
     private async Task SaveReaderProgressAsync(CancellationToken cancellationToken)
@@ -1073,9 +1158,7 @@ public partial class MainWindow
                 CalculateReaderProgressPercent(),
                 0,
                 DateTimeOffset.UtcNow);
-            try { await _readerData.SaveProgressAsync(pdfProgress, cancellationToken); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-            catch { }
+            await _readerProgressRecovery.SaveAsync(pdfProgress, cancellationToken);
             return;
         }
 
@@ -1113,17 +1196,7 @@ public partial class MainWindow
             ContentPosition = contentPosition
         };
 
-        try
-        {
-            await _readerData.SaveProgressAsync(progress, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch
-        {
-            // Progress is best-effort and must not make a readable chapter fail.
-        }
+        await _readerProgressRecovery.SaveAsync(progress, cancellationToken);
     }
 
     private static bool UriEquals(Uri? left, Uri right) =>

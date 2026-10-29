@@ -6,7 +6,18 @@ namespace Kkindle.Tests;
 public sealed class EpubReaderSearchPolicyTests
 {
     [Fact]
-    public void FiltersNonNavigationSpinePagesAndOrdersRemainingHits()
+    public void EqualExcerptsAtDifferentLocationsAreNotDuplicates()
+    {
+        var book = Guid.NewGuid();
+        var file = Guid.NewGuid();
+        var first = CreateChunk(book, file, 1, 0, 0, "同一章");
+        var second = CreateChunk(book, file, 1, 1, 300, "同一章");
+        var actual = ReaderDataService.DeduplicateSearchResults([first, second], "搜索命中", ["搜索命中"], 10);
+        Assert.Equal(2, actual.Count);
+    }
+
+    [Fact]
+    public void IncludesSpinePagesWithoutNavigationEntriesAndOrdersHits()
     {
         var chapters = Enumerable.Range(0, 6)
             .Select(index => Path.GetFullPath(Path.Combine(
@@ -35,10 +46,9 @@ public sealed class EpubReaderSearchPolicyTests
         var actual = EpubReaderSearchPolicy.FilterAndOrder(document, candidates);
 
         Assert.Equal(
-            ["序幕", "序幕", "第一章"],
+            ["前言", "序幕", "序幕", "第一章"],
             actual.Select(chunk => chunk.ChapterTitle));
-        Assert.Equal([0, 2, 1], actual.Select(chunk => chunk.ChunkIndex));
-        Assert.DoesNotContain(actual, chunk => chunk.ChapterIndex == 2);
+        Assert.Equal([0, 0, 2, 1], actual.Select(chunk => chunk.ChunkIndex));
     }
 
     [Fact]
