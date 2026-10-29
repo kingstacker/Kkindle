@@ -63,7 +63,16 @@ public partial class MainWindow
                 && (!_readerIsPdf || item.Fragment == pdfSelectionFragment))
             : null;
         var existing = _selectedReaderAnnotation ?? exact;
-        var annotation = existing ?? new ReaderAnnotation
+        // Never mutate the live list until the database write succeeds.
+        var annotation = existing is not null ? new ReaderAnnotation
+        {
+            Id = existing.Id, BookId = existing.BookId, BookFileId = existing.BookFileId,
+            ChapterPath = existing.ChapterPath, Fragment = existing.Fragment,
+            StartOffset = existing.StartOffset, EndOffset = existing.EndOffset,
+            SelectedText = existing.SelectedText, Prefix = existing.Prefix, Suffix = existing.Suffix,
+            Color = existing.Color, UnderlineStyle = existing.UnderlineStyle, Note = existing.Note,
+            CreatedAt = existing.CreatedAt, UpdatedAt = existing.UpdatedAt
+        } : new ReaderAnnotation
         {
             BookId = _readerBookCard.Book.Id,
             BookFileId = _readerBookFile.Id,

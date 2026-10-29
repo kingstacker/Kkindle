@@ -139,6 +139,8 @@ public interface IMetadataService
 public interface IKindleDeviceService
 {
     Task<IReadOnlyList<KindleDevice>> DetectDevicesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<KindleBook>> GetCachedBooksAsync(KindleDevice device, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<KindleBook>>([]);
     Task<IReadOnlyList<KindleBook>> ScanBooksAsync(KindleDevice device, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(
         KindleDevice device,

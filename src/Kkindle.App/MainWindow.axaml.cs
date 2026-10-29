@@ -67,6 +67,8 @@ public partial class MainWindow : Window
     private DispatcherTimer? _crossProcessDataRefreshTimer;
     private DateTime _lastInProcessDataChangeUtc = DateTime.MinValue;
     private bool _crossProcessRefreshBusy;
+    private bool _crossProcessRefreshNeedsSync;
+    private readonly SemaphoreSlim _bookMetadataSaveGate = new(1, 1);
 
     private readonly AppPaths _paths;
     private readonly string _rootConfigurationDirectory;
@@ -75,6 +77,7 @@ public partial class MainWindow : Window
     private readonly ReaderFormatCacheService _readerFormatCache;
     private readonly DoubanMetadataService _douban;
     private readonly IKindleDeviceService? _kindle;
+    private IDeviceChangeNotifier? _deviceChangeNotifier;
     private readonly DeviceModelStore _deviceModelStore;
     private readonly KindleDeviceAuxiliaryCacheStore _kindleAuxiliaryCacheStore;
     private readonly ISecretProtector _secretProtector;
@@ -85,6 +88,7 @@ public partial class MainWindow : Window
     private readonly DictionaryService _dictionaryService;
     private readonly ReaderDataService _readerData;
     private readonly ReaderProgressRecoveryService _readerProgressRecovery;
+    private readonly ReaderReadingTimeRecoveryService _readerReadingTimeRecovery;
     private readonly EpubBookContentService _bookContent;
     private readonly EmbeddingModelDownloadService _embeddingModelDownloader;
     private readonly G2PWModelDownloadService _g2pwModelDownloader;
@@ -147,6 +151,8 @@ public partial class MainWindow : Window
     private readonly HashSet<BookCardViewModel> _pdfCoverRequests = [];
     private TaskCompletionSource<bool>? _confirmationCompletion;
     private TaskCompletionSource<BookRemovalChoice>? _bookRemovalCompletion;
+    private TaskCompletionSource<DeviceDuplicateChoice>? _deviceDuplicateCompletion;
+    private enum DeviceDuplicateChoice { Cancel, Skip, SendAll }
     private enum BookRemovalChoice { Cancel, MoveToTrash }
     private TaskCompletionSource<string?>? _collectionNameCompletion;
     private TaskCompletionSource<bool>? _messageCompletion;
@@ -216,6 +222,7 @@ public partial class MainWindow : Window
         _dictionaryService = new DictionaryService(paths, _formatConverter);
         _readerData = new ReaderDataService(paths);
         _readerProgressRecovery = new ReaderProgressRecoveryService(paths, _readerData);
+        _readerReadingTimeRecovery = new ReaderReadingTimeRecoveryService(paths, _readerData);
         _bookContent = new EpubBookContentService(_readerData);
         _embeddingModelDownloader = new EmbeddingModelDownloadService(paths);
         _g2pwModelDownloader = new G2PWModelDownloadService(
@@ -468,6 +475,7 @@ public partial class MainWindow : Window
         InitializeDeviceShelfControls();
         UpdateLibraryUi();
         ConfigureStage3Timer();
+        Opened += (_, _) => InitializeDeviceChangeNotifier(services?.CreateDeviceChangeNotifier);
         SetEjectButtonsEnabled(false);
         Opened += (_, _) => EnsureInteractiveControlToolTips();
         BookGrid.TemplateApplied += (_, _) => AttachBookGridAutoHideScrollbar();
@@ -953,7 +961,17 @@ public partial class MainWindow : Window
     // library. A subsequent native close on the library exits the application.
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
     {
-        if (_allowWindowCloseForPendingUpdate || _allowWindowCloseForS3Sync) return;
+        if (_backupImportInProgress)
+        {
+            e.Cancel = true;
+            SetTaskStatus(T("备份正在导入，请等待完成后再退出。"));
+            return;
+        }
+        if (_allowWindowCloseForPendingUpdate || _allowWindowCloseForS3Sync)
+        {
+            DisposeDeviceChangeNotifier();
+            return;
+        }
         if (ReaderRoot.IsVisible || Volatile.Read(ref _readerCloseInProgress) != 0)
         {
             e.Cancel = true;
@@ -982,6 +1000,7 @@ public partial class MainWindow : Window
             _s3SyncExitInProgress = true;
             _ = CompleteWindowCloseAfterS3SyncAsync();
         }
+        if (!e.Cancel) DisposeDeviceChangeNotifier();
     }
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
@@ -1005,6 +1024,8 @@ public partial class MainWindow : Window
         UiText.LanguageChanged -= MainWindowLanguageChanged;
         UiText.LanguageChanged -= TrayLanguageChanged;
         _stage3Timer.Stop();
+        _deviceChangeDebounceTimer.Stop();
+        DisposeDeviceChangeNotifier();
         _s3SyncTimer.Stop();
         StopS3SyncIndicatorAnimation();
         StopReaderAiThinkingAnimation();
@@ -1035,6 +1056,8 @@ public partial class MainWindow : Window
         _confirmationCompletion = null;
         _bookRemovalCompletion?.TrySetResult(BookRemovalChoice.Cancel);
         _bookRemovalCompletion = null;
+        _deviceDuplicateCompletion?.TrySetResult(DeviceDuplicateChoice.Cancel);
+        _deviceDuplicateCompletion = null;
         _importFormatSelectionCompletion?.TrySetResult(null);
         _importFormatSelectionCompletion = null;
         _importConflictCompletion?.TrySetResult(ImportConflictResolution.Skip);
@@ -1140,10 +1163,11 @@ public partial class MainWindow : Window
         if (_lifetimeCancellation.IsCancellationRequested || _s3SyncBusy) return;
         Dispatcher.UIThread.Post(() =>
         {
-            if (_lifetimeCancellation.IsCancellationRequested
-                || _s3SyncBusy
-                || DateTime.UtcNow - _lastInProcessDataChangeUtc < TimeSpan.FromSeconds(2))
-                return;
+            if (_lifetimeCancellation.IsCancellationRequested || _s3SyncBusy) return;
+            // A notification near one of our own writes might still be from
+            // another process. Always refresh the shelf, but don't turn our
+            // own delayed WAL notifications into another sync.
+            _crossProcessRefreshNeedsSync |= DateTime.UtcNow - _lastInProcessDataChangeUtc >= TimeSpan.FromSeconds(2);
             _crossProcessDataRefreshTimer?.Stop();
             _crossProcessDataRefreshTimer?.Start();
         }, DispatcherPriority.Background);
@@ -1152,13 +1176,20 @@ public partial class MainWindow : Window
     private async void CrossProcessDataRefreshTimer_Tick(object? sender, EventArgs e)
     {
         _crossProcessDataRefreshTimer?.Stop();
-        if (_crossProcessRefreshBusy || _s3SyncBusy || _lifetimeCancellation.IsCancellationRequested) return;
+        if (_lifetimeCancellation.IsCancellationRequested) return;
+        if (_crossProcessRefreshBusy || _s3SyncBusy)
+        {
+            _crossProcessDataRefreshTimer?.Start();
+            return;
+        }
+        var needsSync = _crossProcessRefreshNeedsSync;
+        _crossProcessRefreshNeedsSync = false;
         _crossProcessRefreshBusy = true;
         try
         {
             await RefreshLibraryAsync();
             await RefreshCollectionsAsync();
-            HandleLocalDataChanged(LocalDataChangeKind.Library);
+            if (needsSync) HandleLocalDataChanged(LocalDataChangeKind.Library);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -2362,6 +2393,11 @@ public partial class MainWindow : Window
             try { await WaitForS3SyncAsync(_lifetimeCancellation.Token); }
             catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { return; }
         }
+        if (_backupImportInProgress || _readerCloseInProgress != 0 || _bookOpenInProgress > 0)
+        {
+            SetTaskStatus(T("正在处理书籍或导入备份，请稍后再打开书籍。"));
+            return;
+        }
         if (_readingDataResetBusy)
         {
             SetTaskStatus(T("阅读数据正在重置，请稍后再打开书籍。"));
@@ -3101,10 +3137,14 @@ public partial class MainWindow : Window
         var choice = await ConfirmBookRemovalAsync(T("选中的 {0} 本书将从书库移除并移入回收站，可恢复。", cards.Count));
         if (choice == BookRemovalChoice.Cancel) return;
 
+        var deletedIds = new HashSet<Guid>();
         try
         {
             foreach (var card in cards)
+            {
                 await _library.DeleteAsync(card.Book.Id, _lifetimeCancellation.Token);
+                deletedIds.Add(card.Book.Id);
+            }
             ClearSelectedBook();
             ClearBookMultiSelection();
             await RefreshLibraryAsync();
@@ -3114,8 +3154,20 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetTaskStatus(T("批量删除失败：{0}", UiText.Localize(exception.Message)));
-            await ShowMessageAsync(T("无法删除书籍"), UiText.Localize(exception.Message));
+            if (deletedIds.Count > 0)
+            {
+                _selectedBookIds.ExceptWith(deletedIds);
+                if (_selectedCard is not null && deletedIds.Contains(_selectedCard.Book.Id)) ClearSelectedBook();
+                try { await RefreshLibraryAsync(); }
+                catch (Exception refreshException) { Debug.WriteLine($"Library refresh after partial deletion failed: {refreshException}"); }
+                UpdateMultiSelectionUi();
+            }
+            if (_lifetimeCancellation.IsCancellationRequested) return;
+            var message = deletedIds.Count > 0
+                ? T("已将 {0} 本书移入回收站，剩余书籍未删除：{1}", deletedIds.Count, UiText.Localize(exception.Message))
+                : UiText.Localize(exception.Message);
+            SetTaskStatus(T("批量删除失败：{0}", message));
+            await ShowMessageAsync(T("无法删除书籍"), message);
         }
     }
 
@@ -3148,14 +3200,20 @@ public partial class MainWindow : Window
 
     private async Task ToggleFavoriteAsync(BookCardViewModel card)
     {
-        card.Book.IsFavorite = !card.Book.IsFavorite;
-        await SaveBookMetadataAsync(card, card.Book.IsFavorite ? T("已加入收藏。") : T("已取消收藏。"));
+        await SaveBookMetadataAsync(card, book =>
+        {
+            book.IsFavorite = !book.IsFavorite;
+            return book.IsFavorite ? T("已加入收藏。") : T("已取消收藏。");
+        });
     }
 
     private async Task UpdateReadingStatusAsync(BookCardViewModel card, LibraryReadingStatus status)
     {
-        card.Book.ReadingStatus = status;
-        await SaveBookMetadataAsync(card, T("已标记为“{0}”。", GetReadingStatusName(status)));
+        await SaveBookMetadataAsync(card, book =>
+        {
+            book.ReadingStatus = status;
+            return T("已标记为“{0}”。", GetReadingStatusName(status));
+        });
     }
 
     private async Task ToggleBookCollectionAsync(BookCardViewModel card, BookCollectionFolderViewModel folder)
@@ -3176,17 +3234,27 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task SaveBookMetadataAsync(BookCardViewModel card, string successMessage)
+    private async Task SaveBookMetadataAsync(BookCardViewModel card, Func<Book, string> applyChanges)
     {
+        var entered = false;
         try
         {
-            await _library.UpdateMetadataAsync(card.Book, _lifetimeCancellation.Token);
+            await _bookMetadataSaveGate.WaitAsync(_lifetimeCancellation.Token);
+            entered = true;
+            var book = await _library.GetBookAsync(card.Book.Id, _lifetimeCancellation.Token)
+                ?? throw new InvalidOperationException(T("书籍已不存在。"));
+            var successMessage = applyChanges(book);
+            await _library.UpdateMetadataAsync(book, _lifetimeCancellation.Token);
             await RefreshLibraryAsync();
             SetTaskStatus(successMessage);
         }
         catch (Exception exception)
         {
             SetTaskStatus(T("保存书籍信息失败：{0}", UiText.Localize(exception.Message)));
+        }
+        finally
+        {
+            if (entered) _bookMetadataSaveGate.Release();
         }
     }
 
@@ -3900,7 +3968,7 @@ public partial class MainWindow : Window
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (allowDiagnosticAutoConfirm && Environment.GetEnvironmentVariable("KKINDLE_SEND_DIAG") == "1") return true;
-        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null)
+        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null || _deviceDuplicateCompletion is not null)
         {
             PdfAnnotTrace.Write($"ConfirmAsync busy: confirmation={_confirmationCompletion is not null} bookRemoval={_bookRemovalCompletion is not null} title={title}");
             return false;
@@ -3933,7 +4001,7 @@ public partial class MainWindow : Window
 
     private async Task<BookRemovalChoice> ConfirmBookRemovalAsync(string message)
     {
-        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null)
+        if (_confirmationCompletion is not null || _bookRemovalCompletion is not null || _deviceDuplicateCompletion is not null)
             return BookRemovalChoice.Cancel;
         ConfirmationTitleText.Text = T("从书库移除书籍");
         ConfirmationMessageText.Text = message;
@@ -4026,6 +4094,11 @@ public partial class MainWindow : Window
     private void CompleteConfirmation(bool confirmed)
     {
         ConfirmationOverlay.IsVisible = false;
+        if (_deviceDuplicateCompletion is { } duplicate)
+        {
+            duplicate.TrySetResult(confirmed ? DeviceDuplicateChoice.Skip : DeviceDuplicateChoice.Cancel);
+            return;
+        }
         if (_bookRemovalCompletion is { } bookRemoval)
         {
             bookRemoval.TrySetResult(confirmed ? BookRemovalChoice.MoveToTrash : BookRemovalChoice.Cancel);
@@ -5228,21 +5301,37 @@ public partial class MainWindow : Window
     }
 
     private async void SaveDetailsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => await SaveDetailsAsync();
+
+    private async Task SaveDetailsAsync()
     {
         if (_selectedCard is null) return;
-        var book = _selectedCard.Book;
-        book.Title = string.IsNullOrWhiteSpace(DetailTitleText.Text) ? book.Title : DetailTitleText.Text.Trim();
-        book.Authors = string.IsNullOrWhiteSpace(DetailAuthorsText.Text) ? book.Authors : DetailAuthorsText.Text.Trim();
-        book.Tags = DetailTagsBox.Text?.Trim() ?? string.Empty;
-        book.Category = DetailCategoryBox.Text?.Trim() ?? string.Empty;
-        book.Description = DetailDescriptionBox.Text?.Trim();
-        book.Series = DetailSeriesBox.Text?.Trim();
-        book.Publisher = DetailPublisherBox.Text?.Trim();
-        book.PublishDate = DetailPublishDateBox.Text?.Trim();
-        book.Isbn = DetailIsbnBox.Text?.Trim();
-        book.PageCount = DetailPageCountBox.Text?.Trim();
-        book.Binding = DetailBindingBox.Text?.Trim();
-        await SaveBookMetadataAsync(_selectedCard, T("书籍信息已保存。"));
+        var title = DetailTitleText.Text?.Trim();
+        var authors = DetailAuthorsText.Text?.Trim();
+        var tags = DetailTagsBox.Text?.Trim() ?? string.Empty;
+        var category = DetailCategoryBox.Text?.Trim() ?? string.Empty;
+        var description = DetailDescriptionBox.Text?.Trim();
+        var series = DetailSeriesBox.Text?.Trim();
+        var publisher = DetailPublisherBox.Text?.Trim();
+        var publishDate = DetailPublishDateBox.Text?.Trim();
+        var isbn = DetailIsbnBox.Text?.Trim();
+        var pageCount = DetailPageCountBox.Text?.Trim();
+        var binding = DetailBindingBox.Text?.Trim();
+        await SaveBookMetadataAsync(_selectedCard, book =>
+        {
+            if (!string.IsNullOrWhiteSpace(title)) book.Title = title;
+            if (!string.IsNullOrWhiteSpace(authors)) book.Authors = authors;
+            book.Tags = tags;
+            book.Category = category;
+            book.Description = description;
+            book.Series = series;
+            book.Publisher = publisher;
+            book.PublishDate = publishDate;
+            book.Isbn = isbn;
+            book.PageCount = pageCount;
+            book.Binding = binding;
+            return T("书籍信息已保存。");
+        });
     }
 
     private async void DoubanMatchButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -5256,6 +5345,12 @@ public partial class MainWindow : Window
 
     private void ConfirmationOkButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => CompleteConfirmation(true);
+
+    private void ConfirmationAlternativeButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        ConfirmationOverlay.IsVisible = false;
+        _deviceDuplicateCompletion?.TrySetResult(DeviceDuplicateChoice.SendAll);
+    }
 
     private void CollectionNameCancelButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => CompleteCollectionName(null);

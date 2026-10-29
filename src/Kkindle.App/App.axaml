@@ -525,7 +525,7 @@
             <Setter Property="SelectionForegroundBrush" Value="{DynamicResource PaperBrush}" />
         </Style>
         <Style Selector="TextBox:focus">
-            <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
         <!-- Fluent fades placeholders to half opacity. The palette already
              supplies a muted ink, so a second fade makes night fields illegible. -->
@@ -535,7 +535,7 @@
         <!-- Fluent replaces the template border thickness on focus. Override
              that inner state as well so typing never draws a rectangle. -->
         <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
-            <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
         <!-- The native reflection editor draws the formatted text behind a
@@ -1704,7 +1704,8 @@
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
         </Style>
 
-        <!-- Monochrome capsule switches share the reader settings' dimensions. -->
+        <!-- Settings use a minimal monochrome line and dot rather than a
+             capsule, keeping Fluent's accent colour out of the control. -->
         <Style Selector="ToggleSwitch">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
@@ -1712,15 +1713,14 @@
             <Setter Property="IsThreeState" Value="False" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Grid ColumnDefinitions="36" MinHeight="28" Background="Transparent">
-                        <Border x:Name="SwitchTrack" Width="34" Height="20" CornerRadius="10"
-                                Background="{TemplateBinding Background}" VerticalAlignment="Center">
-                            <Grid x:Name="PART_MovingKnobs" Margin="3">
-                                <Border x:Name="SwitchThumb" Width="14" Height="14"
-                                        Background="{DynamicResource PaperBrush}" CornerRadius="7"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" />
-                            </Grid>
-                        </Border>
+                    <Grid ColumnDefinitions="24" MinHeight="24" Background="Transparent">
+                        <Border x:Name="SwitchTrack" Width="20" Height="1"
+                                Background="{TemplateBinding Background}" VerticalAlignment="Center" />
+                        <Grid x:Name="PART_MovingKnobs">
+                            <Border x:Name="SwitchThumb" Width="10" Height="10"
+                                    Background="#B0B0B0" CornerRadius="5"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        </Grid>
                     </Grid>
                 </ControlTemplate>
             </Setter>
@@ -1731,12 +1731,13 @@
         </Style>
         <Style Selector="ToggleSwitch:checked /template/ Border#SwitchThumb">
             <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="Background" Value="{DynamicResource InkBrush}" />
         </Style>
         <Style Selector="ToggleSwitch:disabled">
             <Setter Property="Opacity" Value="0.45" />
         </Style>
 
-        <!-- The entire labeled row remains the hit target. -->
+        <!-- Keep the compact track, but make the labeled row the hit target. -->
         <Style Selector="ToggleSwitch.settingsToggle">
             <Setter Property="MinHeight" Value="44" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -1745,17 +1746,19 @@
                 <ControlTemplate>
                     <Border x:Name="SettingsToggleRow" Background="Transparent" Padding="0,6" CornerRadius="3"
                             BorderBrush="Transparent" BorderThickness="1" MinHeight="44">
-                        <Grid ColumnDefinitions="*,36" ColumnSpacing="24">
+                        <Grid ColumnDefinitions="*,24" ColumnSpacing="24">
                             <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
                                        FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
-                            <Border Grid.Column="1" x:Name="SwitchTrack" Width="34" Height="20" CornerRadius="10"
-                                    Background="{TemplateBinding Background}" VerticalAlignment="Center">
-                                <Grid x:Name="PART_MovingKnobs" Margin="3">
-                                    <Border x:Name="SwitchThumb" Width="14" Height="14"
-                                            Background="{DynamicResource PaperBrush}" CornerRadius="7"
+                            <Grid Grid.Column="1" Width="24" Height="24" VerticalAlignment="Center"
+                                  Background="Transparent">
+                                <Border x:Name="SwitchTrack" Width="20" Height="1"
+                                        Background="{TemplateBinding Background}" VerticalAlignment="Center" />
+                                <Grid x:Name="PART_MovingKnobs">
+                                    <Border x:Name="SwitchThumb" Width="10" Height="10"
+                                            Background="#B0B0B0" CornerRadius="5"
                                             HorizontalAlignment="Left" VerticalAlignment="Center" />
                                 </Grid>
-                            </Border>
+                            </Grid>
                         </Grid>
                     </Border>
                 </ControlTemplate>

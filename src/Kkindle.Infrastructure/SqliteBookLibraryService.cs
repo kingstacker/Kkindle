@@ -75,6 +75,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
     {
         _paths.EnsureDirectories();
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+        await AppBackupService.RecoverPendingImportsAsync(_paths, cancellationToken);
         await using var connection = await OpenConnectionAsync(cancellationToken);
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -159,6 +160,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await ReadingMaterialBookSchema.EnsureAsync(connection, cancellationToken);
+        await BookFileSyncVersion.EnsureAsync(connection, cancellationToken);
         await EnsureLibraryTrashBookFileIdColumnAsync(connection, cancellationToken);
         await EnsureBookCollectionUpdatedAtColumnAsync(connection, cancellationToken);
         await EnsureBookProductivityColumnsAsync(connection, cancellationToken);
@@ -355,23 +357,40 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
     public async Task<IReadOnlyList<Book>> SearchAsync(string? query = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenConnectionAsync(cancellationToken);
+        var text = query?.Trim() ?? string.Empty;
+        var pinyinQuery = PinyinSearchIndex.NormalizeQuery(text);
+        var usePinyinSearch = text.Length > 0 && pinyinQuery.Length > 0;
         var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = usePinyinSearch
+            ? """
+            SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
+                   Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
+            FROM Books
+            ORDER BY UpdatedAt DESC, Title COLLATE NOCASE;
+            """
+            : """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
                    Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
             FROM Books
             WHERE $query = '' OR Title LIKE $like OR Authors LIKE $like OR Tags LIKE $like OR Series LIKE $like
             ORDER BY UpdatedAt DESC, Title COLLATE NOCASE;
             """;
-        var text = query?.Trim() ?? string.Empty;
-        command.Parameters.AddWithValue("$query", text);
-        command.Parameters.AddWithValue("$like", $"%{text}%");
+        if (!usePinyinSearch)
+        {
+            command.Parameters.AddWithValue("$query", text);
+            command.Parameters.AddWithValue("$like", $"%{text}%");
+        }
 
         var books = new List<Book>();
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
-                books.Add(ReadBook(reader));
+            {
+                var book = ReadBook(reader);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!usePinyinSearch || MatchesLibrarySearch(book, text, pinyinQuery))
+                    books.Add(book);
+            }
         }
 
         var filesByBook = await ReadFilesByBookAsync(connection, books.Select(book => book.Id), cancellationToken);
@@ -458,6 +477,27 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         pageSize = Math.Clamp(pageSize, 1, 500);
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
+        var text = query?.Trim() ?? string.Empty;
+        var pinyinQuery = PinyinSearchIndex.NormalizeQuery(text);
+        if (text.Length > 0 && pinyinQuery.Length > 0)
+        {
+            return await SearchPageByPinyinAsync(
+                connection,
+                text,
+                pinyinQuery,
+                author,
+                tag,
+                format,
+                category,
+                collectionId,
+                readingStatus,
+                favorite,
+                sortMode,
+                pageIndex,
+                pageSize,
+                cancellationToken);
+        }
+
         var where = BuildLibrarySearchWhere(
             query,
             author,
@@ -2810,13 +2850,14 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
     {
         var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256) VALUES ($id, $bookId, $format, $relativePath, $size, $sha256);";
+        command.CommandText = "INSERT INTO BookFiles (Id, BookId, Format, RelativePath, Size, Sha256, SyncUpdatedAt) VALUES ($id, $bookId, $format, $relativePath, $size, $sha256, $syncUpdatedAt);";
         command.Parameters.AddWithValue("$id", file.Id.ToString());
         command.Parameters.AddWithValue("$bookId", file.BookId.ToString());
         command.Parameters.AddWithValue("$format", file.Format);
         command.Parameters.AddWithValue("$relativePath", file.RelativePath);
         command.Parameters.AddWithValue("$size", file.Size);
         command.Parameters.AddWithValue("$sha256", file.Sha256);
+        command.Parameters.AddWithValue("$syncUpdatedAt", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

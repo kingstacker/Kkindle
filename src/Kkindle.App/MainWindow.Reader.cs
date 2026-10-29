@@ -923,12 +923,13 @@ public partial class MainWindow
             // window is active and the reader is visible.
             try
             {
-                await FlushReaderActiveSecondsAsync()
-                    .WaitAsync(ReaderCloseCheckpointTimeout);
+                var flush = FlushReaderActiveSecondsAsync();
+                try { await flush.WaitAsync(ReaderCloseCheckpointTimeout); }
+                catch (TimeoutException) { _ = ObserveLateReadingTimeFlushAsync(flush); }
             }
-            catch
+            catch (Exception exception)
             {
-                // Time accounting is auxiliary; cleanup below is authoritative.
+                await ShowMessageAsync(T("阅读时长保存失败"), T("阅读时长保存失败，请检查存储空间或文件权限：{0}", UiText.Localize(exception.Message)));
             }
         }
         finally
@@ -941,6 +942,16 @@ public partial class MainWindow
             {
                 Interlocked.Exchange(ref _readerCloseInProgress, 0);
             }
+        }
+    }
+
+    private async Task ObserveLateReadingTimeFlushAsync(Task flush)
+    {
+        try { await flush; }
+        catch (Exception exception)
+        {
+            if (!_lifetimeCancellation.IsCancellationRequested)
+                await ShowMessageAsync(T("阅读时长保存失败"), T("阅读时长保存失败，请检查存储空间或文件权限：{0}", UiText.Localize(exception.Message)));
         }
     }
 

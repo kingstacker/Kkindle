@@ -182,8 +182,10 @@ internal static class WpdKindleAccess
         {
             shell = CreateShell();
             dynamic? kindle = FindDevice(shell, device.RootPath);
-            dynamic? storage = kindle is null ? null : FindFirstStorage(kindle);
-            dynamic? documents = storage is null ? null : FindItemByRelativePath(storage, device.Profile.BooksDirectory);
+            if (kindle is null) throw new IOException("设备已断开，请重新连接并解锁设备后重试。");
+            dynamic? storage = FindFirstStorage(kindle);
+            if (storage is null) throw new IOException("无法读取设备存储，请确认设备已解锁后重试。");
+            dynamic? documents = FindItemByRelativePath(storage, device.Profile.BooksDirectory);
             if (documents is null) return books;
 
             var folders = new Stack<(object Folder, string RelativePath)>();
@@ -227,9 +229,9 @@ internal static class WpdKindleAccess
                 }
             }
         }
-        catch (COMException)
+        catch (COMException exception)
         {
-            return books;
+            throw new IOException("设备书库读取中断，请确认连接并解锁设备后重试。", exception);
         }
         finally
         {

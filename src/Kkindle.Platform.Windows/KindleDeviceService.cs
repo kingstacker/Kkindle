@@ -44,9 +44,9 @@ public sealed class KindleDeviceService : IKindleDeviceService
 
     public async Task<IReadOnlyList<KindleDevice>> DetectDevicesAsync(CancellationToken cancellationToken = default)
     {
+        var wpdTask = GetOrStartWpdDetectionTask();
         var devices = await Task.Run(() => DetectMassStorageDevices(cancellationToken), cancellationToken)
             .ConfigureAwait(false);
-        var wpdTask = GetOrStartWpdDetectionTask();
         IReadOnlyList<KindleDevice> wpdDevices;
         try
         {
@@ -119,6 +119,9 @@ public sealed class KindleDeviceService : IKindleDeviceService
         KindleDevice device,
         CancellationToken cancellationToken = default) =>
         ScanBooksProgressivelyAsync(device, progress: null, cancellationToken);
+
+    public Task<IReadOnlyList<KindleBook>> GetCachedBooksAsync(KindleDevice device, CancellationToken cancellationToken = default) =>
+        _scanCache?.GetCachedBooksAsync(device.Identity, cancellationToken) ?? Task.FromResult<IReadOnlyList<KindleBook>>([]);
 
     public async Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(
         KindleDevice device,
@@ -274,6 +277,8 @@ public sealed class KindleDeviceService : IKindleDeviceService
         KindleDevice device,
         CancellationToken cancellationToken)
     {
+        if (!Directory.Exists(device.RootPath))
+            throw new IOException("设备已断开，请重新连接并解锁设备后重试。");
         var documents = GetDocumentsRoot(device);
         if (!Directory.Exists(documents)) return [];
         var books = new List<KindleBook>();

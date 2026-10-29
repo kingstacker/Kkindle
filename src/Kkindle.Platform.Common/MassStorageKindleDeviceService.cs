@@ -53,12 +53,17 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
     public Task<IReadOnlyList<KindleBook>> ScanBooksAsync(KindleDevice device, CancellationToken cancellationToken = default) =>
         ScanBooksProgressivelyAsync(device, null, cancellationToken);
 
+    public Task<IReadOnlyList<KindleBook>> GetCachedBooksAsync(KindleDevice device, CancellationToken cancellationToken = default) =>
+        _scanCache.GetCachedBooksAsync(device.Identity, cancellationToken);
+
     public async Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(
         KindleDevice device,
         IProgress<KindleScanProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         EnsureMassStorage(device);
+        if (!Directory.Exists(device.RootPath))
+            throw new IOException("设备已断开，请重新连接并解锁设备后重试。");
         var documents = GetDocumentsRoot(device);
         if (!Directory.Exists(documents)) return [];
 

@@ -9,6 +9,19 @@ namespace Kkindle.Platform.Common.Tests;
 public sealed class MassStorageKindleDeviceServiceTests
 {
     [Fact]
+    public async Task DisconnectedDeviceDoesNotReportAnEmptyVerifiedLibrary()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var service = new MassStorageKindleDeviceService(new AppPaths(Path.Combine(root, "app")), new CountingMetadataService(), [root]);
+            var device = new KindleDevice { RootPath = Path.Combine(root, "missing"), Transport = KindleTransport.MassStorage };
+            await Assert.ThrowsAsync<IOException>(() => service.ScanBooksAsync(device));
+        }
+        finally { TryDelete(root); }
+    }
+
+    [Fact]
     public async Task LargeLibraryRescanReusesCoverlessMetadataAndRechecksChangedFiles()
     {
         var root = CreateTempDirectory();
@@ -27,6 +40,8 @@ public sealed class MassStorageKindleDeviceServiceTests
             Assert.Equal(1000, metadata.Reads);
             // A fresh service must reuse the persisted cache, including missing covers.
             service = new MassStorageKindleDeviceService(paths, metadata, [root]);
+            Assert.Equal(1000, (await service.GetCachedBooksAsync(device)).Count);
+            Assert.Empty(await service.GetCachedBooksAsync(new KindleDevice { RootPath = Path.Combine(root, "other") }));
             Assert.Equal(1000, (await service.ScanBooksAsync(device)).Count);
             Assert.Equal(1000, metadata.Reads);
             await File.AppendAllTextAsync(Path.Combine(documents, "book-0.epub"), "new edition");

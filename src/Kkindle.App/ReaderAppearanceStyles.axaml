@@ -69,16 +69,19 @@
     <Style Selector="Border.readerAiBubble.user">
         <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
     </Style>
+    <Style Selector="Border.readerSettingsCard RadioButton">
+        <Setter Property="Foreground" Value="#000000" />
+    </Style>
     <Style Selector="RadioButton.readerThemeOption">
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="Margin" Value="3,0" />
         <Setter Property="Padding" Value="5" />
         <Setter Property="FontSize" Value="12" />
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Foreground" Value="#000000" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+        <Setter Property="BorderBrush" Value="#BFBFBF" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="CornerRadius" Value="0" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="Template">
             <ControlTemplate>
@@ -92,16 +95,16 @@
         </Setter>
     </Style>
     <Style Selector="RadioButton.readerThemeOption:pointerover, RadioButton.readerThemeOption:focus-visible">
-        <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccentBrush}" />
-        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+        <Setter Property="BorderBrush" Value="#000000" />
+        <Setter Property="Background" Value="#F2F2F2" />
     </Style>
     <Style Selector="RadioButton.readerThemeOption:checked">
-        <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccentBrush}" />
+        <Setter Property="BorderBrush" Value="#000000" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Border.readerSettingsCard TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Foreground" Value="#000000" />
     </Style>
     <Style Selector="TextBlock.readerSettingsSection">
         <Setter Property="FontSize" Value="13" />
@@ -109,88 +112,104 @@
     </Style>
     <Style Selector="Border.readerSettingsCard TextBlock.readerSettingsHint">
         <Setter Property="FontSize" Value="12" />
-        <Setter Property="Foreground" Value="{DynamicResource ReaderMutedBrush}" />
+        <Setter Property="Foreground" Value="#5A5A5A" />
         <Setter Property="TextWrapping" Value="Wrap" />
         <Setter Property="LineHeight" Value="19" />
     </Style>
     <Style Selector="ToggleSwitch.readerSettingsToggle">
         <Setter Property="HorizontalAlignment" Value="Stretch" />
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
-        <Setter Property="Background" Value="{DynamicResource ReaderBorderBrush}" />
+        <Setter Property="Foreground" Value="#000000" />
+        <Setter Property="Background" Value="#BFBFBF" />
         <Setter Property="Template">
             <ControlTemplate>
                 <Border x:Name="ReaderSettingsToggleRow" MinHeight="38" Background="Transparent"
-                        BorderBrush="Transparent" BorderThickness="1" CornerRadius="4">
-                    <Grid ColumnDefinitions="*,36" ColumnSpacing="20">
+                        BorderBrush="Transparent" BorderThickness="1" CornerRadius="0">
+                    <Grid ColumnDefinitions="*,24" ColumnSpacing="20">
                         <ContentPresenter Content="{TemplateBinding Content}"
                                           Foreground="{TemplateBinding Foreground}"
                                           FontSize="13" VerticalAlignment="Center" />
-                        <Border Grid.Column="1" Width="34" Height="20" CornerRadius="10"
-                                Background="{TemplateBinding Background}" VerticalAlignment="Center">
-                            <Grid x:Name="PART_MovingKnobs" Margin="3">
-                                <Border x:Name="ReaderSettingsToggleThumb" Width="14" Height="14"
-                                        CornerRadius="7" Background="{DynamicResource ReaderInputBrush}"
-                                        HorizontalAlignment="Left" />
+                        <Grid Grid.Column="1" Width="24" Height="24" VerticalAlignment="Center"
+                              Background="Transparent">
+                            <Border x:Name="ReaderSettingsToggleTrack" Width="20" Height="1"
+                                    Background="{TemplateBinding Background}" VerticalAlignment="Center" />
+                            <Grid x:Name="PART_MovingKnobs">
+                                <Border x:Name="ReaderSettingsToggleThumb" Width="10" Height="10"
+                                        CornerRadius="5" Background="#BFBFBF"
+                                        HorizontalAlignment="Left" VerticalAlignment="Center" />
                             </Grid>
-                        </Border>
+                        </Grid>
                     </Grid>
                 </Border>
             </ControlTemplate>
         </Setter>
     </Style>
     <Style Selector="ToggleSwitch.readerSettingsToggle:checked">
-        <Setter Property="Background" Value="{DynamicResource ReaderAccentBrush}" />
+        <Setter Property="Background" Value="#000000" />
     </Style>
     <Style Selector="ToggleSwitch.readerSettingsToggle:checked /template/ Border#ReaderSettingsToggleThumb">
         <Setter Property="HorizontalAlignment" Value="Right" />
+        <Setter Property="Background" Value="#000000" />
     </Style>
     <Style Selector="ToggleSwitch.readerSettingsToggle:pointerover /template/ Border#ReaderSettingsToggleRow">
-        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+        <Setter Property="Background" Value="#F2F2F2" />
     </Style>
     <Style Selector="ToggleSwitch.readerSettingsToggle:focus-visible /template/ Border#ReaderSettingsToggleRow">
-        <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccentBrush}" />
+        <Setter Property="BorderBrush" Value="#000000" />
     </Style>
     <Style Selector="ComboBox.readerSettingsFont">
         <Setter Property="MinHeight" Value="40" />
         <Setter Property="Padding" Value="12,8" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="CornerRadius" Value="0" />
         <Setter Property="FontSize" Value="13" />
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+        <Setter Property="Foreground" Value="#000000" />
+        <Setter Property="Background" Value="#FFFFFF" />
+        <Setter Property="BorderBrush" Value="#000000" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="ComboBox.readerSettingsFont:pointerover, ComboBox.readerSettingsFont:focus-visible, ComboBox.readerSettingsFont:dropdownopen">
-        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccentBrush}" />
+        <Setter Property="Background" Value="#F2F2F2" />
+        <Setter Property="BorderBrush" Value="#000000" />
     </Style>
     <Style Selector="ComboBox.readerSettingsFont /template/ Border#PopupBorder">
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="CornerRadius" Value="0" />
         <Setter Property="Padding" Value="4" />
-        <Setter Property="Background" Value="{DynamicResource ReaderInputBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource ReaderBorderBrush}" />
+        <Setter Property="Background" Value="#FFFFFF" />
+        <Setter Property="BorderBrush" Value="#000000" />
     </Style>
     <Style Selector="ComboBox.readerSettingsFont ComboBoxItem">
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
-        <Setter Property="Background" Value="{DynamicResource ReaderInputBrush}" />
+        <Setter Property="Foreground" Value="#000000" />
+        <Setter Property="Background" Value="#FFFFFF" />
         <Setter Property="Padding" Value="10,8" />
-        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="CornerRadius" Value="0" />
     </Style>
     <Style Selector="ComboBox.readerSettingsFont ComboBoxItem:pointerover, ComboBox.readerSettingsFont ComboBoxItem:selected">
-        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
+        <Setter Property="Foreground" Value="#000000" />
+        <Setter Property="Background" Value="#E2E2E2" />
     </Style>
     <Style Selector="Button.readerSettingsAction">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Foreground" Value="#000000" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="CornerRadius" Value="0" />
+    </Style>
+    <Style Selector="Button.readerSettingsAction Path">
+        <Setter Property="Stroke" Value="#000000" />
+    </Style>
+    <Style Selector="Button.readerSettingsAction Path.readerSettingsResetGlyph">
+        <Setter Property="Width" Value="20" />
+        <Setter Property="Height" Value="20" />
+        <Setter Property="Stretch" Value="Uniform" />
+        <Setter Property="Fill" Value="#000000" />
+        <Setter Property="Stroke" Value="Transparent" />
+        <Setter Property="StrokeThickness" Value="0" />
     </Style>
     <Style Selector="Button.readerSettingsAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource ReaderHoverBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Background" Value="#F2F2F2" />
+        <Setter Property="Foreground" Value="#000000" />
     </Style>
     <Style Selector="Button.readerSettingsAction:pressed /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource ReaderPressedBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
+        <Setter Property="Background" Value="#D9D9D9" />
+        <Setter Property="Foreground" Value="#000000" />
     </Style>
     <Style Selector="Button.readerMarkerColorPicker">
         <Setter Property="Background" Value="Transparent" />

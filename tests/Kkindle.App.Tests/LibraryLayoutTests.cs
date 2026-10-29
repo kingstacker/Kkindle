@@ -110,7 +110,8 @@ public sealed partial class SettingsTests
         scope.Get<Button>("FilterButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Render();
         Assert.True(scope.Get<Border>("FilterPanel").IsVisible);
-        Assert.True(scope.Get<ComboBox>("LibrarySortBox").IsEffectivelyVisible);
+        Assert.True(scope.Get<Button>("LibrarySortButton").IsEffectivelyVisible);
+        Assert.True(scope.Get<Button>("LibrarySortButton").IsEnabled);
         Capture(scope.Window, $"{language}-{width}-library-filters");
         scope.Get<Button>("FilterButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 

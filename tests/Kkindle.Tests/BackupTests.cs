@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Tests;
 
-public sealed class BackupTests
+public sealed partial class BackupTests
 {
     [Fact]
     public async Task ExportsAndRestoresLibraryReaderDataAndSafeSettings()
@@ -248,6 +248,8 @@ public sealed class BackupTests
         try
         {
             var (paths, library, previousBook, backupPath, _) = await PrepareImportFailureAsync(root);
+            var marker = Path.Combine(paths.Data, AppBackupService.PendingSyncBaselineResetFileName);
+            await File.WriteAllTextAsync(marker, "previous pending baseline reset");
             using var cancellation = new CancellationTokenSource();
             var protector = new CallbackSecretProtector(() => cancellation.Cancel());
 
@@ -258,6 +260,7 @@ public sealed class BackupTests
             Assert.Equal(previousBook.Id, restored.Id);
             Assert.True(File.Exists(library.GetAbsoluteFilePath(restored.Files[0])));
             Assert.Equal("previous-key", (await new AiSettingsStore(paths, new TestHelpers.PlaintextSecretProtector()).LoadAsync()).ApiKey);
+            Assert.Equal("previous pending baseline reset", await File.ReadAllTextAsync(marker));
         }
         finally { TestHelpers.TryDelete(root); }
     }

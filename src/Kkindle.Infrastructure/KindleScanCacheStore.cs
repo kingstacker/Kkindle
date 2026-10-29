@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
 
@@ -51,6 +52,18 @@ internal sealed class KindleScanCacheStore
                 .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<KindleBook>> GetCachedBooksAsync(string deviceIdentity, CancellationToken cancellationToken)
+    {
+        var entries = await GetDeviceEntriesAsync(deviceIdentity, cancellationToken);
+        return entries.Values.Where(entry => !entry.IsDictionary && !string.IsNullOrWhiteSpace(entry.RelativePath))
+            .Select(entry => new KindleBook
+            {
+                RelativePath = entry.RelativePath, Size = entry.Size, ModifiedAt = entry.ModifiedAt,
+                Format = entry.Format, Sha256 = entry.Sha256, Title = entry.Title, Authors = entry.Authors,
+                CoverPath = entry.CoverPath is not null && File.Exists(entry.CoverPath) ? entry.CoverPath : null
+            }).OrderBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 
     public async Task ReplaceDeviceEntriesAsync(

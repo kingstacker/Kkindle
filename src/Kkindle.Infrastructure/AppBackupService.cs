@@ -14,7 +14,7 @@ namespace Kkindle.Infrastructure;
 /// protected by Windows on the current machine and are never written to an
 /// export file.
 /// </summary>
-public sealed class AppBackupService
+public sealed partial class AppBackupService
 {
     public const string FileExtension = ".kkindle";
 
@@ -55,6 +55,7 @@ public sealed class AppBackupService
         CancellationToken cancellationToken = default)
     {
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+        await RecoverPendingImportsAsync(_paths, cancellationToken);
         if (string.IsNullOrWhiteSpace(destinationPath))
             throw new ArgumentException("请选择备份文件的保存位置。", nameof(destinationPath));
 
@@ -120,6 +121,7 @@ public sealed class AppBackupService
         CancellationToken cancellationToken = default)
     {
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+        await RecoverPendingImportsAsync(_paths, cancellationToken);
         if (string.IsNullOrWhiteSpace(sourcePath))
             throw new ArgumentException("请选择要导入的备份文件。", nameof(sourcePath));
 
@@ -146,6 +148,11 @@ public sealed class AppBackupService
 
             var summary = await ValidateDatabaseAsync(stagedDatabasePath, cancellationToken);
             await NormalizeSnapshotPathsAsync(stagedDatabasePath, cancellationToken);
+            await using (var staged = new SqliteConnection($"Data Source={stagedDatabasePath};Pooling=False"))
+            {
+                await staged.OpenAsync(cancellationToken);
+                await ReaderRecoveryEpoch.RotateForImportAsync(staged, cancellationToken);
+            }
             backupSettings = await ReadBackupSettingsAsync(
                 Path.Combine(stagingRoot, SettingsEntryName.Replace('/', Path.DirectorySeparatorChar)),
                 cancellationToken);
@@ -166,13 +173,22 @@ public sealed class AppBackupService
             Directory.CreateDirectory(stagedCoversPath);
             Directory.CreateDirectory(stagedTrashPath);
 
-            var rollbackRoot = CreateWorkingDirectory(".kkindle-rollback-");
-            var movedPaths = new List<(string Source, string Backup)>();
-            var replacementStarted = false;
-            var retainRollback = false;
             var baselineResetMarker = Path.Combine(_paths.Data, PendingSyncBaselineResetFileName);
+            var previousBaselineMarker = File.Exists(baselineResetMarker)
+                ? await File.ReadAllTextAsync(baselineResetMarker, cancellationToken) : null;
+            var rollbackRoot = CreateWorkingDirectory(".kkindle-rollback-");
+            var journal = new ImportJournal
+            {
+                StagingDirectory = Path.GetFileName(stagingRoot),
+                OriginalPaths = ManagedImportPaths.Where(name => PathExists(Path.Combine(_paths.Data, name))).ToList(),
+                PreviousBaselineResetMarker = previousBaselineMarker
+            };
+            var retainRollback = false;
+            var importCommitted = false;
+            var replacementStarted = false;
             try
             {
+                await WriteImportJournalAsync(rollbackRoot, journal, cancellationToken);
                 // If the process stops after replacing the library but before
                 // the sync baseline is reset, the next sync sees this marker
                 // and completes the reset before detecting deletions.
@@ -184,8 +200,10 @@ public sealed class AppBackupService
                     Path.Combine(rollbackRoot, "kkindle.db"),
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                MoveCurrentDataToRollback(rollbackRoot, movedPaths);
+                journal.Phase = ImportPhase.Replacing;
+                await WriteImportJournalAsync(rollbackRoot, journal, cancellationToken);
                 replacementStarted = true;
+                MoveCurrentDataToRollback(rollbackRoot);
                 Directory.Move(stagedLibraryPath, _paths.Library);
                 Directory.Move(stagedCoversPath, _paths.Covers);
                 Directory.Move(stagedTrashPath, _paths.Trash);
@@ -197,6 +215,9 @@ public sealed class AppBackupService
                     currentS3Settings.DeviceId,
                     importedS3Settings,
                     cancellationToken);
+                journal.Phase = ImportPhase.Committed;
+                await WriteImportJournalAsync(rollbackRoot, journal, cancellationToken);
+                importCommitted = true;
 
                 return new AppBackupImportResult(
                     summary.BookCount,
@@ -209,25 +230,22 @@ public sealed class AppBackupService
             }
             catch (Exception importException)
             {
-                if (movedPaths.Count > 0)
+                try
                 {
-                    try
+                    if (!importCommitted && replacementStarted)
                     {
                         // Cancellation of the import must never cancel recovery.
-                        if (replacementStarted)
-                            await RestoreCurrentDataFromRollbackAsync(rollbackRoot, movedPaths);
-                        else
-                            RestoreMovedFilesFromRollback(movedPaths);
+                        await RestoreImportAsync(_paths, rollbackRoot, journal, CancellationToken.None);
                     }
-                    catch (Exception rollbackException)
-                    {
-                        retainRollback = true;
-                        throw new IOException(
-                            $"备份导入失败，自动恢复未完成。恢复副本已保留在：{rollbackRoot}",
-                            new AggregateException(importException, rollbackException));
-                    }
+                    RestoreBaselineResetMarker(_paths, journal);
                 }
-                TryDeleteFile(baselineResetMarker);
+                catch (Exception rollbackException)
+                {
+                    retainRollback = true;
+                    throw new IOException(
+                        $"备份导入失败，自动恢复未完成。恢复副本已保留在：{rollbackRoot}",
+                        new AggregateException(importException, rollbackException));
+                }
                 throw;
             }
             finally
@@ -347,6 +365,7 @@ public sealed class AppBackupService
         {
             ("Books", new[] { "CoverPath" }, Array.Empty<string>()),
             ("BookFiles", new[] { "RelativePath" }, Array.Empty<string>()),
+            ("ReadingMaterialBooks", new[] { "CoverPath" }, Array.Empty<string>()),
             ("LibraryTrash", new[] { "TrashPath", "OriginalPath", "TrashCoverPath", "OriginalCoverPath" }, new[] { "BookJson", "FileJson" })
         })
         {
@@ -577,41 +596,15 @@ public sealed class AppBackupService
         });
     }
 
-    private void MoveCurrentDataToRollback(
-        string rollbackRoot,
-        List<(string Source, string Backup)> movedPaths)
+    private void MoveCurrentDataToRollback(string rollbackRoot)
     {
-        foreach (var name in new[] { "library", "covers", "trash", AiSettingsPath, KindleEmailSettingsPath, S3SyncSettingsPath })
+        foreach (var name in ManagedImportPaths)
         {
             var source = Path.Combine(_paths.Data, name);
             if (!File.Exists(source) && !Directory.Exists(source)) continue;
             var backup = Path.Combine(rollbackRoot, name);
             MoveIfExists(source, backup);
-            movedPaths.Add((source, backup));
         }
-    }
-
-    private static void RestoreMovedFilesFromRollback(IReadOnlyList<(string Source, string Backup)> movedPaths)
-    {
-        foreach (var (source, backup) in movedPaths.Reverse())
-            MoveIfExists(backup, source);
-    }
-
-    private async Task RestoreCurrentDataFromRollbackAsync(
-        string rollbackRoot,
-        IReadOnlyList<(string Source, string Backup)> movedPaths)
-    {
-        DeletePath(_paths.Library);
-        DeletePath(_paths.Covers);
-        DeletePath(_paths.Trash);
-        DeletePath(Path.Combine(_paths.Data, AiSettingsPath));
-        DeletePath(Path.Combine(_paths.Data, KindleEmailSettingsPath));
-        DeletePath(Path.Combine(_paths.Data, S3SyncSettingsPath));
-
-        RestoreMovedFilesFromRollback(movedPaths);
-        await ReplaceDatabaseFromSnapshotAsync(
-            Path.Combine(rollbackRoot, "kkindle.db"),
-            CancellationToken.None);
     }
 
     private static async Task AddDirectoryEntriesAsync(

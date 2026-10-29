@@ -1118,7 +1118,6 @@ public partial class MainWindow
     private bool _readerTocMinimalBeforeZen;
     private long _readerActiveSeconds;
     private DispatcherTimer? _readerStatsTimer;
-    private readonly SemaphoreSlim _readerStatsFlushGate = new(1, 1);
     private int _readerTransientStatusSequence;
     private bool _readerContinuousLocked;
     private int _readerContinuousDirection;
@@ -6729,39 +6728,32 @@ public partial class MainWindow
         if (!IsActive || !ReaderRoot.IsVisible) return;
         _readerActiveSeconds++;
         if (_readerActiveSeconds % 30 == 0)
-            _ = FlushReaderActiveSecondsAsync();
+            _ = ObserveReadingTimeFlushAsync();
+    }
+
+    private async Task ObserveReadingTimeFlushAsync()
+    {
+        try { await FlushReaderActiveSecondsAsync(); }
+        catch (Exception exception)
+        {
+            ReaderStatusText.Text = T("阅读时长保存失败，请检查存储空间或文件权限：{0}", UiText.Localize(exception.Message));
+        }
     }
 
     private async Task FlushReaderActiveSecondsAsync()
     {
-        await _readerStatsFlushGate.WaitAsync();
-        try
+        var card = _readerBookCard;
+        var file = _readerBookFile;
+        if (card is null || file is null) return;
+        var seconds = Interlocked.Exchange(ref _readerActiveSeconds, 0);
+        if (seconds <= 0)
         {
-            if (_readerBookCard is null || _readerBookFile is null || _readerActiveSeconds <= 0) return;
-            var activeSeconds = Interlocked.Exchange(ref _readerActiveSeconds, 0);
-            if (activeSeconds <= 0) return;
-            try
-            {
-                await _readerData.AddReadingTimeAsync(
-                    _readerBookCard.Book.Id,
-                    _readerBookFile.Id,
-                    activeSeconds,
-                    CalculateReaderProgressPercent(),
-                    _readerChapterIndex,
-                    _readerDocument?.Chapters.Count ?? (_readerIsPdf ? _readerPdfPages.Count : 0),
-                    CancellationToken.None);
-            }
-            catch
-            {
-                // Keep unsaved seconds pending so the next periodic flush or
-                // reader close can retry instead of silently losing time.
-                Interlocked.Add(ref _readerActiveSeconds, activeSeconds);
-            }
+            await _readerReadingTimeRecovery.InitializeAsync();
+            return;
         }
-        finally
-        {
-            _readerStatsFlushGate.Release();
-        }
+        await _readerReadingTimeRecovery.SaveAsync(card.Book.Id, file.Id, seconds,
+            CalculateReaderProgressPercent(), _readerChapterIndex,
+            _readerDocument?.Chapters.Count ?? (_readerIsPdf ? _readerPdfPages.Count : 0), CancellationToken.None);
     }
 
     private void UpdateReaderZoomLabel()

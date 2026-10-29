@@ -7,6 +7,14 @@ namespace Kkindle.Tests.Windows;
 public sealed class KindleDeviceTests
 {
     [Fact]
+    public async Task MissingWpdDeviceDoesNotReportAnEmptyVerifiedLibrary()
+    {
+        var service = new KindleDeviceService();
+        var device = new KindleDevice { RootPath = @"\\?\not-a-real-reader", VolumeSerial = "missing", Transport = KindleTransport.Wpd };
+        await Assert.ThrowsAsync<IOException>(() => service.ScanBooksAsync(device));
+    }
+
+    [Fact]
     public async Task PdfFirstPageCoverIsExtractedAndReusedByWpdMetadataCache()
     {
         var root = Path.Combine(Path.GetTempPath(), "KkindleTests", Guid.NewGuid().ToString("N"));
@@ -77,6 +85,11 @@ public sealed class KindleDeviceTests
 
             var cachedMetadata = new CountingMetadataService();
             var cachedService = new KindleDeviceService(paths, cachedMetadata);
+            var preview = Assert.Single(await cachedService.GetCachedBooksAsync(device));
+            Assert.Equal(firstBook.RelativePath, preview.RelativePath);
+            Assert.Equal(firstBook.Sha256, preview.Sha256);
+            Assert.Empty(await cachedService.GetCachedBooksAsync(new KindleDevice { VolumeSerial = "OTHER-DEVICE" }));
+            Assert.Equal(0, cachedMetadata.ReadCount);
             var cachedBook = Assert.Single(await cachedService.ScanBooksAsync(device));
             Assert.Equal(0, cachedMetadata.ReadCount);
             Assert.Equal(firstBook.Sha256, cachedBook.Sha256);

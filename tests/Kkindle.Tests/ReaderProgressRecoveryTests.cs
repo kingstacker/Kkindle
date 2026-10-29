@@ -163,6 +163,141 @@ public sealed class ReaderProgressRecoveryTests
         finally { TestHelpers.TryDelete(root); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResetDiscardsPendingProgressInExistingAndRestartedRecoveryServices(bool restart)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            var recovery = new ReaderProgressRecoveryService(paths, reader);
+            var progress = NewProgress(500);
+            await recovery.SaveAsync(progress, new CancellationToken(true));
+            await reader.ResetReadingDataAsync();
+            if (restart) recovery = new ReaderProgressRecoveryService(paths, reader);
+
+            await recovery.InitializeAsync();
+
+            Assert.Null(await reader.GetProgressAsync(progress.BookFileId));
+            Assert.False(File.Exists(RecoveryPath(paths)));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task PendingProgressCreatedAfterResetStillRecovers()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            await reader.ResetReadingDataAsync();
+            var progress = NewProgress(700);
+            await new ReaderProgressRecoveryService(paths, reader).SaveAsync(progress, new CancellationToken(true));
+
+            await new ReaderProgressRecoveryService(paths, reader).InitializeAsync();
+
+            Assert.Equal(700, (await reader.GetProgressAsync(progress.BookFileId))!.ScrollPosition);
+            Assert.False(File.Exists(RecoveryPath(paths)));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task OlderDirectSaveDoesNotReplaceNewerProgress()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            var newer = NewProgress(900);
+            await reader.SaveProgressAsync(newer);
+
+            await reader.SaveProgressAsync(newer with { ScrollPosition = 100, UpdatedAt = newer.UpdatedAt.AddTicks(-1) });
+
+            Assert.Equal(900, (await reader.GetProgressAsync(newer.BookFileId))!.ScrollPosition);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyRecoveryFileIsReplayedOnlyBeforeTheFirstReset(bool reset)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            var progress = NewProgress(550);
+            await File.WriteAllTextAsync(RecoveryPath(paths), JsonSerializer.Serialize(
+                new { Version = 1, Items = new[] { progress } }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            if (reset) await reader.ResetReadingDataAsync();
+
+            await new ReaderProgressRecoveryService(paths, reader).InitializeAsync();
+
+            if (reset) Assert.Null(await reader.GetProgressAsync(progress.BookFileId));
+            else Assert.Equal(550, (await reader.GetProgressAsync(progress.BookFileId))!.ScrollPosition);
+            Assert.False(File.Exists(RecoveryPath(paths)));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task MixedRecoveryGenerationsOnlyReplayCurrentReading()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            var recovery = new ReaderProgressRecoveryService(paths, reader);
+            var obsolete = NewProgress(100);
+            await recovery.SaveAsync(obsolete, new CancellationToken(true));
+            await reader.ResetReadingDataAsync();
+            var current = NewProgress(800);
+            await recovery.SaveAsync(current, new CancellationToken(true));
+
+            await new ReaderProgressRecoveryService(paths, reader).InitializeAsync();
+
+            Assert.Null(await reader.GetProgressAsync(obsolete.BookFileId));
+            Assert.Equal(800, (await reader.GetProgressAsync(current.BookFileId))!.ScrollPosition);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task OutOfOrderCanceledSavesKeepTheNewestQueuedPosition()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            var recovery = new ReaderProgressRecoveryService(paths, reader);
+            var newer = NewProgress(900);
+            await recovery.SaveAsync(newer, new CancellationToken(true));
+            await recovery.SaveAsync(newer with { ScrollPosition = 100, UpdatedAt = newer.UpdatedAt.AddMinutes(-1) }, new CancellationToken(true));
+
+            await new ReaderProgressRecoveryService(paths, reader).InitializeAsync();
+
+            Assert.Equal(900, (await reader.GetProgressAsync(newer.BookFileId))!.ScrollPosition);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     private static ReaderProgressRow NewProgress(
         int scrollPosition,
         DateTimeOffset? updatedAt = null) =>

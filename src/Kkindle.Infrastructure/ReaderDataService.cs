@@ -11,6 +11,7 @@ public sealed partial class ReaderDataService
     private const int CurrentTextExtractionVersion = 2;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _databaseGate = new(1, 1);
+    internal ReaderRecoveryContext? CachedRecoveryContext { get; private set; }
     private bool _ftsAvailable;
     private bool _ftsUsesTrigram;
 
@@ -46,6 +47,7 @@ public sealed partial class ReaderDataService
     {
         _paths.EnsureDirectories();
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
+        await AppBackupService.RecoverPendingImportsAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -218,6 +220,8 @@ public sealed partial class ReaderDataService
             await using (var syncTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
             {
                 await ReadingTimeSyncTracker.EnsureSchemaAsync(connection, syncTransaction, cancellationToken);
+                await ReaderRecoveryEpoch.EnsureAsync(connection, syncTransaction, cancellationToken);
+                CachedRecoveryContext = await ReaderRecoveryEpoch.ReadAsync(connection, syncTransaction, cancellationToken);
                 await syncTransaction.CommitAsync(cancellationToken);
             }
 
@@ -495,15 +499,49 @@ public sealed partial class ReaderDataService
         };
     }
 
-    public async Task SaveProgressAsync(
+    internal async Task<ReaderRecoveryContext> GetRecoveryContextAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        var context = await ReaderRecoveryEpoch.ReadAsync(connection, transaction, cancellationToken);
+        transaction.Commit();
+        return CachedRecoveryContext = context;
+    }
+
+    public Task SaveProgressAsync(
         ReaderProgressRow progress,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        SaveProgressCoreAsync(progress, false, null, cancellationToken);
+
+    internal Task SaveRecoveredProgressAsync(
+        ReaderProgressRow progress, ReaderRecoveryContext? context, CancellationToken cancellationToken) =>
+        SaveProgressCoreAsync(progress, true, context, cancellationToken);
+
+    private async Task SaveProgressCoreAsync(
+        ReaderProgressRow progress, bool checkReset, ReaderRecoveryContext? expectedContext, CancellationToken cancellationToken)
     {
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
+            if (checkReset) await MakeRecoveryCommitDurableAsync(connection, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            if (checkReset && await ReaderRecoveryEpoch.ReadAsync(connection, transaction, cancellationToken) != expectedContext)
+                return;
+
+            // The comparison and write share a writer transaction, including
+            // sub-millisecond timestamps and records written by sync/MCP.
+            using (var current = connection.CreateCommand())
+            {
+                current.Transaction = transaction;
+                current.CommandText = "SELECT UpdatedAt FROM ReaderProgress WHERE BookFileId = $bookFileId;";
+                current.Parameters.AddWithValue("$bookFileId", progress.BookFileId.ToString());
+                if (await current.ExecuteScalarAsync(cancellationToken) is string updatedAt
+                    && DateTimeOffset.Parse(updatedAt) > progress.UpdatedAt)
+                    return;
+            }
             var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO ReaderProgress (
                     BookFileId, BookId, ChapterPath, Fragment, ChapterIndex, ScrollPosition,
@@ -528,6 +566,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$updatedAt", progress.UpdatedAt.ToString("O"));
             command.Parameters.AddWithValue("$contentPosition", (object?)ReaderContentPositionJson.Serialize(progress.ContentPosition) ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             NotifyDataChanged(LocalDataChangeKind.ReadingProgress);
         }
         finally
@@ -1290,22 +1329,50 @@ public sealed partial class ReaderDataService
         };
     }
 
-    public async Task AddReadingTimeAsync(
+    public Task AddReadingTimeAsync(
         Guid bookId,
         Guid bookFileId,
         long activeSeconds,
         double progressPercent,
         int completedChapters,
         int totalChapters,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        AddReadingTimeCoreAsync(bookId, bookFileId, activeSeconds, progressPercent, completedChapters, totalChapters,
+            DateTimeOffset.UtcNow, null, cancellationToken);
+
+    internal Task AddRecoveredReadingTimeAsync(ReadingTimeCheckpoint checkpoint, CancellationToken token) =>
+        AddReadingTimeCoreAsync(checkpoint.BookId, checkpoint.BookFileId, checkpoint.Seconds, checkpoint.ProgressPercent,
+            checkpoint.CompletedChapters, checkpoint.TotalChapters, checkpoint.RecordedAt, checkpoint, token);
+
+    private async Task AddReadingTimeCoreAsync(Guid bookId, Guid bookFileId, long activeSeconds, double progressPercent,
+        int completedChapters, int totalChapters, DateTimeOffset recordedAt, ReadingTimeCheckpoint? checkpoint,
+        CancellationToken cancellationToken)
     {
         if (activeSeconds <= 0) return;
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
+            if (checkpoint is not null) await MakeRecoveryCommitDurableAsync(connection, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-            var recordedAt = DateTimeOffset.UtcNow;
+            if (checkpoint is not null)
+            {
+                if (await ReaderRecoveryEpoch.ReadAsync(connection, transaction, cancellationToken) != checkpoint.Context) return;
+                using var applied = connection.CreateCommand();
+                applied.Transaction = transaction;
+                applied.CommandText = "INSERT OR IGNORE INTO ReaderReadingTimeRecoveryApplied (Id) VALUES ($id);";
+                applied.Parameters.AddWithValue("$id", checkpoint.Id.ToString("N"));
+                if (await applied.ExecuteNonQueryAsync(cancellationToken) == 0) return;
+            }
+            var applyMetadata = true;
+            using (var current = connection.CreateCommand())
+            {
+                current.Transaction = transaction;
+                current.CommandText = "SELECT UpdatedAt FROM ReaderReadingStats WHERE BookFileId=$id;";
+                current.Parameters.AddWithValue("$id", bookFileId.ToString());
+                if (await current.ExecuteScalarAsync(cancellationToken) is string version)
+                    applyMetadata = DateTimeOffset.Parse(version) <= recordedAt;
+            }
             var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
@@ -1315,10 +1382,10 @@ public sealed partial class ReaderDataService
                     $bookFileId, $bookId, $seconds, $progressPercent, $completedChapters, $totalChapters, $updatedAt)
                 ON CONFLICT(BookFileId) DO UPDATE SET
                     CumulativeSeconds = CumulativeSeconds + $seconds,
-                    ProgressPercent = $progressPercent,
-                    CompletedChapters = $completedChapters,
-                    TotalChapters = $totalChapters,
-                    UpdatedAt = $updatedAt;
+                    ProgressPercent = CASE WHEN $applyMetadata=1 THEN $progressPercent ELSE ProgressPercent END,
+                    CompletedChapters = CASE WHEN $applyMetadata=1 THEN $completedChapters ELSE CompletedChapters END,
+                    TotalChapters = CASE WHEN $applyMetadata=1 THEN $totalChapters ELSE TotalChapters END,
+                    UpdatedAt = CASE WHEN $applyMetadata=1 THEN $updatedAt ELSE UpdatedAt END;
                 """;
             command.Parameters.AddWithValue("$bookFileId", bookFileId.ToString());
             command.Parameters.AddWithValue("$bookId", bookId.ToString());
@@ -1327,6 +1394,7 @@ public sealed partial class ReaderDataService
             command.Parameters.AddWithValue("$completedChapters", completedChapters);
             command.Parameters.AddWithValue("$totalChapters", totalChapters);
             command.Parameters.AddWithValue("$updatedAt", recordedAt.ToString("O"));
+            command.Parameters.AddWithValue("$applyMetadata", applyMetadata ? 1 : 0);
             await command.ExecuteNonQueryAsync(cancellationToken);
 
             var session = connection.CreateCommand();
@@ -1371,6 +1439,13 @@ public sealed partial class ReaderDataService
         command.Parameters.AddWithValue("$sourceHash", sourceHash);
         command.Parameters.AddWithValue("$textVersion", CurrentTextExtractionVersion);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
+    }
+
+    private static async Task MakeRecoveryCommitDurableAsync(SqliteConnection connection, CancellationToken token)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA synchronous = FULL;";
+        await command.ExecuteNonQueryAsync(token);
     }
 
     public async Task ReplaceBookChunksAsync(
@@ -1992,7 +2067,6 @@ public sealed partial class ReaderDataService
     {
         var results = new List<BookContentChunk>();
         var seenLocations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seenContexts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenParagraphRanges = new Dictionary<string, List<(int Start, int End)>>(StringComparer.OrdinalIgnoreCase);
         foreach (var candidate in candidates)
         {
@@ -2014,18 +2088,7 @@ public sealed partial class ReaderDataService
             {
                 continue;
             }
-            // Older indexes can contain overlapping chunks whose recorded
-            // offsets were produced before whitespace normalization. Their
-            // numeric locations differ even though the result shown to the
-            // user is identical, so also collapse equal chapter-local context.
-            var context = BuildSearchContext(candidate.Content, query, terms);
-            // Duplicate EPUB spine documents may expose the same text under
-            // different chapter paths. Equal book-local context is still the
-            // same search occurrence from the user's perspective.
-            var contextKey = $"{candidate.BookFileId:N}\u001f{context}";
-            if (context.Length > 0 && seenContexts.Contains(contextKey)) continue;
             seenLocations.Add(key);
-            if (context.Length > 0) seenContexts.Add(contextKey);
             if (!seenParagraphRanges.TryGetValue(paragraphKey, out ranges))
             {
                 ranges = [];
@@ -2073,23 +2136,6 @@ public sealed partial class ReaderDataService
             if (match >= 0 && (earliest < 0 || match < earliest)) earliest = match;
         }
         return earliest;
-    }
-
-    private static string BuildSearchContext(
-        string content,
-        string query,
-        IReadOnlyList<string> terms)
-    {
-        var normalized = WhitespaceRegex().Replace(content ?? string.Empty, " ").Trim();
-        if (normalized.Length == 0) return string.Empty;
-        var match = FindPrimarySearchMatch(normalized, query, terms);
-        if (match < 0) match = 0;
-        // Keep the context anchored to the match. Rebalancing a short tail by
-        // moving the window backward makes two overlapping chunks differ by a
-        // few characters even though they represent the same occurrence.
-        var start = Math.Max(0, match - 40);
-        var end = Math.Min(normalized.Length, match + 60);
-        return normalized[start..end];
     }
 
     internal static IReadOnlyList<string> BuildSearchTerms(string query)

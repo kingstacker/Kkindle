@@ -469,6 +469,64 @@ public sealed class LibraryTests
     }
 
     [Fact]
+    public async Task PagedLibrarySearchMatchesPinyinAndInitials()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var first = Path.Combine(root, "first.epub");
+            var second = Path.Combine(root, "second.epub");
+            var third = Path.Combine(root, "third.epub");
+            CreateEpub(first, "first", "第一本");
+            CreateEpub(second, "second", "第二本");
+            CreateEpub(third, "third", "English Grammar");
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var service = new SqliteBookLibraryService(paths, new BookMetadataService());
+            await service.InitializeAsync();
+            await service.ImportAsync([first, second, third]);
+
+            Assert.Empty(await service.SearchAsync("maozedongxuanji"));
+            var books = await service.SearchAsync();
+            var selected = books.Single(book => book.Title == "第一本");
+            selected.Title = "毛泽东选集";
+            selected.Authors = "毛泽东";
+            await service.UpdateMetadataAsync(selected);
+            var contradiction = books.Single(book => book.Title == "第二本");
+            contradiction.Title = "矛盾论";
+            contradiction.Authors = "毛泽东";
+            await service.UpdateMetadataAsync(contradiction);
+
+            var fullPinyin = await service.SearchPageAsync(
+                query: "mao ze dong xuan ji",
+                pageSize: 1);
+            Assert.Equal(1, fullPinyin.TotalCount);
+            Assert.Equal("毛泽东选集", Assert.Single(fullPinyin.Books).Title);
+
+            var initialsFirstPage = await service.SearchPageAsync(
+                query: "mzd",
+                pageIndex: 0,
+                pageSize: 1);
+            var initialsSecondPage = await service.SearchPageAsync(
+                query: "mzd",
+                pageIndex: 1,
+                pageSize: 1);
+            Assert.Equal(2, initialsFirstPage.TotalCount);
+            Assert.Single(initialsFirstPage.Books);
+            Assert.Equal(2, initialsSecondPage.TotalCount);
+            Assert.Single(initialsSecondPage.Books);
+            Assert.NotEqual(
+                initialsFirstPage.Books[0].Id,
+                initialsSecondPage.Books[0].Id);
+
+            Assert.Equal("毛泽东选集", Assert.Single(await service.SearchAsync("MZDXJ")).Title);
+            Assert.Equal(2, (await service.SearchAsync("maozedong")).Count);
+            Assert.Equal("English Grammar", Assert.Single((await service.SearchPageAsync("grammar")).Books).Title);
+            Assert.Empty(await service.SearchAsync("zhangjuzheng"));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task PagedLibraryQueriesKeepFilteringAndCollectionCountsInSqlite()
     {
         var root = TestHelpers.CreateTempDirectory();
@@ -649,7 +707,7 @@ public sealed class LibraryTests
     }
 
     [Fact]
-    public async Task ReinitializingReaderDataRemovesAnnotationsForMissingFilesOfExistingBooks()
+    public async Task ReinitializingReaderDataPreservesAnnotationsForMissingFilesOfExistingBooks()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -673,7 +731,7 @@ public sealed class LibraryTests
             });
             Assert.Single(await reader.GetAllAnnotationsAsync());
             await reader.InitializeAsync();
-            Assert.Empty(await reader.GetAllAnnotationsAsync());
+            Assert.Single(await reader.GetAllAnnotationsAsync());
         }
         finally { TestHelpers.TryDelete(root); }
     }
