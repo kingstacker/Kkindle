@@ -4,6 +4,10 @@ namespace Kkindle.Infrastructure;
 
 public sealed class PdfTextService
 {
+    private readonly IPdfDocumentFactory _pdfDocuments;
+    public PdfTextService(IPdfDocumentFactory? pdfDocuments = null) =>
+        _pdfDocuments = pdfDocuments ?? new PdfiumDocumentFactory();
+
     private const int MaxIndexedPages = 10_000;
     private const int MaxIndexedCharacters = 20_000_000;
 
@@ -12,7 +16,7 @@ public sealed class PdfTextService
         {
             var pages = new List<PdfPageText>();
             var characterCount = 0L;
-            using var document = new PdfDocumentService(path);
+            using var document = _pdfDocuments.Open(path);
             for (var pageNumber = 1; pageNumber <= document.PageCount; pageNumber++)
             {
                 cancellationToken.ThrowIfCancellationRequested();

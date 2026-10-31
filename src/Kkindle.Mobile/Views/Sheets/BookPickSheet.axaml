@@ -1,0 +1,74 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:s="using:Kkindle.Mobile.Views.Sheets"
+             x:Class="Kkindle.Mobile.Views.Sheets.BookPickSheet">
+  <UserControl.Styles>
+    <Style Selector="Border.tick">
+      <Setter Property="Width" Value="22" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="CornerRadius" Value="11" />
+      <Setter Property="BorderThickness" Value="1.4" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SunkStrongBrush}" />
+    </Style>
+    <Style Selector="Border.tick.on">
+      <Setter Property="BorderBrush" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Background" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="20,0,20,14">
+    <TextBox Name="FilterBox" Classes="field" PlaceholderText="搜索书名或作者" Margin="0,0,0,6"
+             TextChanged="OnFilterChanged" />
+
+    <!-- Virtualized: a phone library can hold thousands of books. -->
+    <ItemsControl Grid.Row="1" Name="Rows">
+      <ItemsControl.Template>
+        <ControlTemplate>
+          <ScrollViewer>
+            <ItemsPresenter ItemsPanel="{TemplateBinding ItemsPanel}" />
+          </ScrollViewer>
+        </ControlTemplate>
+      </ItemsControl.Template>
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="s:PickRow">
+          <Button Classes="row" Padding="0,8" Click="OnRowClick">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <Border Classes="cover" Width="34" Height="49">
+                <Border Classes="coverclip">
+                  <Panel>
+                    <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                    <TextBlock Text="{Binding Initial}" IsVisible="{Binding !HasCover}" FontSize="14"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Panel>
+                </Border>
+              </Border>
+              <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center" Spacing="3">
+                <TextBlock Text="{Binding Title}" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Author}" Classes="muted" FontSize="12.5"
+                           MaxLines="1" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <Border Grid.Column="2" Classes="tick" Classes.on="{Binding IsPicked}" VerticalAlignment="Center">
+                <c:LineIcon Data="{StaticResource IconCheck}" Size="14" StrokeThickness="1.8"
+                            Foreground="{DynamicResource PageBackgroundBrush}" IsVisible="{Binding IsPicked}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+            </Grid>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <TextBlock Grid.Row="1" Name="NoMatchText" Classes="muted" Text="没有匹配的书" IsVisible="False"
+               HorizontalAlignment="Center" Margin="0,40,0,0" />
+
+    <Button Grid.Row="2" Name="ConfirmButton" Classes="primary" Margin="0,10,0,0"
+            Content="选择要加入的书" IsEnabled="False" Click="OnConfirmClick" />
+  </Grid>
+</UserControl>

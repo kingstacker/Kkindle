@@ -1,0 +1,146 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             x:Class="Kkindle.Mobile.Views.ReaderPage">
+  <UserControl.Styles>
+    <Style Selector="Border.chrome">
+      <Setter Property="Opacity" Value="0" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.16" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Border.chrome.visible">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="IsHitTestVisible" Value="True" />
+    </Style>
+    <Style Selector="Button.action">
+      <Setter Property="Height" Value="52" />
+      <Setter Property="Width" Value="NaN" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+    </Style>
+  </UserControl.Styles>
+
+  <ThemeVariantScope Name="ThemeScope">
+    <ContentControl Name="Surface" Classes="themed">
+      <Grid RowDefinitions="*,Auto">
+        <ContentControl Grid.Row="0" Name="ReaderHostSlot" />
+
+        <!-- Always-on position line, the only chrome while reading. -->
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="24,2,24,10">
+          <TextBlock Name="FooterChapter" Classes="muted" FontSize="11.5" MaxLines="1"
+                     TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Column="1" Name="FooterPosition" Classes="muted" FontSize="11.5"
+                     Margin="12,0,0,0" />
+        </Grid>
+
+        <Border Grid.RowSpan="2" Name="LoadingPanel" Background="{Binding #Surface.Background}">
+          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12">
+            <TextBlock Name="LoadingTitleText" Classes="title" HorizontalAlignment="Center"
+                       TextAlignment="Center" MaxWidth="280" TextWrapping="Wrap" />
+            <TextBlock Name="LoadingDetailText" Classes="muted" HorizontalAlignment="Center"
+                       MaxWidth="300" TextWrapping="Wrap" TextAlignment="Center" />
+          </StackPanel>
+        </Border>
+
+        <Border Grid.RowSpan="2" Name="ErrorPanel" IsVisible="False"
+                Background="{Binding #Surface.Background}">
+          <StackPanel VerticalAlignment="Center" Margin="32" Spacing="10">
+            <TextBlock Text="暂时打不开这本书" Classes="title" HorizontalAlignment="Center" />
+            <TextBlock Name="ErrorText" Classes="muted" TextWrapping="Wrap"
+                       TextAlignment="Center" LineHeight="20" />
+            <Button Classes="secondary" Content="返回" Margin="0,6,0,0" Click="OnBackClick" />
+          </StackPanel>
+        </Border>
+
+        <!-- Floating chrome keeps the page visible around it. -->
+        <Border Grid.RowSpan="2" Name="TopChrome" Classes="chrome floating" VerticalAlignment="Top"
+                Margin="12,8,12,0">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="4">
+            <Button Classes="icon" Click="OnBackClick">
+              <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+            </Button>
+            <TextBlock Grid.Column="1" Name="TitleText" FontSize="14" FontWeight="Medium"
+                       VerticalAlignment="Center" MaxLines="1" TextTrimming="CharacterEllipsis"
+                       Margin="2,0" />
+            <Button Grid.Column="2" Classes="icon" Name="SearchButton" Click="OnSearchClick">
+              <c:LineIcon Data="{StaticResource IconSearch}" StrokeThickness="1.4" />
+            </Button>
+            <Button Grid.Column="3" Classes="icon" Name="BookmarkButton" Click="OnBookmarkClick">
+              <c:LineIcon Name="BookmarkIcon" Data="{StaticResource IconBookmark}" StrokeThickness="1.4" />
+            </Button>
+          </Grid>
+        </Border>
+
+        <!-- Reading aloud keeps a small control bar while the chrome is hidden. -->
+        <Border Grid.RowSpan="2" Name="SpeechBar" Classes="floating" IsVisible="False"
+                VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12,0,12,40" Padding="16,4,4,4">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <c:LineIcon Data="{StaticResource IconHeadphones}" Size="18" StrokeThickness="1.4"
+                        VerticalAlignment="Center" />
+            <TextBlock Name="SpeechStatusText" FontSize="13" VerticalAlignment="Center" Margin="6,0,6,0" />
+            <Button Classes="icon" Width="40" Height="40" Click="OnSpeechPauseClick">
+              <c:LineIcon Name="SpeechPauseIcon" Data="{StaticResource IconPause}" Size="18" StrokeThickness="1.6" />
+            </Button>
+            <Button Classes="icon" Width="40" Height="40" Click="OnSpeechStopClick">
+              <c:LineIcon Data="{StaticResource IconClose}" Size="17" StrokeThickness="1.4" />
+            </Button>
+          </StackPanel>
+        </Border>
+
+        <Border Grid.RowSpan="2" Name="BottomChrome" Classes="chrome floating" VerticalAlignment="Bottom"
+                Margin="12,0,12,12">
+          <StackPanel Margin="18,14,18,6">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Name="ChapterText" Classes="secondary" FontSize="13" MaxLines="1"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="1" Name="PercentText" Classes="muted" FontSize="13"
+                         Margin="12,0,0,0" />
+            </Grid>
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="-10,2,-10,0">
+              <Button Classes="icon" Width="36" Click="OnPreviousClick">
+                <c:LineIcon Data="{StaticResource IconPrevious}" Size="17" StrokeThickness="1.4" />
+              </Button>
+              <Slider Grid.Column="1" Name="ProgressSlider" Minimum="0" Maximum="100"
+                      ValueChanged="OnSliderValueChanged" />
+              <Button Grid.Column="2" Classes="icon" Width="36" Click="OnNextClick">
+                <c:LineIcon Data="{StaticResource IconNext}" Size="17" StrokeThickness="1.4" />
+              </Button>
+            </Grid>
+            <Grid ColumnDefinitions="*,*,*,*">
+              <Button Grid.Column="0" Classes="icon action" Name="TocButton" Click="OnTocClick">
+                <StackPanel Spacing="2">
+                  <c:LineIcon Data="{StaticResource IconToc}" Size="21" StrokeThickness="1.4"
+                              HorizontalAlignment="Center" />
+                  <TextBlock Text="目录" FontSize="11" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button Grid.Column="1" Classes="icon action" Name="ListenButton" Click="OnListenClick">
+                <StackPanel Spacing="2">
+                  <c:LineIcon Data="{StaticResource IconHeadphones}" Size="21" StrokeThickness="1.4"
+                              HorizontalAlignment="Center" />
+                  <TextBlock Name="ListenLabel" Text="听书" FontSize="11" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button Grid.Column="2" Classes="icon action" Name="AiButton" Click="OnAiClick">
+                <StackPanel Spacing="2">
+                  <c:LineIcon Data="{StaticResource IconSparkle}" Size="21" StrokeThickness="1.4"
+                              HorizontalAlignment="Center" />
+                  <TextBlock Text="AI" FontSize="11" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button Grid.Column="3" Classes="icon action" Name="TypographyButton" Click="OnTypographyClick">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Aa" FontSize="16" Height="21" HorizontalAlignment="Center" />
+                  <TextBlock Name="TypographyLabel" Text="排版" FontSize="11" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </Grid>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </ContentControl>
+  </ThemeVariantScope>
+</UserControl>

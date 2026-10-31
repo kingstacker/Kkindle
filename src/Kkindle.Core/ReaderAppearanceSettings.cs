@@ -17,7 +17,9 @@ public enum ReaderTheme
 {
     Classic = 0,
     Beige = 1,
-    Green = 2
+    Green = 2,
+    // 3 and 4 are reserved: legacy settings holding them must fall back to Classic.
+    Ink = 5
 }
 
 public enum ReaderAnnotationDisplayMode

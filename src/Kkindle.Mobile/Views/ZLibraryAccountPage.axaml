@@ -1,0 +1,57 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             x:Class="Kkindle.Mobile.Views.ZLibraryAccountPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <UserControl.Styles>
+    <Style Selector="StackPanel.field">
+      <Setter Property="Spacing" Value="6" />
+      <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+    <Style Selector="StackPanel.field > TextBlock">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBox.field">
+      <Setter Property="TextInputOptions.AutoCapitalization" Value="False" />
+      <Setter Property="TextInputOptions.ShowSuggestions" Value="False" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Grid ColumnDefinitions="Auto,*" Margin="8,6,24,0">
+      <Button Classes="icon" Click="OnBackClick">
+        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+      </Button>
+      <TextBlock Grid.Column="1" Classes="title" Text="Z-Library 账号" VerticalAlignment="Center" Margin="2,0,0,0" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" Name="FormScroller">
+      <StackPanel Margin="24,12,24,20">
+        <TextBlock Classes="muted" TextWrapping="Wrap" LineHeight="20" Margin="0,0,0,18"
+                   Text="与电脑版共用同一份加密保存的账号。搜索不需要登录，下载需要。" />
+        <StackPanel Classes="field">
+          <TextBlock Text="邮箱" />
+          <TextBox Name="EmailBox" Classes="field" TextInputOptions.ContentType="Email" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="密码" />
+          <TextBox Name="PasswordBox" Classes="field" PasswordChar="•"
+                   TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="服务地址" />
+          <TextBox Name="BaseUrlBox" Classes="field" TextInputOptions.ContentType="Url" />
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="2" Name="ActionBar" Margin="24,8,24,14" Spacing="10">
+      <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" LineHeight="20" />
+      <Grid ColumnDefinitions="*,12,*">
+        <Button Name="LoginButton" Classes="primary" Content="测试登录" Click="OnLoginClick" />
+        <Button Grid.Column="2" Name="SaveButton" Classes="primary" Content="保存" Click="OnSaveClick" />
+      </Grid>
+    </StackPanel>
+  </Grid>
+</UserControl>

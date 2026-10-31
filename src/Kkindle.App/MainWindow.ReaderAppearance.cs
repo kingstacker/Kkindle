@@ -77,9 +77,8 @@ public partial class MainWindow
         ApplyReaderTocFontSize();
         ReaderAppearanceResources.PopulateControls(ReaderThemeScope.Resources, appearance);
         ReaderThemeScope.RequestedThemeVariant = ThemeVariant.Light;
-        (_readerActiveHost as NativeReaderHost)?.SetAppearance(appearance);
-        (_readerPreloadHost as NativeReaderHost)?.SetAppearance(appearance);
-        (_readerActiveHost as NativePdfReaderHost)?.SetAppearance(appearance);
+        (_readerActiveHost as IReaderAppearanceHost)?.SetAppearance(appearance);
+        (_readerPreloadHost as IReaderAppearanceHost)?.SetAppearance(appearance);
         UpdateReaderTitleAppearance();
         // Updating marker brushes leaves the rail's scroll offset and hover
         // wave intact; rebuilding its ItemsSource would move the chapter map.
@@ -286,7 +285,7 @@ public partial class MainWindow
         ApplyReaderAppearance();
         SyncReaderAppearanceControls();
         SyncReaderBookScopeControls();
-        await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
+        await ApplyReaderLayoutToHostsAsync(_readerSession.GetTokenOr(CancellationToken.None));
         await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
     }
 

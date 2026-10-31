@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Self-hosted AI, WebDAV and S3 servers (Ollama, a NAS) are often plain HTTP
+     on the local network. Public services should still be configured as HTTPS. -->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true">
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </base-config>
+</network-security-config>

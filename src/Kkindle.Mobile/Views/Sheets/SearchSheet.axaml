@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:s="using:Kkindle.Mobile.Views.Sheets"
+             x:Class="Kkindle.Mobile.Views.Sheets.SearchSheet">
+  <Grid RowDefinitions="Auto,Auto,*" Margin="20,4,20,12">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBox Name="QueryBox" Classes="field" PlaceholderText="搜索全书" KeyDown="OnQueryKeyDown" />
+      <Button Grid.Column="1" Classes="icon" Margin="4,0,-10,0" Click="OnSearchClick">
+        <c:LineIcon Data="{StaticResource IconSearch}" StrokeThickness="1.4" />
+      </Button>
+    </Grid>
+    <TextBlock Grid.Row="1" Name="StatusText" Classes="muted" Margin="0,10,0,0" IsVisible="False"
+               TextWrapping="Wrap" />
+    <ItemsControl Grid.Row="2" Name="Results" Margin="0,6,0,0">
+      <ItemsControl.Template>
+        <ControlTemplate>
+          <ScrollViewer>
+            <ItemsPresenter ItemsPanel="{TemplateBinding ItemsPanel}" />
+          </ScrollViewer>
+        </ControlTemplate>
+      </ItemsControl.Template>
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="s:SearchHit">
+          <Button Classes="row" Click="OnHitClick">
+            <Grid ColumnDefinitions="Auto,*">
+              <Border Classes="cover" Width="44" Height="62" Margin="0,0,14,0" VerticalAlignment="Top"
+                      IsVisible="{Binding ShowsCover}">
+                <Border Classes="coverclip">
+                  <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                </Border>
+              </Border>
+              <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Title}" Classes="muted" FontSize="12" MaxLines="1"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Excerpt}" FontSize="14" LineHeight="21" MaxLines="2"
+                           TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Grid>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </Grid>
+</UserControl>

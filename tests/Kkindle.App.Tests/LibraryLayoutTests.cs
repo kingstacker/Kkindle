@@ -90,6 +90,12 @@ public sealed partial class SettingsTests
         Assert.True(shelfRight <= detailLeft, "The detail pane must not cover books.");
         Assert.True(grid.Bounds.Width <= shelf.Bounds.Width + 1);
         Assert.Contains("EPUB", scope.Get<TextBlock>("DetailFormatText").Text);
+        // Douban lookup belongs to developer mode.
+        Assert.False(scope.Get<Button>("DetailDoubanButton").IsVisible);
+        Assert.False(scope.Get<ToggleSwitch>("AutoDoubanMatchCheck").IsVisible);
+        scope.Call("UnlockZLibraryAdvancedOptions");
+        await Render();
+        Assert.True(scope.Get<Button>("DetailDoubanButton").IsEffectivelyVisible);
         var detailButtons = new[]
         {
             scope.Get<Button>("LibraryDetailCloseButton"),
@@ -165,7 +171,7 @@ public sealed partial class SettingsTests
         var editReflectionButton = scope.Get<Button>("EditBookReflectionButton");
         Assert.True(editReflectionButton.IsEffectivelyVisible);
         Assert.IsType<Avalonia.Controls.Shapes.Path>(editReflectionButton.Content);
-        var detailActionButton = scope.Get<Button>("DetailDoubanButton");
+        var detailActionButton = scope.Get<Button>("DetailFavoriteButton");
         Assert.Equal(detailActionButton.Bounds.Width, editReflectionButton.Bounds.Width, 1);
         Assert.Equal(detailActionButton.Bounds.Height, editReflectionButton.Bounds.Height, 1);
         var preview = scope.Get<KreaderMarkdownTextBlock>("DetailReflectionPreviewText");

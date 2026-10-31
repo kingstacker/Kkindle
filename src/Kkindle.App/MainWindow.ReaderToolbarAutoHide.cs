@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Kkindle.Core;
 
 namespace Kkindle;
 
@@ -145,8 +146,8 @@ public partial class MainWindow
         var row = expanded ? 0 : 1;
         var span = expanded ? 3 : 1;
         if (Grid.GetRow(ReaderReadingArea) == row && Grid.GetRowSpan(ReaderReadingArea) == span) return;
-        (_readerActiveHost as NativeReaderHost)?.PreservePositionForViewportChange();
-        (_readerPreloadHost as NativeReaderHost)?.PreservePositionForViewportChange();
+        (_readerActiveHost as IReaderConfiguredHost)?.PreservePositionForViewportChange();
+        (_readerPreloadHost as IReaderConfiguredHost)?.PreservePositionForViewportChange();
         Grid.SetRow(ReaderReadingArea, row);
         Grid.SetRowSpan(ReaderReadingArea, span);
     }

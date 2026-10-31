@@ -29,7 +29,7 @@ public sealed record PdfRasterRegion(int PageNumber, int PagePixelWidth, int Pag
 /// Rendering and text extraction use the same engine and UTF-16 offset stream.
 /// No PDF JavaScript, external actions or embedded attachments are executed.
 /// </summary>
-public sealed partial class PdfDocumentService : IDisposable
+public sealed partial class PdfDocumentService : IPdfDocument
 {
     private static readonly object NativeGate = new();
     private static bool _initialized;

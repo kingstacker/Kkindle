@@ -1,0 +1,289 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:vm="using:Kkindle.Mobile.Views"
+             x:Class="Kkindle.Mobile.Views.ReadingDataPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <UserControl.Styles>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource SunkBrush}" />
+      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Padding" Value="16" />
+    </Style>
+    <Style Selector="TextBlock.section">
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="TextBlock.stat">
+      <Setter Property="FontSize" Value="24" />
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="Border.bar">
+      <Setter Property="Background" Value="{DynamicResource SunkStrongBrush}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="MaxWidth" Value="16" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+    </Style>
+    <Style Selector="Border.bar.strong">
+      <Setter Property="Background" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Border.bar.picked">
+      <Setter Property="Background" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="c|ThinProgress.thick">
+      <Setter Property="Height" Value="4" />
+    </Style>
+    <Style Selector="Button.plain">
+      <!-- A rounded presenter would clip chart labels that overhang their bar. -->
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Stretch" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*">
+    <Grid ColumnDefinitions="Auto,*" Margin="8,6,24,0">
+      <Button Classes="icon" Click="OnBackClick">
+        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+      </Button>
+      <TextBlock Grid.Column="1" Classes="title" Text="阅读数据" VerticalAlignment="Center" Margin="2,0,0,0" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1">
+      <StackPanel Margin="20,8,20,36">
+        <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" Margin="4,0,4,12" />
+
+        <!-- Hero -->
+        <StackPanel Margin="4,8,4,22" Spacing="4">
+          <TextBlock Classes="muted" Text="累计阅读" />
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Name="TotalValueText" Text="0" FontSize="48" FontWeight="Medium" LineHeight="54" />
+            <TextBlock Name="TotalUnitText" Text="分钟" Classes="secondary" FontSize="16"
+                       VerticalAlignment="Bottom" Margin="0,0,0,9" />
+          </StackPanel>
+          <TextBlock Name="HeroDetailText" Classes="muted" />
+        </StackPanel>
+
+        <!-- Stat cards -->
+        <Grid ColumnDefinitions="*,10,*" RowDefinitions="Auto,10,Auto">
+          <Border Classes="card">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="muted" FontSize="12.5" Text="已开始" />
+              <TextBlock Classes="stat" Name="BooksStartedText" Text="0 本" />
+              <TextBlock Classes="muted" FontSize="11.5" Name="AverageProgressText" />
+            </StackPanel>
+          </Border>
+          <Border Grid.Column="2" Classes="card">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="muted" FontSize="12.5" Text="已读完" />
+              <TextBlock Classes="stat" Name="BooksFinishedText" Text="0 本" />
+              <TextBlock Classes="muted" FontSize="11.5" Name="FinishedRateText" />
+            </StackPanel>
+          </Border>
+          <Border Grid.Row="2" Classes="card">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="muted" FontSize="12.5" Text="书签" />
+              <TextBlock Classes="stat" Name="BookmarksText" Text="0" />
+            </StackPanel>
+          </Border>
+          <Border Grid.Row="2" Grid.Column="2" Classes="card">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="muted" FontSize="12.5" Text="划线与笔记" />
+              <TextBlock Classes="stat" Name="AnnotationsText" Text="0" />
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <!-- Daily time -->
+        <Border Classes="card" Margin="0,10,0,0" Padding="16,16,16,12">
+          <StackPanel>
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="section" Name="DailyTitleText" />
+                <TextBlock Classes="muted" FontSize="12.5" Name="PickedDayText" />
+              </StackPanel>
+              <Border Grid.Column="1" Classes="segments" Background="{DynamicResource SunkStrongBrush}"
+                      VerticalAlignment="Top" Padding="2">
+                <StackPanel Orientation="Horizontal">
+                  <Button Name="Range7" Classes="seg" Padding="10,4" FontSize="12.5" Content="7 天" Click="OnRangeClick" />
+                  <Button Name="Range14" Classes="seg on" Padding="10,4" FontSize="12.5" Content="14 天" Click="OnRangeClick" />
+                  <Button Name="Range30" Classes="seg" Padding="10,4" FontSize="12.5" Content="30 天" Click="OnRangeClick" />
+                </StackPanel>
+              </Border>
+            </Grid>
+            <!-- Labels sit in their own row: overhanging text inside a bar's
+                 button would be painted over by the next bar. -->
+            <ItemsControl Name="DaysChart" Height="124" Margin="-2,18,-2,0">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <UniformGrid Rows="1" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ReadingDayBar">
+                  <Button Classes="plain" Click="OnDayClick">
+                    <Border Classes="bar" Classes.strong="{Binding IsStrong}" Classes.picked="{Binding IsPicked}"
+                            Height="{Binding BarHeight}" />
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ItemsControl Name="DaysLabels" Margin="-2,8,-2,0" IsHitTestVisible="False">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <UniformGrid Rows="1" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ReadingDayBar">
+                  <TextBlock Text="{Binding Label}" Classes="muted" FontSize="10.5" Margin="-16,0"
+                             TextAlignment="Center" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <!-- Recent -->
+        <TextBlock Classes="section" Text="最近在读" Margin="4,28,4,12" />
+        <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Margin="-20,0">
+          <ItemsControl Name="RecentList" Margin="20,0">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="14" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ReadingBookRow">
+                <Button Classes="plain" Width="96" Click="OnBookClick">
+                  <StackPanel Spacing="6">
+                    <Border Classes="cover" Width="96" Height="138">
+                      <Border Classes="coverclip">
+                        <Panel>
+                          <Image Source="{Binding Cover}" Stretch="Uniform" />
+                          <TextBlock Text="{Binding Initial}" IsVisible="{Binding !HasCover}" FontSize="24"
+                                     Foreground="{DynamicResource TextMutedBrush}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Panel>
+                      </Border>
+                    </Border>
+                    <TextBlock Text="{Binding Title}" FontSize="13" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                    <Grid ColumnDefinitions="*,Auto">
+                      <c:ThinProgress Value="{Binding Percent}" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Text="{Binding Detail}" Classes="muted" FontSize="11"
+                                 Margin="6,0,0,0" />
+                    </Grid>
+                  </StackPanel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <TextBlock Name="RecentEmptyText" Classes="muted" Text="还没有阅读记录" IsVisible="False" Margin="4,0" />
+
+        <!-- Most read -->
+        <TextBlock Classes="section" Text="读得最久" Margin="4,28,4,4" />
+        <ItemsControl Name="BookTimesList">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:ReadingBookRow">
+              <Button Classes="plain" Click="OnBookClick">
+                <Grid ColumnDefinitions="Auto,*" Margin="4,8">
+                  <Border Classes="cover" Width="38" Height="54">
+                    <Border Classes="coverclip">
+                      <Panel>
+                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <TextBlock Text="{Binding Initial}" IsVisible="{Binding !HasCover}" FontSize="15"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Panel>
+                    </Border>
+                  </Border>
+                  <StackPanel Grid.Column="1" Margin="14,0,0,0" Spacing="8" VerticalAlignment="Center">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{Binding Title}" FontSize="14" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Grid.Column="1" Text="{Binding Detail}" Classes="muted" FontSize="12.5"
+                                 Margin="12,0,0,0" />
+                    </Grid>
+                    <c:ThinProgress Classes="thick" Value="{Binding Percent}" />
+                  </StackPanel>
+                </Grid>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Name="BookTimesEmptyText" Classes="muted" Text="暂无阅读时长" IsVisible="False" Margin="4,0" />
+
+        <!-- Progress distribution -->
+        <Border Classes="card" Margin="0,24,0,0">
+          <StackPanel Spacing="14">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="section" Text="进度分布" />
+              <TextBlock Grid.Column="1" Name="DistributionTotalText" Classes="muted" FontSize="12.5"
+                         VerticalAlignment="Center" />
+            </Grid>
+            <Border Height="10" CornerRadius="5" ClipToBounds="True" Background="{DynamicResource SunkStrongBrush}">
+              <Grid Name="DistributionBar" />
+            </Border>
+            <ItemsControl Name="DistributionLegend">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ReadingBucket">
+                  <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,5">
+                    <Border Width="8" Height="8" CornerRadius="4" Opacity="{Binding Shade}"
+                            Background="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding Label}" Classes="secondary" FontSize="13"
+                               Margin="8,0,0,0" />
+                    <TextBlock Grid.Column="2" Text="{Binding CountText}" Classes="muted" FontSize="12.5" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <!-- Medals -->
+        <Grid ColumnDefinitions="*,Auto" Margin="4,28,0,14">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="section" Text="阅读勋章" />
+            <TextBlock Classes="muted" FontSize="12.5" Name="MedalSummaryText" />
+          </StackPanel>
+          <Border Grid.Column="1" Classes="segments" VerticalAlignment="Top" Padding="2">
+            <StackPanel Orientation="Horizontal">
+              <Button Name="MedalsUnlocked" Classes="seg on" Padding="10,4" FontSize="12.5" Content="已解锁"
+                      Click="OnMedalFilterClick" />
+              <Button Name="MedalsAll" Classes="seg" Padding="10,4" FontSize="12.5" Content="全部"
+                      Click="OnMedalFilterClick" />
+            </StackPanel>
+          </Border>
+        </Grid>
+        <ItemsControl Name="MedalsList">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid Columns="4" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:ReadingMedalTile">
+              <Button Classes="plain" Click="OnMedalClick" Margin="0,0,0,16">
+                <StackPanel Spacing="8">
+                  <Panel Width="58" Height="58" HorizontalAlignment="Center">
+                    <Ellipse Stroke="{DynamicResource SunkStrongBrush}" StrokeThickness="3" />
+                    <Arc StartAngle="-90" SweepAngle="{Binding Sweep}" Stroke="{DynamicResource TextPrimaryBrush}"
+                         StrokeThickness="3" StrokeLineCap="Round" />
+                    <c:LineIcon Data="{Binding Icon}" StrokeThickness="1.3" Opacity="{Binding IconOpacity}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Panel>
+                  <TextBlock Text="{Binding Medal.Name}" FontSize="11.5" MaxLines="1"
+                             TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Name="MedalsEmptyText" Classes="muted" Text="继续阅读，解锁第一枚勋章" IsVisible="False" Margin="4,0" />
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

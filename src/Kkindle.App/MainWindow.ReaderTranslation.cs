@@ -42,7 +42,7 @@ public partial class MainWindow
         if (source.Length == 0) return;
         if (_readerIsPdf)
         {
-            var paragraphText = (CurrentReaderHost as NativePdfReaderHost)?.GetSelectedTextForTranslation();
+            var paragraphText = (CurrentReaderHost as IPdfTextHost)?.GetSelectedTextForTranslation();
             source = string.IsNullOrWhiteSpace(paragraphText)
                 ? PdfTextSelectionLayout.NormalizeCopy(source)
                 : paragraphText;

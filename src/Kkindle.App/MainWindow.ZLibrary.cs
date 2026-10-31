@@ -45,11 +45,19 @@ public partial class MainWindow
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Developer mode, toggled by clicking the version five times. It holds
+    /// features that are not part of the normal product: Z-Library and Douban.
+    /// </summary>
+    private bool IsDeveloperMode => _zLibraryAdvancedUnlocked;
+
     private void UnlockZLibraryAdvancedOptions()
     {
         if (_zLibraryAdvancedUnlocked) return;
         _zLibraryAdvancedUnlocked = true;
         ZLibraryBooksButton.IsVisible = true;
+        DetailDoubanButton.IsVisible = true;
+        AutoDoubanMatchCheck.IsVisible = true;
         SettingsAccountExpander.IsVisible = true;
         McpZLibraryFeaturesPanel.IsVisible = true;
         PopulateZLibraryControls();
@@ -64,6 +72,8 @@ public partial class MainWindow
         _zLibrarySearchCancellation?.Cancel();
         ++_zLibrarySearchGeneration;
         ZLibraryBooksButton.IsVisible = false;
+        DetailDoubanButton.IsVisible = false;
+        AutoDoubanMatchCheck.IsVisible = false;
         SettingsAccountExpander.IsVisible = false;
         McpZLibraryFeaturesPanel.IsVisible = false;
         ZLibraryPage.IsVisible = false;
@@ -98,7 +108,6 @@ public partial class MainWindow
         _zLibrarySearchCancellation = null;
         foreach (var item in ZLibraryBooks) item.Dispose();
         ZLibraryBooks.Clear();
-        _zLibraryService.Dispose();
     }
     private void UpdateZLibraryAccountStatus()
     {

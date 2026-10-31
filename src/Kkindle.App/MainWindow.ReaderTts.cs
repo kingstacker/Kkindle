@@ -165,7 +165,7 @@ public partial class MainWindow
             return GetCurrentPdfReaderTtsDocument();
 
         if (_readerDocument is null
-            || CurrentReaderHost is not NativeReaderHost host)
+            || CurrentReaderHost is not IReaderSpeechHost host)
         {
             return null;
         }
@@ -218,7 +218,7 @@ public partial class MainWindow
         {
             if (_readerIsPdf && page == _readerPdfPage)
             {
-                (CurrentReaderHost as NativePdfReaderHost)?.SetSpeechHighlight(start, length);
+                (CurrentReaderHost as IPdfTextHost)?.SetSpeechHighlight(start, length);
                 ReaderStatusText.Text = T("PDF 第 {0} 页 · 正在朗读", page);
             }
         });
@@ -232,7 +232,7 @@ public partial class MainWindow
             return;
         }
         if (!_readerIsPdf || !ReaderRoot.IsVisible) return;
-        (CurrentReaderHost as NativePdfReaderHost)?.ClearSpeechHighlight();
+        (CurrentReaderHost as IPdfTextHost)?.ClearSpeechHighlight();
         ResetReaderStatusText();
     }
 
@@ -248,7 +248,7 @@ public partial class MainWindow
             if (request is null) return null;
 
             var snapshot = await Task.Run(
-                () => NativeReaderHost.LoadSpeechTextSnapshot(
+                () => ReaderSpeechTextBuilder.Load(
                     request.ChapterPath,
                     request.ParagraphIndent,
                     cancellationToken),
@@ -310,7 +310,7 @@ public partial class MainWindow
     }
 
     private Task ApplyReaderTtsHighlightAsync(
-        NativeReaderHost host,
+        IReaderSpeechHost host,
         int start,
         int length)
     {
@@ -328,7 +328,7 @@ public partial class MainWindow
         });
     }
 
-    private void ClearReaderTtsHighlight(NativeReaderHost host)
+    private void ClearReaderTtsHighlight(IReaderSpeechHost host)
     {
         var version = Interlocked.Increment(ref _readerTtsHighlightVersion);
         try

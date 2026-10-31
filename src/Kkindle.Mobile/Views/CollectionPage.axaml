@@ -1,0 +1,87 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:vm="using:Kkindle.Mobile.Views"
+             x:Class="Kkindle.Mobile.Views.CollectionPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <Grid RowDefinitions="Auto,*">
+    <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="8,6,8,0">
+      <Button Classes="icon" Click="OnBackClick">
+        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+      </Button>
+      <Button Grid.Column="2" Classes="icon" Name="AddButton" Click="OnAddClick">
+        <c:LineIcon Data="{StaticResource IconPlus}" StrokeThickness="1.4" />
+      </Button>
+      <Button Grid.Column="3" Classes="icon" Name="MoreButton" Click="OnMoreClick">
+        <c:LineIcon Data="{StaticResource IconMore}" StrokeThickness="2.2" />
+      </Button>
+    </Grid>
+
+    <ScrollViewer Grid.Row="1">
+      <StackPanel Margin="24,4,24,28">
+        <!-- Hero: the folder's own fan of covers, a little larger than on the shelf. -->
+        <Border Background="{DynamicResource SunkBrush}" CornerRadius="22" Padding="20,26,20,22"
+                Margin="0,4,0,24">
+          <StackPanel>
+            <c:CoverStack Name="HeroCovers" Height="150" Width="230" HorizontalAlignment="Center"
+                          Placeholder="{DynamicResource SunkStrongBrush}"
+                          Backdrop="{DynamicResource SunkBrush}"
+                          Ink="{DynamicResource TextMutedBrush}" />
+            <TextBlock Name="NameText" Classes="display" HorizontalAlignment="Center" Margin="0,20,0,0"
+                       TextAlignment="Center" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+            <TextBlock Name="MetaText" Classes="muted" HorizontalAlignment="Center" Margin="0,6,0,0" />
+          </StackPanel>
+        </Border>
+
+        <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" Margin="0,0,0,10" />
+
+        <ItemsControl Name="BooksGrid" Tapped="OnBookTapped" Holding="OnBookHolding" Margin="-8,0">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid Columns="3" VerticalAlignment="Top" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:BookTile">
+              <StackPanel Margin="8,0,8,26" Background="Transparent">
+                <c:AspectBox>
+                  <Border Classes="cover">
+                    <Border Classes="coverclip">
+                      <Panel>
+                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
+                                   FontSize="26" Foreground="{DynamicResource TextMutedBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Panel>
+                    </Border>
+                  </Border>
+                </c:AspectBox>
+                <Panel Height="2" Margin="0,8,0,0">
+                  <c:ThinProgress Value="{Binding Progress}" IsVisible="{Binding IsInProgress}" />
+                </Panel>
+                <TextBlock Text="{Binding Title}" FontSize="13.5" Margin="0,8,0,0"
+                           MaxLines="2" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"
+                           LineHeight="19" />
+                <TextBlock Text="{Binding Author}" Classes="muted" FontSize="12" Margin="0,2,0,0"
+                           MaxLines="1" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <StackPanel Name="EmptyState" Spacing="6" IsVisible="False" Margin="0,28,0,0">
+          <c:LineIcon Data="{StaticResource IconFolder}" Size="32" StrokeThickness="1.1"
+                      HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+          <TextBlock Classes="title" Text="收藏夹还是空的" HorizontalAlignment="Center" Margin="0,8,0,0" />
+          <TextBlock Name="EmptyDetail" Classes="muted" Text="把同一主题的书放在一起，随时翻阅"
+                     HorizontalAlignment="Center" />
+          <Button Name="EmptyAddButton" Classes="primary" Content="添加书籍" HorizontalAlignment="Center"
+                  Padding="28,12" Margin="0,18,0,0" Click="OnAddClick" />
+        </StackPanel>
+
+        <TextBlock Name="HintText" Classes="muted" FontSize="12" Text="长按书籍可移出收藏夹"
+                   HorizontalAlignment="Center" Margin="0,4,0,0" />
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

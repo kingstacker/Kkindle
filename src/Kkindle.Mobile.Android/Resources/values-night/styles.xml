@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <style name="KkindleTheme" parent="Theme.AppCompat.NoActionBar">
+    <item name="android:fontFamily">sans</item>
+    <item name="android:colorAccent">#EDEDED</item>
+    <item name="android:statusBarColor">#FF121212</item>
+    <item name="android:navigationBarColor">#FF121212</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar">false</item>
+    <item name="android:windowActionModeOverlay">true</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowBackground">#FF121212</item>
+  </style>
+</resources>

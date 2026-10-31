@@ -116,7 +116,7 @@ public sealed class ReaderTests(SettingsUiSession session)
         scope.Set("_readerDocument", new EpubReaderDocument(scope.Paths.ReaderCache, chapters, [], []));
         scope.Set("_readerActiveHost", current);
         scope.Set("_readerPreloadHost", hidden);
-        scope.Set("_readerSessionCancellation", cancellation);
+        scope.Field<ReaderSession>("_readerSession").Begin(cancellation.Token);
         var preload = scope.Call<Task>("PreloadNextReaderChapterAsync", cancellation.Token);
         Assert.Equal(new Uri(chapters[1]), Assert.Single(hidden.Requests));
         if (sameChapter)
@@ -145,7 +145,7 @@ public sealed class ReaderTests(SettingsUiSession session)
             cancellation.Cancel();
             await preload;
             await navigation;
-            scope.Set("_readerSessionCancellation", null);
+            scope.Field<ReaderSession>("_readerSession").End();
         }
     });
 
@@ -161,7 +161,7 @@ public sealed class ReaderTests(SettingsUiSession session)
         scope.Set("_readerDocument", new EpubReaderDocument(scope.Paths.ReaderCache, chapters, [], []));
         scope.Set("_readerActiveHost", new ControlledReaderHost(new Uri(chapters[0])));
         scope.Set("_readerPreloadHost", hidden);
-        scope.Set("_readerSessionCancellation", cancellation);
+        scope.Field<ReaderSession>("_readerSession").Begin(cancellation.Token);
         var preload = scope.Call<Task>("PreloadNextReaderChapterAsync", cancellation.Token);
         var navigation = scope.Call<Task<bool>>("NavigateToReaderItemAsync",
             new EpubReaderNavigationItem("Next chapter", new Uri(chapters[1]).AbsoluteUri, 1),
@@ -178,7 +178,7 @@ public sealed class ReaderTests(SettingsUiSession session)
             cancellation.Cancel();
             await preload;
             await navigation;
-            scope.Set("_readerSessionCancellation", null);
+            scope.Field<ReaderSession>("_readerSession").End();
         }
     });
 

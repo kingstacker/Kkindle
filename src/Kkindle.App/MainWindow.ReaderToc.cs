@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
@@ -877,7 +877,7 @@ public partial class MainWindow
             _ = ObserveReaderTaskAsync(
                 NavigateToReaderItemAsync(
                     item,
-                    _readerSessionCancellation?.Token ?? CancellationToken.None,
+                    _readerSession.GetTokenOr(CancellationToken.None),
                     ReaderNavigationIntent.Toc));
             return;
         }
@@ -893,7 +893,7 @@ public partial class MainWindow
         _ = ObserveReaderTaskAsync(
             NavigateToReaderItemAsync(
                 item,
-                _readerSessionCancellation?.Token ?? CancellationToken.None,
+                _readerSession.GetTokenOr(CancellationToken.None),
                 ReaderNavigationIntent.Toc));
     }
 

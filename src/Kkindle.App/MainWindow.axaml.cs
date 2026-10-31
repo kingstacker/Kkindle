@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
@@ -70,6 +70,7 @@ public partial class MainWindow : Window
     private bool _crossProcessRefreshNeedsSync;
     private readonly SemaphoreSlim _bookMetadataSaveGate = new(1, 1);
 
+    private readonly ApplicationModules _modules;
     private readonly AppPaths _paths;
     private readonly string _rootConfigurationDirectory;
     private readonly IBookLibraryService _library;
@@ -99,7 +100,7 @@ public partial class MainWindow : Window
     private readonly EpubFootnoteResolver _footnotes;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly AiChatClient _aiChatClient;
-    private readonly ReaderWebSearchService _readerWebSearch = new();
+    private readonly ReaderWebSearchService _readerWebSearch;
     private readonly TranslationService _translationService;
     private readonly IEpubTranslationService _epubTranslationService;
     private readonly QueryRewriteService _queryRewriteService;
@@ -107,12 +108,12 @@ public partial class MainWindow : Window
     private readonly TtsCacheManager _ttsCacheManager;
     private readonly TtsService _readerTts;
     private readonly EpubReaderPreparationService _epubReader;
-    private readonly Func<IReaderHost> _readerHostFactory;
+    private readonly IReaderHostFactory _readerHostFactory;
     private readonly ZLibraryService _zLibraryService;
     private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
     private readonly KindleEmailSender _kindleEmailSender;
-    private readonly S3SyncService _s3SyncService;
+    private readonly ISyncService _s3SyncService;
     // Refreshing the library rebuilds BookCardViewModel instances. Keep the
     // last per-book result so a transient refresh failure cannot turn every
     // existing card back into the default NotSynced state.
@@ -184,12 +185,7 @@ public partial class MainWindow : Window
     private ScrollViewer? _bookGridScrollViewer;
 
     public MainWindow()
-        : this(CreateDefaultDependencies())
-    {
-    }
-
-    private MainWindow((AppPaths Paths, IBookLibraryService Library, IBookFormatConverter FormatConverter, DoubanMetadataService Douban) dependencies)
-        : this(dependencies.Paths, dependencies.Library, dependencies.FormatConverter, dependencies.Douban)
+        : this(DesktopApplicationBootstrap.Create())
     {
     }
 
@@ -200,51 +196,55 @@ public partial class MainWindow : Window
         DoubanMetadataService? douban = null,
         AppServices? services = null,
         AppSettings? startupSettings = null)
+        : this(DesktopApplicationBootstrap.Create(
+            paths, library, formatConverter, douban, services, startupSettings), services)
     {
-        _paths = paths;
+    }
+
+    /// <summary>Transfers ownership of a per-shell service graph to this window.</summary>
+    public MainWindow(ApplicationModules modules, AppServices? services = null)
+    {
+        ArgumentNullException.ThrowIfNull(modules);
+        ObjectDisposedException.ThrowIf(modules.IsDisposed, modules);
+        _modules = modules;
+        _paths = modules.Paths;
         // Clear the previous process's task records as the window starts, even
         // if the user does not open the task-history flyout during this run.
         _ = BackgroundTasks;
         _rootConfigurationDirectory = services?.RootConfigurationDirectory ?? AppContext.BaseDirectory;
-        _library = library;
-        _appSettings = AppSettings.Normalize(startupSettings);
-        _formatConverter = formatConverter ?? new BookFormatConversionService();
-        _readerFormatCache = new ReaderFormatCacheService(paths, _formatConverter);
-        _douban = douban ?? new DoubanMetadataService();
+        _library = modules.Library.Books;
+        _appSettings = modules.StartupSettings;
+        _formatConverter = modules.Library.FormatConverter;
+        _readerFormatCache = modules.Reader.FormatCache;
+        _douban = modules.Library.Douban;
         _kindle = services?.KindleDeviceService;
-        _deviceModelStore = new DeviceModelStore(paths);
-        _kindleAuxiliaryCacheStore = new KindleDeviceAuxiliaryCacheStore(paths);
-        _secretProtector = services?.SecretProtector ?? new PlaintextSecretProtector();
-        _backupService = new AppBackupService(paths, _secretProtector);
-        _platformDiagnostics = new PlatformDiagnosticsService(paths);
-        _appSettingsStore = new AppSettingsStore(paths);
-        _fontLibrary = new FontLibraryService(paths);
-        _dictionaryService = new DictionaryService(paths, _formatConverter);
-        _readerData = new ReaderDataService(paths);
-        _readerProgressRecovery = new ReaderProgressRecoveryService(paths, _readerData);
-        _readerReadingTimeRecovery = new ReaderReadingTimeRecoveryService(paths, _readerData);
-        _bookContent = new EpubBookContentService(_readerData);
-        _embeddingModelDownloader = new EmbeddingModelDownloadService(paths);
-        _g2pwModelDownloader = new G2PWModelDownloadService(
-            paths,
-            proxyAddress: _appSettings.Translation.GoogleProxyAddress);
-        _embeddingService = new LocalEmbeddingService(paths, _appSettings.EmbeddingModelId);
-        _readerEmbeddingIndex = new ReaderEmbeddingIndexService(_readerData, _embeddingService);
-        _readerRetriever = new HybridRetriever(
-            new KeywordRetriever(_readerData),
-            new VectorRetriever(_readerData, _embeddingService),
-            log: message => Debug.WriteLine($"[RAG] {message}"));
-        _readerAiContextBuilder = new ReaderAiContextBuilder(_readerData);
-        _footnotes = new EpubFootnoteResolver();
-        _aiSettingsStore = new AiSettingsStore(paths, _secretProtector);
-        _aiChatClient = new AiChatClient();
-        _translationService = new TranslationService(_aiChatClient);
-        _epubTranslationService = new EpubTranslationService(paths, _secretProtector, _aiChatClient);
-        _queryRewriteService = new QueryRewriteService(
-            _aiChatClient,
-            message => Debug.WriteLine($"[RAG] {message}"));
-        _ttsSettingsStore = new TtsSettingsStore(paths);
-        _ttsCacheManager = new TtsCacheManager();
+        _deviceModelStore = modules.Integrations.DeviceModels;
+        _kindleAuxiliaryCacheStore = modules.Integrations.DeviceCache;
+        _secretProtector = modules.SecretProtector;
+        _backupService = modules.Library.Backups;
+        _platformDiagnostics = modules.Integrations.Diagnostics;
+        _appSettingsStore = modules.Library.Settings;
+        _fontLibrary = modules.Library.Fonts;
+        _dictionaryService = modules.Library.Dictionary;
+        _readerData = modules.Reader.Data;
+        _readerProgressRecovery = modules.Reader.ProgressRecovery;
+        _readerReadingTimeRecovery = modules.Reader.ReadingTimeRecovery;
+        _bookContent = modules.Reader.Content;
+        _embeddingModelDownloader = modules.Ai.EmbeddingModels;
+        _g2pwModelDownloader = modules.Ai.PinyinModels;
+        _embeddingService = modules.Ai.Embedding;
+        _readerEmbeddingIndex = modules.Ai.EmbeddingIndex;
+        _readerRetriever = modules.Ai.Retriever;
+        _readerAiContextBuilder = modules.Ai.Context;
+        _footnotes = modules.Reader.Footnotes;
+        _aiSettingsStore = modules.Ai.Settings;
+        _aiChatClient = modules.Ai.ChatClient;
+        _readerWebSearch = modules.Ai.WebSearch;
+        _translationService = modules.Ai.Translation;
+        _epubTranslationService = modules.Ai.EpubTranslation;
+        _queryRewriteService = modules.Ai.QueryRewrite;
+        _ttsSettingsStore = modules.Reader.TtsSettings;
+        _ttsCacheManager = modules.Reader.TtsCache;
         _readerTts = new TtsService(
             services?.TtsEngine,
             _ttsCacheManager,
@@ -255,19 +255,17 @@ public partial class MainWindow : Window
             GetNextReaderTtsDocumentAsync);
         _readerTts.StateChanged += ReaderTts_StateChanged;
         _readerTts.EnvironmentChanged += ReaderTts_EnvironmentChanged;
-        _epubReader = new EpubReaderPreparationService(paths);
-        _readerHostFactory = services?.ReaderHostFactory ?? (() => new NativeWebViewReaderHost());
+        _epubReader = modules.Reader.Preparation;
+        _readerHostFactory = services?.FormatReaderHostFactory ?? new DesktopReaderHostFactory(services?.PdfDocumentFactory);
         _kindleWebFileInput = services?.KindleWebFileInput;
-        _zLibraryService = new ZLibraryService();
-        _zLibrarySettingsStore = new ZLibrarySettingsStore(paths, _secretProtector);
-        _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, _secretProtector);
-        _kindleEmailSender = new KindleEmailSender();
-        _s3SyncService = new S3SyncService(paths, _secretProtector);
+        _zLibraryService = modules.Integrations.ZLibrary;
+        _zLibrarySettingsStore = modules.Integrations.ZLibrarySettings;
+        _kindleEmailSettingsStore = modules.Integrations.KindleEmailSettings;
+        _kindleEmailSender = modules.Integrations.KindleEmail;
+        _s3SyncService = modules.Sync.Service;
         _s3SyncService.RemoteSettingsApplied += S3RemoteSettingsApplied;
-        _updateService = services?.UpdateInstaller is { } updateInstaller
-            ? new UpdateService(updateInstaller)
-            : null;
-        ViewModel = new LibraryViewModel(library, paths.Data);
+        _updateService = modules.Integrations.Updates;
+        ViewModel = new LibraryViewModel(_library, _paths.Data);
         ViewModel.SortMode = ParseLibrarySortMode(_appSettings.LibrarySortMode);
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
@@ -298,7 +296,7 @@ public partial class MainWindow : Window
         _readerData.DataChanged += LocalReaderDataChanged;
         InitializeS3SyncIndicator();
         _readerAiThinkingAnimationTimer.Tick += (_, _) => TickReaderAiThinkingAnimation();
-        if (startupSettings is not null && !_appSettings.OnboardingCompleted)
+        if (modules.HasStartupSettings && !_appSettings.OnboardingCompleted)
         {
             // Choose the first-run surface before the window is presented. The
             // async library/database initialization can continue behind it.
@@ -941,22 +939,6 @@ public partial class MainWindow : Window
             or "TopLeft" or "TopRight" or "BottomLeft" or "BottomRight";
     }
 
-    private static (AppPaths Paths, IBookLibraryService Library, IBookFormatConverter FormatConverter, DoubanMetadataService Douban) CreateDefaultDependencies()
-    {
-        var paths = new AppPaths(AppRootConfiguration.ResolveRoot(AppContext.BaseDirectory));
-        return (
-            paths,
-            new SqliteBookLibraryService(paths, new BookMetadataService()),
-            new BookFormatConversionService(),
-            new DoubanMetadataService());
-    }
-
-    private sealed class PlaintextSecretProtector : ISecretProtector
-    {
-        public byte[] Protect(byte[] value) => value.ToArray();
-        public byte[] Unprotect(byte[] value) => value.ToArray();
-    }
-
     // Native close requests (including Alt+F4) return from Kreader to the
     // library. A subsequent native close on the library exits the application.
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
@@ -1071,7 +1053,7 @@ public partial class MainWindow : Window
         if (_readerDocument is not null || _readerIsPdf)
             await CloseReaderAsync();
         _readerNavigationCancellation?.Cancel();
-        _readerSessionCancellation?.Cancel();
+        _readerSession.Cancel();
         _embeddingModelDownloadCancellation?.Cancel();
         _g2pwModelDownloadCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
@@ -1102,21 +1084,12 @@ public partial class MainWindow : Window
         _librarySearchDebounce?.Dispose();
         _librarySearchDebounce = null;
         _lifetimeCancellation.Dispose();
-        _douban.Dispose();
         _doubanBatchService?.Dispose();
-        _epubTranslationService.Dispose();
-        _translationService.Dispose();
-        _aiChatClient.Dispose();
-        _readerWebSearch.Dispose();
-        _embeddingModelDownloader.Dispose();
-        _g2pwModelDownloader.Dispose();
-        (_embeddingService as IDisposable)?.Dispose();
         _readerTts.EnvironmentChanged -= ReaderTts_EnvironmentChanged;
         _readerTts.StateChanged -= ReaderTts_StateChanged;
         _readerTts.Dispose();
-        _updateService?.Dispose();
         _readerNavigationCancellation?.Dispose();
-        _readerSessionCancellation?.Dispose();
+        _readerSession.Dispose();
         _readerActiveHost?.Dispose();
         _readerPreloadHost?.Dispose();
         ShutdownZLibrary();
@@ -1124,6 +1097,7 @@ public partial class MainWindow : Window
         foreach (var item in DoubanCandidates) item.Dispose();
         foreach (var item in _allStage3ReadingMaterials) item.Dispose();
         ViewModel.Dispose();
+        _modules.Dispose();
     }
 
     private void InitializeCrossProcessDatabaseWatcher()
@@ -2002,7 +1976,7 @@ public partial class MainWindow : Window
             HideTaskProgressPopup();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
-            if (_appSettings.AutoDoubanMatchOnImport && result.BookDetailsAvailable)
+            if (IsDeveloperMode && _appSettings.AutoDoubanMatchOnImport && result.BookDetailsAvailable)
             {
                 var importedIds = result.Items
                     .Where(item => item.Succeeded && item.Added && item.BookId is not null)
@@ -4518,10 +4492,26 @@ public partial class MainWindow : Window
                 }
             ]
         });
-        await ImportPathsAsync(files
-            .Select(file => file.TryGetLocalPath())
-            .Where(path => path is not null)
-            .Select(path => path!));
+        try
+        {
+            var sources = files.Select(file => new ImportFileSource(
+                file.Name,
+                file.TryGetLocalPath(),
+                async token =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    return await file.OpenReadAsync();
+                }));
+            using var staging = await ImportFileStaging.PrepareAsync(
+                sources, Path.Combine(_paths.ReaderCache, "import-staging"), _lifetimeCancellation.Token);
+            await ImportPathsAsync(staging.Paths);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("导入文件失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法导入"), UiText.Localize(exception.Message));
+        }
     }
 
     private async void ImportFolderButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -5336,7 +5326,7 @@ public partial class MainWindow : Window
 
     private async void DoubanMatchButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (_selectedCard is not null)
+        if (IsDeveloperMode && _selectedCard is not null)
             await MatchDoubanAsync(_selectedCard);
     }
 

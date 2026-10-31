@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <style name="KkindleTheme" parent="Theme.AppCompat.Light.NoActionBar">
+    <item name="android:fontFamily">sans</item>
+    <item name="android:colorAccent">#1C1C1C</item>
+    <item name="android:statusBarColor">#FFFFFFFF</item>
+    <item name="android:navigationBarColor">#FFFFFFFF</item>
+    <item name="android:windowLightStatusBar">true</item>
+    <item name="android:windowLightNavigationBar">true</item>
+    <item name="android:windowActionModeOverlay">true</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowBackground">#FFFFFFFF</item>
+    <item name="android:windowSplashScreenBackground">#FFFFFFFF</item>
+    <item name="android:windowSplashScreenAnimatedIcon">@drawable/app_icon</item>
+  </style>
+</resources>

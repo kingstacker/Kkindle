@@ -1847,7 +1847,7 @@ public partial class MainWindow
         var hasSelection = !string.IsNullOrWhiteSpace(_readerPendingSelection);
         var start = hasSelection
             ? Math.Min(_readerPendingSelectionStartOffset, _readerPendingSelectionEndOffset)
-            : (CurrentReaderHost as NativeReaderHost)?.CaptureContentPosition()?.TextOffset ?? 0;
+            : (CurrentReaderHost as IReaderPositionHost)?.CaptureContentPosition()?.TextOffset ?? 0;
         start = Math.Max(0, start);
         var end = hasSelection
             ? Math.Max(start + 1, Math.Max(_readerPendingSelectionStartOffset, _readerPendingSelectionEndOffset))

@@ -1,0 +1,233 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:vm="using:Kkindle.Mobile.Views"
+             x:Class="Kkindle.Mobile.Views.LibraryPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <UserControl.Styles>
+    <!-- Masthead tabs: both at title size, the idle one simply recedes. -->
+    <Style Selector="Button.masthead">
+      <Setter Property="Padding" Value="0,2" />
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFaintBrush}" />
+    </Style>
+    <Style Selector="Button.masthead:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.masthead:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFaintBrush}" />
+    </Style>
+    <Style Selector="Button.masthead.on">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.masthead.on:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.masthead.on:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+
+    <Style Selector="Border.folder">
+      <Setter Property="Background" Value="{DynamicResource SunkBrush}" />
+      <Setter Property="CornerRadius" Value="18" />
+      <Setter Property="Margin" Value="7,0,7,14" />
+    </Style>
+    <Style Selector="Border.folder.create">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+  </UserControl.Styles>
+  <Grid RowDefinitions="Auto,Auto,*">
+    <!-- Masthead -->
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="24,16,12,4">
+      <StackPanel Orientation="Horizontal" Spacing="18">
+        <Button Name="BooksTab" Classes="masthead on" Content="书库" Click="OnModeClick" />
+        <Button Name="CollectionsTab" Classes="masthead" Content="收藏夹" Click="OnModeClick" />
+      </StackPanel>
+      <Button Grid.Column="1" Classes="icon" Name="SearchButton" Click="OnSearchClick">
+        <c:LineIcon Data="{StaticResource IconSearch}" StrokeThickness="1.4" />
+      </Button>
+      <Button Grid.Column="2" Classes="icon" Name="ImportButton" Click="OnImportClick">
+        <c:LineIcon Data="{StaticResource IconPlus}" StrokeThickness="1.4" />
+      </Button>
+    </Grid>
+
+    <Grid Grid.Row="1" Name="SearchRow" IsVisible="False" ColumnDefinitions="*,Auto" Margin="24,4,12,4">
+      <TextBox Name="SearchBox" Classes="field" PlaceholderText="搜索书名或作者"
+               TextChanged="OnSearchTextChanged" />
+      <Button Grid.Column="1" Classes="icon" Click="OnCloseSearchClick">
+        <c:LineIcon Data="{StaticResource IconClose}" Size="18" StrokeThickness="1.4" />
+      </Button>
+    </Grid>
+
+    <ScrollViewer Grid.Row="2" Name="PageScroller">
+      <Panel Margin="24,8,24,28">
+      <StackPanel Name="BooksPanel">
+        <!-- Continue reading: an unboxed row, carried by its cover and progress. -->
+        <Button Name="ContinueCard" IsVisible="False" Padding="0" CornerRadius="0"
+                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Margin="0,4,0,26" Click="OnContinueClick">
+          <Grid ColumnDefinitions="Auto,*">
+            <Border Classes="cover" Width="56" Height="80">
+              <Border Classes="coverclip">
+                <Image Name="ContinueCover" Stretch="Uniform" />
+              </Border>
+            </Border>
+            <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto" Margin="16,2,0,2">
+              <TextBlock Classes="muted" Text="继续阅读" />
+              <TextBlock Grid.Row="1" Name="ContinueTitle" FontSize="16" FontWeight="Medium"
+                         Margin="0,4,0,0" MaxLines="1" TextTrimming="CharacterEllipsis" />
+              <Grid Grid.Row="3" ColumnDefinitions="*,Auto">
+                <c:ThinProgress Name="ContinueProgress" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Name="ContinuePercent" Classes="muted" FontSize="12"
+                           Margin="10,0,0,0" />
+              </Grid>
+            </Grid>
+          </Grid>
+        </Button>
+
+        <!-- Filters and view -->
+        <Grid ColumnDefinitions="*,Auto,Auto" Margin="-12,0,-12,12">
+          <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+            <Button Name="FilterAll" Classes="chip on" Content="全部" Click="OnFilterClick" />
+            <Button Name="FilterReading" Classes="chip" Content="在读" Click="OnFilterClick" />
+            <Button Name="FilterFavorite" Classes="chip" Content="收藏" Click="OnFilterClick" />
+            <Button Name="FilterFinished" Classes="chip" Content="读完" Click="OnFilterClick" />
+          </StackPanel>
+          <Button Grid.Column="1" Classes="icon" Name="SortButton" Width="38" Click="OnSortClick">
+            <c:LineIcon Data="{StaticResource IconSort}" Size="19" StrokeThickness="1.4"
+                        Foreground="{DynamicResource TextMutedBrush}" />
+          </Button>
+          <Button Grid.Column="2" Classes="icon" Name="ViewButton" Width="38" Click="OnViewClick">
+            <c:LineIcon Name="ViewIcon" Data="{StaticResource IconList}" Size="19" StrokeThickness="1.4"
+                        Foreground="{DynamicResource TextMutedBrush}" />
+          </Button>
+        </Grid>
+
+        <TextBlock Name="SummaryText" Classes="muted" FontSize="12" Margin="0,0,0,14" />
+        <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap"
+                   Margin="0,0,0,10" />
+
+        <ItemsControl Name="BooksGrid" Tapped="OnBookTapped" Margin="-8,0">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid Columns="3" VerticalAlignment="Top" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:BookTile">
+              <StackPanel Margin="8,0,8,26" Background="Transparent">
+                <c:AspectBox>
+                  <Border Classes="cover">
+                    <Border Classes="coverclip">
+                      <Panel>
+                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
+                                   FontSize="26" Foreground="{DynamicResource TextMutedBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Panel>
+                    </Border>
+                  </Border>
+                </c:AspectBox>
+                <!-- The slot stays reserved so titles line up across a row. -->
+                <Panel Height="2" Margin="0,8,0,0">
+                  <c:ThinProgress Value="{Binding Progress}" IsVisible="{Binding IsInProgress}" />
+                </Panel>
+                <TextBlock Text="{Binding Title}" FontSize="13.5" Margin="0,8,0,0"
+                           MaxLines="2" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"
+                           LineHeight="19" />
+                <TextBlock Text="{Binding Author}" Classes="muted" FontSize="12" Margin="0,2,0,0"
+                           MaxLines="1" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <ItemsControl Name="BooksRows" Tapped="OnBookTapped" IsVisible="False">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:BookTile">
+              <Border Classes="row" Padding="0,10" Background="Transparent">
+                <Grid ColumnDefinitions="Auto,*">
+                  <Border Classes="cover" Width="46" Height="66">
+                    <Border Classes="coverclip">
+                      <Panel>
+                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
+                                   FontSize="18" Foreground="{DynamicResource TextMutedBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Panel>
+                    </Border>
+                  </Border>
+                  <Grid Grid.Column="1" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto"
+                        Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" FontSize="15" Grid.ColumnSpan="2"
+                               MaxLines="1" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="1" Text="{Binding Author}" Classes="muted" FontSize="12.5"
+                               Margin="0,4,0,0" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ProgressText}" Classes="muted"
+                               FontSize="12" Margin="10,4,0,0" />
+                  </Grid>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <StackPanel Name="EmptyState" Spacing="6" IsVisible="False" Margin="0,96,0,0">
+          <c:LineIcon Data="{StaticResource IconBook}" Size="34" StrokeThickness="1.1"
+                      HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+          <TextBlock Name="EmptyTitle" Classes="title" Text="书库还是空的"
+                     HorizontalAlignment="Center" Margin="0,8,0,0" />
+          <TextBlock Name="EmptyDetail" Classes="muted" Text="点右上角 + 导入 EPUB 或 PDF"
+                     HorizontalAlignment="Center" />
+        </StackPanel>
+      </StackPanel>
+
+      <!-- Collections: soft folder cards, each fronted by a fan of its newest covers. -->
+      <StackPanel Name="CollectionsPanel" IsVisible="False">
+        <TextBlock Name="CollectionsSummary" Classes="muted" FontSize="12" Margin="0,6,0,16" />
+        <ItemsControl Name="CollectionsGrid" Margin="-7,0">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid Columns="2" VerticalAlignment="Top" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:CollectionCard">
+              <Border Classes="folder" Classes.create="{Binding IsCreate}"
+                      Tapped="OnCollectionTapped" Holding="OnCollectionHolding">
+                <Panel>
+                  <StackPanel IsVisible="{Binding !IsCreate}">
+                    <c:AspectBox Ratio="0.8" Margin="18,20,18,0">
+                      <c:CoverStack Items="{Binding Covers}"
+                                    Placeholder="{DynamicResource SunkStrongBrush}"
+                                    Backdrop="{DynamicResource SunkBrush}"
+                                    Ink="{DynamicResource TextMutedBrush}" />
+                    </c:AspectBox>
+                    <StackPanel Margin="16,14,16,15" Spacing="3">
+                      <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Medium" LineHeight="21"
+                                 MaxLines="1" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding CountText}" Classes="muted" FontSize="12" LineHeight="17" />
+                    </StackPanel>
+                  </StackPanel>
+                  <!-- The last cell invites a new folder: an outline, not a filled block. -->
+                  <Panel IsVisible="{Binding IsCreate}">
+                    <Rectangle RadiusX="18" RadiusY="18" StrokeThickness="1.4" StrokeDashArray="3,3"
+                               Stroke="{DynamicResource SunkStrongBrush}" />
+                    <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <Border Width="44" Height="44" CornerRadius="22" HorizontalAlignment="Center"
+                              Background="{DynamicResource SunkBrush}">
+                        <c:LineIcon Data="{StaticResource IconPlus}" Size="20" StrokeThickness="1.4"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Border>
+                      <TextBlock Text="新建收藏夹" Classes="muted" HorizontalAlignment="Center" />
+                    </StackPanel>
+                  </Panel>
+                </Panel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Name="CollectionsHint" Classes="muted" FontSize="12" TextWrapping="Wrap" LineHeight="18" Margin="0,6,0,0"
+                   Text="长按收藏夹可重命名、清空、合并或解散。" />
+      </StackPanel>
+      </Panel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

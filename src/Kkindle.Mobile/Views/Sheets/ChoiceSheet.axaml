@@ -1,0 +1,35 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:s="using:Kkindle.Mobile.Views.Sheets"
+             x:Class="Kkindle.Mobile.Views.Sheets.ChoiceSheet">
+  <!-- Virtualized: a large book's table of contents has hundreds of rows. -->
+  <ItemsControl Name="Choices" Margin="20,0,20,12">
+    <ItemsControl.Template>
+      <ControlTemplate>
+        <ScrollViewer>
+          <ItemsPresenter ItemsPanel="{TemplateBinding ItemsPanel}" />
+        </ScrollViewer>
+      </ControlTemplate>
+    </ItemsControl.Template>
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <VirtualizingStackPanel />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="s:ChoiceItem">
+          <Button Classes="row" Click="OnChoiceClick">
+            <Grid ColumnDefinitions="*,Auto,Auto" Margin="{Binding IndentMargin}">
+              <TextBlock Text="{Binding Title}" TextWrapping="Wrap" MaxLines="2"
+                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="{Binding Detail}" Classes="muted"
+                         Margin="12,0,0,0" VerticalAlignment="Center" />
+              <c:LineIcon Grid.Column="2" Data="{StaticResource IconCheck}" Size="17" StrokeThickness="1.4"
+                          Margin="10,0,0,0" IsVisible="{Binding Selected}" />
+            </Grid>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>

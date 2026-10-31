@@ -10,6 +10,11 @@ namespace Kkindle.Infrastructure;
 
 public sealed class BookMetadataService : IMetadataService
 {
+    private readonly IPdfDocumentFactory _pdfDocuments;
+
+    public BookMetadataService(IPdfDocumentFactory? pdfDocuments = null) =>
+        _pdfDocuments = pdfDocuments ?? new PdfiumDocumentFactory();
+
     private const uint AuthorRecordType = 100;
     private const uint KindleCoverOffsetRecordType = 201;
 
@@ -22,13 +27,13 @@ public sealed class BookMetadataService : IMetadataService
             : await ReadFallbackAsync(path, extension, cancellationToken);
     }
 
-    private static Task<BookMetadata> ReadPdfAsync(string path, CancellationToken cancellationToken) =>
+    private Task<BookMetadata> ReadPdfAsync(string path, CancellationToken cancellationToken) =>
         Task.Run(() =>
         {
             var title = CleanFileTitle(Path.GetFileNameWithoutExtension(path));
             try
             {
-                using var pdf = new PdfDocumentService(path);
+                using var pdf = _pdfDocuments.Open(path);
                 var info = pdf.ReadInfo(cancellationToken);
                 var cover = pdf.RenderPage(1, 480, 720, cancellationToken);
                 return new BookMetadata

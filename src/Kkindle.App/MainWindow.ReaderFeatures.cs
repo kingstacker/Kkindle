@@ -41,13 +41,13 @@ public partial class MainWindow
     }
 
     private CancellationToken ReaderToken =>
-        _readerSessionCancellation?.Token ?? _lifetimeCancellation.Token;
+        _readerSession.GetTokenOr(_lifetimeCancellation.Token);
 
     private bool IsNativeReaderPaginated =>
-        !_readerIsPdf && CurrentReaderHost is NativeReaderHost { IsPaginated: true };
+        !_readerIsPdf && CurrentReaderHost is IReaderPositionHost { IsPaginated: true };
 
     private bool IsReaderPaginated =>
-        _readerIsPdf ? (CurrentReaderHost as NativePdfReaderHost)?.DisplayMode != PdfReaderDisplayMode.Continuous
+        _readerIsPdf ? (CurrentReaderHost as IPdfReadingHost)?.DisplayMode != PdfReaderDisplayMode.Continuous
             : _readerLayout.FlowMode == 1 || IsNativeReaderPaginated;
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
@@ -80,14 +80,14 @@ public partial class MainWindow
             return;
         }
 
-        if (_readerIsPdf && CurrentReaderHost is NativePdfReaderHost pdf && !IsReaderTextInputFocused())
+        if (_readerIsPdf && CurrentReaderHost is IReaderKeyboardHost pdf && !IsReaderTextInputFocused())
         {
             pdf.HandleReaderKey(e);
             if (e.Handled) { FocusCurrentReaderHost(); return; }
         }
 
         if (IsReaderPaginated
-            && CurrentReaderHost is NativeReaderHost nativeReader
+            && CurrentReaderHost is IReaderLocationHost nativeReader
             && !IsReaderTextInputFocused()
             && e.Key is Key.Home or Key.End)
         {
@@ -237,11 +237,7 @@ public partial class MainWindow
         // Invalidate any debounced progress save from the previous reader
         // session before installing the new session cancellation source.
         Interlocked.Increment(ref _readerProgressSaveSequence);
-        _readerSessionCancellation?.Cancel();
-        _readerSessionCancellation?.Dispose();
-        _readerSessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            _lifetimeCancellation.Token);
-        var token = _readerSessionCancellation.Token;
+        var token = _readerSession.Begin(_lifetimeCancellation.Token);
 
         try
         {
@@ -271,10 +267,13 @@ public partial class MainWindow
             _readerIsPdf = true;
             _readerPdfSourcePath = path;
             await EnsureReaderHostsAsync();
-            var host = (NativePdfReaderHost)CurrentReaderHost!;
+            var host = CurrentReaderHost as IPdfReadingHost
+                ?? throw new InvalidOperationException(T("PDF 阅读器不支持所需的文档操作。"));
+            var hostView = host.View as Control
+                ?? throw new InvalidOperationException(T("PDF 阅读器未提供有效的显示控件。"));
             // Do not expose the page origin while the saved zoom and pan are
             // still being restored after the first raster has loaded.
-            host.Opacity = 0;
+            hostView.Opacity = 0;
             var pageCount = await host.PrepareDocumentAsync(path, token);
             var pages = Enumerable.Range(1, pageCount).Select(page => new PdfPageText(page, string.Empty)).ToArray();
             _readerPdfPages = pages;
@@ -332,7 +331,7 @@ public partial class MainWindow
             if (progress is not null)
                 await host.RestoreViewStateAsync(progress.Fragment, progress.ScrollPosition);
             token.ThrowIfCancellationRequested();
-            host.Opacity = 1;
+            hostView.Opacity = 1;
             RememberCurrentPdfPageText();
             SyncReaderPdfTocSelection();
             UpdateReaderToolbar();
@@ -381,7 +380,7 @@ public partial class MainWindow
             CancelReaderPdfNavigation();
         if (!_readerTtsAutoNavigation)
             await _readerTts.StopAsync();
-        if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not NativePdfReaderHost host) return false;
+        if (!_readerIsPdf || _readerPdfPages.Count == 0 || CurrentReaderHost is not IPdfReadingHost host) return false;
         if (string.IsNullOrWhiteSpace(_readerPdfSourcePath)) return false;
         _selectedReaderAnnotation = null;
         _readerPendingPdfPoint = null;
@@ -435,7 +434,7 @@ public partial class MainWindow
     {
         CancelReaderPdfNavigation();
         requestVersion = ++_readerPdfNavigationVersion;
-        var sessionToken = _readerSessionCancellation?.Token ?? CancellationToken.None;
+        var sessionToken = _readerSession.GetTokenOr(CancellationToken.None);
         var navigation = CancellationTokenSource.CreateLinkedTokenSource(
             sessionToken,
             cancellationToken);
@@ -454,7 +453,7 @@ public partial class MainWindow
     private Task ApplySavedReaderPdfAnnotationsAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (_readerBookFile is not null && CurrentReaderHost is NativePdfReaderHost host)
+        if (_readerBookFile is not null && CurrentReaderHost is IPdfAnnotationsHost host)
         {
             host.SetAnnotations(ReaderAnnotations.ToArray());
             HideReaderAnnotationHoverPopup();
@@ -470,7 +469,7 @@ public partial class MainWindow
         {
             return;
         }
-        var pdf = CurrentReaderHost as NativePdfReaderHost;
+        var pdf = CurrentReaderHost as IPdfReadingHost;
         var top = pdf?.NavigationTop ?? 0;
         // Several outline entries can point at the same page and even the same
         // offset (e.g. "1 Features" and "3 Description" on a two-column
@@ -495,13 +494,13 @@ public partial class MainWindow
         var firstOnPage = pdf is { DisplayMode: not PdfReaderDisplayMode.Continuous, NavigationBottom: >= 0.98 }
             && top <= 0.02
             ? _readerTocItems.Where(item => item.ChapterIndex == _readerChapterIndex)
-                .OrderBy(item => NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)))
+                .OrderBy(item => PdfNavigationTarget.ReadTop(new Uri(item.Target)))
                 .ThenBy(item => item.Level).FirstOrDefault()
             : null;
         var current = firstOnPage ?? _readerTocItems.Where(item => item.ChapterIndex < _readerChapterIndex
-            || item.ChapterIndex == _readerChapterIndex && NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)) <= top + 0.02)
+            || item.ChapterIndex == _readerChapterIndex && PdfNavigationTarget.ReadTop(new Uri(item.Target)) <= top + 0.02)
             .OrderByDescending(item => item.ChapterIndex)
-            .ThenByDescending(item => NativePdfReaderHost.ReadTargetTop(new Uri(item.Target)))
+            .ThenByDescending(item => PdfNavigationTarget.ReadTop(new Uri(item.Target)))
             .ThenByDescending(item => item.Level).FirstOrDefault()
             ?? _readerTocItems.FirstOrDefault(item => item.ChapterIndex == _readerChapterIndex)
             ?? _readerTocItems[0];
@@ -680,7 +679,7 @@ public partial class MainWindow
     {
         if (_readerBookCard is null || _readerBookFile is null) return;
         var location = await CaptureCurrentReaderBookmarkLocationAsync();
-        if (CurrentReaderHost is NativeReaderHost && location is null) return;
+        if (CurrentReaderHost is IReaderPositionHost && location is null) return;
         var currentPath = location?.ChapterPath ?? (_readerIsPdf
             ? $"pdf:{_readerPdfPage}"
             : GetReaderChapterPath());
@@ -697,7 +696,7 @@ public partial class MainWindow
         var existing = ReaderBookmarks.FirstOrDefault(bookmark =>
             AreReaderBookmarkChapterPathsEqual(bookmark.ChapterPath, currentPath)
             && (ReaderContentPosition.Validate(bookmark.ContentPosition) is { } savedContent
-                && CurrentReaderHost is NativeReaderHost native
+                && CurrentReaderHost is IReaderPositionHost native
                 ? native.IsContentPositionVisible(savedContent)
                 : string.Equals(bookmark.Fragment, fragment, StringComparison.OrdinalIgnoreCase)
                 && (bookmark.ScrollPosition is int savedPosition
@@ -749,7 +748,7 @@ public partial class MainWindow
     private async Task<string?> CaptureCurrentPageQuoteAsync()
     {
         if (CurrentReaderHost is not { } host) return null;
-        if (host is NativeReaderHost nativeReader)
+        if (host is IReaderPositionHost nativeReader)
             return nativeReader.GetCurrentPageQuote();
 
         try
@@ -908,7 +907,7 @@ public partial class MainWindow
         }
 
         if (CurrentReaderHost is not { } host) return null;
-        if (host is NativeReaderHost nativeReader)
+        if (host is IReaderPositionHost nativeReader)
         {
             var contentPosition = nativeReader.CaptureContentPosition();
             if (contentPosition is null) return null;
@@ -1045,7 +1044,7 @@ public partial class MainWindow
                 _readerIsPdf ? 0 : _readerLayout.FlowMode,
                 _readerIsPdf ? null : _readerCurrentFragment)
             {
-                ContentPosition = (CurrentReaderHost as NativeReaderHost)?.CaptureContentPosition()
+                ContentPosition = (CurrentReaderHost as IReaderPositionHost)?.CaptureContentPosition()
             };
         ApplyReaderBookmarkIndicator(location);
     }
@@ -1064,7 +1063,7 @@ public partial class MainWindow
         var tolerance = location.FlowMode == 1 ? 8 : 4;
         var isBookmarked = ReaderBookmarks.Any(bookmark =>
             ReaderContentPosition.Validate(bookmark.ContentPosition) is { } savedContent
-                && CurrentReaderHost is NativeReaderHost native
+                && CurrentReaderHost is IReaderPositionHost native
             ? AreReaderBookmarkChapterPathsEqual(bookmark.ChapterPath, location.ChapterPath)
                 && native.IsContentPositionVisible(savedContent)
             : ReaderBookmarkPolicy.MatchesVisiblePosition(
@@ -1283,9 +1282,10 @@ public partial class MainWindow
         if (result.PageNumber is { } page)
         {
             await NavigatePdfPageAsync(page, ReaderToken);
-            if (CurrentReaderHost is NativePdfReaderHost pdf && pdf.PageNumber == page)
+            if (CurrentReaderHost is IPdfNavigationHost pdf && pdf.PageNumber == page
+                && pdf is IPdfSearchHost search)
             {
-                var match = pdf.Find(result.Query ?? string.Empty, result.StartOffset);
+                var match = search.Find(result.Query ?? string.Empty, result.StartOffset);
                 _readerSearchCount = match.Count;
                 _readerSearchIndex = match.Index;
                 UpdateReaderSearchCount();
@@ -1500,7 +1500,7 @@ public partial class MainWindow
 
     private Task ApplyReaderPdfSearchAsync(string query, int sequence)
     {
-        if (sequence != _readerPdfSearchSequence || CurrentReaderHost is not NativePdfReaderHost pdf) return Task.CompletedTask;
+        if (sequence != _readerPdfSearchSequence || CurrentReaderHost is not IPdfSearchHost pdf) return Task.CompletedTask;
         var result = pdf.Find(query);
         _readerSearchCount = result.Count;
         _readerSearchIndex = result.Index;
@@ -1721,10 +1721,10 @@ public partial class MainWindow
         try
         {
             UpdateReaderZoomLabel();
-            await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
+            await ApplyReaderLayoutToHostsAsync(_readerSession.GetTokenOr(CancellationToken.None));
             await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
         }
-        catch (OperationCanceledException) when (_readerSessionCancellation?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (_readerSession.IsCancellationRequested)
         {
         }
         catch
@@ -1756,7 +1756,7 @@ public partial class MainWindow
                     _readerLayout = NormalizeReaderLayoutForPlatform(ReadReaderLayoutFromControls());
                     _readerPageAnimation = GetSelectedReaderPageAnimation();
                     UpdateReaderZoomLabel();
-                    await ApplyReaderLayoutToHostsAsync(_readerSessionCancellation?.Token ?? CancellationToken.None);
+                    await ApplyReaderLayoutToHostsAsync(_readerSession.GetTokenOr(CancellationToken.None));
                     await SaveCurrentReaderPreferencesAsync(CancellationToken.None);
                 }
                 catch

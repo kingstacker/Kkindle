@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Android head: owns MainActivity and the platform adapters, contains no
+         UI. Everything shared lives in Kkindle.Mobile / ApplicationModules. -->
+    <TargetFramework>net10.0-android36.0</TargetFramework>
+    <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Kkindle.AndroidHead</RootNamespace>
+    <AssemblyName>Kkindle.Mobile.Android</AssemblyName>
+    <ApplicationId>com.kingstacker.kkindle</ApplicationId>
+    <ApplicationTitle>Kkindle</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.1.3</ApplicationDisplayVersion>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <!-- Make Debug APKs installable without an IDE fast-deployment session. -->
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <!-- Emulator + typical phones. Add android-arm only if a 32-bit device matters. -->
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+    <!-- Android's own HTTP stack rejects WebDAV methods such as PROPFIND, so
+         HttpClient uses the managed handler. Certificates are still checked
+         against the system trust store. -->
+    <UseNativeHttpHandler>false</UseNativeHttpHandler>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- Ahead-of-time compile everything: interpreting the app's assemblies makes
+         cold start several times slower on a phone. -->
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kkindle.Mobile\Kkindle.Mobile.csproj" />
+    <PackageReference Include="Avalonia.Android" Version="12.1.1" />
+    <!-- Local embeddings back the desktop AI features, which the phone app does
+         not expose; the native runtime alone is about 70 MB. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" ExcludeAssets="native;build;buildTransitive" />
+    <!-- PDFium for the native PDF surface; the desktop heads get their own
+         platform binaries through Kkindle.Infrastructure. -->
+    <PackageReference Include="bblanchon.PDFium.Android" Version="152.0.7961" />
+  </ItemGroup>
+</Project>

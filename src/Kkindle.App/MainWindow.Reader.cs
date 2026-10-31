@@ -23,7 +23,7 @@ public partial class MainWindow
     private bool _readerShowingPreload;
     private static readonly TimeSpan ReaderCloseCheckpointTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ReaderCloseHostStopTimeout = TimeSpan.FromSeconds(2);
-    private CancellationTokenSource? _readerSessionCancellation;
+    private readonly ReaderSession _readerSession = new();
     private CancellationTokenSource? _readerNavigationCancellation;
     private CancellationTokenSource? _readerPdfNavigationCancellation;
     private int _readerPdfNavigationVersion;
@@ -56,11 +56,7 @@ public partial class MainWindow
         // Invalidate it before replacing the cancellation source so it cannot
         // write the old book/page into a newly opened session.
         Interlocked.Increment(ref _readerProgressSaveSequence);
-        _readerSessionCancellation?.Cancel();
-        _readerSessionCancellation?.Dispose();
-        _readerSessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            _lifetimeCancellation.Token);
-        var sessionToken = _readerSessionCancellation.Token;
+        var sessionToken = _readerSession.Begin(_lifetimeCancellation.Token);
 
         try
         {
@@ -173,61 +169,30 @@ public partial class MainWindow
     private static ReaderProgressRow? ValidateReaderProgress(
         EpubReaderDocument document,
         ReaderProgressRow? progress)
-    {
-        if (progress is null || string.IsNullOrWhiteSpace(progress.ChapterPath)) return null;
-
-        try
-        {
-            var savedPath = Path.GetFullPath(Path.Combine(
-                document.RootPath,
-                progress.ChapterPath.Replace('/', Path.DirectorySeparatorChar)));
-            if (!IsPathInside(document.RootPath, savedPath)) return null;
-
-            var chapterIndex = document.Chapters
-                .Select((chapter, index) => (chapter, index))
-                .Where(item => string.Equals(
-                    Path.GetFullPath(item.chapter),
-                    savedPath,
-                    StringComparison.OrdinalIgnoreCase))
-                .Select(item => item.index)
-                .DefaultIfEmpty(-1)
-                .First();
-            if (chapterIndex < 0) return null;
-
-            return progress with
-            {
-                ChapterIndex = chapterIndex,
-                ScrollPosition = Math.Max(0, progress.ScrollPosition),
-                Fragment = DecodeReaderFragment(progress.Fragment),
-                ContentPosition = ReaderContentPosition.Validate(progress.ContentPosition)
-            };
-        }
-        catch (Exception exception) when (exception is ArgumentException
-                                          or IOException
-                                          or NotSupportedException
-                                          or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+        => ReaderResourcePolicy.RestoreProgress(document, progress);
 
     private IReaderHost CreateReaderHostForCurrentFormat()
     {
-        if (_readerIsPdf)
+        var format = _readerIsPdf ? ReaderHostFormat.Pdf : ReaderHostFormat.Epub;
+        var host = _readerHostFactory.Create(format)
+            ?? throw new InvalidOperationException(T("阅读器宿主工厂必须返回有效实例。"));
+        try
         {
-            var pdf = new NativePdfReaderHost();
-            pdf.SetAppearance(CurrentReaderAppearance);
-            return pdf;
+            if (!_readerHostFactory.IsCompatible(host, format))
+                throw new InvalidOperationException(T("阅读器宿主与当前书籍格式不兼容。"));
+            (host as IReaderAppearanceHost)?.SetAppearance(CurrentReaderAppearance);
+            return host;
         }
-        var host = new NativeReaderHost();
-        host.SetAppearance(CurrentReaderAppearance);
-        return host;
+        catch
+        {
+            host.Dispose();
+            throw;
+        }
     }
 
     private bool IsReaderHostTypeCompatible(IReaderHost host) =>
-        _readerIsPdf
-            ? host is NativePdfReaderHost
-            : host is NativeReaderHost;
+        _readerHostFactory.IsCompatible(host,
+            _readerIsPdf ? ReaderHostFormat.Pdf : ReaderHostFormat.Epub);
 
     private async Task EnsureReaderHostsAsync()
     {
@@ -241,19 +206,35 @@ public partial class MainWindow
 
         if (_readerActiveHost is null)
         {
-            _readerActiveHost = CreateReaderHostForCurrentFormat();
+            var activeHost = CreateReaderHostForCurrentFormat();
+            IReaderHost? preloadHost = null;
+            try
+            {
+                if (!_readerIsPdf)
+                {
+                    preloadHost = CreateReaderHostForCurrentFormat();
+                    if (ReferenceEquals(activeHost, preloadHost))
+                        throw new InvalidOperationException(T("阅读器宿主工厂必须返回两个不同实例。"));
+                }
+            }
+            catch
+            {
+                if (!ReferenceEquals(activeHost, preloadHost)) preloadHost?.Dispose();
+                activeHost.Dispose();
+                throw;
+            }
+
+            // Publish only a complete pair; a failed adapter must not leave
+            // a disposed or half-initialized surface attached to the shell.
+            _readerActiveHost = activeHost;
+            _readerPreloadHost = preloadHost;
             _readerActiveHost.NavigationStarting += ReaderHost_NavigationStarting;
             _readerActiveHost.NavigationCompleted += ReaderHost_NavigationCompleted;
             _readerActiveHost.WebMessageReceived += ReaderHost_WebMessageReceived;
             ReaderActiveHostSlot.Content = _readerActiveHost.View;
 
-            // Native EPUB hosts support background layout on every platform.
-            if (!_readerIsPdf)
+            if (_readerPreloadHost is not null)
             {
-                _readerPreloadHost = CreateReaderHostForCurrentFormat();
-                if (ReferenceEquals(_readerActiveHost, _readerPreloadHost))
-                    throw new InvalidOperationException(T("阅读器宿主工厂必须返回两个不同实例。"));
-
                 _readerPreloadHost.NavigationStarting += ReaderHost_NavigationStarting;
                 _readerPreloadHost.NavigationCompleted += ReaderHost_NavigationCompleted;
                 _readerPreloadHost.WebMessageReceived += ReaderHost_WebMessageReceived;
@@ -278,7 +259,7 @@ public partial class MainWindow
         if (!await WaitForReaderHostReadyAsync(
                 _readerActiveHost,
                 TimeSpan.FromSeconds(10),
-                _readerSessionCancellation?.Token ?? _lifetimeCancellation.Token))
+                _readerSession.GetTokenOr(_lifetimeCancellation.Token)))
         {
             throw new InvalidOperationException(
                 T("阅读器 WebView 初始化超时。请确认 Linux 已安装 WPE WebKit 运行库后重试。"));
@@ -288,7 +269,7 @@ public partial class MainWindow
         {
             _ = WarmUpReaderPreloadHostAsync(
                 _readerPreloadHost,
-                _readerSessionCancellation?.Token ?? _lifetimeCancellation.Token);
+                _readerSession.GetTokenOr(_lifetimeCancellation.Token));
         }
     }
 
@@ -438,7 +419,7 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (host is NativeReaderHost nativeReader)
+        if (host is IReaderLayoutNavigationHost nativeReader)
         {
             // Each host can hold a different spine document. Only its own
             // TOC anchors participate in reading-position tracking.
@@ -625,7 +606,7 @@ public partial class MainWindow
         }
         ResetReaderContinuousEdgeTracking();
 
-        var sessionToken = _readerSessionCancellation?.Token ?? _lifetimeCancellation.Token;
+        var sessionToken = _readerSession.GetTokenOr(_lifetimeCancellation.Token);
         _readerNavigationCancellation?.Cancel();
         var navigationCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
         _readerNavigationCancellation = navigationCancellation;
@@ -700,7 +681,7 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (host is NativeReaderHost nativeReader)
+        if (host is IReaderLocationHost nativeReader)
         {
             nativeReader.SeekToBoundary(moveToEnd);
             await UpdateReaderScrollStateAsync(host);
@@ -890,7 +871,7 @@ public partial class MainWindow
         // in-flight reader transition animating over the switch.
         // Cancel the session before waiting on persistence so an active page
         // turn releases its gate immediately.
-        _readerSessionCancellation?.Cancel();
+        _readerSession.Cancel();
         _readerNavigationCancellation?.Cancel();
         CancelReaderChapterPreload();
         Interlocked.Exchange(ref _readerPendingKeyboardNavigation, 0);
@@ -1017,9 +998,7 @@ public partial class MainWindow
         _readerNavigationCancellation?.Dispose();
         _readerNavigationCancellation = null;
         CancelReaderPdfNavigation();
-        _readerSessionCancellation?.Cancel();
-        _readerSessionCancellation?.Dispose();
-        _readerSessionCancellation = null;
+        _readerSession.End();
         _readerLayoutApplyCancellation?.Cancel();
         _readerLayoutApplyCancellation?.Dispose();
         _readerLayoutApplyCancellation = null;
@@ -1152,7 +1131,7 @@ public partial class MainWindow
                 _readerBookCard.Book.Id,
                 _readerBookFile.Id,
                 $"pdf:page:{_readerPdfPage}",
-                (CurrentReaderHost as NativePdfReaderHost)?.CaptureViewState(),
+                (CurrentReaderHost as IPdfReadingHost)?.CaptureViewState(),
                 _readerPdfPage - 1,
                 (int)Math.Round(_readerScrollPosition),
                 CalculateReaderProgressPercent(),
@@ -1169,7 +1148,7 @@ public partial class MainWindow
 
         TryApplyLinuxReaderTextFallbackState();
 
-        var nativeReader = CurrentReaderHost as NativeReaderHost;
+        var nativeReader = CurrentReaderHost as IReaderPositionHost;
         var contentPosition = nativeReader?.CaptureContentPosition();
         if (nativeReader is not null && (contentPosition is null
             || nativeReader.Source is not { IsFile: true } source
@@ -1204,10 +1183,7 @@ public partial class MainWindow
         && string.Equals(left.AbsoluteUri, right.AbsoluteUri, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPathInside(string root, string path)
-    {
-        var boundary = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return Path.GetFullPath(path).StartsWith(boundary, StringComparison.OrdinalIgnoreCase);
-    }
+        => ReaderResourcePolicy.IsPathInside(root, path);
 
     private async void CloseReaderButton_Click(object? sender, RoutedEventArgs e)
         => await CloseReaderAsync();

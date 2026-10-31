@@ -16,13 +16,13 @@ public partial class MainWindow
     // The rail is cheap (the host already parsed the outline while opening the
     // document) so it starts before navigation. Full-text indexing stays after
     // the first paint: it walks every page and must never hold up the reader.
-    private void StartReaderPdfOutlineWork(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
+    private void StartReaderPdfOutlineWork(IPdfDocumentHost host, Guid fileId, CancellationToken token) =>
         _readerPdfOutlineTask = ApplyReaderPdfOutlineWhenReadyAsync(host, fileId, token);
 
-    private void StartReaderPdfTextIndexWork(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
+    private void StartReaderPdfTextIndexWork(IPdfDocumentHost host, Guid fileId, CancellationToken token) =>
         _readerPdfIndexTask = BuildReaderPdfTextIndexAsync(host, fileId, token);
 
-    private bool IsCurrentPdfSession(NativePdfReaderHost host, Guid fileId, CancellationToken token) =>
+    private bool IsCurrentPdfSession(IPdfDocumentHost host, Guid fileId, CancellationToken token) =>
         !token.IsCancellationRequested && _readerIsPdf && _readerBookFile?.Id == fileId && ReferenceEquals(CurrentReaderHost, host);
 
     // The host parses the outline while it opens the document, so the rail can
@@ -30,7 +30,7 @@ public partial class MainWindow
     // ReadDocumentInfoAsync instead would queue behind that render (PDFium is
     // serialised process-wide) and the table of contents would only appear once
     // the page was ready.
-    private async Task ApplyReaderPdfOutlineWhenReadyAsync(NativePdfReaderHost host, Guid fileId, CancellationToken token)
+    private async Task ApplyReaderPdfOutlineWhenReadyAsync(IPdfDocumentHost host, Guid fileId, CancellationToken token)
     {
         try
         {
@@ -45,7 +45,7 @@ public partial class MainWindow
         await LoadReaderPdfOutlineAsync(host, fileId, token);
     }
 
-    private async Task LoadReaderPdfOutlineAsync(NativePdfReaderHost host, Guid fileId, CancellationToken token)
+    private async Task LoadReaderPdfOutlineAsync(IPdfDocumentHost host, Guid fileId, CancellationToken token)
     {
         try
         {
@@ -73,7 +73,7 @@ public partial class MainWindow
         }
     }
 
-    private async Task BuildReaderPdfTextIndexAsync(NativePdfReaderHost host, Guid fileId, CancellationToken token)
+    private async Task BuildReaderPdfTextIndexAsync(IPdfDocumentHost host, Guid fileId, CancellationToken token)
     {
         try
         {
@@ -114,7 +114,7 @@ public partial class MainWindow
 
     private void ReaderPdfPointNoteButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfDocumentHost pdf) return;
         var enabled = !pdf.IsPointAnnotationMode;
         pdf.SetPointAnnotationMode(enabled);
         UpdateReaderPdfPointNoteButton(enabled);
@@ -134,7 +134,7 @@ public partial class MainWindow
 
     private void ReaderPdfHandToolButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfDocumentHost pdf) return;
         var enabled = !pdf.IsHandToolMode;
         pdf.SetHandToolMode(enabled);
         UpdateReaderPdfHandToolButton(enabled);
@@ -161,7 +161,7 @@ public partial class MainWindow
 
     private void RememberCurrentPdfPageText()
     {
-        if (CurrentReaderHost is not NativePdfReaderHost host || _readerPdfPages is not PdfPageText[] pages) return;
+        if (CurrentReaderHost is not IPdfReadingHost host || _readerPdfPages is not PdfPageText[] pages) return;
         foreach (var page in host.VisiblePageNumbers.Append(host.PageNumber).Distinct())
             if (page >= 1 && page <= pages.Length && host.GetPageContent(page) is { } content)
                 pages[page - 1] = new(page, content.Text);
@@ -169,7 +169,7 @@ public partial class MainWindow
 
     private async Task SetReaderPdfDisplayModeAsync(PdfReaderDisplayMode mode)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfReadingHost pdf) return;
         await _readerTts.StopAsync();
         _selectedReaderAnnotation = null;
         HideReaderSelectionPopup();
@@ -186,7 +186,7 @@ public partial class MainWindow
 
     private async Task RotateReaderPdfAsync()
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfReadingHost pdf) return;
         await _readerTts.StopAsync();
         _selectedReaderAnnotation = null;
         HideReaderSelectionPopup();
@@ -199,7 +199,7 @@ public partial class MainWindow
 
     private async void ReaderPdfFitItem_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf || sender is not MenuItem { Tag: string tag }) return;
+        if (CurrentReaderHost is not IPdfReadingHost pdf || sender is not MenuItem { Tag: string tag }) return;
         ReaderPdfFitButton.Flyout?.Hide();
         await pdf.SetFitModeAsync(tag == "page" ? PdfReaderFitMode.Page : PdfReaderFitMode.Width);
         if (!ReferenceEquals(pdf, CurrentReaderHost)) return;
@@ -210,7 +210,7 @@ public partial class MainWindow
     private string GetPdfPagePositionLabel()
     {
         var total = Math.Max(1, _readerPdfPages.Count);
-        var pdf = CurrentReaderHost as NativePdfReaderHost;
+        var pdf = CurrentReaderHost as IPdfReadingHost;
         string Label(int first, int last)
         {
             var physical = first == last ? $"{first} / {total}" : $"{first}–{last} / {total}";
@@ -219,7 +219,7 @@ public partial class MainWindow
             return a == first.ToString() && b == last.ToString() ? physical
                 : T("书页 {0} · {1}", first == last ? a : $"{a}–{b}", physical);
         }
-        if (CurrentReaderHost is NativePdfReaderHost { DisplayMode: PdfReaderDisplayMode.TwoPage })
+        if (CurrentReaderHost is IPdfReadingHost { DisplayMode: PdfReaderDisplayMode.TwoPage })
         {
             var first = (_readerPdfPage - 1) / 2 * 2 + 1;
             var last = Math.Min(total, first + 1);
@@ -230,7 +230,7 @@ public partial class MainWindow
 
     private async Task MoveReaderPdfPositionAsync(int direction)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfReadingHost pdf) return;
         direction = Math.Sign(direction);
         if (direction == 0) return;
         var page = pdf.GetAdjacentPage(direction);

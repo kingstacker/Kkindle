@@ -88,9 +88,7 @@ public partial class MainWindow
     private bool _s3DeletionConfirmationPending;
     private bool _s3SyncCancelledByUser;
     private volatile bool _s3RemoteSettingsChanged;
-    private long _s3LocalChangeVersion;
-    private long _s3SyncedLocalChangeVersion;
-    private int _s3LocalChangeRetryAttempt;
+    private readonly LocalSyncChanges _localSyncChanges = new();
     private bool _suppressS3SettingsDraftTracking;
     private DateTimeOffset? _lastS3SyncAt;
     private S3SyncResult? _lastS3SyncResult;
@@ -4449,7 +4447,7 @@ public partial class MainWindow
             DashboardDailyAverageText.Text = weekSeconds == 0
                 ? T("近 7 天日均 —")
                 : T("近 7 天日均 {0}", FormatReadingTime((long)Math.Round(weekSeconds / 7d)));
-            DashboardStreakText.Text = T("{0} 天", ComputeReadingStreakDays(dashboard.DailyReading));
+            DashboardStreakText.Text = T("{0} 天", ReadingMedalCatalog.ComputeStreakDays(dashboard.DailyReading));
             PopulateReadingMedals(dashboard);
             DashboardStatusText.IsVisible = false;
 
@@ -4553,20 +4551,6 @@ public partial class MainWindow
             DashboardStatusText.IsVisible = true;
         }
         finally { temporaryCard?.Dispose(); }
-    }
-
-    // Consecutive active days inside the 14-day window, ending today or
-    // yesterday (today alone may not have started yet without breaking it).
-    private static int ComputeReadingStreakDays(IReadOnlyList<ReadingDashboardDay> days)
-    {
-        var streak = 0;
-        for (var i = days.Count - 1; i >= 0; i--)
-        {
-            if (days[i].ActiveSeconds > 0) streak++;
-            else if (streak == 0 && i == days.Count - 1) continue;
-            else break;
-        }
-        return streak;
     }
 
     private static void PopulateDashboardBars(
@@ -5225,7 +5209,7 @@ public partial class MainWindow
                 // A newly selected target needs an initial sync even if the
                 // previous provider was up to date a moment ago.
                 _lastS3SyncAt = null;
-                _s3LocalChangeVersion++;
+                _localSyncChanges.MarkChanged();
             }
             _s3SyncStoredSettings = new S3SyncStoredSettings(_s3SyncStoredSettings.DeviceId, settings);
             RefreshS3SyncIndicatorFromSettings();
@@ -5470,7 +5454,7 @@ public partial class MainWindow
 
         if (_lifetimeCancellation.IsCancellationRequested) return;
         _lastInProcessDataChangeUtc = DateTime.UtcNow;
-        _s3LocalChangeVersion++;
+        _localSyncChanges.MarkChanged();
         _s3DeletionConfirmationPending = false;
         _s3SyncCancelledByUser = false;
         if (kind is LocalDataChangeKind.Library or LocalDataChangeKind.BookReflection)
@@ -5493,23 +5477,19 @@ public partial class MainWindow
             return;
         }
 
-        _s3LocalChangeRetryAttempt = 0;
+        _localSyncChanges.ResetRetry();
         ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce, resetRetry: false);
     }
 
     private bool HasPendingS3LocalChanges =>
-        _s3LocalChangeVersion != _s3SyncedLocalChangeVersion;
+        _localSyncChanges.HasPendingChanges;
 
     private bool IsAutomaticS3SyncReady()
     {
-        if (!_stage3Ready || _backupBusy || _readingDataResetBusy || _s3SyncExitInProgress || !_appSettings.NetworkEnabled
-            || _s3DeletionConfirmationPending || _s3SyncCancelledByUser)
-            return false;
-
-        var settings = _s3SyncStoredSettings.Settings;
-        return settings.Enabled
-            && settings.AutomaticSyncEnabled
-            && settings.IsConfigured;
+        return AutomaticSyncCoordinator.IsReady(_s3SyncStoredSettings.Settings,
+            _stage3Ready, _appSettings.NetworkEnabled,
+            _backupBusy || _readingDataResetBusy || _s3SyncExitInProgress,
+            _s3DeletionConfirmationPending, _s3SyncCancelledByUser);
     }
 
     private void ScheduleS3LocalChangeSync(TimeSpan delay, bool resetRetry = true)
@@ -5521,25 +5501,13 @@ public partial class MainWindow
         }
 
         if (resetRetry)
-            _s3LocalChangeRetryAttempt = 0;
+            _localSyncChanges.ResetRetry();
         _s3LocalChangeSyncTimer.Stop();
         _s3LocalChangeSyncTimer.Interval = delay;
         _s3LocalChangeSyncTimer.Start();
     }
 
-    private TimeSpan GetNextS3LocalChangeRetryDelay()
-    {
-        var delay = _s3LocalChangeRetryAttempt switch
-        {
-            0 => TimeSpan.FromSeconds(15),
-            1 => TimeSpan.FromSeconds(30),
-            2 => TimeSpan.FromMinutes(1),
-            3 => TimeSpan.FromMinutes(2),
-            _ => TimeSpan.FromMinutes(5)
-        };
-        _s3LocalChangeRetryAttempt = Math.Min(_s3LocalChangeRetryAttempt + 1, 4);
-        return delay;
-    }
+    private TimeSpan GetNextS3LocalChangeRetryDelay() => _localSyncChanges.NextRetryDelay();
 
     private async Task RunPendingS3LocalChangeSyncAsync()
     {
@@ -5549,7 +5517,7 @@ public partial class MainWindow
         var succeeded = await RunS3SyncAsync(silent: true);
         if (succeeded)
         {
-            _s3LocalChangeRetryAttempt = 0;
+            _localSyncChanges.ResetRetry();
             if (HasPendingS3LocalChanges && IsAutomaticS3SyncReady())
                 ScheduleS3LocalChangeSync(S3LocalChangeSyncDebounce, resetRetry: false);
             return;
@@ -5596,12 +5564,9 @@ public partial class MainWindow
             // running. Give that write another checkpoint before continuing;
             // the cap prevents a busy shutdown from waiting forever if some
             // background activity keeps producing updates.
-            for (var attempt = 0; attempt < 3; attempt++)
-            {
-                var succeeded = await RunS3SyncAsync(silent: true, token);
-                if (!succeeded || !HasPendingS3LocalChanges)
-                    break;
-            }
+            await AutomaticSyncCoordinator.RunCheckpointsAsync(
+                syncToken => RunS3SyncAsync(silent: true, syncToken),
+                () => HasPendingS3LocalChanges, token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -5676,9 +5641,8 @@ public partial class MainWindow
         {
             var settings = _s3SyncStoredSettings.Settings;
             if (!settings.Enabled || !settings.AutomaticSyncEnabled) return;
-            if (!HasPendingS3LocalChanges
-                && _lastS3SyncAt is { } last
-                && DateTimeOffset.UtcNow - last < TimeSpan.FromMinutes(settings.IntervalMinutes))
+            if (!AutomaticSyncCoordinator.IsDue(HasPendingS3LocalChanges,
+                    _lastS3SyncAt, DateTimeOffset.UtcNow, settings.IntervalMinutes))
                 return;
             await RunS3SyncAsync(silent: true);
         }
@@ -5739,7 +5703,7 @@ public partial class MainWindow
             return false;
         }
 
-        var localChangeVersionAtStart = _s3LocalChangeVersion;
+        var localChangeVersionAtStart = _localSyncChanges.CaptureVersion();
         var succeeded = false;
         var refreshAfterFailure = false;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token, cancellationToken);
@@ -5797,18 +5761,11 @@ public partial class MainWindow
                 else
                     Dispatcher.UIThread.Post(ApplyProgressOnUiThread);
             });
-            S3SyncOptions? options = null;
-            S3SyncResult result;
             refreshAfterFailure = true;
-            while (true)
-            {
-                try
-                {
-                    result = await _s3SyncService.SyncAsync(
-                        _s3SyncStoredSettings.DeviceId, settings, progress, token, options);
-                    break;
-                }
-                catch (S3SyncDeletionConfirmationRequiredException exception)
+            var result = await SyncDeletionCoordinator.RunAsync(
+                (options, syncToken) => _s3SyncService.SyncAsync(
+                    _s3SyncStoredSettings.DeviceId, settings, progress, syncToken, options),
+                async (exception, syncToken) =>
                 {
                     _s3DeletionConfirmationPending = true;
                     _s3LocalChangeSyncTimer.Stop();
@@ -5817,13 +5774,13 @@ public partial class MainWindow
                     UpdateS3SyncIndicator(S3SyncIndicatorState.ConfirmationRequired, message);
                     if (silent || _s3SyncExitInProgress || !await ConfirmAsync(
                             T("确认同步删除"), message + "\n\n" + T("继续后，这些删除会同步到其他设备。"),
-                            T("同步这些删除"), token))
+                            T("同步这些删除"), syncToken))
                         return false;
-                    options = new S3SyncOptions { ConfirmedDeletionFingerprint = exception.DeletionFingerprint };
                     _s3DeletionConfirmationPending = false;
                     UpdateS3SyncIndicator(S3SyncIndicatorState.Syncing);
-                }
-            }
+                    return true;
+                }, token);
+            if (result is null) return false;
             _s3DeletionConfirmationPending = false;
             _lastS3SyncAt = DateTimeOffset.UtcNow;
             _lastS3SyncResult = result;
@@ -5855,7 +5812,7 @@ public partial class MainWindow
             SetS3SyncStatus(status, silent);
             succeeded = !result.IsPartial;
             if (succeeded)
-                _s3SyncedLocalChangeVersion = Math.Max(_s3SyncedLocalChangeVersion, localChangeVersionAtStart);
+                _localSyncChanges.MarkSynced(localChangeVersionAtStart);
             // A write that landed while the network operation was running is
             // deliberately left pending and is shown as such. This avoids a
             // misleading green check between the two sync passes.

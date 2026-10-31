@@ -52,7 +52,7 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(chapterPath)) return;
 
         var pdfSelectionFragment = _readerIsPdf
-            ? _selectedReaderAnnotation?.Fragment ?? (CurrentReaderHost as NativePdfReaderHost)?.SelectionFragment
+            ? _selectedReaderAnnotation?.Fragment ?? (CurrentReaderHost as IPdfTextHost)?.SelectionFragment
             : null;
 
         var exact = selectedText.Length > 0
@@ -169,7 +169,7 @@ public partial class MainWindow
             : _readerPendingSelection;
         ReaderAnnotationInputBox.Text = _selectedReaderAnnotation?.Note ?? string.Empty;
         var placedOutsidePdfPage = _readerIsPdf
-            && CurrentReaderHost is NativePdfReaderHost pdf
+            && CurrentReaderHost is IPdfAnnotationVisualHost pdf
             && TryShowReaderPdfAnnotationCallout(
                 ReaderAnnotationInputPopup,
                 pdf,
@@ -181,7 +181,7 @@ public partial class MainWindow
         {
             // The PDF right gutter can disappear at fit-width/high zoom.
             // An explicit edit must still expose a usable input control.
-            if (CurrentReaderHost is NativePdfReaderHost fallbackPdf)
+            if (CurrentReaderHost is IPdfAnnotationVisualHost fallbackPdf)
                 fallbackPdf.ClearAnnotationCallout();
             ReaderAnnotationInputPanel.IsVisible = true;
             ReaderAnnotationInputPanel.Height = double.NaN;
@@ -198,13 +198,14 @@ public partial class MainWindow
 
     private bool TryShowReaderPdfAnnotationCallout(
         Popup popup,
-        NativePdfReaderHost pdf,
+        IPdfAnnotationVisualHost pdf,
         ReaderAnnotation? annotation,
         Point? fallbackAnchor,
         Size preferredSize,
         bool requireVisibleBounds = false,
         Func<double, double>? measureHeight = null)
     {
+        if (pdf.View is not Control pdfView) return false;
         var pageNumber = 0;
         var anchor = default(Point);
         var hasAnnotationAnchor = annotation is not null
@@ -212,7 +213,7 @@ public partial class MainWindow
         if (!hasAnnotationAnchor)
         {
             if (fallbackAnchor is not { } readerAnchor
-                || ReaderWebViewHost.TranslatePoint(readerAnchor, pdf) is not { } pdfAnchor)
+                || ReaderWebViewHost.TranslatePoint(readerAnchor, pdfView) is not { } pdfAnchor)
                 return false;
             pageNumber = Math.Clamp(_readerPdfPage, 1, Math.Max(1, pdf.PageCount));
             anchor = pdfAnchor;
@@ -227,7 +228,7 @@ public partial class MainWindow
             if (requireVisibleBounds) return false;
             calloutBounds = new Rect(new Point(), preferredSize);
         }
-        var popupOrigin = pdf.TranslatePoint(calloutBounds.TopLeft, ReaderWebViewHost);
+        var popupOrigin = pdfView.TranslatePoint(calloutBounds.TopLeft, ReaderWebViewHost);
         if (popupOrigin is null) return false;
 
         pdf.SetAnnotationCallout(anchor, calloutBounds, movedBounds =>
@@ -243,7 +244,7 @@ public partial class MainWindow
                 }
             }
             if (movedBounds.Width > 0
-                && pdf.TranslatePoint(movedBounds.TopLeft, ReaderWebViewHost) is { } origin)
+                && pdfView.TranslatePoint(movedBounds.TopLeft, ReaderWebViewHost) is { } origin)
                 popup.PlacementRect = new Rect(origin, new Size(1, 1));
         }, pageNumber, preferredSize, measureHeight);
         popup.PlacementTarget = ReaderWebViewHost;
@@ -261,14 +262,14 @@ public partial class MainWindow
 
     private void HideReaderAnnotationInputPopup()
     {
-        if (CurrentReaderHost is NativePdfReaderHost pdf)
+        if (CurrentReaderHost is IPdfAnnotationVisualHost pdf)
             pdf.ClearAnnotationCallout();
         ReaderAnnotationInputPopup.IsOpen = false;
     }
 
     private void ReaderAnnotationInputPopup_Closed(object? sender, EventArgs e)
     {
-        if (CurrentReaderHost is NativePdfReaderHost pdf)
+        if (CurrentReaderHost is IPdfAnnotationVisualHost pdf)
             pdf.ClearAnnotationCallout();
         // Light dismiss (clicking back into the body) closes the popup without
         // going through cancel/save; drop the pending selection so a stale
@@ -342,7 +343,7 @@ public partial class MainWindow
             if (TryGetReaderPdfPage(annotation.ChapterPath, out var page))
             {
                 await NavigatePdfPageAsync(page, ReaderToken);
-                if (CurrentReaderHost is NativePdfReaderHost pdf && pdf.PageNumber == page)
+                if (CurrentReaderHost is IPdfNavigationHost pdf && pdf.PageNumber == page)
                 {
                     if (ReaderPdfPointAnchor.TryParse(annotation.Fragment, out var x, out var y))
                     {
@@ -350,7 +351,7 @@ public partial class MainWindow
                     }
                     else
                     {
-                        pdf.ScrollToOffset(annotation.StartOffset);
+                        (pdf as IPdfTextHost)?.ScrollToOffset(annotation.StartOffset);
                     }
                 }
             }
@@ -443,7 +444,7 @@ public partial class MainWindow
         {
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard
                 ?? throw new InvalidOperationException(T("当前窗口无法访问剪贴板。"));
-            await clipboard.SetTextAsync(CurrentReaderHost is NativePdfReaderHost pdf
+            await clipboard.SetTextAsync(CurrentReaderHost is IPdfTextHost pdf
                 ? pdf.GetSelectedTextForCopy() : _readerPendingSelection);
         }
         catch (OperationCanceledException) when (ReaderToken.IsCancellationRequested)
@@ -487,14 +488,9 @@ public partial class MainWindow
 
     private static async Task ClearCurrentReaderSelectionAsync(IReaderHost host)
     {
-        if (host is NativePdfReaderHost pdf)
+        if (host is IReaderSelectionHost selection)
         {
-            pdf.ClearSelection();
-            return;
-        }
-        if (host is NativeReaderHost nativeReader)
-        {
-            nativeReader.ClearSelection();
+            selection.ClearSelection();
             return;
         }
 
@@ -540,11 +536,12 @@ public partial class MainWindow
         _readerLastSelectionPopupAnchor = null;
         _readerLastSelectionPopupBottom = null;
 
-        if (CurrentReaderHost is NativeReaderHost nativeReader)
+        if (CurrentReaderHost is IReaderAnnotationBoundsHost nativeReader
+            && nativeReader.View is Control nativeView)
         {
             var bounds = nativeReader.GetAnnotationBounds(annotation);
             if (bounds.Count > 0
-                && nativeReader.TranslatePoint(
+                && nativeView.TranslatePoint(
                     new Point(bounds[0].X, bounds[0].Y),
                     ReaderWebViewHost) is { } anchor)
             {
@@ -576,7 +573,7 @@ public partial class MainWindow
         _readerLastHighlightStyle = annotation.UnderlineStyle;
         _readerLastSelectionPopupAnchor = null;
         _readerLastSelectionPopupBottom = null;
-        if (CurrentReaderHost is NativePdfReaderHost pdf)
+        if (CurrentReaderHost is IPdfAnnotationVisualHost pdf && pdf.View is Control pdfView)
         {
             var point = isPoint
                 ? pdf.GetPdfPointPosition(annotation)
@@ -584,7 +581,7 @@ public partial class MainWindow
             var bounds = pdf.GetRangeBounds(annotation.StartOffset, annotation.EndOffset);
             var position = point ?? (bounds.Count > 0 ? bounds[0].TopLeft : (Point?)null);
             if (position is { } localPosition
-                && pdf.TranslatePoint(localPosition, ReaderWebViewHost) is { } anchor)
+                && pdfView.TranslatePoint(localPosition, ReaderWebViewHost) is { } anchor)
             {
                 _readerLastSelectionPopupAnchor = anchor;
                 _readerLastSelectionPopupBottom = anchor.Y + (bounds.Count > 0 ? bounds[0].Height : 1);
@@ -603,7 +600,7 @@ public partial class MainWindow
         double hostY)
     {
         if (!_readerIsPdf
-            || CurrentReaderHost is not NativePdfReaderHost pdf
+            || CurrentReaderHost is not IPdfNavigationHost pdf
             || page != pdf.PageNumber)
             return;
 

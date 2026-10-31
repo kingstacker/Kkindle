@@ -1,0 +1,73 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             x:Class="Kkindle.Mobile.Views.KindleSettingsPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <UserControl.Styles>
+    <Style Selector="StackPanel.field">
+      <Setter Property="Spacing" Value="6" />
+      <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+    <Style Selector="StackPanel.field > TextBlock">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBox.field">
+      <Setter Property="TextInputOptions.AutoCapitalization" Value="False" />
+      <Setter Property="TextInputOptions.ShowSuggestions" Value="False" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Grid ColumnDefinitions="Auto,*" Margin="8,6,24,0">
+      <Button Classes="icon" Click="OnBackClick">
+        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+      </Button>
+      <TextBlock Grid.Column="1" Classes="title" Text="发送到 Kindle" VerticalAlignment="Center" Margin="2,0,0,0" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" Name="FormScroller">
+      <StackPanel Margin="24,12,24,20">
+        <TextBlock Classes="muted" TextWrapping="Wrap" LineHeight="20" Margin="0,0,0,18"
+                   Text="通过亚马逊的个人文档邮箱把 EPUB 或 PDF 发到 Kindle。发件邮箱需要先加入亚马逊账户的“已认可发件人”列表。" />
+        <StackPanel Classes="field">
+          <TextBlock Text="Kindle 收件邮箱" />
+          <TextBox Name="KindleAddressBox" Classes="field" PlaceholderText="name@kindle.com"
+                   TextInputOptions.ContentType="Email" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="发件邮箱" />
+          <TextBox Name="SenderBox" Classes="field" TextInputOptions.ContentType="Email" />
+        </StackPanel>
+        <Grid ColumnDefinitions="*,12,96">
+          <StackPanel Classes="field">
+            <TextBlock Text="SMTP 服务器" />
+            <TextBox Name="HostBox" Classes="field" PlaceholderText="smtp.example.com" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Classes="field">
+            <TextBlock Text="端口" />
+            <TextBox Name="PortBox" Classes="field" TextInputOptions.ContentType="Digits" />
+          </StackPanel>
+        </Grid>
+        <StackPanel Classes="field">
+          <TextBlock Text="SMTP 用户名" />
+          <TextBox Name="UserBox" Classes="field" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="SMTP 密码或授权码" />
+          <TextBox Name="PasswordBox" Classes="field" PasswordChar="•"
+                   TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+        </StackPanel>
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="使用加密连接" VerticalAlignment="Center" />
+          <ToggleSwitch Grid.Column="1" Name="SslSwitch" OnContent="" OffContent="" MinWidth="0" />
+        </Grid>
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="2" Name="ActionBar" Margin="24,8,24,14" Spacing="10">
+      <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" LineHeight="20" />
+      <Button Name="SaveButton" Classes="primary" Content="保存" Click="OnSaveClick" />
+    </StackPanel>
+  </Grid>
+</UserControl>

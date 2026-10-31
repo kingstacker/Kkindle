@@ -10,7 +10,7 @@ namespace Kkindle;
 
 public partial class MainWindow
 {
-    private NativePdfReaderHost? _readerThumbnailHost;
+    private IPdfThumbnailHost? _readerThumbnailHost;
     private bool _syncingPdfThumbnails;
 
     private bool TryHandleReaderPdfHistoryKey(KeyEventArgs e)
@@ -28,21 +28,23 @@ public partial class MainWindow
     private void UpdateReaderPdfNavigationUi()
     {
         if (ReaderPdfBackButton is null) return;
-        var pdf = _readerIsPdf ? CurrentReaderHost as NativePdfReaderHost : null;
-        ReaderPdfBackButton.IsVisible = ReaderPdfForwardButton.IsVisible = ReaderPdfThumbnailsButton.IsVisible = pdf is not null;
-        ReaderPdfThumbnailsTabButton.IsVisible = pdf is not null;
-        ReaderAssistantTabsGrid.ColumnDefinitions[2].Width = pdf is not null
+        var pdf = _readerIsPdf ? CurrentReaderHost as IPdfNavigationHost : null;
+        var thumbnails = pdf as IPdfThumbnailHost;
+        ReaderPdfBackButton.IsVisible = ReaderPdfForwardButton.IsVisible = pdf is not null;
+        ReaderPdfThumbnailsButton.IsVisible = thumbnails is not null;
+        ReaderPdfThumbnailsTabButton.IsVisible = thumbnails is not null;
+        ReaderAssistantTabsGrid.ColumnDefinitions[2].Width = thumbnails is not null
             ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
-        ReaderPdfBackButton.IsEnabled = pdf?.CanGoPrevious == true;
-        ReaderPdfForwardButton.IsEnabled = pdf?.CanGoNext == true;
+        ReaderPdfBackButton.IsEnabled = pdf is not null && pdf.GetAdjacentPage(-1) != pdf.PageNumber;
+        ReaderPdfForwardButton.IsEnabled = pdf is not null && pdf.GetAdjacentPage(1) != pdf.PageNumber;
         ReaderPagePositionButton.IsEnabled = pdf is not null;
-        if (!ReferenceEquals(pdf, _readerThumbnailHost))
+        if (!ReferenceEquals(thumbnails, _readerThumbnailHost))
         {
             ReaderPagePositionButton.Flyout?.Hide();
             ReaderPdfThumbnailsList.ItemsSource = null;
-            _readerThumbnailHost = pdf;
+            _readerThumbnailHost = thumbnails;
         }
-        if (pdf is null)
+        if (thumbnails is null)
         {
             if (ReaderPdfThumbnailsView.IsVisible)
             {
@@ -51,14 +53,14 @@ public partial class MainWindow
                 SetReaderAssistantTabState(ReaderAiTabButton, selected: true);
                 SetReaderAssistantTabState(ReaderPdfThumbnailsTabButton, selected: false);
             }
-            return;
         }
+        if (pdf is null) return;
         ToolTip.SetTip(ReaderPagePositionButton, pdf.GetPageDescription(pdf.PageNumber) + T(" · 点击跳页或校正页码"));
-        if (ReaderPdfThumbnailsView.IsVisible || ReaderPdfThumbnailsList.ItemsSource is not null)
-            SyncReaderPdfThumbnails(pdf);
+        if (thumbnails is not null && (ReaderPdfThumbnailsView.IsVisible || ReaderPdfThumbnailsList.ItemsSource is not null))
+            SyncReaderPdfThumbnails(thumbnails);
     }
 
-    private void SyncReaderPdfThumbnails(NativePdfReaderHost pdf, bool revealCurrentPage = false)
+    private void SyncReaderPdfThumbnails(IPdfThumbnailHost pdf, bool revealCurrentPage = false)
     {
         var pageIndex = pdf.PageNumber - 1;
         var selectionChanged = ReaderPdfThumbnailsList.SelectedIndex != pageIndex;
@@ -94,7 +96,7 @@ public partial class MainWindow
 
     private async Task NavigateReaderPdfHistoryAsync(int direction)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfNavigationHost pdf) return;
         CancelReaderPdfNavigation();
         await _readerTts.StopAsync();
         HideReaderSelectionPopup();
@@ -124,7 +126,7 @@ public partial class MainWindow
             Process.Start(new ProcessStartInfo(external.AbsoluteUri) { UseShellExecute = true });
             return;
         }
-        if (CurrentReaderHost is not NativePdfReaderHost pdf || page < 1 || page > pdf.PageCount) return;
+        if (CurrentReaderHost is not IPdfNavigationHost pdf || page < 1 || page > pdf.PageCount) return;
         if (!await NavigatePdfPageCoreAsync(page, ReaderToken, saveProgress: false, syncTocSelection: true)) return;
         if (!ReferenceEquals(pdf, CurrentReaderHost)) return;
         // /XYZ zoom is an absolute PDF scale; the reader's zoom is relative to
@@ -139,7 +141,7 @@ public partial class MainWindow
 
     private void ReaderPdfThumbnailsButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfThumbnailHost pdf) return;
         if (_readerZenMode) ExitReaderZenMode();
         ReaderAssistantPanel.IsVisible = true;
         ReaderAiView.IsVisible = false;
@@ -165,7 +167,7 @@ public partial class MainWindow
 
     private void ReaderPagePositionButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfNavigationHost pdf) return;
         ReaderPdfPageJumpBox.Text = pdf.GetPageLabel(pdf.PageNumber);
         ReaderPdfPrintedPageBox.Text = pdf.GetPageLabel(pdf.PageNumber);
         ReaderPdfPageJumpKind.SelectedIndex = 0;
@@ -180,7 +182,7 @@ public partial class MainWindow
     }
     private async Task JumpReaderPdfPageAsync()
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfNavigationHost pdf) return;
         var label = ReaderPdfPageJumpBox.Text?.Trim() ?? "";
         var page = ReaderPdfPageJumpKind.SelectedIndex == 1
             ? int.TryParse(label, NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? number : -1
@@ -195,7 +197,7 @@ public partial class MainWindow
     }
     private async void ReaderPdfPageMappingButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfNavigationHost pdf) return;
         if (!int.TryParse(ReaderPdfPrintedPageBox.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var printed)
             || printed is < 1 or > 1_000_000)
         {
@@ -208,7 +210,7 @@ public partial class MainWindow
     }
     private async void ReaderPdfResetPageMappingButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (CurrentReaderHost is not NativePdfReaderHost pdf) return;
+        if (CurrentReaderHost is not IPdfNavigationHost pdf) return;
         pdf.SetPageNumberOffset(null);
         ReaderPdfPageJumpStatus.Text = T("已恢复 PDF 自带页码。");
         await ObserveReaderTaskAsync(SaveReaderProgressAsync(ReaderToken));

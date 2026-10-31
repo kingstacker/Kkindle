@@ -1,0 +1,11 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kkindle.Mobile.Views.Sheets.InfoSheet">
+  <ScrollViewer MaxHeight="520">
+    <StackPanel Margin="20,4,20,24" Spacing="12">
+      <TextBlock Name="SourceText" Classes="muted" FontSize="13" LineHeight="20" TextWrapping="Wrap"
+                 IsVisible="False" />
+      <SelectableTextBlock Name="BodyText" FontSize="15" LineHeight="24" TextWrapping="Wrap" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

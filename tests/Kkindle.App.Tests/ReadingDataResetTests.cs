@@ -50,7 +50,7 @@ public sealed partial class SettingsTests
         Assert.Equal(60, (await reader.GetProgressAsync(file))!.ProgressPercent);
         Assert.Equal(120, (await reader.GetReadingStatsAsync(file))!.CumulativeSeconds);
 
-        var changeVersion = scope.Field<long>("_s3LocalChangeVersion");
+        var changeVersion = scope.Field<LocalSyncChanges>("_localSyncChanges").CaptureVersion();
         var confirm = scope.Call<Task>("ResetReadingDataFromSettingsAsync");
         await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
         scope.Get<Button>("ConfirmationOkButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -69,7 +69,7 @@ public sealed partial class SettingsTests
         Assert.Empty(scope.Window.DashboardBookTimes);
         Assert.True(scope.Get<TextBlock>("DashboardRecentEmptyText").IsVisible);
         Assert.Equal("1 / 1", scope.Get<TextBlock>("DashboardBookmarksText").Text);
-        Assert.True(scope.Field<long>("_s3LocalChangeVersion") > changeVersion);
+        Assert.True(scope.Field<LocalSyncChanges>("_localSyncChanges").CaptureVersion() > changeVersion);
         Assert.Equal(UiText.Get("阅读统计和进度已重置。书籍、书签、划线与批注已保留。"),
             scope.Get<TextBlock>("SettingsReadingDataStatusText").Text);
         Assert.False(scope.Get<Control>("ConfirmationOverlay").IsVisible);

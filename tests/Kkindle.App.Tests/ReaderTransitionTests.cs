@@ -249,7 +249,7 @@ public sealed class ReaderTransitionTests(SettingsUiSession session)
             var preload = preloaded ? new NativeReaderHost() : null;
             var items = chapters.Select((path, index) =>
                 new EpubReaderNavigationItem($"第{index + 1}章", new Uri(path).AbsoluteUri, index)).ToArray();
-            scope.Set("_readerSessionCancellation", cancellation);
+            scope.Field<ReaderSession>("_readerSession").Begin(cancellation.Token);
             scope.Set("_readerLayout", new ReaderLayoutSettings(VerticalWriting: vertical, TwoPageMode: spread));
             scope.Set("_readerDocument", new EpubReaderDocument(scope.Paths.ReaderCache, chapters, [], []));
             scope.Set("_readerTocItems", items);
@@ -279,7 +279,7 @@ public sealed class ReaderTransitionTests(SettingsUiSession session)
             await Task.Delay(30);
             scope.Set("_readerActiveHost", null);
             scope.Set("_readerPreloadHost", null);
-            scope.Set("_readerSessionCancellation", null);
+            scope.Field<ReaderSession>("_readerSession").End();
             scope.Get<ContentControl>("ReaderActiveHostSlot").Content = null;
             scope.Get<ContentControl>("ReaderPreloadHostSlot").Content = null;
             active.Dispose();

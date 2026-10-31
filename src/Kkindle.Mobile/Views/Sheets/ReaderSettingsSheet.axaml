@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kkindle.Mobile.Views.Sheets.ReaderSettingsSheet">
+  <StackPanel Margin="20,4,20,24" Spacing="8">
+    <TextBlock Classes="label" Text="纸张" />
+    <Border Classes="segments">
+      <Grid ColumnDefinitions="*,*,*">
+        <Button Grid.Column="0" Name="PaperWhite" Classes="seg" Content="白" Click="OnPaperClick" />
+        <Button Grid.Column="1" Name="PaperBeige" Classes="seg" Content="米" Click="OnPaperClick" />
+        <Button Grid.Column="2" Name="PaperInk" Classes="seg" Content="黑" Click="OnPaperClick" />
+      </Grid>
+    </Border>
+
+    <StackPanel Name="PdfOptions" Spacing="8" IsVisible="False">
+      <TextBlock Classes="label" Text="缩放" Margin="0,14,0,0" />
+      <Border Classes="segments">
+        <Grid ColumnDefinitions="*,*,*">
+          <Button Grid.Column="0" Name="ZoomPage" Classes="seg" Content="整页" Click="OnZoomClick" />
+          <Button Grid.Column="1" Name="ZoomMedium" Classes="seg" Content="1.5 倍" Click="OnZoomClick" />
+          <Button Grid.Column="2" Name="ZoomLarge" Classes="seg" Content="2 倍" Click="OnZoomClick" />
+        </Grid>
+      </Border>
+    </StackPanel>
+
+    <StackPanel Name="TextOptions" Spacing="8">
+      <TextBlock Classes="label" Text="字号" Margin="0,14,0,0" />
+      <Border Classes="segments">
+        <Grid ColumnDefinitions="*,*,*">
+          <Button Grid.Column="0" Classes="seg" Content="A−" Click="OnSmallerClick" />
+          <TextBlock Grid.Column="1" Name="FontScaleText" HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+          <Button Grid.Column="2" Classes="seg" Content="A+" Click="OnLargerClick" />
+        </Grid>
+      </Border>
+
+      <TextBlock Classes="label" Text="行距" Margin="0,14,0,0" />
+      <Border Classes="segments">
+        <Grid ColumnDefinitions="*,*,*">
+          <Button Grid.Column="0" Name="LineTight" Classes="seg" Content="紧凑" Click="OnLineClick" />
+          <Button Grid.Column="1" Name="LineNormal" Classes="seg" Content="标准" Click="OnLineClick" />
+          <Button Grid.Column="2" Name="LineLoose" Classes="seg" Content="宽松" Click="OnLineClick" />
+        </Grid>
+      </Border>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

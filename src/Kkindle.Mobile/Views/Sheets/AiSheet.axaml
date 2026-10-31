@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:s="using:Kkindle.Mobile.Views.Sheets"
+             x:Class="Kkindle.Mobile.Views.Sheets.AiSheet">
+  <UserControl.Styles>
+    <Style Selector="Border.question">
+      <Setter Property="Background" Value="{DynamicResource SunkBrush}" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="MaxWidth" Value="300" />
+    </Style>
+  </UserControl.Styles>
+  <Grid RowDefinitions="*,Auto,Auto" Margin="20,0,20,12">
+    <ScrollViewer Name="Scroller">
+      <StackPanel Spacing="16" Margin="0,4,0,8">
+        <StackPanel Name="SetupPanel" Spacing="12" IsVisible="False" Margin="0,24,0,0">
+          <TextBlock Classes="secondary" TextWrapping="Wrap" LineHeight="22"
+                     Text="AI 助手需要连接你自己的 AI 服务（DeepSeek、OpenAI 或兼容接口）。" />
+          <Button Classes="primary" Content="去设置" Click="OnSetupClick" />
+        </StackPanel>
+        <TextBlock Name="IntroText" Classes="muted" TextWrapping="Wrap" LineHeight="20"
+                   Text="可以问这一页讲了什么，或让它解释一个概念。" />
+        <ItemsControl Name="Messages">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Spacing="14" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="s:AiMessage">
+              <Panel>
+                <Border Classes="question" IsVisible="{Binding IsQuestion}">
+                  <TextBlock Text="{Binding Text}" FontSize="14" LineHeight="21" TextWrapping="Wrap" />
+                </Border>
+                <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding !IsQuestion}" FontSize="15"
+                                     LineHeight="24" TextWrapping="Wrap" />
+              </Panel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="1" Name="QuickRow" Orientation="Horizontal" Spacing="4" Margin="-12,6,0,6">
+      <Button Classes="chip" Content="总结这一页" Click="OnSummarizeClick" />
+      <Button Classes="chip" Name="ExplainButton" Content="解释选中内容" Click="OnExplainClick" />
+    </StackPanel>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto">
+      <TextBox Name="QuestionBox" Classes="field" PlaceholderText="问问这本书" KeyDown="OnQuestionKeyDown" />
+      <Button Grid.Column="1" Classes="icon" Name="SendButton" Margin="4,0,-10,0" Click="OnSendClick">
+        <c:LineIcon Data="{StaticResource IconSend}" StrokeThickness="1.4" />
+      </Button>
+    </Grid>
+  </Grid>
+</UserControl>

@@ -1,0 +1,100 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             x:Class="Kkindle.Mobile.Views.BookEditPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <UserControl.Styles>
+    <Style Selector="StackPanel.field">
+      <Setter Property="Spacing" Value="6" />
+      <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+    <Style Selector="StackPanel.field > TextBlock">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Grid ColumnDefinitions="Auto,*" Margin="8,6,24,0">
+      <Button Classes="icon" Click="OnBackClick">
+        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+      </Button>
+      <TextBlock Grid.Column="1" Classes="title" Text="编辑书籍信息" VerticalAlignment="Center" Margin="2,0,0,0" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" Name="FormScroller">
+      <StackPanel Margin="24,12,24,20">
+        <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,20">
+          <Border Classes="cover" Width="72" Height="104">
+            <Border Classes="coverclip">
+              <Panel>
+                <Image Name="CoverImage" Stretch="Uniform" />
+                <TextBlock Name="CoverInitial" FontSize="24" Foreground="{DynamicResource TextMutedBrush}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Panel>
+            </Border>
+          </Border>
+          <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center" Spacing="8">
+            <Button Name="DoubanButton" Classes="primary" Content="从豆瓣获取" Click="OnDoubanClick" IsVisible="False" />
+            <TextBlock Name="RatingText" Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+          </StackPanel>
+        </Grid>
+
+        <StackPanel Classes="field">
+          <TextBlock Text="书名" />
+          <TextBox Name="TitleBox" Classes="field" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="作者" />
+          <TextBox Name="AuthorsBox" Classes="field" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="丛书" />
+          <TextBox Name="SeriesBox" Classes="field" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="出版社" />
+          <TextBox Name="PublisherBox" Classes="field" />
+        </StackPanel>
+        <Grid ColumnDefinitions="*,12,*">
+          <StackPanel Classes="field">
+            <TextBlock Text="出版日期" />
+            <TextBox Name="PublishDateBox" Classes="field" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Classes="field">
+            <TextBlock Text="ISBN" />
+            <TextBox Name="IsbnBox" Classes="field" TextInputOptions.ContentType="Digits" />
+          </StackPanel>
+        </Grid>
+        <Grid ColumnDefinitions="*,12,*">
+          <StackPanel Classes="field">
+            <TextBlock Text="页数" />
+            <TextBox Name="PageCountBox" Classes="field" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Classes="field">
+            <TextBlock Text="装帧" />
+            <TextBox Name="BindingBox" Classes="field" />
+          </StackPanel>
+        </Grid>
+        <StackPanel Classes="field">
+          <TextBlock Text="标签" />
+          <TextBox Name="TagsBox" Classes="field" PlaceholderText="多个标签用逗号分隔" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="分类" />
+          <TextBox Name="CategoryBox" Classes="field" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="简介" />
+          <TextBox Name="DescriptionBox" Classes="field" AcceptsReturn="True" TextWrapping="Wrap"
+                   MinHeight="120" VerticalContentAlignment="Top" />
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="2" Name="ActionBar" Margin="24,8,24,14" Spacing="10">
+      <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" LineHeight="20" />
+      <Button Name="SaveButton" Classes="primary" Content="保存" Click="OnSaveClick" />
+    </StackPanel>
+  </Grid>
+</UserControl>

@@ -16,7 +16,7 @@ public partial class MainWindow
         var searchContext = _readerPendingSearchContext;
         _readerPendingSearchContext = null;
         cancellationToken.ThrowIfCancellationRequested();
-        if (host is not NativeReaderHost nativeReader)
+        if (host is not IReaderTextSearchHost nativeReader)
         {
             return;
         }

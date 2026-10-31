@@ -20,7 +20,7 @@ namespace Kkindle.Infrastructure;
 /// the important part of SiYuan/dejavu's design while keeping Kkindle's
 /// existing SQLite schema and reader services intact.
 /// </summary>
-public sealed partial class S3SyncService
+public sealed partial class S3SyncService : ISyncService
 {
     // Additive changes keep this wire version. A future wire version can still
     // be read when its explicit MinimumReaderVersion permits it.

@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kkindle.Mobile.Views.Sheets.ZLibraryBookSheet">
+  <Grid RowDefinitions="*,Auto" Margin="20,0,20,14">
+    <ScrollViewer>
+      <StackPanel Spacing="16" Margin="0,4,0,12">
+        <Grid ColumnDefinitions="Auto,*">
+          <Border Classes="cover" Width="84" Height="120">
+            <Border Classes="coverclip">
+              <Panel>
+                <Image Name="CoverImage" Stretch="UniformToFill" />
+                <TextBlock Name="CoverInitial" FontSize="26" Foreground="{DynamicResource TextMutedBrush}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Panel>
+            </Border>
+          </Border>
+          <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="4" VerticalAlignment="Center">
+            <TextBlock Name="TitleText" FontSize="17" FontWeight="Medium" TextWrapping="Wrap" MaxLines="3"
+                       TextTrimming="CharacterEllipsis" LineHeight="23" />
+            <TextBlock Name="AuthorText" Classes="secondary" TextWrapping="Wrap" MaxLines="2" />
+            <TextBlock Name="InfoText" Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+          </StackPanel>
+        </Grid>
+        <ItemsControl Name="FactsList">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:CompileBindings="False">
+              <Grid ColumnDefinitions="72,*" Margin="0,5">
+                <TextBlock Text="{Binding Label}" Classes="muted" FontSize="13.5" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" Classes="secondary" TextWrapping="Wrap" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Name="DescriptionText" Classes="secondary" TextWrapping="Wrap" LineHeight="23" />
+      </StackPanel>
+    </ScrollViewer>
+    <StackPanel Grid.Row="1" Spacing="10">
+      <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" LineHeight="20" />
+      <Button Name="DownloadButton" Classes="primary" Content="下载到书库" Click="OnDownloadClick" />
+    </StackPanel>
+  </Grid>
+</UserControl>

@@ -775,14 +775,15 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     {
         public MainWindow Window => window;
         public AppPaths Paths => paths;
-        public S3SyncService Sync => Field<S3SyncService>("_s3SyncService");
+        public ISyncService Sync => Field<ISyncService>("_s3SyncService");
         public T Get<T>(string name) where T : Control => window.FindControl<T>(name)!;
         public T Field<T>(string name) => (T)typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
         public void Set(string name, object? value) => typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, value);
         public object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, args);
         public T Call<T>(string name, params object?[] args) => (T)Call(name, args)!;
 
-        public static async Task<TestWindow> Create(AppSettings? settings = null, IBookFormatConverter? formatConverter = null)
+        public static async Task<TestWindow> Create(AppSettings? settings = null, IBookFormatConverter? formatConverter = null,
+            IReaderHostFactory? readerHostFactory = null, ISyncService? syncService = null)
         {
             ((Kkindle.App)Application.Current!).ApplyLanguage("zh-CN");
             var directory = Path.Combine(Path.GetTempPath(), "kkindle-settings-tests", Guid.NewGuid().ToString("N"));
@@ -796,7 +797,11 @@ public sealed partial class SettingsTests(SettingsUiSession session)
             await new AppSettingsStore(paths).SaveAsync(initial);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
             await library.InitializeAsync();
-            var window = new MainWindow(paths, library, formatConverter: formatConverter, startupSettings: initial) { Width = 1294, Height = 818 };
+            var services = readerHostFactory is null && syncService is null ? null
+                : new AppServices(new TestSecretProtector(), _ => null,
+                    FormatReaderHostFactory: readerHostFactory, SyncService: syncService);
+            var window = new MainWindow(paths, library, formatConverter: formatConverter,
+                startupSettings: initial, services: services) { Width = 1294, Height = 818 };
             var scope = new TestWindow(window, paths, directory);
             scope.Set("_s3SyncStoredSettings", await scope.Sync.LoadSettingsAsync());
             await scope.Field<ReaderDataService>("_readerData").InitializeAsync();
@@ -827,6 +832,12 @@ public sealed partial class SettingsTests(SettingsUiSession session)
             try { Directory.Delete(directory, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+        }
+
+        private sealed class TestSecretProtector : ISecretProtector
+        {
+            public byte[] Protect(byte[] value) => value.ToArray();
+            public byte[] Unprotect(byte[] value) => value.ToArray();
         }
     }
 }

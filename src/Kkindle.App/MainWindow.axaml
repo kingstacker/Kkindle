@@ -1527,7 +1527,10 @@
                                       Height="250"
                                       VerticalAlignment="Top"
                                       RowDefinitions="*,*,*">
+                                    <!-- Developer mode only; kept in the last row so hiding it leaves no gap. -->
                                     <Button x:Name="DetailDoubanButton"
+                                            Grid.Row="2"
+                                            IsVisible="False"
                                             Classes="quiet"
                                             BorderThickness="0"
                                             Width="34"
@@ -1546,7 +1549,7 @@
                                               Data="M 11,4 A 7,7 0 1,0 11,18 A 7,7 0 1,0 11,4 M 16,16 L 21,21" />
                                     </Button>
                                     <Button x:Name="DetailFavoriteButton"
-                                            Grid.Row="1"
+                                            Grid.Row="0"
                                             Classes="quiet"
                                             BorderThickness="0"
                                             Width="34"
@@ -1565,7 +1568,7 @@
                                               Data="M 12,3 L 14.8,8.7 L 21,9.6 L 16.5,14 L 17.6,20.2 L 12,17.3 L 6.4,20.2 L 7.5,14 L 3,9.6 L 9.2,8.7 Z" />
                                     </Button>
                                     <Button x:Name="DetailReadingStatusButton"
-                                            Grid.Row="2"
+                                            Grid.Row="1"
                                             Classes="quiet"
                                             BorderThickness="0"
                                             Width="34"
@@ -2831,7 +2834,7 @@
                                 <ToggleSwitch x:Name="ShowLibraryPresenceIconCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.ShowPresenceIconHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Library.ShowPresenceIcon}" AutomationProperties.Name="{DynamicResource Ui.Library.ShowPresenceIcon}" />
                                 <ToggleSwitch x:Name="CollectionsMutuallyExclusiveCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Library.CollectionsMutuallyExclusiveHelp}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.F6A273284E344858}" AutomationProperties.Name="{DynamicResource Ui.Auto.F6A273284E344858}" />
                                 <TextBlock Text="{DynamicResource Ui.Settings.Group.Import}" Classes="settingsSectionTitle" Margin="0,16,0,0" TextWrapping="Wrap" />
-                                <ToggleSwitch x:Name="AutoDoubanMatchCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.4799DAF25FD6C6CC}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" AutomationProperties.Name="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" />
+                                <ToggleSwitch x:Name="AutoDoubanMatchCheck" IsVisible="False" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.4799DAF25FD6C6CC}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" AutomationProperties.Name="{DynamicResource Ui.Auto.07F4A49C6D9FCA72}" />
                                 <ToggleSwitch x:Name="AutoGenerateReaderFormatsCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Ui.Auto.8B0CC19DB0791E72}" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.55A2226420BCBF78}" AutomationProperties.Name="{DynamicResource Ui.Auto.55A2226420BCBF78}" />
                                 <Expander x:Name="SettingsCalibreExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.39F073ED740B19B8}" Tag="{DynamicResource Ui.Auto.76B87E0C608BEE4A}" AutomationProperties.Name="{DynamicResource Ui.Auto.39F073ED740B19B8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsCalibreSection" Padding="0">

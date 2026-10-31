@@ -1,0 +1,150 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             x:Class="Kkindle.Mobile.Views.SyncSettingsPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <UserControl.Styles>
+    <Style Selector="StackPanel.field">
+      <Setter Property="Spacing" Value="6" />
+      <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+    <Style Selector="StackPanel.field > TextBlock">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBox.field">
+      <Setter Property="TextInputOptions.AutoCapitalization" Value="False" />
+      <Setter Property="TextInputOptions.ShowSuggestions" Value="False" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Grid ColumnDefinitions="Auto,*" Margin="8,6,24,0">
+      <Button Classes="icon" Click="OnBackClick">
+        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+      </Button>
+      <TextBlock Grid.Column="1" Classes="title" Text="云同步" VerticalAlignment="Center"
+                 Margin="2,0,0,0" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" Name="FormScroller">
+      <StackPanel Name="FormPanel" Margin="24,12,24,20">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel VerticalAlignment="Center" Spacing="2">
+            <TextBlock Text="启用同步" />
+            <TextBlock Name="LastSyncText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" Name="EnabledSwitch" OnContent="" OffContent="" MinWidth="0" />
+        </Grid>
+
+        <Grid ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+          <StackPanel VerticalAlignment="Center" Spacing="2">
+            <TextBlock Text="自动同步" />
+            <TextBlock Classes="muted" FontSize="12" Text="打开应用、回到前台和读完退出时同步" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" Name="AutomaticSwitch" OnContent="" OffContent="" MinWidth="0" />
+        </Grid>
+
+        <Button Name="SyncNowButton" Classes="primary" Content="立即同步" Margin="0,16,0,0"
+                Click="OnSyncNowClick" />
+
+        <TextBlock Classes="label" Text="连接" Margin="0,28,0,12" />
+
+        <Border Classes="segments" Margin="0,0,0,16">
+          <Grid ColumnDefinitions="*,*">
+            <Button Grid.Column="0" Name="ProviderS3" Classes="seg" Content="S3" Click="OnProviderClick" />
+            <Button Grid.Column="1" Name="ProviderWebDav" Classes="seg" Content="WebDAV" Click="OnProviderClick" />
+          </Grid>
+        </Border>
+
+        <StackPanel Name="WebDavFields" IsVisible="False">
+          <StackPanel Classes="field">
+            <TextBlock Text="服务地址" />
+            <TextBox Name="WebDavEndpointBox" Classes="field" PlaceholderText="https://dav.example.com/remote.php/dav"
+                     TextInputOptions.ContentType="Url" />
+          </StackPanel>
+          <StackPanel Classes="field">
+            <TextBlock Text="用户名" />
+            <TextBox Name="WebDavUserBox" Classes="field" TextInputOptions.IsSensitive="True" />
+          </StackPanel>
+          <StackPanel Classes="field">
+            <TextBlock Text="密码" />
+            <TextBox Name="WebDavPasswordBox" Classes="field" PasswordChar="•"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel Name="S3Fields">
+        <StackPanel Classes="field">
+          <TextBlock Text="服务地址 Endpoint" />
+          <TextBox Name="EndpointBox" Classes="field" PlaceholderText="使用 AWS S3 时留空"
+                   TextInputOptions.ContentType="Url" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="存储桶 Bucket" />
+          <TextBox Name="BucketBox" Classes="field" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="区域 Region" />
+          <TextBox Name="RegionBox" Classes="field" PlaceholderText="us-east-1" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="Access Key" />
+          <TextBox Name="AccessKeyBox" Classes="field" TextInputOptions.IsSensitive="True" />
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="Secret Key" />
+          <TextBox Name="SecretKeyBox" Classes="field" PasswordChar="•"
+                   TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+        </StackPanel>
+        </StackPanel>
+        <StackPanel Classes="field">
+          <TextBlock Text="目录前缀" />
+          <TextBox Name="PrefixBox" Classes="field" PlaceholderText="kkindle" />
+        </StackPanel>
+
+        <Button Name="AdvancedButton" Classes="ghost" Content="高级选项" Click="OnAdvancedClick" />
+
+        <StackPanel Name="AdvancedPanel" IsVisible="False" Margin="0,10,0,0" Spacing="14">
+          <Grid Name="PathStyleRow" ColumnDefinitions="*,Auto">
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+              <TextBlock Text="路径样式访问" />
+              <TextBlock Classes="muted" FontSize="12" Text="MinIO 等兼容服务通常需要开启" />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" Name="PathStyleSwitch" OnContent="" OffContent="" MinWidth="0" />
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+              <TextBlock Text="同步时下载书籍文件" />
+              <TextBlock Classes="muted" FontSize="12" Text="关闭时只同步书目，打开书时再下载" />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" Name="DownloadFilesSwitch" OnContent="" OffContent="" MinWidth="0" />
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+              <TextBlock Text="跳过证书校验" />
+              <TextBlock Classes="muted" FontSize="12" Text="仅用于可信的自建服务" />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" Name="SkipTlsSwitch" OnContent="" OffContent="" MinWidth="0" />
+          </Grid>
+          <StackPanel Classes="field" Margin="0">
+            <TextBlock Text="加密密钥（可选）" />
+            <TextBox Name="EncryptionKeyBox" Classes="field" PasswordChar="•"
+                     PlaceholderText="所有设备必须一致"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- Results stay beside the buttons, visible wherever the form is scrolled. -->
+    <StackPanel Grid.Row="2" Name="ActionBar" Margin="24,8,24,14" Spacing="10">
+      <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap"
+                 LineHeight="20" />
+      <Grid ColumnDefinitions="*,12,*">
+        <Button Name="TestButton" Classes="primary" Content="测试连接" Click="OnTestClick" />
+        <Button Grid.Column="2" Name="SaveButton" Classes="primary" Content="保存" Click="OnSaveClick" />
+      </Grid>
+    </StackPanel>
+  </Grid>
+</UserControl>

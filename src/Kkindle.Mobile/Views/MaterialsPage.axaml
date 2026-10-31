@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             xmlns:vm="using:Kkindle.Mobile.Views"
+             x:Class="Kkindle.Mobile.Views.MaterialsPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <Grid RowDefinitions="Auto,Auto,*">
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="24,20,24,10">
+      <TextBlock Classes="display" Text="阅读资料" />
+      <TextBlock Grid.Column="1" Name="SummaryText" Classes="muted" FontSize="12"
+                 VerticalAlignment="Bottom" Margin="0,0,0,5" />
+    </Grid>
+
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="2" Margin="12,0,12,8">
+      <Button Name="FilterAll" Classes="chip on" Content="全部" Click="OnFilterClick" />
+      <Button Name="FilterHighlights" Classes="chip" Content="划线" Click="OnFilterClick" />
+      <Button Name="FilterNotes" Classes="chip" Content="笔记" Click="OnFilterClick" />
+      <Button Name="FilterBookmarks" Classes="chip" Content="书签" Click="OnFilterClick" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="2">
+      <StackPanel Margin="24,4,24,28">
+        <ItemsControl Name="MaterialsList" Tapped="OnItemTapped">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:MaterialEntry">
+              <StackPanel Background="Transparent">
+                <TextBlock Text="{Binding BookTitle}" IsVisible="{Binding IsFirstOfBook}"
+                           Classes="muted" FontWeight="Medium" Margin="0,18,0,10"
+                           MaxLines="1" TextTrimming="CharacterEllipsis" />
+                <StackPanel Spacing="5" Margin="0,0,0,18">
+                  <TextBlock Text="{Binding Quote}" TextWrapping="Wrap" LineHeight="24" />
+                  <TextBlock Text="{Binding Note}" IsVisible="{Binding HasNote}" Classes="secondary"
+                             TextWrapping="Wrap" LineHeight="21" />
+                  <TextBlock Text="{Binding Meta}" Classes="muted" FontSize="12"
+                             MaxLines="1" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" />
+
+        <StackPanel Name="EmptyState" Spacing="6" IsVisible="False" Margin="0,96,0,0">
+          <c:LineIcon Data="{StaticResource IconNotes}" Size="34" StrokeThickness="1.1"
+                      HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+          <TextBlock Name="EmptyTitle" Classes="title" Text="还没有阅读资料"
+                     HorizontalAlignment="Center" Margin="0,8,0,0" />
+          <TextBlock Classes="muted" Text="书签、划线和笔记会汇集在这里"
+                     HorizontalAlignment="Center" />
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

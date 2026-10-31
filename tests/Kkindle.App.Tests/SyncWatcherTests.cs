@@ -42,11 +42,11 @@ public sealed partial class SettingsTests
 
         // Genuine service writes during sync must remain pending.
         scope.Set("_s3SyncBusy", true);
-        var version = scope.Field<long>("_s3LocalChangeVersion");
+        var version = scope.Field<LocalSyncChanges>("_localSyncChanges").CaptureVersion();
         scope.Call("HandleLocalDataChanged", LocalDataChangeKind.Bookmark);
-        Assert.Equal(version + 1, scope.Field<long>("_s3LocalChangeVersion"));
+        Assert.Equal(version + 1, scope.Field<LocalSyncChanges>("_localSyncChanges").CaptureVersion());
         scope.Call("CrossProcessDataRefreshTimer_Tick", null, EventArgs.Empty);
-        Assert.Equal(version + 1, scope.Field<long>("_s3LocalChangeVersion"));
+        Assert.Equal(version + 1, scope.Field<LocalSyncChanges>("_localSyncChanges").CaptureVersion());
 
         scope.Set("_s3SyncBusy", false);
         scope.Set("_lastInProcessDataChangeUtc", DateTime.UtcNow);

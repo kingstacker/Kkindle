@@ -1,0 +1,89 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             x:Class="Kkindle.Mobile.MobileShell"
+             TopLevel.AutoSafeAreaPadding="True"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <UserControl.Styles>
+    <Style Selector="Border#SheetScrim">
+      <Setter Property="Opacity" Value="0" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Border#SheetScrim.open">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="ContentControl#SheetPanel">
+      <Setter Property="RenderTransform" Value="translateY(640px)" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.22" Easing="CubicEaseOut" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="ContentControl#SheetPanel.open">
+      <Setter Property="RenderTransform" Value="translateY(0px)" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="*,Auto">
+    <ContentControl Grid.Row="0" Name="PageHost" />
+
+    <Grid Grid.Row="1" Name="TabBar" ColumnDefinitions="*,*,*" Margin="0,2,0,2">
+      <Button Grid.Column="0" Name="LibraryTab" Classes="tab" Click="OnLibraryTabClick">
+        <StackPanel Spacing="3">
+          <c:LineIcon Data="{StaticResource IconBook}" Size="23" StrokeThickness="1.4"
+                      HorizontalAlignment="Center" />
+          <TextBlock Text="书库" FontSize="11" HorizontalAlignment="Center" />
+        </StackPanel>
+      </Button>
+      <Button Grid.Column="1" Name="MaterialsTab" Classes="tab" Click="OnMaterialsTabClick">
+        <StackPanel Spacing="3">
+          <c:LineIcon Data="{StaticResource IconNotes}" Size="23" StrokeThickness="1.4"
+                      HorizontalAlignment="Center" />
+          <TextBlock Text="阅读资料" FontSize="11" HorizontalAlignment="Center" />
+        </StackPanel>
+      </Button>
+      <Button Grid.Column="2" Name="ProfileTab" Classes="tab" Click="OnProfileTabClick">
+        <StackPanel Spacing="3">
+          <c:LineIcon Data="{StaticResource IconPerson}" Size="23" StrokeThickness="1.4"
+                      HorizontalAlignment="Center" />
+          <TextBlock Text="我的" FontSize="11" HorizontalAlignment="Center" />
+        </StackPanel>
+      </Button>
+    </Grid>
+
+    <!-- Bottom sheet. Its theme scope follows the page that opened it, so reader
+         controls on black paper are not shown in the app's light theme. -->
+    <ThemeVariantScope Grid.RowSpan="2" Name="SheetScope" IsVisible="False" ZIndex="20">
+      <Grid>
+        <Border Name="SheetScrim" Background="{DynamicResource ScrimBrush}"
+                PointerPressed="OnScrimPressed" />
+        <ContentControl Name="SheetPanel" Classes="themed" VerticalAlignment="Bottom"
+                        CornerRadius="20,20,0,0" Background="{DynamicResource SurfaceBrush}">
+          <Grid RowDefinitions="Auto,Auto,*">
+            <Border Width="36" Height="4" CornerRadius="2" Margin="0,8,0,0"
+                    Background="{DynamicResource SunkStrongBrush}" HorizontalAlignment="Center" />
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="20,6,10,0">
+              <TextBlock Name="SheetTitle" Classes="title" VerticalAlignment="Center" />
+              <Button Grid.Column="1" Classes="icon" Click="OnCloseSheetClick">
+                <c:LineIcon Data="{StaticResource IconClose}" Size="18" StrokeThickness="1.4" />
+              </Button>
+            </Grid>
+            <ContentControl Grid.Row="2" Name="SheetBody" />
+          </Grid>
+        </ContentControl>
+      </Grid>
+    </ThemeVariantScope>
+
+    <Border Grid.RowSpan="2" Name="Toast" Classes="floating" IsVisible="False" IsHitTestVisible="False"
+            ZIndex="30" Padding="16,10" Margin="24,0,24,160"
+            VerticalAlignment="Bottom" HorizontalAlignment="Center">
+      <TextBlock Name="ToastText" FontSize="14" Foreground="{DynamicResource TextPrimaryBrush}"
+                 TextWrapping="Wrap" />
+    </Border>
+  </Grid>
+</UserControl>
