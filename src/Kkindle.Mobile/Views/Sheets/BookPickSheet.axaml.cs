@@ -21,11 +21,10 @@ public partial class BookPickSheet : UserControl, IFullHeightSheet
     {
         _onConfirm = onConfirm;
         InitializeComponent();
-        var grayscale = shell.Preferences.Current.GrayscaleCovers;
         // A row asks for its cover the first time a realized row binds to it,
         // so a long library costs only what is on screen.
         _rows = books.Select(book => new PickRow(book,
-            () => shell.Covers.GetAsync(book, CoverWidth, grayscale))).ToList();
+            () => shell.Covers.GetAsync(book, CoverWidth))).ToList();
         Rows.ItemsSource = _rows;
     }
 

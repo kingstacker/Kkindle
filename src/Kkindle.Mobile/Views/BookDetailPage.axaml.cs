@@ -85,7 +85,7 @@ public partial class BookDetailPage : UserControl
     private async Task LoadCoverAsync()
     {
         var cover = await _shell.Covers.GetAsync(
-            _book, CoverWidth, _shell.Preferences.Current.GrayscaleCovers);
+            _book, CoverWidth);
         CoverImage.Source = cover;
         CoverInitial.IsVisible = cover is null;
     }

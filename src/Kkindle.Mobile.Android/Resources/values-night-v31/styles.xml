@@ -11,6 +11,6 @@
     <item name="android:windowNoTitle">true</item>
     <item name="android:windowBackground">#FF121212</item>
     <item name="android:windowSplashScreenBackground">#FF121212</item>
-    <item name="android:windowSplashScreenAnimatedIcon">@drawable/app_icon</item>
+    <item name="android:windowSplashScreenAnimatedIcon">@drawable/startup_logo</item>
   </style>
 </resources>

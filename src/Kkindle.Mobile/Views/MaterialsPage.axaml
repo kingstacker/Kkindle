@@ -20,21 +20,64 @@
 
     <ScrollViewer Grid.Row="2">
       <StackPanel Margin="24,4,24,28">
-        <ItemsControl Name="MaterialsList" Tapped="OnItemTapped">
+        <ItemsControl Name="MaterialsList">
           <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="vm:MaterialEntry">
-              <StackPanel Background="Transparent">
-                <TextBlock Text="{Binding BookTitle}" IsVisible="{Binding IsFirstOfBook}"
-                           Classes="muted" FontWeight="Medium" Margin="0,18,0,10"
-                           MaxLines="1" TextTrimming="CharacterEllipsis" />
-                <StackPanel Spacing="5" Margin="0,0,0,18">
-                  <TextBlock Text="{Binding Quote}" TextWrapping="Wrap" LineHeight="24" />
-                  <TextBlock Text="{Binding Note}" IsVisible="{Binding HasNote}" Classes="secondary"
-                             TextWrapping="Wrap" LineHeight="21" />
-                  <TextBlock Text="{Binding Meta}" Classes="muted" FontSize="12"
-                             MaxLines="1" TextTrimming="CharacterEllipsis" />
+            <DataTemplate x:DataType="vm:MaterialBookGroup">
+              <Border BorderBrush="{DynamicResource SunkStrongBrush}" BorderThickness="0,0,0,1">
+                <StackPanel>
+                  <Button Padding="0,14" CornerRadius="0" HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Stretch" Click="OnBookClick">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <Border Classes="cover" Width="48" Height="68">
+                        <Border Classes="coverclip">
+                          <Panel>
+                            <Image Source="{Binding Cover}" Stretch="Uniform" />
+                            <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
+                                       FontSize="18" Foreground="{DynamicResource TextMutedBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Panel>
+                        </Border>
+                      </Border>
+                      <StackPanel Grid.Column="1" Margin="14,0,12,0" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Medium"
+                                   MaxLines="2" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding CountText}" Classes="muted" FontSize="12" />
+                      </StackPanel>
+                      <Panel Grid.Column="2" VerticalAlignment="Center">
+                        <c:LineIcon Data="{StaticResource IconChevronRight}" Size="18" StrokeThickness="1.4"
+                                    IsVisible="{Binding !IsExpanded}" Foreground="{DynamicResource TextMutedBrush}" />
+                        <c:LineIcon Data="{StaticResource IconChevronDown}" Size="18" StrokeThickness="1.4"
+                                    IsVisible="{Binding IsExpanded}" Foreground="{DynamicResource TextMutedBrush}" />
+                      </Panel>
+                    </Grid>
+                  </Button>
+                  <ItemsControl ItemsSource="{Binding Entries}" IsVisible="{Binding IsExpanded}" Tapped="OnItemTapped"
+                                Margin="0,0,0,12">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:MaterialEntry">
+                        <Border Background="{DynamicResource SunkBrush}" CornerRadius="10"
+                                Padding="12,11" Margin="0,0,0,6">
+                          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                            <Panel Width="18" Height="18" VerticalAlignment="Top" Margin="0,1,0,0">
+                              <c:LineIcon Data="{StaticResource IconBookmark}" Size="17" StrokeThickness="1.3"
+                                          IsVisible="{Binding IsBookmark}" Foreground="{DynamicResource TextMutedBrush}" />
+                              <c:LineIcon Data="{StaticResource IconNotes}" Size="17" StrokeThickness="1.3"
+                                          IsVisible="{Binding !IsBookmark}" Foreground="{DynamicResource TextMutedBrush}" />
+                            </Panel>
+                            <StackPanel Grid.Column="1" Spacing="5">
+                              <TextBlock Text="{Binding Meta}" Classes="muted" FontSize="12"
+                                         MaxLines="1" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Text="{Binding Quote}" FontSize="14" TextWrapping="Wrap" LineHeight="21" />
+                              <TextBlock Text="{Binding Note}" IsVisible="{Binding HasNote}" Classes="secondary"
+                                         FontSize="13" TextWrapping="Wrap" LineHeight="20" />
+                            </StackPanel>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </StackPanel>
-              </StackPanel>
+              </Border>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

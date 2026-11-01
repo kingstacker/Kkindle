@@ -91,6 +91,7 @@ public partial class MainWindow : Window
     private readonly ReaderProgressRecoveryService _readerProgressRecovery;
     private readonly ReaderReadingTimeRecoveryService _readerReadingTimeRecovery;
     private readonly EpubBookContentService _bookContent;
+    private readonly KindleAnnotationSyncService _kindleAnnotationSync;
     private readonly EmbeddingModelDownloadService _embeddingModelDownloader;
     private readonly G2PWModelDownloadService _g2pwModelDownloader;
     private readonly LocalEmbeddingService _embeddingService;
@@ -230,6 +231,11 @@ public partial class MainWindow : Window
         _readerProgressRecovery = modules.Reader.ProgressRecovery;
         _readerReadingTimeRecovery = modules.Reader.ReadingTimeRecovery;
         _bookContent = modules.Reader.Content;
+        _kindleAnnotationSync = new KindleAnnotationSyncService(
+            _paths,
+            _library,
+            _readerData,
+            _bookContent);
         _embeddingModelDownloader = modules.Ai.EmbeddingModels;
         _g2pwModelDownloader = modules.Ai.PinyinModels;
         _embeddingService = modules.Ai.Embedding;

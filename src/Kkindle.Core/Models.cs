@@ -135,7 +135,12 @@ public enum BookSyncStatus
 
 public sealed record BookLibraryComparisonResult(
     IReadOnlySet<Guid> BooksOnKindle,
-    IReadOnlySet<string> KindleBooksOnComputer);
+    IReadOnlySet<string> KindleBooksOnComputer,
+    IReadOnlyList<BookLibraryMatchPair>? Matches = null);
+
+public sealed record BookLibraryMatchPair(
+    Guid LocalBookId,
+    string DeviceRelativePath);
 
 public static class BookLibraryComparer
 {
@@ -184,6 +189,7 @@ public static class BookLibraryComparer
 
         var matchedLocalIds = new HashSet<Guid>();
         var matchedDevicePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var matchPairs = new List<BookLibraryMatchPair>();
         foreach (var kindleBook in deviceBooks)
         {
             var matches = new HashSet<LibraryBookMatch>();
@@ -204,11 +210,15 @@ public static class BookLibraryComparer
                 matches.Add(titleMatches[0]);
 
             if (matches.Count == 0) continue;
-            foreach (var match in matches) matchedLocalIds.Add(match.Id);
+            foreach (var match in matches)
+            {
+                matchedLocalIds.Add(match.Id);
+                matchPairs.Add(new BookLibraryMatchPair(match.Id, kindleBook.RelativePath));
+            }
             matchedDevicePaths.Add(kindleBook.RelativePath);
         }
 
-        return new BookLibraryComparisonResult(matchedLocalIds, matchedDevicePaths);
+        return new BookLibraryComparisonResult(matchedLocalIds, matchedDevicePaths, matchPairs);
     }
 
     private static Dictionary<string, List<LibraryBookMatch>> BuildLookup(
@@ -336,6 +346,16 @@ public sealed class KindleClipping
     public string Content { get; set; } = string.Empty;
     public string RawBlock { get; set; } = string.Empty;
     public DateTimeOffset? AddedAt { get; set; }
+    /// <summary>
+    /// Database-backed Kindle annotations are read and exported only. Editing
+    /// the shared account database is deliberately outside this read path.
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+    public KindleAnnotationBookIdentity? SourceBook { get; set; }
+    public long? StartPosition { get; set; }
+    public long? EndPosition { get; set; }
+    public bool IsTextResolved { get; set; }
+    public int TextResolutionVersion { get; set; }
     /// <summary>Used by the reading-materials view when a Kindle note belongs to this highlight.</summary>
     public KindleClipping? PairedNote { get; set; }
     public string TypeLabel => Type switch

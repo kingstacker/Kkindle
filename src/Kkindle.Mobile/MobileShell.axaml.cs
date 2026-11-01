@@ -15,7 +15,7 @@ using Kkindle.Mobile.Views.Sheets;
 namespace Kkindle.Mobile;
 
 /// <summary>
-/// Single-view mobile shell: a content slot plus three tab roots. Book detail
+/// Single-view mobile shell: a content slot plus four tab roots. Book detail
 /// and the reader are pushed on top of the active tab and hide the tab bar.
 /// Transient choices open in one shared bottom sheet. Android's back gesture is
 /// routed through <see cref="TopLevel.BackRequested"/>.
@@ -26,6 +26,7 @@ public partial class MobileShell : UserControl
     {
         Library,
         Materials,
+        ReadingData,
         Profile
     }
 
@@ -132,7 +133,7 @@ public partial class MobileShell : UserControl
 
     public void OpenBookEditor(Book book) => Push(new BookEditPage(book, _modules, this));
 
-    public void OpenReadingData() => Push(new ReadingDataPage(_modules, this));
+    public void ShowReadingData() => ShowRoot(ShellTab.ReadingData, new ReadingDataPage(_modules, this));
 
     public void OpenSyncSettings() => Push(new SyncSettingsPage(_modules, this));
 
@@ -312,11 +313,14 @@ public partial class MobileShell : UserControl
     private void Apply()
     {
         var (page, tab) = _history.Peek();
+        page.Classes.Remove("page-enter");
+        page.Classes.Add("page-enter");
         PageHost.Content = page;
         // Pushed pages (book detail, reader) own the full screen.
         TabBar.IsVisible = _history.Count == 1;
         LibraryTab.Classes.Set("active", tab == ShellTab.Library);
         MaterialsTab.Classes.Set("active", tab == ShellTab.Materials);
+        ReadingDataTab.Classes.Set("active", tab == ShellTab.ReadingData);
         ProfileTab.Classes.Set("active", tab == ShellTab.Profile);
     }
 
@@ -339,6 +343,8 @@ public partial class MobileShell : UserControl
     private void OnLibraryTabClick(object? sender, RoutedEventArgs e) => ShowLibrary();
 
     private void OnMaterialsTabClick(object? sender, RoutedEventArgs e) => ShowMaterials();
+
+    private void OnReadingDataTabClick(object? sender, RoutedEventArgs e) => ShowReadingData();
 
     private void OnProfileTabClick(object? sender, RoutedEventArgs e) => ShowProfile();
 

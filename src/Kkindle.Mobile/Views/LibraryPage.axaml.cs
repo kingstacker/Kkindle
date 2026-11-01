@@ -176,11 +176,10 @@ public partial class LibraryPage : UserControl
             .OrderByDescending(book => book.UpdatedAt)
             .Take(3)
             .ToList();
-        var grayscale = _shell.Preferences.Current.GrayscaleCovers;
         var covers = new List<CoverStackItem>(books.Count);
         foreach (var book in books)
         {
-            var image = await _shell.Covers.GetAsync(book, FolderCoverWidth, grayscale);
+            var image = await _shell.Covers.GetAsync(book, FolderCoverWidth);
             covers.Add(new CoverStackItem(image, string.IsNullOrEmpty(book.Title) ? "?" : book.Title[..1]));
         }
         card.Covers = covers;
@@ -209,13 +208,13 @@ public partial class LibraryPage : UserControl
     private async Task LoadCoverAsync(BookTile tile)
     {
         tile.Cover = await _shell.Covers.GetAsync(
-            tile.Book, CoverWidth, _shell.Preferences.Current.GrayscaleCovers);
+            tile.Book, CoverWidth);
     }
 
     private async Task LoadContinueCoverAsync(Book book)
     {
         ContinueCover.Source = await _shell.Covers.GetAsync(
-            book, CoverWidth, _shell.Preferences.Current.GrayscaleCovers);
+            book, CoverWidth);
     }
 
     private void Status(string? text)

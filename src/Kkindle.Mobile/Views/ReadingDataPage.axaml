@@ -45,12 +45,7 @@
   </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,*">
-    <Grid ColumnDefinitions="Auto,*" Margin="8,6,24,0">
-      <Button Classes="icon" Click="OnBackClick">
-        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
-      </Button>
-      <TextBlock Grid.Column="1" Classes="title" Text="阅读数据" VerticalAlignment="Center" Margin="2,0,0,0" />
-    </Grid>
+    <TextBlock Classes="display" Text="阅读数据" Margin="24,20,24,10" />
 
     <ScrollViewer Grid.Row="1">
       <StackPanel Margin="20,8,20,36">
@@ -269,9 +264,9 @@
               <Button Classes="plain" Click="OnMedalClick" Margin="0,0,0,16">
                 <StackPanel Spacing="8">
                   <Panel Width="58" Height="58" HorizontalAlignment="Center">
-                    <Ellipse Stroke="{DynamicResource SunkStrongBrush}" StrokeThickness="3" />
+                    <Ellipse Stroke="{DynamicResource SunkStrongBrush}" StrokeThickness="1" />
                     <Arc StartAngle="-90" SweepAngle="{Binding Sweep}" Stroke="{DynamicResource TextPrimaryBrush}"
-                         StrokeThickness="3" StrokeLineCap="Round" />
+                         StrokeThickness="1" StrokeLineCap="Round" />
                     <c:LineIcon Data="{Binding Icon}" StrokeThickness="1.3" Opacity="{Binding IconOpacity}"
                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
                   </Panel>

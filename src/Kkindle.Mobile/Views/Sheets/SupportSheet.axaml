@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kkindle.Mobile.Views.Sheets.SupportSheet">
+  <StackPanel Margin="20,4,20,28" Spacing="14" HorizontalAlignment="Center">
+    <TextBlock Text="感谢你的支持" Classes="muted" HorizontalAlignment="Center" />
+    <Border Background="White" Padding="8" CornerRadius="8">
+      <Image Source="avares://Kkindle.Mobile/Assets/Images/SupportWechatQr.png"
+             Width="220" Height="220" Stretch="Uniform" />
+    </Border>
+    <TextBlock Text="使用微信扫一扫" Classes="muted" FontSize="12" HorizontalAlignment="Center" />
+  </StackPanel>
+</UserControl>

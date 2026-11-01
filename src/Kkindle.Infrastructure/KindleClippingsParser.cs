@@ -188,7 +188,9 @@ public static partial class KindleClippingsParser
         terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsSameBook(KindleClipping left, KindleClipping right) =>
-        string.Equals(left.BookTitle, right.BookTitle, StringComparison.CurrentCultureIgnoreCase)
+        left.SourceBook is not null && right.SourceBook is not null
+            ? string.Equals(left.SourceBook.BookId, right.SourceBook.BookId, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(left.BookTitle, right.BookTitle, StringComparison.CurrentCultureIgnoreCase)
         && string.Equals(left.Author, right.Author, StringComparison.CurrentCultureIgnoreCase);
 
     private static bool LocationsAreRelated(string leftMetadata, string rightMetadata)

@@ -20,6 +20,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
     };
 
     private readonly KindleScanCacheStore _scanCache;
+    private readonly AppPaths _paths;
     private readonly IMetadataService _metadata;
     private readonly IBookFormatConverter _formatConverter;
     private readonly string _coverCacheDirectory;
@@ -34,6 +35,7 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         IBookFormatConverter? formatConverter = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        _paths = paths;
         _scanCache = new KindleScanCacheStore(paths);
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _formatConverter = formatConverter ?? new BookFormatConversionService();
@@ -397,10 +399,175 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
             return device.Profile.SupportsKoboNotes
                 ? await KoboNotesReader.ReadAsync(Path.Combine(device.RootPath, ".kobo", "KoboReader.sqlite"), maxItems, cancellationToken)
                 : [];
+
+        try
+        {
+            var databaseNotes = await ReadAnnotationDatabasesAsync(device, cancellationToken, maxItems);
+            if (databaseNotes.Count > 0) return databaseNotes;
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or InvalidDataException
+            or NotSupportedException
+            or Microsoft.Data.Sqlite.SqliteException
+            or System.Text.Json.JsonException)
+        {
+            // Older firmware and partially copied snapshots must fall back to
+            // My Clippings.txt without preventing the device from being used.
+        }
+
         var path = GetClippingsPath(device);
         if (!File.Exists(path)) return [];
         using var reader = new StreamReader(path, Encoding.UTF8, true);
         return await KindleClippingsParser.ParseAsync(reader, maxItems, cancellationToken);
+    }
+
+    private static async Task<IReadOnlyList<KindleClipping>> ReadAnnotationDatabasesAsync(
+        KindleDevice device,
+        CancellationToken cancellationToken,
+        int maxItems)
+    {
+        if (maxItems <= 0) return [];
+        var databases = KindleAnnotationDeviceFiles.FindMountedDatabases(device.RootPath, cancellationToken);
+        if (databases.Count == 0) return [];
+        var documents = GetDocumentsRoot(device);
+        var titleResolver = KindleAnnotationBookTitleResolver.Create(
+            KindleAnnotationDeviceFiles.FindSdrFolderNames(documents, cancellationToken));
+        var result = new List<KindleClipping>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var database in databases)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var remaining = maxItems - result.Count;
+            if (remaining <= 0) break;
+            var notes = await KindleAnnotationDatabaseReader.ReadClippingsAsync(
+                database,
+                titleResolver.Resolve,
+                remaining,
+                cancellationToken);
+            foreach (var note in notes)
+                if (ids.Add(note.Id)) result.Add(note);
+        }
+        return result;
+    }
+
+    public async Task<KindleAnnotationSnapshot?> ReadAnnotationSnapshotAsync(
+        KindleDevice device,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureMassStorage(device);
+        if (!device.Profile.SupportsClippings) return null;
+        var databases = KindleAnnotationDeviceFiles.FindMountedDatabases(device.RootPath, cancellationToken);
+        if (databases.Count == 0) return null;
+        var database = databases[0];
+        var records = await KindleAnnotationDatabaseReader.ReadRecordsAsync(
+            database,
+            maxItems: 100_000,
+            cancellationToken);
+        var titleResolver = KindleAnnotationBookTitleResolver.Create(
+            KindleAnnotationDeviceFiles.FindSdrFolderNames(
+                GetDocumentsRoot(device),
+                cancellationToken));
+        var snapshotRecords = records.Select(record => new KindleAnnotationRecord(
+            record.Id,
+            new KindleAnnotationBookIdentity(
+                record.Book.BookId,
+                record.Book.Asin,
+                record.Book.Guid),
+            record.Dataset,
+            record.Type,
+            record.Start,
+            record.End,
+            record.CreatedAt?.ToUnixTimeMilliseconds() ?? 0,
+            record.UpdatedAt?.ToUnixTimeMilliseconds() ?? 0,
+            record.Note,
+            record.SerializedPayload,
+            titleResolver.Resolve(record.Book) ?? string.Empty)).ToArray();
+        await using var stream = File.OpenRead(database);
+        var sha256 = Convert.ToHexString(
+            await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+        return new KindleAnnotationSnapshot(
+            Path.GetRelativePath(device.RootPath, database).Replace('\\', '/'),
+            sha256,
+            snapshotRecords);
+    }
+
+    public Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(
+        KindleDevice device,
+        KindleAnnotationSnapshot snapshot,
+        IReadOnlyList<KindleAnnotationMutation> mutations,
+        CancellationToken cancellationToken = default) =>
+        ApplyAnnotationMutationsAsync(device, snapshot, mutations, cancellationToken, null);
+
+    public async Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(
+        KindleDevice device, KindleAnnotationSnapshot snapshot,
+        IReadOnlyList<KindleAnnotationMutation> mutations, CancellationToken cancellationToken,
+        IProgress<KindleAnnotationSyncProgress>? progress)
+    {
+        progress?.Report(new(KindleAnnotationSyncStage.BackingUp));
+        EnsureMassStorage(device);
+        if (!device.Profile.SupportsClippings)
+            throw new NotSupportedException(UiText.Get("当前设备暂不支持回写 Kindle 批注。"));
+        if (mutations.Count == 0)
+            return new KindleAnnotationWriteResult(0, snapshot.Sha256, snapshot.Sha256, null, null);
+
+        var source = Path.GetFullPath(
+            Path.Combine(device.RootPath, snapshot.DatabaseRelativePath));
+        var annotationRoot = Path.GetFullPath(
+            Path.Combine(device.RootPath, "system", "ksdk", ".annotations"));
+        if (!source.StartsWith(
+                annotationRoot.TrimEnd(Path.DirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(source))
+            throw new IOException("设备批注数据库路径已经变化。");
+
+        var deviceKey = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(device.Identity))).ToLowerInvariant()[..16];
+        var backupDirectory = Path.Combine(
+            _paths.Backups,
+            "KindleAnnotations",
+            deviceKey,
+            DateTime.Now.ToString("yyyyMMdd-HHmmssfff"));
+        Directory.CreateDirectory(backupDirectory);
+        var localBackup = Path.Combine(backupDirectory, "ksdk_annotation_v1.db");
+        var working = Path.Combine(backupDirectory, "working.db");
+        var candidate = Path.Combine(backupDirectory, "candidate.db");
+        try
+        {
+            File.Copy(source, localBackup, overwrite: false);
+            File.Copy(source, working, overwrite: false);
+            await using (var stream = File.OpenRead(working))
+            {
+                var currentHash = Convert.ToHexString(
+                    await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+                if (!currentHash.Equals(snapshot.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Kindle 批注数据库在检测后已变化，请重新检测。");
+            }
+
+            var newHash = await KindleAnnotationDatabaseWriter.BuildCandidateAsync(
+                working,
+                candidate,
+                mutations,
+                cancellationToken, progress);
+            var installed = await KindleAnnotationMountedWriter.ApplyAsync(
+                source, snapshot.Sha256, localBackup, mutations, cancellationToken, progress);
+            return new KindleAnnotationWriteResult(
+                mutations.Count,
+                snapshot.Sha256,
+                installed.Hash,
+                localBackup,
+                installed.DeviceBackup);
+        }
+        finally
+        {
+            foreach (var path in new[] { working, candidate })
+            {
+                try { File.Delete(path); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
     }
 
     public Task DeleteClippingAsync(
@@ -420,6 +587,8 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         ArgumentNullException.ThrowIfNull(clippingIds);
         if (clippingIds.Count == 0) return;
         if (clippingIds.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("设备笔记标识无效。", nameof(clippingIds));
+        if (clippingIds.Any(id => id.StartsWith("kindle-db:", StringComparison.OrdinalIgnoreCase)))
+            throw new NotSupportedException(UiText.Get("Kindle 账户数据库中的批注当前仅支持读取和导出。"));
         var ids = clippingIds.ToHashSet(StringComparer.Ordinal);
         var path = GetClippingsPath(device);
         if (!File.Exists(path)) throw new FileNotFoundException("Kindle 上不存在 My Clippings.txt。", path);

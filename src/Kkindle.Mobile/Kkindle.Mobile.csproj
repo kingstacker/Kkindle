@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <AvaloniaResource Include="..\Kkindle.App\Assets\Fonts\KingHwaOldSong-v3.0.ttf" Link="Assets\Fonts\KingHwaOldSong-v3.0.ttf" />
+    <AvaloniaResource Include="..\Kkindle.App\Assets\Images\SupportWechatQr.png" Link="Assets\Images\SupportWechatQr.png" />
     <ProjectReference Include="..\Kkindle.Core\Kkindle.Core.csproj" />
     <ProjectReference Include="..\Kkindle.Application\Kkindle.Application.csproj" />
     <ProjectReference Include="..\Kkindle.Infrastructure\Kkindle.Infrastructure.csproj" />

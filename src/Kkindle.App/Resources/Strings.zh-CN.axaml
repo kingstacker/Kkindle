@@ -2328,4 +2328,5 @@
     <x:String x:Key="Ui.Auto.A8FE93A424AF05F6">有 {0} 本失败的书籍已不在电脑书库。</x:String>
     <x:String x:Key="Ui.Auto.2C8F8091E220C543">已跳过设备中可能已有的书籍，没有发送。</x:String>
     <x:String x:Key="Ui.Auto.5AE6FD40CA2C0289">发送完成：成功 {0} 本，跳过可能已有 {1} 本，失败 {2} 本。</x:String>
+    <x:String x:Key="Main.KindleAnnotationSync.Button">同步 Kindle 批注</x:String>
 </ResourceDictionary>

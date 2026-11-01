@@ -145,6 +145,9 @@
         <DataTemplate x:Key="LibraryRefreshActionContent" x:CompileBindings="False">
             <Path Classes="libraryGlyph" Data="M 20,8 A 9,9 0 1,0 20,16 M 20,8 V 3 M 20,8 H 15" />
         </DataTemplate>
+        <DataTemplate x:Key="LibraryAnnotationSyncActionContent" x:CompileBindings="False">
+            <Path Classes="libraryGlyph" Data="M 3,7 H 20 M 16,3 L 20,7 L 16,11 M 21,17 H 4 M 8,13 L 4,17 L 8,21" />
+        </DataTemplate>
         <DataTemplate x:Key="SettingsUpdateActionContent" x:CompileBindings="False">
             <Grid ColumnDefinitions="*,36" ColumnSpacing="24">
                 <TextBlock Text="{Binding}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
@@ -2329,6 +2332,12 @@
                     </ComboBox>
                 </StackPanel>
                     <StackPanel x:Name="ReadingMaterialsNotesActions" Grid.Row="1" Grid.Column="1" Margin="0,0,6,14" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                        <Button x:Name="SyncKindleAnnotationsButton"
+                                Content="{DynamicResource Main.KindleAnnotationSync.Button}"
+                                ContentTemplate="{StaticResource LibraryAnnotationSyncActionContent}"
+                                Classes="quiet libraryToolbar"
+                                IsVisible="False"
+                                Click="SyncKindleAnnotationsButton_Click" />
                         <Button x:Name="ExportReadingMaterialsToggleButton"
                                 Content="{DynamicResource Ui.Auto.B4FBE589C50EE54E}"
                                 Classes="quiet libraryToolbar readingExportToggle"
@@ -2344,7 +2353,9 @@
                         <Button x:Name="RefreshReadingMaterialsButton" Content="{DynamicResource Ui.Auto.AEE88743413144A2}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingMaterialsButton_Click" />
                     </StackPanel>
                 </Grid>
-                <TextBlock x:Name="ReadingMaterialsStatusText" Classes="pageDescription" Grid.Row="1" Margin="6,0,6,8" Text="{DynamicResource Ui.Auto.5F83A944D270ED82}" />
+                <StackPanel Grid.Row="1" Margin="6,0,6,8" Spacing="8">
+                    <TextBlock x:Name="ReadingMaterialsStatusText" Classes="pageDescription" Text="{DynamicResource Ui.Auto.5F83A944D270ED82}" />
+                </StackPanel>
                 <Border x:Name="ReadingMaterialsSummaryBorder"
                         Classes="flatPanel"
                         Grid.Row="2"

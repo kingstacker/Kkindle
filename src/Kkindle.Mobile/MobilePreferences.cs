@@ -23,7 +23,6 @@ public enum MobileBookSort
 public sealed record MobilePreferences
 {
     public MobileThemeMode ThemeMode { get; init; }
-    public bool GrayscaleCovers { get; init; }
     public bool ListView { get; init; }
     public bool CollectionsView { get; init; }
     public double PdfZoom { get; init; } = 1;

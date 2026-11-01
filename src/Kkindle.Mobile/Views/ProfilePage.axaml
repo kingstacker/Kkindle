@@ -7,17 +7,7 @@
     <StackPanel Margin="24,20,24,32">
       <TextBlock Classes="display" Text="我的" />
 
-      <Button Classes="row" Margin="0,16,0,0" Click="OnReadingDataClick">
-        <Grid ColumnDefinitions="*,Auto,Auto">
-          <TextBlock Text="阅读数据" VerticalAlignment="Center" />
-          <TextBlock Grid.Column="1" Name="ReadingSummaryText" Classes="muted" FontSize="14"
-                     VerticalAlignment="Center" />
-          <c:LineIcon Grid.Column="2" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
-                      Margin="6,0,0,0" VerticalAlignment="Center"
-                      Foreground="{DynamicResource TextMutedBrush}" />
-        </Grid>
-      </Button>
-      <Button Classes="row" Click="OnSyncClick">
+      <Button Classes="row" Margin="0,16,0,0" Click="OnSyncClick">
         <Grid ColumnDefinitions="*,Auto,Auto">
           <TextBlock Text="云同步" VerticalAlignment="Center" />
           <TextBlock Grid.Column="1" Name="SyncSummaryText" Classes="muted" FontSize="14"
@@ -77,14 +67,7 @@
           <Button Grid.Column="2" Name="ThemeDark" Classes="seg" Content="深色" Click="OnThemeClick" />
         </Grid>
       </Border>
-      <Grid ColumnDefinitions="*,Auto" Margin="0,14,0,0">
-        <StackPanel VerticalAlignment="Center" Spacing="2">
-          <TextBlock Text="黑白封面" />
-          <TextBlock Classes="muted" FontSize="12" Text="把封面统一显示为灰度" />
-        </StackPanel>
-        <ToggleSwitch Grid.Column="1" Name="GrayscaleSwitch" OnContent="" OffContent=""
-                      MinWidth="0" IsCheckedChanged="OnGrayscaleChanged" />
-      </Grid>
+
 
       <TextBlock Classes="label" Text="数据" Margin="0,32,0,4" />
       <Border Classes="row">
@@ -96,6 +79,27 @@
       </Border>
 
       <TextBlock Classes="label" Text="关于" Margin="0,24,0,4" />
+      <Button Classes="row" Click="OnDeveloperClick">
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <TextBlock Text="开发者" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" Text="kingstacker" Classes="muted" FontSize="14" VerticalAlignment="Center" />
+          <c:LineIcon Grid.Column="2" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
+                      Margin="6,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+        </Grid>
+      </Button>
+      <Button Classes="row" Click="OnGroupClick">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="QQ 交流群" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" Text="1109898894" Classes="muted" FontSize="14" VerticalAlignment="Center" />
+        </Grid>
+      </Button>
+      <Button Classes="row" Click="OnSupportClick">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="请我喝杯咖啡" VerticalAlignment="Center" />
+          <c:LineIcon Grid.Column="1" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
+                      VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+        </Grid>
+      </Button>
       <Button Classes="row" Click="OnVersionClick">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Text="版本" VerticalAlignment="Center" />

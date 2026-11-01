@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
+using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.ApplicationServices;
 using Kkindle.Core;
 
@@ -23,9 +25,21 @@ public sealed record MaterialEntry(
     DateTimeOffset UpdatedAt,
     ReaderProgressRow Location)
 {
-    public string BookTitle => Book.Title;
     public bool HasNote => !string.IsNullOrWhiteSpace(Note);
-    public bool IsFirstOfBook { get; init; }
+    public bool IsBookmark => Kind == MaterialKind.Bookmark;
+}
+
+public sealed class MaterialBookGroup(Book book, IReadOnlyList<MaterialEntry> entries, Bitmap? cover, bool expanded) : ObservableObject
+{
+    private bool _isExpanded = expanded;
+    public Book Book { get; } = book;
+    public IReadOnlyList<MaterialEntry> Entries { get; } = entries;
+    public Bitmap? Cover { get; } = cover;
+    public bool HasCover => Cover is not null;
+    public string Title => Book.Title;
+    public string TitleInitial => string.IsNullOrWhiteSpace(Title) ? "?" : Title[..1];
+    public string CountText => $"{Entries.Count} 条资料";
+    public bool IsExpanded { get => _isExpanded; set => SetProperty(ref _isExpanded, value); }
 }
 
 public partial class MaterialsPage : UserControl
@@ -34,6 +48,8 @@ public partial class MaterialsPage : UserControl
     private readonly MobileShell? _shell;
     private List<MaterialEntry> _entries = [];
     private MaterialKind? _filter;
+    private readonly Dictionary<Guid, Bitmap?> _covers = [];
+    private readonly HashSet<Guid> _expandedBooks = [];
 
     public MaterialsPage() => InitializeComponent();
 
@@ -81,6 +97,9 @@ public partial class MaterialsPage : UserControl
                 }
             }
             _entries = entries;
+            foreach (var book in entries.Select(entry => entry.Book).DistinctBy(book => book.Id))
+                _covers[book.Id] = await _shell.Covers.GetAsync(book, 120);
+            StatusText.IsVisible = false;
             Present();
         }
         catch (Exception exception)
@@ -96,21 +115,28 @@ public partial class MaterialsPage : UserControl
             ? page - 1
             : -1;
 
-    /// <summary>Groups by book, newest book first, so quotes read as one passage.</summary>
     private void Present()
     {
         var visible = _entries
             .Where(entry => _filter is null || entry.Kind == _filter)
             .GroupBy(entry => entry.Book.Id)
             .OrderByDescending(group => group.Max(entry => entry.UpdatedAt))
-            .SelectMany(group => group
-                .OrderByDescending(entry => entry.UpdatedAt)
-                .Select((entry, index) => entry with { IsFirstOfBook = index == 0 }))
+            .Select(group => new MaterialBookGroup(group.First().Book,
+                group.OrderByDescending(entry => entry.UpdatedAt).ToList(),
+                _covers.GetValueOrDefault(group.Key), _expandedBooks.Contains(group.Key)))
             .ToList();
         MaterialsList.ItemsSource = visible;
         SummaryText.Text = $"共 {_entries.Count} 条";
         EmptyState.IsVisible = visible.Count == 0;
         EmptyTitle.Text = _entries.Count == 0 ? "还没有阅读资料" : "这一类还没有内容";
+    }
+
+    private void OnBookClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: MaterialBookGroup group }) return;
+        group.IsExpanded = !group.IsExpanded;
+        if (group.IsExpanded) _expandedBooks.Add(group.Book.Id);
+        else _expandedBooks.Remove(group.Book.Id);
     }
 
     private void OnFilterClick(object? sender, RoutedEventArgs e)

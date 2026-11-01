@@ -5,10 +5,10 @@
              x:Class="Kkindle.Mobile.Views.LibraryPage"
              Background="{DynamicResource PageBackgroundBrush}">
   <UserControl.Styles>
-    <!-- Masthead tabs: both at title size, the idle one simply recedes. -->
+    <!-- The idle library tab recedes while keeping both labels compact. -->
     <Style Selector="Button.masthead">
       <Setter Property="Padding" Value="0,2" />
-      <Setter Property="FontSize" Value="26" />
+      <Setter Property="FontSize" Value="21" />
       <Setter Property="FontWeight" Value="Medium" />
       <Setter Property="Foreground" Value="{DynamicResource TextFaintBrush}" />
     </Style>

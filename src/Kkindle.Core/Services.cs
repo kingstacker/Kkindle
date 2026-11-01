@@ -159,6 +159,20 @@ public interface IKindleDeviceService
         int maxItems = int.MaxValue);
     Task DeleteClippingAsync(KindleDevice device, string clippingId, CancellationToken cancellationToken = default);
     Task DeleteClippingsAsync(KindleDevice device, IReadOnlyCollection<string> clippingIds, CancellationToken cancellationToken = default);
+    Task<KindleAnnotationSnapshot?> ReadAnnotationSnapshotAsync(
+        KindleDevice device,
+        CancellationToken cancellationToken = default) => Task.FromResult<KindleAnnotationSnapshot?>(null);
+    Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(
+        KindleDevice device,
+        KindleAnnotationSnapshot snapshot,
+        IReadOnlyList<KindleAnnotationMutation> mutations,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(UiText.Get("当前设备暂不支持回写 Kindle 批注。"));
+    Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(
+        KindleDevice device, KindleAnnotationSnapshot snapshot,
+        IReadOnlyList<KindleAnnotationMutation> mutations, CancellationToken cancellationToken,
+        IProgress<KindleAnnotationSyncProgress>? progress) =>
+        ApplyAnnotationMutationsAsync(device, snapshot, mutations, cancellationToken);
     Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default);
 }
 

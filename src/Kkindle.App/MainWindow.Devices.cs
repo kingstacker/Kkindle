@@ -178,6 +178,7 @@ public partial class MainWindow
             _allStage3ReadingMaterials.Remove(item);
             item.Dispose();
         }
+        UpdateKindleAnnotationSyncButtonVisibility();
         if (ReadingMaterialsPage.IsVisible) ApplyReadingMaterialsFilter();
     }
 }

@@ -12,8 +12,6 @@ namespace Kkindle.Infrastructure;
 /// <summary>Builds Kreader resources from unencrypted MOBI/KF8 without an external runtime.</summary>
 public static partial class Azw3ReaderService
 {
-    private sealed record Part(byte[] Data, int Start, int End);
-    private sealed record Fragment(int Insert, int File, int Length);
     private sealed record Navigation(string Title, string Target, int Level, int ReadingOrder);
     private static readonly XNamespace Html = "http://www.w3.org/1999/xhtml";
     private static readonly XNamespace Opf = "http://www.idpf.org/2007/opf";
@@ -139,33 +137,7 @@ public static partial class Azw3ReaderService
         }
         var skeleton = ReadIndex(Record, start + Int(header, 252), encoding, token);
         var fragmentIndex = ReadIndex(Record, start + Int(header, 248), encoding, token);
-        var fragments = fragmentIndex.Entries.Select(e => new Fragment(int.Parse(e.Text, System.Globalization.CultureInfo.InvariantCulture), e.Value(3), e.Value(6, 1))).ToList();
-        var parts = new List<Part>();
-        var fragmentNumber = 0;
-        foreach (var skel in skeleton.Entries)
-        {
-            token.ThrowIfCancellationRequested();
-            var position = skel.Value(6); var length = skel.Value(6, 1); var count = skel.Value(1);
-            var body = Slice(flows[0], position, length);
-            var cursor = position + length;
-            for (var j = 0; j < count; j++)
-            {
-                if (fragmentNumber >= fragments.Count) throw Invalid();
-                var fragment = fragments[fragmentNumber++];
-                var insertion = fragment.Insert - position;
-                if (insertion < 0 || insertion > body.Length) throw Invalid();
-                var payload = Slice(flows[0], cursor, fragment.Length);
-                if (body.Length + payload.Length > MaximumOutput) throw Invalid();
-                var combined = new byte[body.Length + payload.Length];
-                body.AsSpan(0, insertion).CopyTo(combined);
-                payload.CopyTo(combined, insertion);
-                body.AsSpan(insertion).CopyTo(combined.AsSpan(insertion + payload.Length));
-                body = combined;
-                cursor += fragment.Length;
-            }
-            parts.Add(new Part(body, position, cursor));
-        }
-        if (parts.Count == 0 || fragmentNumber != fragments.Count) throw Invalid();
+        var (parts, fragments) = ReconstructKf8MainFlow(flows[0], skeleton, fragmentIndex, token);
         var resources = new Dictionary<int, (string Path, string Media, byte[] Data)>();
         var firstResource = U32(firstHeader, 108) == uint.MaxValue ? recordCount : Int(firstHeader, 108);
         if (firstResource < 0 || firstResource > recordCount) throw Invalid();

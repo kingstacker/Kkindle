@@ -97,7 +97,7 @@ public partial class CollectionPage : UserControl
 
     private async Task LoadCoverAsync(BookTile tile)
     {
-        tile.Cover = await _shell.Covers.GetAsync(tile.Book, CoverWidth, _shell.Preferences.Current.GrayscaleCovers);
+        tile.Cover = await _shell.Covers.GetAsync(tile.Book, CoverWidth);
     }
 
     private async Task LoadHeroAsync(IReadOnlyList<Book> books)
@@ -105,7 +105,7 @@ public partial class CollectionPage : UserControl
         var covers = new List<CoverStackItem>();
         foreach (var book in books.Take(3))
         {
-            var image = await _shell.Covers.GetAsync(book, CoverWidth, _shell.Preferences.Current.GrayscaleCovers);
+            var image = await _shell.Covers.GetAsync(book, CoverWidth);
             covers.Add(new CoverStackItem(image, string.IsNullOrEmpty(book.Title) ? "?" : book.Title[..1]));
         }
         HeroCovers.Items = covers;

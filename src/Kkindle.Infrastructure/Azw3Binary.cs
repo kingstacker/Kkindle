@@ -8,6 +8,43 @@ namespace Kkindle.Infrastructure;
 
 internal static class Azw3Binary
 {
+    internal sealed record Kf8Part(byte[] Data, int Start, int End);
+    internal sealed record Kf8Fragment(int Insert, int File, int Length);
+
+    internal static (List<Kf8Part> Parts, List<Kf8Fragment> Fragments) ReconstructKf8MainFlow(
+        byte[] flow, Index skeleton, Index fragmentIndex, CancellationToken token)
+    {
+        var fragments = fragmentIndex.Entries.Select(entry => new Kf8Fragment(
+            int.Parse(entry.Text, System.Globalization.CultureInfo.InvariantCulture), entry.Value(3), entry.Value(6, 1))).ToList();
+        var parts = new List<Kf8Part>();
+        var fragmentNumber = 0;
+        foreach (var skel in skeleton.Entries)
+        {
+            token.ThrowIfCancellationRequested();
+            var position = skel.Value(6);
+            var length = skel.Value(6, 1);
+            var body = Slice(flow, position, length);
+            var cursor = position + length;
+            for (var index = 0; index < skel.Value(1); index++)
+            {
+                if (fragmentNumber >= fragments.Count) throw Invalid();
+                var fragment = fragments[fragmentNumber++];
+                var insertion = fragment.Insert - position;
+                if (insertion < 0 || insertion > body.Length) throw Invalid();
+                var payload = Slice(flow, cursor, fragment.Length);
+                if (body.Length + payload.Length > MaximumOutput) throw Invalid();
+                var combined = new byte[body.Length + payload.Length];
+                body.AsSpan(0, insertion).CopyTo(combined);
+                payload.CopyTo(combined, insertion);
+                body.AsSpan(insertion).CopyTo(combined.AsSpan(insertion + payload.Length));
+                body = combined;
+                cursor += fragment.Length;
+            }
+            parts.Add(new(body, position, cursor));
+        }
+        if (parts.Count == 0 || fragmentNumber != fragments.Count) throw Invalid();
+        return (parts, fragments);
+    }
     internal const int MaximumOutput = 256 * 1024 * 1024;
     internal static InvalidDataException Invalid() => new("AZW3 文件结构损坏或超出阅读器支持的范围。");
     internal static byte[] Slice(byte[] data, int start, int length)

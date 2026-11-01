@@ -224,7 +224,7 @@ public partial class ReadingDataPage : UserControl
     }
 
     private async Task LoadCoverAsync(ReadingBookRow row) =>
-        row.Cover = await _shell!.Covers.GetAsync(row.Book!, CoverWidth, _shell.Preferences.Current.GrayscaleCovers);
+        row.Cover = await _shell!.Covers.GetAsync(row.Book!, CoverWidth);
 
     /// <summary>One stacked bar in shades of ink, from untouched to finished.</summary>
     private void PresentDistribution(ReadingDashboard dashboard)
@@ -269,7 +269,6 @@ public partial class ReadingDataPage : UserControl
         MedalsEmptyText.IsVisible = visible.Count == 0;
     }
 
-    private void OnBackClick(object? sender, RoutedEventArgs e) => _shell?.GoBack();
 
     private async void OnRangeClick(object? sender, RoutedEventArgs e)
     {

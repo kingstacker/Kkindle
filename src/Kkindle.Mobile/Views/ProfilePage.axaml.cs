@@ -1,7 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Input.Platform;
 using Kkindle.ApplicationServices;
 using Kkindle.Core;
+using Kkindle.Mobile.Views.Sheets;
 
 namespace Kkindle.Mobile.Views;
 
@@ -11,7 +13,6 @@ public partial class ProfilePage : UserControl
     private readonly MobileShell? _shell;
     private const int DeveloperModeClicks = 5;
     private static readonly TimeSpan DeveloperModeClickWindow = TimeSpan.FromSeconds(3);
-    private bool _presenting;
     private int _versionClicks;
     private DateTimeOffset _firstVersionClick;
 
@@ -34,12 +35,9 @@ public partial class ProfilePage : UserControl
     private void PresentPreferences()
     {
         var preferences = _shell!.Preferences.Current;
-        _presenting = true;
         ThemeSystem.Classes.Set("on", preferences.ThemeMode == MobileThemeMode.System);
         ThemeLight.Classes.Set("on", preferences.ThemeMode == MobileThemeMode.Light);
         ThemeDark.Classes.Set("on", preferences.ThemeMode == MobileThemeMode.Dark);
-        GrayscaleSwitch.IsChecked = preferences.GrayscaleCovers;
-        _presenting = false;
     }
 
     // Also runs when a pushed page is popped, so both summaries stay current.
@@ -48,12 +46,9 @@ public partial class ProfilePage : UserControl
         try
         {
             await _modules!.Library.Books.InitializeAsync();
-            await _shell!.EnsureReaderDataAsync();
-            var dashboard = await _modules.Reader.Data.GetReadingDashboardAsync(dayCount: 1);
             var books = await _modules.Library.Books.SearchAsync();
             var sync = await _modules.Sync.Service.LoadSettingsAsync();
 
-            ReadingSummaryText.Text = MobileFormat.ReadingTime(dashboard.TotalSeconds);
             SyncSummaryText.Text = sync.Settings is { Enabled: true, IsConfigured: true } settings
                 ? $"{settings.ProviderName} · 已开启"
                 : "未开启";
@@ -92,13 +87,43 @@ public partial class ProfilePage : UserControl
 
     private void OnZLibraryAccountClick(object? sender, RoutedEventArgs e) => _shell?.OpenZLibraryAccount();
 
-    private void OnReadingDataClick(object? sender, RoutedEventArgs e) => _shell?.OpenReadingData();
-
     private void OnSyncClick(object? sender, RoutedEventArgs e) => _shell?.OpenSyncSettings();
 
     private void OnAiClick(object? sender, RoutedEventArgs e) => _shell?.OpenAiSettings();
 
     private void OnKindleClick(object? sender, RoutedEventArgs e) => _shell?.OpenKindleSettings();
+
+    private async void OnDeveloperClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var launcher = TopLevel.GetTopLevel(this)?.Launcher;
+            if (launcher is null || !await launcher.LaunchUriAsync(new Uri("https://github.com/kingstacker")))
+                _shell?.ShowToast("无法打开开发者主页");
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _shell?.ShowToast("无法打开开发者主页");
+        }
+    }
+
+    private async void OnGroupClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard is null) { _shell?.ShowToast("剪贴板不可用"); return; }
+            await clipboard.SetTextAsync("1109898894");
+            _shell?.ShowToast("群号已复制到剪贴板");
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _shell?.ShowToast("复制群号失败");
+        }
+    }
+
+    private void OnSupportClick(object? sender, RoutedEventArgs e) =>
+        _shell?.ShowSheet("请我喝杯咖啡", new SupportSheet());
 
     private void OnThemeClick(object? sender, RoutedEventArgs e)
     {
@@ -113,10 +138,4 @@ public partial class ProfilePage : UserControl
         PresentPreferences();
     }
 
-    private void OnGrayscaleChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_presenting || _shell is null) return;
-        var enabled = GrayscaleSwitch.IsChecked == true;
-        _shell.Preferences.Update(value => value with { GrayscaleCovers = enabled });
-    }
 }

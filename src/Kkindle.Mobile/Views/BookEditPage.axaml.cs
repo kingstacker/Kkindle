@@ -68,7 +68,7 @@ public partial class BookEditPage : UserControl
 
     private async Task LoadCoverAsync()
     {
-        var cover = await _shell.Covers.GetAsync(_book, CoverWidth, _shell.Preferences.Current.GrayscaleCovers);
+        var cover = await _shell.Covers.GetAsync(_book, CoverWidth);
         CoverImage.Source = cover;
         CoverInitial.IsVisible = cover is null;
     }

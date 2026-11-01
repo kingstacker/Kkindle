@@ -798,6 +798,7 @@ public partial class MainWindow
             var changed = !IsCurrentDevice(device);
             if (changed)
             {
+                ResetKindleAnnotationSyncPrompt();
                 SetDisconnectedDeviceUi();
             }
             _devices = [device];
@@ -874,6 +875,8 @@ public partial class MainWindow
 
     private void SetDisconnectedDeviceUi(string? detail = null)
     {
+        CancelKindleAnnotationAnalysis();
+        ResetKindleAnnotationSyncPrompt();
         _deviceBookScanGeneration++;
         _deviceBookScanCancellation?.Cancel();
         _deviceBookScanCancellation = null;
@@ -1848,6 +1851,9 @@ public partial class MainWindow
             // device session can be opened between the final operation and the
             // eject request.
             _lastDeviceIdentity = null;
+            // A read-only annotation check can stop immediately; only writes
+            // must be allowed to finish.
+            CancelKindleAnnotationAnalysis();
 
             if (_isTransferring || HasActiveDeviceOperations)
             {
@@ -3332,7 +3338,8 @@ public partial class MainWindow
                 IReadOnlyList<KindleClipping>? clippings = null;
                 await TrackDeviceOperationAsync(async () =>
                 {
-                    if (_deviceClippingCache.TryGetValue(device.Identity, out var cached))
+                    if (_deviceClippingCache.TryGetValue(device.Identity, out var cached)
+                        && !cached.Any(clip => clip.IsReadOnly && clip.Type == KindleClippingType.Highlight && clip.SourceBook is null))
                         clippings = cached;
                     else
                     {
@@ -3341,8 +3348,24 @@ public partial class MainWindow
                             _lifetimeCancellation.Token,
                             MaxReadingMaterials + 1);
                         _deviceClippingCache[device.Identity] = clippings;
-                        await PersistDeviceAuxiliaryCacheAsync(device);
                     }
+                    if (clippings.Any(KindleAnnotationClippingTextResolver.NeedsResolution))
+                    {
+                        var booksToResolve = DeviceBooks.Select(card => card.Book).ToArray();
+                        var clippingsToResolve = clippings;
+                        await RunKindleAnnotationTaskAsync(
+                            T("读取 Kindle 划线原文"),
+                            cancellable: false,
+                            async (progress, _) =>
+                            {
+                                await KindleAnnotationClippingTextResolver.ResolveAsync(device,
+                                    booksToResolve, clippingsToResolve, _kindle,
+                                    _lifetimeCancellation.Token, progress);
+                                return true;
+                            },
+                            _lifetimeCancellation.Token);
+                    }
+                    await PersistDeviceAuxiliaryCacheAsync(device);
                 });
                 readingMaterialsTruncated |= (clippings?.Count ?? 0) > MaxReadingMaterials;
                 var clippingInput = (clippings ?? [])
@@ -3373,7 +3396,9 @@ public partial class MainWindow
                         pair.PairedNote,
                         device.Identity,
                         _deviceDisplayName ?? device.Name,
-                        device.Profile.CanDeleteNotes));
+                        device.Profile.CanDeleteNotes
+                            && !clipping.IsReadOnly
+                            && !(pair.PairedNote?.IsReadOnly ?? false)));
                 }
             }
 
@@ -3385,6 +3410,11 @@ public partial class MainWindow
             ReadingMaterialsStatusText.Text = T("本地资料已读取 · 设备 {0} 条{1}", kindleCount, readingMaterialsTruncated ? T("（已限制最多 {0} 条）", MaxReadingMaterials) : string.Empty);
             if (CurrentDevice is { CanReadNotes: false })
                 ReadingMaterialsStatusText.Text = T("本地资料已读取；当前设备暂不支持读取笔记。");
+            UpdateKindleAnnotationSyncButtonVisibility();
+            // The check copies shared books from the device; refreshing the
+            // list must not wait for it. It handles its own errors.
+            if (CurrentDevice is { CanReadNotes: true } currentDevice)
+                _ = PromptKindleAnnotationSyncIfNeededAsync(currentDevice);
         }
         catch (Exception exception)
         {
@@ -3699,6 +3729,7 @@ public partial class MainWindow
 
     private async void RefreshReadingMaterialsButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (CurrentDevice is { } currentDevice) _deviceClippingCache.Remove(currentDevice.Identity);
         await RefreshDevicesAsync(scanBooks: false);
         await RefreshReadingMaterialsAsync();
     }
