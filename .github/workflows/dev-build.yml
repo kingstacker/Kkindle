@@ -10,12 +10,6 @@ on:
         required: false
         default: ""
         type: string
-  push:
-    branches:
-      - dev
-      - develop
-      - "dev/**"
-
 permissions:
   contents: write
 

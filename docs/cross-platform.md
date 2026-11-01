@@ -59,12 +59,11 @@ OCR is not included. PDF page notes can be anchored to arbitrary normalized page
 positions. PDF zoom and the position within a page are restored without changing
 EPUB typography preferences.
 
-The `Development Build` GitHub Actions workflow can be run manually or by
-pushing the `dev`, `develop`, or `dev/**` branches. It appends the Actions run
-number to a base version such as `1.0.6-dev`, builds Windows installer and
-three-platform packages, and publishes a GitHub pre-release tagged with the
-development version. The workflow also keeps the per-platform artifacts for
-seven days. Development macOS packages always use ad-hoc signing.
+The `Development Build` GitHub Actions workflow runs only when manually
+dispatched. It chooses the next development version based on the latest stable
+release (or a manually supplied base version), builds Windows and Linux packages,
+and publishes a GitHub pre-release tagged with the development version. The
+workflow also keeps the per-platform artifacts for seven days.
 
 Calibre is not bundled in any Windows, Linux or macOS archive. It is optional and is
 discovered from the application directory, standard install locations or
