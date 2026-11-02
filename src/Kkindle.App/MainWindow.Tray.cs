@@ -18,8 +18,13 @@ public partial class MainWindow
     {
         try
         {
-            var icon = new WindowIcon(AssetLoader.Open(
-                new Uri("avares://Kkindle.App/Assets/Icons/kkindle.png")));
+            // macOS menu bar icons are template images: only the alpha channel
+            // is used and the system tints them for light/dark menu bars. The
+            // full app icon is an opaque square, which would render as a solid
+            // block, so the menu bar uses a transparent glyph instead.
+            var icon = new WindowIcon(AssetLoader.Open(new Uri(OperatingSystem.IsMacOS()
+                ? "avares://Kkindle.App/Assets/Icons/tray.png"
+                : "avares://Kkindle.App/Assets/Icons/kkindle.png")));
 
             var openItem = new NativeMenuItem(T("打开 Kkindle"));
             openItem.Click += (_, _) => RestoreFromTray();
@@ -40,6 +45,8 @@ public partial class MainWindow
                 Menu = menu,
                 IsVisible = true
             };
+            if (OperatingSystem.IsMacOS())
+                MacOSProperties.SetIsTemplateIcon(_trayIcon, true);
             // A left click also brings the window back, matching common
             // Windows tray behaviour.
             _trayIcon.Clicked += (_, _) => RestoreFromTray();
