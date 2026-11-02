@@ -40,6 +40,35 @@ cp "$repo_root/LICENSE" "$app_root/Contents/Resources/LICENSE"
 cp "$repo_root/src/Kkindle.App/Assets/Icons/Kkindle.ico" "$app_root/Contents/Resources/Kkindle.ico"
 chmod 0755 "$app_root/Contents/MacOS/Kkindle"
 
+# macOS uses .icns for the bundle/Dock icon. Build one from the shared PNG so
+# the Finder and Dock show the Kkindle icon instead of the generic app icon.
+icon_source="$repo_root/src/Kkindle.App/Assets/Icons/kkindle.png"
+if [[ ! -f "$icon_source" ]]; then
+  echo "Missing app icon source: $icon_source" >&2
+  exit 2
+fi
+iconset="$work_root/Kkindle.iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" "$icon_source" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  double=$((size * 2))
+  sips -z "$double" "$double" "$icon_source" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$app_root/Contents/Resources/Kkindle.icns"
+
+# Newer Kindles only speak MTP, which macOS cannot mount. Bundle libmtp (the
+# same stack calibre uses on macOS) next to the executable so the managed
+# resolver can load it with @loader_path.
+mtp_deps="$repo_root/artifacts/macos-deps"
+bash "$repo_root/scripts/build-macos-mtp-deps.sh" "$mtp_deps"
+cp "$mtp_deps/prefix/lib/libmtp.9.dylib" "$mtp_deps/prefix/lib/libusb-1.0.0.dylib" \
+  "$app_root/Contents/MacOS/"
+mkdir -p "$app_root/Contents/Resources/ThirdParty"
+cp "$mtp_deps/prefix/share/licenses/libmtp-COPYING" \
+  "$app_root/Contents/Resources/ThirdParty/libmtp-COPYING"
+cp "$mtp_deps/prefix/share/licenses/libusb-COPYING" \
+  "$app_root/Contents/Resources/ThirdParty/libusb-COPYING"
+
 cat > "$app_root/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -48,6 +77,7 @@ cat > "$app_root/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>Kkindle</string>
   <key>CFBundleExecutable</key><string>Kkindle</string>
   <key>CFBundleIdentifier</key><string>io.github.kingstacker.kkindle</string>
+  <key>CFBundleIconFile</key><string>Kkindle.icns</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Kkindle</string>
   <key>CFBundlePackageType</key><string>APPL</string>

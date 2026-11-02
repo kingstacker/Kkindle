@@ -24,13 +24,18 @@ internal static class Program
     {
         var configurationDirectory = MacOSAppData.ResolveConfigurationDirectory();
         var paths = new AppPaths(AppRootConfiguration.ResolveRoot(configurationDirectory, MacOSAppData.ResolveRoot()));
+        var metadata = new BookMetadataService();
+        var massStorage = new MassStorageKindleDeviceService(
+            paths,
+            metadata,
+            eject: MacOSKindleEjector.EjectAsync);
+        // Newer Kindles only expose MTP, which macOS cannot mount; libmtp
+        // provides the same access path calibre uses on this platform.
+        var mtp = new MtpKindleDeviceService(paths, metadata);
         return new AppServices(
             SecretProtector: new MacOSSecretProtector(),
             CreateDeviceChangeNotifier: _ => null,
-            KindleDeviceService: new MassStorageKindleDeviceService(
-                paths,
-                new BookMetadataService(),
-                eject: MacOSKindleEjector.EjectAsync),
+            KindleDeviceService: new MacOSKindleDeviceService(massStorage, mtp),
             Paths: paths,
             RootConfigurationDirectory: configurationDirectory);
     }

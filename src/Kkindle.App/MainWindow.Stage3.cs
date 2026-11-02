@@ -1240,7 +1240,7 @@ public partial class MainWindow
         // disks are "ejected").
         var action = !enabled
             ? T("未连接设备")
-            : CurrentDevice?.Transport == KindleTransport.Wpd ? T("停止访问设备") : T("安全弹出设备");
+            : CurrentDevice?.Transport != KindleTransport.MassStorage ? T("停止访问设备") : T("安全弹出设备");
         ToolTip.SetTip(DeviceStatusEjectButton, action);
         AutomationProperties.SetName(DeviceStatusEjectButton, action);
         ToolTip.SetTip(EjectDeviceButton, action);
@@ -1833,7 +1833,9 @@ public partial class MainWindow
     {
         if (_kindle is null || CurrentDevice is not { } device || _deviceEjectInProgress) return;
         _deviceEjectInProgress = true;
-        var isWpd = device.Transport == KindleTransport.Wpd;
+        // MTP sessions (WPD on Windows, libmtp on macOS) are stopped rather
+        // than ejected; only mounted USB disks can be safely ejected.
+        var isWpd = device.Transport != KindleTransport.MassStorage;
         try
         {
             // Eject always asks first (WinUI reference): WPD sessions are

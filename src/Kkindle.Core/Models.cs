@@ -72,7 +72,9 @@ public sealed class KindleDevice
         ? RootPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
         : VolumeSerial.Trim();
     public string CapacityLabel => UiText.Get("{0} 可用 / {1}", FormatBytes(FreeBytes), FormatBytes(TotalBytes));
-    public string ConnectionLabel => Transport == KindleTransport.Wpd ? "MTP" : UiText.Get("USB 磁盘");
+    public string ConnectionLabel => Transport == KindleTransport.MassStorage
+        ? UiText.Get("USB 磁盘")
+        : "MTP";
 
     private static string FormatBytes(long bytes)
     {
@@ -85,7 +87,9 @@ public sealed class KindleDevice
 public enum KindleTransport
 {
     MassStorage,
-    Wpd
+    Wpd,
+    /// <summary>MTP device reached through libmtp (non-Windows MTP hosts).</summary>
+    Mtp
 }
 
 public sealed class KindleBook

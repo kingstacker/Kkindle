@@ -46,6 +46,7 @@
          device service needs its own entry here. -->
     <InternalsVisibleTo Include="Kkindle.Platform.Windows" />
     <InternalsVisibleTo Include="Kkindle.Platform.Common" />
+    <InternalsVisibleTo Include="Kkindle.Platform.MacOS" />
     <InternalsVisibleTo Include="Kkindle.App" />
     <InternalsVisibleTo Include="Kkindle.Tests" />
   </ItemGroup>
