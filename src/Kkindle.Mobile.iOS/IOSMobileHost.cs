@@ -9,8 +9,7 @@ internal static class IOSMobileHost
 {
     public static MobileServices Create(IMobileTabBar? tabBar = null)
     {
-        // Library is backed up by iCloud and invisible to the Files app; the
-        // sandbox keeps it private to Kkindle.
+        // Keep the library in the app's private, backed-up data container.
         var root = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Kkindle");
@@ -25,6 +24,7 @@ internal static class IOSMobileHost
             // until replaced by an in-process converter.
             new UnavailableBookFormatConverter(),
             new IOSFileImportSource(),
-            TabBar: tabBar);
+            TabBar: tabBar,
+            BackgroundWork: new IOSBackgroundWork());
     }
 }

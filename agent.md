@@ -24,6 +24,26 @@
 - 启动或交付时使用同步后的 `artifacts\Kkindle-debug-win-x64-latest\Kkindle.exe`，不要直接使用未发布的 `bin\...\win-x64\Kkindle.exe`。
 - 除非用户明确要求，不生成 Release EXE、安装包或便携包；默认只出保留完整调试工具、.NET Runtime 与其他运行依赖的 x64 Debug EXE（与 `AI_HANDOFF.md` 第 8 节一致）。
 
+## Android 模拟器验证（macOS，2026-11-02）
+
+- JDK 21 在 `~/.local/jdk-21/Contents/Home`（`JAVA_HOME` 要指向 `Contents/Home`，指向 `~/.local/jdk-21` 会报 “Could not find required file jar”）。
+- SDK 在 `~/Library/Android/sdk`，AVD 为 `kkindle-api36`（API 36，x86_64）。
+- 本机（Hackintosh，i5-13600KF，macOS 26）的 Hypervisor.framework 会透传 WAITPKG，guest 执行 TPAUSE 时触发 `invalid opcode`（`delay_halt_tpause`）内核 panic。**不能从 Android Studio / AVD Manager 直接启动**，必须带 `-qemu -append clearcpuid=517`：
+
+  ```bash
+  ~/Library/Android/sdk/emulator/emulator -avd kkindle-api36 \
+    -no-snapshot -no-boot-anim -no-audio \
+    -gpu swiftshader_indirect -memory 4096 -cores 4 \
+    -qemu -append clearcpuid=517
+  ```
+
+- 构建 Debug APK（项目根目录）：
+  `dotnet build src/Kkindle.Mobile.Android/Kkindle.Mobile.Android.csproj -c Debug -p:RuntimeIdentifier=android-x64`
+- APK 输出：`src/Kkindle.Mobile.Android/bin/Debug/net10.0-android36.0/android-x64/com.kingstacker.kkindle-Signed.apk`
+- 安装 / 启动：`adb -s emulator-5554 install -r <apk>`，然后 `adb shell am start -W -n com.kingstacker.kkindle/crc64fcb7126634234113.MainActivity`（LaunchActivity 名称以 `cmd package resolve-activity --brief com.kingstacker.kkindle` 为准）。
+- 崩溃后残留的 `~/.android/avd/kkindle-api36.avd/*.lock` 会导致 “Running multiple emulators with the same AVD”，无模拟器运行时删除即可。
+- 最近验证：Debug APK（android-x64）安装启动正常，EPUB 导入 → 书架 → 阅读 → 章节切换 → 阅读数据统计均通过，logcat 无 FATAL。
+
 ## Linux Debug 验证信息（2026-08-22）
 
 - Linux Debug 入口：`src/Kkindle.Desktop.Linux/bin/Debug/net10.0/Kkindle`。

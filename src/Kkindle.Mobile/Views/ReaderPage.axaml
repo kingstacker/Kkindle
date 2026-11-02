@@ -26,7 +26,44 @@
   <ThemeVariantScope Name="ThemeScope">
     <ContentControl Name="Surface" Classes="themed">
       <Grid RowDefinitions="*,Auto">
-        <ContentControl Grid.Row="0" Name="ReaderHostSlot" />
+        <Grid Grid.Row="0" Name="ReaderPaper" ClipToBounds="True"
+              Background="{Binding #Surface.Background}">
+          <ContentControl Name="ReaderHostSlot" />
+          <Image Name="TransitionSnapshot" IsVisible="False" IsHitTestVisible="False" />
+          <Rectangle Name="TransitionTrail" IsVisible="False" IsHitTestVisible="False" />
+          <Rectangle Name="TransitionFront" IsVisible="False" IsHitTestVisible="False" />
+          <Rectangle Name="TransitionEdge" IsVisible="False" IsHitTestVisible="False" />
+
+          <!-- Floating selection toolbar, anchored beside the selection the
+               way the desktop reader's icon bar does. -->
+          <Canvas Name="SelectionLayer" IsVisible="False">
+            <Border Name="SelectionBar" Classes="floating" Padding="4"
+                    BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1">
+              <StackPanel Orientation="Horizontal" Spacing="0">
+                <Button Name="SelectionHighlightButton" Classes="icon" Click="OnSelectionHighlightClick"
+                        AutomationProperties.Name="划线">
+                  <c:LineIcon Data="{StaticResource IconHighlight}" Size="19" StrokeThickness="1.5" />
+                </Button>
+                <Button Name="SelectionNoteButton" Classes="icon" Click="OnSelectionNoteClick"
+                        AutomationProperties.Name="写笔记">
+                  <c:LineIcon Data="{StaticResource IconNotes}" Size="19" StrokeThickness="1.4" />
+                </Button>
+                <Button Name="SelectionTranslateButton" Classes="icon" Click="OnSelectionTranslateClick"
+                        AutomationProperties.Name="翻译">
+                  <c:LineIcon Data="{StaticResource IconTranslate}" Size="19" StrokeThickness="1.4" />
+                </Button>
+                <Button Name="SelectionAskButton" Classes="icon" Click="OnSelectionAskClick"
+                        AutomationProperties.Name="问 AI">
+                  <c:LineIcon Data="{StaticResource IconSparkle}" Size="19" StrokeThickness="1.4" />
+                </Button>
+                <Button Name="SelectionCopyButton" Classes="icon" Click="OnSelectionCopyClick"
+                        AutomationProperties.Name="复制">
+                  <c:LineIcon Data="{StaticResource IconCopy}" Size="19" StrokeThickness="1.4" />
+                </Button>
+              </StackPanel>
+            </Border>
+          </Canvas>
+        </Grid>
 
         <!-- Always-on position line, the only chrome while reading. -->
         <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="24,2,24,10">
@@ -109,7 +146,7 @@
                 <c:LineIcon Data="{StaticResource IconNext}" Size="17" StrokeThickness="1.4" />
               </Button>
             </Grid>
-            <Grid ColumnDefinitions="*,*,*,*">
+            <Grid Name="ReaderActions" ColumnDefinitions="*,*,*,*">
               <Button Grid.Column="0" Classes="icon action" Name="TocButton" Click="OnTocClick">
                 <StackPanel Spacing="2">
                   <c:LineIcon Data="{StaticResource IconToc}" Size="21" StrokeThickness="1.4"

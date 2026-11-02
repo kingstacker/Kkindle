@@ -19,20 +19,48 @@ public sealed class AndroidFileImportSource : IFileImportSource
         Directory.CreateDirectory(directory);
 
         var files = new List<string>(uris.Count);
-        foreach (var uri in uris)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var name = SafeFileName(activity.GetDisplayName(uri));
-            var target = UniquePath(directory, name);
-
-            await using var input = activity.ContentResolver?.OpenInputStream(uri);
-            if (input is null) continue;
-            await using var output = File.Create(target);
-            await input.CopyToAsync(output, cancellationToken);
-            files.Add(target);
+            foreach (var uri in uris)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var name = SafeFileName(activity.GetDisplayName(uri));
+                await using var input = activity.ContentResolver?.OpenInputStream(uri);
+                if (input is null) continue;
+                var fileDirectory = Path.Combine(directory, Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(fileDirectory);
+                var target = Path.Combine(fileDirectory, name);
+                files.Add(target);
+                await using var output = File.Create(target);
+                await input.CopyToAsync(output, cancellationToken);
+            }
+            return files;
         }
+        catch
+        {
+            ReleaseFiles(files);
+            throw;
+        }
+    }
 
-        return files;
+    public void ReleaseFiles(IReadOnlyList<string> files)
+    {
+        var activity = MainActivity.Current;
+        if (activity?.CacheDir is null) return;
+        var root = Path.GetFullPath(Path.Combine(activity.CacheDir.AbsolutePath, "imports")) + Path.DirectorySeparatorChar;
+        foreach (var file in files)
+        {
+            var fullPath = Path.GetFullPath(file);
+            if (!fullPath.StartsWith(root, StringComparison.Ordinal)) continue;
+            try { File.Delete(fullPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            var parent = Path.GetDirectoryName(fullPath);
+            if (parent is null || !parent.StartsWith(root, StringComparison.Ordinal)) continue;
+            try { Directory.Delete(parent); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static string SafeFileName(string? name)
@@ -44,12 +72,4 @@ public sealed class AndroidFileImportSource : IFileImportSource
         return trimmed;
     }
 
-    private static string UniquePath(string directory, string fileName)
-    {
-        var target = Path.Combine(directory, fileName);
-        if (!File.Exists(target)) return target;
-        var stem = Path.GetFileNameWithoutExtension(fileName);
-        var extension = Path.GetExtension(fileName);
-        return Path.Combine(directory, $"{stem}-{Guid.NewGuid():N}{extension}");
-    }
 }

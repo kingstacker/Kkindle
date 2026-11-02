@@ -10,6 +10,15 @@ namespace Kkindle.Mobile;
 public interface IFileImportSource
 {
     Task<IReadOnlyList<string>> PickFilesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Releases temporary files created by the picker after import.</summary>
+    void ReleaseFiles(IReadOnlyList<string> files) { }
+}
+
+/// <summary>Allows a platform to finish a short save when its app is backgrounded.</summary>
+public interface IMobileBackgroundWork
+{
+    void Run(Func<Task> work);
 }
 
 /// <summary>
@@ -53,7 +62,8 @@ public sealed record MobileServices(
     ISystemBarAppearance? SystemBars = null,
     Func<ITtsEngine>? CreateTtsEngine = null,
     Func<ITtsAudioPlayer>? CreateTtsPlayer = null,
-    IMobileTabBar? TabBar = null);
+    IMobileTabBar? TabBar = null,
+    IMobileBackgroundWork? BackgroundWork = null);
 
 /// <summary>Fallback for hosts without a document picker (designer, preview).</summary>
 public sealed class NoFileImportSource : IFileImportSource

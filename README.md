@@ -10,10 +10,20 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 
 ![Kkindle library](docs/images/主界面.png?v=20261004)
 
+## Platform status
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| Windows | ✅ Tested | Stable; minor fixes in progress |
+| macOS | 🟡 Initial testing | Packages available; fixes and testing in progress |
+| iOS | 🚧 In development | Initial version in development |
+| Android | 🚧 In development | Initial version in development |
+| Linux | ⏳ Pending testing | Full testing not yet done |
+
 ## Features
 
-- **Library** — Import EPUB, PDF, MOBI, AZW3, and TXT; TXT encoding and chapter/volume headings are detected automatically and converted to EPUB without Calibre. Manage metadata, covers, tags, collections, search, and reading status.
-- **Kreader** — Open EPUB, PDF, and DRM-free AZW3 in the app; AZW3 uses the built-in KF8 reader without Calibre. Paginated or scrolling reading, table of contents, bookmarks, search, annotations, typography settings, reading progress, and Windows read-aloud.
+- **Library** — Import EPUB, PDF, MOBI, AZW3, and TXT; TXT encoding and chapter/volume headings are detected automatically and converted to EPUB without Calibre. Manage metadata, covers, tags, collections, search, and reading status. When a book with the same title is imported, choose to add the format, keep it separately, or skip; deleted content goes to a recoverable trash first.
+- **Kreader** — Open EPUB, PDF, and DRM-free AZW3 in the app; AZW3 uses the built-in KF8 reader without Calibre. Paginated or scrolling reading, table of contents, bookmarks, search, annotations, typography settings, reading progress, and read-aloud on Windows and Linux (Linux requires mpv, ffplay, VLC, or GStreamer).
 - **PDF reading** — First-page library covers, continuous scrolling, single-page and two-page reading, fit-width/page controls, sharp zoom and 90° rotation. Supports selectable text, six underline/highlight styles, editable comments, and page annotations at arbitrary PDF positions through the page-note icon or right-click. Pages appear before full-book text indexing finishes; only visible regions are rendered at the screen's pixel density. Search, bookmarks and reading position use the same local reading data as EPUB. Scanned pages support viewing and page notes; OCR is not included.
 - **AI assistant** — Ask questions about the current book, summarize chapters, explain selections, and choose from discovered models through DeepSeek, OpenAI, or compatible endpoints. Requests use relevant local excerpts only.
 - **Kindle** — Detect USB/WPD/MTP devices, transfer books, manage fonts and dictionaries, and import `My Clippings.txt`.
@@ -21,11 +31,13 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 
 ## Download
 
-Download the latest Windows or Linux package from the [official site](https://kkindle.stacker.beauty/#downloads); it automatically selects the latest stable release.
+Download the latest Windows, Linux, or macOS package from the [official site](https://kkindle.stacker.beauty/#downloads); it automatically selects the latest stable release.
 
 Backup download: [GitHub Releases](https://github.com/kingstacker/Kkindle/releases).
 
-Calibre is required separately for format conversion. Official GitHub releases currently provide Windows and Linux packages; the macOS source target remains available for local builds.
+Calibre is required separately for format conversion. Official GitHub releases provide Windows, Linux, and macOS packages. macOS builds support macOS 12 or later on Intel and Apple Silicon; when Apple distribution credentials are not configured, the archive is ad-hoc signed and includes `MACOS-README.md` with the Gatekeeper steps.
+
+The **Settings → Diagnostics** page checks the data directory, PDF parser, WebView, Calibre, TTS, and Kindle services, and is the first place to look for cross-platform issues. The library trash can restore a deleted book or a single format, and permanently purge items after confirmation; trash contents are included in local backups.
 
 ## Cloud sync
 
@@ -37,10 +49,12 @@ The sync subdirectory, encryption, scheduling, and transfer options are shared b
 
 ## Run from source
 
-Requires [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0).
+Requires the exact [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0) pinned by `global.json`.
+
+Windows (PowerShell):
 
 ```powershell
-dotnet restore Kkindle.sln
+dotnet restore Kkindle.sln -p:Platform=x64
 dotnet build Kkindle.sln -p:Platform=x64
 dotnet test Kkindle.sln --no-build -p:Platform=x64
 # Run the slow regression suite explicitly before a release
@@ -48,9 +62,30 @@ dotnet test Kkindle.sln --no-build -p:Platform=x64 -p:RunSlowTests=true
 dotnet run --project src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj -p:Platform=x64
 ```
 
+macOS:
+
+```bash
+dotnet build src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj
+dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj
+dotnet run --project src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj
+```
+
+Linux uses the same commands with `Kkindle.Desktop.Linux` in place of `Kkindle.Desktop.MacOS`.
+
+Build a macOS app bundle for either architecture:
+
+```bash
+# Apple Silicon
+bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-arm64
+# Intel
+bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-x64
+```
+
+Run each command on the matching architecture; CI uses `macos-15` for arm64 and `macos-15-intel` for x64 because the bundled libmtp libraries are built for the host architecture.
+
 The default test run skips expensive UI, rendering, and GC-stress cases while keeping core, platform, device, and a small UI smoke set. The skipped tests remain in the repository and can be enabled with `RunSlowTests=true`.
 
-Linux also requires WebKitGTK and Secret Service. See [cross-platform notes](docs/cross-platform.md) for Linux and macOS commands.
+Linux also requires WebKitGTK and Secret Service. See [cross-platform notes](docs/cross-platform.md) for platform packages and signing details. Mobile heads live in `Kkindle.Mobile.sln`; see [mobile notes](docs/mobile-skeleton.md) for workloads and simulator commands.
 
 ## Referenced technologies
 

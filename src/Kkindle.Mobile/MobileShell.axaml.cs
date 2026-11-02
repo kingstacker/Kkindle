@@ -11,6 +11,7 @@ using Kkindle.ApplicationServices;
 using Kkindle.Core;
 using Kkindle.Mobile.Views;
 using Kkindle.Mobile.Views.Sheets;
+using Kkindle.Mobile.Controls;
 
 namespace Kkindle.Mobile;
 
@@ -37,7 +38,7 @@ public partial class MobileShell : UserControl
     {
         public static readonly TimeSpan OnStart = TimeSpan.Zero;
         public static readonly TimeSpan OnResume = TimeSpan.FromMinutes(2);
-        public static readonly TimeSpan AfterReading = TimeSpan.FromSeconds(30);
+        public static readonly TimeSpan AfterReading = TimeSpan.Zero;
     }
 
     private static readonly TimeSpan SheetCloseDelay = TimeSpan.FromMilliseconds(230);
@@ -72,6 +73,15 @@ public partial class MobileShell : UserControl
         Covers = new CoverCache(modules.Paths);
         Sync = new MobileSync(modules);
         InitializeComponent();
+        SheetPanel.SizeChanged += (_, _) =>
+        {
+            if (SheetScope.IsVisible && SheetPanel.Classes.Contains("open"))
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (SheetScope.IsVisible && SheetPanel.Classes.Contains("open"))
+                        SetPageNativeControlsObscured(true, checkCoverage: true);
+                }, DispatcherPriority.Render);
+        };
         if (_services.TabBar is { } tabBar)
         {
             // The platform bar is the visible one. This one only keeps the grid
@@ -172,9 +182,20 @@ public partial class MobileShell : UserControl
         }
     }
 
-    public void OnAppResumed() => RequestAutoSync(AutoSyncGap.OnResume);
+    public void OnAppResumed()
+    {
+        (CurrentPage as ReaderPage)?.Resume();
+        RequestAutoSync(AutoSyncGap.OnResume);
+    }
 
-    public void OnAppPaused() => (CurrentPage as ReaderPage)?.SaveNow();
+    public void OnAppPaused()
+    {
+        if (CurrentPage is not ReaderPage reader) return;
+        if (_services.BackgroundWork is { } background)
+            background.Run(reader.PauseAsync);
+        else
+            _ = reader.PauseAsync();
+    }
 
     public void ApplyThemeMode()
     {
@@ -207,6 +228,8 @@ public partial class MobileShell : UserControl
         var safe = Padding;
         SheetScope.Margin = new Thickness(-safe.Left, -safe.Top, -safe.Right, -safe.Bottom);
         SheetPanel.Padding = new Thickness(0, 0, 0, safe.Bottom);
+        _services.TabBar?.Update(false, (int)_tab);
+        SetPageNativeControlsObscured(true);
         SheetScope.IsVisible = true;
         Dispatcher.UIThread.Post(() =>
         {
@@ -225,6 +248,7 @@ public partial class MobileShell : UserControl
     {
         await Task.Delay(SheetCloseDelay);
         if (version != _sheetVersion) return;
+        SetPageNativeControlsObscured(true, checkCoverage: true);
         foreach (var panel in SheetBody.GetVisualDescendants().OfType<VirtualizingStackPanel>())
             panel.InvalidateMeasure();
     }
@@ -254,12 +278,36 @@ public partial class MobileShell : UserControl
         if (!SheetScope.IsVisible) return;
         NotifySheetDismissed();
         var version = ++_sheetVersion;
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSegmentGroup>())
+            group.SetObscured(true);
         SheetScrim.Classes.Remove("open");
         SheetPanel.Classes.Remove("open");
         await Task.Delay(SheetCloseDelay);
         if (version != _sheetVersion) return;
         SheetScope.IsVisible = false;
         SheetBody.Content = null;
+        SetPageNativeControlsObscured(false);
+        _services.TabBar?.Update(_history.Count == 1, (int)_tab);
+    }
+
+    private void SetPageNativeControlsObscured(bool obscured, bool checkCoverage = false)
+    {
+        var brush = SheetScrim.Background as ISolidColorBrush;
+        var color = brush?.Color ?? Color.FromArgb(0x59, 0, 0, 0);
+        if (brush is not null && brush.Opacity < 1)
+            color = Color.FromArgb((byte)Math.Round(color.A * brush.Opacity), color.R, color.G, color.B);
+
+        Rect? sheetBounds = null;
+        if (checkCoverage && SheetPanel.TranslatePoint(default, this) is { } origin)
+            sheetBounds = new Rect(origin, SheetPanel.Bounds.Size);
+
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSegmentGroup>())
+        {
+            var covered = sheetBounds is { } sheet
+                && group.TranslatePoint(default, this) is { } groupOrigin
+                && sheet.Intersects(new Rect(groupOrigin, group.Bounds.Size));
+            group.SetSheetObscured(obscured, covered, color);
+        }
     }
 
     public async void ShowToast(string message)
@@ -329,7 +377,7 @@ public partial class MobileShell : UserControl
         var showTabs = _history.Count == 1;
         TabBar.IsVisible = showTabs;
         TabBarGlass.IsVisible = showTabs;
-        _services.TabBar?.Update(showTabs, (int)tab);
+        _services.TabBar?.Update(showTabs && !SheetScope.IsVisible, (int)tab);
         LibraryTab.Classes.Set("active", tab == ShellTab.Library);
         MaterialsTab.Classes.Set("active", tab == ShellTab.Materials);
         ReadingDataTab.Classes.Set("active", tab == ShellTab.ReadingData);

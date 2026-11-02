@@ -19,6 +19,14 @@ public enum MobileBookSort
     Added = 3
 }
 
+public enum MobilePageAnimation
+{
+    None = 0,
+    Fade = 1,
+    Slide = 2,
+    Wave = 3
+}
+
 /// <summary>Phone-only interface choices; shared library data stays in the database.</summary>
 public sealed record MobilePreferences
 {
@@ -30,6 +38,7 @@ public sealed record MobilePreferences
     public ReaderTheme ReaderTheme { get; init; }
     public double ReaderFontScale { get; init; } = 1.35;
     public double ReaderLineHeight { get; init; } = 1.75;
+    public MobilePageAnimation ReaderPageAnimation { get; init; } = MobilePageAnimation.Fade;
 }
 
 /// <summary>

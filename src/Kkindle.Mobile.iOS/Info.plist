@@ -19,6 +19,10 @@
     </array>
     <key>UILaunchScreen</key>
     <dict/>
+    <key>UIAppFonts</key>
+    <array>
+        <string>Assets/Fonts/KingHwaOldSong-v3.0.ttf</string>
+    </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>

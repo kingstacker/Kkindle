@@ -17,15 +17,21 @@
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
   </Style>
 
-  <!-- Match the bundled desktop application font. -->
+  <!-- Use the bundled reading font throughout the application interface. -->
   <Style Selector="TextBlock">
-    <Setter Property="FontFamily" Value="avares://Kkindle.Mobile/Assets/Fonts#KingHwaOldSong" />
+    <Setter Property="FontFamily" Value="{DynamicResource MobileUiFontFamily}" />
   </Style>
   <Style Selector="Button">
-    <Setter Property="FontFamily" Value="avares://Kkindle.Mobile/Assets/Fonts#KingHwaOldSong" />
+    <Setter Property="FontFamily" Value="{DynamicResource MobileUiFontFamily}" />
   </Style>
   <Style Selector="TextBox">
-    <Setter Property="FontFamily" Value="avares://Kkindle.Mobile/Assets/Fonts#KingHwaOldSong" />
+    <Setter Property="FontFamily" Value="{DynamicResource MobileUiFontFamily}" />
+  </Style>
+  <Style Selector="ComboBox">
+    <Setter Property="FontFamily" Value="{DynamicResource MobileUiFontFamily}" />
+  </Style>
+  <Style Selector="CheckBox">
+    <Setter Property="FontFamily" Value="{DynamicResource MobileUiFontFamily}" />
   </Style>
 
   <!-- Type scale. -->

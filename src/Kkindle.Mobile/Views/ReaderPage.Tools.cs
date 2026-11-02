@@ -33,6 +33,7 @@ public partial class ReaderPage
 
     public void ShowSearch()
     {
+        HideSelectionBar();
         var sheet = new SearchSheet(SearchBookAsync, hit => _ = JumpToSearchHitAsync(hit), _lastSearch);
         _shell.ShowSheet("搜索", sheet, ThemeScope.RequestedThemeVariant, () => _lastSearch = sheet.Query);
     }
@@ -136,6 +137,7 @@ public partial class ReaderPage
 
     private async Task ToggleListeningAsync()
     {
+        HideSelectionBar();
         if (_tts is { State: not (TtsPlaybackState.Stopped or TtsPlaybackState.Error) } running)
         {
             await running.StopAsync();
@@ -269,9 +271,12 @@ public partial class ReaderPage
 
     private void OnAiClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => ShowAssistant(null);
 
-    private void ShowAssistant(string? selection) =>
+    private void ShowAssistant(string? selection)
+    {
+        HideSelectionBar();
         _shell.ShowSheet("AI 助手", new AiSheet(_modules, _shell, _book, CurrentPageText, selection),
             ThemeScope.RequestedThemeVariant);
+    }
 
     private string CurrentPageText()
     {
@@ -288,6 +293,7 @@ public partial class ReaderPage
     /// <summary>Uses the reader's own AI service when configured, otherwise a free online engine.</summary>
     private async Task TranslateAsync(string text)
     {
+        HideSelectionBar();
         var sheet = new InfoSheet("正在翻译…", text);
         _shell.ShowSheet("翻译", sheet, ThemeScope.RequestedThemeVariant);
         try

@@ -22,7 +22,9 @@ public sealed class CoverStack : Control
     private const double Radius = 5;
 
     private static readonly BoxShadows Shadow = BoxShadows.Parse("0 3 10 0 #29000000");
-    private static readonly Typeface InitialFace = new(FontFamily.Default, FontStyle.Normal, FontWeight.Medium);
+    private static readonly Typeface InitialFace = new(
+        new FontFamily("avares://Kkindle.Mobile/Assets/Fonts#KingHwaOldSong"),
+        FontStyle.Normal, FontWeight.Medium);
 
     public static readonly StyledProperty<IReadOnlyList<CoverStackItem>?> ItemsProperty =
         AvaloniaProperty.Register<CoverStack, IReadOnlyList<CoverStackItem>?>(nameof(Items));

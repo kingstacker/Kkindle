@@ -10,10 +10,20 @@ Kkindle 是一款基于 Avalonia 的跨平台电子书与 Kindle 管理器。它
 
 ![Kkindle 书库主界面](docs/images/主界面.png?v=20261004)
 
+## 平台开发状态
+
+| 平台 | 状态 | 说明 |
+| --- | --- | --- |
+| Windows | ✅ 已测试 | 稳定可用，小修小补进行中 |
+| macOS | 🟡 初始测试 | 已提供安装包，修改与测试进行中 |
+| iOS | 🚧 开发中 | 初始版本开发中 |
+| Android | 🚧 开发中 | 初始版本开发中 |
+| Linux | ⏳ 待测试 | 尚未进行完整测试 |
+
 ## 主要功能
 
 - **书库管理**：导入 EPUB、PDF、MOBI、AZW3、TXT；TXT 自动识别 UTF-8、带 BOM 的 Unicode 或 GB18030 编码，识别章节及分卷目录并转换为 EPUB，无需 Calibre。管理元数据、封面、标签、分类、搜索和阅读状态；同名版本导入时可选择添加格式、独立保存或跳过，删除内容会先进入可恢复回收站。
-- **Kreader 阅读器**：EPUB、PDF 和无 DRM 的 AZW3 可直接在应用内阅读；AZW3 使用内置 KF8 解析，无需安装 Calibre。支持分页/滚动阅读、目录、书签、查找、批注、排版设置、阅读进度和 Windows 听书。
+- **Kreader 阅读器**：EPUB、PDF 和无 DRM 的 AZW3 可直接在应用内阅读；AZW3 使用内置 KF8 解析，无需安装 Calibre。支持分页/滚动阅读、目录、书签、查找、批注、排版设置、阅读进度，以及 Windows/Linux 听书（Linux 需安装 mpv、ffplay、VLC 或 GStreamer）。
 - **PDF 阅读**：书库自动使用第一页作为封面，支持连续滚动、单页和双页阅读，以及适合宽度/整页、清晰缩放和 90° 旋转。支持选择文字、六种划线/标记样式、批注编辑，以及通过页注图标或右键在 PDF 任意位置添加页面批注。打开时先显示当前页，全文搜索在后台准备；可见区域按屏幕像素密度重绘。搜索、书签和阅读进度沿用 EPUB 的本地保存逻辑。扫描版可显示原页并添加页面笔记，暂不提供 OCR。
 - **AI 阅读助手**：围绕当前书籍提问、章节总结、选文解释和全书概览；支持自动获取模型、模型选择、连通性检测以及 DeepSeek、OpenAI 兼容接口。只发送相关本地片段。
 - **Kindle 管理**：识别 USB/WPD/MTP 设备，传输书籍，管理字体和词典，导入 `My Clippings.txt`。
@@ -21,11 +31,11 @@ Kkindle 是一款基于 Avalonia 的跨平台电子书与 Kindle 管理器。它
 
 ## 下载
 
-通过[官网下载页](https://kkindle.stacker.beauty/#downloads)获取 Windows 或 Linux 安装包；页面会自动选择最新稳定版。
+通过[官网下载页](https://kkindle.stacker.beauty/#downloads)获取 Windows、Linux 或 macOS 安装包；页面会自动选择最新稳定版。
 
 备用下载：[GitHub Releases](https://github.com/kingstacker/Kkindle/releases)。
 
-格式转换需要另行安装 Calibre。GitHub 官方 Release 目前提供 Windows 和 Linux 包；macOS 源码目标仍可在本地构建。
+格式转换需要另行安装 Calibre。GitHub 官方 Release 提供 Windows、Linux 和 macOS 包。macOS 包支持 macOS 12+ 的 Intel 与 Apple Silicon；未配置 Apple 发布凭据时使用临时签名，并在压缩包中附带 `MACOS-README.md` 说明 Gatekeeper 放行步骤。
 
 设置中的“诊断”页面会检查数据目录、PDF 解析器、WebView、Calibre、TTS 和 Kindle 服务；跨平台问题可先从这里确认。书库设置中的“回收站”支持恢复误删的整本书或单个格式，也可在确认后永久清理。回收站内容会随本地备份一起保存。
 
@@ -39,10 +49,12 @@ WebDAV 服务地址应指向已存在的目录，例如 `https://dav.example.com
 
 ## 从源码运行
 
-需要 [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0)。
+需要 `global.json` 锁定的 [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0)。
+
+Windows（PowerShell）：
 
 ```powershell
-dotnet restore Kkindle.sln
+dotnet restore Kkindle.sln -p:Platform=x64
 dotnet build Kkindle.sln -p:Platform=x64
 dotnet test Kkindle.sln --no-build -p:Platform=x64
 # 发布前需要完整回归时再显式加入慢测试
@@ -50,9 +62,30 @@ dotnet test Kkindle.sln --no-build -p:Platform=x64 -p:RunSlowTests=true
 dotnet run --project src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj -p:Platform=x64
 ```
 
+macOS：
+
+```bash
+dotnet build src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj
+dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj
+dotnet run --project src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj
+```
+
+Linux 使用相同命令，把 `Kkindle.Desktop.MacOS` 换成 `Kkindle.Desktop.Linux`。
+
+构建 macOS 应用包：
+
+```bash
+# Apple Silicon
+bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-arm64
+# Intel
+bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-x64
+```
+
+请在与目标架构一致的机器上执行；CI 分别使用 `macos-15` 和 `macos-15-intel`，因为随包分发的 libmtp 按本机架构编译。
+
 默认测试会跳过耗时的 UI/渲染/GC 压力用例，只保留核心、平台、设备和少量 UI 冒烟回归；这些用例仍保留在仓库中，可用 `RunSlowTests=true` 手动开启。
 
-Linux 还需要 WebKitGTK 和 Secret Service。Linux/macOS 的运行命令见[跨平台说明](docs/cross-platform.md)。
+Linux 还需要 WebKitGTK 和 Secret Service。平台打包和签名细节见[跨平台说明](docs/cross-platform.md)。移动端位于 `Kkindle.Mobile.sln`，工作负载和模拟器命令见[移动端说明](docs/mobile-skeleton.md)。
 
 ## 技术参考
 

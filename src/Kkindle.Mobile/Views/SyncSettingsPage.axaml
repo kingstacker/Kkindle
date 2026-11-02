@@ -50,12 +50,14 @@
 
         <TextBlock Classes="label" Text="连接" Margin="0,28,0,12" />
 
-        <Border Classes="segments" Margin="0,0,0,16">
-          <Grid ColumnDefinitions="*,*">
-            <Button Grid.Column="0" Name="ProviderS3" Classes="seg" Content="S3" Click="OnProviderClick" />
-            <Button Grid.Column="1" Name="ProviderWebDav" Classes="seg" Content="WebDAV" Click="OnProviderClick" />
-          </Grid>
-        </Border>
+        <c:NativeSegmentGroup Margin="0,0,0,16">
+          <Border Classes="segments">
+            <Grid ColumnDefinitions="*,*">
+              <Button Grid.Column="0" Name="ProviderS3" Classes="seg" Content="S3" Click="OnProviderClick" />
+              <Button Grid.Column="1" Name="ProviderWebDav" Classes="seg" Content="WebDAV" Click="OnProviderClick" />
+            </Grid>
+          </Border>
+        </c:NativeSegmentGroup>
 
         <StackPanel Name="WebDavFields" IsVisible="False">
           <StackPanel Classes="field">

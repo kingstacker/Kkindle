@@ -3,6 +3,7 @@
              x:Class="Kkindle.Mobile.MobileApp">
   <Application.Resources>
     <ResourceDictionary>
+      <FontFamily x:Key="MobileUiFontFamily">avares://Kkindle.Mobile/Assets/Fonts#KingHwaOldSong</FontFamily>
       <ResourceDictionary.MergedDictionaries>
         <ResourceInclude Source="avares://Kkindle.Mobile/Styles/MobileTokens.axaml" />
         <ResourceInclude Source="avares://Kkindle.Mobile/Styles/MobileIcons.axaml" />

@@ -27,4 +27,7 @@
   <StreamGeometry x:Key="IconPlay">M8 5l11 7-11 7z</StreamGeometry>
   <StreamGeometry x:Key="IconPause">M8 5v14 M16 5v14</StreamGeometry>
   <StreamGeometry x:Key="IconSend">M4 12l16-8-6 16-3-7z M11 13l9-9</StreamGeometry>
+  <StreamGeometry x:Key="IconCopy">M9 9h11v12H9z M4 15H3V3h12v1</StreamGeometry>
+  <StreamGeometry x:Key="IconHighlight">M6 3v7a6 6 0 0 0 12 0V3 M4 21h16</StreamGeometry>
+  <StreamGeometry x:Key="IconTranslate">M2 5h12 M8 2v3 M12 5c-1 5-5 9-9 11 M5 8c2 3 4 5 7 6 M13 22l4.5-11L22 22 M15 18h5</StreamGeometry>
 </ResourceDictionary>

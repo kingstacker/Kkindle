@@ -169,9 +169,42 @@ jobs:
           retention-days: 7
           compression-level: 0
 
+  macos:
+    name: Build macOS package (${{ matrix.arch }})
+    needs: [prepare, validate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            rid: osx-arm64
+            runner: macos-15
+          - arch: x64
+            rid: osx-x64
+            runner: macos-15-intel
+    env:
+      DEV_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.400
+      - name: Build macOS package
+        shell: bash
+        run: bash scripts/build-macos-release.sh "$DEV_VERSION" artifacts/development-macos "${{ matrix.rid }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Kkindle-${{ needs.prepare.outputs.version }}-${{ matrix.rid }}
+          path: artifacts/development-macos/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   publish:
     name: Publish development GitHub Release
-    needs: [prepare, windows, linux]
+    needs: [prepare, windows, linux, macos]
     if: ${{ github.ref_name == 'dev' || github.ref_name == 'develop' || startsWith(github.ref_name, 'dev/') }}
     runs-on: ubuntu-24.04
     env:

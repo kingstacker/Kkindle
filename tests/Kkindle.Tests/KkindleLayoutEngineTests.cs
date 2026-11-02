@@ -131,6 +131,32 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     }
 
     [Fact]
+    public void Horizontal_SingleEmptyParagraphUsesNormalLineSpacing()
+    {
+        var content = new XhtmlChapterLoader().Load(WriteChapter(
+            "<p>第一行<br/>第二行</p><p><br/></p><p>下一段</p>"));
+        using var engine = CreateEngine();
+        var layout = engine.Compose(content, Options(TypesetWritingMode.HorizontalTb));
+        var baselines = layout.Pages.SelectMany(page => page.Runs)
+            .Select(run => run.OriginY)
+            .Distinct()
+            .OrderBy(y => y)
+            .ToArray();
+
+        Assert.Equal(3, baselines.Length);
+        Assert.InRange(Math.Abs((baselines[2] - baselines[1]) - (baselines[1] - baselines[0])), 0f, 0.01f);
+    }
+
+    [Fact]
+    public void MultipleEmptyParagraphsRemainVisible()
+    {
+        var content = new XhtmlChapterLoader().Load(WriteChapter(
+            "<p>前一段</p><p><br/></p><p><br/></p><p>后一段</p>"));
+
+        Assert.Equal(4, content.Blocks.Count);
+    }
+
+    [Fact]
     public void Horizontal_PaginationCoversTextWithoutOverflow()
     {
         var longParagraph = string.Concat(Enumerable.Range(0, 12).Select(i =>

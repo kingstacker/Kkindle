@@ -22,13 +22,15 @@
 
     <ScrollViewer Grid.Row="2" Name="ResultsScroller">
       <StackPanel Margin="20,4,20,28">
-        <StackPanel Orientation="Horizontal" Spacing="2" Margin="-12,0,0,6">
-          <Button Name="FormatAll" Classes="chip on" Content="全部" Click="OnFormatClick" />
-          <Button Name="FormatEpub" Classes="chip" Content="EPUB" Click="OnFormatClick" />
-          <Button Name="FormatPdf" Classes="chip" Content="PDF" Click="OnFormatClick" />
-          <Button Name="FormatMobi" Classes="chip" Content="MOBI" Click="OnFormatClick" />
-          <Button Name="FormatAzw3" Classes="chip" Content="AZW3" Click="OnFormatClick" />
-        </StackPanel>
+        <c:NativeSegmentGroup Margin="-12,0,0,6">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Button Name="FormatAll" Classes="chip on" Content="全部" Click="OnFormatClick" />
+            <Button Name="FormatEpub" Classes="chip" Content="EPUB" Click="OnFormatClick" />
+            <Button Name="FormatPdf" Classes="chip" Content="PDF" Click="OnFormatClick" />
+            <Button Name="FormatMobi" Classes="chip" Content="MOBI" Click="OnFormatClick" />
+            <Button Name="FormatAzw3" Classes="chip" Content="AZW3" Click="OnFormatClick" />
+          </StackPanel>
+        </c:NativeSegmentGroup>
         <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap" Margin="0,6,0,6" />
 
         <ItemsControl Name="ResultsList">

@@ -2,8 +2,8 @@
 
 Kkindle uses one portable Avalonia UI with separate Windows, Linux and macOS
 desktop heads. Windows retains WPD support for MTP-only Kindle devices. Linux
-and macOS support Kindles exposed as mounted USB storage; MTP devices are not
-currently enumerated on those systems.
+supports Kindles exposed as mounted USB storage. macOS supports mounted storage
+and MTP devices through the bundled libmtp stack.
 
 ## User data and secrets
 
@@ -26,9 +26,13 @@ SDK versions so Linux, macOS and Windows packages are produced by the same SDK.
 dotnet --version # must print 10.0.400
 dotnet build src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj -c Release
 dotnet build src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj -c Release
-bash scripts/build-linux-release.sh 0.5.2 artifacts/linux linux-x64
-bash scripts/build-macos-release.sh 0.5.2 artifacts/macos osx-arm64
+bash scripts/build-linux-release.sh 1.1.3 artifacts/linux linux-x64
+bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-arm64
 ```
+
+The Release and Development Build workflows build macOS packages on both
+`macos-15` (`osx-arm64`) and `macos-15-intel` (`osx-x64`) runners so libmtp and
+the app bundle match the target architecture.
 
 The Linux package is self-contained for .NET but still depends on the native
 webview, font, Secret Service and desktop libraries declared by the `.deb`.
@@ -61,9 +65,9 @@ EPUB typography preferences.
 
 The `Development Build` GitHub Actions workflow runs only when manually
 dispatched. It chooses the next development version based on the latest stable
-release (or a manually supplied base version), builds Windows and Linux packages,
-and publishes a GitHub pre-release tagged with the development version. The
-workflow also keeps the per-platform artifacts for seven days.
+release (or a manually supplied base version), builds Windows, Linux and macOS
+packages, and publishes a GitHub pre-release tagged with the development
+version. The workflow also keeps the per-platform artifacts for seven days.
 
 Calibre is not bundled in any Windows, Linux or macOS archive. It is optional and is
 discovered from the application directory, standard install locations or
@@ -83,6 +87,8 @@ downloads never become part of a Kkindle release artifact.
 Local macOS builds and GitHub Releases use ad-hoc signing when Apple
 distribution credentials are not configured. The archive includes
 `MACOS-README.md` with the Gatekeeper override steps required for that build.
+Development Build pre-releases are always ad-hoc signed; only the stable
+Release workflow imports distribution credentials.
 
 For normal Gatekeeper-approved distribution, configure these repository
 secrets:

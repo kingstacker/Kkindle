@@ -10,6 +10,13 @@ case "$rid" in
   *) echo "Unsupported macOS RID: $rid" >&2; exit 2 ;;
 esac
 
+host_arch="$(uname -m)"
+expected_arch=arm64
+[[ "$rid" == "osx-x64" ]] && expected_arch=x86_64
+if [[ "$host_arch" != "$expected_arch" ]]; then
+  echo "Warning: building $rid on $host_arch; bundled libmtp libraries use the host architecture. Run this build on a $expected_arch machine for a distributable package." >&2
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$repo_root/scripts/dotnet-sdk.sh"
 require_repo_dotnet_sdk "$repo_root"

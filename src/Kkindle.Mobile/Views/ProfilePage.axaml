@@ -60,13 +60,15 @@
       </StackPanel>
 
       <TextBlock Classes="label" Text="外观" Margin="0,28,0,10" />
-      <Border Classes="segments">
-        <Grid ColumnDefinitions="*,*,*">
-          <Button Grid.Column="0" Name="ThemeSystem" Classes="seg" Content="跟随系统" Click="OnThemeClick" />
-          <Button Grid.Column="1" Name="ThemeLight" Classes="seg" Content="浅色" Click="OnThemeClick" />
-          <Button Grid.Column="2" Name="ThemeDark" Classes="seg" Content="深色" Click="OnThemeClick" />
-        </Grid>
-      </Border>
+      <c:NativeSegmentGroup>
+        <Border Classes="segments">
+          <Grid ColumnDefinitions="*,*,*">
+            <Button Grid.Column="0" Name="ThemeSystem" Classes="seg" Content="跟随系统" Click="OnThemeClick" />
+            <Button Grid.Column="1" Name="ThemeLight" Classes="seg" Content="浅色" Click="OnThemeClick" />
+            <Button Grid.Column="2" Name="ThemeDark" Classes="seg" Content="深色" Click="OnThemeClick" />
+          </Grid>
+        </Border>
+      </c:NativeSegmentGroup>
 
 
       <TextBlock Classes="label" Text="数据" Margin="0,32,0,4" />

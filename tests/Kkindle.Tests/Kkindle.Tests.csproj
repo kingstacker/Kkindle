@@ -8,6 +8,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Kkindle.Mobile/ReadingActivityClock.cs" Link="ReadingActivityClock.cs" />
     <Compile Include="../Fixtures/PdfFixture.cs" Link="Fixtures/PdfFixture.cs" />
     <Compile Include="../Fixtures/FakePdfDocument.cs" Link="Fixtures/FakePdfDocument.cs" />
     <None Include="../Fixtures/Azw3/*" Link="Fixtures/Azw3/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

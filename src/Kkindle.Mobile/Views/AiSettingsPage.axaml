@@ -30,13 +30,15 @@
       <StackPanel Margin="24,12,24,20">
         <TextBlock Classes="muted" TextWrapping="Wrap" LineHeight="20" Margin="0,0,0,18"
                    Text="用于阅读时提问、解释和翻译。密钥只加密保存在本机，与电脑版共用同一份设置文件。" />
-        <Border Classes="segments" Margin="0,0,0,16">
-          <Grid ColumnDefinitions="*,*,*">
-            <Button Grid.Column="0" Name="ProviderDeepSeek" Classes="seg" Content="DeepSeek" Click="OnProviderClick" />
-            <Button Grid.Column="1" Name="ProviderOpenAi" Classes="seg" Content="OpenAI" Click="OnProviderClick" />
-            <Button Grid.Column="2" Name="ProviderCustom" Classes="seg" Content="自定义" Click="OnProviderClick" />
-          </Grid>
-        </Border>
+        <c:NativeSegmentGroup Margin="0,0,0,16">
+          <Border Classes="segments">
+            <Grid ColumnDefinitions="*,*,*">
+              <Button Grid.Column="0" Name="ProviderDeepSeek" Classes="seg" Content="DeepSeek" Click="OnProviderClick" />
+              <Button Grid.Column="1" Name="ProviderOpenAi" Classes="seg" Content="OpenAI" Click="OnProviderClick" />
+              <Button Grid.Column="2" Name="ProviderCustom" Classes="seg" Content="自定义" Click="OnProviderClick" />
+            </Grid>
+          </Border>
+        </c:NativeSegmentGroup>
         <StackPanel Classes="field">
           <TextBlock Text="接口地址" />
           <TextBox Name="BaseUrlBox" Classes="field" TextInputOptions.ContentType="Url" />

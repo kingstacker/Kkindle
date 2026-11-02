@@ -11,12 +11,14 @@
                  VerticalAlignment="Bottom" Margin="0,0,0,5" />
     </Grid>
 
-    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="2" Margin="12,0,12,8">
-      <Button Name="FilterAll" Classes="chip on" Content="全部" Click="OnFilterClick" />
-      <Button Name="FilterHighlights" Classes="chip" Content="划线" Click="OnFilterClick" />
-      <Button Name="FilterNotes" Classes="chip" Content="笔记" Click="OnFilterClick" />
-      <Button Name="FilterBookmarks" Classes="chip" Content="书签" Click="OnFilterClick" />
-    </StackPanel>
+    <c:NativeSegmentGroup Grid.Row="1" Margin="12,0,12,8">
+      <StackPanel Orientation="Horizontal" Spacing="2">
+        <Button Name="FilterAll" Classes="chip on" Content="全部" Click="OnFilterClick" />
+        <Button Name="FilterHighlights" Classes="chip" Content="划线" Click="OnFilterClick" />
+        <Button Name="FilterNotes" Classes="chip" Content="笔记" Click="OnFilterClick" />
+        <Button Name="FilterBookmarks" Classes="chip" Content="书签" Click="OnFilterClick" />
+      </StackPanel>
+    </c:NativeSegmentGroup>
 
     <ScrollViewer Grid.Row="2">
       <StackPanel Margin="24,4,24,28">

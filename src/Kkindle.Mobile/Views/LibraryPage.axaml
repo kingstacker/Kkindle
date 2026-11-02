@@ -83,12 +83,14 @@
 
         <!-- Filters and view -->
         <Grid ColumnDefinitions="*,Auto,Auto" Margin="-12,0,-12,12">
-          <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-            <Button Name="FilterAll" Classes="chip on" Content="全部" Click="OnFilterClick" />
-            <Button Name="FilterReading" Classes="chip" Content="在读" Click="OnFilterClick" />
-            <Button Name="FilterFavorite" Classes="chip" Content="收藏" Click="OnFilterClick" />
-            <Button Name="FilterFinished" Classes="chip" Content="读完" Click="OnFilterClick" />
-          </StackPanel>
+          <c:NativeSegmentGroup VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Button Name="FilterAll" Classes="chip on" Content="全部" Click="OnFilterClick" />
+              <Button Name="FilterReading" Classes="chip" Content="在读" Click="OnFilterClick" />
+              <Button Name="FilterFavorite" Classes="chip" Content="收藏" Click="OnFilterClick" />
+              <Button Name="FilterFinished" Classes="chip" Content="读完" Click="OnFilterClick" />
+            </StackPanel>
+          </c:NativeSegmentGroup>
           <Button Grid.Column="1" Classes="icon" Name="SortButton" Width="38" Click="OnSortClick">
             <c:LineIcon Data="{StaticResource IconSort}" Size="19" StrokeThickness="1.4"
                         Foreground="{DynamicResource TextMutedBrush}" />

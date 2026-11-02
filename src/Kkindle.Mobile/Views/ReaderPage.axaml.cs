@@ -27,7 +27,6 @@ public partial class ReaderPage : UserControl
     private const double SwipeDistance = 44;
     private const double TapSlop = 12;
     private const double SwipeDominance = 1.3;
-    private const int IdleSecondsLimit = 120;
     private const string PdfPageChapterPrefix = "pdf:page:";
     private static readonly TimeSpan LongPressDelay = TimeSpan.FromMilliseconds(450);
 
@@ -51,12 +50,13 @@ public partial class ReaderPage : UserControl
     private double _overallProgress;
     private ReaderLayoutSettings _layout;
     private DateTimeOffset _lastProgressSave = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastActivity = DateTimeOffset.UtcNow;
+    private readonly ReadingActivityClock _activityClock = new(DateTimeOffset.UtcNow);
     private long _unsavedSeconds;
     private Point? _pressPoint;
     private bool _pressMoved;
     private bool _selectionArmed;
     private bool _expectSelection;
+    private ReaderSelection? _selection;
     private bool _tapConsumed;
     private bool _sliderActive;
     private bool _turning;
@@ -85,6 +85,13 @@ public partial class ReaderPage : UserControl
         InitializeComponent();
         TitleText.Text = book.Title;
         LoadingTitleText.Text = book.Title;
+        if (shell.Services.CreateTtsEngine is null || shell.Services.CreateTtsPlayer is null)
+        {
+            ListenButton.IsVisible = false;
+            ReaderActions.ColumnDefinitions = ColumnDefinitions.Parse("*,*,*");
+            Grid.SetColumn(AiButton, 1);
+            Grid.SetColumn(TypographyButton, 2);
+        }
 
         const RoutingStrategies tunnel = RoutingStrategies.Tunnel;
         ReaderHostSlot.AddHandler(PointerPressedEvent, OnSurfacePressed, tunnel, handledEventsToo: true);
@@ -370,7 +377,10 @@ public partial class ReaderPage : UserControl
                         root.GetProperty("startOffset").GetInt32(),
                         root.GetProperty("endOffset").GetInt32(),
                         root.GetProperty("prefix").GetString() ?? string.Empty,
-                        root.GetProperty("suffix").GetString() ?? string.Empty));
+                        root.GetProperty("suffix").GetString() ?? string.Empty,
+                        ReadDouble(root, "x"),
+                        ReadDouble(root, "y"),
+                        ReadDouble(root, "bottom")));
                 }
             }
             else if (type.GetString() == "pdfPage")
@@ -388,6 +398,11 @@ public partial class ReaderPage : UserControl
             // interrupt page rendering.
         }
     }
+
+    private static double? ReadDouble(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.Number
+            ? element.GetDouble()
+            : null;
 
     private void UpdateEpubLabels()
     {
@@ -509,14 +524,15 @@ public partial class ReaderPage : UserControl
         _ = SaveProgressSoonAsync(force: true);
     }
 
-    private async Task SaveProgressSoonAsync(bool force)
+    private async Task<bool> SaveProgressSoonAsync(bool force)
     {
-        if (_bookFile is null || _readerHost is null) return;
+        if (_bookFile is null || _readerHost is null) return true;
         var now = DateTimeOffset.UtcNow;
         CountReadingTime(now);
-        if (!force && now - _lastProgressSave < TimeSpan.FromSeconds(1.2)) return;
+        if (!force && now - _lastProgressSave < TimeSpan.FromSeconds(1.2)) return true;
         _lastProgressSave = now;
 
+        long seconds = 0;
         try
         {
             var chapterIndex = _isPdf ? Math.Max(0, _pdfPage - 1) : _chapterIndex;
@@ -540,28 +556,30 @@ public partial class ReaderPage : UserControl
             { ContentPosition = contentPosition }, token);
 
             // The dashboard, library grid and continue card read reading stats.
-            var seconds = Interlocked.Exchange(ref _unsavedSeconds, 0);
+            seconds = Interlocked.Exchange(ref _unsavedSeconds, 0);
             var chapters = _isPdf ? _pdfPageCount : _epubDocument?.Chapters.Count ?? 0;
             await _modules.Reader.Data.AddReadingTimeAsync(
                 _book.Id, _bookFile.Id, seconds, percent, chapterIndex, chapters, token);
+            return true;
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
+            Interlocked.Add(ref _unsavedSeconds, seconds);
+            return false;
         }
         catch
         {
+            Interlocked.Add(ref _unsavedSeconds, seconds);
             // Progress is best-effort; a transient database error must not
             // close the reading surface.
+            return false;
         }
     }
 
     /// <summary>Time since the last interaction counts, capped so an idle phone adds nothing.</summary>
     private void CountReadingTime(DateTimeOffset now)
     {
-        var seconds = (long)(now - _lastActivity).TotalSeconds;
-        if (seconds <= 0) return;
-        _lastActivity = now;
-        if (seconds <= IdleSecondsLimit) Interlocked.Add(ref _unsavedSeconds, seconds);
+        Interlocked.Add(ref _unsavedSeconds, _activityClock.CountUntil(now));
     }
 
     private void ShowError(string message)
@@ -583,6 +601,15 @@ public partial class ReaderPage : UserControl
     private void OnSurfacePressed(object? sender, PointerPressedEventArgs e)
     {
         TrackTouchPressed(e);
+        if (SelectionLayer.IsVisible)
+        {
+            // A tap outside the floating toolbar dismisses the selection
+            // instead of turning the page or toggling the chrome.
+            CancelPress();
+            ClearSelection();
+            e.Handled = true;
+            return;
+        }
         if (_touches.Count > 1)
         {
             // A second finger starts a pinch, never a tap or selection.
@@ -686,21 +713,41 @@ public partial class ReaderPage : UserControl
     /// <summary>Turns one page, crossing into the neighboring chapter at its edge.</summary>
     public async Task TurnAsync(int direction)
     {
+        HideSelectionBar();
         if (_turning) return;
         _turning = true;
         try
         {
-            if (_isPdf)
+            if (_isPdf && (_pdfPage + direction < 1 || _pdfPage + direction > _pdfPageCount))
             {
-                var page = _pdfPage + direction;
-                if (page < 1 || page > _pdfPageCount) ShowEdgeNotice(direction);
-                else await GoToPdfPageAsync(page);
+                ShowEdgeNotice(direction);
+                return;
+            }
+            if (!_isPdf && _readerHost is NativeReaderHost current
+                && !current.CanTurn(direction)
+                && (_epubDocument is null || _chapterIndex + direction < 0
+                    || _chapterIndex + direction >= _epubDocument.Chapters.Count))
+            {
+                ShowEdgeNotice(direction);
                 return;
             }
 
-            if (_readerHost is not NativeReaderHost host) return;
-            if (host.TurnPage(direction)) return;
-            await GoToChapterAsync(host, _chapterIndex + direction, fromEnd: direction < 0, direction);
+            var surface = new ReaderTransitionSurface(
+                ReaderHostSlot, TransitionSnapshot, TransitionTrail, TransitionFront, TransitionEdge, ReaderPaper);
+            var animation = (int)_shell.Preferences.Current.ReaderPageAnimation;
+            await ReaderTransitionPlayer.RunAsync(surface, animation, direction, async () =>
+            {
+                if (_isPdf)
+                {
+                    await GoToPdfPageAsync(_pdfPage + direction);
+                    return true;
+                }
+
+                if (_readerHost is not NativeReaderHost host) return false;
+                if (!host.TurnPage(direction))
+                    await GoToChapterAsync(host, _chapterIndex + direction, fromEnd: direction < 0, direction);
+                return true;
+            }, _lifetime.Token);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
@@ -717,6 +764,7 @@ public partial class ReaderPage : UserControl
 
     private async Task GoToChapterAsync(NativeReaderHost host, int chapter, bool fromEnd, int direction)
     {
+        HideSelectionBar();
         if (_epubDocument is null) return;
         if (chapter < 0 || chapter >= _epubDocument.Chapters.Count)
         {
@@ -790,53 +838,88 @@ public partial class ReaderPage : UserControl
         }
     }
 
-    private void ClearSelection() => (_readerHost as IReaderSelectionHost)?.ClearSelection();
+    private void ClearSelection()
+    {
+        HideSelectionBar();
+        (_readerHost as IReaderSelectionHost)?.ClearSelection();
+    }
 
+    /// <summary>
+    /// Shows the icon toolbar beside the selection instead of a sheet, so the
+    /// selected text stays visible while choosing an action.
+    /// </summary>
     private void ShowSelection(ReaderSelection selection)
     {
         var chapterPath = CurrentChapterPath;
         var overlaps = _annotations.Any(item => item.ChapterPath == chapterPath
             && selection.Start < item.EndOffset && selection.End > item.StartOffset);
-        var items = new List<ChoiceItem>
-        {
-            new("翻译", Tag: SelectionAction.Translate),
-            new("问 AI", Tag: SelectionAction.Ask),
-            new("复制", Tag: SelectionAction.Copy)
-        };
-        if (!overlaps)
-        {
-            items.Insert(0, new ChoiceItem("写笔记", Tag: SelectionAction.Note));
-            items.Insert(0, new ChoiceItem("划线", Tag: SelectionAction.Highlight));
-        }
-        _shell.ShowSheet(
-            selection.Text.Length > 24 ? selection.Text[..24] + "…" : selection.Text,
-            new ChoiceSheet(items, choice =>
-            {
-                switch ((SelectionAction)choice.Tag!)
-                {
-                    case SelectionAction.Highlight:
-                        _shell.HideSheet();
-                        _ = SaveAnnotationAsync(NewAnnotation(selection));
-                        break;
-                    case SelectionAction.Note:
-                        PromptNote(NewAnnotation(selection));
-                        break;
-                    case SelectionAction.Translate:
-                        ClearSelection();
-                        _ = TranslateAsync(selection.Text);
-                        break;
-                    case SelectionAction.Ask:
-                        ClearSelection();
-                        ShowAssistant(selection.Text);
-                        break;
-                    default:
-                        _shell.HideSheet();
-                        _ = CopyAsync(selection.Text);
-                        break;
-                }
-            }),
-            ThemeScope.RequestedThemeVariant,
-            ClearSelection);
+        _selection = selection;
+        SelectionHighlightButton.IsVisible = !overlaps;
+        SelectionNoteButton.IsVisible = !overlaps;
+        SelectionLayer.IsVisible = true;
+        PositionSelectionBar(selection);
+    }
+
+    private void HideSelectionBar()
+    {
+        _selection = null;
+        SelectionLayer.IsVisible = false;
+    }
+
+    private void PositionSelectionBar(ReaderSelection selection)
+    {
+        SelectionBar.Measure(Size.Infinity);
+        var size = SelectionBar.DesiredSize;
+        var width = ReaderPaper.Bounds.Width;
+        var height = ReaderPaper.Bounds.Height;
+        if (width <= 0 || height <= 0) return;
+
+        // Anchor to the selection's left edge and prefer the space above it;
+        // fall below when the first line is too close to the top edge.
+        const double inset = 8;
+        const double gap = 10;
+        var left = selection.X ?? (width - size.Width) / 2;
+        left = Math.Clamp(left, inset, Math.Max(inset, width - inset - size.Width));
+        var top = (selection.Y ?? height / 2) - size.Height - gap;
+        if (top < inset)
+            top = (selection.Bottom ?? selection.Y ?? height / 2) + gap;
+        top = Math.Clamp(top, inset, Math.Max(inset, height - inset - size.Height));
+        Canvas.SetLeft(SelectionBar, left);
+        Canvas.SetTop(SelectionBar, top);
+    }
+
+    private void OnSelectionHighlightClick(object? sender, RoutedEventArgs e)
+    {
+        if (_selection is not { } selection) return;
+        HideSelectionBar();
+        _ = SaveAnnotationAsync(NewAnnotation(selection));
+    }
+
+    private void OnSelectionNoteClick(object? sender, RoutedEventArgs e)
+    {
+        if (_selection is not { } selection) return;
+        HideSelectionBar();
+        PromptNote(NewAnnotation(selection));
+    }
+
+    private void OnSelectionTranslateClick(object? sender, RoutedEventArgs e)
+    {
+        if (_selection is not { } selection) return;
+        ClearSelection();
+        _ = TranslateAsync(selection.Text);
+    }
+
+    private void OnSelectionAskClick(object? sender, RoutedEventArgs e)
+    {
+        if (_selection is not { } selection) return;
+        ClearSelection();
+        ShowAssistant(selection.Text);
+    }
+
+    private void OnSelectionCopyClick(object? sender, RoutedEventArgs e)
+    {
+        if (_selection is not { } selection) return;
+        _ = CopyAsync(selection.Text);
     }
 
     private ReaderAnnotation NewAnnotation(ReaderSelection selection) => new()
@@ -981,6 +1064,7 @@ public partial class ReaderPage : UserControl
 
     public void ShowToc()
     {
+        HideSelectionBar();
         var current = _isPdf ? _pdfPage - 1 : _chapterIndex;
         var selected = _tocEntries.FindIndex(entry => entry.ChapterIndex == current);
         if (selected < 0) selected = _tocEntries.FindLastIndex(entry => entry.ChapterIndex < current);
@@ -1001,6 +1085,7 @@ public partial class ReaderPage : UserControl
 
     public void ShowTypography()
     {
+        HideSelectionBar();
         _shell.ShowSheet(_isPdf ? "显示" : "排版", new ReaderSettingsSheet(_shell.Preferences, !_isPdf, OnReaderSettingsChanged),
             ThemeScope.RequestedThemeVariant);
     }
@@ -1144,8 +1229,7 @@ public partial class ReaderPage : UserControl
             _tts?.Dispose();
             _shell.Services.SystemBars?.SetEdgeGesturesCaptured(false);
             _shell.ClearPaperSystemBars();
-            _ = SaveProgressSoonAsync(force: true);
-            _shell.RequestAutoSync(MobileShell.AutoSyncGap.AfterReading);
+            _ = SaveAndSyncOnExitAsync();
             _lifetime.Cancel();
             if (_readerHost is not null)
             {
@@ -1160,19 +1244,29 @@ public partial class ReaderPage : UserControl
         base.OnDetachedFromVisualTree(e);
     }
 
-    /// <summary>Flushes position while Android may still kill the paused process.</summary>
-    public void SaveNow() => _ = SaveProgressSoonAsync(force: true);
-
-    private enum SelectionAction
+    private async Task SaveAndSyncOnExitAsync()
     {
-        Highlight,
-        Note,
-        Translate,
-        Ask,
-        Copy
+        if (await SaveProgressSoonAsync(force: true))
+            _shell.RequestAutoSync(MobileShell.AutoSyncGap.AfterReading);
     }
 
-    private sealed record ReaderSelection(string Text, int Start, int End, string Prefix, string Suffix);
+    public Task PauseAsync()
+    {
+        Interlocked.Add(ref _unsavedSeconds, _activityClock.Pause(DateTimeOffset.UtcNow));
+        return SaveProgressSoonAsync(force: true);
+    }
+
+    public void Resume() => _activityClock.Resume(DateTimeOffset.UtcNow);
+
+    private sealed record ReaderSelection(
+        string Text,
+        int Start,
+        int End,
+        string Prefix,
+        string Suffix,
+        double? X,
+        double? Y,
+        double? Bottom);
 
     private sealed record TocEntry(string Title, int ChapterIndex, string? Target, int Level);
 }

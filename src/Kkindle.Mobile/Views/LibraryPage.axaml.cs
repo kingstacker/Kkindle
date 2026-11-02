@@ -202,7 +202,7 @@ public partial class LibraryPage : UserControl
         if (!EmptyState.IsVisible) return;
         var libraryEmpty = _books.Count == 0;
         EmptyTitle.Text = libraryEmpty ? "书库还是空的" : searching ? "没有找到相关书籍" : "这里还没有书";
-        EmptyDetail.Text = libraryEmpty ? "点右上角 + 导入 EPUB 或 PDF" : "换个关键词或筛选条件试试";
+        EmptyDetail.Text = libraryEmpty ? "点右上角 + 导入 EPUB、PDF 或 TXT" : "换个关键词或筛选条件试试";
     }
 
     private async Task LoadCoverAsync(BookTile tile)
@@ -362,17 +362,29 @@ public partial class LibraryPage : UserControl
 
     public async Task ImportAsync()
     {
+        IReadOnlyList<string> files = [];
         try
         {
             ImportButton.IsEnabled = false;
-            var files = await _services.ImportSource.PickFilesAsync();
+            files = await _services.ImportSource.PickFilesAsync();
             if (files.Count == 0) return;
+            var rules = new Dictionary<string, TxtImportRules>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in files.Where(path =>
+                Path.GetExtension(path).Equals(".txt", StringComparison.OrdinalIgnoreCase)))
+            {
+                var selected = await ChooseTxtRulesAsync(path);
+                if (selected is null) return;
+                rules[path] = selected;
+            }
             Status($"正在导入 {files.Count} 个文件…");
-            var result = await _modules.Library.Books.ImportAsync(files);
+            var result = await _modules.Library.Books.ImportAsync(files, txtImportRules: rules);
             await ReloadAsync();
-            _shell.ShowToast(result.FailureCount > 0
+            var message = result.FailureCount > 0
                 ? $"已导入 {result.AddedCount} 本，{result.FailureCount} 个文件失败"
-                : $"已导入 {result.AddedCount} 本");
+                : $"已导入 {result.AddedCount} 本";
+            var error = result.Items.FirstOrDefault(item => !item.Succeeded)?.Message;
+            if (error is not null) Status($"{message}：{error}");
+            _shell.ShowToast(message);
         }
         catch (Exception exception)
         {
@@ -380,8 +392,25 @@ public partial class LibraryPage : UserControl
         }
         finally
         {
+            _services.ImportSource.ReleaseFiles(files);
             ImportButton.IsEnabled = true;
         }
+    }
+
+    private Task<TxtImportRules?> ChooseTxtRulesAsync(string path)
+    {
+        var decision = new TaskCompletionSource<TxtImportRules?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sheet = new TxtImportSheet(path, rules =>
+        {
+            decision.TrySetResult(rules);
+            _shell.HideSheet();
+        });
+        _shell.ShowSheet("TXT 目录识别", sheet, onDismissed: () =>
+        {
+            sheet.CancelPreview();
+            decision.TrySetResult(null);
+        });
+        return decision.Task;
     }
 }
 

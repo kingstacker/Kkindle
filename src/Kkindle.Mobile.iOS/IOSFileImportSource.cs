@@ -51,27 +51,55 @@ public sealed class IOSFileImportSource : IFileImportSource
         Directory.CreateDirectory(directory);
 
         var files = new List<string>(urls.Count);
-        foreach (var url in urls)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (url.Path is not { } source || !File.Exists(source)) continue;
+            foreach (var url in urls)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (url.Path is not { } source || !File.Exists(source)) continue;
 
-            var access = url.StartAccessingSecurityScopedResource();
-            try
-            {
-                var target = UniquePath(directory, SafeFileName(url.LastPathComponent));
-                await using var input = File.OpenRead(source);
-                await using var output = File.Create(target);
-                await input.CopyToAsync(output, cancellationToken);
-                files.Add(target);
+                var access = url.StartAccessingSecurityScopedResource();
+                try
+                {
+                    var fileDirectory = Path.Combine(directory, Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(fileDirectory);
+                    var target = Path.Combine(fileDirectory, SafeFileName(url.LastPathComponent));
+                    files.Add(target);
+                    await using var input = File.OpenRead(source);
+                    await using var output = File.Create(target);
+                    await input.CopyToAsync(output, cancellationToken);
+                }
+                finally
+                {
+                    if (access) url.StopAccessingSecurityScopedResource();
+                }
             }
-            finally
-            {
-                if (access) url.StopAccessingSecurityScopedResource();
-            }
+            return files;
         }
+        catch
+        {
+            DeleteFiles(files);
+            throw;
+        }
+    }
 
-        return files;
+    public void ReleaseFiles(IReadOnlyList<string> files) => DeleteFiles(files);
+
+    private static void DeleteFiles(IEnumerable<string> files)
+    {
+        var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "imports")) + Path.DirectorySeparatorChar;
+        foreach (var file in files)
+        {
+            if (!Path.GetFullPath(file).StartsWith(root, StringComparison.Ordinal)) continue;
+            try { File.Delete(file); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            var parent = Path.GetDirectoryName(Path.GetFullPath(file));
+            if (parent is null || !parent.StartsWith(root, StringComparison.Ordinal)) continue;
+            try { Directory.Delete(parent); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static UIViewController? TopViewController()
@@ -97,12 +125,4 @@ public sealed class IOSFileImportSource : IFileImportSource
         return trimmed;
     }
 
-    private static string UniquePath(string directory, string fileName)
-    {
-        var target = Path.Combine(directory, fileName);
-        if (!File.Exists(target)) return target;
-        var stem = Path.GetFileNameWithoutExtension(fileName);
-        var extension = Path.GetExtension(fileName);
-        return Path.Combine(directory, $"{stem}-{Guid.NewGuid():N}{extension}");
-    }
 }

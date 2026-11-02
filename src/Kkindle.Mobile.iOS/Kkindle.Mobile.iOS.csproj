@@ -9,6 +9,7 @@
     <AssemblyName>Kkindle.Mobile.iOS</AssemblyName>
     <ApplicationId>com.kingstacker.kkindle</ApplicationId>
     <ApplicationTitle>Kkindle</ApplicationTitle>
+    <AppIcon>AppIcon</AppIcon>
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>1.1.3</ApplicationDisplayVersion>
     <!-- Intel Macs are capped at Xcode 26, while the current .NET iOS
@@ -20,6 +21,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The reader's typesetter opens this font by filesystem path. An
+         AvaloniaResource alone embeds it in an assembly, not in the app bundle. -->
+    <BundleResource Include="..\Kkindle.App\Assets\Fonts\KingHwaOldSong-v3.0.ttf"
+                    LogicalName="Assets/Fonts/KingHwaOldSong-v3.0.ttf" />
     <ProjectReference Include="..\Kkindle.Mobile\Kkindle.Mobile.csproj" />
     <PackageReference Include="Avalonia.iOS" Version="12.1.1" />
     <!-- Local embeddings back the desktop AI features. The managed assembly is

@@ -357,7 +357,14 @@ public sealed class XhtmlChapterLoader
             case "p":
                 FlushParagraph(ctx);
                 TrackId(element);
+                var isSpacingParagraph = IsSpacingParagraph(element);
+                var previousBlockCount = _blocks.Count;
                 WalkBlockParagraph(element, BlockKind.Paragraph, ctx);
+                if (isSpacingParagraph && _blocks.Count == previousBlockCount + 1
+                    && _blocks[^1].FragmentIds.Count == 0)
+                {
+                    _blocks.RemoveAt(_blocks.Count - 1);
+                }
                 break;
             case "h1":
             case "h2":
@@ -471,6 +478,34 @@ public sealed class XhtmlChapterLoader
 
                 break;
         }
+    }
+
+    private static bool IsSpacingParagraph(XElement element)
+    {
+        var children = element.Elements().ToArray();
+        if (children.Length != 1
+            || !children[0].Name.LocalName.Equals("br", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(element.Value)
+            || element.DescendantsAndSelf().Any(e => e.Attributes().Any(a =>
+                a.Name.LocalName.Equals("id", StringComparison.OrdinalIgnoreCase))))
+        {
+            return false;
+        }
+
+        static XElement? AdjacentElement(XNode? node, bool previous)
+        {
+            while (node is not null && node is not XElement)
+                node = previous ? node.PreviousNode : node.NextNode;
+            return node as XElement;
+        }
+
+        static bool IsTextParagraph(XElement? sibling) =>
+            sibling is not null
+            && sibling.Name.LocalName.Equals("p", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(sibling.Value);
+
+        return IsTextParagraph(AdjacentElement(element.PreviousNode, previous: true))
+            && IsTextParagraph(AdjacentElement(element.NextNode, previous: false));
     }
 
     private void AppendFlowText(string value, FlowContext ctx)

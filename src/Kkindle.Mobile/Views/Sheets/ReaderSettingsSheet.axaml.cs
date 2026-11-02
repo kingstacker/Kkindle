@@ -34,6 +34,10 @@ public partial class ReaderSettingsSheet : UserControl
         PaperWhite.Classes.Set("on", current.ReaderTheme == ReaderTheme.Classic);
         PaperBeige.Classes.Set("on", current.ReaderTheme == ReaderTheme.Beige);
         PaperInk.Classes.Set("on", current.ReaderTheme == ReaderTheme.Ink);
+        AnimationNone.Classes.Set("on", current.ReaderPageAnimation == MobilePageAnimation.None);
+        AnimationFade.Classes.Set("on", current.ReaderPageAnimation == MobilePageAnimation.Fade);
+        AnimationSlide.Classes.Set("on", current.ReaderPageAnimation == MobilePageAnimation.Slide);
+        AnimationWave.Classes.Set("on", current.ReaderPageAnimation == MobilePageAnimation.Wave);
         ZoomPage.Classes.Set("on", current.PdfZoom <= 1);
         ZoomMedium.Classes.Set("on", current.PdfZoom is > 1 and < 2);
         ZoomLarge.Classes.Set("on", current.PdfZoom >= 2);
@@ -82,6 +86,18 @@ public partial class ReaderSettingsSheet : UserControl
             _ => 1d
         };
         Change(value => value with { PdfZoom = zoom });
+    }
+
+    private void OnAnimationClick(object? sender, RoutedEventArgs e)
+    {
+        var animation = sender switch
+        {
+            Button { Name: nameof(AnimationNone) } => MobilePageAnimation.None,
+            Button { Name: nameof(AnimationSlide) } => MobilePageAnimation.Slide,
+            Button { Name: nameof(AnimationWave) } => MobilePageAnimation.Wave,
+            _ => MobilePageAnimation.Fade
+        };
+        Change(value => value with { ReaderPageAnimation = animation });
     }
 
     private void OnLineClick(object? sender, RoutedEventArgs e)

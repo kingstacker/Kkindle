@@ -26,9 +26,9 @@ work_root="$(mktemp -d)"
 trap 'rm -rf "$work_root"' EXIT
 
 echo "Downloading libusb $libusb_version and libmtp $libmtp_version"
-curl -fsSL -o "$work_root/libusb.tar.bz2" \
+curl -fsSL --retry 3 --retry-delay 5 -o "$work_root/libusb.tar.bz2" \
   "https://github.com/libusb/libusb/releases/download/v$libusb_version/libusb-$libusb_version.tar.bz2"
-curl -fsSL -o "$work_root/libmtp.tar.gz" \
+curl -fsSL --retry 3 --retry-delay 5 -o "$work_root/libmtp.tar.gz" \
   "https://downloads.sourceforge.net/project/libmtp/libmtp/$libmtp_version/libmtp-$libmtp_version.tar.gz"
 
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"

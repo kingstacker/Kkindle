@@ -65,24 +65,11 @@ its key inside the app sandbox, and `IOSFileImportSource` copies documents
 picked through the system picker into the cache. `IOSGlassTabBar` supplies the
 native bar described below.
 
-On iOS the shared shell switches to a Liquid Glass theme: translucent tokens and
-an ambient gradient with blurred colour fields behind every page. The three
-colour fields drift and breathe on their own slow cycles. `MobileApp.UseLiquidGlass()`
-copies the glass values into the application's own resources (they outrank the
-merged flat tokens), then loads `Styles/MobileLiquidGlassTheme.axaml`. Android
-never loads either file.
-
-The tab bar itself uses the **real system material on iOS 26**: `IOSGlassTabBar`
-puts a native `UIVisualEffectView` with `UIGlassEffect` on the window above
-Avalonia's view, with UIKit buttons inside it. The shell keeps its own bar
-transparent so the grid still reserves the same space; taps on the native bar
-call back into the shell and the two stay in sync. On iOS 15–25, where
-`UIGlassEffect` does not exist, the Avalonia bar remains visible with its
-frosted capsule, drifting highlight sweep and press feedback.
-
-`TransformAnimator` registers the matrix interpolator that Avalonia 12 leaves
-out, so keyframes can animate `RenderTransform` at all (used by the fallback
-backdrop).
+On iOS 26 `IOSGlassTabBar` hosts a native `UITabBar`, so UIKit controls its
+Liquid Glass material, selection, and accessibility. The shared shell reserves
+space for it and hides it while a page or bottom sheet is open. Content uses a
+neutral background and the system UI font; book text keeps its reader font.
+On iOS 15–25 the shared Avalonia tab bar is used.
 
 Intel Macs can only run Xcode 26, while the current .NET iOS workload targets
 Xcode 27. The head therefore pins `ValidateXcodeVersion=false` and
@@ -97,9 +84,8 @@ xcrun simctl install booted src/Kkindle.Mobile.iOS/bin/Debug/net10.0-ios/iossimu
 xcrun simctl launch booted com.kingstacker.kkindle
 ```
 
-iOS has no TTS adapter or system-bar tinting yet; both are optional in
-`MobileServices`, so those features stay hidden while the rest of the shell
-works.
+iOS has no TTS adapter or system-bar tinting yet. The reader hides its listening
+button when a host has no TTS engine and player.
 
 ## What is wired up
 

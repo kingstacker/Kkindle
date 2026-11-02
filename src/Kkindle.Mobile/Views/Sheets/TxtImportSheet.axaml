@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kkindle.Mobile.Views.Sheets.TxtImportSheet">
+  <Grid RowDefinitions="*,Auto" Margin="20,4,20,20">
+    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" MaxHeight="470">
+      <StackPanel Spacing="8">
+        <TextBlock Name="FileText" Classes="secondary" TextWrapping="Wrap" />
+        <TextBlock Classes="label" Text="文件编码" Margin="0,8,0,0" />
+        <ComboBox Name="EncodingBox" HorizontalAlignment="Stretch" SelectionChanged="OnRulesChanged" />
+        <TextBlock Classes="label" Text="章节识别" Margin="0,8,0,0" />
+        <ComboBox Name="RuleBox" HorizontalAlignment="Stretch" SelectionChanged="OnRulesChanged" />
+        <TextBox Name="PatternBox" Classes="field" PlaceholderText="章节标题正则表达式"
+                 IsVisible="False" TextChanged="OnPatternChanged" />
+        <CheckBox Name="VolumesBox" Content="识别分卷" IsChecked="True"
+                  IsCheckedChanged="OnRulesChanged" />
+        <TextBlock Classes="label" Text="目录预览" Margin="0,8,0,0" />
+        <TextBlock Name="StatusText" Classes="muted" TextWrapping="Wrap" />
+        <ItemsControl Name="PreviewItems">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,3" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Grid ColumnDefinitions="*,*">
+          <Button Name="PreviousButton" Content="上一页" Click="OnPreviousClick" />
+          <Button Grid.Column="1" Name="NextButton" Content="下一页" Click="OnNextClick" />
+        </Grid>
+      </StackPanel>
+    </ScrollViewer>
+    <Button Grid.Row="1" Name="ImportButton" Classes="primary" Content="确认导入"
+            Margin="0,12,0,0" Click="OnImportClick" IsEnabled="False" />
+  </Grid>
+</UserControl>
