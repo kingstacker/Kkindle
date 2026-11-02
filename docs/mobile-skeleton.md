@@ -1,19 +1,20 @@
-# Mobile app (Android)
+# Mobile app (Android + iOS)
 
 The mobile head is a separate solution so the desktop release pipeline keeps
-building and testing without an Android workload installed.
+building and testing without the mobile workloads installed.
 
 ```
 Kkindle.sln                 desktop only: Core / Infrastructure / Application / App / Desktop heads
-Kkindle.Mobile.sln          mobile: Kkindle.Mobile + Kkindle.Mobile.Android + Kkindle.Mobile.Desktop
+Kkindle.Mobile.sln          mobile: Kkindle.Mobile + Kkindle.Mobile.Android + Kkindle.Mobile.iOS + Kkindle.Mobile.Desktop
 ```
 
 ## Projects
 
 | Project | TFM | Purpose |
 | --- | --- | --- |
-| `src/Kkindle.Mobile` | `net10.0` | Platform-neutral single-view shell, pages and mobile styles. No Android APIs. |
+| `src/Kkindle.Mobile` | `net10.0` | Platform-neutral single-view shell, pages and mobile styles. No Android/iOS APIs. |
 | `src/Kkindle.Mobile.Android` | `net10.0-android36.0` | Android head: `AvaloniaMainActivity`, private data root, secret storage, document-provider import. |
+| `src/Kkindle.Mobile.iOS` | `net10.0-ios` | iOS head: `AvaloniaAppDelegate`, sandbox data root, secret storage, document picker. |
 | `src/Kkindle.Mobile.Desktop` | `net10.0` | Dev-only preview harness that shows the phone shell in an 411x880 window. |
 
 `Kkindle.Mobile` references Core, Application, Infrastructure and Layout, so the
@@ -32,6 +33,12 @@ Captured on the `Kkindle_Pixel` emulator:
 | --- | --- |
 | ![阅读资料](images/mobile/阅读资料.png) | ![我的](images/mobile/我的.png) |
 
+Captured on the iPhone 17 Pro simulator (iOS 26.5, Liquid Glass theme):
+
+| 书库 |
+| --- |
+| ![书库](images/mobile/ios-书库.png) |
+
 ## Design system
 
 The phone UI is quiet and neutral: hierarchy comes from spacing, the system sans
@@ -49,6 +56,50 @@ small pill or a raised segment. Book covers keep their own color unless 我的 �
   and `ReaderPalette`; the desktop theme picker does not offer it yet.
 - `MobilePreferencesStore` holds phone-only choices in
   `mobile-preferences.json`; library data stays in the database.
+
+## iOS head
+
+`Kkindle.Mobile.iOS` mirrors the Android head: `Main` publishes `MobileServices`
+before UIKit starts, `AppDelegate` hosts `MobileApp`, `IOSSecretProtector` keeps
+its key inside the app sandbox, and `IOSFileImportSource` copies documents
+picked through the system picker into the cache. `IOSGlassTabBar` supplies the
+native bar described below.
+
+On iOS the shared shell switches to a Liquid Glass theme: translucent tokens and
+an ambient gradient with blurred colour fields behind every page. The three
+colour fields drift and breathe on their own slow cycles. `MobileApp.UseLiquidGlass()`
+copies the glass values into the application's own resources (they outrank the
+merged flat tokens), then loads `Styles/MobileLiquidGlassTheme.axaml`. Android
+never loads either file.
+
+The tab bar itself uses the **real system material on iOS 26**: `IOSGlassTabBar`
+puts a native `UIVisualEffectView` with `UIGlassEffect` on the window above
+Avalonia's view, with UIKit buttons inside it. The shell keeps its own bar
+transparent so the grid still reserves the same space; taps on the native bar
+call back into the shell and the two stay in sync. On iOS 15–25, where
+`UIGlassEffect` does not exist, the Avalonia bar remains visible with its
+frosted capsule, drifting highlight sweep and press feedback.
+
+`TransformAnimator` registers the matrix interpolator that Avalonia 12 leaves
+out, so keyframes can animate `RenderTransform` at all (used by the fallback
+backdrop).
+
+Intel Macs can only run Xcode 26, while the current .NET iOS workload targets
+Xcode 27. The head therefore pins `ValidateXcodeVersion=false` and
+`MtouchLink=SdkOnly`, which keeps the app building without iOS 27-only APIs.
+
+```
+dotnet build src/Kkindle.Mobile.iOS/Kkindle.Mobile.iOS.csproj -c Debug \
+  -f net10.0-ios -p:RuntimeIdentifier=iossimulator-x64
+xcrun simctl boot "iPhone 17 Pro"
+open /Applications/Xcode.app/Contents/Developer/Applications/Simulator.app
+xcrun simctl install booted src/Kkindle.Mobile.iOS/bin/Debug/net10.0-ios/iossimulator-x64/Kkindle.Mobile.iOS.app
+xcrun simctl launch booted com.kingstacker.kkindle
+```
+
+iOS has no TTS adapter or system-bar tinting yet; both are optional in
+`MobileServices`, so those features stay hidden while the rest of the shell
+works.
 
 ## What is wired up
 

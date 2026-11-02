@@ -40,6 +40,10 @@ public interface ISystemBarAppearance
 /// <param name="SystemBars">Absent on hosts without system bars.</param>
 /// <param name="CreateTtsEngine">Speech for reading aloud; absent where none exists.</param>
 /// <param name="CreateTtsPlayer">Audio output paired with <paramref name="CreateTtsEngine"/>.</param>
+/// <param name="TabBar">
+/// Native tab bar for hosts that can draw a better one than Avalonia (iOS 26
+/// Liquid Glass). The shell keeps its own bar as an invisible layout spacer.
+/// </param>
 public sealed record MobileServices(
     AppPaths Paths,
     ISecretProtector SecretProtector,
@@ -48,7 +52,8 @@ public sealed record MobileServices(
     IFileImportSource ImportSource,
     ISystemBarAppearance? SystemBars = null,
     Func<ITtsEngine>? CreateTtsEngine = null,
-    Func<ITtsAudioPlayer>? CreateTtsPlayer = null);
+    Func<ITtsAudioPlayer>? CreateTtsPlayer = null,
+    IMobileTabBar? TabBar = null);
 
 /// <summary>Fallback for hosts without a document picker (designer, preview).</summary>
 public sealed class NoFileImportSource : IFileImportSource

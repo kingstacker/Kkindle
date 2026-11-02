@@ -1,0 +1,153 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- iOS 26 Liquid Glass chrome. Avalonia has no system glass material, so
+       the shell approximates it: an ambient gradient with blurred colour
+       fields, frosted surfaces and a floating, edge-lit tab capsule. -->
+
+  <Style Selector="Grid#GlassBackdrop">
+    <Setter Property="IsVisible" Value="True" />
+    <!-- Bleed under the status bar and home indicator: the shell's content is
+         inset by the safe area, but glass needs to reach the screen edges. -->
+    <Setter Property="Margin" Value="0,-120,0,-80" />
+  </Style>
+
+  <!-- Slow ambient motion. Liquid Glass is a live material: the colour fields
+       behind it never sit still, so the translucent chrome keeps shifting.
+       Each blob runs on its own cycle to avoid a visible loop. -->
+  <Style Selector="Ellipse#GlassBlobBlue">
+    <Style.Animations>
+      <Animation Duration="0:0:19" IterationCount="Infinite"
+                 PlaybackDirection="Alternate" Easing="SineEaseInOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="RenderTransform" Value="translate(-30px,-20px) scale(0.92)" />
+          <Setter Property="Opacity" Value="0.8" />
+        </KeyFrame>
+        <KeyFrame Cue="55%">
+          <Setter Property="RenderTransform" Value="translate(70px,60px) scale(1.22)" />
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="RenderTransform" Value="translate(20px,110px) scale(0.98)" />
+          <Setter Property="Opacity" Value="0.85" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <Style Selector="Ellipse#GlassBlobPink">
+    <Style.Animations>
+      <Animation Duration="0:0:24" IterationCount="Infinite"
+                 PlaybackDirection="Alternate" Easing="SineEaseInOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="RenderTransform" Value="translate(20px,30px) scale(1)" />
+          <Setter Property="Opacity" Value="0.78" />
+        </KeyFrame>
+        <KeyFrame Cue="45%">
+          <Setter Property="RenderTransform" Value="translate(-80px,-70px) scale(1.18)" />
+          <Setter Property="Opacity" Value="0.95" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="RenderTransform" Value="translate(-30px,-130px) scale(0.9)" />
+          <Setter Property="Opacity" Value="0.75" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <Style Selector="Ellipse#GlassBlobMint">
+    <Style.Animations>
+      <Animation Duration="0:0:16" IterationCount="Infinite"
+                 PlaybackDirection="Alternate" Easing="SineEaseInOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="RenderTransform" Value="translate(-60px,-40px) scale(1.05)" />
+          <Setter Property="Opacity" Value="0.7" />
+        </KeyFrame>
+        <KeyFrame Cue="50%">
+          <Setter Property="RenderTransform" Value="translate(50px,-90px) scale(0.88)" />
+          <Setter Property="Opacity" Value="0.95" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="RenderTransform" Value="translate(90px,40px) scale(1.15)" />
+          <Setter Property="Opacity" Value="0.72" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <!-- A soft highlight drifts across the tab capsule, then rests, so the bar
+       reads as a lit piece of glass rather than a flat white pill. -->
+  <Style Selector="Rectangle#GlassSheen">
+    <Style.Animations>
+      <Animation Duration="0:0:11" IterationCount="Infinite" Easing="CubicEaseInOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="RenderTransform" Value="translate(-160px,0px)" />
+          <Setter Property="Opacity" Value="0" />
+        </KeyFrame>
+        <KeyFrame Cue="12%">
+          <Setter Property="Opacity" Value="0.5" />
+        </KeyFrame>
+        <KeyFrame Cue="46%">
+          <Setter Property="RenderTransform" Value="translate(460px,0px)" />
+          <Setter Property="Opacity" Value="0.5" />
+        </KeyFrame>
+        <KeyFrame Cue="58%">
+          <Setter Property="Opacity" Value="0" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="RenderTransform" Value="translate(460px,0px)" />
+          <Setter Property="Opacity" Value="0" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <!-- Paint the safe-area bands with the same ambient gradient instead of the
+       native white window behind them. -->
+  <Style Selector="TopLevel">
+    <Setter Property="Background" Value="{DynamicResource GlassBackdropBrush}" />
+  </Style>
+
+  <Style Selector="Border.glassbar">
+    <Setter Property="Margin" Value="12,6,12,8" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="CornerRadius" Value="28" />
+    <Setter Property="Background" Value="{DynamicResource GlassBarBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GlassEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GlassBarShadow}" />
+  </Style>
+
+  <!-- The selected tab sits in its own small glass pill. Pressing a tab makes
+       it give slightly, the way the system glass controls do. -->
+  <Style Selector="Button.tab">
+    <Setter Property="CornerRadius" Value="24" />
+    <Setter Property="Padding" Value="0,9" />
+    <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.14" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.tab:pressed">
+    <Setter Property="RenderTransform" Value="scale(0.93)" />
+  </Style>
+  <Style Selector="Button.tab.active /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GlassChipBrush}" />
+    <Setter Property="CornerRadius" Value="24" />
+  </Style>
+
+  <!-- Raised surfaces pick up the same lit edge as the tab capsule. -->
+  <Style Selector="Border.floating">
+    <Setter Property="BorderBrush" Value="{DynamicResource GlassEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="ContentControl#SheetPanel">
+    <Setter Property="BorderBrush" Value="{DynamicResource GlassEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1,1,1,0" />
+  </Style>
+  <Style Selector="Border.segments">
+    <Setter Property="BorderBrush" Value="{DynamicResource GlassEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+</Styles>

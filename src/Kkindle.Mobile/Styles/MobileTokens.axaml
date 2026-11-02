@@ -30,6 +30,15 @@
       <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#E6E6E6" />
       <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
+      <!-- Liquid Glass placeholders; the iOS head replaces them at startup. -->
+      <SolidColorBrush x:Key="GlassBackdropBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBlobBlueBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBlobPinkBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBlobMintBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBarBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassChipBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassEdgeBrush" Color="Transparent" />
+      <BoxShadows x:Key="GlassBarShadow">0 0 0 0 #00000000</BoxShadows>
     </ResourceDictionary>
 
     <ResourceDictionary x:Key="Dark">
@@ -59,6 +68,15 @@
       <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#333333" />
       <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#8C8C8C" />
+      <!-- Liquid Glass placeholders; the iOS head replaces them at startup. -->
+      <SolidColorBrush x:Key="GlassBackdropBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBlobBlueBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBlobPinkBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBlobMintBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassBarBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassChipBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="GlassEdgeBrush" Color="Transparent" />
+      <BoxShadows x:Key="GlassBarShadow">0 0 0 0 #00000000</BoxShadows>
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

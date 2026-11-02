@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- iOS head: owns the app delegate and platform adapters, contains no UI.
+         Everything shared lives in Kkindle.Mobile / ApplicationModules. -->
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Kkindle.iOSHead</RootNamespace>
+    <AssemblyName>Kkindle.Mobile.iOS</AssemblyName>
+    <ApplicationId>com.kingstacker.kkindle</ApplicationId>
+    <ApplicationTitle>Kkindle</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.1.3</ApplicationDisplayVersion>
+    <!-- Intel Macs are capped at Xcode 26, while the current .NET iOS
+         workload targets Xcode 27.1. Skip its version gate and link only SDK
+         assemblies: the shared UI calls no iOS 27-only API. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+    <MtouchLink>SdkOnly</MtouchLink>
+    <RuntimeIdentifiers>iossimulator-x64;iossimulator-arm64;ios-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kkindle.Mobile\Kkindle.Mobile.csproj" />
+    <PackageReference Include="Avalonia.iOS" Version="12.1.1" />
+    <!-- Local embeddings back the desktop AI features. The managed assembly is
+         referenced by Kkindle.Infrastructure, so its native framework must be
+         linked here even though the phone app does not expose AI yet. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" ExcludeAssets="native" />
+    <!-- PDFium matches the Android head so PDF reading and text selection work
+         on both platforms. -->
+    <PackageReference Include="bblanchon.PDFium.iOS" Version="152.0.7961" />
+  </ItemGroup>
+</Project>

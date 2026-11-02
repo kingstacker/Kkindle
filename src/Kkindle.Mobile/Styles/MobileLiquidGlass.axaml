@@ -1,0 +1,95 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- iOS 26 Liquid Glass tokens. Pages paint PageBackgroundBrush themselves,
+       so it stays transparent here: the shell's backdrop supplies the colour
+       and every surface floats above it with translucency plus a lit edge. -->
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="PageBackgroundBrush" Color="Transparent" />
+      <LinearGradientBrush x:Key="GlassBackdropBrush" StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Offset="0" Color="#E9F1FF" />
+        <GradientStop Offset="0.48" Color="#F3F6FF" />
+        <GradientStop Offset="1" Color="#FDF0F6" />
+      </LinearGradientBrush>
+      <SolidColorBrush x:Key="GlassBlobBlueBrush" Color="#668CB7FF" />
+      <SolidColorBrush x:Key="GlassBlobPinkBrush" Color="#66FF9ED2" />
+      <SolidColorBrush x:Key="GlassBlobMintBrush" Color="#66A5EED6" />
+
+      <SolidColorBrush x:Key="SurfaceBrush" Color="#B8FFFFFF" />
+      <SolidColorBrush x:Key="SunkBrush" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="SunkStrongBrush" Color="#59FFFFFF" />
+      <SolidColorBrush x:Key="SegmentOnBrush" Color="#E6FFFFFF" />
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1C1C1C" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#5E5E5E" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#767676" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="#9A9A9A" />
+      <SolidColorBrush x:Key="DividerBrush" Color="#26000000" />
+      <SolidColorBrush x:Key="ScrimBrush" Color="#33000000" />
+      <BoxShadows x:Key="CoverShadow">0 6 20 0 #26000000</BoxShadows>
+      <BoxShadows x:Key="CardShadow">0 16 44 0 #1F000000</BoxShadows>
+      <BoxShadows x:Key="SegmentShadow">0 2 8 0 #1F000000</BoxShadows>
+
+      <SolidColorBrush x:Key="GlassBarBrush" Color="#A6FFFFFF" />
+      <SolidColorBrush x:Key="GlassChipBrush" Color="#D9FFFFFF" />
+      <SolidColorBrush x:Key="GlassEdgeBrush" Color="#99FFFFFF" />
+      <BoxShadows x:Key="GlassBarShadow">inset 0 1 0 0 #B3FFFFFF, 0 10 30 0 #1F000000</BoxShadows>
+
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#66FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#66FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#4DFFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="#66FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="PageBackgroundBrush" Color="Transparent" />
+      <LinearGradientBrush x:Key="GlassBackdropBrush" StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Offset="0" Color="#0A1020" />
+        <GradientStop Offset="0.5" Color="#0D1626" />
+        <GradientStop Offset="1" Color="#191021" />
+      </LinearGradientBrush>
+      <SolidColorBrush x:Key="GlassBlobBlueBrush" Color="#66507BFF" />
+      <SolidColorBrush x:Key="GlassBlobPinkBrush" Color="#66FF5FA2" />
+      <SolidColorBrush x:Key="GlassBlobMintBrush" Color="#6638D6B0" />
+
+      <SolidColorBrush x:Key="SurfaceBrush" Color="#26FFFFFF" />
+      <SolidColorBrush x:Key="SunkBrush" Color="#1FFFFFFF" />
+      <SolidColorBrush x:Key="SunkStrongBrush" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="SegmentOnBrush" Color="#40FFFFFF" />
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F2F7" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#C7C7CC" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#9A9AA3" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="#6E6E76" />
+      <SolidColorBrush x:Key="DividerBrush" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="ScrimBrush" Color="#66000000" />
+      <BoxShadows x:Key="CoverShadow">0 0 0 0 #00000000</BoxShadows>
+      <BoxShadows x:Key="CardShadow">0 16 44 0 #66000000</BoxShadows>
+      <BoxShadows x:Key="SegmentShadow">0 0 0 0 #00000000</BoxShadows>
+
+      <SolidColorBrush x:Key="GlassBarBrush" Color="#1FFFFFFF" />
+      <SolidColorBrush x:Key="GlassChipBrush" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="GlassEdgeBrush" Color="#38FFFFFF" />
+      <BoxShadows x:Key="GlassBarShadow">inset 0 1 0 0 #26FFFFFF, 0 10 30 0 #80000000</BoxShadows>
+
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#121212" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#121212" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#121212" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#4DFFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#C7C7CC" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#4DFFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#C7C7CC" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#4DFFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="#4DFFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#C7C7CC" />
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

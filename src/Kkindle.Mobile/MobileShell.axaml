@@ -44,38 +44,83 @@
   </UserControl.Styles>
 
   <Grid RowDefinitions="*,Auto">
+    <!-- iPhone-only backdrop for the Liquid Glass theme. Hidden elsewhere, so
+         Android keeps its flat white/dark pages. -->
+    <Grid Grid.RowSpan="2" Name="GlassBackdrop"
+          IsHitTestVisible="False" ClipToBounds="True">
+      <Rectangle Fill="{DynamicResource GlassBackdropBrush}" />
+      <Ellipse Name="GlassBlobBlue" Width="380" Height="380" Fill="{DynamicResource GlassBlobBlueBrush}"
+               HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-140,-160,0,0"
+               RenderTransformOrigin="50%,50%">
+        <Ellipse.Effect>
+          <BlurEffect Radius="90" />
+        </Ellipse.Effect>
+      </Ellipse>
+      <Ellipse Name="GlassBlobPink" Width="320" Height="320" Fill="{DynamicResource GlassBlobPinkBrush}"
+               HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-120,120"
+               RenderTransformOrigin="50%,50%">
+        <Ellipse.Effect>
+          <BlurEffect Radius="90" />
+        </Ellipse.Effect>
+      </Ellipse>
+      <Ellipse Name="GlassBlobMint" Width="260" Height="260" Fill="{DynamicResource GlassBlobMintBrush}"
+               HorizontalAlignment="Center" VerticalAlignment="Center"
+               RenderTransformOrigin="50%,50%">
+        <Ellipse.Effect>
+          <BlurEffect Radius="80" />
+        </Ellipse.Effect>
+      </Ellipse>
+    </Grid>
+
     <ContentControl Grid.Row="0" Name="PageHost" />
 
-    <Grid Grid.Row="1" Name="TabBar" ColumnDefinitions="*,*,*,*" Margin="0,2,0,2">
-      <Button Grid.Column="0" Name="LibraryTab" Classes="tab" Click="OnLibraryTabClick">
-        <StackPanel Spacing="3">
-          <c:LineIcon Data="{StaticResource IconBook}" Size="23" StrokeThickness="1.4"
-                      HorizontalAlignment="Center" />
-          <TextBlock Text="书库" FontSize="11" HorizontalAlignment="Center" />
-        </StackPanel>
-      </Button>
-      <Button Grid.Column="1" Name="MaterialsTab" Classes="tab" Click="OnMaterialsTabClick">
-        <StackPanel Spacing="3">
-          <c:LineIcon Data="{StaticResource IconNotes}" Size="23" StrokeThickness="1.4"
-                      HorizontalAlignment="Center" />
-          <TextBlock Text="阅读资料" FontSize="11" HorizontalAlignment="Center" />
-        </StackPanel>
-      </Button>
-      <Button Grid.Column="2" Name="ReadingDataTab" Classes="tab" Click="OnReadingDataTabClick">
-        <StackPanel Spacing="3">
-          <c:LineIcon Data="{StaticResource IconChart}" Size="23" StrokeThickness="1.4"
-                      HorizontalAlignment="Center" />
-          <TextBlock Text="阅读数据" FontSize="11" HorizontalAlignment="Center" />
-        </StackPanel>
-      </Button>
-      <Button Grid.Column="3" Name="ProfileTab" Classes="tab" Click="OnProfileTabClick">
-        <StackPanel Spacing="3">
-          <c:LineIcon Data="{StaticResource IconPerson}" Size="23" StrokeThickness="1.4"
-                      HorizontalAlignment="Center" />
-          <TextBlock Text="我的" FontSize="11" HorizontalAlignment="Center" />
-        </StackPanel>
-      </Button>
-    </Grid>
+    <Border Grid.Row="1" Name="TabBarGlass" Classes="glassbar" ClipToBounds="True">
+      <Panel>
+        <Grid Name="TabBar" ColumnDefinitions="*,*,*,*" Margin="0,2,0,2">
+          <Button Grid.Column="0" Name="LibraryTab" Classes="tab" Click="OnLibraryTabClick">
+            <StackPanel Spacing="3">
+              <c:LineIcon Data="{StaticResource IconBook}" Size="23" StrokeThickness="1.4"
+                          HorizontalAlignment="Center" />
+              <TextBlock Text="书库" FontSize="11" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button Grid.Column="1" Name="MaterialsTab" Classes="tab" Click="OnMaterialsTabClick">
+            <StackPanel Spacing="3">
+              <c:LineIcon Data="{StaticResource IconNotes}" Size="23" StrokeThickness="1.4"
+                          HorizontalAlignment="Center" />
+              <TextBlock Text="阅读资料" FontSize="11" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button Grid.Column="2" Name="ReadingDataTab" Classes="tab" Click="OnReadingDataTabClick">
+            <StackPanel Spacing="3">
+              <c:LineIcon Data="{StaticResource IconChart}" Size="23" StrokeThickness="1.4"
+                          HorizontalAlignment="Center" />
+              <TextBlock Text="阅读数据" FontSize="11" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button Grid.Column="3" Name="ProfileTab" Classes="tab" Click="OnProfileTabClick">
+            <StackPanel Spacing="3">
+              <c:LineIcon Data="{StaticResource IconPerson}" Size="23" StrokeThickness="1.4"
+                          HorizontalAlignment="Center" />
+              <TextBlock Text="我的" FontSize="11" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </Grid>
+
+        <!-- Slow specular sweep across the capsule. -->
+        <Rectangle Name="GlassSheen" Width="120" HorizontalAlignment="Left"
+                   VerticalAlignment="Stretch" IsHitTestVisible="False"
+                   RenderTransformOrigin="50%,50%">
+          <Rectangle.Fill>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+              <GradientStop Offset="0" Color="#00FFFFFF" />
+              <GradientStop Offset="0.5" Color="#4DFFFFFF" />
+              <GradientStop Offset="1" Color="#00FFFFFF" />
+            </LinearGradientBrush>
+          </Rectangle.Fill>
+        </Rectangle>
+      </Panel>
+    </Border>
 
     <!-- Bottom sheet. Its theme scope follows the page that opened it, so reader
          controls on black paper are not shown in the app's light theme. -->

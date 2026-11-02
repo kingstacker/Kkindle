@@ -72,6 +72,14 @@ public partial class MobileShell : UserControl
         Covers = new CoverCache(modules.Paths);
         Sync = new MobileSync(modules);
         InitializeComponent();
+        if (_services.TabBar is { } tabBar)
+        {
+            // The platform bar is the visible one. This one only keeps the grid
+            // row that reserves its space.
+            tabBar.TabSelected += OnNativeTabSelected;
+            TabBarGlass.Opacity = 0;
+            TabBarGlass.IsHitTestVisible = false;
+        }
         ActualThemeVariantChanged += (_, _) => SyncSystemBars();
         ApplyThemeMode();
         ShowLibrary();
@@ -316,8 +324,12 @@ public partial class MobileShell : UserControl
         page.Classes.Remove("page-enter");
         page.Classes.Add("page-enter");
         PageHost.Content = page;
-        // Pushed pages (book detail, reader) own the full screen.
-        TabBar.IsVisible = _history.Count == 1;
+        // Pushed pages (book detail, reader) own the full screen; the glass
+        // capsule around the tab bar must disappear with it.
+        var showTabs = _history.Count == 1;
+        TabBar.IsVisible = showTabs;
+        TabBarGlass.IsVisible = showTabs;
+        _services.TabBar?.Update(showTabs, (int)tab);
         LibraryTab.Classes.Set("active", tab == ShellTab.Library);
         MaterialsTab.Classes.Set("active", tab == ShellTab.Materials);
         ReadingDataTab.Classes.Set("active", tab == ShellTab.ReadingData);
@@ -338,6 +350,17 @@ public partial class MobileShell : UserControl
         if (TopLevel.GetTopLevel(this)?.InsetsManager is { } insets)
             insets.SystemBarColor = background;
         _services.SystemBars?.SetIconsForBackground(dark);
+    }
+
+    private void OnNativeTabSelected(int index)
+    {
+        switch ((ShellTab)index)
+        {
+            case ShellTab.Materials: ShowMaterials(); break;
+            case ShellTab.ReadingData: ShowReadingData(); break;
+            case ShellTab.Profile: ShowProfile(); break;
+            default: ShowLibrary(); break;
+        }
     }
 
     private void OnLibraryTabClick(object? sender, RoutedEventArgs e) => ShowLibrary();
