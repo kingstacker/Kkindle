@@ -110,6 +110,24 @@ public sealed class BackgroundTaskCenterService
         return true;
     }
 
+    /// <summary>Removes finished history without affecting queued or running work.</summary>
+    public async Task<int> ClearCompletedAsync()
+    {
+        Guid[] removed;
+        lock (_sync)
+        {
+            removed = _tasks.Values
+                .Where(task => task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued))
+                .Select(task => task.Id)
+                .ToArray();
+            foreach (var id in removed) _tasks.Remove(id);
+        }
+        if (removed.Length == 0) return 0;
+        RaiseChanged(removed[0]);
+        await PersistBestEffortAsync().ConfigureAwait(false);
+        return removed.Length;
+    }
+
     /// <summary>Retries a failed or cancelled task from this process only.</summary>
     public BackgroundTaskHandle? Retry(Guid id, CancellationToken cancellationToken = default)
     {

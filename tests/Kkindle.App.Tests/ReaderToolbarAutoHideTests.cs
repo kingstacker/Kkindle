@@ -255,6 +255,9 @@ public sealed class ReaderToolbarAutoHideTests(SettingsUiSession session)
         await WaitForToolbars(scope, visible: false);
         scope.Call("ToggleReaderZenMode");
         Assert.True(scope.Field<bool>("_readerZenMode"));
+        Assert.Equal(WindowState.FullScreen, scope.Window.WindowState);
+        if (OperatingSystem.IsMacOS())
+            Assert.Equal(WindowDecorations.Full, scope.Window.WindowDecorations);
         Assert.False(scope.Field<bool>("_readerToolbarAutoHideEnabled"));
         Assert.False(scope.Get<Border>("ReaderHeaderBar").IsVisible);
         Assert.False(scope.Get<Border>("ReaderFooterBar").IsVisible);

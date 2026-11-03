@@ -179,6 +179,8 @@ cat > "$app_root/Contents/Info.plist" <<EOF
   <key>CFBundleIdentifier</key><string>io.github.kingstacker.kkindle</string>
   <key>CFBundleIconFile</key><string>Kkindle.icns</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
   <key>CFBundleName</key><string>Kkindle</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$short_version</string>

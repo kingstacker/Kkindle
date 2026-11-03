@@ -252,7 +252,7 @@ internal sealed class BookReflectionEditorWindow : Window
         {
             BorderBrush = AppAppearanceResources.GetBrush("InkBrush"),
             BorderThickness = new Thickness(0),
-            Padding = new Thickness(1),
+            Padding = new Thickness(MacTrafficLights.IsSupported ? 0 : 1),
             Background = Background,
             Child = frame
         };
@@ -260,6 +260,7 @@ internal sealed class BookReflectionEditorWindow : Window
         var frameOutline = new PhysicalWindowOutline
         {
             IsHitTestVisible = false,
+            IsVisible = !MacTrafficLights.IsSupported,
             ZIndex = 20
         };
         Content = new Grid

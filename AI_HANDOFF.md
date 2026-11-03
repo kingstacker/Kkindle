@@ -78,9 +78,13 @@
 - 最近一份有记录的快速回归是 2026-10-17：`Kkindle.Tests` 899、`Kkindle.App.Tests` 13、`Kkindle.Platform.Common.Tests` 12、`Kkindle.Tests.Windows` 43。该结果早于当前 `HEAD`，不能作为当前提交的绿色结论。
 - 完整 UI 回归会明显更慢，且会启动大量 Avalonia 测试宿主。优先按项目拆分运行并保留 `.trx`，不要用超时命令掩盖挂起。
 
-## Windows Debug 交付
+## 按目标平台构建与验证
 
-用户约定：每次修改代码后必须重新生成自包含 Windows x64 Debug 版并启动冒烟验证。
+用户约定（2026-11-03）：修改代码后，默认构建当前开发平台上与任务相关的项目；开发者明确指定目标平台时，按指定目标构建。不默认构建其他平台。根据改动运行适当测试，并说明未覆盖的平台或无法完成的验证；纯文档修改无需构建应用，除非明确要求。
+
+macOS 可使用 `dotnet build src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj -c Debug`，Linux 可使用 `dotnet build src/Kkindle.Desktop.Linux/Kkindle.Desktop.Linux.csproj -c Debug`。开发者明确要求其他产物时按其要求执行。
+
+Windows 是当前平台或指定目标时，生成并交付自包含 Windows x64 Debug 版：
 
 ```powershell
 .\.dotnet\dotnet.exe publish src\Kkindle.Desktop.Windows\Kkindle.Desktop.Windows.csproj -c Debug -p:Platform=x64 -r win-x64 --self-contained true -p:PublishSingleFile=false
@@ -98,7 +102,7 @@ src\Kkindle.Desktop.Windows\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\pu
 robocopy src\Kkindle.Desktop.Windows\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\publish artifacts\Kkindle-debug-win-x64-latest /E /XF kkindle-crash.log /XD data backups
 ```
 
-`robocopy` 退出码小于等于 7 视为成功。交付前确认目录中存在 `Kkindle.exe`、`hostfxr.dll`、`hostpolicy.dll` 和 `coreclr.dll`，再从以下入口启动：
+`robocopy` 退出码小于等于 7 视为成功。交付前确认目录中存在 `Kkindle.exe`、`hostfxr.dll`、`hostpolicy.dll` 和 `coreclr.dll`。需要且环境允许时，从以下入口启动进行冒烟验证：
 
 ```text
 artifacts\Kkindle-debug-win-x64-latest\Kkindle.exe
@@ -110,7 +114,7 @@ artifacts\Kkindle-debug-win-x64-latest\Kkindle.exe
 
 1. 修复 `System.Security.Cryptography.Pkcs 10.0.0` 的 NuGet 审计失败，并重新确认 Windows、Linux、macOS 构建。
 2. 在当前 `HEAD` 上重跑四个测试项目，分别记录快速和 `RunSlowTests=true` 的结果，更新本文测试基线。
-3. 完成 Windows Debug 自包含发布和启动冒烟；若涉及阅读器，补做真实 EPUB/PDF 打开、重排、进度恢复和主题切换。
+3. 按当前或指定平台完成 Debug 构建和适当验证；若涉及阅读器，补做真实 EPUB/PDF 打开、重排、进度恢复和主题切换。
 4. 对真实 S3/WebDAV、Kindle/Kobo USB/WPD、在线 AI、TTS 和邮件流程做集成验证；自动测试主要使用本地替身。
 5. 仍缺少高对比度主题、完整屏幕阅读器审计、Linux/macOS 实机回归、PDF OCR、超长阅读内存压力和突然断电恢复验证。
 6. 同步协议扩展后要同时验证旧客户端拒绝、未知字段往返、对象清理保护和多设备收敛，不能只测当前客户端上传下载。
@@ -121,4 +125,4 @@ artifacts\Kkindle-debug-win-x64-latest\Kkindle.exe
 2. 运行 `git status --short`，区分用户改动与本地环境文件。
 3. 从 `docs/` 中与任务对应的设计记录开始；性能、阅读位置和同步改动不要只看单个提交。
 4. 修改后先跑最接近目标的测试项目，再跑快速全量；涉及 UI、阅读器、字体或同步协议时补跑慢测试。
-5. 交付时说明验证命令、实际结果、未覆盖范围和 Debug EXE 路径，不要用历史测试数量代替当前验证。
+5. 交付时说明验证命令、实际结果、未覆盖范围和适用的 Debug 产物路径，不要用历史测试数量代替当前验证。

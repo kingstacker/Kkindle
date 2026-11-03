@@ -69,7 +69,7 @@ internal static class Program
     }
 
     public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure(() => new Kkindle.App(BuildServices()))
+        AppBuilder.Configure(() => new Kkindle.App(BuildServices()) { Name = "Kkindle" })
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace();
@@ -95,7 +95,12 @@ internal static class Program
         return new AppServices(
             SecretProtector: new MacOSSecretProtector(),
             // IOKit USB notifications refresh the device list on plug/unplug.
-            CreateDeviceChangeNotifier: _ => new MacOSDeviceChangeNotifier(),
+            CreateDeviceChangeNotifier: _ =>
+            {
+                var notifier = new MacOSDeviceChangeNotifier();
+                notifier.DeviceChanged += (_, _) => mtp.InvalidateDetectionCache();
+                return notifier;
+            },
             KindleDeviceService: new MacOSKindleDeviceService(massStorage, mtp),
             UpdateInstaller: new MacOSAppUpdateInstaller(),
             TtsEngine: ttsEngine,

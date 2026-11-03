@@ -56,6 +56,8 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.False(scope.Get<Grid>("OnboardingDevicePage").IsVisible);
         Assert.Equal("1 / 3", scope.Get<TextBlock>("OnboardingStepText").Text);
 
+        scope.Get<CheckBox>("OnboardingInstallCalibreCheckBox").IsChecked = false;
+        scope.Get<CheckBox>("OnboardingInstallTtsCheckBox").IsChecked = false;
         scope.Get<Button>("OnboardingNextButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Render();
         Assert.False(scope.Get<Grid>("OnboardingWelcomePage").IsVisible);

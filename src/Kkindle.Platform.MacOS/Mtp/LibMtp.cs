@@ -137,6 +137,15 @@ internal static class LibMtp
     internal static string ToString(IntPtr value) =>
         value == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(value) ?? string.Empty;
 
+    internal static string ToOwnedString(IntPtr value)
+    {
+        try { return ToString(value); }
+        finally
+        {
+            if (value != IntPtr.Zero) LIBMTP_FreeMemory(value);
+        }
+    }
+
     internal static IReadOnlyList<string> ReadErrorStack(IntPtr device)
     {
         if (device == IntPtr.Zero) return [];

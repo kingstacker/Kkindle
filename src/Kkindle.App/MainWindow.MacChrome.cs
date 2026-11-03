@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Layout;
 using Avalonia.Media;
 
 namespace Kkindle;
@@ -25,16 +26,12 @@ public partial class MainWindow
         ExtendClientAreaToDecorationsHint = true;
         ExtendClientAreaTitleBarHeightHint = MacTrafficLights.TitleBarHeight;
 
-        ReaderZenPopupMacControls.CloseRequested += CloseWindowButton_Click;
-        ReaderZenPopupMacControls.MinimizeRequested += MinimizeWindowButton_Click;
-        ReaderZenPopupMacControls.ZoomRequested += MaximizeWindowButton_Click;
-        ReaderZenPopupMacControls.AttachToWindow(this);
-
         SetWindowsCaptionButtonsVisible(false);
         ReaderZenPopupMinimizeButton.IsVisible = false;
         ReaderZenPopupMaximizeButton.IsVisible = false;
         ReaderZenPopupCloseButton.IsVisible = false;
-        WindowBrandText.Margin = new Thickness(MacTrafficLights.TitleContentInset, 0, 0, 0);
+        WindowBrandText.Margin = new Thickness(0);
+        WindowBrandText.HorizontalAlignment = HorizontalAlignment.Center;
 
         // The sidebar brand sits below the traffic lights on the same line as
         // the page title. Match the navigation rows' selected bounds: the brand
@@ -50,6 +47,7 @@ public partial class MainWindow
         Background = new SolidColorBrush(Colors.White);
         WindowShadowHost.BorderThickness = new Thickness(0);
         WindowFrameOverlay.BorderThickness = new Thickness(0);
+        OnboardingFrame.BorderThickness = new Thickness(0);
 
         // The native red button closes the window the dock way: keep the app
         // in the menu bar. An actual application quit must still exit.

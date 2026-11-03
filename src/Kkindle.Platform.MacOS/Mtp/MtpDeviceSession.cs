@@ -36,7 +36,9 @@ internal sealed class MtpDeviceSession : IDisposable
 
     private static void EnsureInitialized()
     {
-        if (Interlocked.Exchange(ref _initialized, 1) == 0) LibMtp.LIBMTP_Init();
+        if (Volatile.Read(ref _initialized) != 0) return;
+        LibMtp.LIBMTP_Init();
+        Volatile.Write(ref _initialized, 1);
     }
 
     private readonly IntPtr _device;
@@ -49,9 +51,9 @@ internal sealed class MtpDeviceSession : IDisposable
         _device = device;
         _rawDevice = rawDevice;
         Raw = raw;
-        Model = LibMtp.ToString(LibMtp.LIBMTP_Get_Modelname(device));
-        Manufacturer = LibMtp.ToString(LibMtp.LIBMTP_Get_Manufacturername(device));
-        SerialNumber = LibMtp.ToString(LibMtp.LIBMTP_Get_Serialnumber(device));
+        Model = LibMtp.ToOwnedString(LibMtp.LIBMTP_Get_Modelname(device));
+        Manufacturer = LibMtp.ToOwnedString(LibMtp.LIBMTP_Get_Manufacturername(device));
+        SerialNumber = LibMtp.ToOwnedString(LibMtp.LIBMTP_Get_Serialnumber(device));
         if (string.IsNullOrWhiteSpace(Model)) Model = "Kindle";
 
         if (LibMtp.LIBMTP_Get_Storage(device, 0) < 0) Throw("无法读取设备存储信息");
@@ -123,7 +125,16 @@ internal sealed class MtpDeviceSession : IDisposable
             Marshal.FreeHGlobal(native);
             throw new IOException("无法打开 MTP 设备。");
         }
-        return new MtpDeviceSession(device, native, raw);
+        try
+        {
+            return new MtpDeviceSession(device, native, raw);
+        }
+        catch
+        {
+            LibMtp.LIBMTP_Release_Device(device);
+            Marshal.FreeHGlobal(native);
+            throw;
+        }
     }
 
     public IReadOnlyList<MtpEntry> List(string relativeDirectory)

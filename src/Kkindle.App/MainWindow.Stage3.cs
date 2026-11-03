@@ -2965,6 +2965,9 @@ public partial class MainWindow
 
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "Kkindle", "device-export", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporaryDirectory);
+        // The export owns its snapshot of cards; dismiss the selection bar as
+        // soon as the confirmed transfer begins.
+        ClearDeviceBookSelection();
         var importPaths = new List<string>();
         var failed = 0;
         var calibreMissing = false;
@@ -3100,7 +3103,6 @@ public partial class MainWindow
         finally
         {
             acceptProgressUpdates = false;
-            ClearDeviceBookSelection();
             HideTaskProgressPopup();
             HideTransferToast();
             try { if (Directory.Exists(temporaryDirectory)) Directory.Delete(temporaryDirectory, recursive: true); }

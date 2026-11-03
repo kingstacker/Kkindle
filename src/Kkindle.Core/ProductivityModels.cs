@@ -47,6 +47,7 @@ public sealed record AppSettings
     public string UiLanguage { get; init; } = UiText.DetectSystemLanguage();
     public AppTheme MainTheme { get; init; } = AppTheme.Classic;
     public bool OnboardingCompleted { get; init; }
+    public bool DeferTtsInstallationUntilUse { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultDeviceModel { get; init; }
     public string PreferredOpenFormat { get; init; } = "epub";

@@ -13,6 +13,8 @@ public partial class MainWindow
     private BackgroundTaskCenterService? _backgroundTasks;
     private Flyout? _backgroundTaskFlyout;
     private StackPanel? _backgroundTaskRows;
+    private TextBlock? _backgroundTaskHeading;
+    private Button? _clearCompletedTasksButton;
     private TextBlock? _taskHistoryTooltipText;
     private DispatcherTimer? _taskHistoryAnimation;
     private readonly Avalonia.Media.RotateTransform _taskHistoryRotation = new();
@@ -293,11 +295,35 @@ public partial class MainWindow
         if (_backgroundTaskFlyout is null)
         {
             _backgroundTaskRows = new StackPanel { Spacing = 0 };
+            _backgroundTaskHeading = new TextBlock
+            {
+                FontSize = 14, FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+            };
+            _clearCompletedTasksButton = new Button
+            {
+                Classes = { "eject" }, Width = 108, Height = 30,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
+            };
+            _clearCompletedTasksButton.Click += async (_, _) => await BackgroundTasks.ClearCompletedAsync();
+            var header = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                Children = { _backgroundTaskHeading, _clearCompletedTasksButton }
+            };
+            Grid.SetColumn(_clearCompletedTasksButton, 1);
             var content = new StackPanel
             {
                 Spacing = 0,
                 Children =
                 {
+                    new Border
+                    {
+                        Padding = new Thickness(16, 9),
+                        BorderThickness = new Thickness(0, 0, 0, 1),
+                        BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
+                        Child = header
+                    },
                     new ScrollViewer { Content = _backgroundTaskRows, MaxHeight = Math.Clamp(Bounds.Height - 200, 160, 460) }
                 }
             };
@@ -308,7 +334,7 @@ public partial class MainWindow
                 FlyoutPresenterClasses = { "backgroundTaskFlyout" },
                 Content = new Border
                 {
-                    MinWidth = 240, MaxWidth = Math.Clamp(Bounds.Width - 80, 240, 560),
+                    Width = Math.Clamp(Bounds.Width - 80, 240, 480),
                     Child = content
                 }
             };
@@ -340,11 +366,20 @@ public partial class MainWindow
         if (_backgroundTaskRows is null) return;
         _backgroundTaskRows.Children.Clear();
         var tasks = BackgroundTasks.GetSnapshot();
+        if (_backgroundTaskHeading is not null)
+            _backgroundTaskHeading.Text = T("任务记录");
+        if (_clearCompletedTasksButton is not null)
+        {
+            _clearCompletedTasksButton.Content = T("清除已结束");
+            _clearCompletedTasksButton.IsEnabled = tasks.Any(task =>
+                task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued));
+            ToolTip.SetTip(_clearCompletedTasksButton, T("清除已结束的任务记录"));
+        }
         if (tasks.Count == 0) _backgroundTaskRows.Children.Add(new TextBlock
         {
             Text = T("暂无任务记录。"), FontSize = 13,
             Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
-            Margin = new Thickness(16, 10), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+            Margin = new Thickness(16, 24), HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
         });
         foreach (var task in tasks)
         {
@@ -364,7 +399,7 @@ public partial class MainWindow
             var identity = isBatchImport ? T("批量导入") : task.Title + (names.Length > 0 ? " · " + names : string.Empty);
             var result = task.Status == BackgroundTaskStatus.Succeeded
                 ? task.UpdatedAtUtc.ToLocalTime().ToString("MM-dd HH:mm:ss") : string.Empty;
-            var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,*,Auto"), ColumnSpacing = 6 };
+            var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto"), ColumnSpacing = 8 };
             ToolTip.SetTip(heading, status + " · " + identity + (result.Length > 0 ? " · " + result : string.Empty));
             var statusIcon = CreateTaskHistoryIcon(task.Status switch
             {
@@ -380,12 +415,12 @@ public partial class MainWindow
             heading.Children.Add(statusIcon);
             var identityText = new TextBlock
             {
-                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center, Text = identity, MaxWidth = Math.Clamp(Bounds.Width - 300, 60, 300), FontSize = 13, TextWrapping = Avalonia.Media.TextWrapping.NoWrap,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center, Text = identity, FontSize = 13, TextWrapping = Avalonia.Media.TextWrapping.NoWrap,
                 TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
             };
             Grid.SetColumn(identityText, 1);
             heading.Children.Add(identityText);
-            var resultText = new TextBlock { Text = result, FontSize = 13, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+            var resultText = new TextBlock { Text = result, FontSize = 12, Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"), VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
             Grid.SetColumn(resultText, 2);
             heading.Children.Add(resultText);
             var isTransferTask = task.Id == _transferTaskId;
@@ -445,7 +480,7 @@ public partial class MainWindow
             }
             _backgroundTaskRows.Children.Add(new Border
             {
-                Padding = new Thickness(12, 4), BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(12, 7), BorderThickness = new Thickness(0, 0, 0, 1),
                 BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"), Child = row
             });
         }

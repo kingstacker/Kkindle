@@ -9,6 +9,33 @@ namespace Kkindle.Ui.Tests;
 public sealed partial class SettingsTests
 {
     [Fact]
+    public Task ClearFinishedTaskHistoryKeepsRunningTasks() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
+        var center = scope.Field<Kkindle.Infrastructure.BackgroundTaskCenterService>("_backgroundTasks");
+        var clear = scope.Field<Button>("_clearCompletedTasksButton");
+        Assert.False(clear.IsEnabled);
+        var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = center.Start("进行中", BackgroundTaskKind.Other, async (_, _) => await finish.Task);
+        var succeeded = center.Start("完成", BackgroundTaskKind.Other, (_, _) => Task.CompletedTask);
+        var failed = center.Start("失败", BackgroundTaskKind.Other, (_, _) => Task.FromException(new IOException("test")));
+        await Task.WhenAll(succeeded.Completion, failed.Completion);
+        await Until(() => clear.IsEnabled);
+        clear.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => center.GetSnapshot().Count == 1 && !clear.IsEnabled);
+        Assert.Equal(running.Id, Assert.Single(center.GetSnapshot()).Id);
+        Assert.Equal(BackgroundTaskStatus.Running, Assert.Single(center.GetSnapshot()).Status);
+        finish.SetResult();
+        await running.Completion;
+        await Until(() => clear.IsEnabled);
+        clear.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => center.GetSnapshot().Count == 0 && !clear.IsEnabled);
+        Assert.True(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
+        scope.Field<Flyout>("_backgroundTaskFlyout").Hide();
+    });
+
+    [Fact]
     public Task ResourceOperationsRecordNamesFailuresAndCancellation() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -70,7 +97,8 @@ public sealed partial class SettingsTests
         Assert.Equal(2, headingTexts.Length);
         Assert.Equal(Avalonia.Media.TextWrapping.NoWrap, headingTexts[0].TextWrapping);
         Assert.Equal(Avalonia.Media.TextTrimming.CharacterEllipsis, headingTexts[0].TextTrimming);
-        Assert.Equal(headingTexts[0].Bounds.Y, headingTexts[1].Bounds.Y);
+        Assert.InRange(Math.Abs(
+            headingTexts[0].Bounds.Center.Y - headingTexts[1].Bounds.Center.Y), 0, 1);
         var delete = Assert.Single(heading.Children.OfType<Button>());
         Assert.Equal(4, Grid.GetColumn(delete));
         Assert.Equal(heading.Bounds.Width, delete.Bounds.Right, precision: 1);

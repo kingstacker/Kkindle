@@ -6,6 +6,27 @@ namespace Kkindle.Tests;
 public sealed class BackgroundTaskCenterServiceTests
 {
     [Fact]
+    public async Task ClearCompletedPersistsWhileLeavingRunningWorkUntouched()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var history = Path.Combine(root, "tasks.json");
+            var service = new BackgroundTaskCenterService(history);
+            var complete = service.Start("完成", BackgroundTaskKind.Other, (_, _) => Task.CompletedTask);
+            var failed = service.Start("失败", BackgroundTaskKind.Other, (_, _) => Task.FromException(new IOException("failure")));
+            await Task.WhenAll(complete.Completion, failed.Completion);
+            var running = service.Start("运行", BackgroundTaskKind.Other, async (_, token) => await Task.Delay(Timeout.Infinite, token));
+            Assert.Equal(2, await service.ClearCompletedAsync());
+            Assert.Equal(running.Id, Assert.Single(service.GetSnapshot()).Id);
+            Assert.Equal(running.Id, Assert.Single(new BackgroundTaskCenterService(history).GetSnapshot()).Id);
+            Assert.True(service.Cancel(running.Id));
+            await running.Completion;
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
     public async Task RemovingCompletedTaskPersistsAndRejectsRunningTask()
     {
         var root = TestHelpers.CreateTempDirectory();

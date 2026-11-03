@@ -30,6 +30,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
     private readonly object _detectionSync = new();
     private IReadOnlyList<KindleDevice>? _detectionCache;
     private DateTime _detectionCacheAt;
+    private int _detectionGeneration;
 
     public MtpKindleDeviceService(
         AppPaths paths,
@@ -58,17 +59,31 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            int generation;
+            lock (_detectionSync) generation = _detectionGeneration;
             var devices = await Task.Run(() => Detect(cancellationToken), cancellationToken).ConfigureAwait(false);
             lock (_detectionSync)
             {
-                _detectionCache = devices;
-                _detectionCacheAt = DateTime.UtcNow;
+                if (generation == _detectionGeneration)
+                {
+                    _detectionCache = devices;
+                    _detectionCacheAt = DateTime.UtcNow;
+                }
             }
             return devices;
         }
         finally
         {
             Gate.Release();
+        }
+    }
+
+    public void InvalidateDetectionCache()
+    {
+        lock (_detectionSync)
+        {
+            _detectionGeneration++;
+            _detectionCache = null;
         }
     }
 

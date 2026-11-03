@@ -14,28 +14,14 @@ public partial class MainWindow
     private bool _onboardingSaving;
     private bool _onboardingInstallingCalibre;
     private bool _onboardingInstallingTts;
+    private bool _onboardingSetupRunning;
+    private readonly OnboardingInstallationCoordinator _onboardingInstallations = new();
 
-    private void OnboardingSkipCalibreButton_Click(object? sender, RoutedEventArgs e)
+    private async Task<bool> InstallOnboardingCalibreAsync()
     {
-        if (_onboardingInstallingCalibre || _onboardingInstallingTts) return;
-        OnboardingCalibreStatus.Text = GetOnboardingResource("Ui.Onboarding.CalibreSkipped", "暂不安装，可稍后在设置中安装");
-        OnboardingCalibreStatus.IsVisible = true;
-    }
-
-    private async void OnboardingInstallCalibreButton_Click(object? sender, RoutedEventArgs e)
-        => await InstallOnboardingCalibreAsync();
-
-    private async Task InstallOnboardingCalibreAsync()
-    {
-        if (_onboardingInstallingCalibre || _onboardingInstallingTts || _calibreSetupBusy) return;
+        if (_onboardingInstallingCalibre || _onboardingInstallingTts || _calibreSetupBusy) return false;
         _onboardingInstallingCalibre = true;
         _calibreSetupBusy = true;
-        OnboardingInstallCalibreButton.IsEnabled = false;
-        OnboardingSkipCalibreButton.IsEnabled = false;
-        OnboardingInstallTtsButton.IsEnabled = false;
-        OnboardingSkipTtsButton.IsEnabled = false;
-        OnboardingNextButton.IsEnabled = false;
-        OnboardingLanguageBox.IsEnabled = false;
         OnboardingCalibreProgress.IsVisible = true;
         OnboardingCalibreProgress.IsIndeterminate = true;
         OnboardingCalibreStatus.IsVisible = true;
@@ -62,50 +48,28 @@ public partial class MainWindow
             _appSettings = _appSettings with { CalibrePath = executable };
             await _appSettingsStore.SaveAsync(_appSettings, _lifetimeCancellation.Token);
             OnboardingCalibreStatus.Text = GetOnboardingResource("Ui.Onboarding.CalibreDone", "Calibre 和 KFX Input 插件均已安装并验证");
+            return true;
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { throw; }
         catch (Exception exception)
         {
-            OnboardingCalibreStatus.Text = string.Format(GetOnboardingResource("Ui.Onboarding.CalibreFailed", "安装失败，可点击自动安装重试：{0}"), UiText.Localize(exception.Message));
+            OnboardingCalibreStatus.Text = string.Format(GetOnboardingResource("Ui.Onboarding.CalibreFailed", "安装失败，请点击“下一步”重试，或取消勾选后继续：{0}"), UiText.Localize(exception.Message));
+            return false;
         }
         finally
         {
             _onboardingInstallingCalibre = false;
             _calibreSetupBusy = false;
-            OnboardingInstallCalibreButton.IsEnabled = true;
-            OnboardingSkipCalibreButton.IsEnabled = true;
-            OnboardingInstallTtsButton.IsEnabled = true;
-            OnboardingSkipTtsButton.IsEnabled = true;
-            OnboardingNextButton.IsEnabled = !_onboardingSaving;
-            OnboardingLanguageBox.IsEnabled = true;
             OnboardingCalibreProgress.IsVisible = false;
             UpdateCalibreDetectionStatus();
         }
     }
 
-    private void OnboardingSkipTtsButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (_onboardingInstallingTts || _onboardingInstallingCalibre) return;
-        OnboardingTtsStatus.Text = GetOnboardingResource(
-            "Ui.Onboarding.TtsSkipped",
-            "暂不启用，可稍后在听书中自动安装");
-        OnboardingTtsStatus.IsVisible = true;
-    }
-
-    private async void OnboardingInstallTtsButton_Click(object? sender, RoutedEventArgs e)
-        => await InstallOnboardingTtsAsync();
-
-    private async Task InstallOnboardingTtsAsync()
+    private async Task<bool> InstallOnboardingTtsAsync()
     {
         if (_onboardingInstallingTts || _onboardingInstallingCalibre || _calibreSetupBusy)
-            return;
+            return false;
         _onboardingInstallingTts = true;
-        OnboardingInstallTtsButton.IsEnabled = false;
-        OnboardingSkipTtsButton.IsEnabled = false;
-        OnboardingInstallCalibreButton.IsEnabled = false;
-        OnboardingSkipCalibreButton.IsEnabled = false;
-        OnboardingNextButton.IsEnabled = false;
-        OnboardingLanguageBox.IsEnabled = false;
         OnboardingTtsProgress.IsVisible = true;
         OnboardingTtsProgress.IsIndeterminate = true;
         OnboardingTtsProgress.Value = 0;
@@ -134,8 +98,9 @@ public partial class MainWindow
             OnboardingTtsStatus.Text = GetOnboardingResource(
                 "Ui.Onboarding.TtsDone",
                 "听书组件已安装并验证");
+            return true;
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { throw; }
         catch (Exception exception)
         {
             _readerTtsNotice = T(
@@ -144,18 +109,13 @@ public partial class MainWindow
             OnboardingTtsStatus.Text = string.Format(
                 GetOnboardingResource(
                     "Ui.Onboarding.TtsFailed",
-                    "安装失败，可点击“是，自动安装”重试：{0}"),
+                    "安装失败，请点击“下一步”重试，或取消勾选后继续：{0}"),
                 UiText.Localize(exception.Message));
+            return false;
         }
         finally
         {
             _onboardingInstallingTts = false;
-            OnboardingInstallTtsButton.IsEnabled = true;
-            OnboardingSkipTtsButton.IsEnabled = true;
-            OnboardingInstallCalibreButton.IsEnabled = !_calibreSetupBusy;
-            OnboardingSkipCalibreButton.IsEnabled = !_onboardingInstallingCalibre;
-            OnboardingNextButton.IsEnabled = !_onboardingSaving;
-            OnboardingLanguageBox.IsEnabled = true;
             OnboardingTtsProgress.IsVisible = false;
             UpdateReaderTtsUi();
         }
@@ -256,7 +216,7 @@ public partial class MainWindow
         OnboardingBackButton.IsVisible = !isWelcome;
         OnboardingSkipButton.IsVisible = isDevice;
         OnboardingNextButton.IsVisible = isWelcome || isDisclaimer;
-        OnboardingNextButton.IsEnabled = !_onboardingSaving;
+        OnboardingNextButton.IsEnabled = !_onboardingSaving && !_onboardingSetupRunning;
         OnboardingFinishButton.IsVisible = isDevice;
         OnboardingDisclaimerStatusText.IsVisible = false;
         OnboardingDeviceStatusText.IsVisible = false;
@@ -459,13 +419,37 @@ public partial class MainWindow
             OnboardingDisclaimerStatusText.IsVisible = false;
     }
 
-    private void OnboardingNextButton_Click(object? sender, RoutedEventArgs e)
+    private async void OnboardingNextButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (_onboardingInstallingCalibre || _onboardingInstallingTts) return;
+        if (_onboardingSetupRunning || _onboardingInstallingCalibre || _onboardingInstallingTts) return;
         if (_onboardingStep == 1)
         {
-            _onboardingStep = 2;
-            UpdateOnboardingPage();
+            _onboardingSetupRunning = true;
+            OnboardingNextButton.IsEnabled = false;
+            OnboardingLanguageBox.IsEnabled = false;
+            OnboardingInstallCalibreCheckBox.IsEnabled = false;
+            OnboardingInstallTtsCheckBox.IsEnabled = false;
+            try
+            {
+                if (await _onboardingInstallations.PrepareAsync(
+                        OnboardingInstallCalibreCheckBox.IsChecked == true,
+                        OnboardingInstallTtsCheckBox.IsChecked == true,
+                        InstallOnboardingCalibreAsync,
+                        InstallOnboardingTtsAsync))
+                {
+                    _onboardingStep = 2;
+                    UpdateOnboardingPage();
+                }
+            }
+            catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+            finally
+            {
+                _onboardingSetupRunning = false;
+                OnboardingNextButton.IsEnabled = !_onboardingSaving;
+                OnboardingLanguageBox.IsEnabled = true;
+                OnboardingInstallCalibreCheckBox.IsEnabled = true;
+                OnboardingInstallTtsCheckBox.IsEnabled = true;
+            }
             return;
         }
 
@@ -510,7 +494,7 @@ public partial class MainWindow
 
     private async Task CompleteOnboardingAsync(string? selectedModel)
     {
-        if (_onboardingSaving || _onboardingInstallingCalibre || _onboardingInstallingTts) return;
+        if (_onboardingSaving || _onboardingSetupRunning || _onboardingInstallingCalibre || _onboardingInstallingTts) return;
         _onboardingSaving = true;
         OnboardingBackButton.IsEnabled = false;
         OnboardingSkipButton.IsEnabled = false;
@@ -528,6 +512,7 @@ public partial class MainWindow
             _appSettings = AppSettings.Normalize(_appSettings with
             {
                 OnboardingCompleted = true,
+                DeferTtsInstallationUntilUse = OnboardingInstallTtsCheckBox.IsChecked != true,
                 DefaultDeviceModel = normalizedModel
             });
             await _appSettingsStore.SaveAsync(_appSettings, _lifetimeCancellation.Token);
@@ -587,7 +572,7 @@ public partial class MainWindow
 
     private void OnboardingOverlay_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (_onboardingInstallingCalibre || _onboardingInstallingTts) { e.Handled = true; return; }
+        if (_onboardingSetupRunning || _onboardingInstallingCalibre || _onboardingInstallingTts) { e.Handled = true; return; }
         if (e.Key == Key.Escape && _onboardingStep > 1)
         {
             e.Handled = true;
@@ -598,5 +583,24 @@ public partial class MainWindow
             else
                 OnboardingDisclaimerCheckBox.Focus();
         }
+    }
+}
+
+internal sealed class OnboardingInstallationCoordinator
+{
+    private bool _calibreReady;
+    private bool _ttsReady;
+
+    public async Task<bool> PrepareAsync(
+        bool installCalibre,
+        bool installTts,
+        Func<Task<bool>> prepareCalibre,
+        Func<Task<bool>> prepareTts)
+    {
+        if (installCalibre && !_calibreReady)
+            _calibreReady = await prepareCalibre();
+        if (installTts && !_ttsReady)
+            _ttsReady = await prepareTts();
+        return (!installCalibre || _calibreReady) && (!installTts || _ttsReady);
     }
 }

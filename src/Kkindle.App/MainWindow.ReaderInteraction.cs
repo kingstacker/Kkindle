@@ -9551,7 +9551,10 @@ public partial class MainWindow
         // the Windows build. ReaderZenControlsPopup remains independent and
         // continues to provide the custom zen exit row.
         ReaderWindowTitleBar.IsVisible = false;
-        WindowDecorations = Avalonia.Controls.WindowDecorations.None;
+        // AppKit needs the native titled window to complete its fullscreen
+        // transition. Fullscreen itself hides the native title bar and lights.
+        if (!OperatingSystem.IsMacOS())
+            WindowDecorations = Avalonia.Controls.WindowDecorations.None;
 
         // FullScreen/Maximized can cause Windows to restore the native
         // overlapped-window styles after Avalonia has applied

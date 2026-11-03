@@ -23,6 +23,7 @@ public partial class SendToKindleWindow
         MinimizeWindowButton.IsVisible = false;
         MaximizeWindowButton.IsVisible = false;
         CloseWindowButton.IsVisible = false;
+        SendWindowFrame.BorderThickness = new Thickness(0);
         SendWindowBrand.Margin = new Avalonia.Thickness(MacTrafficLights.TitleContentInset, 0, 16, 0);
     }
 

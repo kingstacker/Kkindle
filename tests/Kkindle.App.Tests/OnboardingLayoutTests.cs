@@ -33,25 +33,20 @@ public sealed partial class SettingsTests
             AssertWithinWindow(scope.Get<Button>(step == 3 ? "OnboardingFinishButton" : "OnboardingNextButton"), scope.Window);
             if (step == 1)
             {
-                var install = scope.Get<Button>("OnboardingInstallCalibreButton");
-                var skip = scope.Get<Button>("OnboardingSkipCalibreButton");
+                var install = scope.Get<CheckBox>("OnboardingInstallCalibreCheckBox");
+                var installTts = scope.Get<CheckBox>("OnboardingInstallTtsCheckBox");
                 Assert.True(install.IsEffectivelyVisible);
-                Assert.True(skip.IsEffectivelyVisible);
-                skip.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-                Assert.True(scope.Get<TextBlock>("OnboardingCalibreStatus").IsVisible);
-                Assert.Contains(language == "en-US" ? "Skipped" : "暂不安装", scope.Get<TextBlock>("OnboardingCalibreStatus").Text!);
-                Assert.False(scope.Field<bool>("_onboardingInstallingCalibre"));
-                Assert.True(scope.Get<Button>("OnboardingNextButton").IsEnabled);
-
-                var installTts = scope.Get<Button>("OnboardingInstallTtsButton");
-                var skipTts = scope.Get<Button>("OnboardingSkipTtsButton");
                 Assert.True(installTts.IsEffectivelyVisible);
-                Assert.True(skipTts.IsEffectivelyVisible);
-                skipTts.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-                Assert.True(scope.Get<TextBlock>("OnboardingTtsStatus").IsVisible);
-                Assert.Contains(language == "en-US" ? "Not enabled" : "暂不启用", scope.Get<TextBlock>("OnboardingTtsStatus").Text!);
+                Assert.True(install.IsChecked);
+                Assert.True(installTts.IsChecked);
+                Capture(scope.Window, $"{language}-onboarding-defaults");
+                install.IsChecked = false;
+                installTts.IsChecked = false;
+                Assert.False(scope.Field<bool>("_onboardingInstallingCalibre"));
                 Assert.False(scope.Field<bool>("_onboardingInstallingTts"));
                 Assert.True(scope.Get<Button>("OnboardingNextButton").IsEnabled);
+                if (OperatingSystem.IsMacOS())
+                    Assert.Equal(new Thickness(0), frame.BorderThickness);
             }
             Capture(scope.Window, $"{language}-onboarding-{step}");
         }
@@ -59,6 +54,7 @@ public sealed partial class SettingsTests
         await scope.Call<Task>("CompleteOnboardingAsync", (object?)null);
         await Render();
         Assert.False(scope.Get<Control>("OnboardingOverlay").IsVisible);
+        Assert.True((await new Kkindle.Infrastructure.AppSettingsStore(scope.Paths).LoadAsync()).DeferTtsInstallationUntilUse);
         // Native windows round dimensions to physical pixels.
         Assert.InRange(Math.Abs(scope.Window.Height - scope.Window.Width / ((1 + Math.Sqrt(5)) / 2)), 0, 1);
         Assert.Equal(WindowState.Normal, scope.Window.WindowState);

@@ -7264,7 +7264,7 @@
                         <Grid Margin="28,22,28,18"
                               MinHeight="360">
                             <Grid x:Name="OnboardingWelcomePage"
-                                  RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
                                   RowSpacing="8"
                                   HorizontalAlignment="Stretch">
                                 <TextBlock Text="{DynamicResource Ui.Onboarding.WelcomeTitle}"
@@ -7320,26 +7320,27 @@
                                 </Border>
                                 <Grid Grid.Row="4" ColumnDefinitions="*,20,*">
                                     <StackPanel Grid.Column="0" Spacing="6">
-                                        <TextBlock Text="{DynamicResource Ui.Onboarding.CalibrePrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <CheckBox x:Name="OnboardingInstallCalibreCheckBox" IsChecked="True">
+                                            <TextBlock Text="{DynamicResource Ui.Onboarding.CalibrePrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        </CheckBox>
                                         <TextBlock Text="{DynamicResource Ui.Onboarding.CalibreHelp}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <Button x:Name="OnboardingInstallCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreYes}" Click="OnboardingInstallCalibreButton_Click" />
-                                            <Button x:Name="OnboardingSkipCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreNo}" Classes="quiet" Click="OnboardingSkipCalibreButton_Click" />
-                                        </StackPanel>
                                         <ProgressBar x:Name="OnboardingCalibreProgress" Height="3" IsVisible="False" />
                                         <TextBlock x:Name="OnboardingCalibreStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" Spacing="6">
-                                        <TextBlock Text="{DynamicResource Ui.Onboarding.TtsPrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <CheckBox x:Name="OnboardingInstallTtsCheckBox" IsChecked="True">
+                                            <TextBlock Text="{DynamicResource Ui.Onboarding.TtsPrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        </CheckBox>
                                         <TextBlock Text="{DynamicResource Ui.Onboarding.TtsHelp}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <Button x:Name="OnboardingInstallTtsButton" Content="{DynamicResource Ui.Onboarding.TtsYes}" Click="OnboardingInstallTtsButton_Click" />
-                                            <Button x:Name="OnboardingSkipTtsButton" Content="{DynamicResource Ui.Onboarding.TtsNo}" Classes="quiet" Click="OnboardingSkipTtsButton_Click" />
-                                        </StackPanel>
                                         <ProgressBar x:Name="OnboardingTtsProgress" Height="3" IsVisible="False" />
                                         <TextBlock x:Name="OnboardingTtsStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
                                     </StackPanel>
                                 </Grid>
+                                <TextBlock Grid.Row="5"
+                                           Text="{DynamicResource Ui.Onboarding.InstallHint}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource MutedInkBrush}"
+                                           TextWrapping="Wrap" />
                             </Grid>
 
                             <Grid x:Name="OnboardingDisclaimerPage"
@@ -7604,11 +7605,6 @@
                   PointerEntered="ReaderTitleControls_PointerEntered"
                   PointerExited="ReaderTitleControls_PointerExited">
                 <StackPanel Orientation="Horizontal" Spacing="0">
-                    <!-- macOS keeps its traffic lights even in the zen overlay;
-                         they replace the square caption buttons at the end. -->
-                    <local:MacTrafficLights x:Name="ReaderZenPopupMacControls"
-                                            Margin="10,0,12,0"
-                                            VerticalAlignment="Center" />
                     <Button x:Name="ReaderZenPopupTocButton"
                             Classes="caption"
                             Width="92"

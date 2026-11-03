@@ -251,6 +251,56 @@ public sealed partial class SettingsTests
     });
 
     [Fact]
+    public Task DeviceExportDismissesSelectionWhenConfirmedAndKeepsLaterSelection() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        var device = Reader(scope, "EXPORT-SELECTION", ReaderDeviceProfiles.Kindle);
+        var books = new[]
+        {
+            new KindleBook { RelativePath = "one.epub", Title = "One", Format = "epub" },
+            new KindleBook { RelativePath = "two.epub", Title = "Two", Format = "epub" }
+        };
+        var pending = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new ReaderService
+        {
+            Devices = [device],
+            BooksReader = _ => Task.FromResult<IReadOnlyList<KindleBook>>(books),
+            ExportHandler = _ => pending.Task
+        };
+        await UseReaderServiceAsync(scope, service);
+        await scope.Call<Task>("RefreshDevicesAsync", false, CancellationToken.None);
+        await scope.Field<Task>("_deviceWarmTask");
+        var cards = scope.Window.DeviceBooks.ToArray();
+        Assert.Equal(2, cards.Length);
+        foreach (var card in cards) card.IsSelected = true;
+        scope.Call("UpdateDeviceBookSelectionUi");
+        Assert.True(scope.Get<Border>("DeviceBookSelectionBar").IsVisible);
+
+        var cancelled = scope.Call<Task>("ExportSelectedDeviceBooksAsync");
+        await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        scope.Get<Button>("ConfirmationCancelButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await cancelled;
+        Assert.True(scope.Get<Border>("DeviceBookSelectionBar").IsVisible);
+        Assert.All(cards, card => Assert.True(card.IsSelected));
+
+        var exporting = scope.Call<Task>("ExportSelectedDeviceBooksAsync");
+        await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
+        scope.Get<Button>("ConfirmationOkButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Until(() => !scope.Get<Border>("DeviceBookSelectionBar").IsVisible);
+        Assert.False(exporting.IsCompleted);
+        Assert.All(cards, card => Assert.False(card.IsSelected));
+
+        foreach (var card in cards) card.IsSelected = true;
+        scope.Call("UpdateDeviceBookSelectionUi");
+        pending.SetException(new IOException("simulated export failure"));
+        await Until(() => scope.Get<Control>("MessageOverlay").IsVisible);
+        scope.Get<Button>("MessageOkButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await exporting.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(scope.Get<Border>("DeviceBookSelectionBar").IsVisible);
+        Assert.All(cards, card => Assert.True(card.IsSelected));
+    });
+
+    [Fact]
     public Task FailedDeviceScanKeepsCachedBooksReadOnlyAndOffersRetry() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -636,6 +686,7 @@ public sealed partial class SettingsTests
         public Func<IProgress<KindleScanProgress>?, Task<IReadOnlyList<KindleBook>>>? ProgressiveBooksReader { get; init; }
         public Func<int, Task<IReadOnlyList<KindleDevice>>>? DetectionReader { get; init; }
         public Func<BookFile, Task>? SendHandler { get; init; }
+        public Func<KindleBook, Task<string>>? ExportHandler { get; init; }
         public int DetectionRequests { get; private set; }
         public int RemovedBooks { get; private set; }
         public int ContentRequests { get; private set; }
@@ -665,7 +716,7 @@ public sealed partial class SettingsTests
         public Task SendBookAsync(KindleDevice device, BookFile bookFile, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default, string? coverOverridePath = null) => SendHandler?.Invoke(bookFile) ?? throw new NotSupportedException();
         public Task RemoveBookAsync(KindleDevice device, KindleBook book, CancellationToken cancellationToken = default)
         { RemovedBooks++; return Task.CompletedTask; }
-        public Task<string> ExportBookAsync(KindleDevice device, KindleBook book, string destinationDirectory, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<string> ExportBookAsync(KindleDevice device, KindleBook book, string destinationDirectory, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default) => ExportHandler?.Invoke(book) ?? throw new NotSupportedException();
         public Task SendResourceAsync(KindleDevice device, KindleResourceKind kind, string sourcePath, IProgress<TransferProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task ExportResourceAsync(KindleDevice device, KindleDeviceResource resource, string destinationPath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RemoveResourceAsync(KindleDevice device, KindleDeviceResource resource, CancellationToken cancellationToken = default) => throw new NotSupportedException();

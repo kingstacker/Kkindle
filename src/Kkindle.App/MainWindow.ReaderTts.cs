@@ -542,10 +542,10 @@ public partial class MainWindow
                 LogTtsDebug("env.progress", update.Message);
                 UpdateReaderTtsUi();
             });
-            // The first-run screen offers read-aloud as an explicit opt-in, so
-            // only detect the engine until onboarding is complete. Its install
-            // button (or a later reader interaction) starts the setup.
-            var setupDeferred = !_appSettings.OnboardingCompleted;
+            // Respect the first-run choice on later launches too. Read-aloud
+            // still prepares the environment when the user actually uses it.
+            var setupDeferred = !_appSettings.OnboardingCompleted
+                || _appSettings.DeferTtsInstallationUntilUse;
             var availability = setupDeferred
                 ? await _readerTts.CheckEnvironmentAsync(
                         _lifetimeCancellation.Token)

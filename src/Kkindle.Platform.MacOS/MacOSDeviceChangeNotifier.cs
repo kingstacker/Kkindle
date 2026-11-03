@@ -17,12 +17,15 @@ public sealed class MacOSDeviceChangeNotifier : IDeviceChangeNotifier
     private const string LibSystemLibrary = "/usr/lib/libSystem.B.dylib";
 
     private static readonly string[] ServiceClasses = ["IOUSBHostDevice", "IOUSBDevice"];
-    private static readonly string[] NotificationTypes = ["IOServiceFirstMatch", "IOServiceTerminated"];
+    private static readonly string[] NotificationTypes = ["IOServiceFirstMatch", "IOServiceTerminate"];
 
     private static readonly ServiceCallback Callback = OnServicesChanged;
+    private static readonly Lazy<IntPtr> MainQueue = new(() =>
+        NativeLibrary.GetExport(NativeLibrary.Load(LibSystemLibrary), "_dispatch_main_q"));
 
     private IntPtr _notificationPort;
     private GCHandle _self;
+    private readonly List<uint> _notifications = [];
     private bool _disposed;
 
     public event EventHandler? DeviceChanged;
@@ -41,7 +44,7 @@ public sealed class MacOSDeviceChangeNotifier : IDeviceChangeNotifier
         _self = GCHandle.Alloc(this);
         try
         {
-            IONotificationPortSetDispatchQueue(_notificationPort, dispatch_get_main_queue());
+            IONotificationPortSetDispatchQueue(_notificationPort, MainQueue.Value);
             var callback = Marshal.GetFunctionPointerForDelegate(Callback);
             foreach (var serviceClass in ServiceClasses)
             {
@@ -62,16 +65,17 @@ public sealed class MacOSDeviceChangeNotifier : IDeviceChangeNotifier
                     // The initial iteration is required: it arms the
                     // notification and must be drained, otherwise the callback
                     // never fires for later arrivals.
+                    _notifications.Add(iterator);
                     Drain(iterator);
-                    IOObjectRelease(iterator);
                 }
             }
         }
         catch
         {
-            _self.Free();
+            ReleaseNotifications();
             IONotificationPortDestroy(_notificationPort);
             _notificationPort = IntPtr.Zero;
+            _self.Free();
             throw;
         }
     }
@@ -85,6 +89,7 @@ public sealed class MacOSDeviceChangeNotifier : IDeviceChangeNotifier
             if (_notificationPort != IntPtr.Zero)
             {
                 IONotificationPortSetDispatchQueue(_notificationPort, IntPtr.Zero);
+                ReleaseNotifications();
                 IONotificationPortDestroy(_notificationPort);
             }
         }
@@ -95,10 +100,17 @@ public sealed class MacOSDeviceChangeNotifier : IDeviceChangeNotifier
         }
     }
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void ServiceCallback(IntPtr refcon, IntPtr iterator);
+    private void ReleaseNotifications()
+    {
+        foreach (var notification in _notifications)
+            IOObjectRelease(notification);
+        _notifications.Clear();
+    }
 
-    private static void OnServicesChanged(IntPtr refcon, IntPtr iterator)
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ServiceCallback(IntPtr refcon, uint iterator);
+
+    private static void OnServicesChanged(IntPtr refcon, uint iterator)
     {
         try
         {
@@ -115,13 +127,13 @@ public sealed class MacOSDeviceChangeNotifier : IDeviceChangeNotifier
         }
     }
 
-    private static void Drain(IntPtr iterator)
+    private static void Drain(uint iterator)
     {
-        if (iterator == IntPtr.Zero) return;
+        if (iterator == 0) return;
         while (true)
         {
             var service = IOIteratorNext(iterator);
-            if (service == IntPtr.Zero) break;
+            if (service == 0) break;
             IOObjectRelease(service);
         }
     }
@@ -148,14 +160,11 @@ public sealed class MacOSDeviceChangeNotifier : IDeviceChangeNotifier
         IntPtr matching,
         IntPtr callback,
         IntPtr refcon,
-        out IntPtr iterator);
+        out uint iterator);
 
     [DllImport(IOKitLibrary)]
-    private static extern IntPtr IOIteratorNext(IntPtr iterator);
+    private static extern uint IOIteratorNext(uint iterator);
 
     [DllImport(IOKitLibrary)]
-    private static extern int IOObjectRelease(IntPtr obj);
-
-    [DllImport(LibSystemLibrary)]
-    private static extern IntPtr dispatch_get_main_queue();
+    private static extern int IOObjectRelease(uint obj);
 }
