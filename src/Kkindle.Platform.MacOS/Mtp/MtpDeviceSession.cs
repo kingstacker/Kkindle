@@ -244,18 +244,15 @@ internal sealed class MtpDeviceSession : IDisposable
         }
 
         Invalidate(directory.StorageId, directory.ItemId);
-        return Children(directory.StorageId, directory.ItemId, directory.RelativePath)
-            .FirstOrDefault(entry => !entry.IsFolder && entry.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase))
-            ?? new MtpEntry
-            {
-                ItemId = 0,
-                ParentId = directory.ItemId,
-                StorageId = directory.StorageId,
-                Name = fileName,
-                RelativePath = Normalize($"{directory.RelativePath}/{fileName}"),
-                IsFolder = false,
-                Size = size
-            };
+        var uploaded = Children(directory.StorageId, directory.ItemId, directory.RelativePath)
+            .FirstOrDefault(entry => !entry.IsFolder && entry.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+        if (uploaded is null)
+            throw new IOException($"设备未确认写入文件 {fileName}");
+        // Some firmware reports 0 until the object is re-read; only a known,
+        // mismatching size is treated as a failed transfer.
+        if (uploaded.Size > 0 && uploaded.Size != size)
+            throw new IOException($"设备文件大小校验失败：{fileName}");
+        return uploaded;
     }
 
     public void Delete(MtpEntry entry)
@@ -263,6 +260,29 @@ internal sealed class MtpDeviceSession : IDisposable
         ArgumentNullException.ThrowIfNull(entry);
         if (LibMtp.LIBMTP_Delete_Object(_device, entry.ItemId) != 0)
             Throw($"无法删除设备文件 {entry.RelativePath}");
+        Invalidate(entry.StorageId, entry.ParentId);
+    }
+
+    /// <summary>
+    /// Deletes a folder and everything below it. PTP device support for
+    /// recursive <c>DeleteObject</c> is inconsistent, so children are removed
+    /// explicitly before the folder itself.
+    /// </summary>
+    public void DeleteTree(MtpEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (!entry.IsFolder)
+        {
+            Delete(entry);
+            return;
+        }
+        foreach (var child in Children(entry.StorageId, entry.ItemId, entry.RelativePath).ToArray())
+        {
+            if (child.IsFolder) DeleteTree(child);
+            else Delete(child);
+        }
+        if (LibMtp.LIBMTP_Delete_Object(_device, entry.ItemId) != 0)
+            Throw($"无法删除设备文件夹 {entry.RelativePath}");
         Invalidate(entry.StorageId, entry.ParentId);
     }
 

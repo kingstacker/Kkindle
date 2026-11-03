@@ -4188,13 +4188,13 @@ public partial class MainWindow
             e.Handled = HandleReaderEscapeShortcut();
             return e.Handled;
         }
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.F)
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0 && e.Key == Key.F)
         {
             e.Handled = true;
             OpenReaderSearchShortcut();
             return true;
         }
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.B)
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0 && e.Key == Key.B)
         {
             e.Handled = true;
             _ = ObserveReaderTaskAsync(ToggleReaderBookmarkAsync());
@@ -9184,9 +9184,15 @@ public partial class MainWindow
         if (!_readerZenMode) return;
         WindowState = _readerWindowStateBeforeZen;
         WindowDecorationsTheme = _readerWindowDecorationsThemeBeforeZen;
-        ExtendClientAreaToDecorationsHint = false;
-        ExtendClientAreaTitleBarHeightHint = -1;
-        WindowDecorations = Avalonia.Controls.WindowDecorations.None;
+        // macOS restores its native traffic lights together with the title
+        // row; Windows/Linux keep the self-drawn borderless frame.
+        ExtendClientAreaToDecorationsHint = MacTrafficLights.IsSupported;
+        ExtendClientAreaTitleBarHeightHint = MacTrafficLights.IsSupported
+            ? MacTrafficLights.TitleBarHeight
+            : -1;
+        WindowDecorations = MacTrafficLights.IsSupported
+            ? Avalonia.Controls.WindowDecorations.Full
+            : Avalonia.Controls.WindowDecorations.None;
         _readerZenMode = false;
         RestoreReaderWindowChromeAfterZen();
         ReaderWindowTitleBar.IsVisible = true;
@@ -9223,9 +9229,7 @@ public partial class MainWindow
         ReaderZenActivationRegion.IsVisible = false;
         ReaderZenControlsPopup.IsOpen = false;
         UpdateReaderTtsFloatingPointerWatch();
-        MinimizeWindowButton.IsVisible = true;
-        MaximizeWindowButton.IsVisible = true;
-        CloseWindowButton.IsVisible = true;
+        SetWindowsCaptionButtonsVisible(true);
         WindowBrandText.IsVisible = ReaderRoot.IsVisible;
     }
 
@@ -9323,6 +9327,22 @@ public partial class MainWindow
 
     private static IntPtr _readerX11Display;
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ReaderCoreGraphicsPoint
+    {
+        public double X;
+        public double Y;
+    }
+
+    [DllImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
+    private static extern IntPtr CGEventCreate(IntPtr source);
+
+    [DllImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
+    private static extern ReaderCoreGraphicsPoint CGEventGetLocation(IntPtr @event);
+
+    [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+    private static extern void CFRelease(IntPtr value);
+
     private static bool TryGetReaderCursorScreenPoint(out PixelPoint point)
     {
         point = default;
@@ -9331,6 +9351,33 @@ public partial class MainWindow
             if (!GetCursorPos(out var cursor)) return false;
             point = new PixelPoint(cursor.X, cursor.Y);
             return true;
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            try
+            {
+                var eventHandle = CGEventCreate(IntPtr.Zero);
+                if (eventHandle == IntPtr.Zero) return false;
+                try
+                {
+                    // CoreGraphics and Avalonia's macOS backend both use screen
+                    // points with a top-left origin, so no scaling is applied.
+                    var location = CGEventGetLocation(eventHandle);
+                    point = new PixelPoint(
+                        (int)Math.Round(location.X),
+                        (int)Math.Round(location.Y));
+                    return true;
+                }
+                finally
+                {
+                    CFRelease(eventHandle);
+                }
+            }
+            catch (DllNotFoundException)
+            {
+                return false;
+            }
         }
 
         if (!OperatingSystem.IsLinux()) return false;
@@ -9612,9 +9659,7 @@ public partial class MainWindow
         if (_readerZenMode) ApplyReaderZenWindowChrome();
         ReaderZenTitleTocButton.IsVisible = false;
         ReaderZenTitleExitButton.IsVisible = false;
-        MinimizeWindowButton.IsVisible = visible;
-        MaximizeWindowButton.IsVisible = visible;
-        CloseWindowButton.IsVisible = visible;
+        SetWindowsCaptionButtonsVisible(visible);
         if (_readerZenMode && visible)
         {
             // Anchor the fallback/native popup to the reader surface instead

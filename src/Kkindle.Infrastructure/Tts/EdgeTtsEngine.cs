@@ -7,9 +7,9 @@ using Kkindle.Core;
 namespace Kkindle.Infrastructure;
 
 /// <summary>
-/// Invokes the pipx-installed edge-tts command on both Windows and Linux.
-/// The engine only creates temporary MP3 files; caching and playback belong to
-/// the layers above it.
+/// Invokes the application-local edge-tts command on Windows, Linux and
+/// macOS. The engine only creates temporary MP3 files; caching and playback
+/// belong to the layers above it.
 /// </summary>
 public sealed class EdgeTtsEngine : ITtsEngine
 {
@@ -24,8 +24,10 @@ public sealed class EdgeTtsEngine : ITtsEngine
         + "Windows PowerShell 可以执行：\n"
         + "py -m pip install --user pipx\n"
         + "py -m pipx ensurepath\n"
-        + "pipx install edge-tts\n"
-        + "（重新打开终端后再启动软件。）";
+        + "pipx install edge-tts\n\n"
+        + "macOS 可以在“终端”中执行：\n"
+        + "xcode-select --install\n"
+        + "（首次启动 Kkindle 会自动创建专用环境并安装 edge-tts。重新打开软件。）";
 
     private static readonly Regex VoiceNamePattern = new(
         @"(?<![\w-])(?<voice>[A-Za-z]{2,3}-[A-Za-z]{2,3}-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)(?![\w-])",

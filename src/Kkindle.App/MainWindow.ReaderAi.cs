@@ -1337,7 +1337,8 @@ public partial class MainWindow
 
     private async void ReaderAiQuestionBox_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Enter || !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        if (e.Key != Key.Enter
+            || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) == 0) return;
         e.Handled = true;
         if (_readerAiBusy) return;
         var question = ReaderAiQuestionBox.Text?.Trim() ?? string.Empty;

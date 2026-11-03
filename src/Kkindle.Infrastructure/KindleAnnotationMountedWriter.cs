@@ -1,5 +1,7 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Kkindle.Core;
+using Microsoft.Win32.SafeHandles;
 using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Infrastructure;
@@ -95,6 +97,44 @@ internal static class KindleAnnotationMountedWriter
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken))
             .Equals(expected, StringComparison.OrdinalIgnoreCase);
     }
-    private static FileStream OpenSharedRead(string path) =>
-        new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+    private static FileStream OpenSharedRead(string path)
+    {
+        if (OperatingSystem.IsWindows())
+            return new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+        // On Unix, .NET emulates FileShare with flock(). SQLite holds an
+        // advisory lock on the database while our IMMEDIATE transaction is
+        // open, so any FileStream open is rejected as "in use by another
+        // process" even though plain readers share the file freely. A raw
+        // POSIX open takes no lock and matches SQLite's own read semantics.
+        var descriptor = Libc.open(path, Libc.O_RDONLY);
+        if (descriptor < 0)
+            throw new IOException($"无法打开文件 {path}（errno {Marshal.GetLastPInvokeError()}）。");
+        try
+        {
+            _ = Libc.fcntl(descriptor, Libc.F_SETFD, Libc.FD_CLOEXEC);
+            return new FileStream(new SafeFileHandle(descriptor, ownsHandle: true), FileAccess.Read, 81920);
+        }
+        catch
+        {
+            _ = Libc.close(descriptor);
+            throw;
+        }
+    }
+
+    private static class Libc
+    {
+        public const int O_RDONLY = 0;
+        public const int F_SETFD = 2;
+        public const int FD_CLOEXEC = 1;
+
+        [DllImport("libc", SetLastError = true)]
+        public static extern int open(string path, int flags);
+
+        [DllImport("libc", SetLastError = true)]
+        public static extern int fcntl(int descriptor, int command, int argument);
+
+        [DllImport("libc", SetLastError = true)]
+        public static extern int close(int descriptor);
+    }
 }

@@ -10,6 +10,22 @@ namespace Kkindle;
 
 public partial class SendToKindleWindow
 {
+    private void ConfigureMacWindowChrome()
+    {
+        if (!MacTrafficLights.IsSupported) return;
+
+        // Native traffic lights; the extended client area keeps our own
+        // 38-DIP title row as the visible header.
+        WindowDecorations = Avalonia.Controls.WindowDecorations.Full;
+        ExtendClientAreaToDecorationsHint = true;
+        ExtendClientAreaTitleBarHeightHint = MacTrafficLights.TitleBarHeight;
+
+        MinimizeWindowButton.IsVisible = false;
+        MaximizeWindowButton.IsVisible = false;
+        CloseWindowButton.IsVisible = false;
+        SendWindowBrand.Margin = new Avalonia.Thickness(MacTrafficLights.TitleContentInset, 0, 16, 0);
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -48,13 +64,16 @@ public partial class SendToKindleWindow
         WindowResizeLayer.IsVisible = !maximized;
     }
 
+    private WindowEdgeResizer? _windowEdgeResizer;
+    private WindowEdgeResizer WindowResizer => _windowEdgeResizer ??= new WindowEdgeResizer(this);
+
     private void WindowResize_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (WindowState != WindowState.Normal || !CanResize
-            || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
-            || sender is not Control { Tag: string edge }
-            || !Enum.TryParse<WindowEdge>(edge, out var windowEdge)) return;
-        BeginResizeDrag(windowEdge, e);
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
+            || sender is not Control { Tag: string edge } source)
+            return;
+        if (!WindowResizer.TryBegin(source, edge, e))
+            return;
         e.Handled = true;
     }
 }

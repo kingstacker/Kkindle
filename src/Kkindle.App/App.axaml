@@ -571,8 +571,9 @@
         </Style>
 
         <!-- Caption buttons invert to black-on-white on hover, which is the
-             product's hover language everywhere. Note there is no red close
-             button: the three-colour rule has no exception for it. -->
+             product's hover language everywhere. Windows and Linux keep the
+             square monochrome row; macOS uses its native window decorations,
+             so this row is hidden there. -->
         <Style Selector="Button.caption">
             <Setter Property="Width" Value="46" />
             <Setter Property="Height" Value="38" />
@@ -606,6 +607,72 @@
         <Style Selector="Button.caption:pressed">
             <Setter Property="Background" Value="{DynamicResource InkBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PaperBrush}" />
+        </Style>
+
+        <!-- Drawn traffic lights for the zen fullscreen overlay, which sits
+             outside the native titlebar; normal macOS windows use the real
+             system controls. Size, spacing, colours and hover glyphs follow
+             the system. -->
+        <Style Selector="Button.trafficLight">
+            <Setter Property="Width" Value="12" />
+            <Setter Property="Height" Value="12" />
+            <Setter Property="MinWidth" Value="12" />
+            <Setter Property="MinHeight" Value="12" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="BorderThickness" Value="0.5" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="#FF5F57" />
+            <Setter Property="BorderBrush" Value="#E0443E" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}"
+                            ClipToBounds="True">
+                        <ContentPresenter Content="{TemplateBinding Content}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="Button.trafficLight.minimize">
+            <Setter Property="Background" Value="#FEBC2E" />
+            <Setter Property="BorderBrush" Value="#DFA123" />
+        </Style>
+        <Style Selector="Button.trafficLight.zoom">
+            <Setter Property="Background" Value="#28C840" />
+            <Setter Property="BorderBrush" Value="#1DAD2B" />
+        </Style>
+        <!-- Glyphs stay hidden until hover, matching macOS. -->
+        <Style Selector="Button.trafficLight Path">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="StrokeThickness" Value="1.3" />
+            <Setter Property="StrokeLineCap" Value="Round" />
+        </Style>
+        <Style Selector="Button.trafficLight.close Path">
+            <Setter Property="Stroke" Value="#7A1000" />
+        </Style>
+        <Style Selector="Button.trafficLight.minimize Path">
+            <Setter Property="Stroke" Value="#995700" />
+        </Style>
+        <Style Selector="Button.trafficLight.zoom Path">
+            <Setter Property="Fill" Value="#0B650D" />
+            <Setter Property="Stroke" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.trafficLight:pointerover Path">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Button.trafficLight.inactive">
+            <Setter Property="Background" Value="#D8D8D8" />
+            <Setter Property="BorderBrush" Value="#C6C6C6" />
+        </Style>
+        <Style Selector="Button.trafficLight.inactive Path">
+            <Setter Property="Opacity" Value="0" />
         </Style>
 
         <!-- The WinUI reference uses a small set of named visual languages:

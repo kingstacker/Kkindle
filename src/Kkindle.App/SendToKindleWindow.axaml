@@ -48,8 +48,8 @@
     <Grid RowDefinitions="38,Auto,3,*,Auto">
         <Grid x:Name="SendWindowTitleBar" ColumnDefinitions="*,Auto">
             <Border Background="Transparent" PointerPressed="TitleBarDragRegion_PointerPressed">
-                <StackPanel Orientation="Horizontal" Spacing="8" Margin="16,0" VerticalAlignment="Center"
-                            IsHitTestVisible="False">
+                <StackPanel x:Name="SendWindowBrand" Orientation="Horizontal" Spacing="8" Margin="16,0"
+                            VerticalAlignment="Center" IsHitTestVisible="False">
                     <Border Width="18" Height="18" Background="{DynamicResource InkBrush}">
                         <TextBlock Text="K" Foreground="{DynamicResource PaperBrush}" FontSize="13" FontWeight="Bold"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />

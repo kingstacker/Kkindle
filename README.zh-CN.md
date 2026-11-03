@@ -23,7 +23,7 @@ Kkindle 是一款基于 Avalonia 的跨平台电子书与 Kindle 管理器。它
 ## 主要功能
 
 - **书库管理**：导入 EPUB、PDF、MOBI、AZW3、TXT；TXT 自动识别 UTF-8、带 BOM 的 Unicode 或 GB18030 编码，识别章节及分卷目录并转换为 EPUB，无需 Calibre。管理元数据、封面、标签、分类、搜索和阅读状态；同名版本导入时可选择添加格式、独立保存或跳过，删除内容会先进入可恢复回收站。
-- **Kreader 阅读器**：EPUB、PDF 和无 DRM 的 AZW3 可直接在应用内阅读；AZW3 使用内置 KF8 解析，无需安装 Calibre。支持分页/滚动阅读、目录、书签、查找、批注、排版设置、阅读进度，以及 Windows/Linux 听书（Linux 需安装 mpv、ffplay、VLC 或 GStreamer）。
+- **Kreader 阅读器**：EPUB、PDF 和无 DRM 的 AZW3 可直接在应用内阅读；AZW3 使用内置 KF8 解析，无需安装 Calibre。支持分页/滚动阅读、目录、书签、查找、批注、排版设置、阅读进度，以及 Windows/Linux/macOS 听书（Linux 需安装 mpv、ffplay、VLC 或 GStreamer；macOS 使用系统自带的 afplay）。
 - **PDF 阅读**：书库自动使用第一页作为封面，支持连续滚动、单页和双页阅读，以及适合宽度/整页、清晰缩放和 90° 旋转。支持选择文字、六种划线/标记样式、批注编辑，以及通过页注图标或右键在 PDF 任意位置添加页面批注。打开时先显示当前页，全文搜索在后台准备；可见区域按屏幕像素密度重绘。搜索、书签和阅读进度沿用 EPUB 的本地保存逻辑。扫描版可显示原页并添加页面笔记，暂不提供 OCR。
 - **AI 阅读助手**：围绕当前书籍提问、章节总结、选文解释和全书概览；支持自动获取模型、模型选择、连通性检测以及 DeepSeek、OpenAI 兼容接口。只发送相关本地片段。
 - **Kindle 管理**：识别 USB/WPD/MTP 设备，传输书籍，管理字体和词典，导入 `My Clippings.txt`。
@@ -79,9 +79,13 @@ Linux 使用相同命令，把 `Kkindle.Desktop.MacOS` 换成 `Kkindle.Desktop.L
 bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-arm64
 # Intel
 bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-x64
+# 通用版（一个包同时支持两种架构）
+bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-universal
 ```
 
-请在与目标架构一致的机器上执行；CI 分别使用 `macos-15` 和 `macos-15-intel`，因为随包分发的 libmtp 按本机架构编译。
+这些命令在任一架构的 Mac 上都能执行：随包分发的 libmtp 和 libusb 会按目标架构从源码构建（与主机架构不同时用 macOS SDK 交叉编译），所以 Intel Mac 也能打出 arm64 包，反之亦然。CI 仍分别使用 `macos-15` 和 `macos-15-intel`，只是为了加快构建。
+
+`osx-universal` 生成的单个 `Kkindle.app` 可以在 Intel 和 Apple Silicon 上原生启动。.NET 自包含发布包含按架构编译的原生库和 ReadyToRun 程序集，无法合并成同一套文件，因此包里同时携带两份完整负载（`Contents/MacOS/x86_64` 与 `Contents/MacOS/arm64`），由通用启动器选择对应架构。体积约为单架构包的 2 倍。
 
 默认测试会跳过耗时的 UI/渲染/GC 压力用例，只保留核心、平台、设备和少量 UI 冒烟回归；这些用例仍保留在仓库中，可用 `RunSlowTests=true` 手动开启。
 

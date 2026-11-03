@@ -497,7 +497,7 @@
     <x:String x:Key="Ui.Auto.44CE7AE909BBB28B">Search</x:String>
     <x:String x:Key="Ui.Auto.EB050FA14D0DA6AB">Search title or author</x:String>
     <x:String x:Key="Ui.Auto.64295B76D26336F3">Search entire book…</x:String>
-    <x:String x:Key="Ui.Auto.43A641217D7F134F">Search entire book (Ctrl+F)</x:String>
+    <x:String x:Key="Ui.Auto.43A641217D7F134F">Search entire book (Ctrl/⌘+F)</x:String>
     <x:String x:Key="Ui.Auto.168A769EBA62A8E8">Search title, author, or pinyin</x:String>
     <x:String x:Key="Ui.Auto.F7824158AAA04D87">Supports EPUB, PDF, MOBI, AZW3, and TXT; TXT chapters are detected and converted to EPUB; subdirectories are scanned automatically</x:String>
     <x:String x:Key="Ui.Auto.7C456B8E16853FCF">Supports MDX, Kindle dictionaries (AZW/MOBI/PRC), and UTF-8 text dictionaries. Kindle dictionaries are parsed directly where supported, with Calibre as a fallback. DRM-protected dictionaries cannot be imported.</x:String>
@@ -664,7 +664,7 @@
     <x:String x:Key="Ui.Auto.3665885A4FDCEC0A">Open Wikipedia</x:String>
     <x:String x:Key="Ui.Auto.E15BDB444E1C8F75">Source: Wikipedia · CC BY-SA 4.0</x:String>
     <x:String x:Key="Ui.Auto.2F882E6CACB26C17">Select one word or phrase to search Wikipedia.</x:String>
-    <x:String x:Key="Ui.Auto.2884AF5B8126BF7B">Ask about this book… (Ctrl+Enter to send)</x:String>
+    <x:String x:Key="Ui.Auto.2884AF5B8126BF7B">Ask about this book… (Ctrl/⌘+Enter to send)</x:String>
     <x:String x:Key="Ui.Auto.EF51FA34002047BB">Buy me a coffee</x:String>
     <x:String x:Key="Ui.Auto.DD4E63F4F9C0F4B5">Please connect a device</x:String>
     <x:String x:Key="Ui.Auto.E5327DA0211C4F19">Choose the result that matches the current book; if none is suitable, change the keywords and search again.</x:String>
@@ -1622,7 +1622,7 @@
     <x:String x:Key="Ui.Auto.9B4D1CC07395F4B1">Explain selected text</x:String>
     <x:String x:Key="Ui.Auto.51AFFFDDE76EA35A">Quick overview</x:String>
     <x:String x:Key="Ui.Auto.B94E8C2A0D642FC5">Model &amp; thinking ▾</x:String>
-    <x:String x:Key="Ui.Auto.4E95EEDB8847F88D">Ctrl+Enter to send · Enter for a new line</x:String>
+    <x:String x:Key="Ui.Auto.4E95EEDB8847F88D">Ctrl/⌘+Enter to send · Enter for a new line</x:String>
     <x:String x:Key="Ui.Auto.449123DD66674848">Current PDF · Page {0}</x:String>
     <x:String x:Key="Ui.Auto.424EEBE94594D62B">Answer copied.</x:String>
     <x:String x:Key="Ui.Auto.89C45AE963128EF5">Copy failed: {0}</x:String>
@@ -1634,7 +1634,7 @@
     <x:String x:Key="Ui.Auto.47269F0D9084B16F">Generation stopped</x:String>
     <x:String x:Key="Ui.Auto.CC849441C8991724">Stopped. Partial output is preserved; you can retry.</x:String>
     <x:String x:Key="Ui.Auto.9AD0AAC32EA304BE">Stop generating</x:String>
-    <x:String x:Key="Ui.Auto.534A6E69356C32FF">Send · Ctrl+Enter</x:String>
+    <x:String x:Key="Ui.Auto.534A6E69356C32FF">Send · Ctrl/⌘+Enter</x:String>
     <x:String x:Key="Ui.Auto.A7FE990B2999AE03">PDF quick overview samples {0}/{1} pages with text. State explicitly that it is a sample, not a complete summary.</x:String>
     <x:String x:Key="Ui.Auto.671DD3C213FD3C27">PDF scope: current page {0} only, not the entire book or chapter.</x:String>
     <x:String x:Key="Ui.Auto.7C15AA5C25871689">PDF quick overview · {0} sampled pages</x:String>
@@ -2154,6 +2154,15 @@
     <x:String x:Key="Ui.Onboarding.CalibreSkipped">Skipped; you can install them later in Settings</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreDone">Calibre and KFX Input are installed and verified</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreFailed">Installation failed; select Yes to retry: {0}</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsPrompt">Enable read-aloud (edge-tts)?</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsHelp">Free Microsoft Edge online voices; first setup downloads about 15 MB</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsYes">Yes, install automatically</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsNo">No, not now</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsSkipped">Not enabled; Kkindle can install it later when you use read-aloud</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsChecking">Checking read-aloud components</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsDone">Read-aloud components are installed and verified</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsFailed">Installation failed; select Yes to retry: {0}</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsInstallLater">Read-aloud components are not installed yet; Kkindle will install them when you open read-aloud.</x:String>
     <x:String x:Key="Ui.Auto.51F1A930F65EE718">Reading dictionary</x:String>
     <x:String x:Key="Ui.Auto.3B13646ECB15D60F">Checking duplicate dictionaries</x:String>
     <x:String x:Key="Ui.Auto.4CE429F60D8BC556">Saving entries</x:String>
@@ -2252,9 +2261,9 @@
     <x:String x:Key="Ui.Auto.BD885804E1F42B6A">Batch conversion complete</x:String>
     <x:String x:Key="Ui.Auto.D8106FCCAFA2BF48">Converted {0}, skipped {1}, failed {2}.</x:String>
     <x:String x:Key="Ui.Auto.89CE481A4B23D2A4">Keyboard shortcuts</x:String>
-    <x:String x:Key="Ui.Auto.C91E6D58F6714EE7">Ctrl+F  Search library</x:String>
-    <x:String x:Key="Ui.Auto.239BAE424168566C">Ctrl+I  Import books</x:String>
-    <x:String x:Key="Ui.Auto.5729DBB570C4D4BD">Ctrl+A  Select current page</x:String>
+    <x:String x:Key="Ui.Auto.C91E6D58F6714EE7">Ctrl/⌘+F  Search library</x:String>
+    <x:String x:Key="Ui.Auto.239BAE424168566C">Ctrl/⌘+I  Import books</x:String>
+    <x:String x:Key="Ui.Auto.5729DBB570C4D4BD">Ctrl/⌘+A  Select current page</x:String>
     <x:String x:Key="Ui.Auto.A8C4C49651C8C822">Enter  Open selected book</x:String>
     <x:String x:Key="Ui.Auto.378A0C73C444EA69">Delete  Delete selected books</x:String>
     <x:String x:Key="Ui.Auto.6A6972ABA78A9641">Esc  Clear search or selection</x:String>

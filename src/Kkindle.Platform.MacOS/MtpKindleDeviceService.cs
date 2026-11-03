@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
@@ -15,9 +16,13 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
 {
     private const ushort AmazonVendorId = 0x1949;
     private const long MaximumMetadataFileSize = 128L * 1024 * 1024;
+    private const string AnnotationRoot = "system/ksdk/.annotations";
+    private const string AnnotationFileName = "ksdk_annotation_v1.db";
+    private const string ThumbnailDirectory = "system/thumbnails";
     private static readonly TimeSpan DetectionCacheLifetime = TimeSpan.FromSeconds(2);
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
+    private readonly AppPaths _paths;
     private readonly IMetadataService _metadata;
     private readonly KindleScanCacheStore _scanCache;
     private readonly IBookFormatConverter _formatConverter;
@@ -32,6 +37,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         IBookFormatConverter? formatConverter = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        _paths = paths;
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _scanCache = new KindleScanCacheStore(paths);
         _formatConverter = formatConverter ?? new BookFormatConversionService();
@@ -152,15 +158,30 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                 Path.GetExtension(sourcePath),
                 bookFile.Id);
             var total = new FileInfo(sourcePath).Length;
+            // Kindle bookshelves use the EXTH ASIN/CDE pair for cover names.
+            // Books without an ASIN simply have no device thumbnail.
+            var thumbnail = device.Profile.UsesKindleThumbnails
+                ? await KindleThumbnailService.CreateAsync(
+                    sourcePath, _metadata, cancellationToken, coverOverridePath).ConfigureAwait(false)
+                : null;
 
             await WithSessionAsync(device, session =>
             {
                 var folder = session.EnsureDirectory(device.Profile.BooksDirectory);
+                var bookPath = $"{folder.RelativePath}/{fileName}";
+                var isNewBook = session.Find(bookPath) is null;
                 session.Upload(
                     folder.RelativePath,
                     sourcePath,
                     fileName,
                     (sent, size) => progress?.Report(new TransferProgress(sent, size, "正在发送到设备")));
+                if (thumbnail is not null)
+                {
+                    progress?.Report(new TransferProgress(total, total, "正在同步设备书架封面"));
+                    UploadThumbnail(session, thumbnail);
+                }
+                if (isNewBook)
+                    DeleteSidecarFolder(session, device.Profile.BooksDirectory, fileName);
                 return true;
             }, cancellationToken).ConfigureAwait(false);
             progress?.Report(new TransferProgress(total, total, "已发送"));
@@ -184,7 +205,13 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         {
             var entry = session.Find(book.RelativePath)
                 ?? throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
+            var separator = entry.RelativePath.LastIndexOf('/');
+            var directory = separator > 0 ? entry.RelativePath[..separator] : string.Empty;
             session.Delete(entry);
+            // Reading progress, bookmarks and annotations live in the matching
+            // .sdr folder; leaving it behind makes Amazon's device view think
+            // the book is still installed.
+            DeleteSidecarFolder(session, directory, entry.Name);
             return true;
         }, cancellationToken);
     }
@@ -305,6 +332,22 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         CancellationToken cancellationToken = default,
         int maxItems = int.MaxValue)
     {
+        if (!device.Profile.SupportsClippings) return [];
+
+        // Account databases carry highlights and notes that never appear in
+        // My Clippings.txt; the text file remains the fallback for firmware
+        // without a readable database.
+        try
+        {
+            var databaseNotes = await ReadAnnotationDatabaseClippingsAsync(
+                device, cancellationToken, maxItems).ConfigureAwait(false);
+            if (databaseNotes.Count > 0) return databaseNotes;
+        }
+        catch (Exception exception) when (IsAnnotationDatabaseFailure(exception))
+        {
+            Debug.WriteLine($"MTP annotation database unavailable: {exception.Message}");
+        }
+
         var text = await ReadClippingsTextAsync(device, cancellationToken).ConfigureAwait(false);
         return text is null ? [] : KindleClippingsParser.Parse(text, maxItems);
     }
@@ -321,6 +364,12 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
             throw new NotSupportedException(UiText.Get("当前设备的笔记仅支持读取和导出。"));
         ArgumentNullException.ThrowIfNull(clippingIds);
         if (clippingIds.Count == 0) return;
+        if (clippingIds.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("设备笔记标识无效。", nameof(clippingIds));
+        // Rows in the account database are read-only here; only the text file
+        // can be rewritten safely without a full annotation sync transaction.
+        if (clippingIds.Any(id => id.StartsWith("kindle-db:", StringComparison.OrdinalIgnoreCase)))
+            throw new NotSupportedException(UiText.Get("Kindle 账户数据库中的批注当前仅支持读取和导出。"));
         var ids = clippingIds.ToHashSet(StringComparer.Ordinal);
         var text = await ReadClippingsTextAsync(device, cancellationToken).ConfigureAwait(false)
             ?? throw new FileNotFoundException("Kindle 上不存在 My Clippings.txt。");
@@ -333,7 +382,6 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         try
         {
             await File.WriteAllTextAsync(temporary, updated, new UTF8Encoding(true), cancellationToken).ConfigureAwait(false);
-            var relativePath = $"{device.Profile.BooksDirectory}/My Clippings.txt";
             await WithSessionAsync(device, session =>
             {
                 session.Upload(
@@ -342,13 +390,414 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                     "My Clippings.txt");
                 return true;
             }, cancellationToken).ConfigureAwait(false);
-            _ = relativePath;
         }
         finally
         {
             TryDelete(temporary);
         }
     }
+
+    public async Task<KindleAnnotationSnapshot?> ReadAnnotationSnapshotAsync(
+        KindleDevice device,
+        CancellationToken cancellationToken = default)
+    {
+        if (!device.Profile.SupportsClippings) return null;
+        var stagingDirectory = CreateStagingDirectory("annotation-snapshot");
+        try
+        {
+            var local = await WithSessionAsync(device, session =>
+            {
+                var database = FindAnnotationDatabases(session).FirstOrDefault();
+                if (database is null) return null;
+                var destination = Path.Combine(stagingDirectory, AnnotationFileName);
+                session.Download(database, destination);
+                return new LocalAnnotationDatabase(
+                    database.RelativePath.Replace('\\', '/'),
+                    destination,
+                    FindSdrFolders(session, device));
+            }, cancellationToken).ConfigureAwait(false);
+            if (local is null) return null;
+
+            var records = await KindleAnnotationDatabaseReader.ReadRecordsAsync(
+                local.LocalPath, 100_000, cancellationToken).ConfigureAwait(false);
+            var titleResolver = KindleAnnotationBookTitleResolver.Create(local.SdrFolders);
+            var snapshotRecords = records.Select(record => new KindleAnnotationRecord(
+                record.Id,
+                new KindleAnnotationBookIdentity(
+                    record.Book.BookId,
+                    record.Book.Asin,
+                    record.Book.Guid),
+                record.Dataset,
+                record.Type,
+                record.Start,
+                record.End,
+                record.CreatedAt?.ToUnixTimeMilliseconds() ?? 0,
+                record.UpdatedAt?.ToUnixTimeMilliseconds() ?? 0,
+                record.Note,
+                record.SerializedPayload,
+                titleResolver.Resolve(record.Book) ?? string.Empty)).ToArray();
+            await using var stream = File.OpenRead(local.LocalPath);
+            var sha256 = Convert.ToHexString(
+                await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
+            return new KindleAnnotationSnapshot(local.DatabaseRelativePath, sha256, snapshotRecords);
+        }
+        finally
+        {
+            TryDeleteDirectory(stagingDirectory);
+        }
+    }
+
+    public Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(
+        KindleDevice device,
+        KindleAnnotationSnapshot snapshot,
+        IReadOnlyList<KindleAnnotationMutation> mutations,
+        CancellationToken cancellationToken = default) =>
+        ApplyAnnotationMutationsAsync(device, snapshot, mutations, cancellationToken, null);
+
+    public async Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(
+        KindleDevice device,
+        KindleAnnotationSnapshot snapshot,
+        IReadOnlyList<KindleAnnotationMutation> mutations,
+        CancellationToken cancellationToken,
+        IProgress<KindleAnnotationSyncProgress>? progress)
+    {
+        progress?.Report(new(KindleAnnotationSyncStage.BackingUp));
+        if (!device.Profile.SupportsClippings)
+            throw new NotSupportedException(UiText.Get("当前设备暂不支持回写 Kindle 批注。"));
+        if (mutations.Count == 0)
+            return new KindleAnnotationWriteResult(0, snapshot.Sha256, snapshot.Sha256, null, null);
+        ValidateAnnotationDatabasePath(snapshot.DatabaseRelativePath);
+
+        var deviceKey = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(device.Identity))).ToLowerInvariant()[..16];
+        var backupDirectory = Path.Combine(
+            _paths.Backups,
+            "KindleAnnotations",
+            deviceKey,
+            DateTime.Now.ToString("yyyyMMdd-HHmmssfff"));
+        Directory.CreateDirectory(backupDirectory);
+        var workingDirectory = Path.Combine(backupDirectory, "working");
+        Directory.CreateDirectory(workingDirectory);
+        var workingPath = Path.Combine(workingDirectory, AnnotationFileName);
+        var localBackupPath = Path.Combine(backupDirectory, AnnotationFileName);
+        var candidatePath = Path.Combine(backupDirectory, "ksdk_annotation_v1.candidate.db");
+        var readbackDirectory = Path.Combine(workingDirectory, "readback");
+        Directory.CreateDirectory(readbackDirectory);
+        try
+        {
+            // Snapshot the database again and prove it still matches the scan.
+            await WithSessionAsync(device, session =>
+            {
+                var database = FindAnnotationDatabase(session, snapshot.DatabaseRelativePath)
+                    ?? throw new IOException("设备批注数据库路径已经变化。");
+                RejectAnnotationSideFiles(session, database);
+                session.Download(database, workingPath);
+                return true;
+            }, cancellationToken).ConfigureAwait(false);
+            await VerifyHashAsync(
+                workingPath, snapshot.Sha256,
+                "Kindle 批注数据库在检测后已变化，请重新检测。", cancellationToken).ConfigureAwait(false);
+            File.Copy(workingPath, localBackupPath, overwrite: false);
+
+            var newHash = await KindleAnnotationDatabaseWriter.BuildCandidateAsync(
+                workingPath,
+                candidatePath,
+                mutations,
+                cancellationToken,
+                progress).ConfigureAwait(false);
+
+            var deviceBackup = await WithSessionAsync(device, session =>
+                InstallAnnotationDatabase(
+                    session,
+                    snapshot.DatabaseRelativePath,
+                    snapshot.Sha256,
+                    candidatePath,
+                    newHash,
+                    localBackupPath,
+                    readbackDirectory,
+                    progress,
+                    cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+
+            return new KindleAnnotationWriteResult(
+                mutations.Count,
+                snapshot.Sha256,
+                newHash,
+                localBackupPath,
+                deviceBackup);
+        }
+        finally
+        {
+            TryDelete(candidatePath);
+            TryDeleteDirectory(workingDirectory);
+        }
+    }
+
+    private static string InstallAnnotationDatabase(
+        MtpDeviceSession session,
+        string databaseRelativePath,
+        string expectedOriginalHash,
+        string candidatePath,
+        string candidateHash,
+        string localBackupPath,
+        string readbackDirectory,
+        IProgress<KindleAnnotationSyncProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var database = FindAnnotationDatabase(session, databaseRelativePath)
+            ?? throw new IOException("设备批注数据库路径已经变化。");
+        RejectAnnotationSideFiles(session, database);
+        var parentDirectory = database.RelativePath[..database.RelativePath.LastIndexOf('/')];
+
+        var currentReadback = Path.Combine(readbackDirectory, "current.db");
+        session.Download(database, currentReadback);
+        VerifyHash(currentReadback, expectedOriginalHash,
+            "设备批注数据库在同步期间发生变化，已取消安装。");
+
+        // Upload the untouched database and the candidate under temporary
+        // names first, so both are proven readable before the original is
+        // replaced. This mirrors the WPD transport.
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmssfff") + "-" + Guid.NewGuid().ToString("N")[..8];
+        var stageName = $"{AnnotationFileName}.kkindle-sync-new-{stamp}";
+        var backupName = $"{AnnotationFileName}.kkindle-backup-{stamp}";
+
+        progress?.Report(new(KindleAnnotationSyncStage.BackingUp));
+        session.Upload(parentDirectory, localBackupPath, backupName);
+        var backupReadback = Path.Combine(readbackDirectory, "backup.db");
+        session.Download(
+            session.Find($"{parentDirectory}/{backupName}")
+                ?? throw new IOException("设备未确认写入批注备份。"),
+            backupReadback);
+        VerifyHash(backupReadback, expectedOriginalHash, "设备批注备份校验失败。");
+
+        progress?.Report(new(KindleAnnotationSyncStage.PreparingWrite));
+        session.Upload(parentDirectory, candidatePath, stageName);
+        var stageReadback = Path.Combine(readbackDirectory, "stage.db");
+        session.Download(
+            session.Find($"{parentDirectory}/{stageName}")
+                ?? throw new IOException("设备未确认写入批注快照。"),
+            stageReadback);
+        VerifyHash(stageReadback, candidateHash, "设备批注快照校验失败。");
+
+        // Last freshness check immediately before deleting the original.
+        database = FindAnnotationDatabase(session, databaseRelativePath)
+            ?? throw new IOException("设备批注数据库已消失，已取消安装。");
+        RejectAnnotationSideFiles(session, database);
+        session.Download(database, currentReadback);
+        VerifyHash(currentReadback, expectedOriginalHash,
+            "设备批注数据库在同步期间发生变化，已取消安装。");
+
+        progress?.Report(new(KindleAnnotationSyncStage.WritingToDevice));
+        session.Delete(database);
+        try
+        {
+            session.Upload(parentDirectory, candidatePath, AnnotationFileName);
+            var installed = FindAnnotationDatabase(session, databaseRelativePath)
+                ?? throw new IOException("设备未确认安装批注数据库。");
+            var installedReadback = Path.Combine(readbackDirectory, "installed.db");
+            session.Download(installed, installedReadback);
+            VerifyHash(installedReadback, candidateHash, "设备批注数据库安装后校验失败。");
+        }
+        catch
+        {
+            // Never leave the device with a missing or partially written
+            // database: the verified byte copy goes back under its own name.
+            try
+            {
+                session.Upload(parentDirectory, localBackupPath, AnnotationFileName);
+            }
+            catch (Exception restoreFailure) when (restoreFailure is IOException or UnauthorizedAccessException)
+            {
+                Debug.WriteLine($"Restoring the Kindle annotation database failed: {restoreFailure.Message}");
+            }
+            throw;
+        }
+
+        try
+        {
+            if (session.Find($"{parentDirectory}/{stageName}") is { } staged) session.Delete(staged);
+        }
+        catch (IOException exception)
+        {
+            // Leaving a verified staging file behind cannot invalidate a
+            // database that already passed its readback check.
+            Debug.WriteLine($"Removing the staged annotation database failed: {exception.Message}");
+        }
+
+        progress?.Report(new(KindleAnnotationSyncStage.Verifying));
+        return $"{parentDirectory}/{backupName}";
+    }
+
+    private async Task<IReadOnlyList<KindleClipping>> ReadAnnotationDatabaseClippingsAsync(
+        KindleDevice device,
+        CancellationToken cancellationToken,
+        int maxItems)
+    {
+        if (maxItems <= 0) return [];
+        var stagingDirectory = CreateStagingDirectory("annotation-database-read");
+        try
+        {
+            var databases = await WithSessionAsync(
+                device, FindAnnotationDatabases, cancellationToken).ConfigureAwait(false);
+            if (databases.Count == 0) return [];
+            var sdrFolders = await WithSessionAsync(
+                device, session => FindSdrFolders(session, device), cancellationToken).ConfigureAwait(false);
+            var titleResolver = KindleAnnotationBookTitleResolver.Create(sdrFolders);
+            var result = new List<KindleClipping>();
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            for (var index = 0; index < databases.Count && result.Count < maxItems; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var database = databases[index];
+                var localPath = Path.Combine(stagingDirectory, $"annotation-{index}.db");
+                await WithSessionAsync(device, session =>
+                {
+                    session.Download(database, localPath);
+                    return true;
+                }, cancellationToken).ConfigureAwait(false);
+                var notes = await KindleAnnotationDatabaseReader.ReadClippingsAsync(
+                    localPath,
+                    titleResolver.Resolve,
+                    maxItems - result.Count,
+                    cancellationToken).ConfigureAwait(false);
+                foreach (var note in notes)
+                    if (ids.Add(note.Id)) result.Add(note);
+            }
+            return result;
+        }
+        finally
+        {
+            TryDeleteDirectory(stagingDirectory);
+        }
+    }
+
+    private static IReadOnlyList<MtpEntry> FindAnnotationDatabases(MtpDeviceSession session)
+    {
+        var databases = session.Enumerate(AnnotationRoot)
+            .Where(entry => !entry.IsFolder
+                && entry.Name.Equals(AnnotationFileName, StringComparison.OrdinalIgnoreCase))
+            .Take(32)
+            .ToArray();
+        var accounts = databases
+            .Where(entry => IsAccountDatabase(entry.RelativePath))
+            .ToArray();
+        return accounts.Length > 0 ? accounts : databases;
+    }
+
+    private static MtpEntry? FindAnnotationDatabase(MtpDeviceSession session, string relativePath)
+    {
+        var entry = session.Find(relativePath);
+        return entry is not null
+            && !entry.IsFolder
+            && entry.Name.Equals(AnnotationFileName, StringComparison.OrdinalIgnoreCase)
+            ? entry
+            : null;
+    }
+
+    private static IReadOnlyList<string> FindSdrFolders(MtpDeviceSession session, KindleDevice device) =>
+        session.List(device.Profile.BooksDirectory)
+            .Where(entry => entry.IsFolder
+                && entry.Name.EndsWith(".sdr", StringComparison.OrdinalIgnoreCase))
+            .Select(entry => entry.Name)
+            .ToArray();
+
+    private static bool IsAccountDatabase(string relativePath) =>
+        relativePath.Split('/', '\\')
+            .Any(segment => segment.StartsWith("amzn1.account.", StringComparison.OrdinalIgnoreCase));
+
+    private static void RejectAnnotationSideFiles(MtpDeviceSession session, MtpEntry database)
+    {
+        var directory = database.RelativePath[..database.RelativePath.LastIndexOf('/')];
+        foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
+        {
+            if (session.Find($"{directory}/{database.Name}{suffix}") is not null)
+                throw new IOException("设备批注数据库带有 SQLite 侧文件，暂不能安全同步。");
+        }
+    }
+
+    private static void ValidateAnnotationDatabasePath(string relativePath)
+    {
+        var normalized = (relativePath ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (!normalized.StartsWith(AnnotationRoot + "/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Split('/').Any(segment => segment is "." or "..")
+            || !Path.GetFileName(normalized).Equals(AnnotationFileName, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Kindle 批注数据库路径无效。");
+    }
+
+    private static void VerifyHash(string path, string expected, string message)
+    {
+        using var stream = File.OpenRead(path);
+        var actual = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+            throw new IOException(message);
+    }
+
+    private static async Task VerifyHashAsync(
+        string path, string expected, string message, CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(path);
+        var actual = Convert.ToHexString(
+            await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
+        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+            throw new IOException(message);
+    }
+
+    private static bool IsAnnotationDatabaseFailure(Exception exception) =>
+        exception is IOException
+            or UnauthorizedAccessException
+            or InvalidDataException
+            or NotSupportedException
+            or TimeoutException
+            or Microsoft.Data.Sqlite.SqliteException
+            or System.Text.Json.JsonException;
+
+    private static void UploadThumbnail(MtpDeviceSession session, KindleThumbnail thumbnail)
+    {
+        var temporary = Path.Combine(
+            Path.GetTempPath(), "Kkindle", $"thumbnail-{Guid.NewGuid():N}.jpg");
+        Directory.CreateDirectory(Path.GetDirectoryName(temporary)!);
+        try
+        {
+            File.WriteAllBytes(temporary, thumbnail.JpegBytes);
+            session.Upload(ThumbnailDirectory, temporary, thumbnail.FileName);
+        }
+        finally
+        {
+            TryDelete(temporary);
+        }
+    }
+
+    private static void DeleteSidecarFolder(MtpDeviceSession session, string directory, string fileName)
+    {
+        var sidecarName = Path.ChangeExtension(fileName, ".sdr");
+        var sidecarPath = string.IsNullOrEmpty(directory) ? sidecarName : $"{directory}/{sidecarName}";
+        if (session.Find(sidecarPath) is { IsFolder: true } sidecar)
+            session.DeleteTree(sidecar);
+    }
+
+    private static string CreateStagingDirectory(string name)
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(), "Kkindle", name, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private sealed record LocalAnnotationDatabase(
+        string DatabaseRelativePath,
+        string LocalPath,
+        IReadOnlyList<string> SdrFolders);
 
     public Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default)
     {
@@ -361,8 +810,26 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
 
     private IReadOnlyList<KindleDevice> Detect(CancellationToken cancellationToken)
     {
+        IReadOnlyList<MtpRawDevice> rawDevices;
+        try
+        {
+            rawDevices = MtpDeviceSession.Detect();
+        }
+        catch (Exception exception) when (exception is DllNotFoundException
+                                              or EntryPointNotFoundException
+                                              or BadImageFormatException
+                                              or TypeInitializationException)
+        {
+            // Debug builds and source checkouts do not bundle libmtp. MTP is an
+            // optional transport on macOS, so treat a missing native library as
+            // "no MTP devices" instead of turning device detection into an error
+            // in the sidebar. Packaged builds ship the dylib next to the app.
+            Debug.WriteLine($"MTP unavailable: {exception.Message}");
+            return [];
+        }
+
         var devices = new List<KindleDevice>();
-        foreach (var raw in MtpDeviceSession.Detect())
+        foreach (var raw in rawDevices)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (raw.VendorId != AmazonVendorId) continue;
@@ -472,6 +939,12 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                                     if (!string.IsNullOrWhiteSpace(metadata.Title)) book.Title = metadata.Title.Trim();
                                     if (!string.IsNullOrWhiteSpace(metadata.Authors)) book.Authors = metadata.Authors.Trim();
                                     book.CoverPath = WriteCover(book.Sha256, metadata);
+                                    // Sideloaded books often lack an embedded
+                                    // cover, but the device shelf thumbnail is
+                                    // still available next to the book.
+                                    if (string.IsNullOrWhiteSpace(book.CoverPath))
+                                        book.CoverPath = TryReadDeviceThumbnail(
+                                            session, book, staged, stagingDirectory, cancellationToken);
                                 }
                             }
                             finally
@@ -609,6 +1082,43 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
             return null;
         }
         catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private string? TryReadDeviceThumbnail(
+        MtpDeviceSession session,
+        KindleBook book,
+        string bookPath,
+        string stagingDirectory,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var thumbnailName = KindleThumbnailService
+                .ReadThumbnailFileNameAsync(bookPath, cancellationToken)
+                .GetAwaiter().GetResult();
+            if (string.IsNullOrWhiteSpace(thumbnailName)) return null;
+            var remote = session.Find($"{ThumbnailDirectory}/{thumbnailName}");
+            if (remote is null) return null;
+            var local = Path.Combine(stagingDirectory, $"{Guid.NewGuid():N}.jpg");
+            try
+            {
+                session.Download(remote, local);
+                var name = string.IsNullOrWhiteSpace(book.Sha256)
+                    ? Guid.NewGuid().ToString("N")
+                    : book.Sha256;
+                var path = Path.Combine(_coverCacheDirectory, $"{name}.jpg");
+                File.Copy(local, path, overwrite: true);
+                return path;
+            }
+            finally
+            {
+                TryDelete(local);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return null;
         }

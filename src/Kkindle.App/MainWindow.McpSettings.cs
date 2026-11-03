@@ -311,11 +311,13 @@ public partial class MainWindow
             foreach (var name in executableNames)
             {
                 AddCandidate(Path.Combine(repositoryRoot, "artifacts", "Kkindle-debug-win-x64-latest", name));
+                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Debug", "net10.0", name));
+                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Debug", "net10.0", "win-x64", name));
+                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Debug", "net10.0", "win-x64", "publish", name));
+                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Release", "net10.0", name));
+                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Release", "net10.0", "win-x64", "publish", name));
                 AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Debug", "net8.0", name));
-                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Debug", "net8.0", "win-x64", name));
-                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Debug", "net8.0", "win-x64", "publish", name));
                 AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Release", "net8.0", name));
-                AddCandidate(Path.Combine(repositoryRoot, "src", "Kkindle.McpServer", "bin", "Release", "net8.0", "win-x64", "publish", name));
             }
         }
 

@@ -4,6 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Allows macOS/Linux hosts to restore and build the Windows-targeted
+         reference set (the MCP server multi-targets Windows). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Version>1.1.3-dev.5</Version>
   </PropertyGroup>
 </Project>

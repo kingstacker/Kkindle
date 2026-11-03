@@ -10,7 +10,7 @@ namespace Kkindle.Ui.Tests;
 public sealed partial class SettingsTests
 {
     [Fact]
-    public Task DroppingPdfAndTxtImportsBothAfterTxtChapterConfirmation() => Run(async () =>
+    public Task DroppingPdfAndTxtImportsBothWithoutTxtChapterConfirmation() => Run(async () =>
     {
         await using var scope = await TestWindow.Create(new Kkindle.Core.AppSettings
         {
@@ -35,12 +35,8 @@ public sealed partial class SettingsTests
         await Until(() => scope.Get<Grid>("ImportFormatSelectionOverlay").IsVisible);
         Assert.Equal(2, scope.Get<StackPanel>("ImportFormatSelectionList").Children.Count);
         scope.Call("ImportFormatSelectionPrimaryButton_Click", null, new RoutedEventArgs());
-        await Until(() => scope.Get<Grid>("TxtImportRulesOverlay").IsVisible
-            && scope.Get<ItemsControl>("TxtImportPreviewItems").Items.Count > 0);
-        await Render();
-        Capture(scope.Window, "library-drop-txt-preview");
-        scope.Call("TxtImportConfirmButton_Click", null, new RoutedEventArgs());
         await UntilSettled(() => scope.Window.ViewModel.Books.Count == 2, "PDF and TXT drop should import both books");
+        Assert.False(scope.Get<Grid>("TxtImportRulesOverlay").IsVisible);
         Assert.False(scope.Get<Border>("LibraryDropOverlay").IsVisible);
         await Render();
         Capture(scope.Window, "library-drop-imported");

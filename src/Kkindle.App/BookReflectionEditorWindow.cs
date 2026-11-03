@@ -47,9 +47,13 @@ internal sealed class BookReflectionEditorWindow : Window
         CanResize = true;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = AppAppearanceResources.GetBrush("PaperBrush");
-        WindowDecorations = Avalonia.Controls.WindowDecorations.None;
+        WindowDecorations = MacTrafficLights.IsSupported
+            ? Avalonia.Controls.WindowDecorations.Full
+            : Avalonia.Controls.WindowDecorations.None;
         ExtendClientAreaToDecorationsHint = true;
-        ExtendClientAreaTitleBarHeightHint = -1;
+        ExtendClientAreaTitleBarHeightHint = MacTrafficLights.IsSupported
+            ? MacTrafficLights.TitleBarHeight
+            : -1;
         UseLayoutRounding = true;
 
         var titleBar = new Grid
@@ -136,6 +140,13 @@ internal sealed class BookReflectionEditorWindow : Window
         captionButtons.Children.Add(closeButton);
         Grid.SetColumn(captionButtons, 1);
         titleBar.Children.Add(captionButtons);
+
+        if (MacTrafficLights.IsSupported)
+        {
+            captionButtons.IsVisible = false;
+            if (titleDragRegion.Child is StackPanel brand)
+                brand.Margin = new Thickness(MacTrafficLights.TitleContentInset, 0, 16, 0);
+        }
 
         var titleBarBorder = new Border
         {

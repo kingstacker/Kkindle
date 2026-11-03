@@ -1553,7 +1553,7 @@ public partial class MainWindow
             e.Pointer.Capture(control);
         }
 
-        if ((e.KeyModifiers & KeyModifiers.Control) != 0)
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0)
         {
             card.IsSelected = !card.IsSelected;
             _deviceMultiSelectAnchor = card;
@@ -4778,16 +4778,25 @@ public partial class MainWindow
         _diagnosticsRepairBusy = true;
         RefreshDiagnosticsButton.IsEnabled = false;
         UpdateDiagnosticsRepairButtonState();
+        var repairing = PlatformDiagnostics
+            .Where(item => repairKinds.Contains(item.Item.RepairKind))
+            .ToArray();
+        foreach (var item in repairing)
+            item.IsRepairing = true;
         try
         {
             _paths.EnsureDirectories();
-            DiagnosticsStatusText.Text = T("正在修复…");
+            DiagnosticsStatusText.Text = T("正在安装 {0}", string.Join("、", repairNames));
             foreach (var repairKind in repairKinds)
             {
                 switch (repairKind)
                 {
                     case PlatformDiagnosticRepairKind.InstallCalibre:
-                        await RunCalibreSetupAsync(installPlugin: false);
+                        await RunCalibreSetupAsync(
+                            installPlugin: false,
+                            value => DiagnosticsStatusText.Text =
+                                UiText.Localize(value.Message)
+                                + (value.Percentage is { } percentage ? $" {percentage:0}%" : string.Empty));
                         break;
                     case PlatformDiagnosticRepairKind.InstallTts:
                         await RunTtsDiagnosticRepairAsync();
@@ -4808,6 +4817,8 @@ public partial class MainWindow
         }
         finally
         {
+            foreach (var item in repairing)
+                item.IsRepairing = false;
             _diagnosticsRepairBusy = false;
             RefreshDiagnosticsButton.IsEnabled = !_diagnosticsRefreshing;
             UpdateDiagnosticsRepairButtonState();
@@ -6339,7 +6350,9 @@ public partial class MainWindow
     private async void InstallKfxInputButton_Click(object? sender, RoutedEventArgs e) =>
         await RunCalibreSetupAsync(installPlugin: true);
 
-    private async Task RunCalibreSetupAsync(bool installPlugin)
+    private async Task RunCalibreSetupAsync(
+        bool installPlugin,
+        Action<CalibreSetupProgress>? progressSink = null)
     {
         if (_calibreSetupBusy) return;
         if (NetworkEnabledCheck.IsChecked == false)
@@ -6362,6 +6375,7 @@ public partial class MainWindow
             if (value.Percentage is { } percentage) CalibreSetupProgressBar.Value = percentage;
             CalibreSetupPercentageText.Text = value.Percentage is { } displayedPercentage
                 ? $"{displayedPercentage:0}%" : "—";
+            progressSink?.Invoke(value);
         });
 
         var setupFailed = false;
@@ -6382,6 +6396,29 @@ public partial class MainWindow
                 var result = await setup.InstallCalibreAsync(progress, _lifetimeCancellation.Token);
                 CalibrePathBox.Text = result.ExecutablePath;
                 CalibreSetupStatusText.Text = UiText.Localize(result.Message);
+                // KFX conversion depends on the Input plugin, so a fresh
+                // Calibre install includes it instead of leaving a second
+                // manual step. A plugin failure keeps the Calibre result.
+                try
+                {
+                    await setup.InstallKfxInputAsync(
+                        result.ExecutablePath,
+                        progress,
+                        _lifetimeCancellation.Token);
+                    CalibreSetupStatusText.Text =
+                        UiText.Localize(result.Message) + " · "
+                        + T("KFX Input 已安装，可以转换无 DRM 的 KFX 文件。");
+                }
+                catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception pluginException)
+                {
+                    CalibreSetupStatusText.Text =
+                        UiText.Localize(result.Message) + " · "
+                        + UiText.Localize(pluginException.Message);
+                }
             }
             await SaveAppSettingsCoreAsync();
         }
@@ -7348,22 +7385,37 @@ public sealed class PlatformDiagnosticViewModel : ObservableObject, IDisposable
         UiText.LanguageChanged += OnLanguageChanged;
     }
 
+    private bool _isRepairing;
+
     public PlatformDiagnostic Item { get; }
     public string Name => UiText.Localize(Item.Name);
     public string Detail => UiText.Localize(Item.Detail);
     public bool CanRepair => Item.RepairKind != PlatformDiagnosticRepairKind.None;
+    public bool CanStartRepair => CanRepair && !IsRepairing;
+    public bool IsRepairing
+    {
+        get => _isRepairing;
+        set
+        {
+            if (!SetProperty(ref _isRepairing, value)) return;
+            OnPropertyChanged(nameof(CanStartRepair));
+            OnPropertyChanged(nameof(StatusLabel));
+        }
+    }
     public string RepairLabel => Item.RepairKind switch
     {
         PlatformDiagnosticRepairKind.InstallCalibre => UiText.Get("下载/安装 Calibre"),
         PlatformDiagnosticRepairKind.InstallTts => UiText.Get("安装 TTS"),
         _ => UiText.Get("修复")
     };
-    public string StatusLabel => Item.Status switch
-    {
-        PlatformDiagnosticStatus.Ready => UiText.Get("正常"),
-        PlatformDiagnosticStatus.Warning => UiText.Get("注意"),
-        _ => UiText.Get("不可用")
-    };
+    public string StatusLabel => IsRepairing
+        ? UiText.Get("正在安装 {0}", Name)
+        : Item.Status switch
+        {
+            PlatformDiagnosticStatus.Ready => UiText.Get("正常"),
+            PlatformDiagnosticStatus.Warning => UiText.Get("注意"),
+            _ => UiText.Get("不可用")
+        };
     public IBrush StatusBrush => Item.Status switch
     {
         PlatformDiagnosticStatus.Ready => AppAppearanceResources.GetBrush("SuccessBrush"),

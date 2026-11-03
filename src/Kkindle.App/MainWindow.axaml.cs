@@ -276,6 +276,7 @@ public partial class MainWindow : Window
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
+        ConfigureMacWindowChrome();
         PromoteModalOverlays();
         InitializeKindleEmailClipboardSupport();
         ApplyMainAppearance();
@@ -911,42 +912,26 @@ public partial class MainWindow : Window
             WindowResizeLayer.IsVisible = !maximized;
     }
 
-    // Let the platform own the resize gesture. Updating Width, Height and
-    // Position from PointerMoved produced several native window updates for a
-    // single mouse sample; transparent windows then flashed while Avalonia
-    // laid out the surface between those updates.
+    // Let the platform own the resize gesture where it can. Avalonia's macOS
+    // backend does not implement BeginResizeDrag, so the helper falls back to
+    // updating the frame from pointer deltas there.
+    private WindowEdgeResizer? _windowEdgeResizer;
+    private WindowEdgeResizer WindowResizer => _windowEdgeResizer ??= new WindowEdgeResizer(this);
+
     private void WindowResize_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is not Control { Tag: string edge }
+        if (sender is not Control { Tag: string edge } source
             || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             return;
-        if (!TryGetWindowEdge(edge, out var windowEdge))
+        if (!WindowResizer.TryBegin(source, edge, e))
             return;
 
-        BeginResizeDrag(windowEdge, e);
         e.Handled = true;
     }
 
-    private static bool TryGetWindowEdge(string edge, out WindowEdge windowEdge)
-    {
-        windowEdge = edge switch
-        {
-            "Left" => WindowEdge.West,
-            "Right" => WindowEdge.East,
-            "Top" => WindowEdge.North,
-            "Bottom" => WindowEdge.South,
-            "TopLeft" => WindowEdge.NorthWest,
-            "TopRight" => WindowEdge.NorthEast,
-            "BottomLeft" => WindowEdge.SouthWest,
-            "BottomRight" => WindowEdge.SouthEast,
-            _ => default
-        };
-        return edge is "Left" or "Right" or "Top" or "Bottom"
-            or "TopLeft" or "TopRight" or "BottomLeft" or "BottomRight";
-    }
-
     // Native close requests (including Alt+F4) return from Kreader to the
-    // library. A subsequent native close on the library exits the application.
+    // library. On Windows a subsequent native close on the library exits the
+    // application; on macOS the red button hides into the menu bar instead.
     private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
     {
         if (_backupImportInProgress)
@@ -970,6 +955,19 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             _ = PromptPendingUpdateInstallAsync(packagePath, version, exitRequested: true);
+            return;
+        }
+
+        // macOS red button: close the window into the menu bar, matching the
+        // platform convention for an app that lives in the tray. Quitting
+        // (menu bar 退出, Cmd+Q, OS shutdown) still exits through the paths
+        // above, including pending updates and exit-time S3 sync.
+        if (MacTrafficLights.IsSupported
+            && !_applicationShuttingDown
+            && !_s3SyncExitInProgress)
+        {
+            e.Cancel = true;
+            Hide();
             return;
         }
 
@@ -1923,17 +1921,17 @@ public partial class MainWindow : Window
                 SetTaskStatus(T("已取消导入。"));
                 return;
             }
-            var txtFiles = inputPaths
+            // TXT files are imported with automatic encoding, heading and
+            // volume detection. The rules preview used to gate every import
+            // on an extra confirmation step; the defaults handle the common
+            // case, so import proceeds without prompting.
+            var txtImportRules = inputPaths
                 .Where(path => Path.GetExtension(path).Equals(".txt", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            var txtImportRules = await ChooseTxtImportRulesAsync(
-                txtFiles,
-                _lifetimeCancellation.Token);
-            if (txtImportRules is null)
-            {
-                SetTaskStatus(T("已取消导入。"));
-                return;
-            }
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    path => path,
+                    _ => TxtImportRules.Default,
+                    StringComparer.OrdinalIgnoreCase);
             SetTaskStatus(T("正在导入 {0} 个位置…", inputPaths.Length));
             ShowTaskProgressPopup();
             TaskProgressPopupText.Text = T("正在导入 {0} 个位置…", inputPaths.Length);
@@ -4380,7 +4378,9 @@ public partial class MainWindow : Window
         if (e.Source is Control source && (source is TextBox or ComboBox or Button
             || source.GetVisualAncestors().Any(parent => parent is TextBox or ComboBox or Button))) return;
 
-        var control = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        // Command is the primary modifier on macOS; Control stays for the
+        // Windows and Linux heads.
+        var control = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
         if (control && e.Key == Key.F)
         {
             e.Handled = true;
@@ -4636,7 +4636,7 @@ public partial class MainWindow : Window
         if (!pointerProperties.IsLeftButtonPressed)
             return;
 
-        if (e.ClickCount >= 2 || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift)) != 0)
+        if (e.ClickCount >= 2 || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta | KeyModifiers.Shift)) != 0)
             CancelPendingBookDetailClick();
 
         // 记录框选起点：网格左侧没有空白（卡片从视口左缘开始），从左往右
@@ -4650,7 +4650,7 @@ public partial class MainWindow : Window
         // cannot steal movement before the drag crosses the threshold.
         e.Pointer.Capture(control);
 
-        if ((e.KeyModifiers & KeyModifiers.Control) != 0)
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0)
         {
             if (_selectedBookIds.Remove(card.Book.Id))
                 card.IsMultiSelected = false;

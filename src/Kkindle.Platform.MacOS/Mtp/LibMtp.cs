@@ -27,14 +27,21 @@ internal static class LibMtp
         {
             if (name != LibraryName) return IntPtr.Zero;
             var baseDirectory = AppContext.BaseDirectory;
-            foreach (var candidate in new[]
-                     {
-                         Path.Combine(baseDirectory, "libmtp.9.dylib"),
-                         Path.Combine(baseDirectory, "libmtp.dylib"),
-                         Path.Combine(baseDirectory, "runtimes", "osx-x64", "native", "libmtp.9.dylib")
-                     })
+            // The MCP helper lives in Contents/MacOS/mcp while the bundled
+            // dylibs stay next to the main executable, so the parent
+            // directory is searched as well as the current one.
+            var parentDirectory = Path.GetFullPath(Path.Combine(baseDirectory, ".."));
+            foreach (var directory in new[] { baseDirectory, parentDirectory })
             {
-                if (System.IO.File.Exists(candidate)) return NativeLibrary.Load(candidate);
+                foreach (var candidate in new[]
+                         {
+                             Path.Combine(directory, "libmtp.9.dylib"),
+                             Path.Combine(directory, "libmtp.dylib"),
+                             Path.Combine(directory, "runtimes", "osx-x64", "native", "libmtp.9.dylib")
+                         })
+                {
+                    if (System.IO.File.Exists(candidate)) return NativeLibrary.Load(candidate);
+                }
             }
             return NativeLibrary.Load("libmtp.9.dylib");
         });

@@ -28,8 +28,11 @@ var mcpSettings = LoadMcpSettings(paths);
 var metadata = new BookMetadataService();
 var library = new SqliteBookLibraryService(paths, metadata);
 var readerData = new ReaderDataService(paths);
-var devices = new MassStorageKindleDeviceService(paths, metadata);
-var ejectDevices = McpPlatformServices.CreateEjectService(paths, metadata);
+// The platform service is preferred because it also reaches WPD/MTP-only
+// Kindles; the portable mass-storage service remains the fallback.
+var platformDevices = McpPlatformServices.CreateDeviceService(paths, metadata);
+var devices = platformDevices ?? new MassStorageKindleDeviceService(paths, metadata);
+var ejectDevices = platformDevices;
 var formatConverter = new BookFormatConversionService();
 var emailSettingsStore = new KindleEmailSettingsStore(paths, new McpSecretProtector());
 var emailSender = new KindleEmailSender();

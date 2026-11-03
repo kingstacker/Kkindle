@@ -300,7 +300,8 @@ public partial class MainWindow
             e.Handled = true;
             CloseReaderAnnotationInputPopup();
         }
-        else if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        else if (e.Key == Key.Enter
+            && (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0)
         {
             e.Handled = true;
             ReaderAnnotationInputSaveButton_Click(sender, e);

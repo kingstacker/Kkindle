@@ -542,10 +542,18 @@ public partial class MainWindow
                 LogTtsDebug("env.progress", update.Message);
                 UpdateReaderTtsUi();
             });
-            var availability = await _readerTts.EnsureEnvironmentReadyAsync(
-                    progress,
-                    _lifetimeCancellation.Token)
-                .ConfigureAwait(false);
+            // The first-run screen offers read-aloud as an explicit opt-in, so
+            // only detect the engine until onboarding is complete. Its install
+            // button (or a later reader interaction) starts the setup.
+            var setupDeferred = !_appSettings.OnboardingCompleted;
+            var availability = setupDeferred
+                ? await _readerTts.CheckEnvironmentAsync(
+                        _lifetimeCancellation.Token)
+                    .ConfigureAwait(false)
+                : await _readerTts.EnsureEnvironmentReadyAsync(
+                        progress,
+                        _lifetimeCancellation.Token)
+                    .ConfigureAwait(false);
             _readerTtsEnvironmentChecked = true;
             _readerTtsNotice = availability.IsAvailable
                 ? null
@@ -700,7 +708,7 @@ public partial class MainWindow
         ReaderTtsTitleText.Text = T("听书");
         ReaderTtsDescriptionText.Text = _readerIsPdf
             ? T("当前 PDF 页面有可提取文本时可朗读；扫描图片页需要 OCR，当前版本不自动识别。")
-            : T("首次启动会自动准备 edge-tts；生成语音需要联网。Windows 和 Linux 均支持。");
+            : T("首次启动会自动准备 edge-tts；生成语音需要联网。Windows、Linux 和 macOS 均支持。");
         ReaderTtsProviderLabelText.Text = T("语音引擎");
         ReaderTtsEngineText.Text = "edge-tts";
         ReaderTtsVoiceLabelText.Text = T("声音");

@@ -23,7 +23,7 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 ## Features
 
 - **Library** — Import EPUB, PDF, MOBI, AZW3, and TXT; TXT encoding and chapter/volume headings are detected automatically and converted to EPUB without Calibre. Manage metadata, covers, tags, collections, search, and reading status. When a book with the same title is imported, choose to add the format, keep it separately, or skip; deleted content goes to a recoverable trash first.
-- **Kreader** — Open EPUB, PDF, and DRM-free AZW3 in the app; AZW3 uses the built-in KF8 reader without Calibre. Paginated or scrolling reading, table of contents, bookmarks, search, annotations, typography settings, reading progress, and read-aloud on Windows and Linux (Linux requires mpv, ffplay, VLC, or GStreamer).
+- **Kreader** — Open EPUB, PDF, and DRM-free AZW3 in the app; AZW3 uses the built-in KF8 reader without Calibre. Paginated or scrolling reading, table of contents, bookmarks, search, annotations, typography settings, reading progress, and read-aloud on Windows, Linux, and macOS (Linux requires mpv, ffplay, VLC, or GStreamer; macOS uses the built-in afplay).
 - **PDF reading** — First-page library covers, continuous scrolling, single-page and two-page reading, fit-width/page controls, sharp zoom and 90° rotation. Supports selectable text, six underline/highlight styles, editable comments, and page annotations at arbitrary PDF positions through the page-note icon or right-click. Pages appear before full-book text indexing finishes; only visible regions are rendered at the screen's pixel density. Search, bookmarks and reading position use the same local reading data as EPUB. Scanned pages support viewing and page notes; OCR is not included.
 - **AI assistant** — Ask questions about the current book, summarize chapters, explain selections, and choose from discovered models through DeepSeek, OpenAI, or compatible endpoints. Requests use relevant local excerpts only.
 - **Kindle** — Detect USB/WPD/MTP devices, transfer books, manage fonts and dictionaries, and import `My Clippings.txt`.
@@ -79,9 +79,13 @@ Build a macOS app bundle for either architecture:
 bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-arm64
 # Intel
 bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-x64
+# Universal (one package for both architectures)
+bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-universal
 ```
 
-Run each command on the matching architecture; CI uses `macos-15` for arm64 and `macos-15-intel` for x64 because the bundled libmtp libraries are built for the host architecture.
+Every command works on either architecture: the bundled libmtp and libusb are built from source for the target (cross-compiled with the macOS SDK when it differs from the host), so an Intel Mac can produce the arm64 package and vice versa. CI still uses native `macos-15` and `macos-15-intel` runners to keep builds fast.
+
+`osx-universal` produces a single `Kkindle.app` that starts natively on both Intel and Apple Silicon. A self-contained .NET publish contains architecture-specific native and ReadyToRun assemblies that cannot be combined into one file set, so the bundle carries both complete payloads under `Contents/MacOS/x86_64` and `Contents/MacOS/arm64` and a universal launcher execs the matching one. Expect roughly twice the download size of a single-architecture package.
 
 The default test run skips expensive UI, rendering, and GC-stress cases while keeping core, platform, device, and a small UI smoke set. The skipped tests remain in the repository and can be enabled with `RunSlowTests=true`.
 

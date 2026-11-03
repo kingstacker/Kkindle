@@ -23,6 +23,13 @@ public static class TtsRuntimePaths
     public static string PipxVenvCache(AppPaths paths)
         => Path.Combine(Root(paths), "venv-cache");
 
+    /// <summary>
+    /// Application-local virtual environment used by platforms without a
+    /// pipx installation (currently macOS).
+    /// </summary>
+    public static string Venv(AppPaths paths)
+        => Path.Combine(Root(paths), "venv");
+
     public static IReadOnlyList<string> EdgeTtsCandidates(AppPaths paths)
     {
         var directory = PipxBin(paths);

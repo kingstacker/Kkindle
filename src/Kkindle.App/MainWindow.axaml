@@ -510,9 +510,10 @@
                     Background="{DynamicResource SidebarBrush}"
                     BorderBrush="{DynamicResource HairlineBrush}"
                     BorderThickness="0,0,1,0">
-                <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="18,24,18,18">
+                <Grid x:Name="LibrarySidebarContent" RowDefinitions="Auto,*,Auto,Auto" Margin="18,30,18,18">
                     <Grid ColumnDefinitions="*,Auto">
-                        <StackPanel Grid.Column="0"
+                        <StackPanel x:Name="SidebarBrandPanel"
+                                    Grid.Column="0"
                                     VerticalAlignment="Center"
                                     Spacing="0"
                                     Margin="16,0,0,0">
@@ -865,9 +866,13 @@
                       ColumnSpacing="24"
                       LayoutUpdated="LibraryToolbar_LayoutUpdated"
                       SizeChanged="LibraryToolbar_SizeChanged">
+                    <!-- The outer border owns the underline so it spans the
+                         field's full layout edge. Mirror the TextBox focus
+                         state's brush so the underline darkens on focus like
+                         every other search field. -->
                     <Border x:Name="LibrarySearchField" Width="420" Height="38" Margin="0"
                             HorizontalAlignment="Left"
-                            BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1">
+                            BorderBrush="{Binding BorderBrush, ElementName=SearchBox}" BorderThickness="0,0,0,1">
                         <TextBox x:Name="SearchBox" Classes="librarySearch"
                                  HorizontalAlignment="Stretch"
                                  Padding="0,7"
@@ -2850,15 +2855,20 @@
                                 <Expander x:Name="SettingsCalibreExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.39F073ED740B19B8}" Tag="{DynamicResource Ui.Auto.76B87E0C608BEE4A}" AutomationProperties.Name="{DynamicResource Ui.Auto.39F073ED740B19B8}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsCalibreSection" Padding="0">
                                         <StackPanel Spacing="14">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.68DBD3556A19C150}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <StackPanel Spacing="5">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                                     <TextBlock Text="{DynamicResource Ui.Auto.6160F42DABA0438E}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                     <Ellipse x:Name="CalibreDetectionStatusDot" Width="7" Height="7" VerticalAlignment="Center" Fill="#D6A100" ToolTip.Tip="{DynamicResource Ui.Auto.FE66F3C4D3165B5D}" AutomationProperties.Name="{DynamicResource Ui.Auto.FE66F3C4D3165B5D}" />
                                                 </StackPanel>
                                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                    <TextBox x:Name="CalibrePathBox" PlaceholderText="{DynamicResource Ui.Auto.A5D0920936DC7153}" AutomationProperties.Name="{DynamicResource Ui.Auto.68DBD3556A19C150}" FontSize="14" />
-                                                    <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A8C81F93F2E0E3B6}" ContentTemplate="{StaticResource BrowseFolderActionContent}" Classes="quiet libraryToolbar" Click="BrowseCalibreButton_Click" />
+                                                    <TextBox x:Name="CalibrePathBox" PlaceholderText="{DynamicResource Ui.Auto.A5D0920936DC7153}" AutomationProperties.Name="{DynamicResource Ui.Auto.68DBD3556A19C150}" FontSize="14">
+                                                        <ToolTip.Tip>
+                                                            <TextBlock MaxWidth="420" TextWrapping="Wrap" Text="{DynamicResource Ui.Auto.68DBD3556A19C150}" />
+                                                        </ToolTip.Tip>
+                                                    </TextBox>
+                                                    <!-- Keep the folder icon on the same right-hand
+                                                         column as the expander chevron above. -->
+                                                    <Button Grid.Column="1" Content="{DynamicResource Ui.Auto.A8C81F93F2E0E3B6}" ContentTemplate="{StaticResource BrowseFolderActionContent}" Classes="quiet libraryToolbar" Width="20" MinWidth="20" Margin="0,0,-16,0" Click="BrowseCalibreButton_Click" />
                                                 </Grid>
                                                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
                                                     <Button x:Name="InstallCalibreButton" Content="{DynamicResource Ui.Auto.53E06E722B8528B0}" Classes="quiet" Click="InstallCalibreButton_Click" />
@@ -3547,7 +3557,7 @@
                                                                     <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" MinWidth="0" />
                                                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
                                                                         <TextBlock Text="{Binding StatusLabel}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                                        <Button Content="{Binding RepairLabel}" IsVisible="{Binding CanRepair}" Classes="quiet" Padding="8,3" VerticalAlignment="Center" Click="RepairDiagnosticButton_Click" />
+                                                                        <Button Content="{Binding RepairLabel}" IsVisible="{Binding CanRepair}" IsEnabled="{Binding CanStartRepair}" Classes="quiet" Padding="8,3" VerticalAlignment="Center" Click="RepairDiagnosticButton_Click" />
                                                                     </StackPanel>
                                                                     <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Detail}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" MinWidth="0" />
                                                                 </Grid>
@@ -5974,7 +5984,7 @@
                                     <TextBox x:Name="ReaderAiQuestionBox"
                                              Grid.Row="1"
                                              PastingFromClipboard="ReaderAiQuestionBox_PastingFromClipboard"
-                                             ToolTip.Tip="支持粘贴图片 · Ctrl+V"
+                                             ToolTip.Tip="支持粘贴图片 · Ctrl/⌘+V"
                                              Classes="readerMinimalField readerAiQuestionInput"
                                              MinHeight="68"
                                              MaxHeight="160"
@@ -7251,11 +7261,11 @@
                     <ScrollViewer Grid.Row="1"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                        <Grid Margin="28,28,28,24"
+                        <Grid Margin="28,22,28,18"
                               MinHeight="360">
                             <Grid x:Name="OnboardingWelcomePage"
                                   RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                                  RowSpacing="10"
+                                  RowSpacing="8"
                                   HorizontalAlignment="Stretch">
                                 <TextBlock Text="{DynamicResource Ui.Onboarding.WelcomeTitle}"
                                            FontSize="30"
@@ -7308,16 +7318,28 @@
                                                    TextWrapping="Wrap" />
                                     </Grid>
                                 </Border>
-                                <StackPanel Grid.Row="4" Spacing="8">
-                                    <TextBlock Text="{DynamicResource Ui.Onboarding.CalibrePrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                    <TextBlock Text="{DynamicResource Ui.Onboarding.CalibreHelp}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button x:Name="OnboardingInstallCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreYes}" Click="OnboardingInstallCalibreButton_Click" />
-                                        <Button x:Name="OnboardingSkipCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreNo}" Classes="quiet" Click="OnboardingSkipCalibreButton_Click" />
+                                <Grid Grid.Row="4" ColumnDefinitions="*,20,*">
+                                    <StackPanel Grid.Column="0" Spacing="6">
+                                        <TextBlock Text="{DynamicResource Ui.Onboarding.CalibrePrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Text="{DynamicResource Ui.Onboarding.CalibreHelp}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button x:Name="OnboardingInstallCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreYes}" Click="OnboardingInstallCalibreButton_Click" />
+                                            <Button x:Name="OnboardingSkipCalibreButton" Content="{DynamicResource Ui.Onboarding.CalibreNo}" Classes="quiet" Click="OnboardingSkipCalibreButton_Click" />
+                                        </StackPanel>
+                                        <ProgressBar x:Name="OnboardingCalibreProgress" Height="3" IsVisible="False" />
+                                        <TextBlock x:Name="OnboardingCalibreStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
                                     </StackPanel>
-                                    <ProgressBar x:Name="OnboardingCalibreProgress" Height="3" IsVisible="False" />
-                                    <TextBlock x:Name="OnboardingCalibreStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
-                                </StackPanel>
+                                    <StackPanel Grid.Column="2" Spacing="6">
+                                        <TextBlock Text="{DynamicResource Ui.Onboarding.TtsPrompt}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Text="{DynamicResource Ui.Onboarding.TtsHelp}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button x:Name="OnboardingInstallTtsButton" Content="{DynamicResource Ui.Onboarding.TtsYes}" Click="OnboardingInstallTtsButton_Click" />
+                                            <Button x:Name="OnboardingSkipTtsButton" Content="{DynamicResource Ui.Onboarding.TtsNo}" Classes="quiet" Click="OnboardingSkipTtsButton_Click" />
+                                        </StackPanel>
+                                        <ProgressBar x:Name="OnboardingTtsProgress" Height="3" IsVisible="False" />
+                                        <TextBlock x:Name="OnboardingTtsStatus" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
+                                    </StackPanel>
+                                </Grid>
                             </Grid>
 
                             <Grid x:Name="OnboardingDisclaimerPage"
@@ -7582,6 +7604,11 @@
                   PointerEntered="ReaderTitleControls_PointerEntered"
                   PointerExited="ReaderTitleControls_PointerExited">
                 <StackPanel Orientation="Horizontal" Spacing="0">
+                    <!-- macOS keeps its traffic lights even in the zen overlay;
+                         they replace the square caption buttons at the end. -->
+                    <local:MacTrafficLights x:Name="ReaderZenPopupMacControls"
+                                            Margin="10,0,12,0"
+                                            VerticalAlignment="Center" />
                     <Button x:Name="ReaderZenPopupTocButton"
                             Classes="caption"
                             Width="92"

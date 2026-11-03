@@ -6,9 +6,10 @@ namespace Kkindle.Infrastructure;
 
 /// <summary>
 /// Prepares the external pieces needed by the edge-tts implementation. The
-/// installation is deliberately application-local where possible: pipx keeps
-/// its virtual environment and command shims below Kkindle's data directory.
-/// Only Linux system audio/Python packages require an OS authorization dialog.
+/// installation is deliberately application-local where possible: pipx (or a
+/// plain venv on macOS) keeps its virtual environment and command shims below
+/// Kkindle's data directory. Only Linux system audio/Python packages require
+/// an OS authorization dialog.
 /// </summary>
 public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
 {
@@ -52,7 +53,9 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
                 return new TtsSetupResult(true, "TTS 环境已就绪。");
             }
 
-            if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
+            if (!OperatingSystem.IsWindows()
+                && !OperatingSystem.IsLinux()
+                && !OperatingSystem.IsMacOS())
             {
                 return Failure(
                     "当前平台暂不支持自动准备 edge-tts。",
@@ -165,7 +168,20 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
             throw new InvalidOperationException(
                 OperatingSystem.IsLinux()
                     ? "未找到 python3。请允许系统授权对话框安装 python3 后重试。"
-                    : "未找到 Python，且无法通过 winget 自动安装。请先安装 Python 3。 ");
+                    : OperatingSystem.IsMacOS()
+                        ? "未找到 Python 3。可以执行 xcode-select --install 安装命令行工具，"
+                            + "或使用 Homebrew 执行 brew install python3，然后重启 Kkindle。"
+                        : "未找到 Python，且无法通过 winget 自动安装。请先安装 Python 3。 ");
+        }
+
+        // macOS must not assume pipx is installed, and Apple's / Homebrew
+        // Python both refuse user-level pip installs (PEP 668). A dedicated
+        // venv below the app data directory sidesteps both problems.
+        if (OperatingSystem.IsMacOS())
+        {
+            await EnsureMacEdgeTtsAsync(python, progress, cancellationToken)
+                .ConfigureAwait(false);
+            return;
         }
 
         var pipx = FindExecutableOnPath("pipx");
@@ -262,6 +278,68 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
         {
             throw new InvalidOperationException(
                 "edge-tts 安装命令已完成，但没有找到 Kkindle 专用的 edge-tts 启动文件。 ");
+        }
+    }
+
+    private async Task EnsureMacEdgeTtsAsync(
+        PythonCommand python,
+        IProgress<TtsSetupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var venvDirectory = TtsRuntimePaths.Venv(_paths);
+        var venvPython = Path.Combine(venvDirectory, "bin", "python3");
+
+        if (!File.Exists(venvPython))
+        {
+            Report(progress, "正在创建 Kkindle 专用的 Python 环境…");
+            var create = await RunPythonAsync(
+                    python,
+                    ["-m", "venv", venvDirectory],
+                    CommandTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            RequireSuccess(create, "创建 Kkindle 专用 Python 环境失败。");
+        }
+
+        if (!File.Exists(venvPython))
+        {
+            throw new InvalidOperationException(
+                "Python 虚拟环境已创建，但没有找到其中的 python3。 ");
+        }
+
+        Report(progress, "正在安装 edge-tts 到 Kkindle 专用环境…");
+        var install = await RunProcessAsync(
+                venvPython,
+                ["-m", "pip", "install", "--upgrade", EdgeTtsEngine.PackageRequirement],
+                CommandTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+        RequireSuccess(install, "安装 edge-tts 失败。");
+
+        var venvEdgeTts = Path.Combine(venvDirectory, "bin", "edge-tts");
+        if (!File.Exists(venvEdgeTts))
+        {
+            throw new InvalidOperationException(
+                "edge-tts 安装完成，但没有找到虚拟环境中的 edge-tts 启动文件。 ");
+        }
+
+        // EdgeTtsEngine only knows the shared application-local entry point
+        // directory, so expose the venv command there. This also means no
+        // PATH change or pipx installation is required on macOS.
+        Directory.CreateDirectory(TtsRuntimePaths.PipxBin(_paths));
+        var linkPath = TtsRuntimePaths.PreferredEdgeTtsPath(_paths);
+        try
+        {
+            if (File.Exists(linkPath) || Directory.Exists(linkPath))
+                File.Delete(linkPath);
+            File.CreateSymbolicLink(linkPath, venvEdgeTts);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException(
+                "无法在 Kkindle 数据目录中创建 edge-tts 启动链接。\n"
+                + exception.Message);
         }
     }
 
@@ -430,6 +508,15 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
                 if (path is not null)
                     candidates.Add(new PythonCommand(path, []));
             }
+
+            // A Finder-launched .app inherits the minimal launchd PATH, which
+            // does not include Homebrew. Probe the usual install locations so
+            // an existing Python 3 is still found without a terminal.
+            if (OperatingSystem.IsMacOS())
+            {
+                foreach (var path in MacPythonCandidates())
+                    candidates.Add(new PythonCommand(path, []));
+            }
         }
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -464,6 +551,14 @@ public sealed class TtsEnvironmentSetupService : ITtsEnvironmentSetup
         }
 
         return null;
+    }
+
+    private static IEnumerable<string> MacPythonCandidates()
+    {
+        yield return "/opt/homebrew/bin/python3";
+        yield return "/usr/local/bin/python3";
+        yield return "/usr/bin/python3";
+        yield return "/Library/Frameworks/Python.framework/Versions/Current/bin/python3";
     }
 
     private static IEnumerable<string> EnumerateWindowsPythonLocations()

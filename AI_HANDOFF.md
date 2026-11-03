@@ -26,7 +26,7 @@
 - `src/Kkindle.Layout`：无 UI 依赖的 HarfBuzz + Skia 排版、断行、分页、竖排和命中测试。
 - `src/Kkindle.Infrastructure`：SQLite、书籍导入与格式转换、EPUB/MOBI/AZW3/TXT、PDF 文本、词典、AI、TTS、备份、S3/WebDAV 同步。
 - `src/Kkindle.Platform.Common`、`Kkindle.Platform.Windows`、`Kkindle.Platform.Linux`、`Kkindle.Platform.MacOS`：设备、文件系统、密钥链和 WPD/MTP 等平台能力。
-- `src/Kkindle.McpServer`：独立 MCP 服务入口，多目标 `net8.0` 与 `net10.0-windows10.0.19041.0`。
+- `src/Kkindle.McpServer`：独立 MCP 服务入口，多目标 `net10.0`（macOS/Linux，macOS 下启用 MTP）与 `net10.0-windows10.0.19041.0`。
 - `src/Kkindle.Desktop.*`：Windows、Linux、macOS 启动项目。
 - `tests/Kkindle.Tests`：可移植核心与基础设施测试。
 - `tests/Kkindle.App.Tests`：Avalonia Headless / Skia UI 测试；默认跳过部分慢测试。

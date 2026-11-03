@@ -24,6 +24,13 @@ public partial class SendToKindleWindow
     private int _navigationGeneration;
     private bool _nativeAuthenticationAvailable = !OperatingSystem.IsWindows();
 
+    /// <summary>
+    /// True when this platform can hand the queued files to the Amazon page:
+    /// Windows through the WebView2 file-input bridge, macOS and Linux by
+    /// streaming the same batch into the page as real File objects.
+    /// </summary>
+    private bool CanStageFiles => _fileInput is not null || (_useNativeBrowser && _webView is not null);
+
     private void CreateBrowser(Uri? initialUri = null)
     {
         if (_closed) return;
@@ -231,14 +238,77 @@ public partial class SendToKindleWindow
     async Task IKindleWebPage.StageAsync(IReadOnlyList<KindleWebFile> files, CancellationToken cancellationToken)
     {
         EnsureNetworkAllowed();
-        if (_fileInput is null || _webViewHandle == nint.Zero)
+        if (_webView is null)
             throw new InvalidOperationException(UiText.Get("此平台请在亚马逊网页中选择文件并发送。"));
         _batchId = Guid.NewGuid().ToString("N");
         if (!await ExecuteBooleanAsync(KindleWebPageScripts.Prepare(_batchId, files), cancellationToken))
             throw new InvalidOperationException(UiText.Get("网页未接受文件列表，请打开网页检查后重试。"));
-        await _fileInput.SetFilesAsync(_webViewHandle, "kkindle-send-files",
-            files.Select(file => file.FullPath).ToArray(), cancellationToken);
+        if (_fileInput is not null && _webViewHandle != nint.Zero)
+        {
+            await _fileInput.SetFilesAsync(_webViewHandle, "kkindle-send-files",
+                files.Select(file => file.FullPath).ToArray(), cancellationToken);
+        }
+        else if (_useNativeBrowser)
+        {
+            // Windows injects the FileList through the WebView2 DevTools
+            // protocol. WKWebView and the Linux webviews expose no public file
+            // input API, so the same batch is streamed into the page as base64
+            // chunks and rebuilt as real File objects. The existing Prepare /
+            // Drop flow then dispatches the drop event unchanged.
+            await StageFilesByScriptAsync(_batchId, files, cancellationToken);
+        }
+        else
+        {
+            throw new InvalidOperationException(UiText.Get("此平台请在亚马逊网页中选择文件并发送。"));
+        }
         if (!await ExecuteBooleanAsync(KindleWebPageScripts.Drop(_batchId), cancellationToken))
+            throw new InvalidOperationException(UiText.Get("网页未接受文件列表，请打开网页检查后重试。"));
+    }
+
+    private async Task StageFilesByScriptAsync(
+        string batchId,
+        IReadOnlyList<KindleWebFile> files,
+        CancellationToken cancellationToken)
+    {
+        if (!await ExecuteBooleanAsync(
+                KindleWebPageScripts.ScriptStageBegin(batchId, files),
+                cancellationToken))
+            throw new InvalidOperationException(UiText.Get("网页未接受文件列表，请打开网页检查后重试。"));
+
+        // Base64 expands each chunk by a third; 1 MiB keeps every script well
+        // inside the JavaScript bridge limits of WKWebView and WebKitGTK.
+        const int chunkBytes = 1024 * 1024;
+        var buffer = new byte[chunkBytes];
+        foreach (var file in files)
+        {
+            await using var stream = new FileStream(
+                file.FullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                128 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var read = await stream.ReadAsync(buffer, cancellationToken);
+                if (read == 0) break;
+                var encoded = Convert.ToBase64String(buffer, 0, read);
+                var script = KindleWebPageScripts.ScriptStageAppend(
+                    batchId,
+                    file.Name,
+                    read,
+                    encoded);
+                var result = await _webView!.InvokeScript(script)
+                    .WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+                if (!string.Equals(result?.Trim(), "true", StringComparison.Ordinal))
+                    throw new IOException(UiText.Get("网页未接受文件列表，请打开网页检查后重试。"));
+            }
+        }
+
+        if (!await ExecuteBooleanAsync(
+                KindleWebPageScripts.ScriptStageCommit(batchId),
+                cancellationToken))
             throw new InvalidOperationException(UiText.Get("网页未接受文件列表，请打开网页检查后重试。"));
     }
 

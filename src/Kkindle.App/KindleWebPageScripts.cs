@@ -236,11 +236,66 @@ internal static class KindleWebPageScripts
         return true;
         """);
 
+    /// <summary>
+    /// Starts an in-page file batch for platforms without a native file-input
+    /// bridge. Each chunk is appended by <see cref="ScriptStageAppend"/> and the
+    /// commit step assembles real <see cref="File"/> objects on the hidden
+    /// input, so the unchanged Drop script can dispatch the same drop event.
+    /// </summary>
+    public static string ScriptStageBegin(string batchId, IReadOnlyList<KindleWebFile> files) => Wrap($$"""
+        if (!uploadPage || pageKind() !== 'ready' || !state
+            || state.id !== {{JsonSerializer.Serialize(batchId)}} || state.staged || state.submitted) return false;
+        if (!document.getElementById('kkindle-send-files')) return false;
+        state.expected = {{JsonSerializer.Serialize(files.Select(file => new { name = file.Name, size = file.Length }))}};
+        state.chunks = state.expected.map(file => ({ name: file.name, size: file.size, parts: [], received: 0 }));
+        return true;
+        """);
+
+    public static string ScriptStageAppend(string batchId, string name, int length, string base64) => Wrap($$"""
+        if (!uploadPage || pageKind() !== 'ready' || !state
+            || state.id !== {{JsonSerializer.Serialize(batchId)}} || !state.chunks) return false;
+        const entry = state.chunks.find(item => item.name === {{JsonSerializer.Serialize(name)}});
+        if (!entry || entry.received + {{length}} > entry.size) return false;
+        const bytes = Uint8Array.from(atob({{JsonSerializer.Serialize(base64)}}), c => c.charCodeAt(0));
+        if (bytes.length !== {{length}}) return false;
+        entry.parts.push(bytes);
+        entry.received += bytes.length;
+        return true;
+        """);
+
+    public static string ScriptStageCommit(string batchId) => Wrap($$"""
+        if (!uploadPage || pageKind() !== 'ready' || !state
+            || state.id !== {{JsonSerializer.Serialize(batchId)}} || !state.chunks
+            || state.staged || state.submitted) return false;
+        if (state.chunks.some(entry => entry.received !== entry.size)) return false;
+        const input = document.getElementById('kkindle-send-files');
+        if (!input) return false;
+        const transfer = new DataTransfer();
+        for (const entry of state.chunks) {
+            const file = new File(entry.parts, entry.name, { lastModified: Date.now() });
+            transfer.items.add(file);
+        }
+        // Older WebKit builds expose a read-only input.files setter, so the
+        // DataTransfer is also kept on the batch and Drop prefers it.
+        try { input.files = transfer.files; } catch { }
+        const files = Array.from(transfer.files);
+        if (files.length !== state.expected.length || files.some((file, i) =>
+            file.name !== state.expected[i].name || file.size !== state.expected[i].size)) return false;
+        state.stagedTransfer = transfer;
+        state.chunks = null;
+        return true;
+        """);
+
     public static string Drop(string batchId) => Wrap($$"""
         if (!uploadPage || pageKind() !== 'ready' || !state
             || state.id !== {{JsonSerializer.Serialize(batchId)}} || state.staged || state.submitted) return false;
         const input = document.getElementById('kkindle-send-files');
-        const files = Array.from(input?.files || []);
+        // The native file bridge fills input.files; the scripted bridge keeps
+        // its DataTransfer on the batch because some WebKit builds do not
+        // allow assigning input.files.
+        const files = state.stagedTransfer
+            ? Array.from(state.stagedTransfer.files)
+            : Array.from(input?.files || []);
         if (files.length !== state.expected.length || files.some((file, i) =>
             file.name !== state.expected[i].name || file.size !== state.expected[i].size)) return false;
         const target = Array.from(document.querySelectorAll('.s2k-dnd-box')).find(visible);
@@ -249,7 +304,7 @@ internal static class KindleWebPageScripts
         for (const file of files) transfer.items.add(file);
         state.staged = true;
         target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
-        input.remove();
+        input?.remove();
         return true;
         """);
 

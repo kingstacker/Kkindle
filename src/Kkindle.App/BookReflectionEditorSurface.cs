@@ -2093,9 +2093,13 @@ internal sealed class BookReflectionEditorSurface : Border
         // during the Content replacement and raises AttachedToLogicalTreeCore.
         dialog.Content = null;
 
-        dialog.WindowDecorations = WindowDecorations.None;
+        dialog.WindowDecorations = MacTrafficLights.IsSupported
+            ? WindowDecorations.Full
+            : WindowDecorations.None;
         dialog.ExtendClientAreaToDecorationsHint = true;
-        dialog.ExtendClientAreaTitleBarHeightHint = -1;
+        dialog.ExtendClientAreaTitleBarHeightHint = MacTrafficLights.IsSupported
+            ? MacTrafficLights.TitleBarHeight
+            : -1;
         dialog.UseLayoutRounding = true;
 
         var titleDragRegion = new Border
@@ -2209,6 +2213,13 @@ internal sealed class BookReflectionEditorSurface : Border
             Children = { titleDragRegion, captionButtons }
         };
         Grid.SetColumn(captionButtons, 1);
+
+        if (MacTrafficLights.IsSupported)
+        {
+            captionButtons.IsVisible = false;
+            if (titleDragRegion.Child is StackPanel brand)
+                brand.Margin = new Thickness(MacTrafficLights.TitleContentInset, 0, 16, 0);
+        }
 
         var titleBarBorder = new Border
         {

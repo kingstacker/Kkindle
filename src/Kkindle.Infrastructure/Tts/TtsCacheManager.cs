@@ -361,6 +361,16 @@ public sealed class TtsCacheManager
             baseDirectory = Environment.GetFolderPath(
                 Environment.SpecialFolder.LocalApplicationData);
         }
+        else if (OperatingSystem.IsMacOS())
+        {
+            // macOS convention: disposable caches live in ~/Library/Caches,
+            // never in ~/.cache (which is a Linux XDG location).
+            var home = Environment.GetFolderPath(
+                Environment.SpecialFolder.UserProfile);
+            baseDirectory = string.IsNullOrWhiteSpace(home)
+                ? null
+                : Path.Combine(home, "Library", "Caches");
+        }
         else
         {
             baseDirectory = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");

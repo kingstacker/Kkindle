@@ -51,6 +51,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         _useNativeBrowser = page is null;
         _authentication = page is null ? this : page as IKindleWebAuthentication;
         InitializeComponent();
+        ConfigureMacWindowChrome();
         FileList.ItemsSource = _files;
         RecentStatusList.ItemsSource = _recentStatusItems;
         QueuePanel.AddHandler(DragDrop.DragEnterEvent, Queue_DragOver, RoutingStrategies.Bubble, true);
@@ -385,8 +386,8 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
             {
                 CompleteAuthentication();
                 _unknownPageShown = false;
-                if (!_manualWeb && (_fileInput is not null || !_useNativeBrowser)) ShowBrowser(false);
-                if (_useNativeBrowser && _fileInput is null)
+                if (!_manualWeb && CanStageFiles) ShowBrowser(false);
+                if (_useNativeBrowser && !CanStageFiles)
                 {
                     ShowBrowser(true);
                     SetStatus("此平台请在亚马逊网页中选择文件并发送。");
@@ -474,7 +475,7 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         ChooseFilesButton.IsEnabled = !_busy && !_batchFinished;
         ClearFilesButton.IsEnabled = !_busy && _files.Count > 0;
         SendFilesButton.IsEnabled = !_busy && !_batchFinished && _sessionReady && _files.Count > 0
-            && (_fileInput is not null || !_useNativeBrowser);
+            && CanStageFiles;
         StopWaitingButton.IsVisible = _busy;
         BrowserNavigationButtons.IsEnabled = !_busy;
         AccountButton.Content = _sessionReady

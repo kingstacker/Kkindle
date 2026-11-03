@@ -497,7 +497,7 @@
     <x:String x:Key="Ui.Auto.44CE7AE909BBB28B">搜索</x:String>
     <x:String x:Key="Ui.Auto.EB050FA14D0DA6AB">搜索书名或作者</x:String>
     <x:String x:Key="Ui.Auto.64295B76D26336F3">搜索整本书…</x:String>
-    <x:String x:Key="Ui.Auto.43A641217D7F134F">搜索整本书（Ctrl+F）</x:String>
+    <x:String x:Key="Ui.Auto.43A641217D7F134F">搜索整本书（Ctrl/⌘+F）</x:String>
     <x:String x:Key="Ui.Auto.168A769EBA62A8E8">搜索标题、作者或拼音</x:String>
     <x:String x:Key="Ui.Auto.F7824158AAA04D87">支持 EPUB、PDF、MOBI、AZW3、TXT；TXT 自动识别章节并转为 EPUB，自动扫描子目录</x:String>
     <x:String x:Key="Ui.Auto.7C456B8E16853FCF">支持 MDX、Kindle 词典（AZW/MOBI/PRC）及 UTF-8 文本词典。优先直接解析 Kindle 词典，必要时使用 Calibre。受 DRM 保护的词典无法导入。</x:String>
@@ -664,7 +664,7 @@
     <x:String x:Key="Ui.Auto.3665885A4FDCEC0A">打开维基百科</x:String>
     <x:String x:Key="Ui.Auto.E15BDB444E1C8F75">内容来自维基百科 · CC BY-SA 4.0</x:String>
     <x:String x:Key="Ui.Auto.2F882E6CACB26C17">选中的内容太长，请只选一个词或短语查询维基百科。</x:String>
-    <x:String x:Key="Ui.Auto.2884AF5B8126BF7B">询问这本书…（Ctrl+Enter 发送）</x:String>
+    <x:String x:Key="Ui.Auto.2884AF5B8126BF7B">询问这本书…（Ctrl/⌘+Enter 发送）</x:String>
     <x:String x:Key="Ui.Auto.EF51FA34002047BB">请我喝杯咖啡</x:String>
     <x:String x:Key="Ui.Auto.DD4E63F4F9C0F4B5">请连接设备</x:String>
     <x:String x:Key="Ui.Auto.E5327DA0211C4F19">请选择与当前书籍匹配的结果；没有合适的条目时，可修改关键词后重新搜索。</x:String>
@@ -1622,7 +1622,7 @@
     <x:String x:Key="Ui.Auto.9B4D1CC07395F4B1">解释正文中选中的文字</x:String>
     <x:String x:Key="Ui.Auto.51AFFFDDE76EA35A">快速概览</x:String>
     <x:String x:Key="Ui.Auto.B94E8C2A0D642FC5">模型与思考设置 ▾</x:String>
-    <x:String x:Key="Ui.Auto.4E95EEDB8847F88D">Ctrl+Enter 发送 · Enter 换行</x:String>
+    <x:String x:Key="Ui.Auto.4E95EEDB8847F88D">Ctrl/⌘+Enter 发送 · Enter 换行</x:String>
     <x:String x:Key="Ui.Auto.449123DD66674848">当前 PDF · 第 {0} 页</x:String>
     <x:String x:Key="Ui.Auto.424EEBE94594D62B">回答已复制。</x:String>
     <x:String x:Key="Ui.Auto.89C45AE963128EF5">复制失败：{0}</x:String>
@@ -1634,7 +1634,7 @@
     <x:String x:Key="Ui.Auto.47269F0D9084B16F">已停止生成</x:String>
     <x:String x:Key="Ui.Auto.CC849441C8991724">已停止生成，可重试；已生成的内容已保留。</x:String>
     <x:String x:Key="Ui.Auto.9AD0AAC32EA304BE">停止生成</x:String>
-    <x:String x:Key="Ui.Auto.534A6E69356C32FF">发送 · Ctrl+Enter</x:String>
+    <x:String x:Key="Ui.Auto.534A6E69356C32FF">发送 · Ctrl/⌘+Enter</x:String>
     <x:String x:Key="Ui.Auto.A7FE990B2999AE03">PDF 快速概览：抽样覆盖 {0}/{1} 个有文本的页面。请明确说明这是抽样，不是全文总结。</x:String>
     <x:String x:Key="Ui.Auto.671DD3C213FD3C27">PDF 问答范围：仅当前第 {0} 页，不代表全书或完整章节。</x:String>
     <x:String x:Key="Ui.Auto.7C15AA5C25871689">PDF 快速概览 · 抽样 {0} 页</x:String>
@@ -2154,6 +2154,15 @@
     <x:String x:Key="Ui.Onboarding.CalibreSkipped">暂不安装，可稍后在设置中安装</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreDone">Calibre 和 KFX Input 插件均已安装并验证</x:String>
     <x:String x:Key="Ui.Onboarding.CalibreFailed">安装失败，可点击“是，自动安装”重试：{0}</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsPrompt">是否启用听书（edge-tts）</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsHelp">使用微软 Edge 免费在线语音；首次需联网下载约 15 MB 组件</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsYes">是，自动安装</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsNo">否，暂不安装</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsSkipped">暂不启用，可稍后在听书中自动安装</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsChecking">正在检查听书组件</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsDone">听书组件已安装并验证</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsFailed">安装失败，可点击“是，自动安装”重试：{0}</x:String>
+    <x:String x:Key="Ui.Onboarding.TtsInstallLater">听书组件尚未安装，打开听书时会自动安装。</x:String>
     <x:String x:Key="Ui.Auto.51F1A930F65EE718">读取词典</x:String>
     <x:String x:Key="Ui.Auto.3B13646ECB15D60F">检查重复词典</x:String>
     <x:String x:Key="Ui.Auto.4CE429F60D8BC556">保存词条</x:String>
@@ -2252,9 +2261,9 @@
     <x:String x:Key="Ui.Auto.BD885804E1F42B6A">批量转换完成</x:String>
     <x:String x:Key="Ui.Auto.D8106FCCAFA2BF48">已转换 {0} 本，跳过 {1} 本，失败 {2} 本。</x:String>
     <x:String x:Key="Ui.Auto.89CE481A4B23D2A4">键盘快捷键</x:String>
-    <x:String x:Key="Ui.Auto.C91E6D58F6714EE7">Ctrl+F  搜索书库</x:String>
-    <x:String x:Key="Ui.Auto.239BAE424168566C">Ctrl+I  导入书籍</x:String>
-    <x:String x:Key="Ui.Auto.5729DBB570C4D4BD">Ctrl+A  全选当前页</x:String>
+    <x:String x:Key="Ui.Auto.C91E6D58F6714EE7">Ctrl/⌘+F  搜索书库</x:String>
+    <x:String x:Key="Ui.Auto.239BAE424168566C">Ctrl/⌘+I  导入书籍</x:String>
+    <x:String x:Key="Ui.Auto.5729DBB570C4D4BD">Ctrl/⌘+A  全选当前页</x:String>
     <x:String x:Key="Ui.Auto.A8C4C49651C8C822">Enter  打开选中的书</x:String>
     <x:String x:Key="Ui.Auto.378A0C73C444EA69">Delete  删除选中的书</x:String>
     <x:String x:Key="Ui.Auto.6A6972ABA78A9641">Esc  清除搜索或选择</x:String>

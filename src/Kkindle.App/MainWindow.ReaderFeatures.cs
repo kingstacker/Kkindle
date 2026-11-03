@@ -67,7 +67,7 @@ public partial class MainWindow
             e.Handled = HandleReaderEscapeShortcut();
             return;
         }
-        if ((e.KeyModifiers & KeyModifiers.Control) != 0 && e.Key == Key.F)
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0 && e.Key == Key.F)
         {
             e.Handled = true;
             OpenReaderSearchShortcut();
@@ -174,7 +174,7 @@ public partial class MainWindow
             }
         }
 
-        if ((e.KeyModifiers & KeyModifiers.Control) != 0 && e.Key == Key.B
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0 && e.Key == Key.B
             && !IsReaderTextInputFocused())
         {
             e.Handled = true;
