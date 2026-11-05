@@ -18,7 +18,15 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1] / "website" / "assets"
 
-SCREENSHOTS = ["ai", "kindle", "library", "reader"]
+SCREENSHOTS = [
+    "ai",
+    "kindle",
+    "library",
+    "reader",
+    "macos-library",
+    "ios-library",
+    "android-library",
+]
 RESPONSIVE_WIDTHS = (640, 1024)
 WEBP_QUALITY = 82
 
@@ -29,6 +37,16 @@ def mb(path: Path) -> float:
 
 def save_webp(image: Image.Image, path: Path) -> None:
     image.save(path, "WEBP", quality=WEBP_QUALITY, method=6)
+
+
+def flatten_on_white(image: Image.Image) -> Image.Image:
+    """Composite transparency onto white so rounded window corners stay white."""
+    if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+        rgba = image.convert("RGBA")
+        background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        background.alpha_composite(rgba)
+        return background.convert("RGB")
+    return image.convert("RGB")
 
 
 def build_responsive(name: str, source: Image.Image) -> None:
@@ -46,7 +64,7 @@ def main() -> None:
         webp = ROOT / f"{name}.webp"
         before = mb(png)
 
-        original = Image.open(png).convert("RGB")
+        original = flatten_on_white(Image.open(png))
         save_webp(original, webp)
         original.save(png, "PNG", optimize=True, compress_level=9)
         build_responsive(name, original)

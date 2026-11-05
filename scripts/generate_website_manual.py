@@ -226,7 +226,7 @@ def render_page(slug: str, title: str, source_file: str, index: int) -> str:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="{html.escape(description, quote=True)}" />
     <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#fbfbfa" />
+    <meta name="theme-color" content="#ffffff" />
     <link rel="canonical" href="{canonical}" />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Kkindle" />
@@ -240,7 +240,7 @@ def render_page(slug: str, title: str, source_file: str, index: int) -> str:
     <meta name="twitter:title" content="{html.escape(page_title, quote=True)}" />
     <meta name="twitter:description" content="{html.escape(description, quote=True)}" />
     <meta name="twitter:image" content="https://kkindle.stacker.beauty/assets/social-card.jpg" />
-    <link rel="stylesheet" href="manual.css?v=20261104" />
+    <link rel="stylesheet" href="manual.css?v=20261105a" />
     <title>{html.escape(page_title)}</title>
   </head>
   <body>

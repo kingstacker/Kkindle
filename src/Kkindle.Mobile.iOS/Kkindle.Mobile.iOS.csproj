@@ -38,6 +38,11 @@
                     LogicalName="Assets/Fonts/NotoSansSymbols2-LICENSE.txt" />
     <ProjectReference Include="..\Kkindle.Mobile\Kkindle.Mobile.csproj" />
     <PackageReference Include="Avalonia.iOS" Version="12.1.1" />
+    <!-- SkiaSharp only pulls its iOS native framework through its
+         net10.0-ios26.2 dependency group. Device builds pinned to an older
+         iOS SDK (Intel Macs that cannot run Xcode 27) fall back to the plain
+         net10.0 group, so request the framework explicitly. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.iOS" Version="3.119.4" />
     <!-- Local embeddings back the desktop AI features. The managed assembly is
          referenced by Kkindle.Infrastructure, so its native framework must be
          linked here even though the phone app does not expose AI yet. -->

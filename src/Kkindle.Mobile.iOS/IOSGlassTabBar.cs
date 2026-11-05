@@ -32,7 +32,9 @@ internal sealed class IOSGlassTabBar : IMobileTabBar
         {
             TranslatesAutoresizingMaskIntoConstraints = false,
             Hidden = true,
-            Items = _items
+            Items = _items,
+            TintColor = UIColor.Label,
+            UnselectedItemTintColor = UIColor.SecondaryLabel
         };
         _bar.ItemSelected += (_, args) =>
         {
@@ -48,9 +50,16 @@ internal sealed class IOSGlassTabBar : IMobileTabBar
     {
         _visible = visible;
         _selected = Math.Clamp(selectedIndex, 0, _items.Length - 1);
-        _bar.SelectedItem = _items[_selected];
-        _bar.Hidden = !_visible;
+        UIView.PerformWithoutAnimation(() =>
+        {
+            if (_bar.SelectedItem != _items[_selected])
+                _bar.SelectedItem = _items[_selected];
+            _bar.Hidden = !_visible;
+        });
     }
+
+    public void SetDarkAppearance(bool dark) =>
+        _bar.OverrideUserInterfaceStyle = dark ? UIUserInterfaceStyle.Dark : UIUserInterfaceStyle.Light;
 
     public void Attach()
     {

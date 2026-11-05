@@ -39,8 +39,8 @@
 
     <link rel="icon" type="image/png" href="assets/kkindle.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-    <link rel="preload" as="image" href="assets/macos-library.png" />
-    <link rel="stylesheet" href="styles.css?v=20261105n" />
+    <link rel="preload" as="image" href="assets/macos-library-1024.webp" imagesrcset="assets/macos-library-1024.webp 1024w, assets/macos-library.webp 1294w" imagesizes="(max-width: 700px) 92vw, 1040px" />
+    <link rel="stylesheet" href="styles.css?v=20261105a" />
     <title>Kkindle — 个人电子书与 Kindle 工作台</title>
     <script type="application/ld+json">
       {
@@ -60,80 +60,146 @@
   </head>
   <body id="top">
     <a class="skip-link" href="#main" data-i18n="skipToContent">跳到主要内容</a>
-    <header class="site-header">
+    <header class="site-header" id="site-header">
       <div class="wrap header-inner">
-        <a class="brand" href="#top" aria-label="Kkindle"><img src="assets/kkindle.png" alt="" width="34" height="34" /><span>Kkindle</span></a>
+        <a class="brand" href="#top" aria-label="Kkindle"><img src="assets/kkindle.png" alt="" width="28" height="28" /><span>Kkindle</span></a>
         <nav class="main-nav" aria-label="主导航">
           <a href="#features" data-i18n="navFeatures">功能</a>
+          <a href="#preview" data-i18n="navPreview">界面</a>
           <a href="manual/index.html" data-i18n="navManual">使用手册</a>
-          <a href="https://github.com/kingstacker/Kkindle" target="_blank" rel="noreferrer">GitHub ↗</a>
+          <a href="https://github.com/kingstacker/Kkindle" target="_blank" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
         </nav>
-        <div class="header-actions"><button class="language-toggle" id="language-toggle" type="button">EN</button></div>
+        <div class="header-actions">
+          <button class="language-toggle" id="language-toggle" type="button">EN</button>
+          <a class="header-download" href="#downloads" data-i18n="navDownload">下载</a>
+        </div>
       </div>
     </header>
     <main id="main">
       <section class="hero">
-        <div class="wrap">
-          <div class="hero-intro">
+        <div class="wrap hero-grid">
           <div class="hero-copy">
-            <p class="eyebrow"><span class="eyebrow-dot"></span> YOUR PERSONAL READING SPACE</p>
+            <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>YOUR PERSONAL READING SPACE</p>
             <h1 data-i18n="heroTitle">让每一本书，<br />都有自己的位置。</h1>
-            <p class="hero-lead" data-i18n="heroLead">整理书库，沉浸阅读，连接 Kindle。<br />把喜欢的书，留在触手可及的地方。</p>
-          </div>
-          <div class="hero-downloads" id="downloads" aria-labelledby="downloads-title">
-            <div class="hero-downloads-head"><h2 id="downloads-title" data-i18n="heroDownloadTitle">选择平台下载</h2><p class="version"><span data-i18n="stableLabel">最新稳定版本</span> <strong data-release-version data-i18n="checking">正在获取…</strong></p></div>
-          <div class="platform-picker">
-            <a class="platform-pick" data-platform="windows" data-download-key="windows" aria-disabled="true"><span class="platform-icon" aria-hidden="true">▦</span><span class="platform-content"><strong>Windows</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span></a>
-            <a class="platform-pick" data-platform="macos" data-download-key="macos" aria-disabled="true"><span class="platform-icon" aria-hidden="true">⌘</span><span class="platform-content"><strong>macOS</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span></a>
-            <a class="platform-pick" data-platform="linux" data-download-key="linux" aria-disabled="true"><span class="platform-icon" aria-hidden="true">⌁</span><span class="platform-content"><strong>Linux</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span></a>
-            <a class="platform-pick" data-platform="android" data-download-key="android" aria-disabled="true"><span class="platform-icon" aria-hidden="true">◉</span><span class="platform-content"><strong>Android</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span></a>
-            <a class="platform-pick" data-platform="ios" data-download-key="ios" aria-disabled="true"><span class="platform-icon" aria-hidden="true">◒</span><span class="platform-content"><strong>iOS</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span></a>
-          </div>
-          <div class="download-foot"><a data-release-link href="https://github.com/kingstacker/Kkindle/releases/latest" target="_blank" rel="noreferrer"><span data-i18n="heroAllDownloads">全部版本与架构</span> ↗</a><a href="https://pan.baidu.com/s/1A5Sx-2bkFIgGwc35zyioWA?pwd=kxas" target="_blank" rel="noreferrer" data-i18n="heroBaidu">百度网盘备用下载（kxas）</a></div>
-          </div>
-          </div>
-          <section class="device-showcase" id="device-showcase" aria-label="Kkindle 界面预览" data-i18n-label="showcaseLabel" aria-roledescription="carousel">
-            <div class="showcase-stage" id="showcase-stage">
-              <figure class="showcase-slide showcase-desktop" data-showcase-slide>
-                <div class="showcase-image showcase-desktop-image"><img src="assets/macos-library.png" alt="Kkindle macOS 书库界面" data-i18n-alt="macosAlt" width="1294" height="800" fetchpriority="high" decoding="async" /></div>
-                <figcaption><strong>macOS</strong><span data-i18n="macosPreview">桌面版书库</span></figcaption>
-              </figure>
-              <figure class="showcase-slide showcase-desktop" data-showcase-slide hidden>
-                <div class="showcase-image showcase-desktop-image"><img src="assets/library-1024.webp" srcset="assets/library-640.webp 640w, assets/library-1024.webp 1024w, assets/library.webp 1487w" sizes="(max-width: 700px) 90vw, 85vw" alt="Kkindle Windows 书库界面" data-i18n-alt="windowsAlt" width="1487" height="981" loading="lazy" decoding="async" /></div>
-                <figcaption><strong>Windows</strong><span data-i18n="macosPreview">桌面版书库</span></figcaption>
-              </figure>
-              <figure class="showcase-slide showcase-mobile" data-showcase-slide hidden>
-                <div class="showcase-image showcase-phone"><img src="assets/ios-library.png?v=20261105f" alt="Kkindle iOS 书库界面" data-i18n-alt="iosAlt" width="1206" height="2622" loading="lazy" decoding="async" /></div>
-                <figcaption><strong>iOS</strong><span data-i18n="mobilePreview">移动端书库</span></figcaption>
-              </figure>
-              <figure class="showcase-slide showcase-mobile" data-showcase-slide hidden>
-                <div class="showcase-image showcase-phone"><img src="assets/android-library.png?v=20261105f" alt="Kkindle Android 书库界面" data-i18n-alt="androidAlt" width="1080" height="2400" loading="lazy" decoding="async" /></div>
-                <figcaption><strong>Android</strong><span data-i18n="mobilePreview">移动端书库</span></figcaption>
-              </figure>
-              <div class="showcase-arrows" data-showcase-controls hidden>
-                <button type="button" class="showcase-arrow" data-showcase-previous aria-controls="showcase-stage" aria-label="上一张" data-i18n-label="showcasePrevious">←</button>
-                <button type="button" class="showcase-arrow" data-showcase-next aria-controls="showcase-stage" aria-label="下一张" data-i18n-label="showcaseNext">→</button>
-              </div>
+            <p class="hero-lead" data-i18n="heroLead">整理书库，沉浸阅读，连接 Kindle。把喜欢的书，留在触手可及的地方。</p>
+            <div class="hero-actions" id="downloads">
+              <a class="button button-primary" data-primary-download href="https://github.com/kingstacker/Kkindle/releases/latest" target="_blank" rel="noreferrer">
+                <span data-primary-label data-i18n="downloadNow">下载</span>
+                <span class="button-icon" aria-hidden="true">↓</span>
+              </a>
+              <a class="button button-quiet" data-release-link href="https://github.com/kingstacker/Kkindle/releases/latest" target="_blank" rel="noreferrer">
+                <span data-i18n="heroAllDownloads">全部版本与架构</span>
+                <span aria-hidden="true">↗</span>
+              </a>
             </div>
-            <div class="showcase-toolbar" data-showcase-controls hidden>
-              <div class="showcase-dots" aria-label="选择平台截图" data-i18n-label="showcaseSelect">
+            <p class="hero-meta">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span data-i18n="stableLabel">最新稳定版本</span>
+              <strong data-release-version data-i18n="checking">正在获取…</strong>
+            </p>
+          </div>
+          <div class="platform-panel" aria-labelledby="downloads-title">
+            <div class="platform-head">
+              <h2 id="downloads-title" data-i18n="heroDownloadTitle">选择平台下载</h2>
+              <span class="platform-note" data-i18n="platformNote">桌面与移动端</span>
+            </div>
+            <ul class="platform-list">
+              <li>
+                <a class="platform-pick" data-download-key="windows" aria-disabled="true">
+                  <span class="platform-content"><strong>Windows</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span>
+                  <span class="platform-badge" data-recommended-badge hidden data-i18n="recommended">你的设备</span>
+                  <span class="platform-arrow" aria-hidden="true">↓</span>
+                </a>
+              </li>
+              <li>
+                <a class="platform-pick" data-download-key="macos" aria-disabled="true">
+                  <span class="platform-content"><strong>macOS</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span>
+                  <span class="platform-badge" data-recommended-badge hidden data-i18n="recommended">你的设备</span>
+                  <span class="platform-arrow" aria-hidden="true">↓</span>
+                </a>
+              </li>
+              <li>
+                <a class="platform-pick" data-download-key="linux" aria-disabled="true">
+                  <span class="platform-content"><strong>Linux</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span>
+                  <span class="platform-badge" data-recommended-badge hidden data-i18n="recommended">你的设备</span>
+                  <span class="platform-arrow" aria-hidden="true">↓</span>
+                </a>
+              </li>
+              <li>
+                <a class="platform-pick" data-download-key="android" aria-disabled="true">
+                  <span class="platform-content"><strong>Android</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span>
+                  <span class="platform-badge" data-recommended-badge hidden data-i18n="recommended">你的设备</span>
+                  <span class="platform-arrow" aria-hidden="true">↓</span>
+                </a>
+              </li>
+              <li>
+                <a class="platform-pick" data-download-key="ios" aria-disabled="true">
+                  <span class="platform-content"><strong>iOS</strong><span class="platform-pick-meta" data-i18n="inDevelopment">开发内测中</span></span>
+                  <span class="platform-badge" data-recommended-badge hidden data-i18n="recommended">你的设备</span>
+                  <span class="platform-arrow" aria-hidden="true">↓</span>
+                </a>
+              </li>
+            </ul>
+            <p class="download-foot">
+              <a href="https://pan.baidu.com/s/1A5Sx-2bkFIgGwc35zyioWA?pwd=kxas" target="_blank" rel="noreferrer" data-i18n="heroBaidu">百度网盘备用下载（kxas）</a>
+            </p>
+          </div>
+        </div>
+      </section>
+      <section class="showcase-band" id="preview" aria-label="Kkindle 界面预览" data-i18n-label="showcaseLabel">
+        <div class="wrap">
+          <div class="showcase-head">
+            <div>
+              <p class="eyebrow">01 / INTERFACE</p>
+              <h2 data-i18n="showcaseTitle">每一个屏幕，都恰到好处。</h2>
+            </div>
+            <div class="showcase-controls" data-showcase-controls hidden>
+              <div class="showcase-tabs" aria-label="选择平台截图" data-i18n-label="showcaseSelect">
                 <button type="button" data-showcase-index="0" aria-controls="showcase-stage" aria-label="显示 macOS 截图" data-i18n-label="showcaseMac" aria-pressed="true"><span>macOS</span></button>
                 <button type="button" data-showcase-index="1" aria-controls="showcase-stage" aria-label="显示 Windows 截图" data-i18n-label="showcaseWindows" aria-pressed="false"><span>Windows</span></button>
                 <button type="button" data-showcase-index="2" aria-controls="showcase-stage" aria-label="显示 iOS 截图" data-i18n-label="showcaseIos" aria-pressed="false"><span>iOS</span></button>
                 <button type="button" data-showcase-index="3" aria-controls="showcase-stage" aria-label="显示 Android 截图" data-i18n-label="showcaseAndroid" aria-pressed="false"><span>Android</span></button>
               </div>
+              <div class="showcase-arrows">
+                <button type="button" class="showcase-arrow" data-showcase-previous aria-controls="showcase-stage" aria-label="上一张" data-i18n-label="showcasePrevious">←</button>
+                <button type="button" class="showcase-arrow" data-showcase-next aria-controls="showcase-stage" aria-label="下一张" data-i18n-label="showcaseNext">→</button>
+              </div>
             </div>
-            <p class="sr-only" data-showcase-status aria-live="polite" aria-atomic="true"></p>
-          </section>
+          </div>
+          <div class="showcase-stage" id="showcase-stage" aria-roledescription="carousel">
+            <figure class="showcase-slide showcase-desktop" data-showcase-slide>
+              <div class="showcase-image"><img src="assets/macos-library-1024.webp" srcset="assets/macos-library-1024.webp 1024w, assets/macos-library.webp 1294w" sizes="(max-width: 700px) 92vw, 1040px" alt="Kkindle macOS 书库界面" data-i18n-alt="macosAlt" width="1294" height="800" fetchpriority="high" decoding="async" /></div>
+              <figcaption><strong>macOS</strong><span data-i18n="macosPreview">桌面版书库</span></figcaption>
+            </figure>
+            <figure class="showcase-slide showcase-desktop" data-showcase-slide hidden>
+              <div class="showcase-image"><img src="assets/library-1024.webp" srcset="assets/library-640.webp 640w, assets/library-1024.webp 1024w, assets/library.webp 1487w" sizes="(max-width: 700px) 90vw, 85vw" alt="Kkindle Windows 书库界面" data-i18n-alt="windowsAlt" width="1487" height="981" loading="lazy" decoding="async" /></div>
+              <figcaption><strong>Windows</strong><span data-i18n="macosPreview">桌面版书库</span></figcaption>
+            </figure>
+            <figure class="showcase-slide showcase-mobile" data-showcase-slide hidden>
+              <div class="showcase-image showcase-phone"><img src="assets/ios-library-640.webp" srcset="assets/ios-library-640.webp 640w, assets/ios-library-1024.webp 1024w" sizes="(max-width: 700px) 55vw, 300px" alt="Kkindle iOS 书库界面" data-i18n-alt="iosAlt" width="1206" height="2622" loading="lazy" decoding="async" /></div>
+              <figcaption><strong>iOS</strong><span data-i18n="mobilePreview">移动端书库</span></figcaption>
+            </figure>
+            <figure class="showcase-slide showcase-mobile" data-showcase-slide hidden>
+              <div class="showcase-image showcase-phone"><img src="assets/android-library-640.webp" srcset="assets/android-library-640.webp 640w, assets/android-library-1024.webp 1024w" sizes="(max-width: 700px) 55vw, 300px" alt="Kkindle Android 书库界面" data-i18n-alt="androidAlt" width="1080" height="2400" loading="lazy" decoding="async" /></div>
+              <figcaption><strong>Android</strong><span data-i18n="mobilePreview">移动端书库</span></figcaption>
+            </figure>
+          </div>
+          <p class="sr-only" data-showcase-status aria-live="polite" aria-atomic="true"></p>
         </div>
       </section>
       <section class="features-section" id="features">
         <div class="wrap">
-          <div class="section-intro"><div><p class="eyebrow">02 / MADE FOR READING</p><h2 data-i18n="featuresTitle">阅读的事，简单一点。</h2></div><p class="section-lead" data-i18n="featuresLead">从整理到阅读，再到带上 Kindle，<br />把时间留给真正重要的内容。</p></div>
+          <div class="section-intro">
+            <div>
+              <p class="eyebrow">02 / MADE FOR READING</p>
+              <h2 data-i18n="featuresTitle">阅读的事，简单一点。</h2>
+            </div>
+            <p class="section-lead" data-i18n="featuresLead">从整理到阅读，再到带上 Kindle，把时间留给真正重要的内容。</p>
+          </div>
           <div class="feature-list">
             <article class="feature-row">
               <div class="feature-copy"><span class="feature-number">01 / LIBRARY</span><h3 data-i18n="libraryTitle">你的私人书库</h3><p data-i18n="libraryBody">导入 EPUB、PDF、MOBI 和 AZW3，自动识别元数据与封面，按作者、标签、格式和阅读状态找到下一本书。</p></div>
-              <figure class="feature-shot"><img src="assets/macos-library.png" alt="Kkindle macOS 书库界面" data-i18n-alt="macosAlt" width="1294" height="800" loading="lazy" decoding="async" /></figure>
+              <figure class="feature-shot"><img src="assets/macos-library-640.webp" srcset="assets/macos-library-640.webp 640w, assets/macos-library-1024.webp 1024w" sizes="(max-width: 700px) 92vw, 620px" alt="Kkindle macOS 书库界面" data-i18n-alt="macosAlt" width="1294" height="800" loading="lazy" decoding="async" /></figure>
             </article>
             <article class="feature-row feature-row-reverse">
               <div class="feature-copy"><span class="feature-number">02 / READER</span><h3 data-i18n="readerTitle">专注于阅读</h3><p data-i18n="readerBody">支持横排、竖排、滚动、分页和双栏阅读，书签、搜索、脚注、批注与阅读进度都围绕正文展开。</p></div>
@@ -150,7 +216,16 @@
           </div>
         </div>
       </section>
-      <section class="updates-section" id="changelog"><div class="wrap updates-inner"><div><p class="eyebrow">03 / WHAT'S NEW</p><h2 data-i18n="updatesTitle">一直在变得更好。</h2><p class="section-lead" data-i18n="updatesLead">每一次更新，都为了更好的阅读体验。</p><a class="text-link" data-changelog-link href="https://github.com/kingstacker/Kkindle/blob/master/CHANGELOG.md" target="_blank" rel="noreferrer"><span data-i18n="changelogFull">查看完整更新日志</span> ↗</a></div><details class="updates-details"><summary data-i18n="updatesSummary">查看最近更新</summary><div class="changelog-list"><!-- changelog-generated:start -->
+      <section class="updates-section" id="changelog">
+        <div class="wrap updates-inner">
+          <div class="updates-intro">
+            <p class="eyebrow">03 / WHAT'S NEW</p>
+            <h2 data-i18n="updatesTitle">一直在变得更好。</h2>
+            <p class="section-lead" data-i18n="updatesLead">每一次更新，都为了更好的阅读体验。</p>
+            <a class="text-link" data-changelog-link href="https://github.com/kingstacker/Kkindle/blob/master/CHANGELOG.md" target="_blank" rel="noreferrer"><span data-i18n="changelogFull">查看完整更新日志</span> <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="changelog-list">
+<!-- changelog-generated:start -->
 <article class="changelog-entry is-latest">
   <div class="changelog-entry-head">
     <p class="label">
@@ -197,10 +272,27 @@
     </li>
   </ul>
 </article>
-<!-- changelog-generated:end --></div></details></div></section>
+<!-- changelog-generated:end -->
+</div>
+        </div>
+      </section>
     </main>
-    <footer class="site-footer"><div class="wrap footer-inner"><div><a class="brand footer-brand" href="#top"><img src="assets/kkindle.png" alt="" width="34" height="34" /><span>Kkindle</span></a><p data-i18n="footerTagline">让书回到它该在的地方。</p></div><div class="footer-links"><a href="manual/index.html" data-i18n="navManual">使用手册</a><a href="https://github.com/kingstacker/Kkindle" target="_blank" rel="noreferrer">GitHub ↗</a><a href="https://github.com/kingstacker/Kkindle/blob/master/LICENSE" target="_blank" rel="noreferrer">GPL-3.0</a><button id="qq-group-copy" type="button" data-i18n-label="qqGroupButtonLabel"><span data-i18n="qqGroupLabel">QQ 用户群</span> 1109898894</button></div><div class="copy-toast" id="qq-group-copy-status" role="status" aria-live="polite"></div></div></footer>
+    <footer class="site-footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a class="brand" href="#top" aria-label="Kkindle"><img src="assets/kkindle.png" alt="" width="28" height="28" /><span>Kkindle</span></a>
+          <p data-i18n="footerTagline">让书回到它该在的地方。</p>
+        </div>
+        <nav class="footer-links" aria-label="页脚导航">
+          <a href="manual/index.html" data-i18n="navManual">使用手册</a>
+          <a href="https://github.com/kingstacker/Kkindle" target="_blank" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/kingstacker/Kkindle/blob/master/LICENSE" target="_blank" rel="noreferrer">GPL-3.0</a>
+          <button id="qq-group-copy" type="button" data-i18n-label="qqGroupButtonLabel"><span data-i18n="qqGroupLabel">QQ 用户群</span> 1109898894</button>
+        </nav>
+        <div class="copy-toast" id="qq-group-copy-status" role="status" aria-live="polite"></div>
+      </div>
+    </footer>
     <noscript><div class="noscript-note">请启用 JavaScript 以加载下载信息，或访问 GitHub Releases 查看可用版本。</div></noscript>
-    <script src="app.js?v=20261105m" defer></script>
+    <script src="app.js?v=20261105a" defer></script>
   </body>
 </html>

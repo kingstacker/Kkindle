@@ -316,6 +316,19 @@ public partial class MobileShell : UserControl
         Dispatcher.UIThread.Post(SyncSystemBars);
     }
 
+    /// <summary>
+    /// Applies an appearance reported by the platform while the user's choice is
+    /// "follow the system". Platforms whose SDK no longer notifies Avalonia
+    /// directly call this from their own trait observer. Must run on the UI thread.
+    /// </summary>
+    public void ApplySystemThemeVariant(ThemeVariant variant)
+    {
+        if (Preferences.Current.ThemeMode != MobileThemeMode.System) return;
+        if (Application.Current is not { } application) return;
+        if (application.RequestedThemeVariant == variant) return;
+        application.RequestedThemeVariant = variant;
+    }
+
     public void ShowSheet(
         string title,
         Control content,
@@ -329,7 +342,7 @@ public partial class MobileShell : UserControl
         }
         NotifySheetDismissed();
         _sheetDismissed = onDismissed;
-        _sheetVersion++;
+        var version = ++_sheetVersion;
         SheetTitle.Text = title;
         SheetBody.Content = content;
         SheetScope.RequestedThemeVariant = variant ?? ThemeVariant.Default;
@@ -345,10 +358,12 @@ public partial class MobileShell : UserControl
         SheetScope.IsVisible = true;
         Dispatcher.UIThread.Post(() =>
         {
+            if (version != _sheetVersion || !SheetScope.IsVisible) return;
+            SetPageNativeControlsScrim(true);
             SheetScrim.Classes.Add("open");
             SheetPanel.Classes.Add("open");
         }, DispatcherPriority.Render);
-        RefreshVirtualizedListsAfterOpen(_sheetVersion);
+        RefreshVirtualizedListsAfterOpen(version);
     }
 
     /// <summary>
@@ -392,6 +407,7 @@ public partial class MobileShell : UserControl
         var version = ++_sheetVersion;
         foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSegmentGroup>())
             group.SetObscured(true);
+        SetPageNativeControlsScrim(false);
         SheetScrim.Classes.Remove("open");
         SheetPanel.Classes.Remove("open");
         await Task.Delay(SheetCloseDelay);
@@ -399,22 +415,20 @@ public partial class MobileShell : UserControl
         SheetScope.IsVisible = false;
         SheetBody.Content = null;
         SetPageNativeControlsObscured(false);
+        // Let the rendered page replace the sheet before showing the native
+        // glass bar, whose backdrop samples the last composited frame.
+        await Task.Delay(50);
+        if (version != _sheetVersion) return;
         _services.TabBar?.Update(!_backupBlocked && _history.Count == 1, (int)_tab);
     }
 
     /// <summary>
-    /// A hosted native segment is a platform view above the sheet, so it has to
-    /// be dimmed itself; only the part the sheet panel physically covers is
-    /// swapped for the Avalonia fallback, so nothing keeps showing on top of
-    /// the panel. Coverage is only trusted once the sheet has been laid out.
+    /// A hosted native segment is a platform view above the sheet. Block its
+    /// interaction while the sheet is open and swap covered controls for the
+    /// Avalonia fallback. Coverage is trusted once the sheet has been laid out.
     /// </summary>
     private void SetPageNativeControlsObscured(bool obscured, bool checkCoverage = false)
     {
-        var brush = SheetScrim.Background as ISolidColorBrush;
-        var color = brush?.Color ?? Color.FromArgb(0x59, 0, 0, 0);
-        if (brush is not null && brush.Opacity < 1)
-            color = Color.FromArgb((byte)Math.Round(color.A * brush.Opacity), color.R, color.G, color.B);
-
         Rect? sheetBounds = null;
         if (checkCoverage && SheetPanel.TranslatePoint(default, this) is { } origin)
             sheetBounds = new Rect(origin, SheetPanel.Bounds.Size);
@@ -424,8 +438,18 @@ public partial class MobileShell : UserControl
             var covered = sheetBounds is { } sheet
                 && group.TranslatePoint(default, this) is { } groupOrigin
                 && sheet.Intersects(new Rect(groupOrigin, group.Bounds.Size));
-            group.SetSheetObscured(obscured, covered, color);
+            group.SetSheetObscured(obscured, covered);
         }
+    }
+
+    private void SetPageNativeControlsScrim(bool visible)
+    {
+        var brush = SheetScrim.Background as ISolidColorBrush;
+        var color = brush?.Color ?? Color.FromArgb(0x59, 0, 0, 0);
+        if (brush is not null && brush.Opacity < 1)
+            color = Color.FromArgb((byte)Math.Round(color.A * brush.Opacity), color.R, color.G, color.B);
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSegmentGroup>())
+            group.SetSheetScrim(visible ? color : null);
     }
 
     public async void ShowToast(string message)
@@ -510,6 +534,7 @@ public partial class MobileShell : UserControl
 
     private void SyncSystemBars()
     {
+        _services.TabBar?.SetDarkAppearance(ActualThemeVariant == ThemeVariant.Dark);
         if (this.TryFindResource(PageBackgroundKey, ActualThemeVariant, out var value)
             && value is ISolidColorBrush brush)
         {

@@ -7,10 +7,11 @@ using Avalonia.VisualTree;
 
 namespace Kkindle.Mobile.Controls;
 
-/// <summary>Dims a hosted native control so it reads like the dimmed page.</summary>
-public interface INativeSegmentScrim
+/// <summary>Controls a hosted native segment while a sheet is open.</summary>
+public interface INativeSegmentInteraction
 {
-    void SetScrim(Color? color);
+    void SetSheetInteractionBlocked(bool blocked);
+    void SetSheetScrim(Color? color);
 }
 
 /// <summary>Uses a platform segmented control when one is available.</summary>
@@ -22,8 +23,8 @@ public sealed class NativeSegmentGroup : ContentControl
     private Control? _native;
     private bool _sheetObscured;
     private bool _sheetCoversControl;
+    private Color? _sheetScrim;
     private bool _inViewport = true;
-    private Color _scrimColor;
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -91,28 +92,35 @@ public sealed class NativeSegmentGroup : ContentControl
         if (_native is null || _fallback is null) return;
         _sheetObscured = obscured;
         _sheetCoversControl = obscured;
-        _scrimColor = default;
         ApplyObscured();
     }
 
     /// <summary>
-    /// A sheet dims the page: a native control the sheet does not cover is
-    /// dimmed in place, keeping its own appearance, and only the part hidden
-    /// behind the sheet panel gives way to the fallback.
+    /// A covered native control gives way to the fallback, and a visible one
+    /// cannot be tapped while the sheet is open.
     /// </summary>
-    public void SetSheetObscured(bool obscured, bool covered, Color scrimColor)
+    public void SetSheetObscured(bool obscured, bool covered)
     {
         _sheetObscured = obscured;
         _sheetCoversControl = covered;
-        _scrimColor = scrimColor;
+        ApplyObscured();
+    }
+
+    /// <summary>Fades the native control with the page's sheet scrim.</summary>
+    public void SetSheetScrim(Color? color)
+    {
+        _sheetScrim = color;
         ApplyObscured();
     }
 
     private void ApplyObscured()
     {
         if (_native is null || _fallback is null) return;
-        var dimmed = _sheetObscured && !_sheetCoversControl && _inViewport;
-        if (_native is INativeSegmentScrim scrim) scrim.SetScrim(dimmed ? _scrimColor : null);
+        if (_native is INativeSegmentInteraction interaction)
+        {
+            interaction.SetSheetInteractionBlocked(_sheetObscured);
+            interaction.SetSheetScrim(_sheetScrim);
+        }
 
         // Hidden while the sheet panel covers it, and while scrolling carries
         // it out of the viewport: the fallback then stands in, drawn and

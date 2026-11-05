@@ -16,4 +16,7 @@ public interface IMobileTabBar
     /// is false while a pushed page owns the screen.
     /// </summary>
     void Update(bool visible, int selectedIndex);
+
+    /// <summary>Matches the native bar to the application's current appearance.</summary>
+    void SetDarkAppearance(bool dark);
 }

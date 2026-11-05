@@ -149,5 +149,9 @@
   <Style Selector="Border.segments">
     <Setter Property="BorderBrush" Value="{DynamicResource GlassEdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="999" />
+  </Style>
+  <Style Selector="Button.seg">
+    <Setter Property="CornerRadius" Value="999" />
   </Style>
 </Styles>

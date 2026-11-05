@@ -14,6 +14,12 @@ public partial class MobileApp : Application
     /// </summary>
     public static MobileServices? Services { get; set; }
 
+    /// <summary>
+    /// The shell created for this run. Platform heads use it for appearance
+    /// changes that their SDK no longer reports through Avalonia.
+    /// </summary>
+    public MobileShell? Shell { get; private set; }
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -28,6 +34,7 @@ public partial class MobileApp : Application
         var preferences = new MobilePreferencesStore(services.Paths);
         preferences.Load();
         var shell = new MobileShell(modules, services, preferences);
+        Shell = shell;
 
         if (this.TryGetFeature<IActivatableLifetime>() is { } activation)
         {

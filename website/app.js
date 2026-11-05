@@ -2,6 +2,9 @@ const REPOSITORY = "kingstacker/Kkindle";
 const RELEASE_PAGE = `https://github.com/${REPOSITORY}/releases/latest`;
 const RELEASE_API = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
 const SITE_RELEASE_JSON = "_release.json";
+const SHOWCASE_INTERVAL = 6000;
+
+const PLATFORM_NAMES = { windows: "Windows", macos: "macOS", linux: "Linux", android: "Android", ios: "iOS" };
 
 const translations = {
   zh: {
@@ -9,12 +12,15 @@ const translations = {
     pageDescription: "Kkindle 是一款跨平台的个人电子书与 Kindle 设备管理器。",
     ogDescription: "把书库、阅读、批注和 Kindle 设备连接起来。",
     locale: "zh_CN", localeAlternate: "en_US",
-    skipToContent: "跳到主要内容", navFeatures: "功能", navDownload: "下载", navManual: "使用手册",
+    skipToContent: "跳到主要内容", navFeatures: "功能", navPreview: "界面", navDownload: "下载", navManual: "使用手册",
     heroTitle: "让每一本书，都有自己的位置。", heroLead: "整理书库，沉浸阅读，连接 Kindle。把喜欢的书，留在触手可及的地方。",
-    heroDownloadTitle: "选择平台下载", showcaseLabel: "Kkindle 界面预览", showcasePrevious: "上一张截图", showcaseNext: "下一张截图", showcaseSelect: "选择平台截图", showcaseMac: "显示 macOS 截图", showcaseWindows: "显示 Windows 截图", windowsAlt: "Kkindle Windows 书库界面", showcaseIos: "显示 iOS 截图", showcaseAndroid: "显示 Android 截图", showcasePause: "暂停自动切换", showcasePlay: "开始自动切换", macosPreview: "桌面版书库", mobilePreview: "移动端书库", macosAlt: "Kkindle macOS 书库界面", iosAlt: "Kkindle iOS 书库界面", androidAlt: "Kkindle Android 书库界面",
+    heroDownloadTitle: "选择平台下载", platformNote: "桌面与移动端", recommended: "你的设备",
+    showcaseLabel: "Kkindle 界面预览", showcaseTitle: "每一个屏幕，都恰到好处。", showcasePrevious: "上一张截图", showcaseNext: "下一张截图", showcaseSelect: "选择平台截图", showcaseMac: "显示 macOS 截图", showcaseWindows: "显示 Windows 截图", windowsAlt: "Kkindle Windows 书库界面", showcaseIos: "显示 iOS 截图", showcaseAndroid: "显示 Android 截图", macosPreview: "桌面版书库", mobilePreview: "移动端书库", macosAlt: "Kkindle macOS 书库界面", iosAlt: "Kkindle iOS 书库界面", androidAlt: "Kkindle Android 书库界面",
     downloadTitle: "在你喜欢的设备上阅读。", downloadLead: "选择你的平台，让阅读从这里开始。",
     stableLabel: "最新稳定版本", checking: "正在获取…", releaseUnavailable: "暂无版本信息",
     inDevelopment: "开发内测中", downloadUnavailable: "暂时无法获取下载信息", downloadNow: "下载",
+    downloadFor: "下载 {platform} 版", downloadLatest: "下载最新版本",
+    formatInstaller: "安装包", formatPortable: "便携版", formatArchive: "压缩包",
     heroAllDownloads: "全部版本与架构", heroBaidu: "百度网盘备用下载（kxas）",
     featuresTitle: "阅读的事，简单一点。", featuresLead: "从整理到阅读，再到带上 Kindle，把时间留给真正重要的内容。",
     libraryTitle: "你的私人书库", libraryBody: "导入 EPUB、PDF、MOBI 和 AZW3，自动识别元数据与封面，按作者、标签、格式和阅读状态找到下一本书。",
@@ -34,12 +40,15 @@ const translations = {
     pageDescription: "Kkindle is a cross-platform ebook library and Kindle device manager.",
     ogDescription: "Connect your library, reading, annotations, and Kindle device in one local-first workflow.",
     locale: "en_US", localeAlternate: "zh_CN",
-    skipToContent: "Skip to content", navFeatures: "Features", navDownload: "Download", navManual: "Chinese manual",
+    skipToContent: "Skip to content", navFeatures: "Features", navPreview: "Interface", navDownload: "Download", navManual: "Chinese manual",
     heroTitle: "A place for every book.", heroLead: "Organize your library, settle into a book, and connect your Kindle. Keep the books you love close at hand.",
-    heroDownloadTitle: "Choose your platform", showcaseLabel: "Kkindle interface previews", showcasePrevious: "Previous screenshot", showcaseNext: "Next screenshot", showcaseSelect: "Choose a platform screenshot", showcaseMac: "Show macOS screenshot", showcaseWindows: "Show Windows screenshot", windowsAlt: "Kkindle Windows library", showcaseIos: "Show iOS screenshot", showcaseAndroid: "Show Android screenshot", showcasePause: "Pause automatic rotation", showcasePlay: "Start automatic rotation", macosPreview: "Desktop library", mobilePreview: "Mobile library", macosAlt: "Kkindle macOS library", iosAlt: "Kkindle iOS library", androidAlt: "Kkindle Android library",
+    heroDownloadTitle: "Choose your platform", platformNote: "Desktop & mobile", recommended: "Your device",
+    showcaseLabel: "Kkindle interface previews", showcaseTitle: "Right at home on every screen.", showcasePrevious: "Previous screenshot", showcaseNext: "Next screenshot", showcaseSelect: "Choose a platform screenshot", showcaseMac: "Show macOS screenshot", showcaseWindows: "Show Windows screenshot", windowsAlt: "Kkindle Windows library", showcaseIos: "Show iOS screenshot", showcaseAndroid: "Show Android screenshot", macosPreview: "Desktop library", mobilePreview: "Mobile library", macosAlt: "Kkindle macOS library", iosAlt: "Kkindle iOS library", androidAlt: "Kkindle Android library",
     downloadTitle: "Read on your favorite device.", downloadLead: "Choose your platform and start reading.",
     stableLabel: "Latest stable release", checking: "Loading…", releaseUnavailable: "Release unavailable",
     inDevelopment: "In development · testing", downloadUnavailable: "Download information unavailable", downloadNow: "Download",
+    downloadFor: "Download for {platform}", downloadLatest: "Download latest version",
+    formatInstaller: "Installer", formatPortable: "Portable", formatArchive: "Archive",
     heroAllDownloads: "All releases & architectures", heroBaidu: "Baidu Netdisk backup (kxas)",
     featuresTitle: "A simpler way to read.", featuresLead: "From organizing and reading to your Kindle, spend more time with what matters.",
     libraryTitle: "Your personal library", libraryBody: "Import EPUB, PDF, MOBI, and AZW3 files, with metadata and covers. Find your next book by author, tag, format, or reading status.",
@@ -67,6 +76,7 @@ const assetMatchers = {
 let currentLanguage = "zh";
 let latestRelease = null;
 let releaseFailed = false;
+let recommendedPlatform = null;
 
 function getStoredLanguage() {
   try {
@@ -76,6 +86,50 @@ function getStoredLanguage() {
     if (stored === "zh" || stored === "en") return stored;
   } catch { /* Language preferences are optional. */ }
   return navigator.language && navigator.language.toLowerCase().startsWith("en") ? "en" : "zh";
+}
+
+function detectPlatform() {
+  const ua = navigator.userAgent || "";
+  if (/Android/i.test(ua)) return "android";
+  if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
+  if (/Windows/i.test(ua)) return "windows";
+  if (/Macintosh|Mac OS X/i.test(ua)) return navigator.maxTouchPoints > 1 ? "ios" : "macos";
+  if (/Linux|X11/i.test(ua)) return "linux";
+  return null;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const megabytes = bytes / 1048576;
+  if (megabytes >= 1024) return `${(megabytes / 1024).toFixed(1)} GB`;
+  return `${Math.round(megabytes)} MB`;
+}
+
+function formatLabel(name, copy) {
+  const asset = (name || "").toLowerCase();
+  if (/setup\.exe$|\.msi$|-setup\./.test(asset)) return copy.formatInstaller;
+  if (/\.zip$/.test(asset)) return copy.formatPortable;
+  if (/\.tar\.gz$|\.tgz$/.test(asset)) return copy.formatArchive;
+  if (/\.deb$/.test(asset)) return "DEB";
+  if (/\.rpm$/.test(asset)) return "RPM";
+  if (/\.appimage$/.test(asset)) return "AppImage";
+  if (/\.apk$/.test(asset)) return "APK";
+  if (/\.ipa$/.test(asset)) return "IPA";
+  if (/\.dmg$/.test(asset)) return "DMG";
+  return "";
+}
+
+function assetMeta(asset, copy) {
+  const parts = [formatLabel(asset.name, copy), formatBytes(asset.size)].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function findAssetFor(key, assets) {
+  const matchers = assetMatchers[key] || [];
+  const match = matchers
+    .map((matcher) => assets.find((item) => matcher.test(item.name || "") && item.browser_download_url))
+    .find(Boolean);
+  return match || null;
 }
 
 function applyLanguage(language, updateUrl = false) {
@@ -121,45 +175,97 @@ function applyLanguage(language, updateUrl = false) {
   else if (releaseFailed) setFallbackLinks();
 }
 
+function markRecommendedPlatform() {
+  recommendedPlatform = detectPlatform();
+  document.querySelectorAll("[data-download-key]").forEach((link) => {
+    link.classList.toggle("is-recommended", link.dataset.downloadKey === recommendedPlatform);
+  });
+  updateRecommendedBadges();
+}
+
+// Highlight the row that matches the visitor's system, even while that build is
+// still in development, so the platform list always answers "which one is mine?".
+function updateRecommendedBadges() {
+  document.querySelectorAll("[data-download-key]").forEach((link) => {
+    const badge = link.querySelector("[data-recommended-badge]");
+    if (!badge) return;
+    badge.hidden = link.dataset.downloadKey !== recommendedPlatform;
+  });
+}
+
 function setFallbackLinks() {
   releaseFailed = true;
   document.querySelectorAll("[data-release-version]").forEach((element) => {
     element.removeAttribute("data-i18n");
     element.textContent = translations[currentLanguage].releaseUnavailable;
   });
+  const primary = document.querySelector("[data-primary-download]");
+  const primaryLabel = document.querySelector("[data-primary-label]");
+  if (primary && primaryLabel) {
+    primary.href = RELEASE_PAGE;
+    primaryLabel.removeAttribute("data-i18n");
+    primaryLabel.textContent = translations[currentLanguage].downloadLatest;
+  }
   document.querySelectorAll("[data-download-key]").forEach((link) => {
     link.removeAttribute("href");
     link.setAttribute("aria-disabled", "true");
+    link.removeAttribute("title");
     link.querySelector(".platform-pick-meta").textContent = translations[currentLanguage][
       ["android", "ios"].includes(link.dataset.downloadKey) ? "inDevelopment" : "downloadUnavailable"
     ];
   });
+  updateRecommendedBadges();
 }
 
 function renderRelease(release) {
   releaseFailed = false;
   latestRelease = release;
+  const copy = translations[currentLanguage];
   document.querySelectorAll("[data-release-version]").forEach((element) => {
     element.removeAttribute("data-i18n");
-    element.textContent = release.tag_name || release.name || translations[currentLanguage].releaseUnavailable;
+    element.textContent = release.tag_name || release.name || copy.releaseUnavailable;
   });
   document.querySelectorAll("[data-release-link]").forEach((link) => { link.href = release.html_url || RELEASE_PAGE; });
+
   const assets = Array.isArray(release.assets) ? release.assets : [];
-  Object.entries(assetMatchers).forEach(([key, matchers]) => {
-    const asset = matchers.map((matcher) => assets.find((item) => matcher.test(item.name || "") && item.browser_download_url)).find(Boolean);
+  const available = {};
+
+  Object.keys(assetMatchers).forEach((key) => {
+    const asset = findAssetFor(key, assets);
+    available[key] = asset;
     document.querySelectorAll(`[data-download-key="${key}"]`).forEach((link) => {
       const meta = link.querySelector(".platform-pick-meta");
       if (asset) {
         link.href = asset.browser_download_url;
         link.removeAttribute("aria-disabled");
-        meta.textContent = `${translations[currentLanguage].downloadNow} · ${asset.name}`;
+        link.title = asset.name;
+        meta.removeAttribute("data-i18n");
+        meta.textContent = assetMeta(asset, copy);
       } else {
         link.removeAttribute("href");
         link.setAttribute("aria-disabled", "true");
-        meta.textContent = translations[currentLanguage].inDevelopment;
+        link.removeAttribute("title");
+        meta.setAttribute("data-i18n", "inDevelopment");
+        meta.textContent = copy.inDevelopment;
       }
     });
   });
+
+  updateRecommendedBadges();
+
+  const primary = document.querySelector("[data-primary-download]");
+  const primaryLabel = document.querySelector("[data-primary-label]");
+  if (primary && primaryLabel) {
+    primaryLabel.removeAttribute("data-i18n");
+    const platform = recommendedPlatform && available[recommendedPlatform] ? recommendedPlatform : null;
+    if (platform) {
+      primary.href = available[platform].browser_download_url;
+      primaryLabel.textContent = copy.downloadFor.replace("{platform}", PLATFORM_NAMES[platform]);
+    } else {
+      primary.href = release.html_url || RELEASE_PAGE;
+      primaryLabel.textContent = copy.downloadLatest;
+    }
+  }
 }
 
 async function fetchRelease(url, options = {}) {
@@ -183,6 +289,7 @@ async function loadLatestRelease() {
 function setupQQGroupCopy() {
   const button = document.querySelector("#qq-group-copy");
   const status = document.querySelector("#qq-group-copy-status");
+  if (!button || !status) return;
   let timer;
   button.addEventListener("click", async () => {
     try { await navigator.clipboard.writeText("1109898894"); status.textContent = translations[currentLanguage].qqGroupCopied; }
@@ -193,8 +300,16 @@ function setupQQGroupCopy() {
   });
 }
 
+function setupHeader() {
+  const header = document.querySelector("#site-header");
+  if (!header) return;
+  const update = () => header.classList.toggle("is-scrolled", window.scrollY > 8);
+  update();
+  window.addEventListener("scroll", update, { passive: true });
+}
+
 function setupShowcase() {
-  const showcase = document.querySelector("#device-showcase");
+  const showcase = document.querySelector("#preview");
   if (!showcase) return;
   const slides = Array.from(showcase.querySelectorAll("[data-showcase-slide]"));
   const selectors = Array.from(showcase.querySelectorAll("[data-showcase-index]"));
@@ -206,14 +321,13 @@ function setupShowcase() {
   let paused = reducedMotion.matches;
   let hovering = false;
   let focused = false;
+  let visible = true;
   let timer;
 
   function schedule() {
     window.clearTimeout(timer);
-    if (paused || hovering || focused || document.hidden) return;
-    timer = window.setTimeout(() => {
-      show(selected + 1);
-    }, 3000);
+    if (paused || hovering || focused || !visible || document.hidden) return;
+    timer = window.setTimeout(() => show(selected + 1), SHOWCASE_INTERVAL);
   }
 
   function show(index, announce = false) {
@@ -244,13 +358,21 @@ function setupShowcase() {
     paused = event.matches;
     schedule();
   });
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((entries) => {
+      visible = entries.some((entry) => entry.isIntersecting);
+      schedule();
+    }, { threshold: 0.15 }).observe(showcase);
+  }
   showcase.querySelectorAll("[data-showcase-controls]").forEach((element) => { element.hidden = false; });
   show(0);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   applyLanguage(getStoredLanguage());
+  markRecommendedPlatform();
   setupQQGroupCopy();
+  setupHeader();
   setupShowcase();
   document.querySelector("#language-toggle").addEventListener("click", () => applyLanguage(currentLanguage === "en" ? "zh" : "en", true));
   loadLatestRelease();

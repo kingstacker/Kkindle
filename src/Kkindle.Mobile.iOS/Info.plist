@@ -18,7 +18,10 @@
         <integer>2</integer>
     </array>
     <key>UILaunchScreen</key>
-    <dict/>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBackground</string>
+    </dict>
     <key>UIAppFonts</key>
     <array>
         <string>Assets/Fonts/KingHwaOldSong-v3.0.ttf</string>
