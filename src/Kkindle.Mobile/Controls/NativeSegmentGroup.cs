@@ -1,11 +1,13 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 
 namespace Kkindle.Mobile.Controls;
 
-/// <summary>Applies the sheet scrim to a hosted native control.</summary>
+/// <summary>Dims a hosted native control so it reads like the dimmed page.</summary>
 public interface INativeSegmentScrim
 {
     void SetScrim(Color? color);
@@ -20,7 +22,40 @@ public sealed class NativeSegmentGroup : ContentControl
     private Control? _native;
     private bool _sheetObscured;
     private bool _sheetCoversControl;
+    private bool _inViewport = true;
     private Color _scrimColor;
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        EffectiveViewportChanged += OnEffectiveViewportChanged;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        EffectiveViewportChanged -= OnEffectiveViewportChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    /// <summary>
+    /// A hosted native view is a platform view drawn above the whole Avalonia
+    /// scene, so a scrolling ancestor cannot clip it. Whenever any part of the
+    /// group leaves the visible viewport — sliding under a page header, mostly
+    /// — the Avalonia fallback takes over, because Avalonia does clip it.
+    /// </summary>
+    private void OnEffectiveViewportChanged(object? sender, EffectiveViewportChangedEventArgs e)
+    {
+        // The rect is the visible part expressed in this control's own
+        // coordinates, so it *contains* the control when nothing is cut off.
+        var viewport = e.EffectiveViewport;
+        var visible = viewport.Width > 0 && viewport.Height > 0
+            && viewport.X <= 0.5 && viewport.Y <= 0.5
+            && viewport.Right >= Bounds.Width - 0.5
+            && viewport.Bottom >= Bounds.Height - 0.5;
+        if (visible == _inViewport) return;
+        _inViewport = visible;
+        ApplyObscured();
+    }
 
     protected override async void OnLoaded(RoutedEventArgs e)
     {
@@ -47,40 +82,44 @@ public sealed class NativeSegmentGroup : ContentControl
         fallback.Opacity = 0;
         fallback.IsHitTestVisible = false;
         Content = new Grid { Children = { fallback, native } };
-        ApplySheetObscured();
+        ApplyObscured();
     }
 
-    /// <summary>Lets Avalonia's sheet and scrim cover the hosted native view.</summary>
+    /// <summary>Hides the hosted native view; the fallback stands in.</summary>
     public void SetObscured(bool obscured)
     {
         if (_native is null || _fallback is null) return;
-        _native.IsVisible = !obscured;
-        _fallback.Opacity = obscured ? 1 : 0;
+        _sheetObscured = obscured;
+        _sheetCoversControl = obscured;
+        _scrimColor = default;
+        ApplyObscured();
     }
 
     /// <summary>
-    /// Dim uncovered native controls in place; hide only those actually covered
-    /// by the Avalonia sheet, which must be drawn above them.
+    /// A sheet dims the page: a native control the sheet does not cover is
+    /// dimmed in place, keeping its own appearance, and only the part hidden
+    /// behind the sheet panel gives way to the fallback.
     /// </summary>
     public void SetSheetObscured(bool obscured, bool covered, Color scrimColor)
     {
         _sheetObscured = obscured;
         _sheetCoversControl = covered;
         _scrimColor = scrimColor;
-        ApplySheetObscured();
+        ApplyObscured();
     }
 
-    private void ApplySheetObscured()
+    private void ApplyObscured()
     {
         if (_native is null || _fallback is null) return;
-        if (_native is not INativeSegmentScrim nativeScrim)
-        {
-            SetObscured(_sheetObscured);
-            return;
-        }
+        var dimmed = _sheetObscured && !_sheetCoversControl && _inViewport;
+        if (_native is INativeSegmentScrim scrim) scrim.SetScrim(dimmed ? _scrimColor : null);
 
-        nativeScrim.SetScrim(_sheetObscured ? _scrimColor : null);
-        _native.IsVisible = !_sheetObscured || !_sheetCoversControl;
-        _fallback.Opacity = _sheetObscured && _sheetCoversControl ? 1 : 0;
+        // Hidden while the sheet panel covers it, and while scrolling carries
+        // it out of the viewport: the fallback then stands in, drawn and
+        // clipped by Avalonia, so it can also take the taps.
+        var showNative = _inViewport && !(_sheetObscured && _sheetCoversControl);
+        _native.IsVisible = showNative;
+        _fallback.Opacity = showNative ? 0 : 1;
+        _fallback.IsHitTestVisible = !_inViewport && !_sheetObscured;
     }
 }

@@ -135,8 +135,17 @@ public partial class MobileShell : UserControl
         _backupBlocked = true;
         BackupBlockerTitle.Text = restore ? "正在恢复备份" : "正在导出备份";
         BackupBlockerText.Text = "正在等待进行中的数据操作完成，请保持应用打开。";
+        BackupBlockerProgress.Value = 0;
+        BackupBlockerProgress.IsVisible = true;
         BackupBlocker.IsVisible = true;
+        SetNativeControlsBlocked(true);
         _services.TabBar?.Update(false, (int)_tab);
+        // Reported from a background thread; Progress<T> hops back to the UI one.
+        var progress = new Progress<AppBackupProgress>(update =>
+        {
+            BackupBlockerProgress.Value = Math.Clamp(update.Fraction, 0, 1);
+            if (!string.IsNullOrWhiteSpace(update.Message)) BackupBlockerText.Text = update.Message;
+        });
         try
         {
             using var lease = await MobileDataCoordinator.BeginRestoreAsync(token)
@@ -146,7 +155,7 @@ public partial class MobileShell : UserControl
             {
                 try
                 {
-                    await backup.ImportAsync(path, token);
+                    await backup.ImportAsync(path, token, progress);
                 }
                 catch (AppBackupRollbackException)
                 {
@@ -160,7 +169,7 @@ public partial class MobileShell : UserControl
                 ShowRestartRequired();
             }
             else
-                await backup.ExportAsync(path, token);
+                await backup.ExportAsync(path, token, progress);
         }
         finally
         {
@@ -168,8 +177,30 @@ public partial class MobileShell : UserControl
             {
                 _backupBlocked = false;
                 BackupBlocker.IsVisible = false;
+                SetNativeControlsBlocked(false);
                 _services.TabBar?.Update(_history.Count == 1 && !SheetScope.IsVisible, (int)_tab);
             }
+        }
+    }
+
+    /// <summary>
+    /// The backup blocker is an opaque Avalonia border, but a hosted UIKit
+    /// segment is a platform view above the whole scene and would keep showing
+    /// through it, so the native controls are swapped for the fallback while
+    /// the blocker is up.
+    /// </summary>
+    private void SetNativeControlsBlocked(bool blocked)
+    {
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSegmentGroup>())
+            group.SetObscured(blocked);
+        if (blocked)
+        {
+            foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSegmentGroup>())
+                group.SetObscured(true);
+        }
+        else
+        {
+            SetPageNativeControlsObscured(SheetScope.IsVisible);
         }
     }
 
@@ -180,7 +211,9 @@ public partial class MobileShell : UserControl
         BackupBlockerText.Text = recoveryIncomplete
             ? "恢复失败，自动回滚未完成。请完全关闭应用并重新打开，让应用尝试恢复原数据。重新启动前无法继续使用或同步。"
             : "请完全关闭应用后重新打开，以载入恢复的数据。重新启动前无法继续使用或同步。";
+        BackupBlockerProgress.IsVisible = false;
         BackupBlocker.IsVisible = true;
+        SetNativeControlsBlocked(true);
         _services.TabBar?.Update(false, (int)_tab);
     }
 
@@ -369,6 +402,12 @@ public partial class MobileShell : UserControl
         _services.TabBar?.Update(!_backupBlocked && _history.Count == 1, (int)_tab);
     }
 
+    /// <summary>
+    /// A hosted native segment is a platform view above the sheet, so it has to
+    /// be dimmed itself; only the part the sheet panel physically covers is
+    /// swapped for the Avalonia fallback, so nothing keeps showing on top of
+    /// the panel. Coverage is only trusted once the sheet has been laid out.
+    /// </summary>
     private void SetPageNativeControlsObscured(bool obscured, bool checkCoverage = false)
     {
         var brush = SheetScrim.Background as ISolidColorBrush;

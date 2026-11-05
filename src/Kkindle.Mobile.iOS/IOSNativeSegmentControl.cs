@@ -48,10 +48,13 @@ internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmen
         _control.Frame = _glass.ContentView.Bounds;
         _control.AutoresizingMask = UIViewAutoresizing.FlexibleDimensions;
         _glass.ContentView.AddSubview(_control);
+        // Dims the control with the page while a sheet dims it; it has to be
+        // the top subview so the sheet scrim reads the same as on the page.
         _scrim = new UIView(_glass.ContentView.Bounds)
         {
             AutoresizingMask = UIViewAutoresizing.FlexibleDimensions,
-            UserInteractionEnabled = false
+            UserInteractionEnabled = false,
+            Hidden = true
         };
         _glass.ContentView.AddSubview(_scrim);
         _control.ValueChanged += OnValueChanged;

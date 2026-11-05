@@ -150,6 +150,9 @@
       <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16" MaxWidth="360">
         <TextBlock Name="BackupBlockerTitle" Classes="title" TextWrapping="Wrap" />
         <TextBlock Name="BackupBlockerText" TextWrapping="Wrap" />
+        <ProgressBar Name="BackupBlockerProgress" Minimum="0" Maximum="1" Height="3"
+                     Background="{DynamicResource SunkStrongBrush}"
+                     Foreground="{DynamicResource TextSecondaryBrush}" />
       </StackPanel>
     </Border>
 

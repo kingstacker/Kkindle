@@ -100,8 +100,6 @@
                       VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
         </Grid>
       </Button>
-      <TextBlock Classes="muted" Margin="0,4,0,0" TextWrapping="Wrap" LineHeight="19"
-                 Text="备份为 .kkindle 格式，不包含 API 密钥、云同步凭据和 SMTP 密码。" />
       <TextBlock Name="BackupStatusText" Classes="muted" Margin="0,8,0,0"
                  TextWrapping="Wrap" IsVisible="False" />
 

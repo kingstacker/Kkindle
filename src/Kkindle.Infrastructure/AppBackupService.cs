@@ -17,6 +17,9 @@ public sealed class AppBackupRollbackException(string message, Exception innerEx
 /// protected by Windows on the current machine and are never written to an
 /// export file.
 /// </summary>
+/// <summary>Coarse backup progress for a progress bar; fraction is 0..1.</summary>
+public sealed record AppBackupProgress(double Fraction, string Message);
+
 public sealed partial class AppBackupService
 {
     public const string FileExtension = ".kkindle";
@@ -56,8 +59,12 @@ public sealed partial class AppBackupService
 
     public async Task<AppBackupExportResult> ExportAsync(
         string destinationPath,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<AppBackupProgress>? progress = null)
     {
+        void Report(double fraction, string message) =>
+            progress?.Report(new AppBackupProgress(fraction, message));
+        Report(0, "正在读取书库…");
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await RecoverPendingImportsAsync(_paths, cancellationToken);
         if (string.IsNullOrWhiteSpace(destinationPath))
@@ -74,6 +81,7 @@ public sealed partial class AppBackupService
         {
             await CreateDatabaseSnapshotAsync(databaseSnapshotPath, cancellationToken);
             await NormalizeSnapshotPathsAsync(databaseSnapshotPath, cancellationToken);
+            Report(0.06, "正在整理书籍文件…");
             var summary = await ReadLibrarySummaryAsync(databaseSnapshotPath, cancellationToken);
             var settings = await BuildExportSettingsAsync(cancellationToken);
             var manifest = new BackupManifest
@@ -89,6 +97,29 @@ public sealed partial class AppBackupService
             if (!string.IsNullOrWhiteSpace(destinationDirectory))
                 Directory.CreateDirectory(destinationDirectory);
 
+            // Listing first gives the progress bar a denominator; a file added
+            // mid-export is simply left for the next backup.
+            var sources = new (string Directory, string Prefix)[]
+            {
+                (_paths.Library, "library"),
+                (_paths.Covers, "covers"),
+                (Path.Combine(_paths.Data, ReadingMaterialCoversDirectory), ReadingMaterialCoversDirectory),
+                (_paths.Trash, "trash")
+            };
+            var files = sources
+                .SelectMany(source => EnumerateExportFiles(source.Directory)
+                    .Select(path => (Path: path, Entry: $"{source.Prefix}/{RelativeEntryPath(source.Directory, path)}")))
+                .ToList();
+            var totalBytes = files.Sum(file => new FileInfo(file.Path).Length)
+                + new FileInfo(databaseSnapshotPath).Length;
+            var processedBytes = 0L;
+            void ReportFile(long length)
+            {
+                processedBytes += length;
+                Report(0.1 + 0.85 * Math.Min(1, totalBytes <= 0 ? 1 : (double)processedBytes / totalBytes),
+                    "正在打包书籍文件…");
+            }
+
             await using (var output = new FileStream(
                 pendingPath,
                 FileMode.CreateNew,
@@ -99,18 +130,21 @@ public sealed partial class AppBackupService
             using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
             {
                 await AddJsonEntryAsync(archive, ManifestEntryName, manifest, cancellationToken);
-                await AddFileEntryAsync(archive, databaseSnapshotPath, DatabaseEntryName, cancellationToken);
-                await AddDirectoryEntriesAsync(archive, _paths.Library, "library", cancellationToken);
-                await AddDirectoryEntriesAsync(archive, _paths.Covers, "covers", cancellationToken);
+                ReportFile(await AddFileEntryAsync(archive, databaseSnapshotPath, DatabaseEntryName, cancellationToken));
                 // Mark even an empty directory so imports can distinguish it from older backups.
                 archive.CreateEntry(ReadingMaterialCoversDirectory + "/");
-                await AddDirectoryEntriesAsync(archive, Path.Combine(_paths.Data, ReadingMaterialCoversDirectory), ReadingMaterialCoversDirectory, cancellationToken);
-                await AddDirectoryEntriesAsync(archive, _paths.Trash, "trash", cancellationToken);
+                foreach (var file in files)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ReportFile(await AddFileEntryAsync(archive, file.Path, file.Entry, cancellationToken));
+                }
                 await AddJsonEntryAsync(archive, SettingsEntryName, settings, cancellationToken);
             }
+            Report(0.97, "正在写入备份文件…");
 
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(pendingPath, destinationPath, overwrite: true);
+            Report(1, "备份已完成。");
             return new AppBackupExportResult(
                 manifest.BookCount,
                 manifest.FileCount,
@@ -125,8 +159,12 @@ public sealed partial class AppBackupService
 
     public async Task<AppBackupImportResult> ImportAsync(
         string sourcePath,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<AppBackupProgress>? progress = null)
     {
+        void Report(double fraction, string message) =>
+            progress?.Report(new AppBackupProgress(fraction, message));
+        Report(0, "正在读取备份文件…");
         using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await RecoverPendingImportsAsync(_paths, cancellationToken);
         if (string.IsNullOrWhiteSpace(sourcePath))
@@ -153,8 +191,18 @@ public sealed partial class AppBackupService
                     return name.Equals(ReadingMaterialCoversDirectory, StringComparison.OrdinalIgnoreCase)
                         || name.StartsWith(ReadingMaterialCoversDirectory + "/", StringComparison.OrdinalIgnoreCase);
                 });
-                await ExtractSupportedEntriesAsync(archive, stagingRoot, cancellationToken);
+                var totalBytes = archive.Entries
+                    .Where(entry => IsSupportedEntry(NormalizeEntryName(entry.FullName)))
+                    .Sum(entry => entry.Length);
+                var extractedBytes = 0L;
+                await ExtractSupportedEntriesAsync(archive, stagingRoot, cancellationToken, length =>
+                {
+                    extractedBytes += length;
+                    Report(0.05 + 0.75 * Math.Min(1, totalBytes <= 0 ? 1 : (double)extractedBytes / totalBytes),
+                        "正在解压备份…");
+                });
             }
+            Report(0.82, "正在检查备份数据…");
 
             var stagedDatabasePath = Path.Combine(stagingRoot, DatabaseEntryName.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(stagedDatabasePath))
@@ -220,6 +268,7 @@ public sealed partial class AppBackupService
                 journal.Phase = ImportPhase.Replacing;
                 await WriteImportJournalAsync(rollbackRoot, journal, cancellationToken);
                 replacementStarted = true;
+                Report(0.9, "正在还原书库…");
                 MoveCurrentDataToRollback(rollbackRoot, journal);
                 Directory.Move(stagedLibraryPath, _paths.Library);
                 Directory.Move(stagedCoversPath, _paths.Covers);
@@ -237,6 +286,7 @@ public sealed partial class AppBackupService
                 journal.Phase = ImportPhase.Committed;
                 await WriteImportJournalAsync(rollbackRoot, journal, cancellationToken);
                 importCommitted = true;
+                Report(1, "备份已恢复。");
 
                 return new AppBackupImportResult(
                     summary.BookCount,
@@ -627,29 +677,20 @@ public sealed partial class AppBackupService
         }
     }
 
-    private static async Task AddDirectoryEntriesAsync(
-        ZipArchive archive,
-        string directory,
-        string entryPrefix,
-        CancellationToken cancellationToken)
-    {
-        if (!Directory.Exists(directory)) return;
+    /// <summary>Files that belong in a backup; partial downloads are skipped.</summary>
+    private static IEnumerable<string> EnumerateExportFiles(string directory) =>
+        Directory.Exists(directory)
+            ? Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+                .Where(path => !path.EndsWith(".part", StringComparison.OrdinalIgnoreCase)
+                    && !path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            : [];
 
-        foreach (var filePath in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (filePath.EndsWith(".part", StringComparison.OrdinalIgnoreCase)
-                || filePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
-                continue;
+    private static string RelativeEntryPath(string directory, string filePath) =>
+        Path.GetRelativePath(directory, filePath)
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
 
-            var relativePath = Path.GetRelativePath(directory, filePath)
-                .Replace(Path.DirectorySeparatorChar, '/')
-                .Replace(Path.AltDirectorySeparatorChar, '/');
-            await AddFileEntryAsync(archive, filePath, $"{entryPrefix}/{relativePath}", cancellationToken);
-        }
-    }
-
-    private static async Task AddFileEntryAsync(
+    private static async Task<long> AddFileEntryAsync(
         ZipArchive archive,
         string sourcePath,
         string entryName,
@@ -665,6 +706,7 @@ public sealed partial class AppBackupService
             useAsync: true);
         await using var destination = entry.Open();
         await source.CopyToAsync(destination, 81920, cancellationToken);
+        return source.Length;
     }
 
     private static async Task AddJsonEntryAsync<T>(
@@ -681,7 +723,8 @@ public sealed partial class AppBackupService
     private static async Task ExtractSupportedEntriesAsync(
         ZipArchive archive,
         string stagingRoot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<long>? onEntryExtracted = null)
     {
         foreach (var entry in archive.Entries)
         {
@@ -707,6 +750,7 @@ public sealed partial class AppBackupService
                 81920,
                 useAsync: true);
             await source.CopyToAsync(destination, 81920, cancellationToken);
+            onEntryExtracted?.Invoke(entry.Length);
         }
     }
 

@@ -66,7 +66,8 @@ picked through the system picker into the cache. `IOSGlassTabBar` supplies the
 native bar described below.
 
 On iOS 26 `IOSGlassTabBar` hosts a native `UITabBar`, so UIKit controls its
-Liquid Glass material, selection, and accessibility. The shared shell reserves
+Liquid Glass material, selection, and accessibility. Segmented groups are
+hosted by `IOSNativeSegmentControl` for the same reason (see below). The shared shell reserves
 space for it and hides it while a page or bottom sheet is open. Content uses a
 neutral background and the system UI font; book text keeps its reader font.
 On iOS 15–25 the shared Avalonia tab bar is used.
@@ -122,6 +123,15 @@ The reader hides its listening button when a host has no TTS engine and player.
   series, edition, ISBN, pages, language, description, cover) with
   `ZLibraryMetadata.Apply`. Books already in the library are not downloaded
   again. The account shares the desktop's protected settings file.
+- `NativeSegmentGroup` hosts UIKit's segmented control, which is a platform
+  view drawn above the whole Avalonia scene and therefore cannot be clipped by
+  a scrolling page or covered by a sheet. Whenever any part of it leaves the
+  visible viewport, or the sheet panel physically covers it, it hands over to
+  the Avalonia fallback, which is clipped and still takes taps. A sheet that
+  does not cover it dims it in place through `IOSNativeSegmentControl`, whose
+  scrim follows the page's sheet scrim so the control keeps its own appearance
+  and only darkens with everything else. Coverage is only trusted after the
+  sheet has been laid out, so a control cannot stay on top of the panel.
 - `ReaderPage` is paginated. The chrome stays hidden while reading, but the
   system bars stay visible and take the paper color: hiding them reflows the
   page on every toggle and raises Android's full-screen confirmation. Side taps
@@ -135,8 +145,10 @@ The reader hides its listening button when a host has no TTS engine and player.
   searches local book text by keyword when answering book questions; page
   summaries and selection explanations use the current page. Pinches are
   recognized in the reader's own tunnel handlers because the PDF surface takes each finger. The
-  排版 sheet adjusts font size and line spacing and switches between horizontal
-  and vertical (竖排) typesetting; vertical books are laid out single-page.
+  排版 sheet adjusts font size, line spacing, side margins and first-line
+  indentation (首行缩进), and switches between horizontal and vertical (竖排)
+  typesetting; vertical books are laid out single-page. Phone margins run from
+  16 to 36 points, below the desktop's 24-point floor.
 - Progress, bookmarks and annotations store chapters relative to the book, like
   the desktop app, because the rows sync between devices.
 - `MaterialsPage` groups bookmarks, highlights and notes by book, opens the
@@ -176,7 +188,9 @@ The reader hides its listening button when a host has no TTS engine and player.
 ## Library backup and restore
 
 In 我的, export a `.kkindle` backup through the system save or share interface,
-then keep the file somewhere outside the app. Restore selects one backup, asks
+then keep the file somewhere outside the app. While a backup runs, the shell
+covers the app with a blocker that follows `AppBackupProgress`: a progress bar
+and the current step, so a large library does not look stuck. Restore selects one backup, asks
 for confirmation and replaces the current library. A successful restore blocks
 further use and sync until the app process is restarted: fully close the app
 (including dismissing it from the app switcher), then open it again. On iOS,
