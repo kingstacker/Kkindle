@@ -112,16 +112,25 @@ public partial class ReaderPage : UserControl
 
     public string? PositionText => FooterPosition.Text;
 
-    private static ReaderLayoutSettings BuildLayout(MobilePreferences preferences) =>
-        ReaderLayoutDefaults.Normalize(new ReaderLayoutSettings(
+    private static ReaderLayoutSettings BuildLayout(MobilePreferences preferences)
+    {
+        var normalized = ReaderLayoutDefaults.Normalize(new ReaderLayoutSettings(
             FontScale: preferences.ReaderFontScale,
             LineHeight: preferences.ReaderLineHeight,
             MaxWidth: 900,
-            BodyPadding: 24,
+            BodyPadding: ReaderLayoutDefaults.DefaultBodyPadding,
             FontFamily: ReaderFontDefaults.BundledFamily,
             FlowMode: 1,
             VerticalWriting: preferences.ReaderVerticalWriting,
             TwoPageMode: false));
+        // Applied after Normalize: a phone reads better with a narrower column
+        // than the desktop's 24-point floor allows.
+        return normalized with
+        {
+            ParagraphIndent = preferences.ReaderParagraphIndent,
+            BodyPadding = Math.Clamp(preferences.ReaderBodyPadding, 16, 64)
+        };
+    }
 
     private async void OnLoaded(object? sender, RoutedEventArgs e)
     {

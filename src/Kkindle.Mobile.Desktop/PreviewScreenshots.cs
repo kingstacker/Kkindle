@@ -22,6 +22,87 @@ internal static class PreviewScreenshots
     public static void Schedule(string directory) =>
         Dispatcher.UIThread.Post(() => _ = RunAsync(directory), DispatcherPriority.Background);
 
+    public static void ScheduleReader(string directory, int turns) =>
+        Dispatcher.UIThread.Post(() => _ = RunReaderAsync(directory, turns), DispatcherPriority.Background);
+
+    /// <summary>
+    /// Opens every seeded EPUB a few pages into the text and saves the page at
+    /// the default typography and at the extremes of the 排版 sheet.
+    /// </summary>
+    private static async Task RunReaderAsync(string directory, int turns)
+    {
+        var lifetime = (IClassicDesktopStyleApplicationLifetime)Application.Current!.ApplicationLifetime!;
+        MobileShell? shell = null;
+        MobilePreferences? original = null;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            while (lifetime.MainWindow?.Content is not MobileShell) await Task.Delay(50);
+            shell = (MobileShell)lifetime.MainWindow.Content;
+            original = shell.Preferences.Current;
+            await Task.Delay(Settle);
+
+            async Task Shot(string name)
+            {
+                await Task.Delay(Settle);
+                var size = new PixelSize((int)shell.Bounds.Width, (int)shell.Bounds.Height);
+                using var bitmap = new RenderTargetBitmap(size);
+                bitmap.Render(shell);
+                using var file = File.Create(Path.Combine(directory, $"{name}.png"));
+                bitmap.Save(file, new PngBitmapEncoderOptions());
+            }
+
+            var variants = new (string Name, Func<MobilePreferences, MobilePreferences> Apply)[]
+            {
+                ("default", value => original with { ReaderTheme = ReaderTheme.Classic }),
+                ("small", value => value with { ReaderFontScale = 1.1 }),
+                ("large", value => value with { ReaderFontScale = 1.6 }),
+                ("narrow", value => value with { ReaderBodyPadding = 16 }),
+                ("indent", value => value with { ReaderParagraphIndent = true }),
+            };
+            shell.ShowLibrary();
+            await Task.Delay(Settle);
+            var page = (LibraryPage)shell.CurrentPage!;
+            var index = 0;
+            foreach (var book in page.VisibleBooks.Where(book => !book.FormatSummary.Contains("PDF")).ToList())
+            {
+                index++;
+                foreach (var (name, apply) in variants)
+                {
+                    shell.Preferences.Update(value => apply(original) with
+                    {
+                        ReaderPageAnimation = MobilePageAnimation.None
+                    });
+                    shell.OpenReader(book);
+                    await Task.Delay(TimeSpan.FromSeconds(4));
+                    var reader = (ReaderPage)shell.CurrentPage!;
+                    for (var turn = 0; turn < turns; turn++) await reader.TurnAsync(1);
+                    await Shot($"book{index}-{name}");
+                    await reader.TurnAsync(1);
+                    await Shot($"book{index}-{name}-next");
+                    if (name == "default")
+                    {
+                        reader.ShowTypography();
+                        await Shot($"book{index}-sheet");
+                        shell.HideSheet();
+                        await Task.Delay(Settle);
+                    }
+                    shell.GoBack();
+                    await Task.Delay(Settle);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory, "error.txt"), exception.ToString());
+        }
+        finally
+        {
+            if (original is not null) shell?.Preferences.Update(_ => original);
+            lifetime.Shutdown();
+        }
+    }
+
     private static async Task RunAsync(string directory)
     {
         var lifetime = (IClassicDesktopStyleApplicationLifetime)Application.Current!.ApplicationLifetime!;

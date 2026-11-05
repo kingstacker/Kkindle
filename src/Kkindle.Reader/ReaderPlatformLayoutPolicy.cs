@@ -22,11 +22,11 @@ internal static class ReaderPlatformLayoutPolicy
     {
         var width = double.IsFinite(viewportWidth) ? Math.Max(1, viewportWidth) : 1;
         var height = double.IsFinite(viewportHeight) ? Math.Max(1, viewportHeight) : 1;
+        // The desktop offers MinBodyPadding as its smallest choice, but a
+        // phone column can be narrower, so the requested inset is only kept
+        // inside the range this policy can actually lay out.
         var requested = double.IsFinite(requestedInset)
-            ? Math.Clamp(
-                requestedInset,
-                ReaderLayoutDefaults.MinBodyPadding,
-                ReaderLayoutDefaults.MaxBodyPadding)
+            ? Math.Clamp(requestedInset, 8, ReaderLayoutDefaults.MaxBodyPadding)
             : ReaderLayoutDefaults.DefaultBodyPadding;
 
         // MaxWidth is the readable body width, not the bitmap/page width.

@@ -61,6 +61,27 @@
         </Border>
       </c:NativeSegmentGroup>
 
+      <TextBlock Classes="label" Text="页边距" Margin="0,14,0,0" />
+      <c:NativeSegmentGroup>
+        <Border Classes="segments">
+          <Grid ColumnDefinitions="*,*,*">
+            <Button Grid.Column="0" Name="MarginNarrow" Classes="seg" Content="窄" Click="OnMarginClick" />
+            <Button Grid.Column="1" Name="MarginNormal" Classes="seg" Content="标准" Click="OnMarginClick" />
+            <Button Grid.Column="2" Name="MarginWide" Classes="seg" Content="宽" Click="OnMarginClick" />
+          </Grid>
+        </Border>
+      </c:NativeSegmentGroup>
+
+      <TextBlock Classes="label" Text="首行缩进" Margin="0,14,0,0" />
+      <c:NativeSegmentGroup>
+        <Border Classes="segments">
+          <Grid ColumnDefinitions="*,*">
+            <Button Grid.Column="0" Name="IndentOff" Classes="seg" Content="关" Click="OnIndentClick" />
+            <Button Grid.Column="1" Name="IndentOn" Classes="seg" Content="开" Click="OnIndentClick" />
+          </Grid>
+        </Border>
+      </c:NativeSegmentGroup>
+
       <TextBlock Classes="label" Text="排版方向" Margin="0,14,0,0" />
       <c:NativeSegmentGroup>
         <Border Classes="segments">

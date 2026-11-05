@@ -58,6 +58,12 @@ internal static class Program
         if (args.Length > 1 && args[0] == "--shots")
             builder = builder.AfterSetup(_ => PreviewScreenshots.Schedule(args[1]));
 
+        // Dev-only: open each seeded book deep into its text and save reading
+        // pages at several typography settings, for layout review.
+        if (args.Length > 1 && args[0] == "--reader-shots")
+            builder = builder.AfterSetup(_ => PreviewScreenshots.ScheduleReader(args[1],
+                args.Length > 2 && int.TryParse(args[2], out var turns) ? turns : 12));
+
         builder.StartWithClassicDesktopLifetime(args);
     }
 
