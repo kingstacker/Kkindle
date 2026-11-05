@@ -37,7 +37,7 @@ python3 scripts/optimize_website_assets.py
 
 ## 目录
 
-- `index.html` — 首页（首屏包含三平台直下）
+- `index.html` — 首页（展示 Windows、macOS、Linux、Android 和 iOS 的下载状态）
 - `manual/` — 由脚本生成，请勿直接编辑 `manual/*.html`
 - `assets/` — 截图与优化后的图片变体
 - `dev/` — 本地检查用页面（`noindex`，构建产物中排除）
