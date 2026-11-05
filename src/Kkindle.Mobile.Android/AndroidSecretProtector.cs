@@ -96,16 +96,59 @@ public sealed class AndroidSecretProtector : ISecretProtector
     {
         lock (Gate)
         {
-            Directory.CreateDirectory(_keyDirectory);
-            if (File.Exists(_wrappedKeyPath))
-                return Unwrap(Convert.FromBase64String(File.ReadAllText(_wrappedKeyPath).Trim()));
+            try
+            {
+                Directory.CreateDirectory(_keyDirectory);
+                if (File.Exists(_wrappedKeyPath))
+                {
+                    if (TryUnwrapStoredKey() is { } stored) return stored;
+                    // The wrapping key is gone for good (restored from a backup
+                    // onto another phone, lock screen reset): the secrets it
+                    // protected are unreadable either way. Starting a new key keeps
+                    // settings savable; the old file is kept beside it.
+                    File.Move(_wrappedKeyPath, _wrappedKeyPath + $".lost-{DateTime.UtcNow:yyyyMMddHHmmss}", overwrite: true);
+                }
 
-            // Keys from earlier builds were stored in the clear; keep their
-            // secrets readable by moving the same key under the Keystore.
-            var key = ReadLegacyKey() ?? RandomNumberGenerator.GetBytes(KeySize);
-            File.WriteAllText(_wrappedKeyPath, Convert.ToBase64String(Wrap(key)));
-            File.Delete(_keyPath);
-            return key;
+                // Keys from earlier builds were stored in the clear; keep their
+                // secrets readable by moving the same key under the Keystore.
+                var key = ReadLegacyKey() ?? RandomNumberGenerator.GetBytes(KeySize);
+                var temporary = _wrappedKeyPath + ".tmp";
+                File.WriteAllText(temporary, Convert.ToBase64String(Wrap(key)));
+                File.Move(temporary, _wrappedKeyPath, overwrite: true);
+                File.Delete(_keyPath);
+                return key;
+            }
+            catch (Java.Lang.Exception exception)
+            {
+                // Callers handle CryptographicException; a raw Java exception would
+                // escape their handling and crash the settings page.
+                throw new CryptographicException("Android Keystore failed: " + exception.Message, exception);
+            }
+        }
+    }
+
+    /// <returns>Null only when the stored key can never be recovered.</returns>
+    private byte[]? TryUnwrapStoredKey()
+    {
+        byte[] wrapped;
+        try
+        {
+            wrapped = Convert.FromBase64String(File.ReadAllText(_wrappedKeyPath).Trim());
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+        if (wrapped.Length < 2 || wrapped[0] == 0 || wrapped.Length <= 1 + wrapped[0] + TagSize) return null;
+        try
+        {
+            return Unwrap(wrapped);
+        }
+        catch (Exception exception) when (exception is AEADBadTagException
+            or Android.Security.Keystore.KeyPermanentlyInvalidatedException
+            or UnrecoverableKeyException)
+        {
+            return null;
         }
     }
 

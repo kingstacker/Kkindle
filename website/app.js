@@ -1,100 +1,57 @@
 const REPOSITORY = "kingstacker/Kkindle";
 const RELEASE_PAGE = `https://github.com/${REPOSITORY}/releases/latest`;
 const RELEASE_API = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
+// Same-origin snapshot refreshed by scripts/refresh_website_release.py.
+const SITE_RELEASE_JSON = "_release.json";
 
 const translations = {
   zh: {
+    pageTitle: "Kkindle — 个人电子书与 Kindle 工作台",
+    pageDescription: "Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle 设备管理器。",
+    ogTitle: "Kkindle — 个人电子书与 Kindle 工作台",
+    ogDescription: "把书库、阅读、批注和 Kindle 设备连接起来。",
+    locale: "zh_CN",
+    localeAlternate: "en_US",
     skipToContent: "跳到主要内容",
     menuLabel: "打开菜单",
-    navProduct: "产品",
     navFeatures: "功能",
     navDownload: "下载",
     navManual: "使用手册",
     navChangelog: "更新日志",
-    navAbout: "关于",
     headerGitHub: "GitHub",
     heroKicker: "KINDLE, WITHOUT THE FRICTION.",
     heroTitle: "把书库、阅读与 Kindle 连接起来。",
     heroLead: "Kkindle 是一款安静、跨平台的电子书书库与 Kindle 工作台。整理你的书，专注地读，然后把它们带到真正的阅读设备上。",
-    heroDownload: "下载 Kkindle",
-    heroSource: "查看源码",
-    heroFactPlatforms: "桌面平台",
-    heroFactFormats: "常用格式",
-    heroFactLicense: "开源许可",
-    signalLocal: "LOCAL-FIRST",
-    signalFormats: "EPUB / PDF / MOBI / AZW3",
-    signalKindle: "KINDLE READY",
-    signalAi: "AI-ASSISTED READING",
+    heroDownloadTitle: "选择平台下载",
+    heroWindowsMeta: "Windows 11 · x64",
+    heroLinuxMeta: ".deb · x64",
+    heroMacMeta: "Apple Silicon",
+    heroAllDownloads: "全部架构",
+    heroChecksum: "SHA-256 校验值",
+    heroBaidu: "百度网盘备用下载（kxas）",
     featuresKicker: "THE WHOLE READING DESK",
     featuresTitle: "从一本书开始，直到它真正被读完。",
     featuresLead: "书库、阅读器、设备和阅读记录在同一处工作。没有多余的云端流程，也不打断你的阅读节奏。",
     libraryKicker: "LOCAL LIBRARY",
     libraryTitle: "把混乱的文件，变成真正的书库。",
     libraryBody: "导入 EPUB、PDF、MOBI 和 AZW3，自动识别元数据与封面，按作者、标签、格式和阅读状态找到下一本书。",
-    libraryTag1: "拖放导入",
-    libraryTag2: "封面与元数据",
-    libraryTag3: "本地 SQLite",
     readerKicker: "KREADER",
     readerTitle: "让排版退后，让内容走到前面。",
     readerBody: "支持横排、竖排、滚动、分页和双栏阅读。书签、搜索、脚注、批注与阅读进度都围绕正文展开。",
-    readerTag1: "原生排版",
-    readerTag2: "竖排阅读",
-    readerTag3: "笔记与批注",
     kindleKicker: "KINDLE WORKFLOW",
     kindleTitle: "从桌面书库，到手里的 Kindle。",
     kindleBody: "连接 Kindle 后查看书籍、容量、字体和词典，批量发送、导出和安全退出设备，把传书变成一个清晰的动作。",
-    kindleTag1: "USB / WPD / MTP",
-    kindleTag2: "字体与词典",
-    kindleTag3: "安全传输",
     aiKicker: "READING TOOLS",
     aiTitle: "读得更深，也记得更久。",
     aiBody: "用 AI 解释选文、总结章节或讨论全书；用批注、词典、阅读数据和导出记录，把阅读留下来。",
-    aiTag1: "AI 阅读助手",
-    aiTag2: "词典查询",
-    aiTag3: "阅读数据",
-    aboutKicker: "ABOUT KKINDLE",
-    aboutTitle: "面向个人阅读的开源桌面工作台。",
-    aboutBody: "Kkindle 是一款面向 Windows、Linux 和 macOS 的开源电子书书库与 Kindle 管理工具。它将书库整理、阅读、批注和设备传输放在同一个本地优先的工作流中。",
-    aboutPoint1: "Windows / Linux / macOS",
-    aboutPoint2: "EPUB / PDF / MOBI / AZW3",
-    aboutPoint3: "GPL-3.0 开源许可",
-    aboutSource: "查看 GitHub 项目",
     qqGroupLabel: "QQ 用户群",
     qqGroupCopied: "已复制群号 1109898894",
     qqGroupCopyFailed: "复制失败，请手动记录群号 1109898894。",
     qqGroupButtonLabel: "复制 QQ 用户群号 1109898894",
-    downloadKicker: "DOWNLOAD Kkindle",
-    downloadTitle: "选一个平台，开始建立你的书库。",
-    downloadLead: "下载区会自动选择最新稳定版，安装包优先通过本站镜像下载；也可通过百度网盘下载。",
-    baiduKicker: "备用下载",
-    baiduNote: "GitHub 下载不便时，可从百度网盘获取安装包。",
-    baiduLink: "百度网盘下载",
-    baiduCodeLabel: "提取码",
     stableLabel: "最新稳定版本",
     checking: "正在获取…",
-    releasePage: "查看完整 Release ↗",
     releaseUnavailable: "暂无版本信息",
-    recommended: "推荐",
-    windowsTitle: "Windows",
-    windowsNote: "Windows 11 / x64，自带运行时。",
-    windowsInstaller: "安装版",
-    windowsPortable: "便携版",
-    linuxTitle: "Linux",
-    linuxNote: "Debian / Ubuntu，或其它 x64 / arm64 发行版。",
-    linuxDebX64: ".deb · x64",
-    linuxDebArm64: ".deb · arm64",
-    linuxTarX64: "tar.gz · x64",
-    linuxTarArm64: "tar.gz · arm64",
-    macTitle: "macOS",
-    macNote: "macOS 12+，提供 Intel 与 Apple Silicon 包。",
-    macArm64: "Apple Silicon",
-    macX64: "Intel",
-    loadingAsset: "正在读取文件…",
-    checksum: "SHA-256 校验值",
-    releaseLoading: "正在获取最新版本…",
-    releaseLoaded: "下载地址来自本站镜像（同步自 GitHub Releases）。",
-    releaseFallback: "暂时无法读取版本信息，请打开 Release 页面选择下载文件。",
-    unavailable: "当前版本未提供",
+    openRelease: "查看 Release",
     changelogKicker: "CHANGELOG",
     changelogTitle: "每一次更新，都让阅读更顺手。",
     changelogFull: "查看完整更新日志",
@@ -123,7 +80,7 @@ const translations = {
     footerGitHub: "GitHub",
     footerChangelog: "更新日志",
     footerLicense: "GPL-3.0 License",
-    footerNote: "官网与镜像下载由 kkindle.stacker.beauty 提供。",
+    footerNote: "官网由 kkindle.stacker.beauty 提供，安装包由 GitHub Releases 托管。",
     libraryAlt: "Kkindle 电脑书库界面",
     libraryGridAlt: "Kkindle 书库网格视图",
     readerAlt: "Kreader 阅读器界面",
@@ -131,97 +88,52 @@ const translations = {
     aiAlt: "Kkindle AI 阅读助手"
   },
   en: {
+    pageTitle: "Kkindle — Personal ebook & Kindle workspace",
+    pageDescription: "Kkindle is a personal ebook library and Kindle device manager for Windows, Linux, and macOS.",
+    ogTitle: "Kkindle — Personal ebook & Kindle workspace",
+    ogDescription: "Connect your library, reading, annotations, and Kindle device in one local-first workflow.",
+    locale: "en_US",
+    localeAlternate: "zh_CN",
     skipToContent: "Skip to content",
     menuLabel: "Open menu",
-    navProduct: "Product",
     navFeatures: "Features",
     navDownload: "Download",
     navManual: "Chinese manual",
     navChangelog: "Changelog",
-    navAbout: "About",
     headerGitHub: "GitHub",
     heroKicker: "KINDLE, WITHOUT THE FRICTION.",
     heroTitle: "Bring your library, reading, and Kindle together.",
     heroLead: "Kkindle is a quiet, cross-platform ebook library and Kindle workspace. Organize your books, read with focus, and move them to the device you actually read on.",
-    heroDownload: "Download Kkindle",
-    heroSource: "View source",
-    heroFactPlatforms: "desktop platforms",
-    heroFactFormats: "common formats",
-    heroFactLicense: "open-source license",
-    signalLocal: "LOCAL-FIRST",
-    signalFormats: "EPUB / PDF / MOBI / AZW3",
-    signalKindle: "KINDLE READY",
-    signalAi: "AI-ASSISTED READING",
+    heroDownloadTitle: "Choose your platform",
+    heroWindowsMeta: "Windows 11 · x64",
+    heroLinuxMeta: ".deb · x64",
+    heroMacMeta: "Apple Silicon",
+    heroAllDownloads: "All architectures",
+    heroChecksum: "SHA-256 checksums",
+    heroBaidu: "Baidu Netdisk backup (kxas)",
     featuresKicker: "THE WHOLE READING DESK",
     featuresTitle: "Start with a book. Stay until it is actually read.",
     featuresLead: "Your library, reader, device, and reading records work in one place—with no extra cloud workflow to interrupt the page.",
     libraryKicker: "LOCAL LIBRARY",
     libraryTitle: "Turn a folder of files into a real library.",
     libraryBody: "Import EPUB, PDF, MOBI, and AZW3 files. Parse metadata and covers, then find the next book by author, tag, format, or reading status.",
-    libraryTag1: "Drag and drop",
-    libraryTag2: "Covers and metadata",
-    libraryTag3: "Local SQLite",
     readerKicker: "KREADER",
     readerTitle: "Let the typesetting recede. Let the words lead.",
     readerBody: "Read horizontally or vertically, in scroll, paginated, or two-page layouts. Bookmarks, search, footnotes, annotations, and progress stay close to the text.",
-    readerTag1: "Native layout",
-    readerTag2: "Vertical writing",
-    readerTag3: "Notes and annotations",
     kindleKicker: "KINDLE WORKFLOW",
     kindleTitle: "From desktop library to the Kindle in your hand.",
     kindleBody: "Inspect books, capacity, fonts, and dictionaries on a connected Kindle. Send, export, and safely eject in one clear workflow.",
-    kindleTag1: "USB / WPD / MTP",
-    kindleTag2: "Fonts and dictionaries",
-    kindleTag3: "Safe transfers",
     aiKicker: "READING TOOLS",
     aiTitle: "Read deeper. Keep more of it.",
     aiBody: "Use AI to explain a passage, summarize a chapter, or discuss a whole book. Keep the reading with annotations, dictionaries, data, and exports.",
-    aiTag1: "AI reading assistant",
-    aiTag2: "Dictionary lookup",
-    aiTag3: "Reading data",
-    aboutKicker: "ABOUT KKINDLE",
-    aboutTitle: "An open-source desktop workspace for personal reading.",
-    aboutBody: "Kkindle is an open-source ebook library and Kindle management tool for Windows, Linux, and macOS. It brings library organization, reading, annotations, and device transfer into one local-first workflow.",
-    aboutPoint1: "Windows / Linux / macOS",
-    aboutPoint2: "EPUB / PDF / MOBI / AZW3",
-    aboutPoint3: "GPL-3.0 License",
-    aboutSource: "View the project on GitHub",
     qqGroupLabel: "QQ Group",
     qqGroupCopied: "Copied QQ group number 1109898894",
     qqGroupCopyFailed: "Copy failed. Please note group number 1109898894 manually.",
     qqGroupButtonLabel: "Copy QQ user group number 1109898894",
-    downloadKicker: "DOWNLOAD Kkindle",
-    downloadTitle: "Choose a platform. Start your library.",
-    downloadLead: "The download area selects the latest stable version automatically, with installers served primarily from this site's mirror. You can also download via Baidu Netdisk.",
-    baiduKicker: "Alternative download",
-    baiduNote: "If GitHub downloads are inconvenient, get the installer from Baidu Netdisk.",
-    baiduLink: "Download from Baidu Netdisk",
-    baiduCodeLabel: "Extraction code",
     stableLabel: "Latest stable release",
     checking: "Loading…",
-    releasePage: "View full Release ↗",
     releaseUnavailable: "Release unavailable",
-    recommended: "Recommended",
-    windowsTitle: "Windows",
-    windowsNote: "Windows 11 / x64, runtime included.",
-    windowsInstaller: "Installer",
-    windowsPortable: "Portable",
-    linuxTitle: "Linux",
-    linuxNote: "Debian / Ubuntu, or other x64 / arm64 distributions.",
-    linuxDebX64: ".deb · x64",
-    linuxDebArm64: ".deb · arm64",
-    linuxTarX64: "tar.gz · x64",
-    linuxTarArm64: "tar.gz · arm64",
-    macTitle: "macOS",
-    macNote: "macOS 12+, with Intel and Apple Silicon packages.",
-    macArm64: "Apple Silicon",
-    macX64: "Intel",
-    loadingAsset: "Reading asset…",
-    checksum: "SHA-256 checksums",
-    releaseLoading: "Fetching the latest version…",
-    releaseLoaded: "Download links are served from this site's mirror, synced from GitHub Releases.",
-    releaseFallback: "Release data is temporarily unavailable. Open the Release page to choose a file.",
-    unavailable: "Not provided in this release",
+    openRelease: "Open release",
     changelogKicker: "CHANGELOG",
     changelogTitle: "Every update makes reading feel easier.",
     changelogFull: "View the full changelog",
@@ -250,7 +162,7 @@ const translations = {
     footerGitHub: "GitHub",
     footerChangelog: "Changelog",
     footerLicense: "GPL-3.0 License",
-    footerNote: "The official site and mirror downloads are provided by kkindle.stacker.beauty.",
+    footerNote: "The official site is provided by kkindle.stacker.beauty; installers are hosted on GitHub Releases.",
     libraryAlt: "Kkindle desktop library",
     libraryGridAlt: "Kkindle library grid view",
     readerAlt: "Kreader reading view",
@@ -261,13 +173,8 @@ const translations = {
 
 const assetMatchers = {
   "windows-installer": /-win-x64-setup\.exe$/i,
-  "windows-portable": /-win-x64-portable\.zip$/i,
   "linux-deb-x64": /_amd64\.deb$/i,
-  "linux-deb-arm64": /_arm64\.deb$/i,
-  "linux-tar-x64": /-linux-x64\.tar\.gz$/i,
-  "linux-tar-arm64": /-linux-arm64\.tar\.gz$/i,
   "mac-arm64": /-osx-arm64\.tar\.gz$/i,
-  "mac-x64": /-osx-x64\.tar\.gz$/i,
   checksums: /^SHA256SUMS\.txt$/i
 };
 
@@ -277,6 +184,13 @@ let releaseFailed = false;
 
 function getStoredLanguage() {
   try {
+    const requested = new URLSearchParams(window.location.search).get("lang");
+    if (requested === "zh" || requested === "en") return requested;
+  } catch {
+    // Query strings are optional.
+  }
+
+  try {
     const stored = window.localStorage.getItem("kkindle-site-language");
     if (stored === "zh" || stored === "en") return stored;
   } catch {
@@ -284,6 +198,22 @@ function getStoredLanguage() {
   }
 
   return navigator.language && navigator.language.toLowerCase().startsWith("en") ? "en" : "zh";
+}
+
+function updateMetaContent(attribute, name, value) {
+  if (!value) return;
+  const element = document.querySelector(`meta[${attribute}="${name}"]`);
+  if (element) element.setAttribute("content", value);
+}
+
+function updateLanguageUrl() {
+  if (!window.history || typeof window.history.replaceState !== "function") return;
+  const url = new URL(window.location.href);
+  if (currentLanguage === "en") url.searchParams.set("lang", "en");
+  else url.searchParams.delete("lang");
+  if (url.href !== window.location.href) {
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
 }
 
 function applyChangelogLanguage() {
@@ -305,7 +235,7 @@ function applyChangelogLanguage() {
   });
 }
 
-function applyLanguage(language) {
+function applyLanguage(language, updateUrl = false) {
   currentLanguage = language === "en" ? "en" : "zh";
   const copy = translations[currentLanguage];
 
@@ -334,22 +264,22 @@ function applyLanguage(language) {
     languageToggle.setAttribute("aria-label", currentLanguage === "en" ? "Switch to Chinese" : "切换为英文");
   }
 
-  document.title = currentLanguage === "en"
-    ? "Kkindle — Personal ebook & Kindle workspace"
-    : "Kkindle — 个人电子书与 Kindle 工作台";
+  document.title = copy.pageTitle;
+  updateMetaContent("name", "description", copy.pageDescription);
+  updateMetaContent("property", "og:title", copy.ogTitle);
+  updateMetaContent("property", "og:description", copy.ogDescription);
+  updateMetaContent("property", "og:locale", copy.locale);
+  updateMetaContent("property", "og:locale:alternate", copy.localeAlternate);
+  updateMetaContent("name", "twitter:title", copy.ogTitle);
+  updateMetaContent("name", "twitter:description", copy.ogDescription);
+
+  if (updateUrl) updateLanguageUrl();
 
   try {
     window.localStorage.setItem("kkindle-site-language", currentLanguage);
   } catch {
     // Local storage is optional.
   }
-}
-
-function setStatus(key) {
-  const status = document.querySelector("#release-status");
-  if (!status) return;
-  status.dataset.i18n = key;
-  status.textContent = translations[currentLanguage][key] || key;
 }
 
 function resyncHashTarget() {
@@ -364,18 +294,6 @@ function resyncHashTarget() {
     const targetTop = target.getBoundingClientRect().top + window.scrollY;
     window.scrollTo({ top: Math.max(0, targetTop - headerHeight - 16), behavior: "auto" });
   });
-}
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index += 1;
-  }
-  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function formatReleaseDate(value) {
@@ -393,31 +311,28 @@ function formatReleaseDate(value) {
 
 function setFallbackLinks() {
   releaseFailed = true;
-  const versionElement = document.querySelector("#latest-version");
-  if (versionElement) {
-    versionElement.removeAttribute("data-i18n");
-    versionElement.textContent = translations[currentLanguage].releaseUnavailable;
-  }
+  document.querySelectorAll("[data-release-version]").forEach((element) => {
+    element.removeAttribute("data-i18n");
+    element.textContent = translations[currentLanguage].releaseUnavailable;
+  });
   document.querySelectorAll("[data-download-key]").forEach((link) => {
     link.href = RELEASE_PAGE;
     link.classList.remove("disabled");
     link.removeAttribute("aria-disabled");
   });
-  document.querySelectorAll("[data-file-meta]").forEach((element) => {
-    element.removeAttribute("data-i18n");
-    element.textContent = currentLanguage === "en" ? "Open release page" : "打开 Release 页面";
-  });
   document.querySelectorAll("[data-release-link]").forEach((link) => {
     link.href = RELEASE_PAGE;
   });
-  setStatus("releaseFallback");
+  markRecommendedPlatform();
   resyncHashTarget();
 }
 
 function detectPlatform() {
   const platform = (navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "").toLowerCase();
   if (platform.includes("win")) return "windows";
-  if (platform.includes("mac") || platform.includes("iphone") || platform.includes("ipad")) return "macos";
+  // iPadOS reports "MacIntel"; it cannot run the desktop macOS package.
+  if (platform.includes("mac") && navigator.maxTouchPoints > 1) return null;
+  if (platform.includes("mac")) return "macos";
   if (platform.includes("linux")) return "linux";
   return null;
 }
@@ -425,8 +340,11 @@ function detectPlatform() {
 function markRecommendedPlatform() {
   const detected = detectPlatform();
   document.querySelectorAll("[data-platform]").forEach((card) => {
-    const recommended = detected && card.dataset.platform === detected;
-    card.classList.toggle("is-recommended", Boolean(recommended));
+    const unavailable =
+      card.classList.contains("disabled") ||
+      Boolean(card.querySelector("[data-download-key].disabled"));
+    const recommended = Boolean(detected) && card.dataset.platform === detected && !unavailable;
+    card.classList.toggle("is-recommended", recommended);
     const badge = card.querySelector(".platform-badge");
     if (badge) badge.hidden = !recommended;
   });
@@ -435,12 +353,12 @@ function markRecommendedPlatform() {
 function renderRelease(release) {
   releaseFailed = false;
   latestRelease = release;
-  const versionElement = document.querySelector("#latest-version");
-  const publishedElement = document.querySelector("#release-published");
   const version = release.tag_name || release.name || "";
 
-  if (versionElement) versionElement.textContent = version;
-  if (publishedElement) publishedElement.textContent = formatReleaseDate(release.published_at);
+  document.querySelectorAll("[data-release-version]").forEach((element) => {
+    element.removeAttribute("data-i18n");
+    element.textContent = version || translations[currentLanguage].releaseUnavailable;
+  });
   document.querySelectorAll("[data-release-link]").forEach((link) => {
     link.href = release.html_url || RELEASE_PAGE;
   });
@@ -449,46 +367,80 @@ function renderRelease(release) {
   Object.entries(assetMatchers).forEach(([key, matcher]) => {
     const asset = assets.find((item) => matcher.test(item.name || ""));
     document.querySelectorAll(`[data-download-key="${key}"]`).forEach((link) => {
-      const meta = document.querySelector(`[data-file-meta="${key}"]`);
+      const pickMeta = link.querySelector(".platform-pick-meta");
       if (asset?.browser_download_url) {
         link.href = asset.browser_download_url;
         link.classList.remove("disabled");
         link.removeAttribute("aria-disabled");
-        if (meta) {
-          meta.removeAttribute("data-i18n");
-          meta.textContent = [formatBytes(asset.size), asset.name].filter(Boolean).join(" · ");
+        if (pickMeta?.dataset.i18n) {
+          pickMeta.textContent =
+            translations[currentLanguage][pickMeta.dataset.i18n] || pickMeta.textContent;
         }
       } else {
         link.href = release.html_url || RELEASE_PAGE;
         link.classList.add("disabled");
-        link.setAttribute("aria-disabled", "true");
-        if (meta) {
-          meta.removeAttribute("data-i18n");
-          meta.textContent = translations[currentLanguage].unavailable;
+        // First-screen picks still open a useful page (the release), so they are
+        // not announced as disabled; detailed asset rows are.
+        if (link.classList.contains("platform-pick")) {
+          link.removeAttribute("aria-disabled");
+          if (pickMeta) pickMeta.textContent = translations[currentLanguage].openRelease;
+        } else {
+          link.setAttribute("aria-disabled", "true");
         }
       }
     });
   });
   applyChangelogLanguage();
 
-  const primary = document.querySelector("[data-primary-download]");
-  if (primary) primary.href = "#platform-downloads";
-  setStatus("releaseLoaded");
+  markRecommendedPlatform();
   resyncHashTarget();
 }
 
+async function fetchRelease(url, options = {}) {
+  const response = await fetch(url, { cache: "no-cache", ...options });
+  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  return response.json();
+}
+
+function isReleasePayload(release) {
+  return Boolean(
+    release &&
+      typeof release === "object" &&
+      (Array.isArray(release.assets) || typeof release.html_url === "string")
+  );
+}
+
 async function loadLatestRelease() {
+  let rendered = false;
+
+  // Prefer the same-origin snapshot: no rate limit, works when GitHub is slow
+  // or blocked, and renders the version before the page has fully painted.
   try {
-    const response = await fetch(RELEASE_API, {
-      headers: { Accept: "application/vnd.github+json" },
-      cache: "default"
-    });
-    if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-    const release = await response.json();
-    renderRelease(release);
+    const cached = await fetchRelease(SITE_RELEASE_JSON);
+    if (isReleasePayload(cached)) {
+      renderRelease(cached);
+      rendered = true;
+    }
   } catch {
-    setFallbackLinks();
+    // The snapshot is optional; fall through to the live API.
   }
+
+  // Revalidate in the background so a stale snapshot still converges on the
+  // latest release when GitHub is reachable.
+  try {
+    const live = await fetchRelease(RELEASE_API, {
+      cache: "default",
+      headers: { Accept: "application/vnd.github+json" }
+    });
+    if (isReleasePayload(live)) {
+      if (!latestRelease || live.tag_name !== latestRelease.tag_name) renderRelease(live);
+      rendered = true;
+    }
+  } catch {
+    // Rate limited or unreachable; the snapshot (if any) is already rendered.
+  }
+
+  if (!rendered) setFallbackLinks();
 }
 
 function setupNavigation() {
@@ -506,6 +458,13 @@ function setupNavigation() {
       nav.classList.remove("is-open");
       toggle.setAttribute("aria-expanded", "false");
     });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !nav.classList.contains("is-open")) return;
+    nav.classList.remove("is-open");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.focus();
   });
 }
 
@@ -543,7 +502,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupQQGroupCopy();
 
   document.querySelector("#language-toggle")?.addEventListener("click", () => {
-    applyLanguage(currentLanguage === "en" ? "zh" : "en");
+    applyLanguage(currentLanguage === "en" ? "zh" : "en", true);
     markRecommendedPlatform();
     if (latestRelease) renderRelease(latestRelease);
     else if (releaseFailed) setFallbackLinks();

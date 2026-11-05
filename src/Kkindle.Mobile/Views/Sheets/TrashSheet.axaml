@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:core="using:Kkindle.Core"
+             x:Class="Kkindle.Mobile.Views.Sheets.TrashSheet">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="20,0,20,14">
+    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+      <TextBlock Name="StatusText" Classes="muted" Text="正在加载…" TextWrapping="Wrap"
+                 VerticalAlignment="Center" />
+      <Button Grid.Column="1" Name="RefreshButton" Classes="ghost" Content="刷新" Click="OnRefreshClick" />
+    </Grid>
+
+    <ItemsControl Grid.Row="1" Name="Rows">
+      <ItemsControl.Template>
+        <ControlTemplate>
+          <ScrollViewer>
+            <ItemsPresenter ItemsPanel="{TemplateBinding ItemsPanel}" />
+          </ScrollViewer>
+        </ControlTemplate>
+      </ItemsControl.Template>
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="core:LibraryTrashItem">
+          <Border Classes="row" Padding="0,12">
+            <StackPanel Spacing="6">
+              <TextBlock Text="{Binding DisplayTitle}" TextWrapping="Wrap" FontSize="16" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="{Binding KindLabel}" Classes="muted" FontSize="12" />
+                <TextBlock Text="{Binding SizeLabel}" Classes="muted" FontSize="12" />
+                <TextBlock Text="{Binding DeletedAtLabel}" Classes="muted" FontSize="12" />
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Classes="secondary" Content="恢复" Click="OnRestoreClick" />
+                <Button Classes="secondary" Content="永久删除" Click="OnPurgeClick" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <TextBlock Grid.Row="1" Name="EmptyText" Classes="muted" Text="回收站是空的" IsVisible="False"
+               HorizontalAlignment="Center" Margin="0,40,0,0" />
+
+    <Border Grid.Row="2" Name="ConfirmPanel" IsVisible="False" Background="{DynamicResource SunkBrush}"
+            CornerRadius="14" Padding="16" Margin="0,10,0,0">
+      <StackPanel Spacing="12">
+        <TextBlock Name="ConfirmText" TextWrapping="Wrap" LineHeight="22" />
+        <Grid ColumnDefinitions="*,*,*">
+          <Button Classes="secondary" Content="取消" Click="OnCancelPurgeClick" />
+          <Button Grid.Column="2" Classes="primary" Content="永久删除" Click="OnConfirmPurgeClick" />
+        </Grid>
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

@@ -29,9 +29,7 @@ public partial class MainWindow
             var openItem = new NativeMenuItem(T("打开 Kkindle"));
             openItem.Click += (_, _) => RestoreFromTray();
             var quitItem = new NativeMenuItem(T("退出"));
-            quitItem.Click += (_, _) =>
-                (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)
-                    ?.Shutdown();
+            quitItem.Click += (_, _) => RequestApplicationQuit();
 
             var menu = new NativeMenu();
             menu.Items.Add(openItem);

@@ -131,6 +131,64 @@ public sealed partial class BackupTests
         }
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task RestoresReadingMaterialCoversAndPreservesThemForLegacyBackups(bool hasCover, bool removeMarker)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var protector = new TestHelpers.PlaintextSecretProtector();
+            var source = new AppPaths(Path.Combine(root, "source"));
+            await new SqliteBookLibraryService(source, new BookMetadataService()).InitializeAsync();
+            var coverDirectory = Path.Combine(source.Data, "reading-material-covers");
+            if (hasCover)
+            {
+                Directory.CreateDirectory(coverDirectory);
+                await File.WriteAllTextAsync(Path.Combine(coverDirectory, "retained.jpg"), "source-cover");
+                await using var db = new SqliteConnection($"Data Source={source.Database};Pooling=False");
+                await db.OpenAsync();
+                using var command = db.CreateCommand();
+                command.CommandText = "INSERT INTO ReadingMaterialBooks (Id,Title,CoverPath) VALUES ($id,'Retained','reading-material-covers\\retained.jpg');";
+                command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var backupPath = Path.Combine(root, "backup.kkindle");
+            await new AppBackupService(source, protector).ExportAsync(backupPath);
+            using (var archive = ZipFile.Open(backupPath, ZipArchiveMode.Update))
+            {
+                var marker = archive.GetEntry("reading-material-covers/");
+                Assert.NotNull(marker);
+                Assert.Equal(hasCover, archive.GetEntry("reading-material-covers/retained.jpg") is not null);
+                if (removeMarker) marker!.Delete();
+            }
+
+            var target = new AppPaths(Path.Combine(root, "target"));
+            await new SqliteBookLibraryService(target, new BookMetadataService()).InitializeAsync();
+            var targetCovers = Path.Combine(target.Data, "reading-material-covers");
+            Directory.CreateDirectory(targetCovers);
+            await File.WriteAllTextAsync(Path.Combine(targetCovers, "old.jpg"), "old-cover");
+            await new AppBackupService(target, protector).ImportAsync(backupPath);
+
+            Assert.Equal(removeMarker && !hasCover, File.Exists(Path.Combine(targetCovers, "old.jpg")));
+            if (hasCover)
+            {
+                await using var db = new SqliteConnection($"Data Source={target.Database};Pooling=False");
+                await db.OpenAsync();
+                using var command = db.CreateCommand();
+                command.CommandText = "SELECT CoverPath FROM ReadingMaterialBooks;";
+                var relativePath = Assert.IsType<string>(await command.ExecuteScalarAsync());
+                Assert.Equal("reading-material-covers/retained.jpg", relativePath);
+                Assert.Equal("source-cover", await File.ReadAllTextAsync(Path.Combine(target.Data, relativePath)));
+            }
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
     [Fact]
     public async Task ExportsAndRestoresTrashItems()
     {
@@ -248,6 +306,9 @@ public sealed partial class BackupTests
         try
         {
             var (paths, library, previousBook, backupPath, _) = await PrepareImportFailureAsync(root);
+            var retainedCovers = Path.Combine(paths.Data, "reading-material-covers");
+            Directory.CreateDirectory(retainedCovers);
+            await File.WriteAllTextAsync(Path.Combine(retainedCovers, "previous.jpg"), "previous-cover");
             var marker = Path.Combine(paths.Data, AppBackupService.PendingSyncBaselineResetFileName);
             await File.WriteAllTextAsync(marker, "previous pending baseline reset");
             using var cancellation = new CancellationTokenSource();
@@ -260,6 +321,7 @@ public sealed partial class BackupTests
             Assert.Equal(previousBook.Id, restored.Id);
             Assert.True(File.Exists(library.GetAbsoluteFilePath(restored.Files[0])));
             Assert.Equal("previous-key", (await new AiSettingsStore(paths, new TestHelpers.PlaintextSecretProtector()).LoadAsync()).ApiKey);
+            Assert.Equal("previous-cover", await File.ReadAllTextAsync(Path.Combine(retainedCovers, "previous.jpg")));
             Assert.Equal("previous pending baseline reset", await File.ReadAllTextAsync(marker));
         }
         finally { TestHelpers.TryDelete(root); }

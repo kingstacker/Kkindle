@@ -761,7 +761,57 @@ public partial class MainWindow : Window
         }
     }
 
-    public async Task InitializeLibraryAsync()
+    private Task? _libraryInitialization;
+
+    public Task InitializeLibraryAsync() => _libraryInitialization ??= InitializeLibraryCoreAsync();
+
+    /// <summary>
+    /// Imports files opened from Finder, a second launch, or the command line.
+    /// The window and library may still be starting, so the import waits for
+    /// the initial library pass before expanding and staging the files.
+    /// </summary>
+    public async Task OpenExternalFilesAsync(
+        IEnumerable<string> paths,
+        Task? libraryInitialization = null)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => _ = OpenExternalFilesAsync(paths, libraryInitialization));
+            return;
+        }
+
+        var files = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (files.Length == 0) return;
+
+        // Do not call Show() during first-launch startup before the main
+        // window has ever been displayed; the lifetime shows it right after
+        // framework initialization. A loaded-but-hidden window (the macOS
+        // menu-bar state) still needs to come back.
+        if (IsLoaded) RestoreFromTray();
+        if (LibraryWorkspace.IsVisible == false && IsLoaded) ShowLibraryPage();
+
+        var initialization = libraryInitialization ?? _libraryInitialization;
+        if (initialization is not null)
+        {
+            try
+            {
+                await initialization;
+            }
+            catch
+            {
+                // Initialization reports its own failure; an external open is
+                // still attempted so the user sees the actionable error.
+            }
+        }
+
+        await ImportPathsAsync(files);
+    }
+
+    private async Task InitializeLibraryCoreAsync()
     {
         try
         {
@@ -4439,18 +4489,27 @@ public partial class MainWindow : Window
         }
     }
 
-    private Task ShowKeyboardShortcutsAsync() => ShowMessageAsync(
-        T("键盘快捷键"),
-        string.Join("\n", new[]
-        {
-            T("Ctrl+F  搜索书库"),
-            T("Ctrl+I  导入书籍"),
-            T("Ctrl+A  全选当前页"),
-            T("Enter  打开选中的书"),
-            T("Delete  删除选中的书"),
-            T("Esc  清除搜索或选择"),
-            T("F1  显示本帮助")
-        }));
+    private Task ShowKeyboardShortcutsAsync()
+    {
+        // macOS uses Command for the same bindings; the shortcut text should
+        // match the key the user actually presses.
+        var modifier = OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl";
+        string Shortcut(string source) =>
+            T(source).Replace("Ctrl", modifier, StringComparison.Ordinal);
+
+        return ShowMessageAsync(
+            T("键盘快捷键"),
+            string.Join("\n", new[]
+            {
+                Shortcut("Ctrl+F  搜索书库"),
+                Shortcut("Ctrl+I  导入书籍"),
+                Shortcut("Ctrl+A  全选当前页"),
+                T("Enter  打开选中的书"),
+                T("Delete  删除选中的书"),
+                T("Esc  清除搜索或选择"),
+                T("F1  显示本帮助")
+            }));
+    }
 
     private void ImportButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

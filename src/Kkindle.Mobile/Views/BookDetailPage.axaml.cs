@@ -92,6 +92,8 @@ public partial class BookDetailPage : UserControl
 
     private async Task LoadProgressAsync()
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         var file = _book.Files.FirstOrDefault();
         if (file is null) return;
         try
@@ -120,6 +122,8 @@ public partial class BookDetailPage : UserControl
 
     private async void OnFavoriteClick(object? sender, RoutedEventArgs e)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         var previous = _book.IsFavorite;
         try
         {
@@ -197,6 +201,8 @@ public partial class BookDetailPage : UserControl
 
     private async Task ToggleShelfAsync(BookCollection shelf, bool wasIn)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         _shell.HideSheet();
         try
         {
@@ -222,6 +228,8 @@ public partial class BookDetailPage : UserControl
     {
         _shell.ShowSheet("新建收藏夹", new PromptSheet(null, "创建并加入", async name =>
         {
+            using var operation = MobileDataCoordinator.TryBeginOperation();
+            if (operation is null) return;
             try
             {
                 var shelf = await _modules.Library.Books.CreateCollectionAsync(name);
@@ -238,6 +246,8 @@ public partial class BookDetailPage : UserControl
     {
         _shell.ShowSheet("修改书名", new PromptSheet(null, "保存", async title =>
         {
+            using var operation = MobileDataCoordinator.TryBeginOperation();
+            if (operation is null) return;
             try
             {
                 await _modules.Library.Books.RenameBookAsync(_book.Id, title);
@@ -260,6 +270,8 @@ public partial class BookDetailPage : UserControl
     {
         _shell.ShowSheet("删除这本书", new PromptSheet($"《{_book.Title}》将移到回收站。", "移到回收站", async _ =>
         {
+            using var operation = MobileDataCoordinator.TryBeginOperation();
+            if (operation is null) return;
             try
             {
                 await _modules.Library.Books.DeleteAsync(_book.Id);

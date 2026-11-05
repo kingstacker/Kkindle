@@ -107,6 +107,12 @@ public sealed class ZLibrarySettingsStore
         {
             return new ZLibrarySettings();
         }
+        catch (SecretStoreUnavailableException)
+        {
+            // Keychain locked: keep the stored (still valid) password.
+            SecretStoreGuard.MarkUnreadable(SettingsPath);
+            return new ZLibrarySettings();
+        }
     }
 
     public async Task SaveAsync(ZLibrarySettings settings, CancellationToken cancellationToken = default)
@@ -117,6 +123,7 @@ public sealed class ZLibrarySettingsStore
 
     internal async Task SaveUnderLockAsync(ZLibrarySettings settings, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
     {
+        SecretStoreGuard.ThrowIfUnreadable(SettingsPath);
         _paths.EnsureDirectories();
         var normalized = ZLibrarySettings.Normalize(settings);
         var persisted = new PersistedZLibrarySettings

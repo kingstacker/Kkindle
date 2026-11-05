@@ -101,6 +101,14 @@ public sealed class S3SyncSettingsStore
             // from opening. The user can re-enter the sync credentials.
             return new S3SyncStoredSettings(Guid.NewGuid().ToString("N"), new S3SyncSettings());
         }
+        catch (SecretStoreUnavailableException)
+        {
+            // The Keychain is locked or access was refused. The encrypted
+            // credentials are still valid, so keep sync off for this run and
+            // refuse saves that would overwrite them with empty values.
+            SecretStoreGuard.MarkUnreadable(SettingsPath);
+            return new S3SyncStoredSettings(Guid.NewGuid().ToString("N"), new S3SyncSettings());
+        }
     }
 
     public async Task SaveAsync(
@@ -108,6 +116,7 @@ public sealed class S3SyncSettingsStore
         S3SyncSettings settings,
         CancellationToken cancellationToken = default)
     {
+        SecretStoreGuard.ThrowIfUnreadable(SettingsPath);
         using var lease = await SettingsWriteLock.AcquireAsync(_paths, cancellationToken);
         _paths.EnsureDirectories();
         var normalized = S3SyncSettings.Normalize(settings);

@@ -21,7 +21,7 @@
           <Button Classes="primary" Content="去设置" Click="OnSetupClick" />
         </StackPanel>
         <TextBlock Name="IntroText" Classes="muted" TextWrapping="Wrap" LineHeight="20"
-                   Text="可以问这一页讲了什么，或让它解释一个概念。" />
+                   Text="可以询问全书内容，也可以总结当前页或解释选中内容。全书问答使用本地关键词检索。" />
         <ItemsControl Name="Messages">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -43,9 +43,12 @@
       </StackPanel>
     </ScrollViewer>
 
-    <StackPanel Grid.Row="1" Name="QuickRow" Orientation="Horizontal" Spacing="4" Margin="-12,6,0,6">
-      <Button Classes="chip" Content="总结这一页" Click="OnSummarizeClick" />
-      <Button Classes="chip" Name="ExplainButton" Content="解释选中内容" Click="OnExplainClick" />
+    <StackPanel Grid.Row="1">
+      <TextBlock Name="ScopeText" Classes="muted" IsVisible="False" TextWrapping="Wrap" FontSize="12" />
+      <StackPanel Name="QuickRow" Orientation="Horizontal" Spacing="4" Margin="-12,6,0,6">
+        <Button Classes="chip" Content="总结这一页" Click="OnSummarizeClick" />
+        <Button Classes="chip" Name="ExplainButton" Content="解释选中内容" Click="OnExplainClick" />
+      </StackPanel>
     </StackPanel>
 
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto">

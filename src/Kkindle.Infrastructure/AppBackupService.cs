@@ -6,6 +6,9 @@ using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Infrastructure;
 
+/// <summary>The failed import could not be rolled back; startup recovery must run before more writes.</summary>
+public sealed class AppBackupRollbackException(string message, Exception innerException) : IOException(message, innerException);
+
 /// <summary>
 /// Creates and restores a portable Kkindle backup package.
 ///
@@ -23,6 +26,7 @@ public sealed partial class AppBackupService
     private const string DatabaseWalEntryName = "database/kkindle.db-wal";
     private const string DatabaseShmEntryName = "database/kkindle.db-shm";
     private const string SettingsEntryName = "settings/settings.json";
+    private const string ReadingMaterialCoversDirectory = "reading-material-covers";
     private const int CurrentFormatVersion = 1;
     private const string BackupFormat = "KkindleBackup";
     private const string AiSettingsPath = "ai-settings.json";
@@ -98,6 +102,9 @@ public sealed partial class AppBackupService
                 await AddFileEntryAsync(archive, databaseSnapshotPath, DatabaseEntryName, cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Library, "library", cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Covers, "covers", cancellationToken);
+                // Mark even an empty directory so imports can distinguish it from older backups.
+                archive.CreateEntry(ReadingMaterialCoversDirectory + "/");
+                await AddDirectoryEntriesAsync(archive, Path.Combine(_paths.Data, ReadingMaterialCoversDirectory), ReadingMaterialCoversDirectory, cancellationToken);
                 await AddDirectoryEntriesAsync(archive, _paths.Trash, "trash", cancellationToken);
                 await AddJsonEntryAsync(archive, SettingsEntryName, settings, cancellationToken);
             }
@@ -135,10 +142,17 @@ public sealed partial class AppBackupService
         {
             BackupManifest manifest;
             BackupSettings? backupSettings;
+            bool hasReadingMaterialCovers;
             using (var archive = ZipFile.OpenRead(sourcePath))
             {
                 manifest = await ReadManifestAsync(archive, cancellationToken);
                 ValidateManifest(manifest);
+                hasReadingMaterialCovers = archive.Entries.Any(entry =>
+                {
+                    var name = NormalizeEntryName(entry.FullName);
+                    return name.Equals(ReadingMaterialCoversDirectory, StringComparison.OrdinalIgnoreCase)
+                        || name.StartsWith(ReadingMaterialCoversDirectory + "/", StringComparison.OrdinalIgnoreCase);
+                });
                 await ExtractSupportedEntriesAsync(archive, stagingRoot, cancellationToken);
             }
 
@@ -168,9 +182,11 @@ public sealed partial class AppBackupService
 
             var stagedLibraryPath = Path.Combine(stagingRoot, "library");
             var stagedCoversPath = Path.Combine(stagingRoot, "covers");
+            var stagedReadingMaterialCoversPath = Path.Combine(stagingRoot, ReadingMaterialCoversDirectory);
             var stagedTrashPath = Path.Combine(stagingRoot, "trash");
             Directory.CreateDirectory(stagedLibraryPath);
             Directory.CreateDirectory(stagedCoversPath);
+            if (hasReadingMaterialCovers) Directory.CreateDirectory(stagedReadingMaterialCoversPath);
             Directory.CreateDirectory(stagedTrashPath);
 
             var baselineResetMarker = Path.Combine(_paths.Data, PendingSyncBaselineResetFileName);
@@ -181,6 +197,7 @@ public sealed partial class AppBackupService
             {
                 StagingDirectory = Path.GetFileName(stagingRoot),
                 OriginalPaths = ManagedImportPaths.Where(name => PathExists(Path.Combine(_paths.Data, name))).ToList(),
+                ReplaceReadingMaterialCovers = hasReadingMaterialCovers,
                 PreviousBaselineResetMarker = previousBaselineMarker
             };
             var retainRollback = false;
@@ -203,9 +220,11 @@ public sealed partial class AppBackupService
                 journal.Phase = ImportPhase.Replacing;
                 await WriteImportJournalAsync(rollbackRoot, journal, cancellationToken);
                 replacementStarted = true;
-                MoveCurrentDataToRollback(rollbackRoot);
+                MoveCurrentDataToRollback(rollbackRoot, journal);
                 Directory.Move(stagedLibraryPath, _paths.Library);
                 Directory.Move(stagedCoversPath, _paths.Covers);
+                if (hasReadingMaterialCovers)
+                    Directory.Move(stagedReadingMaterialCoversPath, Path.Combine(_paths.Data, ReadingMaterialCoversDirectory));
                 Directory.Move(stagedTrashPath, _paths.Trash);
                 await ReplaceDatabaseFromSnapshotAsync(stagedDatabasePath, cancellationToken);
 
@@ -242,7 +261,7 @@ public sealed partial class AppBackupService
                 catch (Exception rollbackException)
                 {
                     retainRollback = true;
-                    throw new IOException(
+                    throw new AppBackupRollbackException(
                         $"备份导入失败，自动恢复未完成。恢复副本已保留在：{rollbackRoot}",
                         new AggregateException(importException, rollbackException));
                 }
@@ -596,10 +615,11 @@ public sealed partial class AppBackupService
         });
     }
 
-    private void MoveCurrentDataToRollback(string rollbackRoot)
+    private void MoveCurrentDataToRollback(string rollbackRoot, ImportJournal journal)
     {
         foreach (var name in ManagedImportPaths)
         {
+            if (name == ReadingMaterialCoversDirectory && !journal.ReplaceReadingMaterialCovers) continue;
             var source = Path.Combine(_paths.Data, name);
             if (!File.Exists(source) && !Directory.Exists(source)) continue;
             var backup = Path.Combine(rollbackRoot, name);
@@ -698,6 +718,7 @@ public sealed partial class AppBackupService
         || entryName.Equals(SettingsEntryName, StringComparison.OrdinalIgnoreCase)
         || entryName.StartsWith("library/", StringComparison.OrdinalIgnoreCase)
         || entryName.StartsWith("covers/", StringComparison.OrdinalIgnoreCase)
+        || entryName.StartsWith(ReadingMaterialCoversDirectory + "/", StringComparison.OrdinalIgnoreCase)
         || entryName.StartsWith("trash/", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeEntryName(string entryName)

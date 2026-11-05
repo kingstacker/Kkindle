@@ -1592,6 +1592,26 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         ? "/system/fonts/NotoSerifCJK-Regular.ttc"
         : Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", BundledFontFileName);
 
+    /// <summary>
+    /// Faces bundled next to the reading font for glyphs the CJK face does not
+    /// cover. iOS cannot read the system font directory, so these are the only
+    /// fallbacks available on device.
+    /// </summary>
+    private static readonly string[] BundledFallbackFontFileNames =
+    [
+        "NotoEmoji.ttf",
+        "NotoSansSymbols2-Regular.ttf",
+    ];
+
+    private static IEnumerable<string> GetBundledFallbackFontPaths()
+    {
+        var fontDirectory = Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts");
+        foreach (var fileName in BundledFallbackFontFileNames)
+        {
+            yield return Path.Combine(fontDirectory, fileName);
+        }
+    }
+
     private static IEnumerable<string> GetReaderFontCandidatesForFamily(string family)
     {
         var normalized = family.Trim();
@@ -1660,7 +1680,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     private static IReadOnlyList<string> GetReaderFontCandidates()
     {
-        var paths = new List<string>();
+        var paths = new List<string>(GetBundledFallbackFontPaths());
         var windowsFontDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
         if (!string.IsNullOrWhiteSpace(windowsFontDirectory))
         {
@@ -1679,24 +1699,38 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 "Deng.ttf",
                 "Dengl.ttf",
                 "Dengb.ttf",
+                "seguiemj.ttf",
+                "seguisym.ttf",
+                "malgun.ttf",
             }.Select(fileName => Path.Combine(windowsFontDirectory, fileName)));
         }
 
         paths.AddRange(new[]
         {
+            // Android
             "/system/fonts/NotoSansCJK-Regular.ttc",
             "/system/fonts/Roboto-Regular.ttf",
+            "/system/fonts/NotoColorEmoji.ttf",
+            "/system/fonts/NotoSansSymbols-Regular.ttf",
+            "/system/fonts/NotoSansSymbols2-Regular.ttf",
+            // Linux
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
             "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.otf",
             "/usr/share/fonts/opentype/source-han-serif/SourceHanSerifSC-Regular.otf",
             "/usr/share/fonts/opentype/source-han-serif/SourceHanSerifCN-Regular.otf",
             "/usr/share/fonts/truetype/adobe-source-han-serif/SourceHanSerifSC-Regular.otf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            // macOS. Apple Color Emoji is intentionally not listed: the face is
+            // ~190 MB and the bundled Noto Emoji covers the same characters.
             "/System/Library/Fonts/PingFang.ttc",
             "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/Apple Symbols.ttf",
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
             "/System/Library/Fonts/SourceHanSerifSC-Regular.otf",
         });
 
@@ -1738,6 +1772,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private static void SelectReaderMainFont(TypesetEngine engine, string? family)
     {
         var selected = ResolveReaderFontPath(family) ?? GetBundledFontPath();
+        // Imported/user fonts are not part of the fallback candidate list, so
+        // register the chosen face before making it the main one.
+        engine.Fonts.TryEnsureFont(selected);
         engine.Fonts.TrySetMainFont(selected);
     }
 

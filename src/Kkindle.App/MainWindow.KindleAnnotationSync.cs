@@ -249,7 +249,7 @@ public partial class MainWindow
                     + T("本机备份：{0}", result.LocalBackupPath);
             // In MTP mode the Kindle keeps running and may hold the database
             // in memory; a restart makes it reload the replaced file.
-            if (result.ChangesToDevice > 0 && device.Transport == KindleTransport.Wpd)
+            if (result.ChangesToDevice > 0 && device.Transport != KindleTransport.MassStorage)
                 completion += Environment.NewLine
                     + T("如果 Kindle 上暂未显示新批注，请断开连接后重启 Kindle 再查看。");
             ReadingMaterialsStatusText.Text = completion.ReplaceLineEndings(" · ");

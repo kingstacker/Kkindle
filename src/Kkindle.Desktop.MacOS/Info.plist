@@ -13,5 +13,71 @@
     <string>en</string>
     <string>zh-Hans</string>
   </array>
+  <!-- Keep this list in sync with the generated bundle plist in
+       scripts/build-macos-release.sh: double-clicking a book in Finder opens
+       Kkindle through the regular file-activation path. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>EPUB</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>org.idpf.epub-container</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>epub</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>PDF</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>pdf</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Kindle eBook</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array>
+        <string>io.github.kingstacker.kkindle.mobi</string>
+        <string>io.github.kingstacker.kkindle.azw</string>
+        <string>io.github.kingstacker.kkindle.azw3</string>
+      </array>
+      <key>CFBundleTypeExtensions</key><array><string>mobi</string><string>prc</string><string>azw</string><string>azw3</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Plain Text</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>public.plain-text</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>txt</string></array>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>io.github.kingstacker.kkindle.mobi</string>
+      <key>UTTypeDescription</key><string>Mobipocket eBook</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key><dict>
+        <key>public.filename-extension</key><array><string>mobi</string><string>prc</string></array>
+        <key>public.mime-type</key><string>application/x-mobipocket-ebook</string>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>io.github.kingstacker.kkindle.azw</string>
+      <key>UTTypeDescription</key><string>Kindle eBook</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key><dict>
+        <key>public.filename-extension</key><array><string>azw</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>io.github.kingstacker.kkindle.azw3</string>
+      <key>UTTypeDescription</key><string>Kindle eBook (AZW3)</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key><dict>
+        <key>public.filename-extension</key><array><string>azw3</string></array>
+      </dict>
+    </dict>
+  </array>
 </dict>
 </plist>

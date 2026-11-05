@@ -69,6 +69,8 @@ public partial class LibraryPage : UserControl
 
     public async Task ReloadAsync()
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             await _modules.Library.Books.InitializeAsync();
@@ -133,7 +135,7 @@ public partial class LibraryPage : UserControl
         }
 
         SummaryText.Text = BuildSummary();
-        PresentContinueCard(string.IsNullOrEmpty(query) && _filter == BookFilter.All);
+        PresentContinueCard(string.IsNullOrEmpty(query) && _filter is BookFilter.All or BookFilter.Reading);
         PresentEmptyState(!string.IsNullOrEmpty(query));
     }
 
@@ -376,6 +378,8 @@ public partial class LibraryPage : UserControl
                 if (selected is null) return;
                 rules[path] = selected;
             }
+            using var operation = MobileDataCoordinator.TryBeginOperation();
+            if (operation is null) return;
             Status($"正在导入 {files.Count} 个文件…");
             var result = await _modules.Library.Books.ImportAsync(files, txtImportRules: rules);
             await ReloadAsync();

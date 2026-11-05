@@ -84,8 +84,9 @@ xcrun simctl install booted src/Kkindle.Mobile.iOS/bin/Debug/net10.0-ios/iossimu
 xcrun simctl launch booted com.kingstacker.kkindle
 ```
 
-iOS has no TTS adapter or system-bar tinting yet. The reader hides its listening
-button when a host has no TTS engine and player.
+iOS reads aloud through `AVSpeechSynthesizer` (rendered to WAV like the Android
+adapter) and plays it with `AVAudioPlayer`; system-bar tinting is not wired yet.
+The reader hides its listening button when a host has no TTS engine and player.
 
 ## What is wired up
 
@@ -129,25 +130,38 @@ button when a host has no TTS engine and player.
   copying. Gestures are classified in tunnel handlers so the shared hosts stay
   unchanged. Links, footnotes and PDF zoom (a zoomed page pans under the finger)
   are supported, for EPUB and PDF alike, plus whole-book search, reading aloud
-  with the system TTS engine, an AI assistant over the visible page, and
-  translation (AI when configured, otherwise Bing). Pinches are recognized in the
-  reader's own tunnel handlers because the PDF surface takes each finger.
+  with a choice of system voice and speed, local dictionary lookup, an AI
+  assistant, and translation (AI when configured, otherwise Bing). The assistant
+  searches local book text by keyword when answering book questions; page
+  summaries and selection explanations use the current page. Pinches are
+  recognized in the reader's own tunnel handlers because the PDF surface takes each finger. The
+  排版 sheet adjusts font size and line spacing and switches between horizontal
+  and vertical (竖排) typesetting; vertical books are laid out single-page.
 - Progress, bookmarks and annotations store chapters relative to the book, like
   the desktop app, because the rows sync between devices.
-- `MaterialsPage` groups bookmarks, highlights and notes by book and opens the
-  reader at the tapped location.
+- `MaterialsPage` groups bookmarks, highlights and notes by book, opens the
+  reader at the tapped location and exports the selected category as Markdown or
+  plain text through the system file picker or share sheet.
+- 我的 → 回收站 lists deleted books and formats, with restore and confirmed
+  permanent deletion.
 - `ReadingDataPage` is the desktop reading dashboard laid out for a phone:
   totals, stat cards, a tappable daily chart, recent and most-read books with
   covers, a stacked progress bar and medals with progress rings.
   `ReadingMedalCatalog` in Core is the one definition of medals and streaks.
-- `SyncSettingsPage` edits the settings file the desktop app uses, and
-  `MobileSync` is the single path for manual and automatic runs. Automatic sync
-  runs on launch, when returning to the foreground and after leaving the reader.
+- `SyncSettingsPage` edits the settings file the desktop app uses. Its connection
+  parameter files are compatible with desktop S3 and WebDAV profiles: import
+  fills a draft that must be saved, while export uses the current draft. The file
+  contains the selected provider's credentials in plain text but excludes the
+  sync encryption key. `MobileSync` is the single path for manual and automatic
+  runs. Automatic sync runs on launch, when returning to the foreground and after
+  leaving the reader.
   Large deletions need confirmation on the sync page and background runs never
   approve them; smaller deletions sync directly, as on desktop. Synced books
   arrive as metadata and their files download when first opened.
-- `AiSettingsPage` and `KindleSettingsPage` edit the desktop's protected AI and
-  Kindle e-mail settings. `BackgroundSyncJob` syncs hourly while the app is closed.
+- `AiSettingsPage` and `KindleSettingsPage` edit the desktop-compatible protected
+  AI and Kindle e-mail settings. On Android, `BackgroundSyncJob` requests periodic
+  sync while the app is closed; the system decides when it runs. iOS has no
+  equivalent periodic background sync.
 - The Android head uses .NET's managed HTTP handler (`UseNativeHttpHandler`
   false) because Android's own stack rejects WebDAV `PROPFIND`, and allows
   cleartext HTTP so self-hosted servers on the local network work.
@@ -159,12 +173,34 @@ button when a host has no TTS engine and player.
   because the mobile shell has no startup phase that runs the schema pass the
   desktop `MainWindow` performs.
 
+## Library backup and restore
+
+In 我的, export a `.kkindle` backup through the system save or share interface,
+then keep the file somewhere outside the app. Restore selects one backup, asks
+for confirmation and replaces the current library. A successful restore blocks
+further use and sync until the app process is restarted: fully close the app
+(including dismissing it from the app switcher), then open it again. On iOS,
+simply moving the app to the background does not restart it.
+
+The package uses the same format as the desktop backup service and includes the
+library database, book files, book covers, reading-material covers, trash, and
+supported non-secret AI, Kindle email and sync settings. Mobile-only preferences
+are not included. Earlier desktop backups did not include reading-material covers;
+when such a backup is restored, existing covers in the destination are retained,
+but missing covers cannot be recovered from that backup. An older app version may
+not restore reading-material covers contained in a newer backup.
+
+API keys, SMTP passwords, sync credentials and sync encryption keys are not
+exported. Restore retains secrets already on the destination device; they may
+need to be entered again or checked against the restored service settings.
+Sync can be disabled when required credentials or the encryption key are absent.
+
 ## What is not there yet
 
 - Kindle device management over USB and MOBI/AZW3 *conversion*, which rely on
   desktop-only USB access and Calibre. Reading MOBI/AZW3 works.
-- AI retrieval across the whole book: the phone sends the visible page only,
-  because local embeddings (ONNX) are not shipped.
+- Semantic AI retrieval: mobile uses keyword matching rather than local ONNX
+  embeddings. PDF searches are bounded and scanned PDFs require searchable text.
 
 ## Running the desktop preview
 

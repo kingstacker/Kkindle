@@ -60,6 +60,16 @@
           </Grid>
         </Border>
       </c:NativeSegmentGroup>
+
+      <TextBlock Classes="label" Text="排版方向" Margin="0,14,0,0" />
+      <c:NativeSegmentGroup>
+        <Border Classes="segments">
+          <Grid ColumnDefinitions="*,*">
+            <Button Grid.Column="0" Name="DirectionHorizontal" Classes="seg" Content="横排" Click="OnDirectionClick" />
+            <Button Grid.Column="1" Name="DirectionVertical" Classes="seg" Content="竖排" Click="OnDirectionClick" />
+          </Grid>
+        </Border>
+      </c:NativeSegmentGroup>
     </StackPanel>
   </StackPanel>
 </UserControl>

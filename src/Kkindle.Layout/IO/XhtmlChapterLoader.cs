@@ -106,8 +106,12 @@ public sealed class XhtmlChapterLoader
         {
             TrackId(body);
             PreparePlainFootnotes(body);
-            WalkFlow(body, FlowContext.Root(_paragraphIndent));
-            FlushParagraph(FlowContext.Root(_paragraphIndent));
+            // Publisher styles often set line-height or text-align on body;
+            // treat it as the outermost container so those inherit.
+            var rootContext = FlowContext.Root(_paragraphIndent)
+                .WithContainerHints(ResolveHints(body));
+            WalkFlow(body, rootContext);
+            FlushParagraph(rootContext);
             ApplyPlainFootnoteReferences();
             MergePlainFootnoteLabelBlocks();
         }
@@ -402,9 +406,14 @@ public sealed class XhtmlChapterLoader
                 WalkFlow(element, containerContext);
                 FlushParagraph(containerContext);
                 break;
+            case "table":
+                FlushParagraph(ctx);
+                TrackId(element);
+                AddTableBlock(element, ctx);
+                FlushParagraph(ctx);
+                break;
             case "ul":
             case "ol":
-            case "table":
             case "thead":
             case "tbody":
             case "tr":
@@ -570,7 +579,11 @@ public sealed class XhtmlChapterLoader
     private void WalkInlineElement(XElement element, FlowContext ctx)
     {
         var local = element.Name.LocalName.ToLowerInvariant();
-        if (IsFootnoteDefinition(element) && !ContainsVisibleFootnoteTarget(element))
+        // Inside a table cell, flushing would emit a separate block and drop
+        // the cell text collected so far; keep the note inline instead.
+        if (!_buildingTableCells
+            && IsFootnoteDefinition(element)
+            && !ContainsVisibleFootnoteTarget(element))
         {
             FlushParagraph(ctx);
             PreserveFootnoteDefinition(element);
@@ -579,8 +592,32 @@ public sealed class XhtmlChapterLoader
 
         switch (local)
         {
+            case "table":
+                if (_buildingTableCells)
+                {
+                    // A nested table cannot become its own block while the
+                    // outer cell is being collected; keep its text inline.
+                    TrackId(element);
+                    AppendInlineElement(element, ctx);
+                    break;
+                }
+
+                FlushParagraph(ctx);
+                TrackId(element);
+                AddTableBlock(element, ctx);
+                FlushParagraph(ctx);
+                break;
             case "ul":
             case "ol":
+                if (_buildingTableCells)
+                {
+                    // Block flow would flush the cell's pending text into a
+                    // separate ContentBlock; keep lists inline in table cells.
+                    TrackId(element);
+                    AppendInlineElement(element, ctx);
+                    break;
+                }
+
                 // A TOC often nests the chapter list inside its volume's li.
                 // Preserve those block boundaries instead of flattening every
                 // descendant link into the parent list item's paragraph.
@@ -717,6 +754,17 @@ public sealed class XhtmlChapterLoader
         if (hints.VerticalTextOrientation is { } orientation)
         {
             style = style with { VerticalTextOrientation = orientation };
+        }
+
+        if (!float.IsNaN(hints.FontSizeFactor))
+        {
+            // CSS font-size is relative to the parent, so multiply rather
+            // than replace (nested spans accumulate).
+            var current = style.FontSizeFactor > 0f ? style.FontSizeFactor : 1f;
+            style = style with
+            {
+                FontSizeFactor = Math.Clamp(current * hints.FontSizeFactor, 0.5f, 3f),
+            };
         }
 
         WalkInlineContent(element, ctx.WithStyle(style));
@@ -881,10 +929,201 @@ public sealed class XhtmlChapterLoader
             TextIndentEm = ctx.TextIndentEm,
             SpaceBeforeLines = ctx.SpaceBeforeLines,
             SpaceAfterLines = ctx.SpaceAfterLines,
+            LineHeightFactor = ctx.LineHeightFactor,
+            MarginTopEm = ctx.MarginTopEm,
+            MarginBottomEm = ctx.MarginBottomEm,
+            MarginLeftEm = ctx.MarginLeftEm,
+            MarginRightEm = ctx.MarginRightEm,
+            PaddingLeftEm = ctx.PaddingLeftEm,
+            PaddingRightEm = ctx.PaddingRightEm,
             FootnoteReferenceFragmentIds = _pendingFragmentIds.Where(_footnoteReferenceFragmentIds.Contains).ToArray(),
             FragmentIds = TakePendingFragmentIds(),
             Items = items,
         });
+    }
+
+    private bool _buildingTableCells;
+
+    /// <summary>
+    /// Reads a table into rows and cells while keeping the body text stream in
+    /// document order. Inline content still flows through the normal walker,
+    /// so character offsets, links, ruby and fragment anchors keep working.
+    /// </summary>
+    private void AddTableBlock(XElement table, FlowContext ctx)
+    {
+        var rows = new List<ContentTableRow>();
+        var defaultBorder = ParseTableBorderAttribute(table);
+        var wasBuildingCells = _buildingTableCells;
+        _buildingTableCells = true;
+        try
+        {
+            foreach (var rowElement in TableRowElements(table))
+            {
+                var cellElements = rowElement.Elements()
+                    .Where(child => child.Name.LocalName is "td" or "th")
+                    .ToList();
+                if (cellElements.Count == 0)
+                {
+                    continue;
+                }
+
+                var cells = new List<ContentTableCell>(cellElements.Count);
+                foreach (var cellElement in cellElements)
+                {
+                    var isHeader = cellElement.Name.LocalName == "th";
+                    var hints = ResolveHints(cellElement);
+                    var cellContext = ctx.ForTableCell(hints, isHeader);
+                    TrackId(cellElement);
+                    WalkInlineContent(cellElement, cellContext);
+                    var items = _pending.ToList();
+                    _pending.Clear();
+                    var anyDeclaredBorder = !float.IsNaN(hints.BorderTopEm)
+                        || !float.IsNaN(hints.BorderRightEm)
+                        || !float.IsNaN(hints.BorderBottomEm)
+                        || !float.IsNaN(hints.BorderLeftEm);
+                    cells.Add(new ContentTableCell
+                    {
+                        Items = items,
+                        ColSpan = ParseColumnSpan(cellElement),
+                        RowSpan = ParseRowSpan(cellElement),
+                        Header = isHeader,
+                        BorderTopEm = CellBorder(hints.BorderTopEm, anyDeclaredBorder, defaultBorder),
+                        BorderRightEm = CellBorder(hints.BorderRightEm, anyDeclaredBorder, defaultBorder),
+                        BorderBottomEm = CellBorder(hints.BorderBottomEm, anyDeclaredBorder, defaultBorder),
+                        BorderLeftEm = CellBorder(hints.BorderLeftEm, anyDeclaredBorder, defaultBorder),
+                    });
+                }
+
+                rows.Add(new ContentTableRow
+                {
+                    Cells = cells,
+                    Header = rowElement.Ancestors()
+                        .Any(ancestor => ancestor.Name.LocalName == "thead"),
+                });
+            }
+        }
+        finally
+        {
+            _buildingTableCells = wasBuildingCells;
+        }
+
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        // Vertical typesetting and table-less hosts read this flattened copy.
+        // Breaks keep cells from running together; offsets stay untouched.
+        var fallback = new List<InlineItem>();
+        foreach (var row in rows)
+        {
+            if (fallback.Count > 0)
+            {
+                fallback.Add(new InlineItem
+                {
+                    Kind = InlineKind.LineBreak,
+                    TextStart = -1,
+                    Style = ctx.BaseStyle,
+                });
+            }
+
+            var firstCell = true;
+            foreach (var cell in row.Cells)
+            {
+                if (!firstCell)
+                {
+                    // A forced break keeps each cell's text offsets in its own
+                    // run; a synthetic space would start a run at offset -1
+                    // and make the following real text unselectable.
+                    fallback.Add(new InlineItem
+                    {
+                        Kind = InlineKind.LineBreak,
+                        TextStart = -1,
+                        Style = ctx.BaseStyle,
+                    });
+                }
+
+                firstCell = false;
+                fallback.AddRange(cell.Items);
+            }
+        }
+
+        _blocks.Add(new ContentBlock
+        {
+            Kind = BlockKind.Table,
+            ElementId = Id(table),
+            Style = ctx.BaseStyle,
+            Justify = ctx.Justify,
+            SpaceBeforeLines = 0.5f,
+            SpaceAfterLines = 0.5f,
+            Table = new ContentTable { Rows = rows },
+            Items = fallback,
+            FragmentIds = TakePendingFragmentIds(),
+        });
+    }
+
+    private static IEnumerable<XElement> TableRowElements(XElement table)
+    {
+        foreach (var child in table.Elements())
+        {
+            var local = child.Name.LocalName;
+            if (local == "tr")
+            {
+                yield return child;
+            }
+            else if (local is "thead" or "tbody" or "tfoot")
+            {
+                foreach (var row in child.Elements())
+                {
+                    if (row.Name.LocalName == "tr")
+                    {
+                        yield return row;
+                    }
+                }
+            }
+        }
+    }
+
+    private static int ParseColumnSpan(XElement cell) =>
+        int.TryParse((string?)cell.Attribute("colspan"), out var span)
+            ? Math.Clamp(span, 1, 12)
+            : 1;
+
+    private static int ParseRowSpan(XElement cell)
+    {
+        if (!int.TryParse((string?)cell.Attribute("rowspan"), out var span) || span < 1)
+        {
+            return 1;
+        }
+
+        return Math.Clamp(span, 1, 64);
+    }
+
+    private static float ParseTableBorderAttribute(XElement table)
+    {
+        var attribute = table.Attribute("border");
+        if (attribute is null)
+        {
+            return 0f;
+        }
+
+        var value = attribute.Value.Trim();
+        if (value.Length == 0)
+        {
+            return 1f / 16f;
+        }
+
+        return int.TryParse(value, out var width) && width > 0 ? 1f / 16f : 0f;
+    }
+
+    private static float CellBorder(float hint, bool anyDeclared, float defaultBorder)
+    {
+        if (!float.IsNaN(hint))
+        {
+            return hint;
+        }
+
+        return anyDeclared ? 0f : defaultBorder;
     }
 
     private void AddFootnoteMarker(XElement element, FlowContext ctx)
@@ -1598,6 +1837,13 @@ public sealed class XhtmlChapterLoader
                 TextIndentEm = labelBlock.TextIndentEm,
                 SpaceBeforeLines = labelBlock.SpaceBeforeLines,
                 SpaceAfterLines = bodyBlock.SpaceAfterLines,
+                LineHeightFactor = labelBlock.LineHeightFactor,
+                MarginTopEm = labelBlock.MarginTopEm,
+                MarginBottomEm = labelBlock.MarginBottomEm,
+                MarginLeftEm = labelBlock.MarginLeftEm,
+                MarginRightEm = labelBlock.MarginRightEm,
+                PaddingLeftEm = labelBlock.PaddingLeftEm,
+                PaddingRightEm = labelBlock.PaddingRightEm,
                 Items = labelBlock.Items.Concat(bodyBlock.Items).ToList(),
             };
             _blocks.RemoveAt(index + 1);
@@ -1832,6 +2078,7 @@ public sealed class XhtmlChapterLoader
             Italic = hints.Italic || inline.Italic,
             Center = hints.Center || inline.Center,
             AlignRight = hints.AlignRight || inline.AlignRight,
+            NoJustify = hints.NoJustify || inline.NoJustify,
             NoWrap = hints.NoWrap || inline.NoWrap,
             VerticalTextCombineLimit = inline.VerticalTextCombineLimit >= 0
                 ? inline.VerticalTextCombineLimit
@@ -1845,6 +2092,33 @@ public sealed class XhtmlChapterLoader
             ImageHeightEm = float.IsNaN(inline.ImageHeightEm)
                 ? hints.ImageHeightEm
                 : inline.ImageHeightEm,
+            LineHeightFactor = float.IsNaN(inline.LineHeightFactor)
+                ? hints.LineHeightFactor
+                : inline.LineHeightFactor,
+            MarginTopEm = float.IsNaN(inline.MarginTopEm) ? hints.MarginTopEm : inline.MarginTopEm,
+            MarginBottomEm = float.IsNaN(inline.MarginBottomEm)
+                ? hints.MarginBottomEm
+                : inline.MarginBottomEm,
+            MarginLeftEm = float.IsNaN(inline.MarginLeftEm) ? hints.MarginLeftEm : inline.MarginLeftEm,
+            MarginRightEm = float.IsNaN(inline.MarginRightEm)
+                ? hints.MarginRightEm
+                : inline.MarginRightEm,
+            PaddingLeftEm = float.IsNaN(inline.PaddingLeftEm)
+                ? hints.PaddingLeftEm
+                : inline.PaddingLeftEm,
+            PaddingRightEm = float.IsNaN(inline.PaddingRightEm)
+                ? hints.PaddingRightEm
+                : inline.PaddingRightEm,
+            BorderTopEm = float.IsNaN(inline.BorderTopEm) ? hints.BorderTopEm : inline.BorderTopEm,
+            BorderRightEm = float.IsNaN(inline.BorderRightEm)
+                ? hints.BorderRightEm
+                : inline.BorderRightEm,
+            BorderBottomEm = float.IsNaN(inline.BorderBottomEm)
+                ? hints.BorderBottomEm
+                : inline.BorderBottomEm,
+            BorderLeftEm = float.IsNaN(inline.BorderLeftEm)
+                ? hints.BorderLeftEm
+                : inline.BorderLeftEm,
         };
     }
 
@@ -1898,6 +2172,13 @@ public sealed class XhtmlChapterLoader
                 TextIndentEm = 0f,
                 SpaceBeforeLines = first.SpaceBeforeLines,
                 SpaceAfterLines = second.SpaceAfterLines,
+                LineHeightFactor = first.LineHeightFactor,
+                MarginTopEm = first.MarginTopEm,
+                MarginBottomEm = second.MarginBottomEm,
+                MarginLeftEm = first.MarginLeftEm,
+                MarginRightEm = first.MarginRightEm,
+                PaddingLeftEm = first.PaddingLeftEm,
+                PaddingRightEm = first.PaddingRightEm,
                 Items = items,
             };
             _blocks.RemoveAt(index + 1);
@@ -1945,6 +2226,13 @@ public sealed class XhtmlChapterLoader
             TextIndentEm = 0f,
             SpaceBeforeLines = 1.15f,
             SpaceAfterLines = 1.25f,
+            LineHeightFactor = first.LineHeightFactor,
+            MarginTopEm = first.MarginTopEm,
+            MarginBottomEm = first.MarginBottomEm,
+            MarginLeftEm = first.MarginLeftEm,
+            MarginRightEm = first.MarginRightEm,
+            PaddingLeftEm = first.PaddingLeftEm,
+            PaddingRightEm = first.PaddingRightEm,
             FragmentIds = first.FragmentIds,
             FootnoteReferenceFragmentIds = first.FootnoteReferenceFragmentIds,
             Items = first.Items,
@@ -1966,10 +2254,18 @@ public sealed class XhtmlChapterLoader
         public bool IsQuote { get; private init; }
         public bool Center { get; private init; }
         public bool AlignRight { get; private init; }
+        public bool NoJustify { get; private init; }
         public bool Justify { get; private init; }
         public float TextIndentEm { get; private init; }
         public float SpaceBeforeLines { get; private init; }
         public float SpaceAfterLines { get; private init; }
+        public float LineHeightFactor { get; private init; }
+        public float MarginTopEm { get; private init; }
+        public float MarginBottomEm { get; private init; }
+        public float MarginLeftEm { get; private init; }
+        public float MarginRightEm { get; private init; }
+        public float PaddingLeftEm { get; private init; }
+        public float PaddingRightEm { get; private init; }
         public TypesetInlineStyle BaseStyle { get; private init; }
         public string? LinkHref { get; private init; }
         public string? FootnoteHref { get; private init; }
@@ -1981,12 +2277,13 @@ public sealed class XhtmlChapterLoader
             Kind = BlockKind.Paragraph,
             Justify = true,
             ParagraphIndentEnabled = paragraphIndent,
+            BaseStyle = new TypesetInlineStyle(),
         };
 
         public FlowContext AsQuote() => this with
         {
             IsQuote = true,
-            Justify = true,
+            Justify = !NoJustify,
             TextIndentEm = ParagraphIndentEnabled ? 2f : 0f,
             SpaceBeforeLines = 0.78f,
             SpaceAfterLines = 0.78f,
@@ -1994,12 +2291,35 @@ public sealed class XhtmlChapterLoader
 
         public FlowContext WithElementId(string? elementId) => this with { ElementId = elementId };
 
+        private static float MarginOrZero(float value) =>
+            float.IsNaN(value) ? 0f : Math.Clamp(value, 0f, 16f);
+
+        private static float ScaleFontSize(float current, float factor)
+        {
+            if (float.IsNaN(factor))
+            {
+                return current;
+            }
+
+            // A struct created before this field existed has zero here.
+            var baseline = current > 0f ? current : 1f;
+            return Math.Clamp(baseline * factor, 0.5f, 3f);
+        }
+
         public FlowContext WithContainerHints(CssHints hints) => this with
         {
             Center = Center || hints.Center,
             AlignRight = AlignRight || hints.AlignRight,
+            NoJustify = NoJustify || hints.NoJustify,
+            // `line-height` inherits, so a styled section sets it for its
+            // paragraphs. Margins do not: applying a container's margin to
+            // every child paragraph would multiply the spacing.
+            LineHeightFactor = float.IsNaN(hints.LineHeightFactor)
+                ? LineHeightFactor
+                : hints.LineHeightFactor,
             BaseStyle = BaseStyle with
             {
+                FontSizeFactor = ScaleFontSize(BaseStyle.FontSizeFactor, hints.FontSizeFactor),
                 VerticalTextCombineLimit = hints.VerticalTextCombineLimit >= 0
                     ? hints.VerticalTextCombineLimit
                     : BaseStyle.VerticalTextCombineLimit,
@@ -2020,16 +2340,68 @@ public sealed class XhtmlChapterLoader
                 ElementId = elementId,
                 Center = isHeading || hints.Center,
                 AlignRight = AlignRight || hints.AlignRight,
-                Justify = !isHeading && !hints.Center,
+                NoJustify = NoJustify || hints.NoJustify,
+                Justify = !isHeading && !hints.Center && !hints.NoJustify && !NoJustify,
                 TextIndentEm = indented ? 2f : 0f,
                 SpaceBeforeLines = isHeading ? 1.15f : SpaceBeforeLines,
                 SpaceAfterLines = isHeading ? 1.25f : SpaceAfterLines,
+                LineHeightFactor = float.IsNaN(hints.LineHeightFactor)
+                    ? LineHeightFactor
+                    : hints.LineHeightFactor,
+                MarginTopEm = MarginOrZero(hints.MarginTopEm),
+                MarginBottomEm = MarginOrZero(hints.MarginBottomEm),
+                MarginLeftEm = MarginOrZero(hints.MarginLeftEm),
+                MarginRightEm = MarginOrZero(hints.MarginRightEm),
+                PaddingLeftEm = MarginOrZero(hints.PaddingLeftEm),
+                PaddingRightEm = MarginOrZero(hints.PaddingRightEm),
                 BaseStyle = (isHeading ? BaseStyle with { Bold = true } : BaseStyle) with
                 {
+                    FontSizeFactor = ScaleFontSize(BaseStyle.FontSizeFactor, hints.FontSizeFactor),
                     VerticalTextCombineLimit = hints.VerticalTextCombineLimit >= 0
                         ? hints.VerticalTextCombineLimit
                         : BaseStyle.VerticalTextCombineLimit,
                     VerticalTextOrientation = hints.VerticalTextOrientation ?? BaseStyle.VerticalTextOrientation,
+                },
+            };
+        }
+
+        /// <summary>
+        /// Cell text ignores paragraph indentation and outer margins: the
+        /// table composer supplies its own padding and column geometry.
+        /// </summary>
+        public FlowContext ForTableCell(CssHints hints, bool header)
+        {
+            var noJustify = NoJustify || hints.NoJustify;
+            return this with
+            {
+                Kind = BlockKind.Paragraph,
+                ElementId = null,
+                Center = hints.Center,
+                AlignRight = hints.AlignRight,
+                NoJustify = noJustify,
+                Justify = !hints.Center && !noJustify,
+                TextIndentEm = 0f,
+                SpaceBeforeLines = 0f,
+                SpaceAfterLines = 0f,
+                MarginTopEm = 0f,
+                MarginBottomEm = 0f,
+                MarginLeftEm = 0f,
+                MarginRightEm = 0f,
+                PaddingLeftEm = 0f,
+                PaddingRightEm = 0f,
+                LineHeightFactor = float.IsNaN(hints.LineHeightFactor)
+                    ? LineHeightFactor
+                    : hints.LineHeightFactor,
+                BaseStyle = BaseStyle with
+                {
+                    Bold = BaseStyle.Bold || hints.Bold || header,
+                    Italic = BaseStyle.Italic || hints.Italic,
+                    FontSizeFactor = ScaleFontSize(BaseStyle.FontSizeFactor, hints.FontSizeFactor),
+                    VerticalTextCombineLimit = hints.VerticalTextCombineLimit >= 0
+                        ? hints.VerticalTextCombineLimit
+                        : BaseStyle.VerticalTextCombineLimit,
+                    VerticalTextOrientation = hints.VerticalTextOrientation
+                        ?? BaseStyle.VerticalTextOrientation,
                 },
             };
         }

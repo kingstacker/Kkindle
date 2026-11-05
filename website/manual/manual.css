@@ -3,16 +3,16 @@
   --paper: #fbfbfa;
   --surface: #fff;
   --ink: #171716;
-  --muted: #73736f;
+  --muted: #66665f;
   --line: #e3e3df;
   --soft: #f1f1ee;
-  --accent: #a46d00;
+  --accent: #8a5a00;
   --serif: "Iowan Old Style", Georgia, "Songti SC", "Source Han Serif SC", "Microsoft YaHei", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", Roboto, Helvetica, Arial, sans-serif;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { background: var(--paper); scroll-behavior: smooth; }
+html { background: var(--paper); scroll-behavior: smooth; scroll-padding-top: 80px; }
 body { margin: 0; color: var(--ink); background: var(--paper); font: 16px/1.8 var(--sans); }
 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 a:hover { color: var(--accent); }
@@ -24,7 +24,7 @@ a:hover { color: var(--accent); }
 .home-link { color: var(--muted); font-size: 13px; text-decoration: none; }
 .manual-layout { width: min(1240px, 100%); margin: 0 auto; display: grid; grid-template-columns: 242px minmax(0, 1fr); gap: clamp(36px, 7vw, 100px); padding: 52px 24px 84px; }
 .manual-sidebar { position: sticky; top: 96px; align-self: start; }
-.sidebar-kicker, .eyebrow { color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .12em; }
+.sidebar-kicker, .eyebrow { color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .12em; }
 .manual-sidebar h2 { margin: 8px 0 19px; font: 500 20px/1.35 var(--serif); }
 .manual-sidebar nav { display: grid; gap: 3px; }
 .manual-sidebar nav a { display: block; padding: 7px 10px; border-left: 2px solid transparent; color: #5d5d58; font-size: 14px; text-decoration: none; }
@@ -40,7 +40,7 @@ article p { margin: 14px 0; color: #333330; }
 article ul, article ol { margin: 16px 0 21px; padding-left: 1.5em; }
 article li { margin: 7px 0; padding-left: .15em; }
 article li::marker { color: var(--accent); }
-article img { display: block; width: 100%; height: auto; margin: 24px 0 30px; border: 1px solid var(--line); background: var(--surface); }
+article img { display: block; width: auto; max-width: 100%; height: auto; margin: 24px 0 30px; border: 1px solid var(--line); background: var(--surface); }
 article blockquote { margin: 21px 0; padding: 3px 18px; border-left: 2px solid var(--accent); color: var(--muted); }
 article blockquote p { color: inherit; }
 article code { padding: 2px 5px; border: 1px solid var(--line); background: var(--surface); font: .88em/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }

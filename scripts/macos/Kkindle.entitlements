@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The .NET runtime JIT-compiles managed code and writes executable
+       memory. Without these hardened-runtime exceptions a Developer ID
+       build is notarized successfully but exits immediately at launch. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Kkindle loads libmtp/libusb from its own payload and the .NET
+       runtime loads native libraries by absolute path. Disabling library
+       validation keeps that working under the hardened runtime. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

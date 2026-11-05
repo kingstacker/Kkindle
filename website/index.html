@@ -3,22 +3,67 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#fbfbfa" />
     <meta
       name="description"
       content="Kkindle 是一款面向 Windows、Linux 和 macOS 的个人电子书与 Kindle 设备管理器。"
     />
+    <link rel="canonical" href="https://kkindle.stacker.beauty/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://kkindle.stacker.beauty/?lang=zh" />
+    <link rel="alternate" hreflang="en" href="https://kkindle.stacker.beauty/?lang=en" />
+    <link rel="alternate" hreflang="x-default" href="https://kkindle.stacker.beauty/" />
+
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Kkindle" />
     <meta property="og:title" content="Kkindle — 个人电子书与 Kindle 工作台" />
     <meta
       property="og:description"
       content="把书库、阅读、批注和 Kindle 设备连接起来。"
     />
     <meta property="og:url" content="https://kkindle.stacker.beauty/" />
-    <meta property="og:image" content="https://raw.githubusercontent.com/kingstacker/Kkindle/master/website/assets/library.png?v=20261004" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:image" content="https://kkindle.stacker.beauty/assets/social-card.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Kkindle 电脑书库界面" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Kkindle — 个人电子书与 Kindle 工作台" />
+    <meta
+      name="twitter:description"
+      content="把书库、阅读、批注和 Kindle 设备连接起来。"
+    />
+    <meta name="twitter:image" content="https://kkindle.stacker.beauty/assets/social-card.jpg" />
+
     <link rel="icon" type="image/png" href="assets/kkindle.png" />
-    <link rel="stylesheet" href="styles.css?v=minimal-17" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <link
+      rel="preload"
+      as="image"
+      type="image/webp"
+      href="assets/library-1024.webp"
+      imagesrcset="assets/library-640.webp 640w, assets/library-1024.webp 1024w, assets/library.webp 1487w"
+      imagesizes="(max-width: 900px) 92vw, 48vw"
+    />
+    <link rel="stylesheet" href="styles.css?v=20261105" />
     <title>Kkindle — 个人电子书与 Kindle 工作台</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Kkindle",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Windows, Linux, macOS",
+        "url": "https://kkindle.stacker.beauty/",
+        "downloadUrl": "https://kkindle.stacker.beauty/#downloads",
+        "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+        "inLanguage": ["zh-CN", "en"],
+        "screenshot": "https://kkindle.stacker.beauty/assets/library.webp",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
   </head>
   <body id="top">
     <a class="skip-link" href="#main" data-i18n="skipToContent">跳到主要内容</a>
@@ -31,12 +76,10 @@
         </a>
 
         <nav class="main-nav" id="main-nav" aria-label="主导航">
-          <a href="#product" data-i18n="navProduct">产品</a>
           <a href="#features" data-i18n="navFeatures">功能</a>
           <a href="#downloads" data-i18n="navDownload">下载</a>
           <a href="manual/index.html" data-i18n="navManual">使用手册</a>
           <a href="#changelog" data-i18n="navChangelog">更新日志</a>
-          <a href="#about" data-i18n="navAbout">关于</a>
         </nav>
 
         <div class="header-actions">
@@ -68,57 +111,111 @@
 
     <main id="main">
       <section class="hero" id="product">
-        <div class="wrap">
+        <div class="wrap hero-grid">
           <div class="hero-copy">
             <p class="label" data-i18n="heroKicker">KINDLE, WITHOUT THE FRICTION.</p>
             <h1 data-i18n="heroTitle">把书库、阅读与 Kindle 连接起来。</h1>
             <p class="lead" data-i18n="heroLead">
               Kkindle 是一款安静、跨平台的电子书书库与 Kindle 工作台。整理你的书，专注地读，然后把它们带到真正的阅读设备上。
             </p>
-            <div class="hero-actions">
-              <a
-                class="button button-primary"
-                href="#platform-downloads"
-                data-primary-download
-                data-i18n="heroDownload"
-              >
-                下载 Kkindle
-              </a>
-              <a
-                class="button button-quiet"
-                href="https://github.com/kingstacker/Kkindle"
-                target="_blank"
-                rel="noreferrer"
-                data-i18n="heroSource"
-              >
-                查看源码
-              </a>
+
+            <div class="hero-downloads" id="downloads" aria-labelledby="hero-downloads-title">
+              <div class="hero-downloads-head">
+                <p class="label" id="hero-downloads-title" data-i18n="heroDownloadTitle">
+                  选择平台下载
+                </p>
+                <p class="hero-downloads-version">
+                  <span data-i18n="stableLabel">最新稳定版本</span>
+                  <strong data-release-version data-i18n="checking">正在获取…</strong>
+                </p>
+              </div>
+              <div class="platform-picker">
+                <a
+                  class="platform-pick"
+                  data-platform="windows"
+                  data-download-key="windows-installer"
+                  href="https://github.com/kingstacker/Kkindle/releases/latest"
+                >
+                  <span class="platform-pick-name">Windows</span>
+                  <span class="platform-pick-arrow" aria-hidden="true">↓</span>
+                  <span class="platform-pick-meta" data-i18n="heroWindowsMeta">Windows 11 · x64</span>
+                </a>
+                <a
+                  class="platform-pick"
+                  data-platform="linux"
+                  data-download-key="linux-deb-x64"
+                  href="https://github.com/kingstacker/Kkindle/releases/latest"
+                >
+                  <span class="platform-pick-name">Linux</span>
+                  <span class="platform-pick-arrow" aria-hidden="true">↓</span>
+                  <span class="platform-pick-meta" data-i18n="heroLinuxMeta">.deb · x64</span>
+                </a>
+                <a
+                  class="platform-pick"
+                  data-platform="macos"
+                  data-download-key="mac-arm64"
+                  href="https://github.com/kingstacker/Kkindle/releases/latest"
+                >
+                  <span class="platform-pick-name">macOS</span>
+                  <span class="platform-pick-arrow" aria-hidden="true">↓</span>
+                  <span class="platform-pick-meta" data-i18n="heroMacMeta">Apple Silicon</span>
+                </a>
+              </div>
+              <p class="hero-downloads-foot">
+                <a
+                  class="link-arrow"
+                  data-release-link
+                  href="https://github.com/kingstacker/Kkindle/releases/latest"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span data-i18n="heroAllDownloads">全部架构</span>
+                  <span aria-hidden="true">↗</span>
+                </a>
+                <span class="foot-sep" aria-hidden="true">·</span>
+                <a
+                  class="link-arrow"
+                  data-download-key="checksums"
+                  href="https://github.com/kingstacker/Kkindle/releases/latest"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span data-i18n="heroChecksum">SHA-256 校验值</span>
+                  <span aria-hidden="true">↗</span>
+                </a>
+                <span class="foot-sep" aria-hidden="true">·</span>
+                <a
+                  class="link-arrow"
+                  href="https://pan.baidu.com/s/1A5Sx-2bkFIgGwc35zyioWA?pwd=kxas"
+                  target="_blank"
+                  rel="noreferrer"
+                  data-i18n="heroBaidu"
+                >
+                  百度网盘备用下载（kxas）
+                </a>
+              </p>
             </div>
-            <ul class="hero-facts inline-list">
-              <li>
-                <span class="fact-value">3</span>
-                <span data-i18n="heroFactPlatforms">桌面平台</span>
-              </li>
-              <li>
-                <span class="fact-value">4+</span>
-                <span data-i18n="heroFactFormats">常用格式</span>
-              </li>
-              <li>
-                <span class="fact-value">GPL-3.0</span>
-                <span data-i18n="heroFactLicense">开源许可</span>
-              </li>
-            </ul>
+
+
           </div>
 
           <figure class="hero-shot shot">
             <picture>
-              <source srcset="assets/library.webp?v=20261004" type="image/webp" />
+              <source
+                type="image/webp"
+                srcset="
+                  assets/library-640.webp   640w,
+                  assets/library-1024.webp 1024w,
+                  assets/library.webp      1487w
+                "
+                sizes="(max-width: 900px) 92vw, 48vw"
+              />
               <img
-                src="assets/library.png?v=20261004"
+                src="assets/library.png"
                 alt="Kkindle 电脑书库界面"
                 data-i18n-alt="libraryAlt"
-                width="1294"
-                height="804"
+                width="1487"
+                height="981"
                 fetchpriority="high"
                 decoding="async"
               />
@@ -127,14 +224,6 @@
         </div>
       </section>
 
-      <div class="strip" aria-label="产品关键词">
-        <div class="wrap label">
-          <span data-i18n="signalLocal">LOCAL-FIRST</span>
-          <span data-i18n="signalFormats">EPUB / PDF / MOBI / AZW3</span>
-          <span data-i18n="signalKindle">KINDLE READY</span>
-          <span data-i18n="signalAi">AI-ASSISTED READING</span>
-        </div>
-      </div>
 
       <section class="section" id="features">
         <div class="wrap">
@@ -150,13 +239,21 @@
             <article class="feature">
               <figure class="feature-shot shot">
                 <picture>
-                  <source srcset="assets/library.webp?v=20261004" type="image/webp" />
+                  <source
+                    type="image/webp"
+                    srcset="
+                      assets/library-grid-640.webp   640w,
+                      assets/library-grid-1024.webp 1024w,
+                      assets/library-grid.webp      1199w
+                    "
+                    sizes="(max-width: 900px) 92vw, 48vw"
+                  />
                   <img
-                    src="assets/library.png?v=20261004"
+                    src="assets/library-grid.png"
                     alt="Kkindle 书库网格视图"
                     data-i18n-alt="libraryGridAlt"
-                    width="1294"
-                    height="804"
+                    width="1199"
+                    height="981"
                     loading="lazy"
                     decoding="async"
                   />
@@ -171,20 +268,23 @@
                 <p class="body-copy" data-i18n="libraryBody">
                   导入 EPUB、PDF、MOBI 和 AZW3，自动识别元数据与封面，按作者、标签、格式和阅读状态找到下一本书。
                 </p>
-                <ul class="meta-list inline-list">
-                  <li data-i18n="libraryTag1">拖放导入</li>
-                  <li data-i18n="libraryTag2">封面与元数据</li>
-                  <li data-i18n="libraryTag3">本地 SQLite</li>
-                </ul>
               </div>
             </article>
 
             <article class="feature feature-reverse">
               <figure class="feature-shot shot">
                 <picture>
-                  <source srcset="assets/reader.webp?v=1.0.6" type="image/webp" />
+                  <source
+                    type="image/webp"
+                    srcset="
+                      assets/reader-640.webp   640w,
+                      assets/reader-1024.webp 1024w,
+                      assets/reader.webp      1294w
+                    "
+                    sizes="(max-width: 900px) 92vw, 48vw"
+                  />
                   <img
-                    src="assets/reader.png?v=1.0.6"
+                    src="assets/reader.png"
                     alt="Kreader 阅读器界面"
                     data-i18n-alt="readerAlt"
                     width="1294"
@@ -203,24 +303,27 @@
                 <p class="body-copy" data-i18n="readerBody">
                   支持横排、竖排、滚动、分页和双栏阅读。书签、搜索、脚注、批注与阅读进度都围绕正文展开。
                 </p>
-                <ul class="meta-list inline-list">
-                  <li data-i18n="readerTag1">原生排版</li>
-                  <li data-i18n="readerTag2">竖排阅读</li>
-                  <li data-i18n="readerTag3">笔记与批注</li>
-                </ul>
               </div>
             </article>
 
             <article class="feature">
               <figure class="feature-shot shot">
                 <picture>
-                  <source srcset="assets/kindle.webp?v=20261004" type="image/webp" />
+                  <source
+                    type="image/webp"
+                    srcset="
+                      assets/kindle-640.webp   640w,
+                      assets/kindle-1024.webp 1024w,
+                      assets/kindle.webp      1487w
+                    "
+                    sizes="(max-width: 900px) 92vw, 48vw"
+                  />
                   <img
-                    src="assets/kindle.png?v=20261004"
+                    src="assets/kindle.png"
                     alt="Kindle 设备书库管理界面"
                     data-i18n-alt="kindleAlt"
-                    width="1294"
-                    height="804"
+                    width="1487"
+                    height="981"
                     loading="lazy"
                     decoding="async"
                   />
@@ -235,24 +338,27 @@
                 <p class="body-copy" data-i18n="kindleBody">
                   连接 Kindle 后查看书籍、容量、字体和词典，批量发送、导出和安全退出设备，把传书变成一个清晰的动作。
                 </p>
-                <ul class="meta-list inline-list">
-                  <li data-i18n="kindleTag1">USB / WPD / MTP</li>
-                  <li data-i18n="kindleTag2">字体与词典</li>
-                  <li data-i18n="kindleTag3">安全传输</li>
-                </ul>
               </div>
             </article>
 
             <article class="feature feature-reverse">
               <figure class="feature-shot shot">
                 <picture>
-                  <source srcset="assets/ai.webp?v=1.0.6" type="image/webp" />
+                  <source
+                    type="image/webp"
+                    srcset="
+                      assets/ai-640.webp   640w,
+                      assets/ai-1024.webp 1024w,
+                      assets/ai.webp      1294w
+                    "
+                    sizes="(max-width: 900px) 92vw, 48vw"
+                  />
                   <img
-                    src="assets/ai.png?v=1.0.6"
+                    src="assets/ai.png"
                     alt="Kkindle AI 阅读助手"
                     data-i18n-alt="aiAlt"
                     width="1294"
-                    height="804"
+                    height="805"
                     loading="lazy"
                     decoding="async"
                   />
@@ -267,187 +373,8 @@
                 <p class="body-copy" data-i18n="aiBody">
                   用 AI 解释选文、总结章节或讨论全书；用批注、词典、阅读数据和导出记录，把阅读留下来。
                 </p>
-                <ul class="meta-list inline-list">
-                  <li data-i18n="aiTag1">AI 阅读助手</li>
-                  <li data-i18n="aiTag2">词典查询</li>
-                  <li data-i18n="aiTag3">阅读数据</li>
-                </ul>
               </div>
             </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section downloads" id="downloads">
-        <div class="wrap">
-          <div class="section-head">
-            <p class="label" data-i18n="downloadKicker">DOWNLOAD Kkindle</p>
-            <h2 data-i18n="downloadTitle">选一个平台，开始建立你的书库。</h2>
-            <p class="lead" data-i18n="downloadLead">
-              官网只负责展示与指路，下载走本站镜像，安装包同步自 GitHub Releases。下载区会自动选择最新稳定版本。
-            </p>
-          </div>
-
-          <div class="release-bar">
-            <div>
-              <p class="label" data-i18n="stableLabel">最新稳定版本</p>
-              <p class="release-version">
-                <strong id="latest-version" data-i18n="checking">正在获取…</strong>
-                <span id="release-published"></span>
-              </p>
-            </div>
-            <a
-              class="link-arrow"
-              data-release-link
-              href="https://github.com/kingstacker/Kkindle/releases/latest"
-              target="_blank"
-              rel="noreferrer"
-              data-i18n="releasePage"
-            >
-              查看完整 Release ↗
-            </a>
-          </div>
-
-          <div class="platforms" id="platform-downloads">
-            <article class="platform" data-platform="windows">
-              <div class="platform-head">
-                <h3 data-i18n="windowsTitle">Windows</h3>
-                <span class="platform-badge" data-i18n="recommended" hidden>推荐</span>
-              </div>
-              <p class="platform-note" data-i18n="windowsNote">Windows 11 / x64，自带运行时。</p>
-              <ul class="asset-list">
-                <li>
-                  <a class="asset" data-download-key="windows-installer" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="windowsInstaller">安装版</span>
-                      <span class="asset-meta" data-file-meta="windows-installer" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-                <li>
-                  <a class="asset" data-download-key="windows-portable" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="windowsPortable">便携版</span>
-                      <span class="asset-meta" data-file-meta="windows-portable" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-              </ul>
-            </article>
-
-            <article class="platform" data-platform="linux">
-              <div class="platform-head">
-                <h3 data-i18n="linuxTitle">Linux</h3>
-                <span class="platform-badge" data-i18n="recommended" hidden>推荐</span>
-              </div>
-              <p class="platform-note" data-i18n="linuxNote">Debian / Ubuntu，或其它 x64 / arm64 发行版。</p>
-              <ul class="asset-list">
-                <li>
-                  <a class="asset" data-download-key="linux-deb-x64" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="linuxDebX64">.deb · x64</span>
-                      <span class="asset-meta" data-file-meta="linux-deb-x64" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-                <li>
-                  <a class="asset" data-download-key="linux-deb-arm64" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="linuxDebArm64">.deb · arm64</span>
-                      <span class="asset-meta" data-file-meta="linux-deb-arm64" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-                <li>
-                  <a class="asset" data-download-key="linux-tar-x64" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="linuxTarX64">tar.gz · x64</span>
-                      <span class="asset-meta" data-file-meta="linux-tar-x64" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-                <li>
-                  <a class="asset" data-download-key="linux-tar-arm64" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="linuxTarArm64">tar.gz · arm64</span>
-                      <span class="asset-meta" data-file-meta="linux-tar-arm64" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-              </ul>
-            </article>
-
-            <article class="platform" data-platform="macos">
-              <div class="platform-head">
-                <h3 data-i18n="macTitle">macOS</h3>
-                <span class="platform-badge" data-i18n="recommended" hidden>推荐</span>
-              </div>
-              <p class="platform-note" data-i18n="macNote">macOS 12+，提供 Intel 与 Apple Silicon 包。</p>
-              <ul class="asset-list">
-                <li>
-                  <a class="asset" data-download-key="mac-arm64" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="macArm64">Apple Silicon</span>
-                      <span class="asset-meta" data-file-meta="mac-arm64" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-                <li>
-                  <a class="asset" data-download-key="mac-x64" href="https://github.com/kingstacker/Kkindle/releases/latest" download>
-                    <span>
-                      <span class="asset-name" data-i18n="macX64">Intel</span>
-                      <span class="asset-meta" data-file-meta="mac-x64" data-i18n="loadingAsset">正在读取文件…</span>
-                    </span>
-                    <span class="asset-arrow" aria-hidden="true">↓</span>
-                  </a>
-                </li>
-              </ul>
-            </article>
-          </div>
-
-          <div class="baidu-download">
-            <div class="baidu-download-copy">
-              <p class="label" data-i18n="baiduKicker">备用下载</p>
-              <p class="baidu-download-note" data-i18n="baiduNote">GitHub 下载不便时，可通过百度网盘下载。</p>
-            </div>
-            <div class="baidu-download-action">
-              <a
-                class="button button-quiet"
-                href="https://pan.baidu.com/s/1A5Sx-2bkFIgGwc35zyioWA?pwd=kxas"
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span data-i18n="baiduLink">百度网盘下载</span>
-                <span aria-hidden="true">↗</span>
-              </a>
-              <p class="baidu-code">
-                <span data-i18n="baiduCodeLabel">提取码</span>
-                <code>kxas</code>
-              </p>
-            </div>
-          </div>
-
-          <div class="downloads-foot">
-            <p id="release-status" class="release-status" data-i18n="releaseLoading">
-              正在获取最新版本…
-            </p>
-            <a
-              class="link-arrow"
-              data-download-key="checksums"
-              href="https://github.com/kingstacker/Kkindle/releases/latest"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <span data-i18n="checksum">SHA-256 校验值</span>
-              <span aria-hidden="true">↗</span>
-            </a>
           </div>
         </div>
       </section>
@@ -470,9 +397,55 @@
           </div>
 
           <div class="changelog-list">
-            <!-- changelog-generated:start -->
-            <!-- changelog-generated:end -->
-          </div>
+<!-- changelog-generated:start -->
+<article class="changelog-entry is-latest">
+  <div class="changelog-entry-head">
+    <p class="label">
+      <span class="label-num">v1.1.3</span><time datetime="2026-10-29" data-changelog-date="2026-10-29">2026 年 10 月 29 日</time>
+    </p>
+    <span class="changelog-badge" data-i18n="changelogLatest">最新</span>
+  </div>
+  <ul class="changelog-points">
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogAdded">新增</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">书库搜索支持标题、作者和拼音检索，并完善中文书名与作者的检索索引。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Search the library by title, author, or pinyin, with improved indexing for Chinese book titles and authors.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogAdded">新增</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">阅读进度与阅读时长增加异常恢复能力，备份导入支持失败回滚和启动恢复。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Recover reading progress and reading time after interruptions, and roll back or recover interrupted backup imports.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogAdded">新增</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">Kindle 设备书库增加扫描状态、书籍重复检测，以及部分发送失败后的重试流程。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Show clearer Kindle device-library scan states, detect duplicate books, and retry individual transfer failures.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogImproved">优化</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">设置页和阅读设置统一为直角黑白界面，开关改为极简线条与圆点，重置默认值图标及缩放动画与主界面保持一致。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Unify Settings and Reading Settings with a square black-and-white interface, minimal line-and-dot switches, and a clearer reset icon with matching scale animation.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogImproved">优化</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">完善 PDF 选文、表格与图表复制、跨页导航，以及批注卡片跟随缩放和滚动时的定位。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Improve PDF selection, table and diagram copying, spread navigation, and annotation-card positioning during scrolling and zooming.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogImproved">优化</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">加强 S3 同步的本地文件清理、失败重试、并发一致性和同步状态反馈。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Strengthen S3 synchronization with local-file cleanup, retries, concurrency consistency, and clearer status feedback.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogFixed">修复</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">修复 EPUB/PDF 阅读生命周期、标注重定位、虚拟目录导航和双页切换相关问题。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Fix EPUB/PDF reader lifecycle, annotation relocation, virtualized table-of-contents navigation, and spread-switch issues.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogFixed">修复</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">修复切章、书签、阅读位置恢复，以及设备连接和书籍删除流程中的状态不同步。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Fix stale state during chapter changes, bookmark and position recovery, device connection, and book deletion flows.</span>
+    </li>
+    <li data-changelog-item>
+      <span class="changelog-type" data-i18n="changelogFixed">修复</span>
+      <span class="changelog-copy" data-changelog-lang="zh" lang="zh-CN">修复部分备份、同步和阅读数据在异常退出后的恢复缺口。</span><span class="changelog-copy" data-changelog-lang="en" lang="en" hidden>Close recovery gaps in backup, synchronization, and reading data after abnormal exits.</span>
+    </li>
+  </ul>
+</article>
+<!-- changelog-generated:end -->
+</div>
         </div>
       </section>
 
@@ -503,51 +476,6 @@
         </div>
       </section>
 
-      <section class="section about" id="about">
-        <div class="wrap">
-          <div class="section-head">
-            <p class="label" data-i18n="aboutKicker">ABOUT KKINDLE</p>
-            <h2 data-i18n="aboutTitle">面向个人阅读的开源桌面工作台。</h2>
-            <p class="lead" data-i18n="aboutBody">
-              Kkindle 是一款面向 Windows、Linux 和 macOS 的开源电子书书库与 Kindle 管理工具。它将书库整理、阅读、批注和设备传输放在同一个本地优先的工作流中。
-            </p>
-          </div>
-          <ul class="about-points">
-            <li data-i18n="aboutPoint1">Windows / Linux / macOS</li>
-            <li data-i18n="aboutPoint2">EPUB / PDF / MOBI / AZW3</li>
-            <li data-i18n="aboutPoint3">GPL-3.0 开源许可</li>
-          </ul>
-          <div class="about-actions">
-            <a
-              class="button button-quiet"
-              href="https://github.com/kingstacker/Kkindle"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <span data-i18n="aboutSource">查看 GitHub 项目</span>
-              <span aria-hidden="true">↗</span>
-            </a>
-            <button
-              class="qq-group"
-              id="qq-group-copy"
-              type="button"
-              data-i18n-label="qqGroupButtonLabel"
-            >
-              <span class="qq-group-copy">
-                <span class="qq-group-label" data-i18n="qqGroupLabel">QQ 用户群</span>
-                <strong class="qq-group-number">1109898894</strong>
-              </span>
-            </button>
-            <div
-              class="copy-toast"
-              id="qq-group-copy-status"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            ></div>
-          </div>
-        </div>
-      </section>
     </main>
 
     <footer class="site-footer">
@@ -561,16 +489,32 @@
             <a href="https://github.com/kingstacker/Kkindle" target="_blank" rel="noreferrer" data-i18n="footerGitHub">GitHub</a>
             <a href="#changelog" data-i18n="footerChangelog">更新日志</a>
             <a href="manual/index.html" data-i18n="navManual">使用手册</a>
+            <button
+              class="footer-qq"
+              id="qq-group-copy"
+              type="button"
+              data-i18n-label="qqGroupButtonLabel"
+            >
+              <span data-i18n="qqGroupLabel">QQ 用户群</span>
+              <strong>1109898894</strong>
+            </button>
             <a href="https://github.com/kingstacker/Kkindle/blob/master/LICENSE" target="_blank" rel="noreferrer" data-i18n="footerLicense">GPL-3.0 License</a>
           </div>
         </div>
-        <p class="footer-note" data-i18n="footerNote">官网与镜像下载由 kkindle.stacker.beauty 提供。</p>
+        <div
+          class="copy-toast"
+          id="qq-group-copy-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></div>
+        <p class="footer-note" data-i18n="footerNote">官网由 kkindle.stacker.beauty 提供，安装包由 GitHub Releases 托管。</p>
       </div>
     </footer>
 
     <noscript>
-      <div class="noscript-note">请启用 JavaScript 以加载最新版本下载信息；镜像下载同样可用。</div>
+      <div class="noscript-note">请启用 JavaScript 以加载最新版本信息；也可直接访问 GitHub Releases 或百度网盘下载。</div>
     </noscript>
-    <script src="app.js?v=minimal-15" defer></script>
+    <script src="app.js?v=20261105" defer></script>
   </body>
 </html>

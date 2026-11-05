@@ -22,15 +22,24 @@ The macOS head matches the Windows build beyond device access:
 
 - A second launch activates the running instance over a Unix domain socket
   (lock file in `~/Library/Application Support/Kkindle`). A window parked in the
-  menu bar is shown again.
+  menu bar is shown again, and files passed to the second launch are imported.
+- The native menu bar replaces Avalonia's default "About Avalonia" menu with
+  About, Settings (Cmd+,), Import (Cmd+I), Close Window (Cmd+W), window,
+  shortcut-help and manual entries; it follows the selected UI language.
+- Finder "Open With" works for EPUB, PDF, MOBI/PRC/AZW/AZW3 and TXT. Documents
+  opened while Kkindle is already running are queued until the library is
+  ready, then imported through the same dialog as a manual import.
 - USB attach/detach events arrive through IOKit and refresh the device list.
-- Unhandled exceptions are written to `kkindle-crash.log` next to the
-  executable and to `data/logs/crash.log`.
+- Unhandled exceptions are written to `data/logs/crash.log`. Only loose
+  Debug executables also write `kkindle-crash.log` next to the binary; a file
+  added inside `Kkindle.app` would break the bundle's code signature.
 - In-app updates install from the `Kkindle-{version}-osx-{arm64|x64}.tar.gz`
-  release asset. A detached helper waits for the app to exit, replaces
-  `Kkindle.app`, verifies the new bundle, reopens it, and restores the previous
-  bundle if anything fails. The option is only offered when the bundle
-  directory is writable and the app is not running from App Translocation.
+  release asset. A detached helper waits for the app to exit, rejects archive
+  members outside `Kkindle.app`, verifies the downloaded bundle's code
+  signature, stops the bundled MCP server, replaces `Kkindle.app`, verifies the
+  installed signature again, reopens it, and restores the previous bundle if
+  anything fails. The option is only offered when the bundle directory is
+  writable and the app is not running from App Translocation.
 - Send to Kindle streams queued files into the Amazon page as real `File`
   objects through the shared webview bridge, so the platform no longer depends
   on the Windows-only WebView2 file-input API.
@@ -41,6 +50,9 @@ The macOS head matches the Windows build beyond device access:
   cache uses `~/Library/Caches/Kkindle/tts`.
 - The MCP server is published self-contained into `Contents/MacOS/mcp` and uses
   libmtp plus mounted storage for device tools.
+- `scripts/uninstall-macos.sh` removes the bundle, library, settings, backups,
+  caches and Keychain entry; pass `--keep-data` to remove only the app. See
+  [macos-uninstall.md](macos-uninstall.md).
 
 ## Build and package
 
@@ -55,6 +67,14 @@ dotnet build src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj -c Release
 bash scripts/build-linux-release.sh 1.1.3 artifacts/linux linux-x64
 bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-arm64
 ```
+
+Each macOS build produces both `Kkindle-{version}-{rid}.dmg` and the
+`Kkindle-{version}-{rid}.tar.gz` used by the in-app updater. The DMG contains
+`Kkindle.app` and an `Applications` symlink, so the standard drag-to-Applications
+install works. Its Finder window uses the generated
+`scripts/macos/dmg-background.png`; the Finder layout pass is best effort with a
+timeout, and builds without Finder automation permission still produce a
+functional DMG. Set `KKINDLE_DMG_STYLE=0` to skip the layout pass entirely.
 
 `build-macos-release.sh` builds libmtp and libusb for the package's architecture
 into `artifacts/macos-deps/<arch>/`. When the target differs from the build
@@ -84,8 +104,9 @@ and Linux use pipx, while macOS creates an application-local Python venv and
 exposes the command through the shared runtime bin directory. macOS locates
 Python 3 in `PATH` or the usual Homebrew and python.org install locations;
 without Python 3 the UI shows the `xcode-select --install` / `brew install
-python3` instructions. Playback uses afplay with SIGSTOP/SIGCONT for
-pause/resume.
+python3` instructions. Playback runs in-process through AVFoundation's
+`AVAudioPlayer`, so pausing never suspends a child process (a stopped child
+used to stall every other process launch in the app).
 
 The Settings > Diagnostics page performs the same local checks at runtime and
 shows the detected WebView library, writable data paths, bundled PDF parser,
@@ -144,5 +165,15 @@ secrets:
 workflow discovers the Developer ID identity and generates a temporary
 keychain password when they are omitted. The release job imports the
 certificate, signs with the hardened runtime, notarizes, staples and validates
-the app before uploading it. Supplying only part of the required credentials
-fails the release instead of silently falling back to ad-hoc signing.
+the app, then signs, notarizes and staples the DMG as well. Supplying only part
+of the required credentials fails the release instead of silently falling back
+to ad-hoc signing. Step-by-step certificate and API-key setup, including local
+notarization without CI, is in [macos-notarization.md](macos-notarization.md).
+
+`scripts/macos/Kkindle.entitlements` grants the hardened runtime's JIT,
+unsigned-executable-memory and library-validation exceptions required by the
+.NET runtime and the bundled libmtp/libusb. The build script signs nested
+Mach-O images from the inside out and applies entitlements to the real
+executables; it no longer relies on the deprecated `--deep` signing shortcut.
+Both macOS workflows run the portable test projects and launch the packaged
+bundle for a 20-second smoke test.

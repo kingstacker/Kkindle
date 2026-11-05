@@ -15,6 +15,15 @@ public interface IFileImportSource
     void ReleaseFiles(IReadOnlyList<string> files) { }
 }
 
+/// <summary>Shares a complete file using the platform's system interface.</summary>
+public interface IMobileFileShare
+{
+    Task<bool> ShareAsync(string fileName, byte[] content);
+
+    /// <summary>Shares an existing file; the caller retains it until the task completes.</summary>
+    Task<bool> ShareFileAsync(string path);
+}
+
 /// <summary>Allows a platform to finish a short save when its app is backgrounded.</summary>
 public interface IMobileBackgroundWork
 {
@@ -63,7 +72,8 @@ public sealed record MobileServices(
     Func<ITtsEngine>? CreateTtsEngine = null,
     Func<ITtsAudioPlayer>? CreateTtsPlayer = null,
     IMobileTabBar? TabBar = null,
-    IMobileBackgroundWork? BackgroundWork = null);
+    IMobileBackgroundWork? BackgroundWork = null,
+    IMobileFileShare? FileShare = null);
 
 /// <summary>Fallback for hosts without a document picker (designer, preview).</summary>
 public sealed class NoFileImportSource : IFileImportSource

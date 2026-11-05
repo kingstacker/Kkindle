@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kkindle.Mobile.Views.Sheets.DictionarySheet">
+  <Grid RowDefinitions="Auto,*" Margin="20,0,20,14" RowSpacing="10">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+      <TextBox Name="QueryBox" PlaceholderText="输入词语" KeyDown="OnQueryKeyDown" />
+      <Button Grid.Column="1" Name="SearchButton" Classes="primary" Content="查询" Click="OnSearchClick" />
+    </Grid>
+    <ScrollViewer Grid.Row="1">
+      <StackPanel Spacing="12">
+        <TextBlock Name="StatusText" Classes="muted" TextWrapping="Wrap" />
+        <StackPanel Name="Results" Spacing="12" />
+        <Grid ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+          <TextBlock Text="词典管理" FontSize="16" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Name="ImportButton" Classes="secondary" Content="导入词典" Click="OnImportClick" />
+        </Grid>
+        <TextBlock Text="支持 MDX、TXT、TSV、CSV 和部分未加密 MOBI、AZW、PRC 词典。文本词典每行使用制表符或等号分隔词语和释义。" Classes="muted" TextWrapping="Wrap" FontSize="12" />
+        <TextBlock Name="ManagementStatus" Classes="muted" TextWrapping="Wrap" />
+        <StackPanel Name="Dictionaries" Spacing="8" />
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

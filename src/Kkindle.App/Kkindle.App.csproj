@@ -12,6 +12,11 @@
          its native stream lifetime crash. Recheck FontLifetimeTests before
          updating Avalonia, then remove this opt-in when upstream fixes it. -->
     <AvaloniaAccessUnstablePrivateApis>true</AvaloniaAccessUnstablePrivateApis>
+    <!-- AVA3001 is emitted unconditionally by AvaloniaPrivateApis.targets for
+         this intentional opt-in. The private font factory is required by the
+         workaround above, so keep the warning out of the build rather than
+         removing the crash protection. -->
+    <NoWarn>$(NoWarn);AVA3001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -48,6 +53,20 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Assets\Fonts\KingHwaOldSong-LICENSE.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- Glyph fallbacks for symbols and emoji that the reading face does not
+         cover. The reader loads them by path when a .notdef is encountered. -->
+    <Content Include="Assets\Fonts\NotoEmoji.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\NotoEmoji-LICENSE.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\NotoSansSymbols2-Regular.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\NotoSansSymbols2-LICENSE.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Assets\Icons\Lucide-LICENSE.txt">

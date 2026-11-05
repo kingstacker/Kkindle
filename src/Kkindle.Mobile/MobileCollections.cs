@@ -27,6 +27,8 @@ public static class MobileCollections
     {
         shell.ShowSheet("新建收藏夹", new PromptSheet(null, "创建", async name =>
         {
+            using var operation = MobileDataCoordinator.TryBeginOperation();
+            if (operation is null) return;
             try
             {
                 var collection = await modules.Library.Books.CreateCollectionAsync(name);
@@ -97,6 +99,8 @@ public static class MobileCollections
     {
         shell.ShowSheet("重命名收藏夹", new PromptSheet(null, "保存", async name =>
         {
+            using var operation = MobileDataCoordinator.TryBeginOperation();
+            if (operation is null) return;
             try
             {
                 await modules.Library.Books.RenameCollectionAsync(collection.Id, name);
@@ -172,6 +176,8 @@ public static class MobileCollections
 
     private static async Task RunAsync(MobileShell shell, string verb, Func<Task> action)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             await action();

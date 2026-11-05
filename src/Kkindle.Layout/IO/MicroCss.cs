@@ -8,6 +8,8 @@ public sealed class CssHints
     public bool Italic { get; init; }
     public bool Center { get; init; }
     public bool AlignRight { get; init; }
+    /// <summary>The publisher asked for ragged-right text (`text-align: left`).</summary>
+    public bool NoJustify { get; init; }
     public bool NoWrap { get; init; }
     /// <summary>-1 means unspecified, 0 means none, positive values limit digits; int.MaxValue means all.</summary>
     public int VerticalTextCombineLimit { get; init; } = -1;
@@ -18,6 +20,19 @@ public sealed class CssHints
     public float ImageWidthFactor { get; init; } = float.NaN;
     /// <summary>Font-relative image height in em units, primarily for inline glyph images.</summary>
     public float ImageHeightEm { get; init; } = float.NaN;
+    /// <summary>Publisher `line-height` as a multiple of the font size; NaN means unspecified.</summary>
+    public float LineHeightFactor { get; init; } = float.NaN;
+    public float MarginTopEm { get; init; } = float.NaN;
+    public float MarginBottomEm { get; init; } = float.NaN;
+    public float MarginLeftEm { get; init; } = float.NaN;
+    public float MarginRightEm { get; init; } = float.NaN;
+    public float PaddingLeftEm { get; init; } = float.NaN;
+    public float PaddingRightEm { get; init; } = float.NaN;
+    /// <summary>Visible border widths in em; NaN means no border was declared.</summary>
+    public float BorderTopEm { get; init; } = float.NaN;
+    public float BorderRightEm { get; init; } = float.NaN;
+    public float BorderBottomEm { get; init; } = float.NaN;
+    public float BorderLeftEm { get; init; } = float.NaN;
 
     public static readonly CssHints None = new();
 }
@@ -72,18 +87,24 @@ public sealed class MicroCss
             var declarationText = body[(open + 1)..close];
             ruleStart = close + 1;
 
-            var selector = selectorText
+            // Selector groups share one declaration block: `td, th { … }`
+            // must apply to every simple selector, not just the first.
+            var selectors = selectorText
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .FirstOrDefault(s => IsSimpleCompoundSelector(s));
-            if (selector is null)
+                .Where(IsSimpleCompoundSelector)
+                .ToArray();
+            if (selectors.Length == 0)
             {
                 continue;
             }
 
             var declarations = ParseDeclarations(declarationText);
-            if (declarations.Count > 0)
+            foreach (var selector in selectors)
             {
-                _rules.Add((selector, declarations));
+                if (declarations.Count > 0)
+                {
+                    _rules.Add((selector, declarations));
+                }
             }
         }
     }
@@ -101,6 +122,7 @@ public sealed class MicroCss
         var italic = false;
         var center = false;
         var alignRight = false;
+        var noJustify = false;
         var noWrap = false;
         var verticalTextCombineLimit = -1;
         TypesetVerticalOrientation? verticalTextOrientation = null;
@@ -108,6 +130,17 @@ public sealed class MicroCss
         var sizeFactor = float.NaN;
         var imageWidthFactor = float.NaN;
         var imageHeightEm = float.NaN;
+        var lineHeightFactor = float.NaN;
+        var marginTop = float.NaN;
+        var marginBottom = float.NaN;
+        var marginLeft = float.NaN;
+        var marginRight = float.NaN;
+        var paddingLeft = float.NaN;
+        var paddingRight = float.NaN;
+        var borderTop = float.NaN;
+        var borderRight = float.NaN;
+        var borderBottom = float.NaN;
+        var borderLeft = float.NaN;
         var matched = false;
 
         foreach (var (selector, declarations) in _rules)
@@ -131,6 +164,7 @@ public sealed class MicroCss
                     case "text-align":
                         center = value == "center";
                         alignRight = value == "right";
+                        noJustify = value is "left" or "start";
                         break;
                     case "white-space":
                         noWrap = value == "nowrap" || value == "pre";
@@ -158,6 +192,119 @@ public sealed class MicroCss
                             imageHeightEm = parsedHeight;
                         }
                         break;
+                    case "line-height":
+                        lineHeightFactor = ParseLineHeightFactor(value);
+                        break;
+                    case "margin-top":
+                        marginTop = ParseLengthEm(value);
+                        break;
+                    case "margin-bottom":
+                        marginBottom = ParseLengthEm(value);
+                        break;
+                    case "margin-left":
+                        marginLeft = ParseLengthEm(value);
+                        break;
+                    case "margin-right":
+                        marginRight = ParseLengthEm(value);
+                        break;
+                    case "padding-left":
+                        paddingLeft = ParseLengthEm(value);
+                        break;
+                    case "padding-right":
+                        paddingRight = ParseLengthEm(value);
+                        break;
+                    case "margin":
+                    case "padding":
+                        var box = ParseBoxShorthand(value);
+                        if (name == "margin")
+                        {
+                            marginTop = box.Top;
+                            marginRight = box.Right;
+                            marginBottom = box.Bottom;
+                            marginLeft = box.Left;
+                        }
+                        else
+                        {
+                            paddingLeft = box.Left;
+                            paddingRight = box.Right;
+                        }
+
+                        break;
+                    case "border":
+                        var border = ParseBorderSide(value);
+                        if (!float.IsNaN(border))
+                        {
+                            borderTop = border;
+                            borderRight = border;
+                            borderBottom = border;
+                            borderLeft = border;
+                        }
+
+                        break;
+                    case "border-top":
+                    case "border-right":
+                    case "border-bottom":
+                    case "border-left":
+                        var sideWidth = ParseBorderSide(value);
+                        if (!float.IsNaN(sideWidth))
+                        {
+                            if (name == "border-top")
+                            {
+                                borderTop = sideWidth;
+                            }
+                            else if (name == "border-right")
+                            {
+                                borderRight = sideWidth;
+                            }
+                            else if (name == "border-bottom")
+                            {
+                                borderBottom = sideWidth;
+                            }
+                            else
+                            {
+                                borderLeft = sideWidth;
+                            }
+                        }
+
+                        break;
+                    case "border-width":
+                        var borderBox = ParseBoxShorthand(value);
+                        if (!float.IsNaN(borderBox.Top))
+                        {
+                            borderTop = ClampBorderWidth(borderBox.Top);
+                            borderRight = ClampBorderWidth(borderBox.Right);
+                            borderBottom = ClampBorderWidth(borderBox.Bottom);
+                            borderLeft = ClampBorderWidth(borderBox.Left);
+                        }
+
+                        break;
+                    case "border-top-width":
+                        borderTop = ClampBorderWidth(ParseLengthEm(value));
+                        break;
+                    case "border-right-width":
+                        borderRight = ClampBorderWidth(ParseLengthEm(value));
+                        break;
+                    case "border-bottom-width":
+                        borderBottom = ClampBorderWidth(ParseLengthEm(value));
+                        break;
+                    case "border-left-width":
+                        borderLeft = ClampBorderWidth(ParseLengthEm(value));
+                        break;
+                    case "border-style":
+                        ApplyBorderStyle(value, ref borderTop, ref borderRight, ref borderBottom, ref borderLeft);
+                        break;
+                    case "border-top-style":
+                        ApplyBorderStyleSide(value, ref borderTop);
+                        break;
+                    case "border-right-style":
+                        ApplyBorderStyleSide(value, ref borderRight);
+                        break;
+                    case "border-bottom-style":
+                        ApplyBorderStyleSide(value, ref borderBottom);
+                        break;
+                    case "border-left-style":
+                        ApplyBorderStyleSide(value, ref borderLeft);
+                        break;
                 }
             }
         }
@@ -169,6 +316,7 @@ public sealed class MicroCss
                 Italic = italic,
                 Center = center,
                 AlignRight = alignRight,
+                NoJustify = noJustify,
                 NoWrap = noWrap,
                 VerticalTextCombineLimit = verticalTextCombineLimit,
                 VerticalTextOrientation = verticalTextOrientation,
@@ -176,8 +324,145 @@ public sealed class MicroCss
                 FontSizeFactor = sizeFactor,
                 ImageWidthFactor = imageWidthFactor,
                 ImageHeightEm = imageHeightEm,
+                LineHeightFactor = lineHeightFactor,
+                MarginTopEm = marginTop,
+                MarginBottomEm = marginBottom,
+                MarginLeftEm = marginLeft,
+                MarginRightEm = marginRight,
+                PaddingLeftEm = paddingLeft,
+                PaddingRightEm = paddingRight,
+                BorderTopEm = borderTop,
+                BorderRightEm = borderRight,
+                BorderBottomEm = borderBottom,
+                BorderLeftEm = borderLeft,
             }
             : CssHints.None;
+    }
+
+    private static float ClampBorderWidth(float width) =>
+        float.IsNaN(width) ? float.NaN : Math.Clamp(width, 0f, 0.5f);
+
+    /// <summary>
+    /// Parses `border`/`border-top` shorthand such as `1px solid #000` or
+    /// `none`. Returns the visible width in em, 0 for an explicit none, and
+    /// NaN when the declaration cannot be understood.
+    /// </summary>
+    private static float ParseBorderSide(string value)
+    {
+        var parts = value.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return float.NaN;
+        }
+
+        var hasStyle = false;
+        var hidden = false;
+        var width = float.NaN;
+        foreach (var part in parts)
+        {
+            var token = part.ToLowerInvariant();
+            if (token is "none" or "hidden")
+            {
+                hidden = true;
+            }
+            else if (IsBorderStyle(token))
+            {
+                hasStyle = true;
+            }
+            else if (!IsBorderColor(token))
+            {
+                var parsed = ParseLengthEm(token);
+                if (!float.IsNaN(parsed))
+                {
+                    width = parsed;
+                }
+            }
+        }
+
+        if (hidden)
+        {
+            return 0f;
+        }
+
+        if (!hasStyle && float.IsNaN(width))
+        {
+            // A bare colour or `initial`/`inherit`: CSS keeps style none.
+            return IsBorderColor(value.Trim().ToLowerInvariant()) ? 0f : float.NaN;
+        }
+
+        return ClampBorderWidth(float.IsNaN(width) ? 1f / 16f : width);
+    }
+
+    private static bool IsBorderStyle(string token) =>
+        token is "solid" or "dashed" or "dotted" or "double"
+            or "groove" or "ridge" or "inset" or "outset";
+
+    private static bool IsBorderColor(string token)
+    {
+        if (token.Length == 0)
+        {
+            return false;
+        }
+
+        if (token[0] == '#'
+            || token.StartsWith("rgb", StringComparison.Ordinal)
+            || token.StartsWith("hsl", StringComparison.Ordinal)
+            || token.StartsWith("var(", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return token is "transparent" or "currentcolor" or "initial" or "inherit"
+            or "unset" or "revert"
+            or "black" or "white" or "gray" or "grey" or "red" or "green" or "blue"
+            or "silver" or "maroon" or "navy" or "olive" or "purple" or "teal"
+            or "yellow" or "aqua" or "fuchsia" or "lime" or "orange";
+    }
+
+    private static void ApplyBorderStyle(
+        string value,
+        ref float top,
+        ref float right,
+        ref float bottom,
+        ref float left)
+    {
+        var parts = value.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length is < 1 or > 4)
+        {
+            return;
+        }
+
+        static bool Visible(string token) => !(token is "none" or "hidden");
+
+        var topVisible = Visible(parts[0]);
+        var rightVisible = Visible(parts.Length > 1 ? parts[1] : parts[0]);
+        var bottomVisible = Visible(parts.Length > 2 ? parts[2] : parts[0]);
+        var leftVisible = Visible(parts.Length > 3 ? parts[3] : parts.Length > 1 ? parts[1] : parts[0]);
+
+        top = StyleWidth(top, topVisible);
+        right = StyleWidth(right, rightVisible);
+        bottom = StyleWidth(bottom, bottomVisible);
+        left = StyleWidth(left, leftVisible);
+    }
+
+    private static void ApplyBorderStyleSide(string value, ref float width)
+    {
+        var token = value.Trim().ToLowerInvariant();
+        width = StyleWidth(width, token is not ("none" or "hidden"));
+    }
+
+    private static float StyleWidth(float current, bool visible)
+    {
+        if (!visible)
+        {
+            return 0f;
+        }
+
+        return float.IsNaN(current) || current <= 0f ? 1f / 16f : current;
     }
 
     private static int ParseTextCombineLimit(string value)
@@ -350,8 +635,21 @@ public sealed class MicroCss
 
             var name = declaration[..colon].Trim().ToLowerInvariant();
             var value = declaration[(colon + 1)..].Trim();
-            if (name.Length > 0 && value.Length > 0 && !result.ContainsKey(name))
+            // `!important` is not part of the value. With no cascade beyond
+            // document order here, the flag rarely changes the winner, but
+            // leaving it attached breaks keyword comparisons such as
+            // `font-weight: bold !important`.
+            var bang = value.LastIndexOf('!');
+            if (bang >= 0
+                && value[(bang + 1)..].Trim().Equals("important", StringComparison.OrdinalIgnoreCase))
             {
+                value = value[..bang].TrimEnd();
+            }
+
+            if (name.Length > 0 && value.Length > 0)
+            {
+                // Later declarations in a rule win, as in CSS (`display:
+                // -webkit-box; display: flex`).
                 result[name] = value;
             }
         }
@@ -386,7 +684,143 @@ public sealed class MicroCss
             return percent / 100f;
         }
 
+        if (value.EndsWith("px", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseNumber(value[..^2], 1f / 16f);
+        }
+
+        if (value.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseNumber(value[..^2], 1f / 12f);
+        }
+
         return float.NaN;
+    }
+
+    /// <summary>
+    /// Parses a CSS length into em units relative to the body font (1em =
+    /// 16px = 12pt). Unsupported units, `auto` and percentages (whose
+    /// containing block is not known here) become NaN.
+    /// </summary>
+    private static float ParseLengthEm(string value)
+    {
+        value = value.Trim();
+        if (value.Length == 0)
+        {
+            return float.NaN;
+        }
+
+        if (value == "0" || value == "0.0")
+        {
+            return 0f;
+        }
+
+        if (value.EndsWith("rem", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseNumber(value[..^3], 1f);
+        }
+
+        if (value.EndsWith("em", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseNumber(value[..^2], 1f);
+        }
+
+        if (value.EndsWith("px", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseNumber(value[..^2], 1f / 16f);
+        }
+
+        if (value.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseNumber(value[..^2], 1f / 12f);
+        }
+
+        return float.NaN;
+    }
+
+    private static float ParseNumber(string text, float scale)
+    {
+        return float.TryParse(
+            text.Trim(),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var number)
+            ? number * scale
+            : float.NaN;
+    }
+
+    private static float ParseLineHeightFactor(string value)
+    {
+        value = value.Trim();
+        if (value.Equals("normal", StringComparison.OrdinalIgnoreCase))
+        {
+            return float.NaN;
+        }
+
+        float factor;
+        if (value.EndsWith('%'))
+        {
+            factor = ParseNumber(value[..^1], 0.01f);
+        }
+        else if (value.EndsWith("rem", StringComparison.OrdinalIgnoreCase))
+        {
+            factor = ParseNumber(value[..^3], 1f);
+        }
+        else if (value.EndsWith("em", StringComparison.OrdinalIgnoreCase))
+        {
+            factor = ParseNumber(value[..^2], 1f);
+        }
+        else if (value.EndsWith("px", StringComparison.OrdinalIgnoreCase))
+        {
+            factor = ParseNumber(value[..^2], 1f / 16f);
+        }
+        else if (value.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+        {
+            factor = ParseNumber(value[..^2], 1f / 12f);
+        }
+        else
+        {
+            factor = ParseNumber(value, 1f);
+        }
+
+        // Publishers occasionally emit pathological values (0, 40) meant for
+        // another medium. Keep a readable band and treat the rest as absent.
+        return factor is >= 1f and <= 4f ? factor : float.NaN;
+    }
+
+    private readonly record struct BoxEdges(float Top, float Right, float Bottom, float Left)
+    {
+        public static BoxEdges Unspecified { get; } =
+            new(float.NaN, float.NaN, float.NaN, float.NaN);
+    }
+
+    private static BoxEdges ParseBoxShorthand(string value)
+    {
+        var parts = value.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length is < 1 or > 4)
+        {
+            return BoxEdges.Unspecified;
+        }
+
+        var lengths = new float[parts.Length];
+        for (var index = 0; index < parts.Length; index++)
+        {
+            lengths[index] = ParseLengthEm(parts[index]);
+            if (float.IsNaN(lengths[index]))
+            {
+                return BoxEdges.Unspecified;
+            }
+        }
+
+        return lengths.Length switch
+        {
+            1 => new BoxEdges(lengths[0], lengths[0], lengths[0], lengths[0]),
+            2 => new BoxEdges(lengths[0], lengths[1], lengths[0], lengths[1]),
+            3 => new BoxEdges(lengths[0], lengths[1], lengths[2], lengths[1]),
+            _ => new BoxEdges(lengths[0], lengths[1], lengths[2], lengths[3]),
+        };
     }
 
     private static float ParsePercent(string value)

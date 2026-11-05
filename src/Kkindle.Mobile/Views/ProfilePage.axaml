@@ -79,6 +79,31 @@
                      VerticalAlignment="Center" Text="—" />
         </Grid>
       </Border>
+      <Button Name="ExportBackupButton" Classes="row" Click="OnExportBackupClick">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="导出备份" VerticalAlignment="Center" />
+          <c:LineIcon Grid.Column="1" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
+                      VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+        </Grid>
+      </Button>
+      <Button Name="RestoreBackupButton" Classes="row" Click="OnRestoreBackupClick">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="恢复备份" VerticalAlignment="Center" />
+          <c:LineIcon Grid.Column="1" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
+                      VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+        </Grid>
+      </Button>
+      <Button Classes="row" Click="OnTrashClick">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="回收站" VerticalAlignment="Center" />
+          <c:LineIcon Grid.Column="1" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
+                      VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+        </Grid>
+      </Button>
+      <TextBlock Classes="muted" Margin="0,4,0,0" TextWrapping="Wrap" LineHeight="19"
+                 Text="备份为 .kkindle 格式，不包含 API 密钥、云同步凭据和 SMTP 密码。" />
+      <TextBlock Name="BackupStatusText" Classes="muted" Margin="0,8,0,0"
+                 TextWrapping="Wrap" IsVisible="False" />
 
       <TextBlock Classes="label" Text="关于" Margin="0,24,0,4" />
       <Button Classes="row" Click="OnDeveloperClick">

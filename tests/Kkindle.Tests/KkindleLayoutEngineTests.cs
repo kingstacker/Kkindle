@@ -1508,6 +1508,493 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         }
     }
 
+    [Fact]
+    public void FullWidthPunctuationUsesAHalfWidthCell()
+    {
+        var path = WriteChapter("<p>甲乙。丙丁（戊己）庚辛</p>");
+        var content = new XhtmlChapterLoader().Load(path);
+        using var engine = CreateEngine();
+        var options = Options(TypesetWritingMode.HorizontalTb);
+        var layout = engine.Compose(content, options);
+
+        foreach (var mark in new[] { '。', '（', '）' })
+        {
+            var offset = content.BodyText.IndexOf(mark);
+            Assert.True(offset >= 0);
+            var pageIndex = layout.GetPageIndexOfOffset(offset);
+            var rect = layout.GetCharRect(pageIndex, offset);
+            Assert.True(rect is { Width: > 0 });
+            Assert.InRange(
+                rect!.Value.Width,
+                options.BaseFontSize * 0.45f,
+                options.BaseFontSize * 0.55f);
+        }
+    }
+
+    [Fact]
+    public void MissingGlyphsUseTheBundledFallbackWithoutBreakingNeighbours()
+    {
+        var emojiFont = FindAssetFont("NotoEmoji.ttf");
+        var path = WriteChapter("<p>前后😀文字</p>");
+        var content = new XhtmlChapterLoader().Load(path);
+
+        using var fonts = new TypesetFontLibrary(_fontPath, new[] { emojiFont });
+        using var engine = new TypesetEngine(fonts);
+        var layout = engine.Compose(content, Options(TypesetWritingMode.HorizontalTb));
+        var runs = layout.Pages.SelectMany(page => page.Runs).ToList();
+
+        Assert.Contains(runs, run =>
+            run.FontPath == emojiFont && run.Glyphs.Any(glyph => glyph != 0));
+        Assert.Contains(runs, run =>
+            run.FontPath == _fontPath && run.Glyphs.Any(glyph => glyph != 0));
+        Assert.DoesNotContain(runs.SelectMany(run => run.Glyphs), glyph => glyph == 0);
+    }
+
+    [Fact]
+    public void JustificationExpandsWordSpacesWithoutStretchingLetters()
+    {
+        var paragraph = string.Join(
+            " ",
+            Enumerable.Repeat("the quick brown fox jumps over the lazy dog", 12));
+        var justified = new XhtmlChapterLoader().Load(WriteChapter($"<p>{paragraph}</p>"));
+        var ragged = new XhtmlChapterLoader().Load(
+            WriteChapter($"<p style=\"text-align:left\">{paragraph}</p>"));
+
+        using var engine = CreateEngine();
+        var options = Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f);
+        var justifiedLayout = engine.Compose(justified, options);
+        var raggedLayout = engine.Compose(ragged, options);
+
+        var justifiedGaps = CollectWordInteriorGaps(justifiedLayout, justified.BodyText);
+        var raggedGaps = CollectWordInteriorGaps(raggedLayout, ragged.BodyText);
+        Assert.True(justifiedGaps.Count > 20, $"expected word gaps, got {justifiedGaps.Count}");
+
+        foreach (var (offset, justifiedGap) in justifiedGaps)
+        {
+            Assert.True(raggedGaps.TryGetValue(offset, out var raggedGap));
+            Assert.InRange(Math.Abs(justifiedGap - raggedGap), 0f, 0.01f);
+        }
+
+        // The justified layout must still use the available width: at least
+        // one inter-word gap has to be wider than in the ragged layout.
+        var justifiedSpaces = CollectSpaceGaps(justifiedLayout, justified.BodyText);
+        var raggedSpaces = CollectSpaceGaps(raggedLayout, ragged.BodyText);
+        Assert.True(
+            justifiedSpaces.Any(pair =>
+                raggedSpaces.TryGetValue(pair.Key, out var raggedGap)
+                && pair.Value > raggedGap + 0.5f),
+            "expected justification to widen at least one word space");
+    }
+
+    [Fact]
+    public void MixedChineseAndEnglishLinesAreJustifiedBetweenCharacters()
+    {
+        // A Chinese sentence with an embedded English word must stay flush:
+        // treating the whole line as "Latin" would leave it ragged because
+        // there are no inter-word spaces to expand.
+        var paragraph = string.Concat(Enumerable.Repeat(
+            "中文排版测试会穿插英文单词 Kindle 与标点，模拟实际书页中的混排段落。", 40));
+        var justified = new XhtmlChapterLoader().Load(WriteChapter($"<p>{paragraph}</p>"));
+        var ragged = new XhtmlChapterLoader().Load(
+            WriteChapter($"<p style=\"text-align:left\">{paragraph}</p>"));
+
+        using var engine = CreateEngine();
+        var options = Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f);
+        var justifiedLayout = engine.Compose(justified, options);
+        var raggedLayout = engine.Compose(ragged, options);
+
+        var justifiedGaps = CollectCjkGaps(justifiedLayout, justified.BodyText);
+        var raggedGaps = CollectCjkGaps(raggedLayout, ragged.BodyText);
+        Assert.True(justifiedGaps.Count > 20, $"expected CJK gaps, got {justifiedGaps.Count}");
+        Assert.True(
+            justifiedGaps.Any(pair =>
+                raggedGaps.TryGetValue(pair.Key, out var raggedGap)
+                && pair.Value > raggedGap + 0.2f),
+            "expected a mixed line to widen its inter-character gaps");
+    }
+
+    [Fact]
+    public void PublisherLineHeightControlsBaselinePitch()
+    {
+        var text = string.Concat(Enumerable.Repeat("这是一段用来测量行距的文字。", 24));
+        var chapter = new XhtmlChapterLoader().Load(
+            WriteChapter($"<p style=\"line-height:2.5\">{text}</p>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(chapter, Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 900f));
+
+        var baselines = layout.Pages[0].Runs
+            .Select(run => MathF.Round(run.OriginY, 2))
+            .Distinct()
+            .OrderBy(y => y)
+            .ToList();
+        Assert.True(baselines.Count >= 3, $"expected several lines, got {baselines.Count}");
+        var pitch = baselines[1] - baselines[0];
+        Assert.InRange(pitch, 17f * 2.5f - 0.5f, 17f * 2.5f + 0.5f);
+    }
+
+    [Fact]
+    public void ContainerLineHeightInheritsIntoParagraphs()
+    {
+        var text = string.Concat(Enumerable.Repeat("容器行距应当传给段落里的每一行。", 20));
+        var chapter = new XhtmlChapterLoader().Load(
+            WriteChapter($"<div style=\"line-height:2.5\"><p>{text}</p></div>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(
+            chapter, Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 900f));
+        var baselines = BaselineY(layout);
+
+        Assert.True(baselines.Count >= 3, $"expected several lines, got {baselines.Count}");
+        Assert.InRange(baselines[1] - baselines[0], 17f * 2.5f - 0.5f, 17f * 2.5f + 0.5f);
+    }
+
+    [Fact]
+    public void PublisherFontSizeScalesSpansAndHeadings()
+    {
+        var chapter = new XhtmlChapterLoader().Load(WriteChapter(
+            "<p>常<span style=\"font-size:2em\">大字</span>常</p>"
+            + "<h2 style=\"font-size:1.5em\">标题</h2>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(
+            chapter, Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f));
+        var runs = layout.Pages[0].Runs;
+
+        var normal = RunAt(runs, chapter.BodyText.IndexOf("常", StringComparison.Ordinal));
+        var big = RunAt(runs, chapter.BodyText.IndexOf("大字", StringComparison.Ordinal));
+        var heading = RunAt(runs, chapter.BodyText.IndexOf("标题", StringComparison.Ordinal));
+
+        Assert.InRange(normal.FontSize, 16.9f, 17.1f);
+        Assert.InRange(big.FontSize, 33.9f, 34.1f);
+        Assert.InRange(heading.FontSize, 25.4f, 25.6f);
+    }
+
+    [Fact]
+    public void PublisherMarginAndPaddingNarrowTheTextColumn()
+    {
+        var plain = new XhtmlChapterLoader().Load(WriteChapter("<p>正文起始位置。</p>"));
+        var styled = new XhtmlChapterLoader().Load(
+            WriteChapter("<p style=\"margin: 0 0 0 2em; padding-left: 1em\">正文起始位置。</p>"));
+
+        using var engine = CreateEngine();
+        var options = Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f);
+        var plainX = engine.Compose(plain, options).Pages[0].Runs[0].OriginX;
+        var styledX = engine.Compose(styled, options).Pages[0].Runs[0].OriginX;
+
+        // 2em margin + 1em padding at 17px = 51px.
+        Assert.InRange(styledX - plainX, 50.5f, 51.5f);
+    }
+
+    [Fact]
+    public void PublisherBottomMarginSeparatesParagraphs()
+    {
+        var plain = new XhtmlChapterLoader().Load(WriteChapter("<p>第一段。</p><p>第二段。</p>"));
+        var spaced = new XhtmlChapterLoader().Load(
+            WriteChapter("<p style=\"margin-bottom:2em\">第一段。</p><p>第二段。</p>"));
+
+        using var engine = CreateEngine();
+        var options = Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 900f);
+        var plainBaselines = BaselineY(engine.Compose(plain, options));
+        var spacedBaselines = BaselineY(engine.Compose(spaced, options));
+
+        Assert.True(plainBaselines.Count >= 2 && spacedBaselines.Count >= 2);
+        var plainGap = plainBaselines[^1] - plainBaselines[0];
+        var spacedGap = spacedBaselines[^1] - spacedBaselines[0];
+        // 2em at 17px = 34px of extra space between the paragraphs.
+        Assert.InRange(spacedGap - plainGap, 33.5f, 34.5f);
+    }
+
+    [Fact]
+    public void TableCellsLayOutInColumnsAndKeepHeaderWeight()
+    {
+        var chapter = new XhtmlChapterLoader().Load(WriteChapter(
+            "<table>"
+            + "<tr><th>名称</th><th>数量</th></tr>"
+            + "<tr><td>左栏内容</td><td>右栏内容</td></tr>"
+            + "</table>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(
+            chapter, Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f));
+        var runs = layout.Pages[0].Runs;
+
+        var headerRun = RunAt(runs, chapter.BodyText.IndexOf("名称", StringComparison.Ordinal));
+        var leftRun = RunAt(runs, chapter.BodyText.IndexOf("左栏内容", StringComparison.Ordinal));
+        var rightRun = RunAt(runs, chapter.BodyText.IndexOf("右栏内容", StringComparison.Ordinal));
+
+        Assert.InRange(Math.Abs(leftRun.OriginY - rightRun.OriginY), 0f, 0.5f);
+        Assert.True(
+            rightRun.OriginX > leftRun.OriginX + 100f,
+            $"expected two columns, left={leftRun.OriginX} right={rightRun.OriginX}");
+        Assert.True(headerRun.Style.Bold, "expected <th> text to be bold");
+    }
+
+    [Fact]
+    public void RowSpanCellsKeepTheirGridColumnsAcrossRows()
+    {
+        var chapter = new XhtmlChapterLoader().Load(WriteChapter(
+            "<table>"
+            + "<tr><td rowspan=\"2\">合并格</td><td>右上</td></tr>"
+            + "<tr><td>右下</td></tr>"
+            + "</table>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(
+            chapter, Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f));
+        var runs = layout.Pages[0].Runs;
+
+        var merged = RunAt(runs, chapter.BodyText.IndexOf("合并格", StringComparison.Ordinal));
+        var upperRight = RunAt(runs, chapter.BodyText.IndexOf("右上", StringComparison.Ordinal));
+        var lowerRight = RunAt(runs, chapter.BodyText.IndexOf("右下", StringComparison.Ordinal));
+
+        Assert.Equal(1, runs.Count(run => run.TextStart == merged.TextStart));
+        Assert.True(
+            upperRight.OriginX > merged.OriginX + 20f,
+            $"expected the data column right of the span, merged={merged.OriginX} upper={upperRight.OriginX}");
+        Assert.InRange(Math.Abs(lowerRight.OriginX - upperRight.OriginX), 0f, 0.5f);
+        Assert.True(
+            lowerRight.OriginY > upperRight.OriginY + 1f,
+            "expected the second data row below the first");
+        Assert.InRange(
+            Math.Abs(merged.OriginY - upperRight.OriginY),
+            0f,
+            6f);
+    }
+
+    [Fact]
+    public void LongEnglishWordsWrapInsideNarrowTableCells()
+    {
+        const string word = "antidisestablishmentarianism";
+        var chapter = new XhtmlChapterLoader().Load(WriteChapter(
+            "<table><tr>"
+            + "<td>这是一个占据较多宽度的第一列</td>"
+            + $"<td>{word} continued text</td>"
+            + "</tr></table>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(
+            chapter, Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f));
+
+        var start = chapter.BodyText.IndexOf(word, StringComparison.Ordinal);
+        var wordRuns = layout.Pages
+            .SelectMany(page => page.Runs)
+            .Where(run => run.TextStart >= 0
+                && run.TextLength > 0
+                && run.TextStart < start + word.Length
+                && run.TextStart + run.TextLength > start)
+            .ToList();
+
+        Assert.True(
+            wordRuns.Count >= 2,
+            $"expected the long word to wrap inside its cell, got {wordRuns.Count} run(s)");
+    }
+
+    [Fact]
+    public void HyphenatedCompoundsOfferBreakOpportunities()
+    {
+        const string text = "well-known state-of-the-art";
+        var units = TypesetText.Itemize(text, 0, text.Length)
+            .Select(unit => text.Substring(unit.Start, unit.Length))
+            .ToArray();
+
+        Assert.Equal(
+            new[] { "well-", "known", " ", "state-", "of-", "the-", "art" },
+            units);
+    }
+
+    [Fact]
+    public void CssUsesLastDeclarationAndIgnoresImportant()
+    {
+        var css = MicroCss.Parse(
+            "p { font-weight: normal; font-weight: bold !important; "
+            + "border: 1px solid #000; border-style: none; }");
+
+        var hints = css.Resolve("p", Array.Empty<string>(), null);
+
+        Assert.True(hints.Bold);
+        Assert.Equal(0f, hints.BorderTopEm);
+        Assert.Equal(0f, hints.BorderBottomEm);
+    }
+
+    [Fact]
+    public void CssSelectorGroupsApplyToEverySelector()
+    {
+        var css = MicroCss.Parse("td, th { text-align: center; border: 1px solid #000; }");
+
+        var header = css.Resolve("th", Array.Empty<string>(), null);
+        Assert.True(header.Center);
+        Assert.True(header.BorderTopEm > 0f);
+        Assert.True(header.BorderBottomEm > 0f);
+
+        var cell = css.Resolve("td", Array.Empty<string>(), null);
+        Assert.True(cell.Center);
+        Assert.True(cell.BorderLeftEm > 0f);
+    }
+
+    [Fact]
+    public void TableBordersDrawCellOutlines()
+    {
+        var chapter = new XhtmlChapterLoader().Load(WriteChapter(
+            "<table><tr>"
+            + "<td style=\"border:1px solid #000\">甲</td>"
+            + "<td style=\"border:1px solid #000\">乙</td></tr><tr>"
+            + "<td style=\"border:1px solid #000\">丙</td>"
+            + "<td style=\"border:1px solid #000\">丁</td></tr></table>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(
+            chapter, Options(TypesetWritingMode.HorizontalTb, width: 420f, height: 600f));
+
+        var rules = layout.Pages
+            .SelectMany(page => page.Decorations)
+            .Where(decoration => decoration.Kind == DecorationKind.Rule)
+            .ToList();
+
+        Assert.True(rules.Count >= 8, $"expected cell borders, got {rules.Count} rules");
+        Assert.Contains(rules, rule => rule.Rect.Height < 2f && rule.Rect.Width > 40f);
+        Assert.Contains(rules, rule => rule.Rect.Width < 2f && rule.Rect.Height > 10f);
+    }
+
+    [Fact]
+    public void TablesFallBackToTextFlowInVerticalWriting()
+    {
+        var chapter = new XhtmlChapterLoader().Load(WriteChapter(
+            "<table><tr><td>甲</td><td>乙</td></tr><tr><td>丙</td><td>丁</td></tr></table>"));
+
+        using var engine = CreateEngine();
+        var layout = engine.Compose(
+            chapter, Options(TypesetWritingMode.VerticalRl, width: 420f, height: 600f));
+
+        Assert.NotEmpty(layout.Pages);
+        Assert.Contains(layout.Pages.SelectMany(page => page.Runs), run => run.TextLength > 0);
+    }
+
+    private static PlacedRun RunAt(IReadOnlyList<PlacedRun> runs, int offset)
+    {
+        Assert.True(offset >= 0);
+        return runs.First(run =>
+            run.TextStart >= 0 && offset >= run.TextStart && offset < run.TextStart + run.TextLength);
+    }
+
+    private static List<float> BaselineY(ChapterLayout layout) =>
+        layout.Pages[0].Runs
+            .Select(run => MathF.Round(run.OriginY, 2))
+            .Distinct()
+            .OrderBy(y => y)
+            .ToList();
+
+    private static Dictionary<int, float> CollectWordInteriorGaps(
+        ChapterLayout layout,
+        string bodyText)
+    {
+        var result = new Dictionary<int, float>();
+        foreach (var run in layout.Pages.SelectMany(page => page.Runs))
+        {
+            for (var index = 0; index < run.Glyphs.Length - 1; index++)
+            {
+                if (index >= run.Clusters.Length || index + 1 >= run.Clusters.Length)
+                {
+                    continue;
+                }
+
+                var first = run.TextStart + run.Clusters[index];
+                var second = run.TextStart + run.Clusters[index + 1];
+                if (second != first + 1
+                    || first < 0
+                    || second >= bodyText.Length
+                    || !char.IsAsciiLetterOrDigit(bodyText[first])
+                    || !char.IsAsciiLetterOrDigit(bodyText[second]))
+                {
+                    continue;
+                }
+
+                result[first] = run.X[index + 1] - run.X[index];
+            }
+        }
+
+        return result;
+    }
+
+    private static Dictionary<int, float> CollectSpaceGaps(ChapterLayout layout, string bodyText)
+    {
+        var gaps = new Dictionary<int, float>();
+        foreach (var run in layout.Pages.SelectMany(page => page.Runs))
+        {
+            for (var index = 0; index < run.Glyphs.Length - 1; index++)
+            {
+                if (index >= run.Clusters.Length || index + 1 >= run.Clusters.Length)
+                {
+                    continue;
+                }
+
+                var first = run.TextStart + run.Clusters[index];
+                var second = run.TextStart + run.Clusters[index + 1];
+                if (second != first + 1
+                    || first < 0
+                    || first >= bodyText.Length
+                    || !char.IsWhiteSpace(bodyText[first]))
+                {
+                    continue;
+                }
+
+                gaps[second] = run.X[index + 1] - run.X[index];
+            }
+        }
+
+        return gaps;
+    }
+
+    private static Dictionary<int, float> CollectCjkGaps(ChapterLayout layout, string bodyText)
+    {
+        var gaps = new Dictionary<int, float>();
+        foreach (var run in layout.Pages.SelectMany(page => page.Runs))
+        {
+            for (var index = 0; index < run.Glyphs.Length - 1; index++)
+            {
+                if (index >= run.Clusters.Length || index + 1 >= run.Clusters.Length)
+                {
+                    continue;
+                }
+
+                var first = run.TextStart + run.Clusters[index];
+                var second = run.TextStart + run.Clusters[index + 1];
+                if (second != first + 1
+                    || first < 0
+                    || first >= bodyText.Length
+                    || !IsCjk(bodyText[first])
+                    || !IsCjk(bodyText[second]))
+                {
+                    continue;
+                }
+
+                gaps[first] = run.X[index + 1] - run.X[index];
+            }
+        }
+
+        return gaps;
+    }
+
+    private static bool IsCjk(char c) => c is >= '㐀' and <= '鿿';
+
+    private static string FindAssetFont(string fileName)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(
+                dir.FullName, "src", "Kkindle.App", "Assets", "Fonts", fileName);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException($"Font asset not found: {fileName}");
+    }
+
     private static SKRect MeasureRunInk(TypesetFontLibrary fonts, PlacedRun run)
     {
         using var font = new SKFont(fonts.GetTypeface(run.FontPath), run.FontSize);

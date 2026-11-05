@@ -30,9 +30,18 @@ public sealed class TypesetFontLibrary : IDisposable
 
     private readonly Dictionary<string, FontFaceEntry> _faces = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _order = new();
+    private readonly List<string> _fallbackCandidates = new();
     private bool _disposed;
 
     public string MainFontPath { get; private set; }
+
+    /// <summary>
+    /// Paths that may be tried when the main face does not cover a glyph.
+    /// They are registered on first use: symbol and emoji faces can be large
+    /// (iOS also exposes a 190 MB color emoji face on macOS), and most pages
+    /// never need them.
+    /// </summary>
+    public IReadOnlyList<string> FallbackCandidates => _fallbackCandidates;
 
     public TypesetFontLibrary(string mainFontPath, IEnumerable<string>? fallbackFontPaths = null)
     {
@@ -42,8 +51,53 @@ public sealed class TypesetFontLibrary : IDisposable
         {
             foreach (var path in fallbackFontPaths)
             {
-                Register(path);
+                AddFallbackCandidate(path);
             }
+        }
+    }
+
+    private void AddFallbackCandidate(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)
+            || string.Equals(path, MainFontPath, StringComparison.OrdinalIgnoreCase)
+            || _fallbackCandidates.Contains(path, StringComparer.OrdinalIgnoreCase)
+            || !File.Exists(path))
+        {
+            return;
+        }
+
+        _fallbackCandidates.Add(path);
+    }
+
+    /// <summary>
+    /// Registers one fallback face on demand. A malformed or unreadable font
+    /// is ignored rather than failing the whole chapter.
+    /// </summary>
+    public bool TryEnsureFont(string path)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        if (_faces.ContainsKey(path))
+        {
+            return true;
+        }
+
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            Register(path);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 
@@ -134,6 +188,8 @@ public sealed class ShapedText
     public required float[] OffsetsX { get; init; }
     public required float[] OffsetsY { get; init; }
     public required float TotalAdvance { get; init; }
+
+    public bool ContainsNotdef => Array.IndexOf(GlyphIds, (ushort)0) >= 0;
 }
 
 /// <summary>
@@ -150,10 +206,72 @@ public sealed class GlyphShaper
     // direction. Keep it explicit so vertical presentation forms are selected
     // consistently when the same EPUB is laid out on different hosts.
     private static readonly Feature VerticalFeature = Feature.Parse("vert");
+    // Proportional alternate widths let CJK punctuation occupy its ink instead
+    // of a full em box. Fonts without the feature simply ignore it; `vpal` is
+    // the vertical counterpart.
+    private static readonly Feature ProportionedFeature = Feature.Parse("palt");
+    private static readonly Feature VerticalProportionedFeature = Feature.Parse("vpal");
 
     public GlyphShaper(TypesetFontLibrary library)
     {
         _library = library;
+    }
+
+    /// <summary>
+    /// Shapes <paramref name="text"/> with the main face, then with any
+    /// registered or lazily loadable fallback that covers the whole unit.
+    /// Returns false when every face leaves at least one .notdef glyph; the
+    /// caller may then split the unit into text elements and retry.
+    /// </summary>
+    public bool TryShapeWithFallback(
+        string text,
+        float fontSize,
+        bool vertical,
+        out string fontPath,
+        out ShapedText shaped)
+    {
+        var main = _library.MainFontPath;
+        shaped = Shape(text, 0, text.Length, main, fontSize, vertical);
+        if (!shaped.ContainsNotdef)
+        {
+            fontPath = main;
+            return true;
+        }
+
+        foreach (var fallback in _library.FontPaths)
+        {
+            if (string.Equals(fallback, main, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var retry = Shape(text, 0, text.Length, fallback, fontSize, vertical);
+            if (!retry.ContainsNotdef)
+            {
+                fontPath = fallback;
+                shaped = retry;
+                return true;
+            }
+        }
+
+        foreach (var candidate in _library.FallbackCandidates)
+        {
+            if (!_library.TryEnsureFont(candidate))
+            {
+                continue;
+            }
+
+            var retry = Shape(text, 0, text.Length, candidate, fontSize, vertical);
+            if (!retry.ContainsNotdef)
+            {
+                fontPath = candidate;
+                shaped = retry;
+                return true;
+            }
+        }
+
+        fontPath = main;
+        return false;
     }
 
     public ShapedText Shape(
@@ -186,11 +304,11 @@ public sealed class GlyphShaper
         buffer.Direction = vertical ? Direction.TopToBottom : Direction.LeftToRight;
         if (vertical)
         {
-            font.Shape(buffer, new[] { VerticalFeature });
+            font.Shape(buffer, new[] { VerticalFeature, VerticalProportionedFeature });
         }
         else
         {
-            font.Shape(buffer);
+            font.Shape(buffer, new[] { ProportionedFeature });
         }
         var infos = buffer.GlyphInfos.ToArray();
         var positions = buffer.GlyphPositions.ToArray();

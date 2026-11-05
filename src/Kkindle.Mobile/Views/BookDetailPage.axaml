@@ -31,7 +31,7 @@
         <Border Classes="cover" Width="148" Height="214" HorizontalAlignment="Center">
           <Border Classes="coverclip">
             <Panel>
-              <Image Name="CoverImage" Stretch="Uniform" />
+              <Image Name="CoverImage" Stretch="UniformToFill" />
               <TextBlock Name="CoverInitial" FontSize="40" Foreground="{DynamicResource TextMutedBrush}"
                          HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Panel>

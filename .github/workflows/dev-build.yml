@@ -191,9 +191,46 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.400
+      - name: Run portable tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj -c Release
+          dotnet test tests/Kkindle.Platform.Common.Tests/Kkindle.Platform.Common.Tests.csproj -c Release
+          dotnet test tests/Kkindle.App.Tests/Kkindle.App.Tests.csproj -c Release
       - name: Build macOS package
         shell: bash
         run: bash scripts/build-macos-release.sh "$DEV_VERSION" artifacts/development-macos "${{ matrix.rid }}"
+      - name: Verify and smoke-test macOS bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/kkindle-smoke"
+          mkdir -p "$work"
+          tar -xzf "artifacts/development-macos/Kkindle-${DEV_VERSION}-${{ matrix.rid }}.tar.gz" -C "$work"
+          plutil -lint "$work/Kkindle.app/Contents/Info.plist"
+          codesign --verify --deep --strict "$work/Kkindle.app"
+          dmg="artifacts/development-macos/Kkindle-${DEV_VERSION}-${{ matrix.rid }}.dmg"
+          hdiutil verify "$dmg"
+          mountpoint="$RUNNER_TEMP/kkindle-dmg"
+          mkdir -p "$mountpoint"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$dmg" >/dev/null
+          trap 'hdiutil detach "$mountpoint" -force -quiet >/dev/null 2>&1 || true' EXIT
+          test -d "$mountpoint/Kkindle.app"
+          test -L "$mountpoint/Applications"
+          test "$(readlink "$mountpoint/Applications")" = "/Applications"
+          hdiutil detach "$mountpoint" >/dev/null
+          log="$RUNNER_TEMP/kkindle-macos-smoke.log"
+          "$work/Kkindle.app/Contents/MacOS/Kkindle" >"$log" 2>&1 &
+          pid=$!
+          sleep 20
+          if ! kill -0 "$pid" 2>/dev/null; then
+            cat "$log"
+            echo "Kkindle exited during the macOS development smoke test." >&2
+            exit 1
+          fi
+          kill -TERM "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
           name: Kkindle-${{ needs.prepare.outputs.version }}-${{ matrix.rid }}

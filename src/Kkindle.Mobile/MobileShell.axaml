@@ -145,6 +145,14 @@
       </Grid>
     </ThemeVariantScope>
 
+    <Border Grid.RowSpan="2" Name="BackupBlocker" IsVisible="False" ZIndex="40"
+            Background="{DynamicResource PageBackgroundBrush}" Padding="32">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16" MaxWidth="360">
+        <TextBlock Name="BackupBlockerTitle" Classes="title" TextWrapping="Wrap" />
+        <TextBlock Name="BackupBlockerText" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
     <Border Grid.RowSpan="2" Name="Toast" Classes="floating" IsVisible="False" IsHitTestVisible="False"
             ZIndex="30" Padding="16,10" Margin="24,0,24,160"
             VerticalAlignment="Bottom" HorizontalAlignment="Center">

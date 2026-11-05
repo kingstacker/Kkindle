@@ -3,9 +3,12 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.ApplicationServices;
 using Kkindle.Core;
+using Kkindle.Infrastructure;
+using Kkindle.Mobile.Views.Sheets;
 
 namespace Kkindle.Mobile.Views;
 
@@ -23,7 +26,8 @@ public sealed record MaterialEntry(
     string? Note,
     string Meta,
     DateTimeOffset UpdatedAt,
-    ReaderProgressRow Location)
+    ReaderProgressRow Location,
+    string ExportLocation)
 {
     public bool HasNote => !string.IsNullOrWhiteSpace(Note);
     public bool IsBookmark => Kind == MaterialKind.Bookmark;
@@ -50,6 +54,7 @@ public partial class MaterialsPage : UserControl
     private MaterialKind? _filter;
     private readonly Dictionary<Guid, Bitmap?> _covers = [];
     private readonly HashSet<Guid> _expandedBooks = [];
+    private bool _exporting;
 
     public MaterialsPage() => InitializeComponent();
 
@@ -64,6 +69,8 @@ public partial class MaterialsPage : UserControl
     private async void OnLoaded(object? sender, RoutedEventArgs e)
     {
         if (_modules is null || _shell is null) return;
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             await _modules.Library.Books.InitializeAsync();
@@ -78,7 +85,8 @@ public partial class MaterialsPage : UserControl
                     entries.Add(new MaterialEntry(book, MaterialKind.Bookmark, bookmark.DisplayQuote, null,
                         $"书签 · {bookmark.DisplayTitle}", bookmark.CreatedAt,
                         new ReaderProgressRow(book.Id, file.Id, bookmark.ChapterPath, null, bookmark.ChapterIndex,
-                            bookmark.ScrollPosition ?? 0, 0, bookmark.FlowMode, bookmark.CreatedAt)));
+                            bookmark.ScrollPosition ?? 0, 0, bookmark.FlowMode, bookmark.CreatedAt),
+                        bookmark.DisplayTitle));
                 }
                 foreach (var annotation in await _modules.Reader.Data.GetAnnotationsAsync(file.Id))
                 {
@@ -93,7 +101,10 @@ public partial class MaterialsPage : UserControl
                             0, 0, 1, annotation.UpdatedAt)
                         {
                             ContentPosition = new ReaderContentPosition { TextOffset = annotation.StartOffset }
-                        }));
+                        },
+                        ChapterIndexOf(annotation) is var pageIndex && pageIndex >= 0
+                            ? $"第 {pageIndex + 1} 页"
+                            : annotation.ChapterPath));
                 }
             }
             _entries = entries;
@@ -127,6 +138,7 @@ public partial class MaterialsPage : UserControl
             .ToList();
         MaterialsList.ItemsSource = visible;
         SummaryText.Text = $"共 {_entries.Count} 条";
+        ExportButton.IsEnabled = !_exporting && visible.Count > 0;
         EmptyState.IsVisible = visible.Count == 0;
         EmptyTitle.Text = _entries.Count == 0 ? "还没有阅读资料" : "这一类还没有内容";
     }
@@ -153,6 +165,79 @@ public partial class MaterialsPage : UserControl
         FilterNotes.Classes.Set("on", _filter == MaterialKind.Note);
         FilterBookmarks.Classes.Set("on", _filter == MaterialKind.Bookmark);
         Present();
+    }
+
+    private void OnExportClick(object? sender, RoutedEventArgs e)
+    {
+        if (_shell is null || _exporting) return;
+        var entries = _entries.Where(entry => _filter is null || entry.Kind == _filter)
+            .OrderByDescending(entry => entry.UpdatedAt).ToArray();
+        if (entries.Length == 0) return;
+        _shell.ShowSheet($"导出当前筛选 · {entries.Length} 条", new ChoiceSheet(
+            [new ChoiceItem("Markdown", "适合整理和继续编辑", Tag: true),
+             new ChoiceItem("纯文本", "适合在文本应用中打开", Tag: false)],
+            choice =>
+            {
+                _shell.HideSheet();
+                _ = ExportAsync(entries, (bool)choice.Tag!);
+            }));
+    }
+
+    private async Task ExportAsync(IReadOnlyList<MaterialEntry> entries, bool markdown)
+    {
+        if (_shell is null || _exporting) return;
+        _exporting = true;
+        ExportButton.IsEnabled = false;
+        StatusText.IsVisible = false;
+        try
+        {
+            var records = entries.Select(entry => new ReadingMaterialRecord(
+                ReadingMaterialSource.Local, entry.Book.Title,
+                entry.Kind switch { MaterialKind.Note => "笔记", MaterialKind.Bookmark => "书签", _ => "划线" },
+                entry.ExportLocation, entry.Quote, entry.Note ?? string.Empty, entry.UpdatedAt)).ToArray();
+            var fileName = $"Kkindle-阅读资料-{DateTime.Now:yyyyMMdd-HHmmss}.{(markdown ? "md" : "txt")}";
+            await using var content = new MemoryStream();
+            if (markdown) await ReadingMaterialsExport.WriteMarkdownAsync(content, records);
+            else await ReadingMaterialsExport.WritePlainTextAsync(content, records);
+
+            if (_shell.Services.FileShare is { } share)
+            {
+                if (await share.ShareAsync(fileName, content.ToArray()))
+                    _shell.ShowToast($"已分享 {records.Length} 条阅读资料");
+                return;
+            }
+
+            var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+            if (storage is null || !storage.CanSave)
+                throw new InvalidOperationException("此设备不支持保存文件。");
+            var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "导出阅读资料",
+                SuggestedFileName = fileName,
+                FileTypeChoices = [new FilePickerFileType(markdown ? "Markdown" : "文本")
+                {
+                    Patterns = [markdown ? "*.md" : "*.txt"],
+                    MimeTypes = [markdown ? "text/markdown" : "text/plain"]
+                }]
+            });
+            if (file is null) return;
+            await using (var destination = await file.OpenWriteAsync())
+            {
+                content.Position = 0;
+                await content.CopyToAsync(destination);
+            }
+            _shell.ShowToast($"已导出 {records.Length} 条阅读资料");
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = "导出阅读资料失败：" + exception.Message;
+            StatusText.IsVisible = true;
+        }
+        finally
+        {
+            _exporting = false;
+            Present();
+        }
     }
 
     private void OnItemTapped(object? sender, TappedEventArgs e)

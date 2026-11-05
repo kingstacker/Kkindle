@@ -14,10 +14,14 @@ internal static class Program
     {
         // Preview data lives apart from the desktop app's library so both can run
         // side by side without touching the same database.
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Kkindle",
-            "mobile-preview");
+        // KKINDLE_MOBILE_PREVIEW_ROOT points a review run (for example --shots,
+        // which adds bookmarks and collections) at a throwaway library.
+        var root = Environment.GetEnvironmentVariable("KKINDLE_MOBILE_PREVIEW_ROOT") is { Length: > 0 } overrideRoot
+            ? Path.GetFullPath(overrideRoot)
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Kkindle",
+                "mobile-preview");
         var paths = new AppPaths(root);
         paths.EnsureDirectories();
 
@@ -60,8 +64,12 @@ internal static class Program
     private static async Task SeedAsync(MobileServices services, string[] files)
     {
         var modules = MobileComposition.Create(services);
+        // A fresh preview root has no schema until the library is initialized.
+        await modules.Library.Books.InitializeAsync();
         var result = await modules.Library.Books.ImportAsync(files);
         Console.WriteLine($"seeded: added {result.AddedCount}, failed {result.FailureCount}");
+        foreach (var item in result.Items.Where(item => !item.Succeeded))
+            Console.WriteLine($"  failed: {item.Message}");
     }
 
     private static async Task SyncAsync(MobileServices services, string[] args)

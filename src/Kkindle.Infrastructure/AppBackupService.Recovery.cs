@@ -6,7 +6,7 @@ public sealed partial class AppBackupService
 {
     internal const string ImportJournalFileName = "import-journal.json";
     private static readonly string[] ManagedImportPaths =
-        ["library", "covers", "trash", AiSettingsPath, KindleEmailSettingsPath, S3SyncSettingsPath];
+        ["library", "covers", ReadingMaterialCoversDirectory, "trash", AiSettingsPath, KindleEmailSettingsPath, S3SyncSettingsPath];
 
     internal enum ImportPhase { Preparing, Replacing, Committed, Restored }
 
@@ -16,6 +16,8 @@ public sealed partial class AppBackupService
         public ImportPhase Phase { get; set; }
         public string StagingDirectory { get; set; } = "";
         public List<string> OriginalPaths { get; set; } = [];
+        // Missing in journals created before reading-material covers were managed.
+        public bool ReplaceReadingMaterialCovers { get; set; }
         public string? PreviousBaselineResetMarker { get; set; }
     }
 
@@ -66,6 +68,7 @@ public sealed partial class AppBackupService
         foreach (var name in ManagedImportPaths)
         {
             token.ThrowIfCancellationRequested();
+            if (name == ReadingMaterialCoversDirectory && !journal.ReplaceReadingMaterialCovers) continue;
             var backup = Path.Combine(root, name);
             var target = Path.Combine(paths.Data, name);
             if (PathExists(backup))

@@ -408,7 +408,7 @@ public sealed class TypesetPainter
         // GetGlyphRect includes a small descender allowance. Put the line at
         // the lower edge of that allowance; painting after the glyphs keeps it
         // visible even for fonts with unusually deep descenders.
-        var thickness = Math.Clamp(band.Height * 0.055f, 1.1f, 1.8f);
+        var thickness = Math.Clamp(band.Height * 0.055f, 1.5f, 1.8f);
         var y = band.Bottom + Math.Clamp(band.Height * 0.025f, 0.7f, 1.5f);
         var paint = CreateUnderlinePaint(color, thickness);
         switch (style)
@@ -439,7 +439,7 @@ public sealed class TypesetPainter
 
     private static void DrawVerticalUnderline(SKCanvas canvas, SKRect band, SKColor color, string style)
     {
-        var thickness = Math.Clamp(band.Width * 0.055f, 1.1f, 1.8f);
+        var thickness = Math.Clamp(band.Width * 0.055f, 1.5f, 1.8f);
         // Match the native vertical composer’s underline side: the line sits
         // immediately to the left of the upright glyph column.
         var x = band.Left - Math.Clamp(band.Width * 0.08f, 1.5f, 3.0f);

@@ -520,6 +520,7 @@ public sealed partial class ReaderDataService
     private async Task SaveProgressCoreAsync(
         ReaderProgressRow progress, bool checkReset, ReaderRecoveryContext? expectedContext, CancellationToken cancellationToken)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -621,6 +622,7 @@ public sealed partial class ReaderDataService
 
     public async Task SaveBookmarkAsync(ReaderBookmark bookmark, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -662,6 +664,7 @@ public sealed partial class ReaderDataService
 
     public async Task DeleteBookmarkAsync(Guid bookmarkId, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -910,6 +913,7 @@ public sealed partial class ReaderDataService
         ReaderLayoutSettings settings,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1016,6 +1020,7 @@ public sealed partial class ReaderDataService
         profile = ReaderBookLayoutProfile.Normalize(profile);
         var timestamp = DateTimeOffset.UtcNow.ToString("O");
         var appearance = profile.Appearance;
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1194,6 +1199,7 @@ public sealed partial class ReaderDataService
 
     public async Task SaveReadingStatsAsync(ReaderReadingStats stats, CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1349,6 +1355,7 @@ public sealed partial class ReaderDataService
         CancellationToken cancellationToken)
     {
         if (activeSeconds <= 0) return;
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1475,6 +1482,7 @@ public sealed partial class ReaderDataService
         IAsyncEnumerable<BookContentChunkDraft> chunks,
         CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {
@@ -1643,6 +1651,7 @@ public sealed partial class ReaderDataService
         if (embeddingDimension <= 0)
             throw new ArgumentOutOfRangeException(nameof(embeddingDimension));
 
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {

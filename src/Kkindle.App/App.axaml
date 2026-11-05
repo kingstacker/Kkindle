@@ -197,7 +197,9 @@
         <SolidColorBrush x:Key="MenuFlyoutItemBackground" Color="{DynamicResource PaperColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="{DynamicResource PressedColor}" />
-        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundDisabled" Color="{DynamicResource SoftHoverColor}" />
+        <!-- Disabled rows stay on paper; only the text greys out. A grey row
+             fill makes a menu whose items are all disabled read as a grey box. -->
+        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundDisabled" Color="{DynamicResource PaperColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{DynamicResource InkColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{DynamicResource PaperColor}" />
         <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{DynamicResource InkColor}" />
@@ -3099,6 +3101,20 @@
         <Style Selector="MenuItem:disabled /template/ Path">
             <Setter Property="Fill" Value="{DynamicResource SubtleInkBrush}" />
         </Style>
+        <!-- Stroked line icons placed in MenuItem.Icon (e.g. the task-history
+             menu) follow the row: ink normally, paper on the inverted hover /
+             selected row, subtle ink when disabled. -->
+        <Style Selector="MenuItem Path.menuLineIcon">
+            <Setter Property="Stroke" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="MenuItem:pointerover Path.menuLineIcon,
+                         MenuItem:pressed Path.menuLineIcon,
+                         MenuItem:selected:not(:open) Path.menuLineIcon">
+            <Setter Property="Stroke" Value="{DynamicResource PaperBrush}" />
+        </Style>
+        <Style Selector="MenuItem:disabled Path.menuLineIcon">
+            <Setter Property="Stroke" Value="{DynamicResource SubtleInkBrush}" />
+        </Style>
         <!-- Menu separators: solid black line instead of the Fluent grey. -->
         <Style Selector="Separator">
             <Setter Property="Background" Value="{DynamicResource InkBrush}" />
@@ -3161,6 +3177,16 @@
         </Style>
         <Style Selector="Grid.libraryShell Button.quiet.settingsSearchResult:focus-visible">
             <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <!-- Task history rows live in a Flyout, which is a separate popup
+             root, so their hover style must be global rather than in
+             MainWindow.Styles. -->
+        <Style Selector="Border.taskHistoryRow">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="4" />
+        </Style>
+        <Style Selector="Border.taskHistoryRow:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
         </Style>
     </Application.Styles>
 </Application>

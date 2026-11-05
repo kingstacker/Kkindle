@@ -25,12 +25,22 @@ namespace Kkindle.AndroidHead;
         | ConfigChanges.UiMode
         | ConfigChanges.ScreenLayout
         | ConfigChanges.SmallestScreenSize
-        | ConfigChanges.Density)]
+        | ConfigChanges.Density
+        // Without these a font-size, language, keyboard or RTL change recreates
+        // the activity, which tears down the open reader mid-page.
+        | ConfigChanges.FontScale
+        | ConfigChanges.Locale
+        | ConfigChanges.LayoutDirection
+        | ConfigChanges.Keyboard
+        | ConfigChanges.KeyboardHidden
+        | ConfigChanges.Navigation)]
 public sealed class MainActivity : AvaloniaMainActivity
 {
     private const int PickDocumentsRequest = 0x4B4;
 
-    private TaskCompletionSource<IReadOnlyList<AndroidUri>>? _pendingPick;
+    // Static: if the system recreates the activity while the picker is open,
+    // the result arrives at the new instance and must still finish the import.
+    private static TaskCompletionSource<IReadOnlyList<AndroidUri>>? _pendingPick;
 
     public static MainActivity? Current { get; private set; }
 

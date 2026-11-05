@@ -49,7 +49,7 @@ public sealed class ZLibraryRow(ZLibraryBook book) : ObservableObject
 }
 
 /// <summary>Developer-mode Z-Library search with download into the library, as on desktop.</summary>
-public partial class ZLibraryPage : UserControl
+public partial class ZLibraryPage : UserControl, IShellPage
 {
     private const int PageSize = 20;
     private const int ThumbnailWidth = 156;
@@ -75,7 +75,6 @@ public partial class ZLibraryPage : UserControl
         _downloader = new ZLibraryDownloader(modules);
         InitializeComponent();
         ResultsList.ItemsSource = _rows;
-        DetachedFromVisualTree += (_, _) => _lifetime.Cancel();
     }
 
     private void ShowStatus(string? text)
@@ -188,9 +187,17 @@ public partial class ZLibraryPage : UserControl
         _shell!.ShowSheet("书籍详情", new ZLibraryBookSheet(row, () => _ = DownloadAsync(row)));
     }
 
+    // The detail sheet can be closed and reopened mid-download; one transfer per book.
+    private readonly HashSet<ZLibraryRow> _downloading = [];
+
     private async Task DownloadAsync(ZLibraryRow row)
     {
         var sheet = _shell!.CurrentSheet as ZLibraryBookSheet;
+        if (!_downloading.Add(row))
+        {
+            sheet?.ShowStatus(row.State);
+            return;
+        }
         try
         {
             if (await _downloader!.FindInLibraryAsync(row.Book, _lifetime.Token) is { } existing)
@@ -226,6 +233,7 @@ public partial class ZLibraryPage : UserControl
         }
         finally
         {
+            _downloading.Remove(row);
             sheet?.SetBusy(false);
         }
     }
@@ -233,4 +241,7 @@ public partial class ZLibraryPage : UserControl
     private void OnAccountClick(object? sender, RoutedEventArgs e) => _shell?.OpenZLibraryAccount();
 
     private void OnBackClick(object? sender, RoutedEventArgs e) => _shell?.GoBack();
+
+    /// <summary>Pushed pages only detach this one; work ends when it leaves history.</summary>
+    public void OnClosed() => _lifetime.Cancel();
 }

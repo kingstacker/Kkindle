@@ -198,28 +198,98 @@ internal sealed class MtpDeviceSession : IDisposable
         };
     }
 
-    public void Download(MtpEntry entry, string destinationPath, Action<long, long>? progress = null)
+    public void Download(
+        MtpEntry entry,
+        string destinationPath,
+        Action<long, long>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        cancellationToken.ThrowIfCancellationRequested();
         if (entry.IsFolder) throw new InvalidOperationException("不能直接下载文件夹。");
-        LibMtp.ProgressCallback? callback = progress is null
-            ? null
-            : (sent, total, _) =>
-            {
-                progress((long)sent, (long)total);
-                return 0;
-            };
-        var result = LibMtp.LIBMTP_Get_File_To_File(_device, entry.ItemId, destinationPath, callback, IntPtr.Zero);
-        if (result < 0) Throw($"无法从设备读取 {entry.RelativePath}");
+        ClearErrors();
+        // Always install a callback: libmtp calls it periodically, and a
+        // non-zero return aborts an in-flight transfer. Without the callback
+        // cancellation could only take effect after the whole file moved.
+        LibMtp.ProgressCallback callback = (sent, total, _) =>
+        {
+            if (cancellationToken.IsCancellationRequested) return -1;
+            progress?.Invoke((long)sent, (long)total);
+            return 0;
+        };
+        var result = LibMtp.LIBMTP_Get_File_To_File(
+            _device,
+            entry.ItemId,
+            destinationPath,
+            callback,
+            IntPtr.Zero);
+        if (result >= 0) return;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            try { File.Delete(destinationPath); } catch { }
+            ClearErrors();
+            throw new OperationCanceledException(cancellationToken);
+        }
+        Throw($"无法从设备读取 {entry.RelativePath}");
     }
 
-    public MtpEntry Upload(string relativeDirectory, string sourcePath, string fileName, Action<long, long>? progress = null)
+    /// <summary>
+    /// Uploads <paramref name="sourcePath"/> as <paramref name="fileName"/>.
+    /// An existing file with that name is replaced only after the new bytes
+    /// are fully on the device: the upload goes to a temporary name first, so
+    /// a failed or cancelled transfer leaves the original untouched.
+    /// </summary>
+    public MtpEntry Upload(
+        string relativeDirectory,
+        string sourcePath,
+        string fileName,
+        Action<long, long>? progress = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var directory = EnsureDirectory(relativeDirectory);
-        var existing = Children(directory.StorageId, directory.ItemId, directory.RelativePath)
-            .FirstOrDefault(entry => !entry.IsFolder && entry.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null) Delete(existing);
+        var existing = FindChild(directory, fileName);
+        if (existing is null)
+            return UploadNew(directory, sourcePath, fileName, progress, cancellationToken);
 
+        // The suffix is not a Kindle book extension, so the device never
+        // indexes the staged copy.
+        var temporaryName = $"{fileName}.kkindle-part-{Guid.NewGuid().ToString("N")[..8]}";
+        var staged = UploadNew(directory, sourcePath, temporaryName, progress, cancellationToken);
+        Delete(existing);
+        ClearErrors();
+        if (LibMtp.LIBMTP_Set_Object_Filename(_device, staged.ItemId, fileName) == 0)
+        {
+            Invalidate(directory.StorageId, directory.ItemId);
+            var renamed = FindChild(directory, fileName);
+            if (renamed is not null && renamed.ItemId == staged.ItemId) return renamed;
+        }
+
+        // Firmware without ObjectFileName write support: the verified staged
+        // copy keeps the content safe while the final name is written again.
+        Invalidate(directory.StorageId, directory.ItemId);
+        var installed = UploadNew(directory, sourcePath, fileName, null, CancellationToken.None);
+        if (FindChild(directory, temporaryName) is { } leftover)
+        {
+            try { Delete(leftover); }
+            catch (IOException) { }
+        }
+        return installed;
+    }
+
+    private MtpEntry? FindChild(MtpEntry directory, string fileName) =>
+        Children(directory.StorageId, directory.ItemId, directory.RelativePath)
+            .FirstOrDefault(entry => !entry.IsFolder && entry.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+
+    private MtpEntry UploadNew(
+        MtpEntry directory,
+        string sourcePath,
+        string fileName,
+        Action<long, long>? progress,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ClearErrors();
         var size = new FileInfo(sourcePath).Length;
         var file = LibMtp.LIBMTP_new_file_t();
         if (file == IntPtr.Zero) throw new IOException("无法创建设备文件结构。");
@@ -239,15 +309,40 @@ internal sealed class MtpDeviceSession : IDisposable
                 Next = IntPtr.Zero
             };
             Marshal.StructureToPtr(info, file, false);
-            LibMtp.ProgressCallback? callback = progress is null
-                ? null
-                : (sent, total, _) =>
+            LibMtp.ProgressCallback callback = (sent, total, _) =>
+            {
+                if (cancellationToken.IsCancellationRequested) return -1;
+                progress?.Invoke((long)sent, (long)total);
+                return 0;
+            };
+            var result = LibMtp.LIBMTP_Send_File_From_File(
+                _device,
+                sourcePath,
+                file,
+                callback,
+                IntPtr.Zero);
+            if (result < 0)
+            {
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    progress((long)sent, (long)total);
-                    return 0;
-                };
-            var result = LibMtp.LIBMTP_Send_File_From_File(_device, sourcePath, file, callback, IntPtr.Zero);
-            if (result < 0) Throw($"无法写入设备文件 {fileName}");
+                    // libmtp may have created a partial object before the
+                    // callback aborted the transfer. Remove it so a retry does
+                    // not leave an unreadable half-book on the device.
+                    Invalidate(directory.StorageId, directory.ItemId);
+                    try
+                    {
+                        if (FindChild(directory, fileName) is { } partial) Delete(partial);
+                    }
+                    catch (Exception cleanupFailure) when (cleanupFailure is IOException or InvalidOperationException)
+                    {
+                        // The transfer already failed; a cleanup failure must
+                        // not hide the cancellation.
+                    }
+                    ClearErrors();
+                    throw new OperationCanceledException(cancellationToken);
+                }
+                Throw($"无法写入设备文件 {fileName}");
+            }
         }
         finally
         {
@@ -255,8 +350,7 @@ internal sealed class MtpDeviceSession : IDisposable
         }
 
         Invalidate(directory.StorageId, directory.ItemId);
-        var uploaded = Children(directory.StorageId, directory.ItemId, directory.RelativePath)
-            .FirstOrDefault(entry => !entry.IsFolder && entry.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+        var uploaded = FindChild(directory, fileName);
         if (uploaded is null)
             throw new IOException($"设备未确认写入文件 {fileName}");
         // Some firmware reports 0 until the object is re-read; only a known,
@@ -269,6 +363,7 @@ internal sealed class MtpDeviceSession : IDisposable
     public void Delete(MtpEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        ClearErrors();
         if (LibMtp.LIBMTP_Delete_Object(_device, entry.ItemId) != 0)
             Throw($"无法删除设备文件 {entry.RelativePath}");
         Invalidate(entry.StorageId, entry.ParentId);
@@ -385,9 +480,14 @@ internal sealed class MtpDeviceSession : IDisposable
     private void Throw(string message)
     {
         var errors = LibMtp.ReadErrorStack(_device);
+        ClearErrors();
         var detail = errors.Count == 0 ? string.Empty : $" ({string.Join("; ", errors)})";
         throw new IOException(message + detail);
     }
+
+    // libmtp appends to a per-device error stack and never clears it; without
+    // this, a later failure would also report every earlier, unrelated error.
+    private void ClearErrors() => LibMtp.LIBMTP_Clear_Errorstack(_device);
 
     private static string[] Split(string? relativePath) =>
         (relativePath ?? string.Empty)

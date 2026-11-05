@@ -49,8 +49,21 @@ internal static class Program
         {
             if (!MacOSSingleInstanceGuard.TryAcquire(out instanceLock))
             {
-                if (!MacOSInstanceActivationServer.RequestActivate())
-                    ActivateWithLaunchServices();
+                // Files passed on the command line belong to the running
+                // instance, so forward them with the activation request.
+                var requestedFiles = args
+                    .Where(argument => !argument.StartsWith('-') && File.Exists(argument))
+                    .ToArray();
+                // The primary instance takes the lock a moment before it binds
+                // the socket, so retry briefly before falling back.
+                var activated = false;
+                for (var attempt = 0; attempt < 20 && !activated; attempt++)
+                {
+                    activated = MacOSInstanceActivationServer.RequestActivate(requestedFiles);
+                    if (!activated) Thread.Sleep(100);
+                }
+                if (!activated)
+                    ActivateWithLaunchServices(requestedFiles);
                 instanceLock?.Dispose();
                 return;
             }
@@ -72,7 +85,10 @@ internal static class Program
         AppBuilder.Configure(() => new Kkindle.App(BuildServices()) { Name = "Kkindle" })
             .UsePlatformDetect()
             .WithInterFont()
-            .LogToTrace();
+            .LogToTrace()
+            // Activation requests from a second launch may arrive before the
+            // UI thread exists; they wait for this signal before dispatching.
+            .AfterSetup(_ => MacOSInstanceActivationServer.SignalUiReady());
 
     private static AppServices BuildServices()
     {
@@ -88,7 +104,7 @@ internal static class Program
         var mtp = new MtpKindleDeviceService(paths, metadata);
         // Read-aloud uses the same Microsoft Edge TTS service as the Windows
         // and Linux heads. The Python dependency is installed into Kkindle's
-        // own data directory on first use; afplay ships with macOS.
+        // own data directory on first use; playback uses the system AVFoundation.
         var ttsEngine = new EdgeTtsEngine(
             executablePath: TtsRuntimePaths.PreferredEdgeTtsPath(paths));
         var ttsPlayer = new MacOSTtsAudioPlayer();
@@ -113,7 +129,12 @@ internal static class Program
             RootConfigurationDirectory: configurationDirectory);
     }
 
-    private static void ActivateWithLaunchServices()
+    /// <summary>
+    /// Fallback when the activation socket is unreachable. LaunchServices
+    /// forwards the files to the running instance as an open-documents event,
+    /// so they are not lost.
+    /// </summary>
+    private static void ActivateWithLaunchServices(IReadOnlyList<string> files)
     {
         if (MacOSAppUpdateInstaller.BundlePath is not { } bundle) return;
         try
@@ -125,6 +146,7 @@ internal static class Program
             };
             info.ArgumentList.Add("-a");
             info.ArgumentList.Add(bundle);
+            foreach (var file in files) info.ArgumentList.Add(Path.GetFullPath(file));
             using var process = Process.Start(info);
         }
         catch
@@ -137,9 +159,13 @@ internal static class Program
     {
         var payload = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] {kind}{Environment.NewLine}{exception}{Environment.NewLine}{Environment.NewLine}";
         var targets = new List<string>();
+        // Never write inside Kkindle.app: an extra file in the sealed
+        // Contents/MacOS directory breaks the bundle's code signature. Loose
+        // Debug executables keep the log next to the binary.
         try
         {
-            targets.Add(Path.Combine(AppContext.BaseDirectory, "kkindle-crash.log"));
+            if (!AppContext.BaseDirectory.Contains(".app/Contents/", StringComparison.Ordinal))
+                targets.Add(Path.Combine(AppContext.BaseDirectory, "kkindle-crash.log"));
         }
         catch
         {

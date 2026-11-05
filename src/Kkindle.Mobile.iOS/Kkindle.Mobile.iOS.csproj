@@ -25,12 +25,23 @@
          AvaloniaResource alone embeds it in an assembly, not in the app bundle. -->
     <BundleResource Include="..\Kkindle.App\Assets\Fonts\KingHwaOldSong-v3.0.ttf"
                     LogicalName="Assets/Fonts/KingHwaOldSong-v3.0.ttf" />
+    <!-- iOS has no readable system font directory; bundle the symbol/emoji
+         fallbacks so missing glyphs do not become .notdef boxes on device. -->
+    <BundleResource Include="..\Kkindle.App\Assets\Fonts\NotoEmoji.ttf"
+                    LogicalName="Assets/Fonts/NotoEmoji.ttf" />
+    <BundleResource Include="..\Kkindle.App\Assets\Fonts\NotoSansSymbols2-Regular.ttf"
+                    LogicalName="Assets/Fonts/NotoSansSymbols2-Regular.ttf" />
+    <!-- OFL 1.1 requires the license text to travel with the fonts. -->
+    <BundleResource Include="..\Kkindle.App\Assets\Fonts\NotoEmoji-LICENSE.txt"
+                    LogicalName="Assets/Fonts/NotoEmoji-LICENSE.txt" />
+    <BundleResource Include="..\Kkindle.App\Assets\Fonts\NotoSansSymbols2-LICENSE.txt"
+                    LogicalName="Assets/Fonts/NotoSansSymbols2-LICENSE.txt" />
     <ProjectReference Include="..\Kkindle.Mobile\Kkindle.Mobile.csproj" />
     <PackageReference Include="Avalonia.iOS" Version="12.1.1" />
     <!-- Local embeddings back the desktop AI features. The managed assembly is
          referenced by Kkindle.Infrastructure, so its native framework must be
          linked here even though the phone app does not expose AI yet. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" ExcludeAssets="native" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" ExcludeAssets="native" />
     <!-- PDFium matches the Android head so PDF reading and text selection work
          on both platforms. -->
     <PackageReference Include="bblanchon.PDFium.iOS" Version="152.0.7961" />

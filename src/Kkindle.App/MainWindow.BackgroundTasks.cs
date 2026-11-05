@@ -1,5 +1,7 @@
 using System.Runtime.ExceptionServices;
 using Avalonia;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -13,8 +15,10 @@ public partial class MainWindow
     private BackgroundTaskCenterService? _backgroundTasks;
     private Flyout? _backgroundTaskFlyout;
     private StackPanel? _backgroundTaskRows;
-    private TextBlock? _backgroundTaskHeading;
-    private Button? _clearCompletedTasksButton;
+    private Button? _taskHistoryMenuButton;
+    private TextBlock? _backgroundTaskCountText;
+    private MenuItem? _deleteAllTaskRecordsItem;
+    private MenuItem? _clearCompletedTaskRecordsItem;
     private TextBlock? _taskHistoryTooltipText;
     private DispatcherTimer? _taskHistoryAnimation;
     private readonly Avalonia.Media.RotateTransform _taskHistoryRotation = new();
@@ -31,6 +35,9 @@ public partial class MainWindow
     private bool _genericTaskActive;
     private bool _progressSubscriptionsAdded;
     private readonly HashSet<Guid> _displayOnlyTaskIds = [];
+    private readonly Dictionary<Guid, Border> _backgroundTaskRowById = [];
+    private bool _taskRecordClearRunning;
+    private int _activeTaskRowAnimations;
 
     private void BeginGenericTaskRecord()
     {
@@ -295,23 +302,74 @@ public partial class MainWindow
         if (_backgroundTaskFlyout is null)
         {
             _backgroundTaskRows = new StackPanel { Spacing = 0 };
-            _backgroundTaskHeading = new TextBlock
+            _backgroundTaskCountText = new TextBlock
             {
-                FontSize = 14, FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                FontSize = 12,
+                Foreground = AppAppearanceResources.GetBrush("MutedInkBrush"),
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
             };
-            _clearCompletedTasksButton = new Button
+            var title = new TextBlock
             {
-                Classes = { "eject" }, Width = 108, Height = 30,
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
+                Text = T("任务记录"), FontSize = 15,
+                FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
             };
-            _clearCompletedTasksButton.Click += async (_, _) => await BackgroundTasks.ClearCompletedAsync();
+            var titleGroup = new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                Spacing = 6,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Children = { title, _backgroundTaskCountText }
+            };
+
+            _deleteAllTaskRecordsItem = new MenuItem
+            {
+                Header = T("删除全部记录"),
+                Icon = CreateTaskMenuIcon(
+                    "M 2,4 L 14,4 M 6,4 L 6,2 L 10,2 L 10,4 M 4,4 L 5,14 L 11,14 L 12,4 M 7,6 L 7,12 M 9,6 L 9,12")
+            };
+            _deleteAllTaskRecordsItem.Click += async (_, _) => await ClearTaskRecordsAsync(onlyCompleted: false);
+            _clearCompletedTaskRecordsItem = new MenuItem
+            {
+                Header = T("清空已完成"),
+                Icon = CreateTaskMenuIcon("M 3,8 L 6,11 L 13,4")
+            };
+            _clearCompletedTaskRecordsItem.Click += async (_, _) => await ClearTaskRecordsAsync(onlyCompleted: true);
+            var menu = new MenuFlyout();
+            menu.Items.Add(_deleteAllTaskRecordsItem);
+            menu.Items.Add(_clearCompletedTaskRecordsItem);
+
+            _taskHistoryMenuButton = new Button
+            {
+                Classes = { "eject" },
+                Width = 30, MinWidth = 30, Height = 26, MinHeight = 26,
+                Padding = new Thickness(0),
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Content = new TextBlock
+                {
+                    Text = "…", FontSize = 18, LineHeight = 14,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+                }
+            };
+            var menuButton = _taskHistoryMenuButton;
+            menuButton.Click += (_, _) => menu.ShowAt(menuButton);
+
+            var clockIcon = CreateTaskHistoryIcon("M 8,2 A 6,6 0 1 1 7.99,2 M 8,4 L 8,8 L 11,10", 16);
+            clockIcon.Stroke = AppAppearanceResources.GetBrush("InkBrush");
             var header = new Grid
             {
-                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
-                Children = { _backgroundTaskHeading, _clearCompletedTasksButton }
+                ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+                ColumnSpacing = 8,
+                Children =
+                {
+                    clockIcon,
+                    titleGroup,
+                    _taskHistoryMenuButton
+                }
             };
-            Grid.SetColumn(_clearCompletedTasksButton, 1);
+            Grid.SetColumn(titleGroup, 1);
+            Grid.SetColumn(_taskHistoryMenuButton, 2);
             var content = new StackPanel
             {
                 Spacing = 0,
@@ -324,7 +382,11 @@ public partial class MainWindow
                         BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"),
                         Child = header
                     },
-                    new ScrollViewer { Content = _backgroundTaskRows, MaxHeight = Math.Clamp(Bounds.Height - 200, 160, 460) }
+                    new ScrollViewer
+                    {
+                        Content = _backgroundTaskRows,
+                        MaxHeight = Math.Clamp(Bounds.Height - 200, 160, 460)
+                    }
                 }
             };
             _backgroundTaskFlyout = new Flyout
@@ -364,17 +426,14 @@ public partial class MainWindow
     private void RefreshBackgroundTaskRows()
     {
         if (_backgroundTaskRows is null) return;
+        // A status update can arrive while rows are animating out. Rebuilding
+        // now would replace those rows, so defer the refresh until the clear
+        // operation has finished and the removals have been persisted.
+        if (_activeTaskRowAnimations > 0 || _taskRecordClearRunning) return;
         _backgroundTaskRows.Children.Clear();
+        _backgroundTaskRowById.Clear();
         var tasks = BackgroundTasks.GetSnapshot();
-        if (_backgroundTaskHeading is not null)
-            _backgroundTaskHeading.Text = T("任务记录");
-        if (_clearCompletedTasksButton is not null)
-        {
-            _clearCompletedTasksButton.Content = T("清除已结束");
-            _clearCompletedTasksButton.IsEnabled = tasks.Any(task =>
-                task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued));
-            ToolTip.SetTip(_clearCompletedTasksButton, T("清除已结束的任务记录"));
-        }
+        UpdateTaskHistoryHeader();
         if (tasks.Count == 0) _backgroundTaskRows.Children.Add(new TextBlock
         {
             Text = T("暂无任务记录。"), FontSize = 13,
@@ -439,8 +498,15 @@ public partial class MainWindow
                     {
                         if (isTransferTask) RequestTransferStop();
                         else BackgroundTasks.Cancel(task.Id);
+                        return;
                     }
-                    else await BackgroundTasks.RemoveCompletedAsync(task.Id);
+
+                    if (_taskRecordClearRunning || _activeTaskRowAnimations > 0) return;
+                    delete.IsEnabled = false;
+                    if (_backgroundTaskRowById.TryGetValue(task.Id, out var row))
+                        await AnimateTaskRowSlideOutAsync(row, TimeSpan.Zero);
+                    await BackgroundTasks.RemoveCompletedAsync(task.Id);
+                    RefreshBackgroundTaskRows();
                 };
                 Grid.SetColumn(delete, 4);
                 heading.Children.Add(delete);
@@ -478,17 +544,149 @@ public partial class MainWindow
                 Grid.SetColumn(retry, 3);
                 heading.Children.Add(retry);
             }
-            _backgroundTaskRows.Children.Add(new Border
+            var rowBorder = new Border
             {
+                Classes = { "taskHistoryRow" },
                 Padding = new Thickness(12, 7), BorderThickness = new Thickness(0, 0, 0, 1),
                 BorderBrush = AppAppearanceResources.GetBrush("HairlineBrush"), Child = row
-            });
+            };
+            _backgroundTaskRowById[task.Id] = rowBorder;
+            _backgroundTaskRows.Children.Add(rowBorder);
         }
     }
 
-    private static Avalonia.Controls.Shapes.Path CreateTaskHistoryIcon(string geometry) => new()
+    private void UpdateTaskHistoryHeader()
     {
-        Width = 12, Height = 12, Stretch = Avalonia.Media.Stretch.Uniform,
+        var tasks = BackgroundTasks.GetSnapshot();
+        var hasFinished = tasks.Any(task =>
+            task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued));
+        var hasSucceeded = tasks.Any(task => task.Status == BackgroundTaskStatus.Succeeded);
+
+        if (_backgroundTaskCountText is not null)
+            _backgroundTaskCountText.Text = tasks.Count > 0
+                ? T("· {0} 项", tasks.Count)
+                : string.Empty;
+        if (_deleteAllTaskRecordsItem is not null)
+        {
+            _deleteAllTaskRecordsItem.Header = T("删除全部记录");
+            _deleteAllTaskRecordsItem.IsEnabled = !_taskRecordClearRunning && hasFinished;
+        }
+        if (_clearCompletedTaskRecordsItem is not null)
+        {
+            _clearCompletedTaskRecordsItem.Header = T("清空已完成");
+            _clearCompletedTaskRecordsItem.IsEnabled = !_taskRecordClearRunning && hasSucceeded;
+        }
+        if (_taskHistoryMenuButton is not null)
+        {
+            _taskHistoryMenuButton.IsEnabled = !_taskRecordClearRunning;
+            ToolTip.SetTip(_taskHistoryMenuButton, T("更多"));
+            Avalonia.Automation.AutomationProperties.SetName(_taskHistoryMenuButton, T("更多"));
+        }
+    }
+
+    /// <summary>
+    /// Removes finished records. Every affected row starts sliding to the
+    /// right immediately, with a small per-row delay so the first row leads
+    /// and the next ones follow; only after all animations finish are the
+    /// entries removed from the service.
+    /// </summary>
+    private async Task ClearTaskRecordsAsync(bool onlyCompleted)
+    {
+        if (_taskRecordClearRunning) return;
+        var targets = BackgroundTasks.GetSnapshot()
+            .Where(task => task.Status is not (BackgroundTaskStatus.Running or BackgroundTaskStatus.Queued)
+                && (!onlyCompleted || task.Status == BackgroundTaskStatus.Succeeded))
+            .ToArray();
+        if (targets.Length == 0) return;
+
+        _taskRecordClearRunning = true;
+        UpdateTaskHistoryHeader();
+        try
+        {
+            var animations = new List<Task>(targets.Length);
+            for (var index = 0; index < targets.Length; index++)
+            {
+                if (!_backgroundTaskRowById.TryGetValue(targets[index].Id, out var row)) continue;
+                animations.Add(AnimateTaskRowSlideOutAsync(
+                    row,
+                    TimeSpan.FromMilliseconds(Math.Min(45 * index, 600))));
+            }
+
+            await Task.WhenAll(animations);
+            if (onlyCompleted)
+            {
+                foreach (var target in targets)
+                    await BackgroundTasks.RemoveCompletedAsync(target.Id);
+            }
+            else
+            {
+                await BackgroundTasks.ClearCompletedAsync();
+            }
+        }
+        finally
+        {
+            _taskRecordClearRunning = false;
+            RefreshBackgroundTaskRows();
+        }
+    }
+
+    /// <summary>
+    /// Slides one row clearly out to the right and fades it near the end of the
+    /// movement. Multiple rows can animate concurrently; the caller may stagger
+    /// their start delays to make the deletion read as a sequence.
+    /// </summary>
+    private async Task AnimateTaskRowSlideOutAsync(Border row, TimeSpan startDelay)
+    {
+        _activeTaskRowAnimations++;
+        try
+        {
+            if (startDelay > TimeSpan.Zero) await Task.Delay(startDelay);
+            var duration = TimeSpan.FromMilliseconds(220);
+            var transform = new Avalonia.Media.TranslateTransform();
+            row.RenderTransform = transform;
+            row.ClipToBounds = true;
+            row.Transitions = new Transitions
+            {
+                new DoubleTransition
+                {
+                    Property = Avalonia.Media.TranslateTransform.XProperty,
+                    Duration = duration,
+                    Easing = new CubicEaseIn()
+                },
+                new DoubleTransition
+                {
+                    Property = Visual.OpacityProperty,
+                    Duration = TimeSpan.FromMilliseconds(70),
+                    Delay = TimeSpan.FromMilliseconds(150),
+                    Easing = new CubicEaseIn()
+                }
+            };
+
+            transform.X = Math.Max(row.Bounds.Width, 200) + 24;
+            row.Opacity = 0;
+            await Task.Delay(duration + TimeSpan.FromMilliseconds(60));
+        }
+        finally
+        {
+            _activeTaskRowAnimations--;
+        }
+    }
+
+    /// <summary>
+    /// Menu-row icon: no local stroke, so the App.axaml
+    /// <c>Path.menuLineIcon</c> styles can invert it with the hover row.
+    /// </summary>
+    private static Avalonia.Controls.Shapes.Path CreateTaskMenuIcon(string geometry)
+    {
+        var icon = CreateTaskHistoryIcon(geometry, 13);
+        icon.ClearValue(Avalonia.Controls.Shapes.Shape.StrokeProperty);
+        icon.Classes.Add("menuLineIcon");
+        return icon;
+    }
+
+    private static Avalonia.Controls.Shapes.Path CreateTaskHistoryIcon(string geometry, double size = 12) => new()
+    {
+        Width = size, Height = size, Stretch = Avalonia.Media.Stretch.Uniform,
         Data = Avalonia.Media.Geometry.Parse(geometry),
         Stroke = AppAppearanceResources.GetBrush("MutedInkBrush"), StrokeThickness = 1,
         Fill = Avalonia.Media.Brushes.Transparent,

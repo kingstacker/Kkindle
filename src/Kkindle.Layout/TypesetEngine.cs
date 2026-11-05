@@ -464,7 +464,11 @@ public static class ChapterLayoutInteraction
                 top + Math.Max(2f, advance));
         }
 
-        var x0 = run.OriginX + run.X[glyphIndex];
+        var inkShift = run.InkShiftX is { } shifts && glyphIndex < shifts.Length
+            ? shifts[glyphIndex]
+            : 0f;
+        var localX = run.X[glyphIndex] + inkShift;
+        var x0 = run.OriginX + localX;
         var y0 = run.OriginY + (glyphIndex < run.Y.Length ? run.Y[glyphIndex] : 0f);
         if (page.WritingMode == TypesetWritingMode.VerticalRl)
         {
@@ -477,10 +481,19 @@ public static class ChapterLayoutInteraction
                 y0 + size * 0.12f);
         }
 
+        var nextShift = nextIndex < run.X.Length && run.InkShiftX is { } nextShifts
+            && nextIndex < nextShifts.Length
+            ? nextShifts[nextIndex]
+            : 0f;
         var width = nextIndex < run.X.Length
-            ? run.X[nextIndex] - run.X[glyphIndex]
-            : Math.Max(2f, run.FlowAdvance - run.X[glyphIndex]);
-        return new SKRect(x0, y0 - size * 0.9f, x0 + Math.Max(2f, width), y0 + size * 0.24f);
+            ? run.X[nextIndex] + nextShift - localX
+            : Math.Max(2f, run.FlowAdvance - localX);
+        // Use the run's real ascent/descent when available so selection bands
+        // cover the painted glyphs; fall back to the old size ratios for runs
+        // produced before metrics were stored (for example PDF hosts).
+        var inkTop = run.OriginY - (run.Ascent > 0f ? run.Ascent : size * 0.9f);
+        var inkBottom = run.OriginY + (run.Descent > 0f ? run.Descent : size * 0.24f);
+        return new SKRect(x0, inkTop, x0 + Math.Max(2f, width), inkBottom);
     }
 
     private static float DistanceToRect(SKPoint point, SKRect rect)

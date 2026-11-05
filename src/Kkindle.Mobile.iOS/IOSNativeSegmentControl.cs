@@ -33,7 +33,8 @@ internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmen
     protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
     {
         var effect = UIGlassEffect.Create(UIGlassEffectStyle.Regular);
-        effect.Interactive = true;
+        // Keep the track's glass appearance stable while a segment is pressed.
+        effect.Interactive = false;
         _glass = new UIVisualEffectView(effect);
         _glass.Layer.CornerRadius = 18;
         _glass.ClipsToBounds = true;

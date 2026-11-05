@@ -51,7 +51,8 @@ internal static class AppAppearanceResources
             resources[key] = palette.Accent;
 
         Brushes(palette.Paper,
-            "MenuFlyoutPresenterBackground", "MenuFlyoutItemBackground", "ComboBoxItemBackground",
+            "MenuFlyoutPresenterBackground", "MenuFlyoutItemBackground", "MenuFlyoutItemBackgroundDisabled",
+            "ComboBoxItemBackground",
             "ComboBoxBackground", "ComboBoxBackgroundPointerOver", "ComboBoxBackgroundPressed",
             "ComboBoxBackgroundUnfocused", "ComboBoxDropDownBackground",
             "TextControlBackground", "TextControlBackgroundFocused", "TextControlBackgroundPointerOver");
@@ -83,7 +84,7 @@ internal static class AppAppearanceResources
             "KkindleScrollBarArrowPointerOverBrush", "KkindleScrollBarArrowPressedBrush");
         Brushes(palette.Pressed, "MenuFlyoutItemBackgroundPressed", "ComboBoxItemBackgroundPressed");
         Brushes(palette.Hover,
-            "MenuFlyoutItemBackgroundDisabled", "ComboBoxItemBackgroundDisabled", "ComboBoxItemBackgroundSelectedDisabled",
+            "ComboBoxItemBackgroundDisabled", "ComboBoxItemBackgroundSelectedDisabled",
             "ComboBoxBackgroundDisabled", "TextControlBackgroundDisabled");
         Brushes(palette.Muted,
             "MenuFlyoutItemForegroundDisabled", "MenuFlyoutSubItemChevronDisabled", "MenuFlyoutItemKeyboardAcceleratorTextForegroundDisabled",

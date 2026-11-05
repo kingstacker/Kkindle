@@ -34,6 +34,8 @@ public sealed class ZLibraryDownloader(ApplicationModules modules)
         IProgress<TransferProgress>? progress,
         CancellationToken cancellationToken)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation()
+            ?? throw new InvalidOperationException("数据恢复期间无法下载书籍。");
         await EnsureLoggedInAsync(cancellationToken);
         var downloads = Path.Combine(modules.Paths.Data, "downloads");
         var downloaded = await Service.DownloadAsync(source, downloads, progress, cancellationToken);

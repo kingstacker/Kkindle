@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Platform;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Kkindle.ApplicationServices;
@@ -16,12 +17,14 @@ namespace Kkindle.Mobile.Views;
 /// desktop app and runs the same sync, including deletion confirmation, so a
 /// phone joins an existing bucket as just another device.
 /// </summary>
-public partial class SyncSettingsPage : UserControl
+public partial class SyncSettingsPage : UserControl, IShellPage
 {
     private readonly ApplicationModules? _modules;
     private readonly MobileShell? _shell;
     private readonly CancellationTokenSource _lifetime = new();
     private S3SyncStoredSettings? _stored;
+    // Includes imported fields that have no mobile form control, without saving the draft.
+    private S3SyncSettings? _draftSettings;
     private SyncProvider _provider;
     private IInputPane? _inputPane;
     private bool _busy;
@@ -42,6 +45,8 @@ public partial class SyncSettingsPage : UserControl
 
     private async void OnLoaded(object? sender, RoutedEventArgs e)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         _inputPane = TopLevel.GetTopLevel(this)?.InputPane;
         if (_inputPane is not null) _inputPane.StateChanged += OnInputPaneChanged;
         try
@@ -49,6 +54,7 @@ public partial class SyncSettingsPage : UserControl
             await _modules!.Library.Books.InitializeAsync(_lifetime.Token);
             await _shell!.EnsureReaderDataAsync();
             _stored = await _modules.Sync.Service.LoadSettingsAsync(_lifetime.Token);
+            _draftSettings = _stored.Settings;
             Present(_stored.Settings);
             await PresentLastSyncAsync();
         }
@@ -82,8 +88,8 @@ public partial class SyncSettingsPage : UserControl
         EncryptionKeyBox.Text = settings.EncryptionKey;
     }
 
-    /// <summary>Fields without a control here (timeouts, WebDAV) keep their stored values.</summary>
-    private S3SyncSettings ReadSettings() => S3SyncSettings.Normalize(_stored!.Settings with
+    /// <summary>Fields without a control retain their current draft values.</summary>
+    private S3SyncSettings ReadSettings() => S3SyncSettings.Normalize(_draftSettings! with
     {
         Provider = _provider,
         WebDavEndpoint = WebDavEndpointBox.Text ?? string.Empty,
@@ -142,6 +148,7 @@ public partial class SyncSettingsPage : UserControl
     {
         await _modules!.Sync.Service.SaveSettingsAsync(_stored!.DeviceId, settings, _lifetime.Token);
         _stored = new S3SyncStoredSettings(_stored.DeviceId, settings);
+        _draftSettings = settings;
         return true;
     }
 
@@ -156,6 +163,8 @@ public partial class SyncSettingsPage : UserControl
             return;
         }
 
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) { ShowStatus("正在恢复数据，请稍后重试。"); return; }
         SetBusy(true);
         try
         {
@@ -173,6 +182,109 @@ public partial class SyncSettingsPage : UserControl
         }
         finally
         {
+            SetBusy(false);
+        }
+    }
+
+    private async void OnImportProfileClick(object? sender, RoutedEventArgs e)
+    {
+        if (_stored is null || _shell is null || _busy) return;
+        SetBusy(true);
+        IReadOnlyList<string> files = [];
+        try
+        {
+            files = await _shell.Services.ImportSource.PickFilesAsync(_lifetime.Token);
+            if (files.Count == 0) return;
+            if (files.Count != 1)
+            {
+                ShowStatus("请选择一个同步参数文件。");
+                return;
+            }
+
+            var imported = await SyncConnectionProfileService.ImportAsync(files[0], ReadSettings(), _lifetime.Token);
+            _draftSettings = imported;
+            Present(imported);
+            ShowStatus("参数已导入，请检查后点击保存。同步加密密钥保持本机原值。");
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowStatus("导入参数失败：" + UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            try { _shell.Services.ImportSource.ReleaseFiles(files); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                ShowStatus("清理临时文件失败：" + UiText.Localize(exception.Message));
+            }
+            SetBusy(false);
+        }
+    }
+
+    private async void OnExportProfileClick(object? sender, RoutedEventArgs e)
+    {
+        if (_stored is null || _shell is null || _busy) return;
+        var settings = ReadSettings();
+        SetBusy(true);
+        string? directory = null;
+        try
+        {
+            if (!await _shell.ConfirmAsync("导出连接参数", "参数文件会明文包含当前服务的账号和密码，请只保存或分享给信任的位置。同步加密密钥不会导出。", "继续导出"))
+                return;
+            _lifetime.Token.ThrowIfCancellationRequested();
+
+            var extension = SyncConnectionProfileService.FileExtension(settings.Provider);
+            var name = $"Kkindle-{(settings.Provider == SyncProvider.WebDav ? "WebDAV" : "S3")}-{DateTime.Now:yyyyMMdd-HHmmss}{extension}";
+            var share = _shell.Services.FileShare;
+            IStorageFile? destination = null;
+            if (share is null)
+            {
+                var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+                if (storage is null || !storage.CanSave)
+                    throw new InvalidOperationException("此设备不支持保存参数文件。");
+                destination = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = "导出同步参数",
+                    SuggestedFileName = name,
+                    FileTypeChoices = [new FilePickerFileType("Kkindle 同步参数") { Patterns = [$"*{extension}"] }]
+                });
+                if (destination is null) return;
+            }
+
+            directory = Path.Combine(Path.GetTempPath(), "kkindle-sync-profile-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, name);
+            await SyncConnectionProfileService.ExportAsync(path, settings, _lifetime.Token);
+            if (share is not null)
+                ShowStatus(await share.ShareFileAsync(path) ? "参数文件已导出。" : "已取消导出参数。");
+            else
+            {
+                await using var input = File.OpenRead(path);
+                await using var output = await destination!.OpenWriteAsync();
+                await input.CopyToAsync(output, _lifetime.Token);
+                ShowStatus("参数文件已导出。");
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowStatus("导出参数失败：" + UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            if (directory is not null)
+            {
+                try { Directory.Delete(directory, recursive: true); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    ShowStatus("含凭据的临时文件清理失败：" + UiText.Localize(exception.Message));
+                }
+            }
             SetBusy(false);
         }
     }
@@ -217,6 +329,8 @@ public partial class SyncSettingsPage : UserControl
             return;
         }
 
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) { ShowStatus("正在恢复数据，请稍后重试。"); return; }
         SetBusy(true);
         ShowStatus("正在同步…");
         try
@@ -231,7 +345,8 @@ public partial class SyncSettingsPage : UserControl
                     "确认同步删除",
                     UiText.Localize(exception.Message) + "\n\n继续后，这些删除会同步到其他设备。",
                     "同步这些删除"),
-                _lifetime.Token);
+                _lifetime.Token,
+                operation);
 
             ShowStatus(result is null ? "已取消，未同步删除。" : DescribeResult(result));
             await PresentLastSyncAsync();
@@ -318,8 +433,9 @@ public partial class SyncSettingsPage : UserControl
     {
         if (_inputPane is not null) _inputPane.StateChanged -= OnInputPaneChanged;
         _inputPane = null;
-        // Leaving cancels a running sync; the next sync resumes from the saved baseline.
-        _lifetime.Cancel();
         base.OnDetachedFromVisualTree(e);
     }
+
+    /// <summary>Leaving cancels a running sync; the next sync resumes from the saved baseline.</summary>
+    public void OnClosed() => _lifetime.Cancel();
 }

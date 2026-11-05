@@ -53,6 +53,8 @@ public partial class CollectionPage : UserControl
 
     private async Task ReloadAsync()
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             await _shell.EnsureReaderDataAsync();
@@ -156,6 +158,8 @@ public partial class CollectionPage : UserControl
 
     private async Task RemoveAsync(Book book)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         _shell.HideSheet();
         try
         {
@@ -185,6 +189,8 @@ public partial class CollectionPage : UserControl
 
     private async Task AddAsync(IReadOnlyList<Book> books)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             foreach (var book in books)

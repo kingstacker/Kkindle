@@ -1,39 +1,52 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Kkindle.Core;
 
 namespace Kkindle.Platform.MacOS;
 
 /// <summary>
-/// Plays cached MP3 files with the afplay tool that ships with macOS. Pause
-/// and resume suspend the child process with SIGSTOP/SIGCONT, matching the
-/// Linux backend's approach and keeping TTS free of extra dependencies.
+/// Plays cached MP3 files in-process with AVFoundation's <c>AVAudioPlayer</c>.
 /// </summary>
+/// <remarks>
+/// The previous backend ran <c>/usr/bin/afplay</c> and paused it with
+/// SIGSTOP/SIGCONT. While a child process was stopped, every other
+/// <c>Process.Start</c> in the app stalled until playback resumed (Keychain
+/// access via <c>security</c>, <c>diskutil</c> eject, edge-tts, updates), and a
+/// crash during a pause left a frozen afplay behind. Playing in-process avoids
+/// both: there is no child process to stop or orphan.
+/// All AVAudioPlayer calls are serialized under <see cref="_gate"/>.
+/// </remarks>
 public sealed class MacOSTtsAudioPlayer : ITtsAudioPlayer
 {
-    internal const string DefaultExecutable = "/usr/bin/afplay";
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly object _gate = new();
-    private Process? _process;
-    private TaskCompletionSource<object?>? _completion;
-    private bool _paused;
+    private Playback? _current;
     private bool _disposed;
+
+    private sealed class Playback(IntPtr player)
+    {
+        public IntPtr Player { get; } = player;
+        public TaskCompletionSource<object?> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Timer? Timer { get; set; }
+        public bool Paused { get; set; }
+    }
 
     public bool IsAvailable =>
         !_disposed
         && OperatingSystem.IsMacOS()
-        && ResolveExecutable() is not null;
+        && AVFoundation.IsAvailable;
 
     public string? UnavailableReason
         => OperatingSystem.IsMacOS()
-            ? "未找到 macOS 系统音频播放器 afplay。"
+            ? "无法加载 macOS 系统音频框架 AVFoundation。"
             : "macOS 音频播放器只能在 macOS 上使用。";
 
     public bool IsPaused
     {
         get
         {
-            lock (_gate) return _paused;
+            lock (_gate) return _current?.Paused == true;
         }
     }
 
@@ -45,8 +58,7 @@ public sealed class MacOSTtsAudioPlayer : ITtsAudioPlayer
         ArgumentException.ThrowIfNullOrWhiteSpace(audioPath);
         if (!OperatingSystem.IsMacOS())
             throw new PlatformNotSupportedException(UnavailableReason);
-        var executable = ResolveExecutable();
-        if (executable is null)
+        if (!AVFoundation.IsAvailable)
             throw new InvalidOperationException(UnavailableReason);
         if (!File.Exists(audioPath))
             throw new FileNotFoundException("TTS 音频文件不存在。", audioPath);
@@ -54,166 +66,203 @@ public sealed class MacOSTtsAudioPlayer : ITtsAudioPlayer
 
         Stop();
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        // afplay derives the decoder from the file extension, so the cached
-        // MP3 name is passed as-is.
-        startInfo.ArgumentList.Add(audioPath);
-        var process = new Process
-        {
-            StartInfo = startInfo,
-            EnableRaisingEvents = true,
-        };
-        var completion = new TaskCompletionSource<object?>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
+        Playback playback;
         lock (_gate)
         {
-            _process = process;
-            _completion = completion;
-            _paused = false;
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            playback = new Playback(AVFoundation.CreatePlayer(Path.GetFullPath(audioPath)));
+            _current = playback;
+            if (AVFoundation.Play(playback.Player))
+                playback.Timer = new Timer(_ => Poll(playback), null, PollInterval, PollInterval);
         }
 
-        process.Exited += (_, _) => Complete(process, null);
-        try
+        if (playback.Timer is null)
         {
-            if (!process.Start())
-                throw new InvalidOperationException("无法启动 macOS 音频播放器。");
-            if (process.HasExited)
-                Complete(process, null);
-        }
-        catch (Exception exception)
-        {
-            Complete(process, exception);
+            Finish(playback, new InvalidOperationException("无法开始播放 TTS 音频。"));
+            return playback.Completion.Task;
         }
 
-        CancellationTokenRegistration registration = default;
-        registration = cancellationToken.Register(() =>
-            Terminate(process, new OperationCanceledException(cancellationToken)));
-        _ = completion.Task.ContinueWith(
-            _ => registration.Dispose(),
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-        return completion.Task;
+        if (cancellationToken.CanBeCanceled)
+        {
+            var registration = cancellationToken.Register(() =>
+                Finish(playback, new OperationCanceledException(cancellationToken)));
+            _ = playback.Completion.Task.ContinueWith(
+                _ => registration.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        return playback.Completion.Task;
     }
 
     public void Pause()
     {
-        Process? process;
         lock (_gate)
         {
-            process = _process;
-            if (process is null || _paused) return;
-            _paused = true;
-        }
-
-        if (kill(process.Id, SigStop) != 0)
-        {
-            lock (_gate) _paused = false;
+            var playback = _current;
+            if (playback is null || playback.Paused) return;
+            AVFoundation.Pause(playback.Player);
+            playback.Paused = true;
         }
     }
 
     public void Resume()
     {
-        Process? process;
         lock (_gate)
         {
-            process = _process;
-            if (process is null || !_paused) return;
-            _paused = false;
-        }
-
-        if (kill(process.Id, SigContinue) != 0)
-        {
-            lock (_gate) _paused = true;
+            var playback = _current;
+            if (playback is null || !playback.Paused) return;
+            if (AVFoundation.Play(playback.Player))
+                playback.Paused = false;
         }
     }
 
     public void Stop()
     {
-        Process? process;
-        lock (_gate) process = _process;
-        if (process is null) return;
-        Terminate(process, new OperationCanceledException());
+        Playback? playback;
+        lock (_gate) playback = _current;
+        if (playback is not null)
+            Finish(playback, new OperationCanceledException());
     }
 
-    private void Terminate(Process process, Exception error)
+    private void Poll(Playback playback)
     {
-        try
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-        }
-        catch
-        {
-        }
-
-        Complete(process, error);
-    }
-
-    private void Complete(Process process, Exception? error)
-    {
-        TaskCompletionSource<object?>? completion;
         lock (_gate)
         {
-            if (!ReferenceEquals(_process, process)) return;
-            _process = null;
-            completion = _completion;
-            _completion = null;
-            _paused = false;
+            if (!ReferenceEquals(_current, playback) || playback.Paused) return;
+            if (AVFoundation.IsPlaying(playback.Player)) return;
         }
-
-        try { process.Dispose(); }
-        catch { }
-
-        if (completion is null) return;
-        if (error is OperationCanceledException)
-            completion.TrySetCanceled();
-        else if (error is not null)
-            completion.TrySetException(error);
-        else
-            completion.TrySetResult(null);
+        // Not paused and no longer playing: the segment reached its end.
+        Finish(playback, null);
     }
 
-    private static string? ResolveExecutable()
+    private void Finish(Playback playback, Exception? error)
     {
-        if (File.Exists(DefaultExecutable)) return DefaultExecutable;
-
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(pathValue)) return null;
-        foreach (var directory in pathValue.Split(
-                     Path.PathSeparator,
-                     StringSplitOptions.RemoveEmptyEntries))
+        lock (_gate)
         {
-            try
-            {
-                var candidate = Path.Combine(directory.Trim(), "afplay");
-                if (File.Exists(candidate)) return Path.GetFullPath(candidate);
-            }
-            catch
-            {
-            }
+            if (!ReferenceEquals(_current, playback)) return;
+            _current = null;
+            playback.Timer?.Dispose();
+            AVFoundation.StopAndRelease(playback.Player);
         }
 
-        return null;
+        if (error is OperationCanceledException)
+            playback.Completion.TrySetCanceled();
+        else if (error is not null)
+            playback.Completion.TrySetException(error);
+        else
+            playback.Completion.TrySetResult(null);
     }
-
-    [DllImport("libc", SetLastError = true)]
-    private static extern int kill(int processId, int signal);
-
-    // Darwin numbers signals differently from Linux (SIGSTOP is 17 here,
-    // SIGCONT is 19), so the constants cannot be shared.
-    private const int SigStop = 17;
-    private const int SigContinue = 19;
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         Stop();
+    }
+
+    /// <summary>Minimal Objective-C bridge to <c>AVAudioPlayer</c>.</summary>
+    private static class AVFoundation
+    {
+        private const string ObjC = "/usr/lib/libobjc.A.dylib";
+        private const string FrameworkPath = "/System/Library/Frameworks/AVFoundation.framework/AVFoundation";
+
+        private static readonly Lazy<bool> Loaded = new(() =>
+            OperatingSystem.IsMacOS()
+            && NativeLibrary.TryLoad(FrameworkPath, out _)
+            && objc_getClass("AVAudioPlayer") != IntPtr.Zero);
+
+        public static bool IsAvailable => Loaded.Value;
+
+        public static IntPtr CreatePlayer(string fullPath)
+        {
+            var pool = objc_autoreleasePoolPush();
+            try
+            {
+                var nsPath = SendStr(objc_getClass("NSString"), Sel("stringWithUTF8String:"), fullPath);
+                var url = SendPtr(objc_getClass("NSURL"), Sel("fileURLWithPath:"), nsPath);
+                var allocated = Send(objc_getClass("AVAudioPlayer"), Sel("alloc"));
+                var player = SendPtrError(allocated, Sel("initWithContentsOfURL:error:"), url, out var error);
+                if (player == IntPtr.Zero)
+                    throw new InvalidDataException($"无法读取 TTS 音频：{Describe(error)}");
+                SendBool(player, Sel("prepareToPlay"));
+                return player;
+            }
+            finally
+            {
+                objc_autoreleasePoolPop(pool);
+            }
+        }
+
+        public static bool Play(IntPtr player) => WithPool(() => SendBool(player, Sel("play")));
+
+        public static bool IsPlaying(IntPtr player) => WithPool(() => SendBool(player, Sel("isPlaying")));
+
+        public static void Pause(IntPtr player) => WithPool(() =>
+        {
+            SendVoid(player, Sel("pause"));
+            return true;
+        });
+
+        public static void StopAndRelease(IntPtr player) => WithPool(() =>
+        {
+            SendVoid(player, Sel("stop"));
+            SendVoid(player, Sel("release"));
+            return true;
+        });
+
+        private static T WithPool<T>(Func<T> action)
+        {
+            var pool = objc_autoreleasePoolPush();
+            try { return action(); }
+            finally { objc_autoreleasePoolPop(pool); }
+        }
+
+        private static string Describe(IntPtr error)
+        {
+            if (error == IntPtr.Zero) return "未知错误";
+            var text = Send(Send(error, Sel("localizedDescription")), Sel("UTF8String"));
+            return Marshal.PtrToStringUTF8(text) ?? "未知错误";
+        }
+
+        private static IntPtr Sel(string name) => sel_registerName(name);
+
+        [DllImport(ObjC, CharSet = CharSet.Ansi)]
+        private static extern IntPtr objc_getClass(string name);
+
+        [DllImport(ObjC, CharSet = CharSet.Ansi)]
+        private static extern IntPtr sel_registerName(string name);
+
+        [DllImport(ObjC)]
+        private static extern IntPtr objc_autoreleasePoolPush();
+
+        [DllImport(ObjC)]
+        private static extern void objc_autoreleasePoolPop(IntPtr pool);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        private static extern IntPtr Send(IntPtr receiver, IntPtr selector);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        private static extern IntPtr SendPtr(IntPtr receiver, IntPtr selector, IntPtr argument);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        private static extern IntPtr SendStr(
+            IntPtr receiver,
+            IntPtr selector,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string argument);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        private static extern IntPtr SendPtrError(
+            IntPtr receiver,
+            IntPtr selector,
+            IntPtr argument,
+            out IntPtr error);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        [return: MarshalAs(UnmanagedType.U1)]
+        private static extern bool SendBool(IntPtr receiver, IntPtr selector);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        private static extern void SendVoid(IntPtr receiver, IntPtr selector);
     }
 }

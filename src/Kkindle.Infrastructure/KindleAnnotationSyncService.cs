@@ -343,16 +343,21 @@ public sealed partial class KindleAnnotationSyncService
                 .OrderByDescending(candidate => candidate.ModifiedTime)
                 .FirstOrDefault();
             if (note is not null) consumedNotes.Add(note.AnnotationId);
-            var quote = context.RawText?.ExtractRange(highlight.Start, highlight.End) ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(quote)
-                && !highlight.AnnotationId.StartsWith("kkindle.highlight.", StringComparison.Ordinal))
+            var owned = highlight.AnnotationId.StartsWith("kkindle.highlight.", StringComparison.Ordinal);
+            var exclusiveEnd = context.RawText is not { } raw ? highlight.End
+                : owned ? raw.OwnedDeviceEndToExclusive(highlight.End)
+                : raw.DeviceEndToExclusive(highlight.End);
+            var quote = context.RawText?.ExtractRange(highlight.Start, exclusiveEnd) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(quote) && !owned)
             {
                 context.UnsupportedCount++;
                 context.DeviceUnsupportedCount++;
                 continue;
             }
             context.DeviceAnnotations.Add(new DeviceAnnotationPair(highlight, note, quote,
-                context.RawText?.ExtractLegacyRange(highlight.Start, highlight.End) ?? string.Empty));
+                context.RawText?.ExtractLegacyRange(highlight.Start, highlight.End) ?? string.Empty,
+                context.RawText?.ExtractRange(highlight.Start, highlight.End) ?? string.Empty,
+                exclusiveEnd));
         }
         var orphanNotes = notes.Count(note => !consumedNotes.Contains(note.AnnotationId));
         context.UnsupportedCount += orphanNotes;
@@ -372,9 +377,14 @@ public sealed partial class KindleAnnotationSyncService
                         && context.RawText.TryFindRange(annotation.SelectedText, annotation.Prefix, annotation.Suffix,
                     out var start, out var end)
                         && Math.Abs(start - device.Highlight.Start) <= 3
-                        && Math.Abs(end - device.Highlight.End) <= 3)
+                        && Math.Abs(end - device.ExclusiveEnd) <= 3)
                     || (!string.IsNullOrWhiteSpace(device.LegacyQuote)
                         && TextKey(annotation.SelectedText) == TextKey(device.LegacyQuote)
+                        && annotation.CreatedAt.ToUnixTimeMilliseconds() == device.Highlight.CreatedTime)
+                    // Imported before the closed Kindle end was honored: the quote
+                    // lost its last single-byte character. Same record, not a new one.
+                    || (!string.IsNullOrWhiteSpace(device.TruncatedQuote)
+                        && TextKey(annotation.SelectedText) == TextKey(device.TruncatedQuote)
                         && annotation.CreatedAt.ToUnixTimeMilliseconds() == device.Highlight.CreatedTime))).ToArray();
             if (candidates.Length > 1)
             {
@@ -488,7 +498,9 @@ public sealed partial class KindleAnnotationSyncService
         KindleAnnotationRecord Highlight,
         KindleAnnotationRecord? Note,
         string Quote,
-        string LegacyQuote = "")
+        string LegacyQuote = "",
+        string TruncatedQuote = "",
+        long ExclusiveEnd = 0)
     {
         public string NoteText => Note?.NoteText ?? string.Empty;
         public DateTimeOffset CreatedAt => DateTimeOffset.FromUnixTimeMilliseconds(
@@ -505,7 +517,8 @@ public sealed partial class KindleAnnotationSyncService
         ReaderAnnotation Local,
         DeviceAnnotationPair? ExistingDevice);
 
-    private sealed record DeviceAnchorRepair(DeviceAnnotationPair Device, Guid LocalId, long Start, long End);
+    /// <summary>Start and End are the highlight's corrected closed device range.</summary>
+    private sealed record DeviceAnchorRepair(DeviceAnnotationPair Device, Guid LocalId, long Start, long End, bool NoteOnly = false);
 
     private static ReaderAnnotation CloneAnnotation(ReaderAnnotation source) => new()
     {

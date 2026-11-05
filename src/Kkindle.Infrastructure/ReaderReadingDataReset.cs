@@ -100,6 +100,7 @@ public sealed partial class ReaderDataService
     /// </summary>
     public async Task ResetReadingDataAsync(CancellationToken cancellationToken = default)
     {
+        using var processLease = await AppDataProcessLock.AcquireAsync(_paths, cancellationToken);
         await _databaseGate.WaitAsync(cancellationToken);
         try
         {

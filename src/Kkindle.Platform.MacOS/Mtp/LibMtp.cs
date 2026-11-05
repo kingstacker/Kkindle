@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Kkindle.Platform.MacOS.Mtp;
@@ -21,8 +20,10 @@ internal static class LibMtp
 
     internal const int ErrorNone = 0;
 
-    [ModuleInitializer]
-    internal static void RegisterResolver() =>
+    // A static constructor runs before the first P/Invoke declared on this
+    // type, which is exactly when the bundled libmtp needs to be resolved.
+    // (CA2255 discourages [ModuleInitializer] in libraries.)
+    static LibMtp() =>
         NativeLibrary.SetDllImportResolver(typeof(LibMtp).Assembly, static (name, _, _) =>
         {
             if (name != LibraryName) return IntPtr.Zero;
@@ -131,7 +132,10 @@ internal static class LibMtp
     [DllImport(LibraryName)] internal static extern int LIBMTP_Delete_Object(IntPtr device, uint objectId);
     [DllImport(LibraryName)] internal static extern uint LIBMTP_Create_Folder(
         IntPtr device, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, uint parentId, uint storageId);
+    [DllImport(LibraryName)] internal static extern int LIBMTP_Set_Object_Filename(
+        IntPtr device, uint objectId, [MarshalAs(UnmanagedType.LPUTF8Str)] string newName);
     [DllImport(LibraryName)] internal static extern void LIBMTP_Dump_Errorstack(IntPtr device);
+    [DllImport(LibraryName)] internal static extern void LIBMTP_Clear_Errorstack(IntPtr device);
     [DllImport(LibraryName)] internal static extern void LIBMTP_FreeMemory(IntPtr memory);
 
     internal static string ToString(IntPtr value) =>

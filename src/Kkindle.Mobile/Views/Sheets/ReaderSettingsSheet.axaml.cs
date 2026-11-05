@@ -45,6 +45,8 @@ public partial class ReaderSettingsSheet : UserControl
         LineTight.Classes.Set("on", current.ReaderLineHeight <= TightLine);
         LineNormal.Classes.Set("on", current.ReaderLineHeight is > TightLine and < LooseLine);
         LineLoose.Classes.Set("on", current.ReaderLineHeight >= LooseLine);
+        DirectionHorizontal.Classes.Set("on", !current.ReaderVerticalWriting);
+        DirectionVertical.Classes.Set("on", current.ReaderVerticalWriting);
     }
 
     private void Change(Func<MobilePreferences, MobilePreferences> change)
@@ -98,6 +100,12 @@ public partial class ReaderSettingsSheet : UserControl
             _ => MobilePageAnimation.Fade
         };
         Change(value => value with { ReaderPageAnimation = animation });
+    }
+
+    private void OnDirectionClick(object? sender, RoutedEventArgs e)
+    {
+        var vertical = sender is Button { Name: nameof(DirectionVertical) };
+        Change(value => value with { ReaderVerticalWriting = vertical });
     }
 
     private void OnLineClick(object? sender, RoutedEventArgs e)

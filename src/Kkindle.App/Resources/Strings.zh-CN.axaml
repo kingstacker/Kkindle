@@ -416,6 +416,11 @@
     <x:String x:Key="Ui.Auto.C542F21D8C901D3A">任务记录</x:String>
     <x:String x:Key="Ui.Auto.6B14DD8A6A1C12CE">清除已结束</x:String>
     <x:String x:Key="Ui.Auto.4EE264D1857EABB6">清除已结束的任务记录</x:String>
+    <x:String x:Key="Ui.Auto.48BA78F2FBC7D36D">一键清除</x:String>
+    <x:String x:Key="Ui.Auto.BA4D7879C8727371">清除所有已结束的任务记录</x:String>
+    <x:String x:Key="Ui.Auto.00ADA08CE5C00634">· {0} 项</x:String>
+    <x:String x:Key="Ui.Auto.EC3482330678F907">删除全部记录</x:String>
+    <x:String x:Key="Ui.Auto.24758549705CF377">清空已完成</x:String>
     <x:String x:Key="Ui.Auto.6C13A7FD9AB51854">暂无任务记录。</x:String>
     <x:String x:Key="Ui.Auto.558518B13361AB07">任务失败</x:String>
     <x:String x:Key="Ui.TxtImport.Description">逐本检查编码和章节识别结果。规则只用于本次导入，不会修改原文件。</x:String>
@@ -2343,4 +2348,13 @@
     <x:String x:Key="Ui.Auto.2C8F8091E220C543">已跳过设备中可能已有的书籍，没有发送。</x:String>
     <x:String x:Key="Ui.Auto.5AE6FD40CA2C0289">发送完成：成功 {0} 本，跳过可能已有 {1} 本，失败 {2} 本。</x:String>
     <x:String x:Key="Main.KindleAnnotationSync.Button">同步 Kindle 批注</x:String>
+    <x:String x:Key="Ui.Auto.B6978BA9B6DB36A7">关于 Kkindle</x:String>
+    <x:String x:Key="Ui.Auto.DA9FC8BA94970B9D">设置…</x:String>
+    <x:String x:Key="Ui.Auto.835CA603BF27FE3D">导入书籍…</x:String>
+    <x:String x:Key="Ui.Auto.1AE6B0A0F8266382">关闭窗口</x:String>
+    <x:String x:Key="Ui.Auto.9EFE01F647D67D91">窗口</x:String>
+    <x:String x:Key="Ui.Auto.AA8B6477C2CE1916">切换全屏</x:String>
+    <x:String x:Key="Ui.Auto.A57CFCB8428DA408">帮助</x:String>
+    <x:String x:Key="Ui.Auto.ACBF912BF36C7C8A">用户手册</x:String>
+    <x:String x:Key="Ui.Auto.49456455E9B3AD26">无法访问系统钥匙串，已保存的凭据暂时读不出来。为避免覆盖它们，本次运行不会保存这些设置。请解锁钥匙串后重启 Kkindle。</x:String>
 </ResourceDictionary>

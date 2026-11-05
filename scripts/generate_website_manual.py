@@ -29,6 +29,63 @@ SOURCE_TO_SLUG = {source: slug for slug, _, source in PAGES}
 INLINE_TOKEN = re.compile(r"`[^`]+`|\*\*.+?\*\*|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)")
 
 
+def image_dimensions(path: Path) -> tuple[int, int] | None:
+    """Read the intrinsic size from a local PNG, JPEG or WebP file."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+    if data[:2] == b"\xff\xd8":
+        offset = 2
+        while offset + 9 < len(data):
+            if data[offset] != 0xFF:
+                offset += 1
+                continue
+            marker = data[offset + 1]
+            if marker in {0xD8, 0xD9}:
+                offset += 2
+                continue
+            length = int.from_bytes(data[offset + 2 : offset + 4], "big")
+            if 0xC0 <= marker <= 0xCF and marker not in {0xC4, 0xC8, 0xCC}:
+                height = int.from_bytes(data[offset + 5 : offset + 7], "big")
+                width = int.from_bytes(data[offset + 7 : offset + 9], "big")
+                return width, height
+            offset += 2 + length
+        return None
+
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+        chunk = data[12:16]
+        if chunk == b"VP8X":
+            width = 1 + int.from_bytes(data[24:27], "little")
+            height = 1 + int.from_bytes(data[27:30], "little")
+            return width, height
+        if chunk == b"VP8L":
+            bits = data[21:25]
+            width = 1 + (((bits[1] & 0x3F) << 8) | bits[0])
+            height = 1 + (((bits[3] & 0x0F) << 10) | (bits[2] << 2) | ((bits[1] & 0xC0) >> 6))
+            return width, height
+        if chunk == b"VP8 ":
+            width = int.from_bytes(data[26:28], "little") & 0x3FFF
+            height = int.from_bytes(data[28:30], "little") & 0x3FFF
+            return width, height
+
+    return None
+
+
+def local_image_dimensions(src: str) -> tuple[int, int] | None:
+    if src.startswith(("http://", "https://", "//", "data:")):
+        return None
+    target = (SOURCE / src.split("#", 1)[0]).resolve()
+    source_root = SOURCE.resolve()
+    if source_root not in target.parents:
+        return None
+    return image_dimensions(target)
+
+
 def rewrite_href(href: str) -> str:
     if href.startswith(("http://", "https://", "mailto:", "#")):
         return href
@@ -54,8 +111,11 @@ def render_inline(value: str) -> str:
             image = re.fullmatch(r"!\[([^\]]*)\]\(([^)]+)\)", token)
             assert image is not None
             src = rewrite_href(image.group(2))
+            size = local_image_dimensions(src)
+            dimensions = f' width="{size[0]}" height="{size[1]}"' if size else ""
             output.append(
-                f'<img src="{html.escape(src, quote=True)}" alt="{html.escape(image.group(1), quote=True)}" loading="lazy" />'
+                f'<img src="{html.escape(src, quote=True)}" alt="{html.escape(image.group(1), quote=True)}"'
+                f'{dimensions} loading="lazy" decoding="async" />'
             )
         else:
             link = re.fullmatch(r"\[([^\]]+)\]\(([^)]+)\)", token)
@@ -156,16 +216,32 @@ def render_page(slug: str, title: str, source_file: str, index: int) -> str:
         if index + 1 < len(PAGES)
         else ""
     )
+    canonical = f"https://kkindle.stacker.beauty/manual/{'' if slug == 'index' else slug + '.html'}"
+    description = f"Kkindle 软件使用手册：{title}。"
+    page_title = f"{title} · Kkindle 使用手册"
     return f'''<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Kkindle 软件使用手册：{html.escape(title, quote=True)}。" />
+    <meta name="description" content="{html.escape(description, quote=True)}" />
+    <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#fbfbfa" />
-    <link rel="canonical" href="https://kkindle.stacker.beauty/manual/{('/' if slug == 'index' else slug + '.html')}" />
-    <link rel="stylesheet" href="manual.css" />
-    <title>{html.escape(title)} · Kkindle 使用手册</title>
+    <link rel="canonical" href="{canonical}" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Kkindle" />
+    <meta property="og:title" content="{html.escape(page_title, quote=True)}" />
+    <meta property="og:description" content="{html.escape(description, quote=True)}" />
+    <meta property="og:url" content="{canonical}" />
+    <meta property="og:image" content="https://kkindle.stacker.beauty/assets/social-card.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{html.escape(page_title, quote=True)}" />
+    <meta name="twitter:description" content="{html.escape(description, quote=True)}" />
+    <meta name="twitter:image" content="https://kkindle.stacker.beauty/assets/social-card.jpg" />
+    <link rel="stylesheet" href="manual.css?v=20261104" />
+    <title>{html.escape(page_title)}</title>
   </head>
   <body>
     <a class="skip-link" href="#content">跳到正文</a>
@@ -198,7 +274,8 @@ def main() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for index, (slug, title, source_file) in enumerate(PAGES):
         destination = OUTPUT / f"{slug}.html"
-        destination.write_text(render_page(slug, title, source_file, index), encoding="utf-8", newline="\n")
+        with destination.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(render_page(slug, title, source_file, index))
     shutil.copytree(SOURCE / "images", OUTPUT / "images", dirs_exist_ok=True)
     print(f"Generated {len(PAGES)} manual pages in {OUTPUT}")
 

@@ -32,6 +32,51 @@ internal sealed partial record KindleRawBookText(
             ? null
             : $"{Asin}-EBOK-{CreateGuid()}-0";
 
+    /// <summary>
+    /// Kindle stores a highlight as a closed byte range: the end position is the
+    /// last byte of the last selected character, so the first excluded byte is
+    /// the next character boundary. An end on markup (a "&lt;" directly after the
+    /// text) excludes that markup. Everything else in this type uses half-open
+    /// ranges; convert only at the device boundary.
+    /// </summary>
+    public long DeviceEndToExclusive(long end)
+    {
+        if (end < 0) return 0;
+        if (end >= Text.LongLength) return Text.LongLength;
+        var position = checked((int)end);
+        var opening = Array.LastIndexOf(Text, (byte)'<', position);
+        var closing = Array.LastIndexOf(Text, (byte)'>', position);
+        if (opening > closing) return opening;
+        position++;
+        while (position < Text.Length && IsContinuation(Text[position])) position++;
+        return position;
+    }
+
+    /// <summary>
+    /// Earlier versions wrote their own highlights with an exclusive end. In a
+    /// multi-byte encoding that end is provably such a record when it sits on a
+    /// lead byte, because a closed end never points at the start of a multi-byte
+    /// character.
+    /// </summary>
+    public long OwnedDeviceEndToExclusive(long end)
+    {
+        if (end > 0 && end < Text.LongLength && IsMultiByteLead(Text[checked((int)end)])) return end;
+        return DeviceEndToExclusive(end);
+    }
+
+    /// <summary>Start of the last character of a closed range, used to anchor notes.</summary>
+    public long LastCharacterStart(long start, long closedEnd)
+    {
+        if (Text.Length == 0) return start;
+        var position = checked((int)Math.Clamp(closedEnd, start, Text.LongLength - 1));
+        if (Text[position] == (byte)'<' && position > start) position--;
+        while (position > start && IsContinuation(Text[position])) position--;
+        return position;
+    }
+
+    public string ExtractDeviceRange(long start, long end, bool writtenByKkindle = false) =>
+        ExtractRange(start, writtenByKkindle ? OwnedDeviceEndToExclusive(end) : DeviceEndToExclusive(end));
+
     public string ExtractRange(long start, long end)
     {
         if (start < 0 || end <= start || end > Text.LongLength) return string.Empty;
@@ -69,6 +114,11 @@ internal sealed partial record KindleRawBookText(
         return WhitespaceRegex().Replace(plain, " ").Trim();
     }
 
+    /// <summary>
+    /// Maps reader text to a half-open byte range. The search runs on visible
+    /// text only, so a quote can never resolve into a tag, an attribute or the
+    /// document head. Only a single occurrence is ever accepted.
+    /// </summary>
     public bool TryFindRange(
         string selectedText,
         string? prefix,
@@ -81,6 +131,64 @@ internal sealed partial record KindleRawBookText(
         selectedText = selectedText.Trim();
         if (selectedText.Length == 0) return false;
 
+        var visible = GetVisibleIndex();
+        if (visible is null) return TryFindRawRange(selectedText, prefix, suffix, out start, out end);
+        var selected = StripWhitespace(selectedText);
+        if (selected.Length == 0) return false;
+        var occurrences = new List<int>();
+        for (var offset = 0; offset <= visible.Text.Length - selected.Length;)
+        {
+            var index = visible.Text.IndexOf(selected, offset, StringComparison.Ordinal);
+            if (index < 0) break;
+            occurrences.Add(index);
+            offset = index + 1;
+        }
+        var found = SelectOccurrence(visible.Text, occurrences, selected.Length,
+            StripWhitespace(prefix ?? string.Empty), StripWhitespace(suffix ?? string.Empty));
+        if (found < 0) return false;
+        start = visible.Starts[found];
+        end = visible.Ends[found + selected.Length - 1];
+        return end > start;
+    }
+
+    /// <summary>
+    /// The reader's context can differ slightly from the book markup, so shorter
+    /// context is tried when nothing matches. More than one survivor is ambiguous;
+    /// shorter context could only add candidates, so the search stops there.
+    /// </summary>
+    private static int SelectOccurrence(string text, List<int> occurrences, int length, string prefix, string suffix)
+    {
+        if (occurrences.Count == 0) return -1;
+        if (occurrences.Count == 1) return occurrences[0];
+        int[] sizes = [int.MaxValue, 24, 12, 6];
+        foreach (var (usePrefix, useSuffix) in new[] { (true, true), (true, false), (false, true) })
+        {
+            if ((usePrefix && prefix.Length == 0) || (useSuffix && suffix.Length == 0)) continue;
+            foreach (var size in sizes)
+            {
+                var before = usePrefix && prefix.Length > size ? prefix[^size..] : usePrefix ? prefix : string.Empty;
+                var after = useSuffix && suffix.Length > size ? suffix[..size] : useSuffix ? suffix : string.Empty;
+                var match = -1;
+                var count = 0;
+                foreach (var occurrence in occurrences)
+                {
+                    if (!text.AsSpan(0, occurrence).EndsWith(before, StringComparison.Ordinal)) continue;
+                    if (!text.AsSpan(occurrence + length).StartsWith(after, StringComparison.Ordinal)) continue;
+                    match = occurrence;
+                    count++;
+                }
+                if (count == 1) return match;
+                if (count > 1) return -1;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>Only for text that cannot be decoded and therefore has no visible index.</summary>
+    private bool TryFindRawRange(string selectedText, string? prefix, string? suffix, out long start, out long end)
+    {
+        start = 0;
+        end = 0;
         var selected = Encoding.GetBytes(selectedText);
         var matches = FindAll(Text, selected, maximum: 3);
         if (matches.Count == 1)
@@ -89,35 +197,36 @@ internal sealed partial record KindleRawBookText(
             end = start + selected.LongLength;
             return true;
         }
-
         var context = string.Concat(
             string.IsNullOrWhiteSpace(prefix) ? string.Empty : prefix.Trim(),
             selectedText,
             string.IsNullOrWhiteSpace(suffix) ? string.Empty : suffix.Trim());
-        if (context.Length > selectedText.Length)
-        {
-            var contextBytes = Encoding.GetBytes(context);
-            var contextMatches = FindAll(Text, contextBytes, maximum: 2);
-            if (contextMatches.Count == 1)
-            {
-                var selectedInContext = Encoding.GetBytes(
-                    (prefix ?? string.Empty).Trim()).LongLength;
-                start = contextMatches[0] + selectedInContext;
-                end = start + selected.LongLength;
-                return true;
-            }
-        }
-
-        return TryFindVisibleRange(selectedText, prefix, suffix, out start, out end);
+        if (context.Length <= selectedText.Length) return false;
+        var contextMatches = FindAll(Text, Encoding.GetBytes(context), maximum: 2);
+        if (contextMatches.Count != 1) return false;
+        start = contextMatches[0] + Encoding.GetBytes((prefix ?? string.Empty).Trim()).LongLength;
+        end = start + selected.LongLength;
+        return true;
     }
 
-    private bool TryFindVisibleRange(string selected, string? prefix, string? suffix,
-        out long start, out long end)
+    private VisibleTextIndex? _visibleIndex;
+    private byte[]? _visibleIndexFailedSource;
+
+    private VisibleTextIndex? GetVisibleIndex()
     {
-        start = end = 0;
+        // "with" copies these fields, so a copy holding different bytes must rebuild.
+        if (_visibleIndex is { } cached && ReferenceEquals(cached.Source, Text)) return cached;
+        if (ReferenceEquals(_visibleIndexFailedSource, Text)) return null;
+        _visibleIndex = BuildVisibleIndex();
+        _visibleIndexFailedSource = _visibleIndex is null ? Text : null;
+        return _visibleIndex;
+    }
+
+    private VisibleTextIndex? BuildVisibleIndex()
+    {
         string source;
         try { source = Encoding.GetString(Text); }
-        catch (DecoderFallbackException) { return false; }
+        catch (DecoderFallbackException) { return null; }
         var byteOffsets = new int[source.Length + 1];
         for (var index = 0; index < source.Length;)
         {
@@ -134,7 +243,7 @@ internal sealed partial record KindleRawBookText(
         var ends = new List<int>();
         foreach (var node in document.DocumentNode.Descendants().OfType<HtmlTextNode>())
         {
-            if (node.Ancestors().Any(parent => parent.Name is "head" or "style" or "script")) continue;
+            if (node.Ancestors().Any(parent => parent.Name is "head" or "style" or "script" or "title")) continue;
             var text = node.Text;
             for (var index = 0; index < text.Length;)
             {
@@ -153,7 +262,7 @@ internal sealed partial record KindleRawBookText(
                 }
                 var sourceStart = node.StreamPosition + index;
                 var sourceEnd = sourceStart + units;
-                if (sourceStart < 0 || sourceEnd > source.Length) return false;
+                if (sourceStart < 0 || sourceEnd > source.Length) return null;
                 foreach (var character in decoded)
                 {
                     if (char.IsWhiteSpace(character)) continue;
@@ -162,24 +271,17 @@ internal sealed partial record KindleRawBookText(
                 index += units;
             }
         }
-        var textValue = visible.ToString();
-        selected = WhitespaceRegex().Replace(selected, string.Empty);
-        var prefixValue = WhitespaceRegex().Replace(prefix ?? string.Empty, string.Empty);
-        var suffixValue = WhitespaceRegex().Replace(suffix ?? string.Empty, string.Empty);
-        var found = -1;
-        for (var offset = 0; offset <= textValue.Length - selected.Length;)
-        {
-            var index = textValue.IndexOf(selected, offset, StringComparison.Ordinal);
-            if (index < 0) break;
-            offset = index + Math.Max(1, selected.Length);
-            if (prefixValue.Length > 0 && !textValue[..index].TrimEnd().EndsWith(prefixValue, StringComparison.Ordinal)) continue;
-            if (suffixValue.Length > 0 && !textValue[(index + selected.Length)..].TrimStart().StartsWith(suffixValue, StringComparison.Ordinal)) continue;
-            if (found >= 0) return false;
-            found = index;
-        }
-        if (found < 0) return false;
-        start = starts[found]; end = ends[found + selected.Length - 1];
-        return end > start;
+        return new VisibleTextIndex(Text, visible.ToString(), starts.ToArray(), ends.ToArray());
+    }
+
+    private sealed record VisibleTextIndex(byte[] Source, string Text, int[] Starts, int[] Ends);
+
+    private static string StripWhitespace(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value)
+            if (!char.IsWhiteSpace(character)) builder.Append(character);
+        return builder.ToString();
     }
 
     private static List<long> FindAll(byte[] source, byte[] value, int maximum)
@@ -198,7 +300,11 @@ internal sealed partial record KindleRawBookText(
         return result;
     }
 
-    private static bool IsContinuation(byte value) => (value & 0xC0) == 0x80;
+    // Only UTF-8 has multi-byte characters here: in Windows-1252 every byte is a
+    // complete character, and 0x80-0xBF are ordinary letters and punctuation.
+    private bool IsContinuation(byte value) => Encoding.CodePage == 65001 && (value & 0xC0) == 0x80;
+
+    private bool IsMultiByteLead(byte value) => Encoding.CodePage == 65001 && value >= 0xC0;
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();

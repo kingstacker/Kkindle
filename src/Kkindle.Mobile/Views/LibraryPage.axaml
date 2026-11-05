@@ -58,29 +58,6 @@
     <ScrollViewer Grid.Row="2" Name="PageScroller">
       <Panel Margin="24,8,24,28">
       <StackPanel Name="BooksPanel">
-        <!-- Continue reading: an unboxed row, carried by its cover and progress. -->
-        <Button Name="ContinueCard" IsVisible="False" Padding="0" CornerRadius="0"
-                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                Margin="0,4,0,26" Click="OnContinueClick">
-          <Grid ColumnDefinitions="Auto,*">
-            <Border Classes="cover" Width="56" Height="80">
-              <Border Classes="coverclip">
-                <Image Name="ContinueCover" Stretch="Uniform" />
-              </Border>
-            </Border>
-            <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto" Margin="16,2,0,2">
-              <TextBlock Classes="muted" Text="继续阅读" />
-              <TextBlock Grid.Row="1" Name="ContinueTitle" FontSize="16" FontWeight="Medium"
-                         Margin="0,4,0,0" MaxLines="1" TextTrimming="CharacterEllipsis" />
-              <Grid Grid.Row="3" ColumnDefinitions="*,Auto">
-                <c:ThinProgress Name="ContinueProgress" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Name="ContinuePercent" Classes="muted" FontSize="12"
-                           Margin="10,0,0,0" />
-              </Grid>
-            </Grid>
-          </Grid>
-        </Button>
-
         <!-- Filters and view -->
         <Grid ColumnDefinitions="*,Auto,Auto" Margin="-12,0,-12,12">
           <c:NativeSegmentGroup VerticalAlignment="Center">
@@ -101,6 +78,29 @@
           </Button>
         </Grid>
 
+        <!-- Keep the shortcut below the filters so their position stays stable. -->
+        <Button Name="ContinueCard" IsVisible="False" Padding="0" CornerRadius="0"
+                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Margin="0,4,0,20" Click="OnContinueClick">
+          <Grid ColumnDefinitions="Auto,*">
+            <Border Classes="cover" Width="48" Height="68">
+              <Border Classes="coverclip">
+                <Image Name="ContinueCover" Stretch="UniformToFill" />
+              </Border>
+            </Border>
+            <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto" Margin="14,0,0,0">
+              <TextBlock Classes="muted" Text="继续阅读" />
+              <TextBlock Grid.Row="1" Name="ContinueTitle" FontSize="16" FontWeight="Medium"
+                         Margin="0,3,0,0" MaxLines="1" TextTrimming="CharacterEllipsis" />
+              <Grid Grid.Row="3" ColumnDefinitions="*,Auto">
+                <c:ThinProgress Name="ContinueProgress" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Name="ContinuePercent" Classes="muted" FontSize="12"
+                           Margin="10,0,0,0" />
+              </Grid>
+            </Grid>
+          </Grid>
+        </Button>
+
         <TextBlock Name="SummaryText" Classes="muted" FontSize="12" Margin="0,0,0,14" />
         <TextBlock Name="StatusText" Classes="muted" IsVisible="False" TextWrapping="Wrap"
                    Margin="0,0,0,10" />
@@ -118,7 +118,7 @@
                   <Border Classes="cover">
                     <Border Classes="coverclip">
                       <Panel>
-                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                         <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
                                    FontSize="26" Foreground="{DynamicResource TextMutedBrush}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -148,7 +148,7 @@
                   <Border Classes="cover" Width="46" Height="66">
                     <Border Classes="coverclip">
                       <Panel>
-                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                         <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
                                    FontSize="18" Foreground="{DynamicResource TextMutedBrush}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />

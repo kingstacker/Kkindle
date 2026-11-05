@@ -83,7 +83,7 @@ public sealed partial class KindleAnnotationSyncServiceTests
             var noteMutation = Assert.Single(fake.Mutations, mutation => mutation.Dataset == 3);
             Assert.Equal(highlight.AnnotationId, highMutation.AnnotationId);
             Assert.Equal(1537, highMutation.Start);
-            Assert.Equal(1559, highMutation.End);
+            Assert.Equal(1558, highMutation.End);
             // The relocated note keeps its original payload, whose metadata may
             // escape non-ASCII text; compare the decoded note instead of raw JSON.
             using (var payload = JsonDocument.Parse(noteMutation.SerializedPayload))
@@ -275,7 +275,7 @@ public sealed partial class KindleAnnotationSyncServiceTests
     {
         Assert.True(s.Raw.TryFindRange("你好，世界。😀",null,null,out var start,out var end));
         var time=DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds();
-        return new("device-highlight",new(s.Raw.CreateBookId()!,s.Raw.Asin,s.Raw.PalmName+":"+s.Raw.UniqueId.ToString("X8")),1,KindleClippingType.Highlight,start,end,time,time,"","{}",s.Book.Title);
+        return new("device-highlight",new(s.Raw.CreateBookId()!,s.Raw.Asin,s.Raw.PalmName+":"+s.Raw.UniqueId.ToString("X8")),1,KindleClippingType.Highlight,start,end-1,time,time,"","{}",s.Book.Title);
     }
     private static async Task<Scenario> Setup(string root)
     {

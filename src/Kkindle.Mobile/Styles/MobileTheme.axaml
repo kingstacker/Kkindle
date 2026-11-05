@@ -122,6 +122,13 @@
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
+  <!-- The tab bar's specular sweep is only animated by the Liquid Glass theme.
+       Unanimated it would rest over the first tab as a white smear, visible in
+       dark mode, so it stays transparent unless that animation drives it. -->
+  <Style Selector="Rectangle#GlassSheen">
+    <Setter Property="Opacity" Value="0" />
+  </Style>
+
   <Style Selector="Button.tab">
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />

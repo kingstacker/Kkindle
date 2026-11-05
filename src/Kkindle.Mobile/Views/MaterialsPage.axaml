@@ -7,8 +7,10 @@
   <Grid RowDefinitions="Auto,Auto,*">
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="24,20,24,10">
       <TextBlock Classes="display" Text="阅读资料" />
-      <TextBlock Grid.Column="1" Name="SummaryText" Classes="muted" FontSize="12"
-                 VerticalAlignment="Bottom" Margin="0,0,0,5" />
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <TextBlock Name="SummaryText" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+        <Button Name="ExportButton" Content="导出" Click="OnExportClick" IsEnabled="False" />
+      </StackPanel>
     </Grid>
 
     <c:NativeSegmentGroup Grid.Row="1" Margin="12,0,12,8">
@@ -33,7 +35,7 @@
                       <Border Classes="cover" Width="48" Height="68">
                         <Border Classes="coverclip">
                           <Panel>
-                            <Image Source="{Binding Cover}" Stretch="Uniform" />
+                            <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                             <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
                                        FontSize="18" Foreground="{DynamicResource TextMutedBrush}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />

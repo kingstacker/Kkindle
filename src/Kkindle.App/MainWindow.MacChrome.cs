@@ -59,6 +59,23 @@ public partial class MainWindow
         => _applicationShuttingDown = true;
 
     /// <summary>
+    /// Tray "退出". <see cref="IClassicDesktopStyleApplicationLifetime.Shutdown"/>
+    /// force-closes every window and skips <c>ShutdownRequested</c>, so the
+    /// close handler never got to flush pending settings or run the exit-time
+    /// S3 sync. <c>TryShutdown</c> goes through the same cancellable path as
+    /// Cmd+Q: MainWindow_Closing defers the close, finishes the exit work and
+    /// then closes the window itself.
+    /// </summary>
+    private void RequestApplicationQuit()
+    {
+        _applicationShuttingDown = true;
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            desktop.TryShutdown();
+        else
+            Close();
+    }
+
+    /// <summary>
     /// Shows or hides the square Windows/Linux caption row. macOS always keeps
     /// it hidden, including when the zen chrome restores the title row.
     /// </summary>

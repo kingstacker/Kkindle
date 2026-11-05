@@ -13,7 +13,7 @@ namespace Kkindle.Mobile.Views;
 /// developer-mode feature; its results only fill the form, nothing is written
 /// until the reader saves.
 /// </summary>
-public partial class BookEditPage : UserControl
+public partial class BookEditPage : UserControl, IShellPage
 {
     private const int CoverWidth = 216;
 
@@ -43,7 +43,6 @@ public partial class BookEditPage : UserControl
         DoubanButton.IsVisible = shell.IsDeveloperMode;
         Present();
         _ = LoadCoverAsync();
-        DetachedFromVisualTree += (_, _) => _lifetime.Cancel();
     }
 
     private void Present()
@@ -206,8 +205,12 @@ public partial class BookEditPage : UserControl
             return;
         }
 
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         static string? Optional(TextBox box) => string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim();
         SaveButton.IsEnabled = false;
+        // _book is the instance the detail page shows; a failed save must not leave it edited.
+        var restore = SnapshotEditableFields();
         try
         {
             _book.Title = title;
@@ -234,15 +237,44 @@ public partial class BookEditPage : UserControl
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
+            restore();
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
+            restore();
             ShowStatus("保存失败：" + UiText.Localize(exception.Message));
         }
         finally
         {
             SaveButton.IsEnabled = true;
         }
+    }
+
+    private Action SnapshotEditableFields()
+    {
+        var book = _book;
+        var (title, authors, series, publisher, publishDate, isbn) =
+            (book.Title, book.Authors, book.Series, book.Publisher, book.PublishDate, book.Isbn);
+        var (pageCount, binding, tags, category, description) =
+            (book.PageCount, book.Binding, book.Tags, book.Category, book.Description);
+        var (rating, ratingCount, coverPath) = (book.DoubanRating, book.DoubanRatingCount, book.CoverPath);
+        return () =>
+        {
+            book.Title = title;
+            book.Authors = authors;
+            book.Series = series;
+            book.Publisher = publisher;
+            book.PublishDate = publishDate;
+            book.Isbn = isbn;
+            book.PageCount = pageCount;
+            book.Binding = binding;
+            book.Tags = tags;
+            book.Category = category;
+            book.Description = description;
+            book.DoubanRating = rating;
+            book.DoubanRatingCount = ratingCount;
+            book.CoverPath = coverPath;
+        };
     }
 
     /// <summary>Same location and naming as the desktop Douban match.</summary>
@@ -259,4 +291,7 @@ public partial class BookEditPage : UserControl
     }
 
     private void OnBackClick(object? sender, RoutedEventArgs e) => _shell.GoBack();
+
+    /// <summary>Pushed pages only detach this one; work ends when it leaves history.</summary>
+    public void OnClosed() => _lifetime.Cancel();
 }

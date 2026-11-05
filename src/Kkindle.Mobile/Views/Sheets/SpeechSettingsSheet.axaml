@@ -1,0 +1,18 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Kkindle.Mobile.Views.Sheets.SpeechSettingsSheet">
+  <StackPanel Margin="20,4,20,24" Spacing="12">
+    <TextBlock Classes="label" Text="系统语音" />
+    <ComboBox Name="VoiceBox" HorizontalAlignment="Stretch" PlaceholderText="正在获取系统语音…" />
+    <TextBlock Name="VoiceHint" Classes="muted" FontSize="12" TextWrapping="Wrap"
+               Text="语音由设备提供，可以在系统设置中下载更多语音。" />
+    <Grid ColumnDefinitions="*,Auto" Margin="0,8,0,0">
+      <TextBlock Classes="label" Text="语速" />
+      <TextBlock Grid.Column="1" Name="SpeedText" Classes="muted" />
+    </Grid>
+    <Slider Name="SpeedSlider" Minimum="0.5" Maximum="2" TickFrequency="0.1"
+            IsSnapToTickEnabled="True" ValueChanged="OnSpeedChanged" />
+    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="保存后，下次开始朗读时生效。" />
+    <Button Name="SaveButton" Classes="primary" Content="保存" Click="OnSaveClick" Margin="0,8,0,0" />
+  </StackPanel>
+</UserControl>

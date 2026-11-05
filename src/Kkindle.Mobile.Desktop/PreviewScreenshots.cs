@@ -132,6 +132,17 @@ internal static class PreviewScreenshots
         await Shot("materials");
         shell.ShowProfile();
         await Shot("profile");
+        shell.ShowReadingData();
+        await Shot("reading-data");
+        shell.OpenSyncSettings();
+        await Shot("sync-settings");
+        shell.GoBack();
+        shell.OpenAiSettings();
+        await Shot("ai-settings");
+        shell.GoBack();
+        shell.OpenKindleSettings();
+        await Shot("kindle-settings");
+        shell.GoBack();
     }
 
     /// <summary>Drives the reader's real routed pointer events, as a finger would.</summary>

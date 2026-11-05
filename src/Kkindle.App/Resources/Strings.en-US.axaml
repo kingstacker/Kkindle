@@ -416,6 +416,11 @@
     <x:String x:Key="Ui.Auto.C542F21D8C901D3A">Task history</x:String>
     <x:String x:Key="Ui.Auto.6B14DD8A6A1C12CE">Clear finished</x:String>
     <x:String x:Key="Ui.Auto.4EE264D1857EABB6">Clear finished task history</x:String>
+    <x:String x:Key="Ui.Auto.48BA78F2FBC7D36D">Clear all</x:String>
+    <x:String x:Key="Ui.Auto.BA4D7879C8727371">Clear all finished task history</x:String>
+    <x:String x:Key="Ui.Auto.00ADA08CE5C00634">· {0} items</x:String>
+    <x:String x:Key="Ui.Auto.EC3482330678F907">Delete all records</x:String>
+    <x:String x:Key="Ui.Auto.24758549705CF377">Clear completed</x:String>
     <x:String x:Key="Ui.Auto.6C13A7FD9AB51854">No task history.</x:String>
     <x:String x:Key="Ui.Auto.558518B13361AB07">Task failed</x:String>
     <x:String x:Key="Ui.TxtImport.Description">Review encoding and chapter detection for each file. These rules apply to this import only and never modify the source files.</x:String>
@@ -1717,7 +1722,7 @@
     <x:String x:Key="Ui.Auto.9E6D027070642978">This sync folder already uses the saved encryption settings. To change the key or enable or disable encryption, use a new object prefix and configure that prefix and key on your other devices.</x:String>
     <x:String x:Key="Ui.Auto.F8395B45EC8A4E69">This device ID: {0}</x:String>
     <x:String x:Key="Ui.Auto.7D874A1A976F3FEE">Collection items</x:String>
-    <x:String x:Key="Ui.Auto.39932F24FE11A6BA">Files</x:String>
+    <x:String x:Key="Ui.Auto.39932F24FE11A6BA">File</x:String>
     <x:String x:Key="Ui.Auto.8D4862F489872F23">Could not remove local files left by duplicate books: {0}</x:String>
     <x:String x:Key="Ui.Auto.F7C9C4CFD4F50703">To change the key or enable or disable encryption, use a new object prefix and update the prefix and key on every device.</x:String>
     <x:String x:Key="Ui.Auto.70E7DA1E3C1F6F85">Skipped {0} missing local files.</x:String>
@@ -2343,4 +2348,13 @@
     <x:String x:Key="Ui.Auto.2C8F8091E220C543">Skipped books that may already be on the device. Nothing was sent.</x:String>
     <x:String x:Key="Ui.Auto.5AE6FD40CA2C0289">Transfer complete: {0} sent, {1} possible existing books skipped, {2} failed.</x:String>
     <x:String x:Key="Main.KindleAnnotationSync.Button">Sync Kindle annotations</x:String>
+    <x:String x:Key="Ui.Auto.B6978BA9B6DB36A7">About Kkindle</x:String>
+    <x:String x:Key="Ui.Auto.DA9FC8BA94970B9D">Settings…</x:String>
+    <x:String x:Key="Ui.Auto.835CA603BF27FE3D">Import Books…</x:String>
+    <x:String x:Key="Ui.Auto.1AE6B0A0F8266382">Close Window</x:String>
+    <x:String x:Key="Ui.Auto.9EFE01F647D67D91">Window</x:String>
+    <x:String x:Key="Ui.Auto.AA8B6477C2CE1916">Toggle Full Screen</x:String>
+    <x:String x:Key="Ui.Auto.A57CFCB8428DA408">Help</x:String>
+    <x:String x:Key="Ui.Auto.ACBF912BF36C7C8A">User Manual</x:String>
+    <x:String x:Key="Ui.Auto.49456455E9B3AD26">Kkindle cannot access the Keychain, so saved credentials are temporarily unreadable. To avoid overwriting them, these settings will not be saved in this session. Unlock the Keychain and restart Kkindle.</x:String>
 </ResourceDictionary>

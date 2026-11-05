@@ -25,6 +25,21 @@ public interface ISecretProtector
 }
 
 /// <summary>
+/// The operating-system secret store (macOS Keychain) is temporarily
+/// unreachable: locked, access denied or the prompt was cancelled. Unlike a
+/// <see cref="System.Security.Cryptography.CryptographicException"/>, the
+/// stored secrets are still valid, so callers must never replace them with
+/// empty values while this is in effect.
+/// </summary>
+public sealed class SecretStoreUnavailableException : InvalidOperationException
+{
+    public SecretStoreUnavailableException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
 /// Raises an event whenever removable storage is attached or detached, so the
 /// Kindle device list can refresh without polling.
 ///

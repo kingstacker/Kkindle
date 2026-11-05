@@ -5,7 +5,7 @@ namespace Kkindle.Infrastructure;
 /// <summary>Enriches the device list from the exact device book, without writing annotations.</summary>
 internal static class KindleAnnotationClippingTextResolver
 {
-    private const int ResolutionVersion = 1;
+    private const int ResolutionVersion = 2;
     public static bool NeedsResolution(KindleClipping clip) => clip.SourceBook is not null
         && clip.Type == KindleClippingType.Highlight
         && (!clip.IsTextResolved || clip.TextResolutionVersion != ResolutionVersion);
@@ -48,7 +48,8 @@ internal static class KindleAnnotationClippingTextResolver
                             clip.BookTitle = raw.Title;
                             clip.Author = raw.Author;
                             if (clip.Type != KindleClippingType.Highlight || clip.StartPosition is not { } start || clip.EndPosition is not { } end) continue;
-                            var quote = raw.ExtractRange(start, end);
+                            var quote = raw.ExtractDeviceRange(start, end,
+                                writtenByKkindle: clip.Id.Contains(":kkindle.highlight.", StringComparison.Ordinal));
                             if (string.IsNullOrWhiteSpace(quote)) continue;
                             clip.Content = quote;
                             clip.IsTextResolved = true;

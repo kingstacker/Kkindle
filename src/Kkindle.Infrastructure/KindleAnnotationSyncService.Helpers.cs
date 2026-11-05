@@ -167,34 +167,54 @@ public sealed partial class KindleAnnotationSyncService
             cancellationToken.ThrowIfCancellationRequested();
             var owned = device.Highlight.AnnotationId == "kkindle.highlight." + local.Id.ToString("N");
             var quote = owned ? local.SelectedText : device.Quote;
+            // An unreadable local book only prevents the computer-side repair; the
+            // device range is derived from the annotation's own text and context.
+            var current = local;
             var chapters = await GetReaderChaptersAsync(context, local.BookFileId, cancellationToken);
-            // An unreadable local book only prevents position repair; note text
-            // synchronization does not depend on reader coordinates.
-            if (chapters.Count == 0) continue;
-            var currentChapter = chapters.Where(chapter => string.Equals(chapter.ChapterPath,
-                local.ChapterPath, StringComparison.OrdinalIgnoreCase)).ToArray();
-            var location = LocateQuoteWithContext(currentChapter, quote, local.Prefix, local.Suffix)
-                ?? LocateQuote(currentChapter, quote)
-                ?? LocateQuote(chapters, quote);
-            if (location is null) continue;
-            var corrected = CloneAnnotation(local);
-            corrected.ChapterPath = location.Chunk.ChapterPath;
-            corrected.StartOffset = location.Start;
-            corrected.EndOffset = location.End;
-            corrected.SelectedText = location.SelectedText;
-            if (corrected.ChapterPath != local.ChapterPath || corrected.StartOffset != local.StartOffset
-                || corrected.EndOffset != local.EndOffset || corrected.SelectedText != local.SelectedText)
+            if (chapters.Count > 0)
             {
-                corrected.Fragment = null;
-                corrected.Prefix = location.Prefix;
-                corrected.Suffix = location.Suffix;
-                // Repositioning is not a new edit to the user's note.
-                context.LocalRepairs[local.Id] = corrected;
+                var currentChapter = chapters.Where(chapter => string.Equals(chapter.ChapterPath,
+                    local.ChapterPath, StringComparison.OrdinalIgnoreCase)).ToArray();
+                var location = LocateQuoteWithContext(currentChapter, quote, local.Prefix, local.Suffix)
+                    ?? LocateQuote(currentChapter, quote)
+                    ?? LocateQuote(chapters, quote);
+                if (location is not null)
+                {
+                    var corrected = CloneAnnotation(local);
+                    corrected.ChapterPath = location.Chunk.ChapterPath;
+                    corrected.StartOffset = location.Start;
+                    corrected.EndOffset = location.End;
+                    corrected.SelectedText = location.SelectedText;
+                    if (corrected.ChapterPath != local.ChapterPath || corrected.StartOffset != local.StartOffset
+                        || corrected.EndOffset != local.EndOffset || corrected.SelectedText != local.SelectedText)
+                    {
+                        corrected.Fragment = null;
+                        corrected.Prefix = location.Prefix;
+                        corrected.Suffix = location.Suffix;
+                        // Repositioning is not a new edit to the user's note.
+                        context.LocalRepairs[local.Id] = corrected;
+                    }
+                    current = corrected;
+                }
             }
-            if (owned && context.RawText is { } raw && raw.TryFindRange(corrected.SelectedText,
-                    corrected.Prefix, corrected.Suffix, out var start, out var end)
-                && (start != device.Highlight.Start || end != device.Highlight.End))
-                context.AnchorRepairs.Add(new(device, local.Id, start, end));
+            if (context.RawText is not { } raw) continue;
+            // Records written by Kkindle follow the computer's text, also when the
+            // local annotation was recreated with a new id (for example after it
+            // was imported back). Kindle-made records are never moved.
+            var writtenByKkindle = device.Highlight.AnnotationId.StartsWith(
+                "kkindle.highlight.", StringComparison.Ordinal);
+            // Device ranges are closed, so the last byte is end - 1.
+            if (writtenByKkindle && raw.TryFindRange(current.SelectedText,
+                    current.Prefix, current.Suffix, out var start, out var end)
+                && (start != device.Highlight.Start || end - 1 != device.Highlight.End))
+            {
+                context.AnchorRepairs.Add(new(device, local.Id, start, end - 1));
+                continue;
+            }
+            if (device.Note is { } note && IsOwnedNote(note)
+                && (note.End != device.Highlight.End
+                    || note.Start != raw.LastCharacterStart(device.Highlight.Start, device.Highlight.End)))
+                context.AnchorRepairs.Add(new(device, local.Id, device.Highlight.Start, device.Highlight.End, NoteOnly: true));
         }
     }
 
@@ -212,7 +232,7 @@ public sealed partial class KindleAnnotationSyncService
         var before = NormalizeWithMap(raw.ExtractRange(
             Math.Max(0, highlight.Start - 512), highlight.Start)).Value;
         var after = NormalizeWithMap(raw.ExtractRange(
-            highlight.End, Math.Min(raw.Text.LongLength, highlight.End + 512))).Value;
+            device.ExclusiveEnd, Math.Min(raw.Text.LongLength, device.ExclusiveEnd + 512))).Value;
         foreach (var length in new[] { 24, 12, 6 })
         {
             var prefix = before.Length > length ? before[^length..] : before;
@@ -331,7 +351,7 @@ public sealed partial class KindleAnnotationSyncService
                         AddMutation(
                             mutations,
                             byKey,
-                            NewNoteMutation(range.Item1, range.Item2, local, bookData, bookId, modified));
+                            NewNoteMutation(context.RawText, range.Item1, range.Item2, local, bookData, bookId, modified));
                     }
                     changed.Add(local.Id);
                     continue;
@@ -352,18 +372,19 @@ public sealed partial class KindleAnnotationSyncService
                     local.UpdatedAt.ToUnixTimeMilliseconds());
                 var created = local.CreatedAt.ToUnixTimeMilliseconds();
                 var highlightId = "kkindle.highlight." + local.Id.ToString("N");
+                var closedEnd = end - 1;
                 var highlight = NewHighlightMutation(
                     highlightId,
                     bookId,
                     bookData,
                     start,
-                    end,
+                    closedEnd,
                     created,
                     now);
                 AddMutation(mutations, byKey, highlight);
                 if (!string.IsNullOrWhiteSpace(local.Note))
                 {
-                    var noteStart = Math.Max(start, end - 3);
+                    var noteStart = context.RawText.LastCharacterStart(start, closedEnd);
                     AddMutation(
                         mutations,
                         byKey,
@@ -372,7 +393,7 @@ public sealed partial class KindleAnnotationSyncService
                             bookId,
                             3,
                             noteStart,
-                            end,
+                            closedEnd,
                             created,
                             now,
                             "NOTE",
@@ -386,13 +407,23 @@ public sealed partial class KindleAnnotationSyncService
             }
             foreach (var repair in context.AnchorRepairs)
             {
-                AddRelocatedMutation(mutations, byKey, repair.Device.Highlight, repair.Start, repair.End);
+                if (!repair.NoteOnly)
+                    AddRelocatedMutation(mutations, byKey, repair.Device.Highlight, repair.Start, repair.End);
                 if (repair.Device.Note is { } note)
                 {
-                    var delta = repair.Start - repair.Device.Highlight.Start;
-                    var noteStart = Math.Clamp(note.Start + delta, repair.Start, repair.End);
-                    var noteEnd = Math.Clamp(note.End + delta, noteStart, repair.End);
-                    if (noteEnd <= noteStart) { noteStart = repair.Start; noteEnd = repair.End; }
+                    long noteStart, noteEnd;
+                    if (IsOwnedNote(note))
+                    {
+                        noteStart = context.RawText.LastCharacterStart(repair.Start, repair.End);
+                        noteEnd = repair.End;
+                    }
+                    else
+                    {
+                        var delta = repair.Start - repair.Device.Highlight.Start;
+                        noteStart = Math.Clamp(note.Start + delta, repair.Start, repair.End);
+                        noteEnd = Math.Clamp(note.End + delta, noteStart, repair.End);
+                        if (noteEnd <= noteStart) { noteStart = repair.Start; noteEnd = repair.End; }
+                    }
                     AddRelocatedMutation(mutations, byKey, note, noteStart, noteEnd);
                 }
                 changed.Add(repair.LocalId);
@@ -401,6 +432,9 @@ public sealed partial class KindleAnnotationSyncService
         }
         return (mutations, changedAnnotations);
     }
+
+    private static bool IsOwnedNote(KindleAnnotationRecord note) =>
+        note.AnnotationId.StartsWith("kkindle.note.", StringComparison.Ordinal);
 
     private static void AddRelocatedMutation(List<KindleAnnotationMutation> mutations,
         Dictionary<(string Id, string BookId), int> byKey,
@@ -478,6 +512,7 @@ public sealed partial class KindleAnnotationSyncService
     }
 
     private static KindleAnnotationMutation NewNoteMutation(
+        KindleRawBookText raw,
         long highlightStart,
         long highlightEnd,
         ReaderAnnotation local,
@@ -485,7 +520,8 @@ public sealed partial class KindleAnnotationSyncService
         string bookId,
         long modified)
     {
-        var start = Math.Max(highlightStart, highlightEnd - 3);
+        // Anchored on the last selected character, like the Kindle's own notes.
+        var start = raw.LastCharacterStart(highlightStart, highlightEnd);
         // The note itself is created now, even when its highlight is older.
         return NewPayloadMutation(
             "kkindle.note." + local.Id.ToString("N"),

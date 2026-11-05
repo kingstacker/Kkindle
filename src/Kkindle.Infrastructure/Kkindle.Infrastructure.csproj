@@ -11,10 +11,17 @@
   <ItemGroup>
     <Content Include="../Kkindle.App/Assets/Fonts/KingHwaOldSong-v3.0.ttf" Link="Assets/Fonts/KingHwaOldSong-v3.0.ttf" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../Kkindle.App/Assets/Fonts/KingHwaOldSong-LICENSE.txt" Link="Assets/Fonts/KingHwaOldSong-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Kkindle.App/Assets/Fonts/NotoEmoji.ttf" Link="Assets/Fonts/NotoEmoji.ttf" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Kkindle.App/Assets/Fonts/NotoEmoji-LICENSE.txt" Link="Assets/Fonts/NotoEmoji-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Kkindle.App/Assets/Fonts/NotoSansSymbols2-Regular.ttf" Link="Assets/Fonts/NotoSansSymbols2-Regular.ttf" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Kkindle.App/Assets/Fonts/NotoSansSymbols2-LICENSE.txt" Link="Assets/Fonts/NotoSansSymbols2-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="..\Kkindle.Core\Kkindle.Core.csproj" />
     <PackageReference Include="AWSSDK.S3" Version="4.0.102.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
+    <!-- 1.24+ no longer ships runtimes/osx-x64/native/libonnxruntime.dylib, so
+         local embeddings fail on Intel Macs with DllNotFoundException. 1.23.2
+         is the last release that includes both osx-x64 and osx-arm64. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
     <PackageReference Include="bblanchon.PDFium.Win32" Version="152.0.7961" />

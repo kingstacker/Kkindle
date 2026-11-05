@@ -187,6 +187,69 @@ cat > "$app_root/Contents/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>$build_version</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>EPUB</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>org.idpf.epub-container</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>epub</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>PDF</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>pdf</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Kindle eBook</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array>
+        <string>io.github.kingstacker.kkindle.mobi</string>
+        <string>io.github.kingstacker.kkindle.azw</string>
+        <string>io.github.kingstacker.kkindle.azw3</string>
+      </array>
+      <key>CFBundleTypeExtensions</key><array><string>mobi</string><string>prc</string><string>azw</string><string>azw3</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Plain Text</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>public.plain-text</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>txt</string></array>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>io.github.kingstacker.kkindle.mobi</string>
+      <key>UTTypeDescription</key><string>Mobipocket eBook</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key><dict>
+        <key>public.filename-extension</key><array><string>mobi</string><string>prc</string></array>
+        <key>public.mime-type</key><string>application/x-mobipocket-ebook</string>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>io.github.kingstacker.kkindle.azw</string>
+      <key>UTTypeDescription</key><string>Kindle eBook</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key><dict>
+        <key>public.filename-extension</key><array><string>azw</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>io.github.kingstacker.kkindle.azw3</string>
+      <key>UTTypeDescription</key><string>Kindle eBook (AZW3)</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key><dict>
+        <key>public.filename-extension</key><array><string>azw3</string></array>
+      </dict>
+    </dict>
+  </array>
 </dict>
 </plist>
 EOF
@@ -211,29 +274,133 @@ if [[ "$require_notarization" == "1" ]]; then
     exit 2
   fi
 fi
-mcp_executables=()
-for payload_rid in "${payload_rids[@]}"; do
-  if (( universal )); then
-    mcp_executables+=("$app_macos/$(payload_arch "$payload_rid")/mcp/Kkindle.McpServer")
-  else
-    mcp_executables+=("$app_macos/mcp/Kkindle.McpServer")
-  fi
-done
-
-if [[ "$signing_identity" == "-" ]]; then
-  for executable in "${mcp_executables[@]}"; do
-    codesign --force --sign - "$executable"
-  done
-  codesign --force --deep --sign - "$app_root"
-else
-  for executable in "${mcp_executables[@]}"; do
-    codesign --force --options runtime --timestamp \
-      --sign "$signing_identity" "$executable"
-  done
-  codesign --force --deep --options runtime --timestamp \
-    --sign "$signing_identity" "$app_root"
+entitlements_file="$repo_root/scripts/macos/Kkindle.entitlements"
+if [[ ! -f "$entitlements_file" ]]; then
+  echo "Missing entitlements file: $entitlements_file" >&2
+  exit 2
 fi
+
+# Sign nested Mach-O images from the inside out, then the bundle. `--deep` is
+# deprecated for distribution and only signs nested code with the top-level
+# options; the hardened runtime needs entitlements on the real executables
+# (the universal launcher, both payload apphosts, and the MCP server).
+sign_args=(--force)
+if [[ "$signing_identity" != "-" ]]; then
+  sign_args+=(--options runtime --timestamp)
+fi
+while IFS= read -r -d '' binary; do
+  [[ "$binary" == "$app_macos/Kkindle" ]] && continue
+  file_type="$(file -b "$binary")"
+  if [[ "$file_type" == *Mach-O* ]]; then
+    # Native code needs the hardened runtime (for Developer ID builds), a
+    # secure timestamp, and entitlements when it is an executable.
+    binary_args=("${sign_args[@]}" --sign "$signing_identity")
+    if [[ "$file_type" == *executable* ]]; then
+      binary_args+=(--entitlements "$entitlements_file")
+    fi
+  else
+    # Managed assemblies, PDBs and other payload files are generic code
+    # objects for `codesign --deep`. Signing them keeps deep verification and
+    # notarization checks consistent with the previous --deep behavior, but
+    # they do not need the hardened runtime or a timestamp round-trip.
+    binary_args=(--force --sign "$signing_identity")
+  fi
+  codesign "${binary_args[@]}" "$binary"
+done < <(find "$app_root" -type f -print0)
+
+codesign "${sign_args[@]}" \
+  --entitlements "$entitlements_file" \
+  --sign "$signing_identity" "$app_root"
 codesign --verify --deep --strict "$app_root"
+plutil -lint "$app_root/Contents/Info.plist" >/dev/null
+
+# Build a drag-to-Applications disk image. The Applications entry is a
+# filesystem symlink, which is what makes Finder copy the bundle on drop; the
+# Finder pass only adds the background image and icon positions. Styling is
+# best effort: a CI session without Finder automation permission still gets a
+# fully functional (if plain) DMG.
+create_dmg() {
+  local dmg_path="$1"
+  local staging="$work_root/dmg-staging"
+  local rw_image="$work_root/Kkindle-rw.dmg"
+  local mountpoint volume_name attach_output background
+  background="$repo_root/scripts/macos/dmg-background.png"
+  rm -rf "$staging" "$rw_image" "$dmg_path"
+  mkdir -p "$staging"
+  cp -a "$app_root" "$staging/Kkindle.app"
+  ln -s /Applications "$staging/Applications"
+  if [[ -f "$background" ]]; then
+    mkdir -p "$staging/.background"
+    cp "$background" "$staging/.background/background.png"
+  fi
+
+  hdiutil create -quiet -volname "Kkindle" -srcfolder "$staging" \
+    -fs HFS+ -format UDRW -ov "$rw_image"
+  # Finder addresses the volume by its displayed (mount point) name. Mounting
+  # at a custom directory makes Finder show that directory name instead of
+  # the volume label, so let hdiutil pick /Volumes/Kkindle and pass the actual
+  # name to AppleScript. Finder also needs the volume to be browsable, so no
+  # -nobrowse here.
+  attach_output="$(hdiutil attach -noautoopen "$rw_image")"
+  mountpoint="$(printf '%s\n' "$attach_output" |
+    awk -F '\t' '/\/Volumes\// { print $NF; exit }')"
+  if [[ -z "$mountpoint" ]]; then
+    echo "Unable to mount the staged DMG at /Volumes." >&2
+    return 1
+  fi
+  volume_name="$(basename "$mountpoint")"
+  sleep 1
+
+  if [[ -f "$background" && "${KKINDLE_DMG_STYLE:-1}" != "0" ]]; then
+    osascript - "$volume_name" <<'APPLESCRIPT' &
+on run argv
+tell application "Finder"
+  tell disk (item 1 of argv)
+    open
+    delay 1
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {100, 100, 760, 540}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 128
+    try
+      set background picture of viewOptions to file ".background:background.png"
+    end try
+    set position of item "Kkindle.app" of container window to {180, 210}
+    set position of item "Applications" of container window to {480, 210}
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+end run
+APPLESCRIPT
+    local style_pid=$!
+    local waited=0
+    while kill -0 "$style_pid" 2>/dev/null && (( waited < 60 )); do
+      sleep 0.5
+      waited=$((waited + 1))
+    done
+    if kill -0 "$style_pid" 2>/dev/null; then
+      kill "$style_pid" 2>/dev/null || true
+      echo "Finder DMG layout timed out; keeping the default layout." >&2
+    else
+      wait "$style_pid" || echo "Finder DMG layout failed; keeping the default layout." >&2
+    fi
+  fi
+
+  # Finder creates .fseventsd while the read-write image is mounted.
+  rm -rf "$mountpoint/.fseventsd" 2>/dev/null || true
+  sync
+  if ! hdiutil detach -quiet "$mountpoint"; then
+    hdiutil detach -force -quiet "$mountpoint" || true
+  fi
+  hdiutil convert -quiet "$rw_image" -format UDZO \
+    -imagekey zlib-level=9 -o "$dmg_path"
+  rm -f "$rw_image"
+}
 
 if [[ -n "$notary_key_path" ]]; then
   notarization_zip="$work_root/Kkindle-notarization.zip"
@@ -249,6 +416,29 @@ elif [[ -n "$notary_profile" ]]; then
     --keychain-profile "$notary_profile" --wait
   xcrun stapler staple "$app_root"
   xcrun stapler validate "$app_root"
+fi
+
+dmg_path="$output_root/Kkindle-$version-$rid.dmg"
+create_dmg "$dmg_path"
+
+if [[ "$signing_identity" != "-" ]]; then
+  codesign --force --timestamp --sign "$signing_identity" "$dmg_path"
+  codesign --verify --strict "$dmg_path"
+fi
+
+# A DMG is a separate notarization artifact. Submitting it after the app has
+# already been stapled keeps both the copy-in-place bundle and the disk image
+# itself valid offline after the user drags Kkindle to Applications.
+if [[ -n "$notary_key_path" ]]; then
+  xcrun notarytool submit "$dmg_path" \
+    --key "$notary_key_path" --key-id "$notary_key_id" --issuer "$notary_issuer" --wait
+  xcrun stapler staple "$dmg_path"
+  xcrun stapler validate "$dmg_path"
+elif [[ -n "$notary_profile" ]]; then
+  xcrun notarytool submit "$dmg_path" \
+    --keychain-profile "$notary_profile" --wait
+  xcrun stapler staple "$dmg_path"
+  xcrun stapler validate "$dmg_path"
 fi
 
 if [[ "$signing_identity" == "-" ]]; then

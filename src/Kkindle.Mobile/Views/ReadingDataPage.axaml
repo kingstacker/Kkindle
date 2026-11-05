@@ -159,7 +159,7 @@
                     <Border Classes="cover" Width="96" Height="138">
                       <Border Classes="coverclip">
                         <Panel>
-                          <Image Source="{Binding Cover}" Stretch="Uniform" />
+                          <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                           <TextBlock Text="{Binding Initial}" IsVisible="{Binding !HasCover}" FontSize="24"
                                      Foreground="{DynamicResource TextMutedBrush}"
                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -190,7 +190,7 @@
                   <Border Classes="cover" Width="38" Height="54">
                     <Border Classes="coverclip">
                       <Panel>
-                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                         <TextBlock Text="{Binding Initial}" IsVisible="{Binding !HasCover}" FontSize="15"
                                    Foreground="{DynamicResource TextMutedBrush}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />

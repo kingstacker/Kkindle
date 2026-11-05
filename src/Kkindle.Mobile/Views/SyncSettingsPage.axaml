@@ -48,7 +48,15 @@
         <Button Name="SyncNowButton" Classes="primary" Content="立即同步" Margin="0,16,0,0"
                 Click="OnSyncNowClick" />
 
-        <TextBlock Classes="label" Text="连接" Margin="0,28,0,12" />
+        <TextBlock Classes="label" Text="连接参数" Margin="0,28,0,12" />
+        <Grid ColumnDefinitions="*,12,*">
+          <Button Name="ImportProfileButton" Classes="secondary" Content="导入参数" Click="OnImportProfileClick" />
+          <Button Grid.Column="2" Name="ExportProfileButton" Classes="secondary" Content="导出参数" Click="OnExportProfileClick" />
+        </Grid>
+        <TextBlock Classes="muted" FontSize="12" Margin="0,8,0,16" TextWrapping="Wrap"
+                   Text="参数文件明文包含连接凭据，请妥善保管；同步加密密钥不包含在内。" />
+
+        <TextBlock Classes="label" Text="连接" Margin="0,8,0,12" />
 
         <c:NativeSegmentGroup Margin="0,0,0,16">
           <Border Classes="segments">

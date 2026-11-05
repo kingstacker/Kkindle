@@ -62,6 +62,10 @@ public partial class ReaderPage : UserControl
     private bool _turning;
     private bool _started;
     private bool _disposed;
+    // Set once the book is on screen. Before that (or after a failed open) the
+    // position fields hold defaults, and saving them would overwrite the real
+    // progress here and, through sync, on every other device.
+    private bool _ready;
     private bool _isPdf;
 
     /// <summary>Design-time only.</summary>
@@ -97,6 +101,7 @@ public partial class ReaderPage : UserControl
         ReaderHostSlot.AddHandler(PointerPressedEvent, OnSurfacePressed, tunnel, handledEventsToo: true);
         ReaderHostSlot.AddHandler(PointerMovedEvent, OnSurfaceMoved, tunnel, handledEventsToo: true);
         ReaderHostSlot.AddHandler(PointerReleasedEvent, OnSurfaceReleased, tunnel, handledEventsToo: true);
+        ReaderHostSlot.AddHandler(PointerCaptureLostEvent, OnSurfaceCaptureLost, RoutingStrategies.Bubble, handledEventsToo: true);
         _longPress.Tick += OnLongPress;
         ProgressSlider.AddHandler(PointerPressedEvent, OnSliderPressed, tunnel, handledEventsToo: true);
         ProgressSlider.AddHandler(PointerReleasedEvent, OnSliderReleased, tunnel, handledEventsToo: true);
@@ -115,7 +120,7 @@ public partial class ReaderPage : UserControl
             BodyPadding: 24,
             FontFamily: ReaderFontDefaults.BundledFamily,
             FlowMode: 1,
-            VerticalWriting: false,
+            VerticalWriting: preferences.ReaderVerticalWriting,
             TwoPageMode: false));
 
     private async void OnLoaded(object? sender, RoutedEventArgs e)
@@ -129,6 +134,8 @@ public partial class ReaderPage : UserControl
 
     private async Task OpenAsync()
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             LoadingPanel.IsVisible = true;
@@ -246,6 +253,7 @@ public partial class ReaderPage : UserControl
         host.SetAnnotations(_annotations.ToList());
         UpdateEpubLabels();
         LoadingPanel.IsVisible = false;
+        _ready = true;
     }
 
     /// <summary>
@@ -290,7 +298,8 @@ public partial class ReaderPage : UserControl
         ReaderHostSlot.Content = host.View;
 
         _pdfPageCount = await host.PrepareDocumentAsync(path, cancellationToken);
-        _annotations.AddRange(await _modules.Reader.Data.GetAnnotationsAsync(_bookFile.Id, cancellationToken));
+        if (_pdfPageCount <= 0) throw new InvalidOperationException("这个 PDF 没有可显示的页面。");
+        _annotations.AddRange(await _modules.Reader.Data.GetAnnotationsAsync(_bookFile!.Id, cancellationToken));
         host.SetAnnotations(_annotations.ToList());
         // One whole page at a time, turned like the EPUB surface.
         await host.SetDisplayModeAsync(PdfReaderDisplayMode.SinglePage);
@@ -305,6 +314,28 @@ public partial class ReaderPage : UserControl
         BuildPdfToc(host.CachedDocumentInfo);
         UpdatePdfLabels();
         LoadingPanel.IsVisible = false;
+        _ready = true;
+    }
+
+    /// <summary>
+    /// The index changes before navigating because position messages from the
+    /// new chapter arrive while it loads; a failed load puts it back so labels
+    /// and saved progress keep describing the chapter still on screen.
+    /// </summary>
+    private async Task<bool> NavigateToChapterAsync(NativeReaderHost host, int chapter, Uri target)
+    {
+        var previous = _chapterIndex;
+        _chapterIndex = chapter;
+        var navigated = false;
+        try
+        {
+            navigated = await NavigateEpubAsync(host, target, _lifetime.Token);
+            return navigated;
+        }
+        finally
+        {
+            if (!navigated) _chapterIndex = previous;
+        }
     }
 
     private async Task<bool> NavigateEpubAsync(
@@ -488,13 +519,13 @@ public partial class ReaderPage : UserControl
             }
             else if (_readerHost is NativeReaderHost epub && _epubDocument is not null)
             {
-                _chapterIndex = Math.Clamp(item.ChapterIndex, 0, _epubDocument.Chapters.Count - 1);
+                var chapter = Math.Clamp(item.ChapterIndex, 0, _epubDocument.Chapters.Count - 1);
                 var targetText = string.IsNullOrWhiteSpace(item.Target)
-                    ? _epubDocument.Chapters[_chapterIndex]
+                    ? _epubDocument.Chapters[chapter]
                     : item.Target;
                 if (!Uri.TryCreate(targetText, UriKind.Absolute, out var target))
-                    target = new Uri(_epubDocument.Chapters[_chapterIndex]);
-                if (await NavigateEpubAsync(epub, target, _lifetime.Token))
+                    target = new Uri(_epubDocument.Chapters[chapter]);
+                if (await NavigateToChapterAsync(epub, chapter, target))
                 {
                     UpdateEpubLabels();
                     _ = SaveProgressSoonAsync(force: true);
@@ -526,7 +557,15 @@ public partial class ReaderPage : UserControl
 
     private async Task<bool> SaveProgressSoonAsync(bool force)
     {
-        if (_bookFile is null || _readerHost is null) return true;
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return false;
+        return await SaveProgressCoreAsync(force);
+    }
+
+    // The caller owns an operation lease for the entire save.
+    private async Task<bool> SaveProgressCoreAsync(bool force)
+    {
+        if (!_ready || _bookFile is null || _readerHost is null) return true;
         var now = DateTimeOffset.UtcNow;
         CountReadingTime(now);
         if (!force && now - _lastProgressSave < TimeSpan.FromSeconds(1.2)) return true;
@@ -772,8 +811,7 @@ public partial class ReaderPage : UserControl
             return;
         }
 
-        _chapterIndex = chapter;
-        if (!await NavigateEpubAsync(host, new Uri(_epubDocument.Chapters[chapter]), _lifetime.Token)) return;
+        if (!await NavigateToChapterAsync(host, chapter, new Uri(_epubDocument.Chapters[chapter]))) return;
         if (fromEnd) host.SeekToBoundary(toEnd: true);
         UpdateEpubLabels();
         _ = SaveProgressSoonAsync(force: true);
@@ -822,8 +860,7 @@ public partial class ReaderPage : UserControl
             var chapter = document.Chapters.ToList().FindIndex(item =>
                 string.Equals(Path.GetFullPath(item), path, StringComparison.Ordinal));
             if (chapter < 0) return;
-            _chapterIndex = chapter;
-            if (await NavigateEpubAsync(host, target, _lifetime.Token))
+            if (await NavigateToChapterAsync(host, chapter, target))
             {
                 UpdateEpubLabels();
                 _ = SaveProgressSoonAsync(force: true);
@@ -947,6 +984,8 @@ public partial class ReaderPage : UserControl
 
     private async Task SaveAnnotationAsync(ReaderAnnotation annotation)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             annotation.UpdatedAt = DateTimeOffset.UtcNow;
@@ -990,6 +1029,8 @@ public partial class ReaderPage : UserControl
 
     private async Task DeleteAnnotationAsync(ReaderAnnotation annotation)
     {
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             await _modules.Reader.Data.DeleteAnnotationAsync(annotation.Id, _lifetime.Token);
@@ -1154,9 +1195,15 @@ public partial class ReaderPage : UserControl
 
     private async void OnBookmarkClick(object? sender, RoutedEventArgs e) => await ToggleBookmarkAsync();
 
+    private bool _bookmarkBusy;
+
     public async Task ToggleBookmarkAsync()
     {
-        if (_bookFile is null) return;
+        // A second tap while the first save runs would add the same mark twice.
+        if (_bookmarkBusy || !_ready) return;
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null || _bookFile is null) return;
+        _bookmarkBusy = true;
         try
         {
             if (FindCurrentBookmark() is { } existing)
@@ -1193,6 +1240,9 @@ public partial class ReaderPage : UserControl
         catch (Exception exception)
         {
             _shell.ShowToast(UiText.Localize(exception.Message));
+        }        finally
+        {
+            _bookmarkBusy = false;
         }
     }
 
@@ -1246,7 +1296,9 @@ public partial class ReaderPage : UserControl
 
     private async Task SaveAndSyncOnExitAsync()
     {
-        if (await SaveProgressSoonAsync(force: true))
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
+        if (await SaveProgressCoreAsync(force: true))
             _shell.RequestAutoSync(MobileShell.AutoSyncGap.AfterReading);
     }
 
@@ -1256,7 +1308,11 @@ public partial class ReaderPage : UserControl
         return SaveProgressSoonAsync(force: true);
     }
 
-    public void Resume() => _activityClock.Resume(DateTimeOffset.UtcNow);
+    public void Resume()
+    {
+        ResetTouches();
+        _activityClock.Resume(DateTimeOffset.UtcNow);
+    }
 
     private sealed record ReaderSelection(
         string Text,

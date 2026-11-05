@@ -48,6 +48,10 @@
                         AutomationProperties.Name="写笔记">
                   <c:LineIcon Data="{StaticResource IconNotes}" Size="19" StrokeThickness="1.4" />
                 </Button>
+                <Button Name="SelectionDictionaryButton" Classes="icon" Click="OnSelectionDictionaryClick"
+                        AutomationProperties.Name="查词典">
+                  <c:LineIcon Data="{StaticResource IconBook}" Size="19" StrokeThickness="1.4" />
+                </Button>
                 <Button Name="SelectionTranslateButton" Classes="icon" Click="OnSelectionTranslateClick"
                         AutomationProperties.Name="翻译">
                   <c:LineIcon Data="{StaticResource IconTranslate}" Size="19" StrokeThickness="1.4" />
@@ -118,6 +122,7 @@
             <c:LineIcon Data="{StaticResource IconHeadphones}" Size="18" StrokeThickness="1.4"
                         VerticalAlignment="Center" />
             <TextBlock Name="SpeechStatusText" FontSize="13" VerticalAlignment="Center" Margin="6,0,6,0" />
+            <Button Classes="ghost" Content="设置" Padding="8,6" Click="OnSpeechSettingsClick" />
             <Button Classes="icon" Width="40" Height="40" Click="OnSpeechPauseClick">
               <c:LineIcon Name="SpeechPauseIcon" Data="{StaticResource IconPause}" Size="18" StrokeThickness="1.6" />
             </Button>

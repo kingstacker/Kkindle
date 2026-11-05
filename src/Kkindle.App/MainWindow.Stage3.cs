@@ -907,7 +907,7 @@ public partial class MainWindow
         _deviceDisplayName = null;
         DevicePageDeviceText.Text = T("未检测到设备");
         DeviceNameButton.IsEnabled = false;
-        DevicePageStatusText.Text = detail ?? (OperatingSystem.IsWindows()
+        DevicePageStatusText.Text = detail ?? (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? T("请连接并解锁阅读设备；支持 USB 磁盘与 MTP，每次只接入一台。")
             : T("请连接并解锁阅读设备；当前平台支持 USB 磁盘，每次只接入一台。"));
         KindleStatusText.Text = T("无设备连接");

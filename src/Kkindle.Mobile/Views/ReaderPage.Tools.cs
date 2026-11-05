@@ -41,7 +41,8 @@ public partial class ReaderPage
     private async Task<IReadOnlyList<SearchHit>> SearchBookAsync(
         string query, IProgress<string> progress, CancellationToken token)
     {
-        if (_bookFile is null) return [];
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null || _bookFile is null) return [];
         _lastSearch = query;
         if (_isPdf)
         {
@@ -149,12 +150,13 @@ public partial class ReaderPage
             return;
         }
 
-        _tts ??= CreateSpeech(createEngine(), createPlayer());
-        SetChromeVisible(false);
-        SpeechBar.IsVisible = true;
-        SpeechStatusText.Text = "正在准备朗读…";
         try
         {
+            // Engine construction binds platform speech services and can throw.
+            _tts ??= CreateSpeech(createEngine(), createPlayer());
+            SetChromeVisible(false);
+            SpeechBar.IsVisible = true;
+            SpeechStatusText.Text = "正在准备朗读…";
             var settings = await _modules.Reader.TtsSettings.LoadAsync(_lifetime.Token);
             settings.AudioFormat = "wav";
             await _tts.StartAsync(settings, _lifetime.Token);
@@ -162,7 +164,7 @@ public partial class ReaderPage
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
         }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        catch (Exception exception)
         {
             SpeechBar.IsVisible = false;
             _shell.ShowToast("朗读失败：" + UiText.Localize(exception.Message));
@@ -263,6 +265,29 @@ public partial class ReaderPage
             _shell.ShowToast("朗读失败：" + UiText.Localize(e.Message));
     }
 
+    private async void OnSpeechSettingsClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_shell.Services.CreateTtsEngine is not { } createEngine) return;
+        try
+        {
+            var settings = await _modules.Reader.TtsSettings.LoadAsync(_lifetime.Token);
+            using var engine = createEngine();
+            var voices = await engine.GetVoicesAsync(_lifetime.Token);
+            if (_disposed) return;
+            _shell.ShowSheet("朗读设置", new SpeechSettingsSheet(
+                _modules.Reader.TtsSettings, settings, voices,
+                () => { _shell.HideSheet(); _shell.ShowToast("朗读设置已保存"); },
+                message => _shell.ShowToast(message)), ThemeScope.RequestedThemeVariant);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _shell.ShowToast("无法获取系统语音：" + UiText.Localize(exception.Message));
+        }
+    }
+
     private void OnSpeechPauseClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _tts?.PauseOrResume();
 
     private void OnSpeechStopClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _ = _tts?.StopAsync();
@@ -323,6 +348,9 @@ public partial class ReaderPage
 
     private void TrackTouchPressed(PointerPressedEventArgs e)
     {
+        // The first finger down starts a fresh gesture; a release the system
+        // swallowed (edge swipe, app switch) must not leave a phantom finger.
+        if (e.Pointer.IsPrimary) ResetTouches();
         _touches[e.Pointer.Id] = e.GetPosition(ReaderHostSlot);
         if (_touches.Count == 2 && _readerHost is NativePdfReaderHost pdf)
         {
@@ -360,6 +388,18 @@ public partial class ReaderPage
         _shell.Preferences.Update(value => value with { PdfZoom = zoom });
         if (_readerHost is NativePdfReaderHost pdf) _ = ApplyPdfZoomAsync(pdf);
         return true;
+    }
+
+    private void OnSurfaceCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        _touches.Remove(e.Pointer.Id);
+        if (_touches.Count == 0) _pinching = false;
+    }
+
+    private void ResetTouches()
+    {
+        _touches.Clear();
+        _pinching = false;
     }
 
     private double TouchDistance()

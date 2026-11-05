@@ -56,6 +56,16 @@ internal static class MacOSSingleInstanceGuard
 internal sealed class MacOSInstanceActivationServer : IDisposable
 {
     private const string ActivateMessage = "activate";
+    private const int MaximumPayloadBytes = 256 * 1024;
+
+    // Set by Program once Avalonia has initialized the UI thread. Touching
+    // Dispatcher.UIThread earlier from a thread-pool thread makes that thread
+    // the dispatcher owner, and Avalonia's own setup on the main thread then
+    // fails its thread-affinity check and aborts the first instance.
+    private static readonly TaskCompletionSource UiReady =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public static void SignalUiReady() => UiReady.TrySetResult();
 
     private readonly Socket _listener;
     private readonly CancellationTokenSource _cancellation = new();
@@ -92,17 +102,29 @@ internal sealed class MacOSInstanceActivationServer : IDisposable
     }
 
     /// <summary>
-    /// Asks the already-running instance to come to the front. Returns false
-    /// when the socket is unavailable, so the caller can fall back to
-    /// LaunchServices activation.
+    /// Asks the already-running instance to come to the front, optionally
+    /// passing files for import. Returns false when the socket is unavailable,
+    /// so the caller can fall back to LaunchServices activation.
     /// </summary>
-    public static bool RequestActivate()
+    public static bool RequestActivate(IReadOnlyList<string>? files = null)
     {
         try
         {
             using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             socket.Connect(new UnixDomainSocketEndPoint(SocketPath));
-            socket.Send(Encoding.UTF8.GetBytes(ActivateMessage));
+            var payload = new StringBuilder(ActivateMessage);
+            foreach (var file in files ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(file)) continue;
+                // Base64 keeps newline-containing paths from breaking the
+                // simple line protocol.
+                payload.Append('\n').Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(file)));
+            }
+            var bytes = Encoding.UTF8.GetBytes(payload.ToString());
+            var sent = 0;
+            while (sent < bytes.Length)
+                sent += socket.Send(bytes, sent, bytes.Length - sent, SocketFlags.None);
+            socket.Shutdown(SocketShutdown.Send);
             return true;
         }
         catch (Exception exception) when (exception is IOException or SocketException or UnauthorizedAccessException)
@@ -153,12 +175,36 @@ internal sealed class MacOSInstanceActivationServer : IDisposable
         {
             using (client)
             {
-                var buffer = new byte[64];
-                var read = await client.ReceiveAsync(buffer, SocketFlags.None, _cancellation.Token)
-                    .ConfigureAwait(false);
-                if (read > 0
-                    && Encoding.UTF8.GetString(buffer, 0, read).Trim() == ActivateMessage)
-                    await ShowMainWindowAsync().ConfigureAwait(false);
+                using var payload = new MemoryStream();
+                var buffer = new byte[8192];
+                while (payload.Length < MaximumPayloadBytes)
+                {
+                    var read = await client.ReceiveAsync(buffer, SocketFlags.None, _cancellation.Token)
+                        .ConfigureAwait(false);
+                    if (read == 0) break;
+                    payload.Write(buffer, 0, read);
+                }
+
+                var lines = Encoding.UTF8.GetString(payload.ToArray())
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (lines.Length == 0 || lines[0] != ActivateMessage) return;
+
+                var files = new List<string>();
+                foreach (var line in lines.Skip(1))
+                {
+                    try
+                    {
+                        var path = Encoding.UTF8.GetString(Convert.FromBase64String(line));
+                        if (!string.IsNullOrWhiteSpace(path)) files.Add(path);
+                    }
+                    catch (FormatException)
+                    {
+                        // Ignore malformed path entries instead of dropping the
+                        // whole activation request.
+                    }
+                }
+
+                await ShowMainWindowAsync(files).ConfigureAwait(false);
             }
         }
         catch
@@ -167,8 +213,17 @@ internal sealed class MacOSInstanceActivationServer : IDisposable
         }
     }
 
-    private async Task ShowMainWindowAsync()
+    private async Task ShowMainWindowAsync(IReadOnlyList<string> files)
     {
+        try
+        {
+            await UiReady.Task.WaitAsync(_cancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         // The second launch can arrive before the main window exists.
         for (var attempt = 0; attempt < 40 && !_cancellation.IsCancellationRequested; attempt++)
         {
@@ -183,6 +238,8 @@ internal sealed class MacOSInstanceActivationServer : IDisposable
                         window.WindowState = WindowState.Normal;
                     window.Show();
                     window.Activate();
+                    if (files.Count > 0 && window is MainWindow mainWindow)
+                        _ = mainWindow.OpenExternalFilesAsync(files);
                     return true;
                 });
                 if (shown) return;

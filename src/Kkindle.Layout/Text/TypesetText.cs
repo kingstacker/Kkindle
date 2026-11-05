@@ -38,6 +38,17 @@ public static class TypesetText
         "、。，．：；？！‼⁇⁈⁉・‥…—―～ー）〕］｝〉》」』】〙〗〟’”"
         + "︶︺︼︾﹀﹈﹂﹄";
 
+    // Punctuation whose ink occupies one half of a full-width cell. Most CJK
+    // reading faces ship no `palt`/`halt` feature (the bundled Song face does
+    // not), so the composer squeezes these marks itself. Ellipses, dashes,
+    // iteration marks and small kana are deliberately excluded: their ink or
+    // their typographic role spans the full cell.
+    private const string CompressibleClosingPunctuation =
+        "、。，．：；？！‼⁇⁈⁉）〕］｝〉》」』】〙〗〟’”｠»";
+
+    private const string CompressibleOpeningPunctuation =
+        "（〔［｛〈《「『【〘〖〝‘“｟«";
+
     private const string NumericPrefixes = "第$€£¥￥";
 
     private const string NumericPostfixes =
@@ -56,6 +67,18 @@ public static class TypesetText
     public static bool IsProhibitedAtLineStart(char c) => ProhibitedAtLineStart.IndexOf(c) >= 0;
 
     public static bool IsProhibitedAtLineEnd(char c) => ProhibitedAtLineEnd.IndexOf(c) >= 0;
+
+    /// <summary>True for a closing mark whose trailing half-cell is blank.</summary>
+    public static bool IsCompressibleClosingPunctuation(string text) =>
+        TryGetFirstScalar(text, out var scalar)
+        && ContainsScalar(CompressibleClosingPunctuation, scalar)
+        && IsSingleScalar(text);
+
+    /// <summary>True for an opening mark whose leading half-cell is blank.</summary>
+    public static bool IsCompressibleOpeningPunctuation(string text) =>
+        TryGetFirstScalar(text, out var scalar)
+        && ContainsScalar(CompressibleOpeningPunctuation, scalar)
+        && IsSingleScalar(text);
 
     /// <summary>
     /// Tests the first Unicode scalar of a complete text element. Layout code
@@ -214,6 +237,21 @@ public static class TypesetText
 
     private static bool ContainsScalar(string characters, int scalar) =>
         scalar <= char.MaxValue && characters.IndexOf((char)scalar) >= 0;
+
+    private static bool IsSingleScalar(string text)
+    {
+        var count = 0;
+        foreach (var _ in text.EnumerateRunes())
+        {
+            count++;
+            if (count > 1)
+            {
+                return false;
+            }
+        }
+
+        return count == 1;
+    }
 
     // UAX #50 / CSS Writing Modes Tr characters: the glyph stays upright only
     // when the font supplies its typographic vertical alternate. ASCII
@@ -382,8 +420,24 @@ public static class TypesetText
                 var wordEnd = match.Success && match.Index == i
                     ? Math.Min(end, match.Index + match.Length)
                     : i + 1;
+
+                // Hyphenated compounds ("well-known") are one spelling unit in
+                // the pattern above, but typography permits a break after the
+                // hyphen. Emit the prefix as its own cell so a justified line
+                // can wrap there instead of pushing the whole compound down.
+                for (var k = i + 1; k < wordEnd - 1; k++)
+                {
+                    if (text[k] is '-' or '–' or '—')
+                    {
+                        units.Add(new TextUnit(i - start, k + 1 - i, TextUnitKind.LatinWord));
+                        i = k + 1;
+                        goto Emitted;
+                    }
+                }
+
                 units.Add(new TextUnit(i - start, wordEnd - i, TextUnitKind.LatinWord));
                 i = wordEnd;
+            Emitted:
                 continue;
             }
 

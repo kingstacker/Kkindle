@@ -150,7 +150,7 @@ public sealed partial class KindleAnnotationSyncServiceTests
             var highlight = Assert.Single(fake.Mutations, mutation => mutation.Dataset == 1);
             var note = Assert.Single(fake.Mutations, mutation => mutation.Dataset == 3);
             Assert.Equal(1537, highlight.Start);
-            Assert.Equal(1559, highlight.End);
+            Assert.Equal(1558, highlight.End);
             Assert.InRange(note.Start, highlight.Start, highlight.End);
             Assert.Equal(highlight.End, note.End);
             Assert.Equal(1, result.ChangesToDevice);

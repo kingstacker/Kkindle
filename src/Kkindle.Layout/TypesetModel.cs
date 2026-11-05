@@ -16,6 +16,7 @@ public enum BlockKind
     Blockquote,
     Image,
     Rule,
+    Table,
 }
 
 public enum InlineKind
@@ -60,6 +61,12 @@ public readonly record struct TypesetInlineStyle(
 
     /// <summary>Null means mixed orientation, subject to the reader default.</summary>
     public TypesetVerticalOrientation? VerticalTextOrientation { get; init; }
+
+    /// <summary>
+    /// Publisher `font-size` as a multiple of the body size. One is the
+    /// default; headings and `<span style="font-size:...">` scale from here.
+    /// </summary>
+    public float FontSizeFactor { get; init; } = 1f;
 }
 
 /// <summary>
@@ -110,7 +117,53 @@ public sealed class ContentBlock
     public float TextIndentEm { get; init; }
     public float SpaceBeforeLines { get; init; }
     public float SpaceAfterLines { get; init; }
+    /// <summary>
+    /// Publisher `line-height` as a multiple of the body font size. Zero keeps
+    /// the reader's own line height, so user settings still win for unstyled
+    /// books.
+    /// </summary>
+    public float LineHeightFactor { get; init; }
+    /// <summary>Publisher margins/padding, in em of the body font size.</summary>
+    public float MarginTopEm { get; init; }
+    public float MarginBottomEm { get; init; }
+    public float MarginLeftEm { get; init; }
+    public float MarginRightEm { get; init; }
+    public float PaddingLeftEm { get; init; }
+    public float PaddingRightEm { get; init; }
+    /// <summary>
+    /// Structured rows and cells. <see cref="Items"/> still carries the same
+    /// text flattened, which vertical typesetting (and any host that does not
+    /// understand tables) falls back to.
+    /// </summary>
+    public ContentTable? Table { get; init; }
     public List<InlineItem> Items { get; init; } = new();
+}
+
+public sealed class ContentTable
+{
+    public required IReadOnlyList<ContentTableRow> Rows { get; init; }
+}
+
+public sealed class ContentTableRow
+{
+    public required IReadOnlyList<ContentTableCell> Cells { get; init; }
+    public bool Header { get; init; }
+}
+
+public sealed class ContentTableCell
+{
+    public required IReadOnlyList<InlineItem> Items { get; init; }
+    public int ColSpan { get; init; } = 1;
+    public int RowSpan { get; init; } = 1;
+    public bool Header { get; init; }
+    /// <summary>Visible border widths in em; zero means no border on that side.</summary>
+    public float BorderTopEm { get; init; }
+    public float BorderRightEm { get; init; }
+    public float BorderBottomEm { get; init; }
+    public float BorderLeftEm { get; init; }
+
+    public bool HasBorder =>
+        BorderTopEm > 0f || BorderRightEm > 0f || BorderBottomEm > 0f || BorderLeftEm > 0f;
 }
 
 /// <summary>
@@ -233,8 +286,17 @@ public sealed record PlacedRun
     /// <summary>Per-glyph pen positions relative to the run origin.</summary>
     public required float[] X { get; init; }
     public required float[] Y { get; init; }
+    /// <summary>
+    /// Per-glyph shift that was applied to squeeze punctuation. Hit-testing
+    /// subtracts it so selection rectangles describe the visible half-cell
+    /// rather than the shifted pen position.
+    /// </summary>
+    public float[]? InkShiftX { get; init; }
     public float OriginX { get; init; }
     public float OriginY { get; init; }
+    /// <summary>Font ascent/descent of the run, used for selection geometry.</summary>
+    public float Ascent { get; init; }
+    public float Descent { get; init; }
     /// <summary>Advance along the flow axis (width horizontally, height vertically).</summary>
     public float FlowAdvance { get; init; }
     /// <summary>Vertical mode only: the run is shaped horizontally and painted rotated 90° clockwise.</summary>

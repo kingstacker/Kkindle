@@ -48,7 +48,6 @@ internal static class MacDockIcon
 
         try
         {
-            Console.Error.WriteLine("MacDockIcon: applying");
             var iconPath = Path.Combine(Path.GetTempPath(), "Kkindle", "Kkindle-dock.png");
             Directory.CreateDirectory(Path.GetDirectoryName(iconPath)!);
             using (var source = AssetLoader.Open(new Uri(IconUri)))
@@ -63,11 +62,9 @@ internal static class MacDockIcon
                 Send(objc_getClass("NSImage"), sel_registerName("alloc")),
                 sel_registerName("initWithContentsOfFile:"),
                 nsPath);
-            Console.Error.WriteLine($"MacDockIcon: path={nsPath} image={image}");
             if (image == IntPtr.Zero) return;
 
             var app = Send(objc_getClass("NSApplication"), sel_registerName("sharedApplication"));
-            Console.Error.WriteLine($"MacDockIcon: app={app}");
             SendVoidPtr(app, sel_registerName("setApplicationIconImage:"), image);
             SendVoid(image, sel_registerName("release"));
         }

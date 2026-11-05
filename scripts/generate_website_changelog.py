@@ -19,7 +19,7 @@ CHANGELOG_EN_SOURCE = ROOT / "CHANGELOG.en.md"
 DEFAULT_OUTPUT = ROOT / "artifacts" / "website"
 START_MARKER = "<!-- changelog-generated:start -->"
 END_MARKER = "<!-- changelog-generated:end -->"
-RELEASE_COUNT = 3
+RELEASE_COUNT = 1
 
 RELEASE_HEADING = re.compile(
     r"^##\s+\[?(?P<version>v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]?"
@@ -247,7 +247,7 @@ def render_changelog(
     )
 
 
-def generate_site(output_dir: Path) -> None:
+def render_index() -> tuple[str, int]:
     source_index_path = WEBSITE_SOURCE / "index.html"
     source_index = source_index_path.read_text(encoding="utf-8")
     if source_index.count(START_MARKER) != 1 or source_index.count(END_MARKER) != 1:
@@ -265,15 +265,37 @@ def generate_site(output_dir: Path) -> None:
     output_index = "\n".join(
         [start.rstrip(), START_MARKER, generated, END_MARKER, end.lstrip()]
     )
+    return output_index, len(releases)
+
+
+def write_lf(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
+def update_source() -> None:
+    output_index, count = render_index()
+    index_path = WEBSITE_SOURCE / "index.html"
+    write_lf(index_path, output_index)
+    print(f"Updated the latest {count} changelog entries in {index_path}")
+
+
+def generate_site(output_dir: Path) -> None:
+    output_index, count = render_index()
 
     output_dir = output_dir.expanduser().resolve()
     source_dir = WEBSITE_SOURCE.resolve()
     if output_dir == source_dir or source_dir in output_dir.parents:
         raise ValueError("Output directory must not be inside the source website directory")
 
-    shutil.copytree(source_dir, output_dir, dirs_exist_ok=True)
-    (output_dir / "index.html").write_text(output_index, encoding="utf-8", newline="\n")
-    print(f"Generated the latest {len(releases)} changelog entries in {output_dir}")
+    shutil.copytree(
+        source_dir,
+        output_dir,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("dev", "README.md"),
+    )
+    write_lf(output_dir / "index.html", output_index)
+    print(f"Generated the latest {count} changelog entries in {output_dir}")
 
 
 def main() -> None:
@@ -284,8 +306,16 @@ def main() -> None:
         default=DEFAULT_OUTPUT,
         help=f"Website artifact directory (default: {DEFAULT_OUTPUT})",
     )
+    parser.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Rewrite website/index.html so the source site previews the changelog",
+    )
     args = parser.parse_args()
-    generate_site(args.output_dir)
+    if args.in_place:
+        update_source()
+    else:
+        generate_site(args.output_dir)
 
 
 if __name__ == "__main__":

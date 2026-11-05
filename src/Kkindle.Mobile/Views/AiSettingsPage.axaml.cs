@@ -7,7 +7,7 @@ using Kkindle.Infrastructure;
 namespace Kkindle.Mobile.Views;
 
 /// <summary>The AI connection, stored in the same protected file as the desktop app's.</summary>
-public partial class AiSettingsPage : UserControl
+public partial class AiSettingsPage : UserControl, IShellPage
 {
     private readonly ApplicationModules? _modules;
     private readonly MobileShell? _shell;
@@ -23,8 +23,12 @@ public partial class AiSettingsPage : UserControl
         _shell = shell;
         InitializeComponent();
         KeyboardAvoidance.Attach(this, FormScroller, ActionBar);
-        Loaded += async (_, _) => Present(await _modules.Ai.Settings.LoadAsync(_lifetime.Token));
-        DetachedFromVisualTree += (_, _) => _lifetime.Cancel();
+        Loaded += async (_, _) =>
+        {
+            try { Present(await _modules.Ai.Settings.LoadAsync(_lifetime.Token)); }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+            catch (Exception exception) { ShowStatus("读取设置失败：" + UiText.Localize(exception.Message)); }
+        };
     }
 
     private void Present(AiConnectionSettings settings)
@@ -107,6 +111,8 @@ public partial class AiSettingsPage : UserControl
             ShowStatus("请输入有效的接口地址");
             return;
         }
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) { ShowStatus("正在恢复数据，请稍后重试。"); return; }
         SetBusy(true);
         try
         {
@@ -117,9 +123,9 @@ public partial class AiSettingsPage : UserControl
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception)
         {
-            ShowStatus("保存失败：" + exception.Message);
+            ShowStatus("保存失败：" + UiText.Localize(exception.Message));
         }
         finally
         {
@@ -128,4 +134,7 @@ public partial class AiSettingsPage : UserControl
     }
 
     private void OnBackClick(object? sender, RoutedEventArgs e) => _shell?.GoBack();
+
+    /// <summary>Pushed pages only detach this one; work ends when it leaves history.</summary>
+    public void OnClosed() => _lifetime.Cancel();
 }

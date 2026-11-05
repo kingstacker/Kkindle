@@ -84,7 +84,7 @@ public partial class ReadingDataPage : UserControl
     private readonly MobileShell? _shell;
     private int _dayCount = 14;
     private bool _showAllMedals;
-    private DateOnly _pickedDay = DateOnly.FromDateTime(DateTime.Now);
+    private DateOnly _pickedDay = ReadingToday;
     private IReadOnlyList<ReadingDashboardDay> _days = [];
     private IReadOnlyList<ReadingMedal> _medals = [];
 
@@ -100,14 +100,25 @@ public partial class ReadingDataPage : UserControl
         Loaded += async (_, _) => await RefreshAsync();
     }
 
+    // Reading days are recorded and synced as UTC dates; "today" must use the
+    // same calendar or the newest bar is labelled with the wrong day.
+    private static DateOnly ReadingToday => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    // Quick 7/14/30 taps overlap; only the newest refresh may paint.
+    private int _refreshGeneration;
+
     private async Task RefreshAsync()
     {
+        var generation = ++_refreshGeneration;
+        using var operation = MobileDataCoordinator.TryBeginOperation();
+        if (operation is null) return;
         try
         {
             await _modules!.Library.Books.InitializeAsync();
             await _shell!.EnsureReaderDataAsync();
             var dashboard = await _modules.Reader.Data.GetReadingDashboardAsync(RecentLimit, dayCount: _dayCount);
             var books = (await _modules.Library.Books.SearchAsync()).ToDictionary(book => book.Id);
+            if (generation != _refreshGeneration) return;
             StatusText.IsVisible = false;
             PresentOverview(dashboard);
             _days = dashboard.DailyReading;
@@ -118,7 +129,7 @@ public partial class ReadingDataPage : UserControl
             _medals = ReadingMedalCatalog.Build(dashboard);
             PresentMedals();
         }
-        catch (Exception exception)
+        catch (Exception exception) when (generation == _refreshGeneration)
         {
             StatusText.Text = "阅读数据暂时不可用：" + UiText.Localize(exception.Message);
             StatusText.IsVisible = true;
@@ -155,7 +166,7 @@ public partial class ReadingDataPage : UserControl
     {
         DailyTitleText.Text = $"近 {_days.Count} 天";
         var longest = Math.Max(1, _days.Count == 0 ? 1 : _days.Max(day => day.ActiveSeconds));
-        var today = DateOnly.FromDateTime(DateTime.Now);
+        var today = ReadingToday;
         var labelInterval = Math.Max(1, (int)Math.Ceiling(_days.Count / 5d));
         var lastIndex = _days.Count - 1;
         var bars = _days.Select((day, index) =>

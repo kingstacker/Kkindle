@@ -1,1 +1,48 @@
-{"tag_name": "v0.7.7", "published_at": "2026-09-02T09:25:05Z", "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v0.7.7", "assets": [{"name": "Kkindle-0.7.7-linux-arm64.tar.gz", "size": 92092589, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/Kkindle-0.7.7-linux-arm64.tar.gz"}, {"name": "Kkindle-0.7.7-linux-x64.tar.gz", "size": 94480678, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/Kkindle-0.7.7-linux-x64.tar.gz"}, {"name": "Kkindle-0.7.7-osx-arm64.tar.gz", "size": 94447109, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/Kkindle-0.7.7-osx-arm64.tar.gz"}, {"name": "Kkindle-0.7.7-osx-x64.tar.gz", "size": 96730774, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/Kkindle-0.7.7-osx-x64.tar.gz"}, {"name": "Kkindle-0.7.7-win-x64-portable.zip", "size": 132203693, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/Kkindle-0.7.7-win-x64-portable.zip"}, {"name": "Kkindle-0.7.7-win-x64-setup.exe", "size": 99098803, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/Kkindle-0.7.7-win-x64-setup.exe"}, {"name": "kkindle_0.7.7_amd64.deb", "size": 80666126, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/kkindle_0.7.7_amd64.deb"}, {"name": "kkindle_0.7.7_arm64.deb", "size": 78079940, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/kkindle_0.7.7_arm64.deb"}, {"name": "SHA256SUMS.txt", "size": 767, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/SHA256SUMS.txt"}, {"name": "update-manifest.json", "size": 782, "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v0.7.7/update-manifest.json"}]}
+{
+  "tag_name": "v1.1.3",
+  "name": "Kkindle v1.1.3",
+  "published_at": "2026-10-29T14:24:47Z",
+  "html_url": "https://github.com/kingstacker/Kkindle/releases/tag/v1.1.3",
+  "assets": [
+    {
+      "name": "Kkindle-1.1.3-linux-arm64.tar.gz",
+      "size": 116273735,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/Kkindle-1.1.3-linux-arm64.tar.gz"
+    },
+    {
+      "name": "Kkindle-1.1.3-linux-x64.tar.gz",
+      "size": 119785010,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/Kkindle-1.1.3-linux-x64.tar.gz"
+    },
+    {
+      "name": "Kkindle-1.1.3-win-x64-portable.zip",
+      "size": 332002749,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/Kkindle-1.1.3-win-x64-portable.zip"
+    },
+    {
+      "name": "Kkindle-1.1.3-win-x64-setup.exe",
+      "size": 238571690,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/Kkindle-1.1.3-win-x64-setup.exe"
+    },
+    {
+      "name": "kkindle_1.1.3_amd64.deb",
+      "size": 101370754,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/kkindle_1.1.3_amd64.deb"
+    },
+    {
+      "name": "kkindle_1.1.3_arm64.deb",
+      "size": 97892396,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/kkindle_1.1.3_arm64.deb"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "size": 575,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/SHA256SUMS.txt"
+    },
+    {
+      "name": "update-manifest.json",
+      "size": 4022,
+      "browser_download_url": "https://github.com/kingstacker/Kkindle/releases/download/v1.1.3/update-manifest.json"
+    }
+  ]
+}

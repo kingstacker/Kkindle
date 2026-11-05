@@ -38,6 +38,8 @@ public sealed record MobilePreferences
     public ReaderTheme ReaderTheme { get; init; }
     public double ReaderFontScale { get; init; } = 1.35;
     public double ReaderLineHeight { get; init; } = 1.75;
+    /// <summary>Vertical right-to-left typesetting, the traditional CJK layout.</summary>
+    public bool ReaderVerticalWriting { get; init; }
     public MobilePageAnimation ReaderPageAnimation { get; init; } = MobilePageAnimation.Fade;
 }
 

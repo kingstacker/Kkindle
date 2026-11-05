@@ -112,6 +112,12 @@ public sealed class KindleEmailSettingsStore
         {
             return new KindleEmailSettings();
         }
+        catch (SecretStoreUnavailableException)
+        {
+            // Keychain locked: keep the stored (still valid) SMTP password.
+            SecretStoreGuard.MarkUnreadable(SettingsPath);
+            return new KindleEmailSettings();
+        }
     }
 
     private static KindleEmailSettings NormalizeLoadedSettings(KindleEmailSettings settings)
@@ -138,6 +144,7 @@ public sealed class KindleEmailSettingsStore
 
     internal async Task SaveUnderLockAsync(KindleEmailSettings settings, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
     {
+        SecretStoreGuard.ThrowIfUnreadable(SettingsPath);
         _paths.EnsureDirectories();
         var normalized = KindleEmailSettings.Normalize(settings);
         var persisted = new PersistedKindleEmailSettings

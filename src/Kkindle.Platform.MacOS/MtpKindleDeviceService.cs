@@ -29,6 +29,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
     private readonly string _coverCacheDirectory;
     private readonly object _detectionSync = new();
     private IReadOnlyList<KindleDevice>? _detectionCache;
+    private IReadOnlyList<KindleDevice>? _lastDetected;
     private DateTime _detectionCacheAt;
     private int _detectionGeneration;
 
@@ -56,7 +57,20 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                 return _detectionCache;
         }
 
-        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // libmtp allows one session at a time, so detection shares the gate
+        // with transfers. A scan or transfer holds it for as long as it runs;
+        // the UI polls every few seconds with a 15 s timeout, so waiting here
+        // reported a healthy device as "detection timed out" during any long
+        // transfer. While the device is busy it is evidently still attached:
+        // return the last result and let the next poll after the transfer
+        // detect for real.
+        if (!await Gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            IReadOnlyList<KindleDevice>? lastDetected;
+            lock (_detectionSync) lastDetected = _lastDetected;
+            if (lastDetected is not null) return lastDetected;
+            await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
         try
         {
             int generation;
@@ -64,6 +78,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
             var devices = await Task.Run(() => Detect(cancellationToken), cancellationToken).ConfigureAwait(false);
             lock (_detectionSync)
             {
+                _lastDetected = devices;
                 if (generation == _detectionGeneration)
                 {
                     _detectionCache = devices;
@@ -90,23 +105,10 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
     public Task<IReadOnlyList<KindleBook>> GetCachedBooksAsync(KindleDevice device, CancellationToken cancellationToken = default) =>
         _scanCache.GetCachedBooksAsync(device.Identity, cancellationToken);
 
-    public async Task<IReadOnlyList<KindleBook>> ScanBooksAsync(KindleDevice device, CancellationToken cancellationToken = default)
-    {
-        IReadOnlyList<KindleBook>? results = null;
-        await ScanBooksProgressivelyAsync(
-            device,
-            new InlineProgress<KindleScanProgress>(progress =>
-            {
-                if (progress.Stage == KindleScanStage.Enriched) results = progress.Books;
-            }),
-            cancellationToken).ConfigureAwait(false);
-        return results ?? [];
-    }
-
-    private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
-    {
-        public void Report(T value) => handler(value);
-    }
+    // Enriched progress reports carry only the books changed in that batch
+    // (at most eight), so the complete list is the scan's return value.
+    public Task<IReadOnlyList<KindleBook>> ScanBooksAsync(KindleDevice device, CancellationToken cancellationToken = default) =>
+        ScanBooksProgressivelyAsync(device, progress: null, cancellationToken);
 
     public async Task<IReadOnlyList<KindleBook>> ScanBooksProgressivelyAsync(
         KindleDevice device,
@@ -189,11 +191,12 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                     folder.RelativePath,
                     sourcePath,
                     fileName,
-                    (sent, size) => progress?.Report(new TransferProgress(sent, size, "正在发送到设备")));
+                    (sent, size) => progress?.Report(new TransferProgress(sent, size, "正在发送到设备")),
+                    cancellationToken);
                 if (thumbnail is not null)
                 {
                     progress?.Report(new TransferProgress(total, total, "正在同步设备书架封面"));
-                    UploadThumbnail(session, thumbnail);
+                    UploadThumbnail(session, thumbnail, cancellationToken);
                 }
                 if (isNewBook)
                     DeleteSidecarFolder(session, device.Profile.BooksDirectory, fileName);
@@ -251,7 +254,8 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                 var entry = session.Find(book.RelativePath)
                     ?? throw new FileNotFoundException("设备书籍不存在。", book.RelativePath);
                 session.Download(entry, temporary,
-                    (sent, total) => progress?.Report(new TransferProgress(sent, total, "正在导出")));
+                    (sent, total) => progress?.Report(new TransferProgress(sent, total, "正在导出")),
+                    cancellationToken);
                 return true;
             }, cancellationToken).ConfigureAwait(false);
             File.Move(temporary, destination, overwrite: true);
@@ -304,7 +308,8 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         return WithSessionAsync(device, session =>
         {
             session.Upload(directory, sourcePath, fileName,
-                (sent, total) => progress?.Report(new TransferProgress(sent, total, "正在发送资源")));
+                (sent, total) => progress?.Report(new TransferProgress(sent, total, "正在发送资源")),
+                cancellationToken);
             return true;
         }, cancellationToken);
     }
@@ -321,7 +326,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         {
             var entry = session.Find(resource.RelativePath)
                 ?? throw new FileNotFoundException("设备资源不存在。", resource.RelativePath);
-            session.Download(entry, destination);
+            session.Download(entry, destination, cancellationToken: cancellationToken);
             return true;
         }, cancellationToken);
     }
@@ -402,7 +407,8 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                 session.Upload(
                     device.Profile.BooksDirectory,
                     temporary,
-                    "My Clippings.txt");
+                    "My Clippings.txt",
+                    cancellationToken: cancellationToken);
                 return true;
             }, cancellationToken).ConfigureAwait(false);
         }
@@ -425,7 +431,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                 var database = FindAnnotationDatabases(session).FirstOrDefault();
                 if (database is null) return null;
                 var destination = Path.Combine(stagingDirectory, AnnotationFileName);
-                session.Download(database, destination);
+                session.Download(database, destination, cancellationToken: cancellationToken);
                 return new LocalAnnotationDatabase(
                     database.RelativePath.Replace('\\', '/'),
                     destination,
@@ -506,7 +512,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                 var database = FindAnnotationDatabase(session, snapshot.DatabaseRelativePath)
                     ?? throw new IOException("设备批注数据库路径已经变化。");
                 RejectAnnotationSideFiles(session, database);
-                session.Download(database, workingPath);
+                session.Download(database, workingPath, cancellationToken: cancellationToken);
                 return true;
             }, cancellationToken).ConfigureAwait(false);
             await VerifyHashAsync(
@@ -566,7 +572,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         var parentDirectory = database.RelativePath[..database.RelativePath.LastIndexOf('/')];
 
         var currentReadback = Path.Combine(readbackDirectory, "current.db");
-        session.Download(database, currentReadback);
+        session.Download(database, currentReadback, cancellationToken: cancellationToken);
         VerifyHash(currentReadback, expectedOriginalHash,
             "设备批注数据库在同步期间发生变化，已取消安装。");
 
@@ -578,28 +584,30 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         var backupName = $"{AnnotationFileName}.kkindle-backup-{stamp}";
 
         progress?.Report(new(KindleAnnotationSyncStage.BackingUp));
-        session.Upload(parentDirectory, localBackupPath, backupName);
+        session.Upload(parentDirectory, localBackupPath, backupName, cancellationToken: cancellationToken);
         var backupReadback = Path.Combine(readbackDirectory, "backup.db");
         session.Download(
             session.Find($"{parentDirectory}/{backupName}")
                 ?? throw new IOException("设备未确认写入批注备份。"),
-            backupReadback);
+            backupReadback,
+            cancellationToken: cancellationToken);
         VerifyHash(backupReadback, expectedOriginalHash, "设备批注备份校验失败。");
 
         progress?.Report(new(KindleAnnotationSyncStage.PreparingWrite));
-        session.Upload(parentDirectory, candidatePath, stageName);
+        session.Upload(parentDirectory, candidatePath, stageName, cancellationToken: cancellationToken);
         var stageReadback = Path.Combine(readbackDirectory, "stage.db");
         session.Download(
             session.Find($"{parentDirectory}/{stageName}")
                 ?? throw new IOException("设备未确认写入批注快照。"),
-            stageReadback);
+            stageReadback,
+            cancellationToken: cancellationToken);
         VerifyHash(stageReadback, candidateHash, "设备批注快照校验失败。");
 
         // Last freshness check immediately before deleting the original.
         database = FindAnnotationDatabase(session, databaseRelativePath)
             ?? throw new IOException("设备批注数据库已消失，已取消安装。");
         RejectAnnotationSideFiles(session, database);
-        session.Download(database, currentReadback);
+        session.Download(database, currentReadback, cancellationToken: cancellationToken);
         VerifyHash(currentReadback, expectedOriginalHash,
             "设备批注数据库在同步期间发生变化，已取消安装。");
 
@@ -607,11 +615,11 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         session.Delete(database);
         try
         {
-            session.Upload(parentDirectory, candidatePath, AnnotationFileName);
+            session.Upload(parentDirectory, candidatePath, AnnotationFileName, cancellationToken: cancellationToken);
             var installed = FindAnnotationDatabase(session, databaseRelativePath)
                 ?? throw new IOException("设备未确认安装批注数据库。");
             var installedReadback = Path.Combine(readbackDirectory, "installed.db");
-            session.Download(installed, installedReadback);
+            session.Download(installed, installedReadback, cancellationToken: cancellationToken);
             VerifyHash(installedReadback, candidateHash, "设备批注数据库安装后校验失败。");
         }
         catch
@@ -668,7 +676,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                 var localPath = Path.Combine(stagingDirectory, $"annotation-{index}.db");
                 await WithSessionAsync(device, session =>
                 {
-                    session.Download(database, localPath);
+                    session.Download(database, localPath, cancellationToken: cancellationToken);
                     return true;
                 }, cancellationToken).ConfigureAwait(false);
                 var notes = await KindleAnnotationDatabaseReader.ReadClippingsAsync(
@@ -767,7 +775,10 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
             or Microsoft.Data.Sqlite.SqliteException
             or System.Text.Json.JsonException;
 
-    private static void UploadThumbnail(MtpDeviceSession session, KindleThumbnail thumbnail)
+    private static void UploadThumbnail(
+        MtpDeviceSession session,
+        KindleThumbnail thumbnail,
+        CancellationToken cancellationToken)
     {
         var temporary = Path.Combine(
             Path.GetTempPath(), "Kkindle", $"thumbnail-{Guid.NewGuid():N}.jpg");
@@ -775,7 +786,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         try
         {
             File.WriteAllBytes(temporary, thumbnail.JpegBytes);
-            session.Upload(ThumbnailDirectory, temporary, thumbnail.FileName);
+            session.Upload(ThumbnailDirectory, temporary, thumbnail.FileName, cancellationToken: cancellationToken);
         }
         finally
         {
@@ -814,13 +825,21 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         string LocalPath,
         IReadOnlyList<string> SdrFolders);
 
-    public Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default)
+    public async Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default)
     {
-        // MTP sessions are opened per operation and released immediately; there
-        // is nothing left open to eject. libmtp closes the PTP session on
-        // release, which is all macOS needs before the cable is unplugged.
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.CompletedTask;
+        // MTP sessions are opened per operation and released immediately, so
+        // there is no mounted volume to unmount. Wait for any in-flight
+        // transfer to finish and invalidate the detection cache so the sidebar
+        // reflects the released PTP session instead of a stale device entry.
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            InvalidateDetectionCache();
+        }
+        finally
+        {
+            Gate.Release();
+        }
     }
 
     private IReadOnlyList<KindleDevice> Detect(CancellationToken cancellationToken)
@@ -942,7 +961,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
                                 $"{Guid.NewGuid():N}{Path.GetExtension(book.FileName)}");
                             try
                             {
-                                session.Download(remote, staged);
+                                session.Download(remote, staged, cancellationToken: cancellationToken);
                                 isDictionary = KindleBookClassifier.IsDictionaryAsync(staged, cancellationToken)
                                     .GetAwaiter().GetResult();
                                 if (!isDictionary)
@@ -1068,7 +1087,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
             {
                 var entry = session.Find(relativePath);
                 if (entry is null) return false;
-                session.Download(entry, temporary);
+                session.Download(entry, temporary, cancellationToken: cancellationToken);
                 return true;
             }, cancellationToken).ConfigureAwait(false);
             if (!found) return null;
@@ -1120,7 +1139,7 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
             var local = Path.Combine(stagingDirectory, $"{Guid.NewGuid():N}.jpg");
             try
             {
-                session.Download(remote, local);
+                session.Download(remote, local, cancellationToken: cancellationToken);
                 var name = string.IsNullOrWhiteSpace(book.Sha256)
                     ? Guid.NewGuid().ToString("N")
                     : book.Sha256;

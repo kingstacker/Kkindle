@@ -14,6 +14,12 @@ internal sealed record LayoutCell
     /// <summary>Per-glyph pen positions relative to the cell origin.</summary>
     public required float[] GlyphX { get; init; }
     public required float[] GlyphY { get; init; }
+    /// <summary>
+    /// Per-glyph horizontal shift applied to squeeze punctuation. Painting uses
+    /// the shifted <see cref="GlyphX"/>; hit-testing adds this back so the
+    /// visible cell keeps its half-width rectangle.
+    /// </summary>
+    public float[]? GlyphInkShiftX { get; init; }
     public required float Advance { get; init; }
     public float Ascent { get; init; }
     public float Descent { get; init; }
@@ -103,6 +109,9 @@ internal sealed class PageBuilder
     public LayoutPage Current => _current;
 
     public int CurrentPageIndex => _current.Index;
+
+    /// <summary>True once visible content has been placed on the open page.</summary>
+    public bool CurrentPageHasContent => _used;
 
     public Dictionary<string, int> Fragments { get; } = new(StringComparer.Ordinal);
 
@@ -303,7 +312,15 @@ internal sealed class CellFactory
         float? fontSizeOverride = null)
     {
         _context.CancellationToken.ThrowIfCancellationRequested();
-        var fontSize = fontSizeOverride ?? _context.Options.BaseFontSize;
+        // Vertical text lives on a fixed 1-em column grid; a publisher font
+        // size would spill into neighbouring columns, so it only scales
+        // horizontal runs.
+        // `default(TypesetInlineStyle)` predates this field and has zero here;
+        // treat non-positive values as the normal size.
+        var styleScale = style.FontSizeFactor > 0f ? style.FontSizeFactor : 1f;
+        var fontSize = fontSizeOverride
+            ?? _context.Options.BaseFontSize
+                * (vertical ? 1f : Math.Clamp(styleScale, 0.5f, 3f));
         if (fontSizeOverride is null && style.Superscript)
         {
             // Footnote references use a compact marker size. Other <sup>
@@ -321,31 +338,16 @@ internal sealed class CellFactory
                 FootnoteHref = footnoteHref, FootnoteText = footnoteText, FootnoteMarker = footnoteMarker
             };
 
-        string fontPath = _context.MainFont;
         // HTML collapses ordinary line breaks and runs of whitespace. Keep
         // the original UTF-16 length for offset mapping, but shape whitespace
         // as one regular space so a newline never turns into a .notdef box.
         var shapeText = unitText.All(TypesetText.IsSpace) ? " " : unitText;
-        var shaped = _context.Shaper.Shape(shapeText, 0, shapeText.Length, fontPath, fontSize, vertical: false);
-
-        if (ContainsNotdef(shaped))
-        {
-            foreach (var fallback in _context.Fonts.FontPaths)
-            {
-                if (fallback == fontPath)
-                {
-                    continue;
-                }
-
-                var retry = _context.Shaper.Shape(shapeText, 0, shapeText.Length, fallback, fontSize, vertical: false);
-                if (!ContainsNotdef(retry))
-                {
-                    fontPath = fallback;
-                    shaped = retry;
-                    break;
-                }
-            }
-        }
+        _ = _context.Shaper.TryShapeWithFallback(
+            shapeText,
+            fontSize,
+            vertical: false,
+            out var fontPath,
+            out var shaped);
 
         var (ascent, descent) = GetMetrics(fontPath, fontSize);
         var letterSpacing = _context.LetterSpacing * (fontSize / _context.Options.BaseFontSize);
@@ -365,6 +367,36 @@ internal sealed class CellFactory
         // line fitting matches the visible ink.
         var advance = glyphCount > 0 ? pen - letterSpacing : 0f;
 
+        // Most CJK faces (including the bundled Song face) ship no `palt` or
+        // `halt`, so full-width punctuation keeps its empty half-cell. Squeeze
+        // closing marks by their trailing blank and opening marks by their
+        // leading blank, the same half-width result those features produce.
+        // Vertical cells keep their full pitch: the empty half is part of the
+        // column rhythm there.
+        float[]? glyphInkShiftX = null;
+        if (!vertical
+            && fontSizeOverride is null
+            && glyphCount == 1
+            && Math.Abs(advance - fontSize) <= fontSize * 0.03f)
+        {
+            var squeeze = fontSize * 0.5f;
+            if (TypesetText.IsCompressibleClosingPunctuation(unitText))
+            {
+                advance -= squeeze;
+            }
+            else if (TypesetText.IsCompressibleOpeningPunctuation(unitText))
+            {
+                glyphInkShiftX = new float[glyphCount];
+                for (var glyphIndex = 0; glyphIndex < glyphX.Length; glyphIndex++)
+                {
+                    glyphX[glyphIndex] -= squeeze;
+                    glyphInkShiftX[glyphIndex] = squeeze;
+                }
+
+                advance -= squeeze;
+            }
+        }
+
         var result = new LayoutCell
         {
             Glyphs = shaped.GlyphIds,
@@ -379,6 +411,7 @@ internal sealed class CellFactory
             TextLength = unitText.Length,
             Text = unitText,
             Clusters = shaped.Clusters,
+            GlyphInkShiftX = glyphInkShiftX,
             Style = style,
             LinkHref = linkHref,
             FootnoteHref = footnoteHref,
@@ -388,6 +421,51 @@ internal sealed class CellFactory
         };
         if (cacheable && _cellCache.Count < 4096) _cellCache.TryAdd(key, result);
         return result;
+    }
+
+    /// <summary>
+    /// Shapes one breakable horizontal text unit into one or more cells. When
+    /// no single face covers every character, the unit is split at grapheme
+    /// boundaries so each element can use the face that covers it. Without
+    /// this, a Latin word containing an emoji or a rare symbol would fall back
+    /// as a whole and render the entire word as .notdef boxes.
+    /// </summary>
+    public List<LayoutCell> ShapeTextUnit(
+        string unitText,
+        int globalTextStart,
+        TypesetInlineStyle style,
+        string? linkHref,
+        string? footnoteHref)
+    {
+        var whole = ShapeCell(
+            unitText, globalTextStart, style, linkHref, footnoteHref, vertical: false);
+        if (!whole.Glyphs.Contains((ushort)0))
+        {
+            return [whole];
+        }
+
+        var starts = StringInfo.ParseCombiningCharacters(unitText);
+        if (starts.Length <= 1)
+        {
+            return [whole];
+        }
+
+        var cells = new List<LayoutCell>(starts.Length);
+        for (var index = 0; index < starts.Length; index++)
+        {
+            _context.CancellationToken.ThrowIfCancellationRequested();
+            var offset = starts[index];
+            var length = (index + 1 < starts.Length ? starts[index + 1] : unitText.Length) - offset;
+            cells.Add(ShapeCell(
+                unitText.Substring(offset, length),
+                globalTextStart + offset,
+                style,
+                linkHref,
+                footnoteHref,
+                vertical: false));
+        }
+
+        return cells;
     }
 
     private LayoutCell ShapeRubyCell(LayoutCell baseCell)
@@ -451,7 +529,10 @@ internal sealed class CellFactory
     /// inline-run policy (single digits upright, two digits combined, Latin
     /// runs sideways) and splitting horizontal text into per-unit cells.
     /// </summary>
-    public List<LayoutCell> BuildCells(InlineItem item, bool vertical)
+    public List<LayoutCell> BuildCells(
+        InlineItem item,
+        bool vertical,
+        float maxWordWidth = float.MaxValue)
     {
         var cells = new List<LayoutCell>();
 
@@ -598,16 +679,17 @@ internal sealed class CellFactory
                 }
 
                 var unitText = item.Text.Substring(unit.Start, unit.Length);
-                var cell = ShapeCell(
+                var produced = ShapeTextUnit(
                     unitText,
                     item.TextStart + unit.Start,
                     item.Style,
                     item.LinkHref,
-                    item.FootnoteHref,
-                    vertical: false);
+                    item.FootnoteHref);
+                var wordLimit = Math.Min(_context.Options.ContentWidth, maxWordWidth);
                 if (unit.Kind == TextUnitKind.LatinWord
                     && unitText.Length > 1
-                    && cell.Advance > _context.Options.ContentWidth + 0.01f)
+                    && produced.Count == 1
+                    && produced[0].Advance > wordLimit + 0.01f)
                 {
                     // A URL or an unspaced Latin token can be wider than the
                     // entire content box. Keep ordinary words atomic, but split
@@ -632,8 +714,10 @@ internal sealed class CellFactory
                 }
                 else
                 {
-                    cell = cell with { IsSpace = unit.Kind == TextUnitKind.Space };
-                    cells.Add(cell);
+                    foreach (var cell in produced)
+                    {
+                        cells.Add(cell with { IsSpace = unit.Kind == TextUnitKind.Space });
+                    }
                 }
             }
         }
@@ -856,16 +940,4 @@ internal sealed class CellFactory
         return value;
     }
 
-    private static bool ContainsNotdef(ShapedText shaped)
-    {
-        foreach (var glyph in shaped.GlyphIds)
-        {
-            if (glyph == 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

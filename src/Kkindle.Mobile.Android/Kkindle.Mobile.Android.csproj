@@ -34,7 +34,7 @@
     <PackageReference Include="Avalonia.Android" Version="12.1.1" />
     <!-- Local embeddings back the desktop AI features, which the phone app does
          not expose; the native runtime alone is about 70 MB. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" ExcludeAssets="native;build;buildTransitive" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" ExcludeAssets="native;build;buildTransitive" />
     <!-- PDFium for the native PDF surface; the desktop heads get their own
          platform binaries through Kkindle.Infrastructure. -->
     <PackageReference Include="bblanchon.PDFium.Android" Version="152.0.7961" />

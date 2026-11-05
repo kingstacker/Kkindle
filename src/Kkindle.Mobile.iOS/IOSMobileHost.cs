@@ -24,7 +24,10 @@ internal static class IOSMobileHost
             // until replaced by an in-process converter.
             new UnavailableBookFormatConverter(),
             new IOSFileImportSource(),
+            CreateTtsEngine: () => new IOSTtsEngine(Path.Combine(root, "tts")),
+            CreateTtsPlayer: () => new IOSTtsAudioPlayer(),
             TabBar: tabBar,
-            BackgroundWork: new IOSBackgroundWork());
+            BackgroundWork: new IOSBackgroundWork(),
+            FileShare: new IOSFileShare());
     }
 }

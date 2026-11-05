@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using Kkindle.Core;
 using Kkindle.Platform.Common;
 
 namespace Kkindle.Platform.MacOS;
@@ -16,7 +17,7 @@ public sealed class MacOSSecretProtector : AesGcmSecretProtector
         var lookup = RunSecurity(["find-generic-password", "-s", ServiceName, "-a", account, "-w"], allowFailure: true);
         if (lookup.ExitCode == 0 && !string.IsNullOrWhiteSpace(lookup.Output)) return ParseStoredKey(lookup.Output);
         if (lookup.ExitCode == 0 || !IsMissingSecret(lookup.Error))
-            throw new InvalidOperationException(
+            throw new SecretStoreUnavailableException(
                 $"Unable to read the existing Kkindle key from Keychain; no new key was created. {lookup.Error}");
 
         var key = CreateKey();
@@ -31,9 +32,9 @@ public sealed class MacOSSecretProtector : AesGcmSecretProtector
             return ParseStoredKey(verified.Output);
         if (store.ExitCode != 0)
         {
-            throw new InvalidOperationException($"Unable to store the Kkindle key in Keychain: {store.Error}");
+            throw new SecretStoreUnavailableException($"Unable to store the Kkindle key in Keychain: {store.Error}");
         }
-        throw new InvalidOperationException("Keychain did not retain the generated Kkindle key.");
+        throw new SecretStoreUnavailableException("Keychain did not retain the generated Kkindle key.");
     }
 
     private static bool IsMissingSecret(string error) =>
@@ -80,7 +81,7 @@ public sealed class MacOSSecretProtector : AesGcmSecretProtector
         }
         catch (Win32Exception exception)
         {
-            throw new InvalidOperationException("The macOS security tool is unavailable.", exception);
+            throw new SecretStoreUnavailableException("The macOS security tool is unavailable.", exception);
         }
     }
 

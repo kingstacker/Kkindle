@@ -109,6 +109,12 @@ public sealed class AiSettingsStore
         {
             return new AiConnectionSettings();
         }
+        catch (SecretStoreUnavailableException)
+        {
+            // Keychain locked: keep the stored (still valid) API key untouched.
+            SecretStoreGuard.MarkUnreadable(SettingsPath);
+            return new AiConnectionSettings();
+        }
     }
 
     public async Task SaveAsync(AiConnectionSettings settings, CancellationToken cancellationToken = default)
@@ -152,6 +158,7 @@ public sealed class AiSettingsStore
 
     internal async Task SaveUnderLockAsync(AiConnectionSettings settings, CancellationToken cancellationToken, DateTimeOffset? syncedAt = null)
     {
+        SecretStoreGuard.ThrowIfUnreadable(SettingsPath);
         _paths.EnsureDirectories();
         var persisted = new PersistedAiSettings
         {

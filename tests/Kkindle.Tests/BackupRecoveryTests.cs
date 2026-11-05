@@ -9,9 +9,116 @@ namespace Kkindle.Tests;
 public sealed partial class BackupTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task StartupRecoversInterruptedImportBeforeDatabaseMigration(bool databaseReplaced)
+    [InlineData("progress")]
+    [InlineData("bookmark")]
+    [InlineData("reading-time")]
+    [InlineData("reset")]
+    public async Task ReaderWritesWaitForAppDataLease(string operation)
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var library = new SqliteBookLibraryService(paths, new BookMetadataService());
+            var reader = new ReaderDataService(paths);
+            await library.InitializeAsync();
+            await reader.InitializeAsync();
+            var bookId = Guid.NewGuid();
+            var fileId = Guid.NewGuid();
+            var lease = await AppDataProcessLock.AcquireAsync(paths, CancellationToken.None);
+            Task write;
+            try
+            {
+                write = operation switch
+                {
+                    "progress" => reader.SaveProgressAsync(new ReaderProgressRow(bookId, fileId, "chapter", null, 0, 1, 1, 0, DateTimeOffset.UtcNow)),
+                    "bookmark" => reader.SaveBookmarkAsync(new ReaderBookmark { Id = Guid.NewGuid(), BookId = bookId, BookFileId = fileId, ChapterPath = "chapter", Title = "mark", Quote = "" }),
+                    "reading-time" => reader.AddReadingTimeAsync(bookId, fileId, 10, 1, 0, 1),
+                    _ => reader.ResetReadingDataAsync()
+                };
+                Assert.False(write.IsCompleted);
+            }
+            finally { lease.Dispose(); }
+
+            await write.WaitAsync(TimeSpan.FromSeconds(10));
+            if (operation == "progress") Assert.NotNull(await reader.GetProgressAsync(fileId));
+            if (operation == "bookmark") Assert.Single(await reader.GetBookmarksAsync(fileId));
+            if (operation == "reading-time") Assert.Equal(10, (await reader.GetReadingStatsAsync(fileId))!.CumulativeSeconds);
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task ExportWaitsForAnInFlightReaderIndexTransaction()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            var reader = new ReaderDataService(paths);
+            await reader.InitializeAsync();
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            async IAsyncEnumerable<BookContentChunkDraft> Chunks()
+            {
+                started.SetResult();
+                await release.Task;
+                yield return new BookContentChunkDraft(0, 0, "chapter", "chapter.xhtml", 0, 4, "text");
+            }
+
+            var indexing = reader.ReplaceBookChunksStreamingAsync(Guid.NewGuid(), Guid.NewGuid(), "hash", Chunks());
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var archivePath = Path.Combine(root, "backup.kkindle");
+            var export = new AppBackupService(paths, new TestHelpers.PlaintextSecretProtector()).ExportAsync(archivePath);
+            Assert.False(export.IsCompleted);
+            release.SetResult();
+            Assert.Equal(1, await indexing.WaitAsync(TimeSpan.FromSeconds(10)));
+            await export.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var snapshot = Path.Combine(root, "snapshot.db");
+            using (var archive = ZipFile.OpenRead(archivePath))
+                archive.GetEntry("database/kkindle.db")!.ExtractToFile(snapshot);
+            await using var connection = new SqliteConnection($"Data Source={snapshot}");
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM BookContentChunks WHERE Content='text';";
+            Assert.Equal(1L, await command.ExecuteScalarAsync());
+        }
+        finally { release.TrySetResult(); TestHelpers.TryDelete(root); }
+    }
+
+    [Fact]
+    public async Task CancelledReaderWriteDoesNotHoldTheAppDataLease()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(Path.Combine(root, "app"));
+            var reader = new ReaderDataService(paths);
+            await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
+            await reader.InitializeAsync();
+            var row = new ReaderProgressRow(Guid.NewGuid(), Guid.NewGuid(), "chapter", null, 0, 1, 1, 0, DateTimeOffset.UtcNow);
+            using var cancellation = new CancellationTokenSource();
+            using (await AppDataProcessLock.AcquireAsync(paths, CancellationToken.None))
+            {
+                var pending = reader.SaveProgressAsync(row, cancellation.Token);
+                Assert.False(pending.IsCompleted);
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+            }
+            await reader.SaveProgressAsync(row).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.NotNull(await reader.GetProgressAsync(row.BookFileId));
+        }
+        finally { TestHelpers.TryDelete(root); }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task StartupRecoversInterruptedImportBeforeDatabaseMigration(bool databaseReplaced, bool legacyJournal)
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -22,14 +129,24 @@ public sealed partial class BackupTests
             Directory.CreateDirectory(recovery);
             Directory.CreateDirectory(staging);
             await CopySnapshot(paths.Database, Path.Combine(recovery, "kkindle.db"));
+            var retainedCovers = Path.Combine(paths.Data, "reading-material-covers");
+            Directory.CreateDirectory(retainedCovers);
+            await File.WriteAllTextAsync(Path.Combine(retainedCovers, "previous.jpg"), "previous-cover");
             var originals = new List<string>();
-            foreach (var name in new[] { "library", "covers", "trash", "ai-settings.json" })
+            var managed = new List<string> { "library", "covers", "trash", "ai-settings.json" };
+            if (!legacyJournal) managed.Add("reading-material-covers");
+            foreach (var name in managed)
             {
                 var source = Path.Combine(paths.Data, name);
                 if (Directory.Exists(source)) Directory.Move(source, Path.Combine(recovery, name));
                 else if (File.Exists(source)) File.Move(source, Path.Combine(recovery, name));
                 else continue;
                 originals.Add(name);
+            }
+            if (!legacyJournal)
+            {
+                Directory.CreateDirectory(retainedCovers);
+                await File.WriteAllTextAsync(Path.Combine(retainedCovers, "incoming.jpg"), "incoming-cover");
             }
             var incomingPath = Path.Combine(paths.Data, incoming.RelativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(incomingPath)!);
@@ -45,8 +162,12 @@ public sealed partial class BackupTests
                 JsonSerializer.Serialize(new AppBackupService.ImportJournal
                 {
                     Phase = AppBackupService.ImportPhase.Replacing,
-                    StagingDirectory = Path.GetFileName(staging), OriginalPaths = originals
-                }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+                    StagingDirectory = Path.GetFileName(staging), OriginalPaths = originals,
+                    ReplaceReadingMaterialCovers = !legacyJournal
+                }, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                {
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault
+                }));
 
             await library.InitializeAsync();
 
@@ -54,6 +175,8 @@ public sealed partial class BackupTests
             Assert.Equal(previous.Id, restored.Id);
             Assert.True(File.Exists(library.GetAbsoluteFilePath(restored.Files[0])));
             Assert.Equal("previous-key", (await new AiSettingsStore(paths, new TestHelpers.PlaintextSecretProtector()).LoadAsync()).ApiKey);
+            Assert.Equal("previous-cover", await File.ReadAllTextAsync(Path.Combine(retainedCovers, "previous.jpg")));
+            Assert.False(File.Exists(Path.Combine(retainedCovers, "incoming.jpg")));
             Assert.False(Directory.Exists(recovery));
             Assert.False(Directory.Exists(staging));
             await library.InitializeAsync();
@@ -109,7 +232,7 @@ public sealed partial class BackupTests
                 locked = new FileStream(Path.Combine(paths.Data, incoming.RelativePath), FileMode.Open, FileAccess.Read, FileShare.Read);
                 throw new IOException("Simulated settings failure.");
             });
-            await Assert.ThrowsAsync<IOException>(() => new AppBackupService(paths, protector).ImportAsync(archive));
+            await Assert.ThrowsAsync<AppBackupRollbackException>(() => new AppBackupService(paths, protector).ImportAsync(archive));
             Assert.NotNull(locked);
             locked.Dispose();
             locked = null;

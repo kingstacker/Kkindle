@@ -48,7 +48,7 @@
                   <Border Classes="cover">
                     <Border Classes="coverclip">
                       <Panel>
-                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                        <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                         <TextBlock Text="{Binding TitleInitial}" IsVisible="{Binding !HasCover}"
                                    FontSize="26" Foreground="{DynamicResource TextMutedBrush}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />

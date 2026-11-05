@@ -134,21 +134,84 @@ public sealed class MacOSAppUpdateInstaller : IAppUpdateInstaller
         log=$4
         exec >>"$log" 2>&1
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] updating $target from $archive"
-        # The app shuts down immediately after launching this script.
+        # The app shuts down immediately after launching this script. Give up
+        # (without touching the installed bundle) if it is still running after
+        # two minutes, e.g. because a quit prompt was cancelled.
+        waited=0
         while kill -0 "$parent_pid" 2>/dev/null; do
+          if [ "$waited" -ge 600 ]; then
+            echo "Kkindle did not exit within 120 seconds; update cancelled"
+            exit 1
+          fi
           sleep 0.2
+          waited=$((waited + 1))
         done
-        stage=$(mktemp -d "${TMPDIR:-/tmp}/kkindle-update.XXXXXX") || exit 1
+        # Stage next to the installed bundle so the final swap is a same-volume
+        # rename. A cross-volume mv copies file by file and can fail halfway.
+        stage=$(mktemp -d "$(dirname "$target")/.kkindle-update.XXXXXX" 2>/dev/null) \
+          || stage=$(mktemp -d "${TMPDIR:-/tmp}/kkindle-update.XXXXXX") || exit 1
         cleanup() { rm -rf "$stage"; }
         trap cleanup EXIT
+
+        # Never let a tampered archive write outside the staging directory.
+        # The updater only accepts a bundle at the archive root.
+        members="$stage/archive-members.txt"
+        if ! /usr/bin/tar -tzf "$archive" > "$members"; then
+          echo "failed to list $archive"
+          exit 1
+        fi
+        if [ ! -s "$members" ]; then
+          echo "the archive is empty"
+          exit 1
+        fi
+        while IFS= read -r member; do
+          case "$member" in
+            Kkindle.app|Kkindle.app/*|MACOS-README.md) ;;
+            *)
+              echo "unsafe archive member: $member"
+              exit 1
+              ;;
+          esac
+          case "/$member/" in
+            */../*)
+              echo "unsafe archive member: $member"
+              exit 1
+              ;;
+          esac
+        done < "$members"
+        if /usr/bin/tar -tvzf "$archive" | grep -Eq '^[lh]'; then
+          echo "the archive contains symbolic or hard links"
+          exit 1
+        fi
+
         if ! /usr/bin/tar -xzf "$archive" -C "$stage"; then
           echo "failed to extract $archive"
           exit 1
         fi
-        if [ ! -d "$stage/Kkindle.app" ]; then
-          echo "the archive does not contain Kkindle.app"
+        if [ ! -d "$stage/Kkindle.app" ] || [ ! -x "$stage/Kkindle.app/Contents/MacOS/Kkindle" ]; then
+          echo "the archive does not contain a runnable Kkindle.app"
           exit 1
         fi
+
+        # Reject an update whose bundle signature is broken before replacing
+        # the working copy. Ad-hoc signed builds still pass this check.
+        if ! /usr/bin/codesign --verify --deep --strict "$stage/Kkindle.app" >/dev/null 2>&1; then
+          echo "the downloaded bundle has an invalid code signature"
+          exit 1
+        fi
+
+        # External MCP clients keep the bundled server running; stop it before
+        # the bundle directory is replaced. Match the bundle path literally:
+        # pkill -f treats characters such as "." or "+" in the path as a regex.
+        /bin/ps -axo pid=,command= | while read -r pid command; do
+          case "$command" in
+            "$target"/Contents/mcp/Kkindle.McpServer*|"$target"/Contents/*/mcp/Kkindle.McpServer*)
+              kill "$pid" 2>/dev/null || true
+              ;;
+          esac
+        done
+        sleep 0.5
+
         backup="$target.kkindle-old"
         rm -rf "$backup"
         if ! mv "$target" "$backup"; then
@@ -157,6 +220,15 @@ public sealed class MacOSAppUpdateInstaller : IAppUpdateInstaller
         fi
         if ! mv "$stage/Kkindle.app" "$target"; then
           echo "failed to install the new bundle, restoring the previous version"
+          # A partial copy may exist; without removing it, mv would move the
+          # backup *into* it and leave neither version runnable.
+          /bin/rm -rf "$target"
+          mv "$backup" "$target"
+          exit 1
+        fi
+        if ! /usr/bin/codesign --verify --deep --strict "$target" >/dev/null 2>&1; then
+          echo "the installed bundle failed signature verification, restoring the previous version"
+          /bin/rm -rf "$target"
           mv "$backup" "$target"
           exit 1
         fi
