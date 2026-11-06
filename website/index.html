@@ -37,8 +37,10 @@
     />
     <meta name="twitter:image" content="https://kkindle.stacker.beauty/assets/social-card.jpg" />
 
+    <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="assets/kkindle.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />
     <link rel="preload" as="image" href="assets/macos-library-1024.webp" imagesrcset="assets/macos-library-1024.webp 1024w, assets/macos-library.webp 1294w" imagesizes="(max-width: 700px) 92vw, 1040px" />
     <link rel="stylesheet" href="styles.css?v=20261105a" />
     <title>Kkindle — 个人电子书与 Kindle 工作台</title>
@@ -46,15 +48,34 @@
       {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
+        "@id": "https://kkindle.stacker.beauty/#software",
         "name": "Kkindle",
+        "alternateName": "Kkindle 个人电子书与 Kindle 管理器",
         "applicationCategory": "MultimediaApplication",
+        "applicationSubCategory": "Ebook manager",
         "operatingSystem": "Windows, Linux, macOS, Android, iOS",
+        "softwareVersion": "1.1.3",
+        "datePublished": "2026-10-29",
         "url": "https://kkindle.stacker.beauty/",
         "downloadUrl": "https://kkindle.stacker.beauty/#downloads",
+        "image": "https://kkindle.stacker.beauty/assets/social-card.jpg",
         "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+        "codeRepository": "https://github.com/kingstacker/Kkindle",
         "inLanguage": ["zh-CN", "en"],
         "screenshot": "https://kkindle.stacker.beauty/assets/library.webp",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+        "description": "Kkindle 是一款面向 Windows、Linux、macOS、Android 和 iOS 的开源电子书书库与 Kindle 设备管理器，支持 EPUB、PDF、MOBI、AZW3 的整理、阅读、批注与传书。",
+        "featureList": [
+          "本地优先的书库管理，支持 EPUB / PDF / MOBI / AZW3",
+          "阅读器支持批注、脚注、词典与阅读进度",
+          "Kindle 设备连接、批量传书与安全退出",
+          "AI 阅读助手：解释选文、总结章节、联网核实"
+        ],
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": {
+          "@type": "Organization",
+          "name": "kingstacker",
+          "url": "https://github.com/kingstacker"
+        }
       }
     </script>
   </head>

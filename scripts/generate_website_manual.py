@@ -261,6 +261,7 @@ def render_page(slug: str, title: str, source_file: str, index: int) -> str:
         <nav class="page-steps" aria-label="手册分页">{previous}{following}</nav>
         <footer class="manual-footer">
           <span>手册内容随软件功能更新。</span>
+          <a href="/">返回 Kkindle 官网首页</a>
           <a href="https://github.com/kingstacker/Kkindle/tree/master/docs/manual/zh-CN" target="_blank" rel="noreferrer">查看 Markdown 源文件 ↗</a>
         </footer>
       </main>
