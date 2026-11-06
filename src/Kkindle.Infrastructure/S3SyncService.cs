@@ -920,7 +920,6 @@ public sealed partial class S3SyncService : ISyncService
             left.AiEnabled,
             left.AutoUpdateCheckEnabled,
             left.DevelopmentUpdateCheckEnabled,
-            left.AutoDoubanMatchOnImport,
             left.CompareKindleLibraryEnabled,
             left.GridGalleryDisplay,
             left.ShowSyncStatusIcon,
@@ -943,7 +942,6 @@ public sealed partial class S3SyncService : ISyncService
             right.AiEnabled,
             right.AutoUpdateCheckEnabled,
             right.DevelopmentUpdateCheckEnabled,
-            right.AutoDoubanMatchOnImport,
             right.CompareKindleLibraryEnabled,
             right.GridGalleryDisplay,
             right.ShowSyncStatusIcon,
@@ -1134,7 +1132,11 @@ public sealed partial class S3SyncService : ISyncService
             // those writes must not pair a new baseline with an old watermark.
             if (!string.Equals(hash, expectedHash, StringComparison.Ordinal)) return null;
             var snapshot = JsonSerializer.Deserialize<S3SyncSnapshot>(json, JsonOptions);
-            if (snapshot is not null) _baselineHash = hash;
+            if (snapshot is not null)
+            {
+                AdoptLegacyRatingFields(snapshot);
+                _baselineHash = hash;
+            }
             return snapshot;
         }
         catch (Exception exception) when (exception is IOException or JsonException or InvalidDataException)
@@ -1851,8 +1853,10 @@ public sealed partial class S3SyncService : ISyncService
         await using var input = new MemoryStream(compressed, writable: false);
         await using var gzip = new GZipStream(input, CompressionMode.Decompress);
         await using var limited = new SnapshotReadLimitStream(gzip, MaxSnapshotBytes);
-        return await JsonSerializer.DeserializeAsync<S3SyncSnapshot>(limited, JsonOptions, cancellationToken)
+        var snapshot = await JsonSerializer.DeserializeAsync<S3SyncSnapshot>(limited, JsonOptions, cancellationToken)
             ?? throw new InvalidDataException("云端同步快照为空。");
+        AdoptLegacyRatingFields(snapshot);
+        return snapshot;
     }
 
     private sealed class SnapshotReadLimitStream(Stream inner, long maximumBytes) : Stream

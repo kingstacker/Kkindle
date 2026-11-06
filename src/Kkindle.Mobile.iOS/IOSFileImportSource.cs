@@ -15,30 +15,40 @@ public sealed class IOSFileImportSource : IFileImportSource
     {
         var picked = new TaskCompletionSource<IReadOnlyList<NSUrl>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        UIDocumentPickerViewController? picker = null;
 
         NSRunLoop.Main.BeginInvokeOnMainThread(() =>
         {
-            var picker = new UIDocumentPickerViewController([UTTypes.Item], asCopy: true)
+            try
             {
-                AllowsMultipleSelection = true
-            };
-            // asCopy hands over sandbox-local copies, so the URLs stay readable
-            // after the picker is dismissed.
-            picker.DidPickDocumentAtUrls += (_, args) =>
-                picked.TrySetResult(args.Urls ?? []);
-            picker.WasCancelled += (_, _) => picked.TrySetResult([]);
-
-            if (TopViewController() is not { } presenter)
-            {
-                picked.TrySetResult([]);
-                return;
+                var presenter = TopViewController()
+                    ?? throw new InvalidOperationException("无法找到可显示文件选择器的窗口，请重新打开应用后重试。");
+                picker = new UIDocumentPickerViewController([UTTypes.Item], asCopy: true)
+                {
+                    AllowsMultipleSelection = true
+                };
+                // asCopy hands over sandbox-local copies, so the URLs stay readable
+                // after the picker is dismissed.
+                picker.DidPickDocumentAtUrls += (_, args) =>
+                    picked.TrySetResult(args.Urls ?? []);
+                picker.WasCancelled += (_, _) => picked.TrySetResult([]);
+                presenter.PresentViewController(picker, animated: true, completionHandler: null);
             }
-
-            presenter.PresentViewController(picker, animated: true, completionHandler: null);
+            catch (Exception exception)
+            {
+                picked.TrySetException(exception);
+            }
         });
 
-        var urls = await picked.Task.WaitAsync(cancellationToken);
-        return await CopyToCacheAsync(urls, cancellationToken);
+        try
+        {
+            var urls = await picked.Task.WaitAsync(cancellationToken);
+            return await CopyToCacheAsync(urls, cancellationToken);
+        }
+        finally
+        {
+            GC.KeepAlive(picker);
+        }
     }
 
     private static async Task<IReadOnlyList<string>> CopyToCacheAsync(
@@ -104,12 +114,17 @@ public sealed class IOSFileImportSource : IFileImportSource
 
     private static UIViewController? TopViewController()
     {
-        var windows = UIApplication.SharedApplication.ConnectedScenes
+        var application = UIApplication.SharedApplication;
+        var windows = application.ConnectedScenes
             .OfType<UIWindowScene>()
+            .Where(scene => scene.ActivationState == UISceneActivationState.ForegroundActive)
             .SelectMany(scene => scene.Windows)
             .ToArray();
         var window = windows.FirstOrDefault(candidate => candidate.IsKeyWindow)
-            ?? windows.FirstOrDefault();
+            ?? windows.FirstOrDefault(candidate => !candidate.Hidden)
+#pragma warning disable CA1422 // Older apps may use the pre-scene window lifecycle.
+            ?? application.KeyWindow;
+#pragma warning restore CA1422
         var controller = window?.RootViewController;
         while (controller?.PresentedViewController is { } presented)
             controller = presented;

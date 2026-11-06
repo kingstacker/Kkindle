@@ -1,0 +1,40 @@
+{
+  "id": "com.kkindle.book-translation",
+  "name": "书籍翻译与注音",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "author": "Kkindle",
+  "description": "整本书翻译和注音。翻译沿用应用里的 AI 或免费翻译服务，注音使用内置或 g2pW 引擎，结果直接加入书库。",
+  "icon": "ui/icon.svg",
+  "permissions": {
+    "library": "read",
+    "translation": true,
+    "pinyin": true,
+    "storage": true
+  },
+  "contributes": {
+    "bookActions": [
+      {
+        "id": "translate",
+        "title": "翻译书籍",
+        "page": "ui/translate.html",
+        "multiple": false,
+        "width": 720,
+        "height": 620
+      },
+      {
+        "id": "pinyin",
+        "title": "生成注音书",
+        "page": "ui/pinyin.html",
+        "multiple": false,
+        "width": 720,
+        "height": 660
+      }
+    ],
+    "settings": {
+      "page": "ui/settings.html",
+      "width": 580,
+      "height": 620
+    }
+  }
+}

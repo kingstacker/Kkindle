@@ -318,8 +318,10 @@ public sealed class BookCardViewModel : ObservableObject, IDisposable
             empty: UiText.Get("暂无出版信息"));
         var identifierLabel = JoinLabels(
             string.IsNullOrWhiteSpace(Book.Isbn) ? string.Empty : UiText.Get("ISBN：{0}", Book.Isbn),
-            Book.DoubanRating is { } rating
-                ? UiText.Get("豆瓣：{0:0.0}（{1} 人评价）", rating, Book.DoubanRatingCount ?? 0)
+            Book.OnlineRating is { } rating
+                ? Book.OnlineRatingCount is { } count
+                    ? UiText.Get("在线评分：{0:0.0}（{1} 人评价）", rating, count)
+                    : UiText.Get("在线评分：{0:0.0}", rating)
                 : string.Empty,
             empty: UiText.Get("暂无 ISBN 或评分"));
         string descriptionLabel;

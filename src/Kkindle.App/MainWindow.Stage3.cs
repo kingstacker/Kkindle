@@ -568,7 +568,6 @@ public partial class MainWindow
         SyncReaderAppearanceControls();
         if (Application.Current is App app)
             app.ApplyLanguage(_appSettings.UiLanguage);
-        _zLibrarySettings = await _zLibrarySettingsStore.LoadAsync(cancellationToken);
         RefreshLocalizedReadingMaterialsSourceFilter();
         LoadReaderVerticalDebugBoxesSetting();
         SetTaskStatus(T("正在检查 Calibre…"));
@@ -620,7 +619,6 @@ public partial class MainWindow
         DeviceResourcePage.IsVisible = false;
         ReadingMaterialsPage.IsVisible = false;
         ReadingDashboardPage.IsVisible = false;
-        ZLibraryPage.IsVisible = false;
         SettingsPage.IsVisible = false;
     }
 
@@ -639,7 +637,6 @@ public partial class MainWindow
             _ when ReferenceEquals(page, ReadingMaterialsPage) =>
                 ReaderNotesNavigationButton,
             _ when ReferenceEquals(page, ReadingDashboardPage) => ReadingDashboardButton,
-            _ when ReferenceEquals(page, ZLibraryPage) => ZLibraryBooksButton,
             _ => SettingsNavigationButton
         };
         SetSidebarActive(activeButton);
@@ -652,7 +649,6 @@ public partial class MainWindow
         DeviceResourcePage.IsVisible = ReferenceEquals(page, DeviceResourcePage);
         ReadingMaterialsPage.IsVisible = ReferenceEquals(page, ReadingMaterialsPage);
         ReadingDashboardPage.IsVisible = ReferenceEquals(page, ReadingDashboardPage);
-        ZLibraryPage.IsVisible = ReferenceEquals(page, ZLibraryPage);
         SettingsPage.IsVisible = ReferenceEquals(page, SettingsPage);
     }
 
@@ -674,7 +670,6 @@ public partial class MainWindow
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
             ReadingDashboardButton,
-            ZLibraryBooksButton,
             SettingsNavigationButton
         ];
         foreach (var button in navigationButtons)
@@ -691,7 +686,6 @@ public partial class MainWindow
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
             ReadingDashboardButton,
-            ZLibraryBooksButton,
             SettingsNavigationButton
         ];
         foreach (var button in buttons)
@@ -2136,7 +2130,7 @@ public partial class MainWindow
         public string SourcePath { get; }
 
         // Library cover to prefer over the file's embedded one when building
-        // the Kindle home-screen thumbnail (e.g. a Douban-matched cover).
+        // the Kindle home-screen thumbnail (e.g. an online-matched cover).
         public string? CoverOverridePath { get; }
 
         public void Dispose()
@@ -5119,6 +5113,7 @@ public partial class MainWindow
                 ? 1
                 : 0;
             CalibrePathBox.Text = _appSettings.CalibrePath;
+            TranslationGoogleProxyBox.Text = _appSettings.Translation.GoogleProxyAddress;
             UpdateCalibreDetectionStatus();
             AiEnabledCheck.IsChecked = _appSettings.AiEnabled;
             DeleteBookAnnotationsCheck.IsChecked = _appSettings.DeleteAnnotationsWhenDeletingBook;
@@ -5127,9 +5122,10 @@ public partial class MainWindow
             AutoGenerateReaderFormatsCheck.IsChecked = _appSettings.AutoGenerateEpubAndAzw3OnImport;
             CollectionsMutuallyExclusiveCheck.IsChecked = _appSettings.CollectionsMutuallyExclusive;
             NetworkEnabledCheck.IsChecked = _appSettings.NetworkEnabled;
+            PluginDeveloperModeCheck.IsChecked = _appSettings.PluginDeveloperMode;
+            InstallPluginFromFolderButton.IsVisible = _appSettings.PluginDeveloperMode;
             AutoUpdateCheck.IsChecked = _appSettings.AutoUpdateCheckEnabled;
             DevelopmentUpdateCheck.IsChecked = _appSettings.DevelopmentUpdateCheckEnabled;
-            AutoDoubanMatchCheck.IsChecked = _appSettings.AutoDoubanMatchOnImport;
             AutoConnectDeviceCheck.IsChecked = _appSettings.AutoConnectDevice;
             CompareKindleLibraryCheck.IsChecked = _appSettings.CompareKindleLibraryEnabled;
             SendToKindleWebEnabledCheck.IsChecked = _appSettings.SendToKindleWebEnabled;
@@ -5138,10 +5134,6 @@ public partial class MainWindow
             ShowLibraryPresenceIconCheck.IsChecked = _appSettings.ShowLibraryPresenceIcon;
             _showUnearnedReadingMedals = _appSettings.ShowUnearnedReadingMedals;
             ReadingMaterialsCollapsedByDefaultCheck.IsChecked = _appSettings.ReadingMaterialsCollapsedByDefault;
-            PinyinContextMenuEnabledCheck.IsChecked = _appSettings.PinyinContextMenuEnabled;
-            PinyinLocalOnlyCheck.IsChecked = _appSettings.PinyinLocalOnly;
-            ApplyPinyinEngineSelection();
-            PopulateBookTranslationControls();
             AboutVersionText.Text = T("版本 {0}", ApplicationVersion.GetDisplayVersion(typeof(MainWindow).Assembly));
             CheckForUpdatesButton.IsEnabled = _updateService is not null;
             AboutUpdateStatusText.Text = _updateService is null
@@ -5154,8 +5146,6 @@ public partial class MainWindow
             {
                 PopulateKindleEmailControls();
             }
-            if (_zLibraryAdvancedUnlocked)
-                PopulateZLibraryControls();
             if (!preserveS3Draft) PopulateS3SyncControls();
         }
         finally
@@ -5503,6 +5493,8 @@ public partial class MainWindow
         _localSyncChanges.MarkChanged();
         _s3DeletionConfirmationPending = false;
         _s3SyncCancelledByUser = false;
+        if (kind == LocalDataChangeKind.Library) BroadcastLibraryChanged();
+        else BroadcastReadingChanged(kind);
         if (kind is LocalDataChangeKind.Library or LocalDataChangeKind.BookReflection)
         {
             MarkReadingMaterialsDirty();
@@ -5965,14 +5957,14 @@ public partial class MainWindow
         _appSettingsAutoSaveConfigured = true;
         ConfigureS3SettingsDraftTracking();
         AiEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        NetworkEnabledCheck.IsCheckedChanged += (_, _) =>
-        {
-            RefreshPinyinEngineStatus();
-            ScheduleAppSettingsAutoSave();
-        };
+        NetworkEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoUpdateCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         DevelopmentUpdateCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        AutoDoubanMatchCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
+        PluginDeveloperModeCheck.IsCheckedChanged += (_, _) =>
+        {
+            InstallPluginFromFolderButton.IsVisible = PluginDeveloperModeCheck.IsChecked == true;
+            ScheduleAppSettingsAutoSave();
+        };
         CollectionsMutuallyExclusiveCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ReadingMaterialsCollapsedByDefaultCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoGenerateReaderFormatsCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -5983,8 +5975,6 @@ public partial class MainWindow
             ScheduleAppSettingsAutoSave();
         };
         GridGalleryDisplayCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        PinyinContextMenuEnabledCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        PinyinLocalOnlyCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoConnectDeviceCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         DeleteBookAnnotationsCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -5992,7 +5982,6 @@ public partial class MainWindow
         ShowLibraryPresenceIconCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         PreferredOpenFormatBox.SelectionChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoBackupRetentionBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
-        TranslationAiRpmBox.ValueChanged += (_, _) => ScheduleAppSettingsAutoSave();
         TranslationGoogleProxyBox.PropertyChanged += (_, e) =>
         {
             if (e.Property != TextBox.TextProperty) return;
@@ -6517,9 +6506,9 @@ public partial class MainWindow
             CollectionsMutuallyExclusive = CollectionsMutuallyExclusiveCheck.IsChecked != false,
             AiEnabled = AiEnabledCheck.IsChecked != false,
             NetworkEnabled = NetworkEnabledCheck.IsChecked != false,
+            PluginDeveloperMode = PluginDeveloperModeCheck.IsChecked == true,
             AutoUpdateCheckEnabled = AutoUpdateCheck.IsChecked != false,
             DevelopmentUpdateCheckEnabled = DevelopmentUpdateCheck.IsChecked == true,
-            AutoDoubanMatchOnImport = AutoDoubanMatchCheck.IsChecked == true,
             AutoConnectDevice = AutoConnectDeviceCheck.IsChecked != false,
             CompareKindleLibraryEnabled = CompareKindleLibraryCheck.IsChecked != false,
             SendToKindleWebEnabled = SendToKindleWebEnabledCheck.IsChecked != false,
@@ -6532,10 +6521,10 @@ public partial class MainWindow
             ShowLibraryPresenceIcon = ShowLibraryPresenceIconCheck.IsChecked != false,
             ShowUnearnedReadingMedals = _showUnearnedReadingMedals,
             ReadingMaterialsCollapsedByDefault = ReadingMaterialsCollapsedByDefaultCheck.IsChecked != false,
-            PinyinContextMenuEnabled = PinyinContextMenuEnabledCheck.IsChecked == true,
-            PinyinLocalOnly = PinyinLocalOnlyCheck.IsChecked == true,
-            PinyinEngineId = GetSelectedPinyinEngineId(),
-            Translation = ReadBookTranslationSettingsFromControls(),
+            Translation = BookTranslationSettings.Normalize(_appSettings.Translation with
+            {
+                GoogleProxyAddress = TranslationGoogleProxyBox.Text ?? string.Empty
+            }),
             // Reader layout preferences are edited from the reader layout
             // popup; keep the saved global defaults untouched here.
             DefaultReaderLayout = _appSettings.DefaultReaderLayout

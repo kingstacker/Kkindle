@@ -30,14 +30,6 @@ public partial class ProfilePage : UserControl
         InitializeComponent();
         VersionText.Text = ApplicationVersion.GetDisplayVersion(typeof(MobileApp).Assembly);
         PresentPreferences();
-        // Subscribed while attached: pushed settings pages detach this page and
-        // it must pick the switch up again when the user comes back.
-        AttachedToVisualTree += (_, _) =>
-        {
-            DeveloperSection.IsVisible = shell.IsDeveloperMode;
-            shell.DeveloperModeChanged += OnDeveloperModeChanged;
-        };
-        DetachedFromVisualTree += (_, _) => shell.DeveloperModeChanged -= OnDeveloperModeChanged;
         Loaded += OnLoaded;
     }
 
@@ -67,8 +59,6 @@ public partial class ProfilePage : UserControl
             AiSummaryText.Text = ai.IsConfigured ? ai.ProviderDisplayName : "未设置";
             var kindle = await _modules.Integrations.KindleEmailSettings.LoadAsync();
             KindleSummaryText.Text = kindle.IsConfigured ? "已设置" : "未设置";
-            var zlibrary = await _modules.Integrations.ZLibrarySettings.LoadAsync();
-            ZLibrarySummaryText.Text = zlibrary.IsConfigured ? "已设置" : "未设置";
             StorageText.Text = MobileFormat.Size(books.Sum(book => book.Files.Sum(file => file.Size)));
         }
         catch (Exception exception)
@@ -90,13 +80,6 @@ public partial class ProfilePage : UserControl
         _versionClicks = 0;
         _shell?.ToggleDeveloperMode();
     }
-
-    private void OnDeveloperModeChanged(object? sender, EventArgs e) =>
-        DeveloperSection.IsVisible = _shell!.IsDeveloperMode;
-
-    private void OnZLibraryClick(object? sender, RoutedEventArgs e) => _shell?.OpenZLibrary();
-
-    private void OnZLibraryAccountClick(object? sender, RoutedEventArgs e) => _shell?.OpenZLibraryAccount();
 
     private void OnSyncClick(object? sender, RoutedEventArgs e) => _shell?.OpenSyncSettings();
 

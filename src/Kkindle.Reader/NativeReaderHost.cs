@@ -31,6 +31,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     private static readonly object ImageCacheLock = new();
     private static readonly Dictionary<string, (SKImage Image, long UsedAt)> ImageCache =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, int> ImagePins =
+        new(StringComparer.OrdinalIgnoreCase);
     private static long _imageCacheTick;
 
     private readonly TaskCompletionSource _readyTcs =
@@ -1531,8 +1533,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 if (!_disposed && version == Volatile.Read(ref _navigationVersion))
                     _composePending = false;
             }
-            catch
+            catch (Exception exception)
             {
+                Console.WriteLine($"[Kkindle] navigation failed {chapterPath}: {exception.Message}");
                 if (!_disposed && version == Volatile.Read(ref _navigationVersion))
                 {
                     _composePending = false;
@@ -2377,6 +2380,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
 
         var page = _layout.Pages[pageIndex];
+        using var imagePins = PinImages(page.Images.Select(image => image.Path));
         canvas.Save();
         canvas.Translate(offsetX, offsetY);
         var selectionBands = SelectionBandsFor(page);
@@ -2421,6 +2425,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
+            Console.WriteLine($"[Kkindle] image decode failed {path}: {exception.Message}");
             return null;
         }
         if (image is null) return null;
@@ -2436,21 +2441,75 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             }
 
             ImageCache[path] = (image, ++_imageCacheTick);
-            while (ImageCache.Count > ImageCacheCapacity)
-            {
-                string? oldestKey = null;
-                var oldestUse = long.MaxValue;
-                foreach (var entry in ImageCache)
-                {
-                    if (entry.Value.UsedAt >= oldestUse) continue;
-                    oldestUse = entry.Value.UsedAt;
-                    oldestKey = entry.Key;
-                }
-                if (oldestKey is null || !ImageCache.Remove(oldestKey, out var stale)) break;
-                stale.Image.Dispose();
-            }
+            TrimImageCacheLocked();
         }
         return image;
+    }
+
+    private static IDisposable PinImages(IEnumerable<string> paths)
+    {
+        var pinned = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (pinned.Length == 0) return EmptyImagePin.Instance;
+
+        lock (ImageCacheLock)
+        {
+            foreach (var path in pinned)
+            {
+                ImagePins.TryGetValue(path, out var count);
+                ImagePins[path] = count + 1;
+            }
+        }
+        return new ImagePin(pinned);
+    }
+
+    private static void TrimImageCacheLocked()
+    {
+        while (ImageCache.Count > ImageCacheCapacity)
+        {
+            string? oldestKey = null;
+            var oldestUse = long.MaxValue;
+            foreach (var entry in ImageCache)
+            {
+                if (ImagePins.ContainsKey(entry.Key) || entry.Value.UsedAt >= oldestUse) continue;
+                oldestUse = entry.Value.UsedAt;
+                oldestKey = entry.Key;
+            }
+            if (oldestKey is null || !ImageCache.Remove(oldestKey, out var stale)) break;
+            stale.Image.Dispose();
+        }
+    }
+
+    private sealed class ImagePin(string[] paths) : IDisposable
+    {
+        private string[]? _paths = paths;
+
+        public void Dispose()
+        {
+            var released = Interlocked.Exchange(ref _paths, null);
+            if (released is null) return;
+            lock (ImageCacheLock)
+            {
+                foreach (var path in released)
+                {
+                    if (!ImagePins.TryGetValue(path, out var count)) continue;
+                    if (count <= 1) ImagePins.Remove(path);
+                    else ImagePins[path] = count - 1;
+                }
+                TrimImageCacheLocked();
+            }
+        }
+    }
+
+    private sealed class EmptyImagePin : IDisposable
+    {
+        public static readonly EmptyImagePin Instance = new();
+
+        public void Dispose()
+        {
+        }
     }
 
     /// <summary>
@@ -2459,22 +2518,90 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// </summary>
     private static SKImage? DecodeImageScaled(string path)
     {
-        using var stream = File.OpenRead(path);
-        using var codec = SKCodec.Create(stream);
-        if (codec is null) return null;
-        var source = codec.Info;
-        if (source.Width <= 0 || source.Height <= 0) return null;
+        SKCodecResult scaledResult = default;
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var codec = SKCodec.Create(stream);
+            if (codec is null) return null;
+            var source = codec.Info;
+            if (source.Width <= 0 || source.Height <= 0) return null;
+
+            var target = ScaledImageInfo(codec, source);
+            using var bitmap = new SKBitmap(target);
+            scaledResult = codec.GetPixels(target, bitmap.GetPixels());
+            if (scaledResult is SKCodecResult.Success or SKCodecResult.IncompleteInput)
+                return SKImage.FromPixelCopy(target, bitmap.GetPixels(), bitmap.RowBytes);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Console.WriteLine($"[Kkindle] scaled image decode failed {path}: {exception.Message}");
+            return null;
+        }
+
+        // Progressive JPEGs (and several other codecs) only support a limited
+        // set of subsampled sizes. Decode at full size as a fallback, then scale
+        // once in Skia rather than leaving a blank frame.
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var codec = SKCodec.Create(stream);
+            if (codec is null) return null;
+            var source = codec.Info;
+            if (source.Width <= 0 || source.Height <= 0) return null;
+            if ((long)source.Width * source.Height > 80_000_000)
+            {
+                Console.WriteLine($"[Kkindle] image too large to decode {path}: {source.Width}x{source.Height} ({scaledResult})");
+                return null;
+            }
+
+            var sourceInfo = new SKImageInfo(
+                source.Width,
+                source.Height,
+                SKColorType.Bgra8888,
+                SKAlphaType.Premul);
+            using var bitmap = new SKBitmap(sourceInfo);
+            var result = codec.GetPixels(sourceInfo, bitmap.GetPixels());
+            if (result is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
+            {
+                Console.WriteLine($"[Kkindle] image decode failed {path}: {result} (scaled: {scaledResult})");
+                return null;
+            }
+
+            var target = FitImageInfo(source);
+            using var scaled = bitmap.Resize(
+                target,
+                new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+            if (scaled is null) return null;
+            return SKImage.FromPixelCopy(target, scaled.GetPixels(), scaled.RowBytes);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Console.WriteLine($"[Kkindle] image decode failed {path}: {exception.Message}");
+            return null;
+        }
+    }
+
+    private static SKImageInfo ScaledImageInfo(SKCodec codec, SKImageInfo source)
+    {
+        var requested = FitImageInfo(source);
+        var supported = codec.GetScaledDimensions(
+            Math.Min(requested.Width / (float)source.Width, requested.Height / (float)source.Height));
+        return new SKImageInfo(
+            Math.Max(1, supported.Width),
+            Math.Max(1, supported.Height),
+            SKColorType.Bgra8888,
+            SKAlphaType.Premul);
+    }
+
+    private static SKImageInfo FitImageInfo(SKImageInfo source)
+    {
         var scale = Math.Min(1d, ImageDecodeMaxDimension / (double)Math.Max(source.Width, source.Height));
-        var target = new SKImageInfo(
+        return new SKImageInfo(
             Math.Max(1, (int)Math.Round(source.Width * scale)),
             Math.Max(1, (int)Math.Round(source.Height * scale)),
             SKColorType.Bgra8888,
             SKAlphaType.Premul);
-        using var bitmap = new SKBitmap(target);
-        var result = codec.GetPixels(target, bitmap.GetPixels());
-        if (result is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
-            return null;
-        return SKImage.FromPixelCopy(target, bitmap.GetPixels(), bitmap.RowBytes);
     }
 
     /// <summary>
@@ -2511,7 +2638,11 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             foreach (var path in paths)
             {
                 if (cancellation.IsCancellationRequested) return;
-                try { ResolveImage(path); }
+                try
+                {
+                    using var imagePins = PinImages([path]);
+                    ResolveImage(path);
+                }
                 catch (Exception exception) when (exception is not OutOfMemoryException) { }
             }
         }, cancellation.Token);

@@ -60,8 +60,9 @@ public partial class BookDetailPage : UserControl
         {
             if (!string.IsNullOrWhiteSpace(value)) facts.Add(new BookFact(label, value.Trim()));
         }
-        if (_book.DoubanRating is { } rating)
-            Add("豆瓣评分", $"{rating:0.0}（{_book.DoubanRatingCount ?? 0} 人评价）");
+        if (_book.OnlineRating is { } rating)
+            Add("在线评分", _book.OnlineRatingCount is { } count
+                ? $"{rating:0.0}（{count} 人评价）" : $"{rating:0.0}");
         Add("丛书", _book.Series);
         Add("出版社", _book.Publisher);
         Add("出版日期", _book.PublishDate);

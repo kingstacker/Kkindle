@@ -121,8 +121,8 @@ Core's TTS engine/audio interfaces, not Avalonia controls. Portable tests refere
 this assembly directly instead of compiling copies of UI-project source files.
 
 Each main window owns its `ApplicationModules`. It first cancels/drains work and
-removes subscriptions, then disposes module clients once. An injected Douban
-service follows the existing window-owned behavior. Library instances and
+removes subscriptions, then disposes module clients once. Injected module
+clients follow the existing window-owned behavior. Library instances and
 platform adapters are not disposed by the composition root. The shell-owned
 `TtsService` retains its existing ownership of its engine and audio player.
 Reader surfaces remain shell-owned and must not be shared between host slots.

@@ -1,12 +1,12 @@
 using Kkindle.Core;
 using Kkindle.Infrastructure;
+using Kkindle.Infrastructure.Plugins;
 
 namespace Kkindle.ApplicationServices;
 
 /// <summary>
-/// A per-shell composition root. It owns the modules' disposable services,
-/// including an injected Douban service; the library and platform adapters
-/// remain caller-owned. It neither creates controls nor starts background work.
+/// A per-shell composition root. It owns the modules' disposable services;
+/// the library and platform adapters remain caller-owned. It neither creates controls nor starts background work.
 /// </summary>
 public sealed class ApplicationModules : IDisposable
 {
@@ -30,6 +30,7 @@ public sealed class ApplicationModules : IDisposable
         Ai = new AiModule(options, StartupSettings, Reader);
         Sync = new SyncModule(options);
         Integrations = new IntegrationModule(options);
+        Plugins = new PluginManager(Paths);
     }
 
     public AppPaths Paths { get; }
@@ -41,6 +42,7 @@ public sealed class ApplicationModules : IDisposable
     public AiModule Ai { get; }
     public SyncModule Sync { get; }
     public IntegrationModule Integrations { get; }
+    public PluginManager Plugins { get; }
     public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
     public void Dispose()
@@ -50,10 +52,9 @@ public sealed class ApplicationModules : IDisposable
         // Cancel/await shell work before disposing the shared clients it uses.
         IDisposable?[] resources =
         [
-            Integrations.Updates, Integrations.ZLibrary,
+            Integrations.Updates,
             Ai.EpubTranslation, Ai.Translation, Ai.ChatClient, Ai.WebSearch,
-            Ai.EmbeddingModels, Ai.PinyinModels, Ai.Embedding,
-            Library.Douban
+            Ai.EmbeddingModels, Ai.PinyinModels, Ai.Embedding
         ];
         foreach (var resource in resources)
         {

@@ -20,6 +20,13 @@ Kkindle 是一款基于 Avalonia 的跨平台电子书与 Kindle 管理器。它
 | Android | 🚧 开发中 | 初始版本开发中 |
 | Linux | ⏳ 待测试 | 尚未进行完整测试 |
 
+## 多端主界面
+
+| macOS | iOS | Android |
+| :---: | :---: | :---: |
+| <img src="website/assets/macos-library.webp?v=20261106" alt="Kkindle macOS 书库主界面" width="460"> | <img src="website/assets/ios-library.webp?v=20261106" alt="Kkindle iOS 书库主界面" width="190"> | <img src="website/assets/android-library.webp?v=20261106" alt="Kkindle Android 书库主界面" width="190"> |
+| 书库 | 书库 | 书库 |
+
 ## 主要功能
 
 - **书库管理**：导入 EPUB、PDF、MOBI、AZW3、TXT；TXT 自动识别 UTF-8、带 BOM 的 Unicode 或 GB18030 编码，识别章节及分卷目录并转换为 EPUB，无需 Calibre。管理元数据、封面、标签、分类、搜索和阅读状态；同名版本导入时可选择添加格式、独立保存或跳过，删除内容会先进入可恢复回收站。

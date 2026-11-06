@@ -23,6 +23,7 @@ public partial class MainWindow
         if (Application.Current is App app) app.ApplyTheme(theme);
         ScheduleAppSettingsAutoSave();
         _appSettings = _appSettings with { MainTheme = theme };
+        BroadcastPluginThemeChanged(theme.ToString());
     }
 
     private AppTheme ReadMainThemeFromControls() =>

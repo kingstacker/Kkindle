@@ -74,6 +74,10 @@ public sealed record AppSettings
     public bool AutoUpdateCheckEnabled { get; init; } = true;
     public bool DevelopmentUpdateCheckEnabled { get; init; }
 
+    // Developer mode exposes plugin diagnostics (DevTools, page log panel,
+    // reload, folder install). It is off by default and never shipped enabled.
+    public bool PluginDeveloperMode { get; init; }
+
     // Update checks run at most once per calendar day; the timestamp and the
     // discovered update summary persist so the title-bar badge survives restarts
     // without extra network calls.
@@ -92,7 +96,6 @@ public sealed record AppSettings
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public DateTimeOffset? PendingUpdateInstallStartedAt { get; init; }
 
-    public bool AutoDoubanMatchOnImport { get; init; }
     public bool AutoConnectDevice { get; init; } = true;
     public bool CompareKindleLibraryEnabled { get; init; } = true;
     public bool GridGalleryDisplay { get; init; }
@@ -231,10 +234,6 @@ public sealed record McpServerSettings
     public bool AnnotationsEnabled { get; init; } = true;
     public bool BookmarksEnabled { get; init; } = true;
     public bool ReadingDashboardEnabled { get; init; } = true;
-    // The online Z-Library tools are opt-in. They remain absent from the MCP
-    // tool list until the user explicitly enables the advanced feature.
-    public bool ZLibrarySearchEnabled { get; init; }
-    public bool ZLibraryDownloadEnabled { get; init; }
 
     public static McpServerSettings Normalize(McpServerSettings? settings)
     {
@@ -268,9 +267,7 @@ public sealed record McpServerSettings
             SearchBookContentEnabled = settings.SearchBookContentEnabled,
             AnnotationsEnabled = settings.AnnotationsEnabled,
             BookmarksEnabled = settings.BookmarksEnabled,
-            ReadingDashboardEnabled = settings.ReadingDashboardEnabled,
-            ZLibrarySearchEnabled = settings.ZLibrarySearchEnabled,
-            ZLibraryDownloadEnabled = settings.ZLibraryDownloadEnabled
+            ReadingDashboardEnabled = settings.ReadingDashboardEnabled
         };
     }
 }

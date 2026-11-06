@@ -20,6 +20,13 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 | Android | 🚧 In development | Initial version in development |
 | Linux | ⏳ Pending testing | Full testing not yet done |
 
+## Platform previews
+
+| macOS | iOS | Android |
+| :---: | :---: | :---: |
+| <img src="website/assets/macos-library.webp?v=20261106" alt="Kkindle library on macOS" width="460"> | <img src="website/assets/ios-library.webp?v=20261106" alt="Kkindle library on iOS" width="190"> | <img src="website/assets/android-library.webp?v=20261106" alt="Kkindle library on Android" width="190"> |
+| Library | Library | Library |
+
 ## Features
 
 - **Library** — Import EPUB, PDF, MOBI, AZW3, and TXT; TXT encoding and chapter/volume headings are detected automatically and converted to EPUB without Calibre. Manage metadata, covers, tags, collections, search, and reading status. When a book with the same title is imported, choose to add the format, keep it separately, or skip; deleted content goes to a recoverable trash first.

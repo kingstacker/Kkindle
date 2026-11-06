@@ -11,7 +11,6 @@ internal static class DesktopApplicationBootstrap
         AppPaths? paths = null,
         IBookLibraryService? library = null,
         IBookFormatConverter? formatConverter = null,
-        DoubanMetadataService? douban = null,
         AppServices? services = null,
         AppSettings? startupSettings = null)
         => new(new ApplicationModuleOptions
@@ -22,7 +21,6 @@ internal static class DesktopApplicationBootstrap
             Library = library,
             MetadataService = new BookMetadataService(services?.PdfDocumentFactory),
             FormatConverter = formatConverter ?? new BookFormatConversionService(),
-            Douban = douban,
             StartupSettings = startupSettings,
             UpdateInstaller = services?.UpdateInstaller,
             SyncService = services?.SyncService,

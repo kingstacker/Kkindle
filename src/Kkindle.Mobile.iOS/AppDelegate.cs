@@ -42,7 +42,7 @@ public partial class AppDelegate : AvaloniaAppDelegate<MobileApp>
 
     private static void ConfigureWindow(UIWindow? window)
     {
-        if (window is null)
+        if (window?.RootViewController?.View is not AvaloniaView)
             return;
 
         ApplyWindowAppearance(window);

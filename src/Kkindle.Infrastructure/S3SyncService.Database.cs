@@ -282,8 +282,8 @@ public sealed partial class S3SyncService
         using (var command = CreateCommand(connection, transaction, 
             """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
-                   PublishDate, Isbn, PageCount, Binding, DoubanRating,
-                   DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                   PublishDate, Isbn, PageCount, Binding, OnlineRating,
+                   OnlineRatingCount, Tags, Category, IsFavorite, ReadingStatus,
                    CreatedAt, UpdatedAt, CoverPath
             FROM Books;
             """
@@ -309,8 +309,8 @@ public sealed partial class S3SyncService
                     Isbn = NullableString(reader, 8),
                     PageCount = NullableString(reader, 9),
                     Binding = NullableString(reader, 10),
-                    DoubanRating = NullableDouble(reader, 11),
-                    DoubanRatingCount = NullableInt(reader, 12),
+                    OnlineRating = NullableDouble(reader, 11),
+                    OnlineRatingCount = NullableInt(reader, 12),
                     Tags = reader.GetString(13),
                     Category = reader.GetString(14),
                     IsFavorite = reader.GetInt32(15) != 0,
@@ -632,15 +632,15 @@ public sealed partial class S3SyncService
         var booksSql = fullScanNonAnnotationTables
             ? """
               SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
-                     PublishDate, Isbn, PageCount, Binding, DoubanRating,
-                     DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                     PublishDate, Isbn, PageCount, Binding, OnlineRating,
+                     OnlineRatingCount, Tags, Category, IsFavorite, ReadingStatus,
                      CreatedAt, UpdatedAt, CoverPath
               FROM Books;
               """
             : """
               SELECT Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
-                     PublishDate, Isbn, PageCount, Binding, DoubanRating,
-                     DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                     PublishDate, Isbn, PageCount, Binding, OnlineRating,
+                     OnlineRatingCount, Tags, Category, IsFavorite, ReadingStatus,
                      CreatedAt, UpdatedAt, CoverPath
               FROM Books WHERE UpdatedAt > $since;
               """;
@@ -1073,8 +1073,8 @@ public sealed partial class S3SyncService
         Isbn = NullableString(reader, 8),
         PageCount = NullableString(reader, 9),
         Binding = NullableString(reader, 10),
-        DoubanRating = NullableDouble(reader, 11),
-        DoubanRatingCount = NullableInt(reader, 12),
+        OnlineRating = NullableDouble(reader, 11),
+        OnlineRatingCount = NullableInt(reader, 12),
         Tags = reader.GetString(13),
         Category = reader.GetString(14),
         IsFavorite = reader.GetInt32(15) != 0,
@@ -1097,8 +1097,8 @@ public sealed partial class S3SyncService
         Isbn = source.Isbn,
         PageCount = source.PageCount,
         Binding = source.Binding,
-        DoubanRating = source.DoubanRating,
-        DoubanRatingCount = source.DoubanRatingCount,
+        OnlineRating = source.OnlineRating,
+        OnlineRatingCount = source.OnlineRatingCount,
         Tags = source.Tags,
         Category = source.Category,
         IsFavorite = source.IsFavorite,
@@ -1239,7 +1239,6 @@ public sealed partial class S3SyncService
                 AiEnabled = app.AiEnabled,
                 AutoUpdateCheckEnabled = app.AutoUpdateCheckEnabled,
                 DevelopmentUpdateCheckEnabled = app.DevelopmentUpdateCheckEnabled,
-                AutoDoubanMatchOnImport = app.AutoDoubanMatchOnImport,
                 CompareKindleLibraryEnabled = app.CompareKindleLibraryEnabled,
                 GridGalleryDisplay = app.GridGalleryDisplay,
                 ShowSyncStatusIcon = app.ShowSyncStatusIcon,
@@ -2974,10 +2973,10 @@ public sealed partial class S3SyncService
                 Binding = CASE WHEN NULLIF(Binding, '') IS NULL
                                THEN (SELECT Binding FROM Books WHERE Id = $duplicate)
                                ELSE Binding END,
-                DoubanRating = COALESCE(DoubanRating,
-                              (SELECT DoubanRating FROM Books WHERE Id = $duplicate)),
-                DoubanRatingCount = COALESCE(DoubanRatingCount,
-                              (SELECT DoubanRatingCount FROM Books WHERE Id = $duplicate)),
+                OnlineRating = COALESCE(OnlineRating,
+                              (SELECT OnlineRating FROM Books WHERE Id = $duplicate)),
+                OnlineRatingCount = COALESCE(OnlineRatingCount,
+                              (SELECT OnlineRatingCount FROM Books WHERE Id = $duplicate)),
                 Tags = CASE WHEN NULLIF(Tags, '') IS NULL
                             THEN COALESCE((SELECT NULLIF(Tags, '') FROM Books WHERE Id = $duplicate), '')
                             ELSE Tags END,
@@ -3654,18 +3653,18 @@ public sealed partial class S3SyncService
         """
         INSERT INTO Books (
             Id, Title, Authors, Series, SeriesIndex, Description, Publisher, PublishDate,
-            Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount, Tags, Category,
+            Isbn, PageCount, Binding, OnlineRating, OnlineRatingCount, Tags, Category,
             IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt)
         VALUES (
             $id, $title, $authors, $series, $seriesIndex, $description, $publisher, $publishDate,
-            $isbn, $pageCount, $binding, $doubanRating, $doubanRatingCount, $tags, $category,
+            $isbn, $pageCount, $binding, $onlineRating, $onlineRatingCount, $tags, $category,
             $isFavorite, $readingStatus, NULL, $createdAt, $updatedAt)
         ON CONFLICT(Id) DO UPDATE SET
             Title = excluded.Title, Authors = excluded.Authors, Series = excluded.Series,
             SeriesIndex = excluded.SeriesIndex, Description = excluded.Description,
             Publisher = excluded.Publisher, PublishDate = excluded.PublishDate,
             Isbn = excluded.Isbn, PageCount = excluded.PageCount, Binding = excluded.Binding,
-            DoubanRating = excluded.DoubanRating, DoubanRatingCount = excluded.DoubanRatingCount,
+            OnlineRating = excluded.OnlineRating, OnlineRatingCount = excluded.OnlineRatingCount,
             Tags = excluded.Tags, Category = excluded.Category, IsFavorite = excluded.IsFavorite,
             ReadingStatus = excluded.ReadingStatus, UpdatedAt = excluded.UpdatedAt
         WHERE julianday(excluded.UpdatedAt) > julianday(Books.UpdatedAt);
@@ -3699,8 +3698,8 @@ public sealed partial class S3SyncService
         AddParameter(command, "$isbn", book.Isbn);
         AddParameter(command, "$pageCount", book.PageCount);
         AddParameter(command, "$binding", book.Binding);
-        AddParameter(command, "$doubanRating", book.DoubanRating);
-        AddParameter(command, "$doubanRatingCount", book.DoubanRatingCount);
+        AddParameter(command, "$onlineRating", book.OnlineRating);
+        AddParameter(command, "$onlineRatingCount", book.OnlineRatingCount);
         AddParameter(command, "$tags", book.Tags);
         AddParameter(command, "$category", book.Category);
         AddParameter(command, "$isFavorite", book.IsFavorite ? 1 : 0);
@@ -4213,7 +4212,6 @@ public sealed partial class S3SyncService
                 // it is deliberately absent from synchronized settings.
                 AutoUpdateCheckEnabled = remoteApp.AutoUpdateCheckEnabled,
                 DevelopmentUpdateCheckEnabled = remoteApp.DevelopmentUpdateCheckEnabled,
-                AutoDoubanMatchOnImport = remoteApp.AutoDoubanMatchOnImport,
                 CompareKindleLibraryEnabled = remoteApp.CompareKindleLibraryEnabled,
                 GridGalleryDisplay = remoteApp.GridGalleryDisplay,
                 ShowSyncStatusIcon = remoteApp.ShowSyncStatusIcon,

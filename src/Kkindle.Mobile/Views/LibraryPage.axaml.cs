@@ -368,24 +368,49 @@ public partial class LibraryPage : UserControl
         try
         {
             ImportButton.IsEnabled = false;
+            Status("请选择书籍文件，正在读取所选文件…");
             files = await _services.ImportSource.PickFilesAsync();
-            if (files.Count == 0) return;
+            if (files.Count == 0)
+            {
+                Status(null);
+                return;
+            }
+            var supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { ".epub", ".pdf", ".mobi", ".azw3", ".txt" };
+            var unsupported = files.Where(path => !supported.Contains(Path.GetExtension(path))).ToArray();
+            if (unsupported.Length > 0)
+            {
+                var unsupportedMessage = "不支持的文件格式：" + string.Join("、", unsupported.Select(Path.GetFileName));
+                Status(unsupportedMessage);
+                _shell.ShowToast(unsupportedMessage);
+                return;
+            }
             var rules = new Dictionary<string, TxtImportRules>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in files.Where(path =>
                 Path.GetExtension(path).Equals(".txt", StringComparison.OrdinalIgnoreCase)))
             {
                 var selected = await ChooseTxtRulesAsync(path);
-                if (selected is null) return;
+                if (selected is null)
+                {
+                    Status(null);
+                    return;
+                }
                 rules[path] = selected;
             }
             using var operation = MobileDataCoordinator.TryBeginOperation();
-            if (operation is null) return;
+            if (operation is null)
+            {
+                Status("正在恢复数据，请稍后重试或重启应用。");
+                return;
+            }
             Status($"正在导入 {files.Count} 个文件…");
-            var result = await _modules.Library.Books.ImportAsync(files, txtImportRules: rules);
+            var result = await Task.Run(() => _modules.Library.Books.ImportAsync(files, txtImportRules: rules));
             await ReloadAsync();
             var message = result.FailureCount > 0
                 ? $"已导入 {result.AddedCount} 本，{result.FailureCount} 个文件失败"
-                : $"已导入 {result.AddedCount} 本";
+                : result.AddedCount == 0
+                    ? "所选书籍已在书库中"
+                    : $"已导入 {result.AddedCount} 本";
             var error = result.Items.FirstOrDefault(item => !item.Succeeded)?.Message;
             if (error is not null) Status($"{message}：{error}");
             _shell.ShowToast(message);
@@ -393,6 +418,7 @@ public partial class LibraryPage : UserControl
         catch (Exception exception)
         {
             Status("导入失败：" + exception.Message);
+            _shell.ShowToast("导入失败：" + exception.Message);
         }
         finally
         {

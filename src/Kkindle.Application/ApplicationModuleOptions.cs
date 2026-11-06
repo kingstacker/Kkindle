@@ -13,7 +13,6 @@ public sealed record ApplicationModuleOptions
     public required IMetadataService MetadataService { get; init; }
     /// <summary>Platform-supplied converter, or an explicit unsupported adapter.</summary>
     public required IBookFormatConverter FormatConverter { get; init; }
-    public DoubanMetadataService? Douban { get; init; }
     public IAppUpdateInstaller? UpdateInstaller { get; init; }
     public ISyncService? SyncService { get; init; }
     public string? TtsCacheDirectory { get; init; }

@@ -39,26 +39,6 @@
         </Grid>
       </Button>
 
-      <StackPanel Name="DeveloperSection" IsVisible="False">
-        <TextBlock Classes="label" Text="开发者" Margin="0,28,0,4" />
-        <Button Classes="row" Click="OnZLibraryClick">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Text="Z-Library 搜索" VerticalAlignment="Center" />
-            <c:LineIcon Grid.Column="1" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
-                        VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
-          </Grid>
-        </Button>
-        <Button Classes="row" Click="OnZLibraryAccountClick">
-          <Grid ColumnDefinitions="*,Auto,Auto">
-            <TextBlock Text="Z-Library 账号" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Name="ZLibrarySummaryText" Classes="muted" FontSize="14"
-                       VerticalAlignment="Center" />
-            <c:LineIcon Grid.Column="2" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
-                        Margin="6,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
-          </Grid>
-        </Button>
-      </StackPanel>
-
       <TextBlock Classes="label" Text="外观" Margin="0,28,0,10" />
       <c:NativeSegmentGroup>
         <Border Classes="segments">

@@ -65,6 +65,29 @@ public sealed partial class SettingsTests
         Assert.True(saved.IsFavorite);
     });
 
+    [Fact]
+    public Task DetailEditsPersistRatingAndCover() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        var card = scope.Window.ViewModel.Books[0];
+        var library = scope.Field<IBookLibraryService>("_library");
+        var book = (await library.GetBookAsync(card.Book.Id))!;
+        book.OnlineRating = 7.5;
+        book.OnlineRatingCount = 100;
+        await library.UpdateMetadataAsync(book);
+        scope.Call("SelectBook", card);
+        scope.Get<TextBox>("DetailOnlineRatingBox").Text = "8.8";
+        var cover = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aS8AAAAASUVORK5CYII=");
+        scope.Set("_pendingDetailCover", cover);
+        await scope.Call<Task>("SaveDetailsAsync");
+        var saved = (await library.GetBookAsync(card.Book.Id))!;
+        Assert.Equal(8.8, saved.OnlineRating);
+        Assert.Null(saved.OnlineRatingCount);
+        Assert.NotNull(saved.CoverPath);
+        Assert.Equal(cover, await File.ReadAllBytesAsync(Path.Combine(scope.Paths.Data, saved.CoverPath)));
+    });
+
     [Theory]
     [InlineData("zh-CN")]
     [InlineData("en-US")]

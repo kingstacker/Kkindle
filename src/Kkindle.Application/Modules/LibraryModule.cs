@@ -9,7 +9,6 @@ public sealed class LibraryModule
     {
         Books = options.Library ?? new SqliteBookLibraryService(options.Paths, options.MetadataService);
         FormatConverter = options.FormatConverter;
-        Douban = options.Douban ?? new DoubanMetadataService();
         Settings = new AppSettingsStore(options.Paths);
         Backups = new AppBackupService(options.Paths, options.SecretProtector);
         Fonts = new FontLibraryService(options.Paths);
@@ -18,7 +17,6 @@ public sealed class LibraryModule
 
     public IBookLibraryService Books { get; }
     public IBookFormatConverter FormatConverter { get; }
-    public DoubanMetadataService Douban { get; }
     public AppSettingsStore Settings { get; }
     public AppBackupService Backups { get; }
     public FontLibraryService Fonts { get; }

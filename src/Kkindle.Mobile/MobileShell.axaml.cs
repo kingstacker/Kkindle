@@ -105,8 +105,8 @@ public partial class MobileShell : UserControl
     public MobileServices Services => _services;
 
     /// <summary>
-    /// Developer mode holds features outside the normal product (Douban lookup,
-    /// Z-Library). Like the desktop app it lasts for this run only.
+    /// Developer mode holds features outside the normal product.
+    /// Like the desktop app it lasts for this run only.
     /// </summary>
     public bool IsDeveloperMode { get; private set; }
 
@@ -114,9 +114,29 @@ public partial class MobileShell : UserControl
 
     public void ToggleDeveloperMode()
     {
-        IsDeveloperMode = !IsDeveloperMode;
+        if (IsDeveloperMode)
+        {
+            SetDeveloperMode(false);
+            return;
+        }
+        ShowSheet("开发者模式", new PromptSheet(null, "进入", password =>
+        {
+            if (password != BookDetailEditing.DeveloperPassword)
+            {
+                ShowToast("密码错误");
+                return Task.CompletedTask;
+            }
+            HideSheet();
+            SetDeveloperMode(true);
+            return Task.CompletedTask;
+        }, placeholder: "请输入密码", isPassword: true));
+    }
+
+    private void SetDeveloperMode(bool enabled)
+    {
+        IsDeveloperMode = enabled;
         DeveloperModeChanged?.Invoke(this, EventArgs.Empty);
-        ShowToast(IsDeveloperMode ? "已进入开发者模式" : "已退出开发者模式");
+        ShowToast(enabled ? "已进入开发者模式" : "已退出开发者模式");
     }
 
     public CoverCache Covers { get; }
@@ -245,10 +265,6 @@ public partial class MobileShell : UserControl
 
     public void OpenReader(Book book, ReaderProgressRow? location = null) =>
         Push(new ReaderPage(book, _modules, this, location));
-
-    public void OpenZLibrary() => Push(new ZLibraryPage(_modules, this));
-
-    public void OpenZLibraryAccount() => Push(new ZLibraryAccountPage(_modules, this));
 
     /// <summary>The control shown in the open sheet, for pages that update it later.</summary>
     public Control? CurrentSheet => SheetScope.IsVisible ? SheetBody.Content as Control : null;
@@ -599,11 +615,16 @@ public partial class MobileShell : UserControl
     private void OnInputPaneChanged(object? sender, InputPaneStateEventArgs e)
     {
         var open = e.NewState == InputPaneState.Open;
-        var lift = open ? e.EndRect.Height + Padding.Bottom : 0;
+        var lift = open ? e.EndRect.Height : 0;
         SheetPanel.Margin = new Thickness(0, 0, 0, lift);
         // A full-height sheet would otherwise be pushed off the top of the screen.
         if (_sheetFillsHeight) SheetPanel.Height = Math.Max(200, SheetPanel.MaxHeight - lift);
         SheetPanel.Padding = new Thickness(0, 0, 0, open ? 0 : Padding.Bottom);
+        if (!open && SheetScope.IsVisible
+            && TopLevel.GetTopLevel(this)?.FocusManager is { } focusManager
+            && focusManager.GetFocusedElement() is TextBox focused
+            && focused.GetVisualAncestors().Contains(SheetBody))
+            focusManager.Focus(null);
     }
 
     private void OnBackRequested(object? sender, RoutedEventArgs e)

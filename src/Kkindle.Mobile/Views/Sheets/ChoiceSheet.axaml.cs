@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace Kkindle.Mobile.Views.Sheets;
 
@@ -22,6 +23,8 @@ public partial class ChoiceSheet : UserControl, IFullHeightSheet
     private const int LongListThreshold = 12;
 
     private readonly Action<ChoiceItem>? _onPick;
+    private int _initialSelection = -1;
+    private bool _initialScrollPending;
 
     /// <summary>Design-time only.</summary>
     public ChoiceSheet() => InitializeComponent();
@@ -45,7 +48,11 @@ public partial class ChoiceSheet : UserControl, IFullHeightSheet
         Loaded += (_, _) => Dispatcher.UIThread.Post(() =>
         {
             Choices.ItemsSource = items;
-            if (selected >= 0) Choices.ScrollIntoView(selected);
+            if (selected <= 0) return;
+            _initialSelection = selected;
+            _initialScrollPending = true;
+            Choices.LayoutUpdated += OnChoicesLayoutUpdated;
+            Choices.InvalidateMeasure();
         }, DispatcherPriority.Background);
     }
 
@@ -53,6 +60,25 @@ public partial class ChoiceSheet : UserControl, IFullHeightSheet
     public bool IsLong { get; }
 
     public bool FillsHeight => IsLong;
+
+    private void OnChoicesLayoutUpdated(object? sender, EventArgs e)
+    {
+        if (!_initialScrollPending || _initialSelection < 0) return;
+        var scroll = Choices.GetVisualDescendants()
+            .OfType<ScrollViewer>()
+            .FirstOrDefault(viewer => viewer.Viewport.Height > 0 && viewer.Extent.Height > 0);
+        if (scroll is null) return;
+
+        // Scroll after the layout pass that realized the initial rows. Calling
+        // this while the panel is still measuring leaves the viewport at the top.
+        _initialScrollPending = false;
+        Choices.LayoutUpdated -= OnChoicesLayoutUpdated;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (Choices.IsAttachedToVisualTree())
+                Choices.ScrollIntoView(_initialSelection);
+        }, DispatcherPriority.Background);
+    }
 
     private void OnChoiceClick(object? sender, RoutedEventArgs e)
     {

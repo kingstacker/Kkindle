@@ -18,6 +18,9 @@ public sealed class AppPaths
         Backups = Path.Combine(Root, "backups");
         // Browser sessions belong to this installation, outside synced/backed-up library data.
         BrowserData = Path.Combine(Root, "browser-data");
+        // Plugins and their private data are per installation as well.
+        Plugins = Path.Combine(Root, "plugins");
+        PluginData = Path.Combine(Root, "plugin-data");
         Database = Path.Combine(Data, "kkindle.db");
         Settings = Path.Combine(Data, "app-settings.json");
     }
@@ -35,6 +38,8 @@ public sealed class AppPaths
     public string Dictionaries { get; }
     public string Backups { get; }
     public string BrowserData { get; }
+    public string Plugins { get; }
+    public string PluginData { get; }
     public string Database { get; }
     public string Settings { get; }
 

@@ -191,7 +191,7 @@ public sealed class BookFormatConversionService : IBookFormatConverter
         }
         // Calibre embeds the given image as the output cover, replacing the
         // source file's own (possibly low-resolution) one. This is how a
-        // Douban-matched cover reaches the Kindle instead of the old cover.
+        // online-matched cover reaches the Kindle instead of the old cover.
         if (!string.IsNullOrWhiteSpace(metadata.CoverPath) && File.Exists(metadata.CoverPath))
         {
             startInfo.ArgumentList.Add("--cover");

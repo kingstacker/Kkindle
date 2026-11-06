@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>翻译书籍</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <h1 id="title">翻译书籍</h1>
+  <p class="lead" id="lead"></p>
+
+  <div class="section">
+    <div class="row">
+      <label for="provider"><span id="providerLabel"></span><span class="hint" id="providerHint"></span></label>
+      <select class="kk-input" id="provider">
+        <option value="ai" id="providerAi"></option>
+        <option value="bing" id="providerBing"></option>
+        <option value="google" id="providerGoogle"></option>
+      </select>
+    </div>
+    <div class="row" id="rpmRow">
+      <label for="rpm"><span id="rpmLabel"></span><span class="hint" id="rpmHint"></span></label>
+      <input class="kk-input" id="rpm" type="number" min="0" max="65536" step="1" value="0">
+    </div>
+    <div class="row" id="proxyRow">
+      <label for="proxy"><span id="proxyLabel"></span><span class="hint" id="proxyHint"></span></label>
+      <input class="kk-input" id="proxy" type="text" spellcheck="false" placeholder="http://127.0.0.1:7890">
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="row">
+      <label for="source"><span id="sourceLabel"></span><span class="hint" id="sourceHint"></span></label>
+      <select class="kk-input" id="source"></select>
+    </div>
+    <div class="row">
+      <label for="target"><span id="targetLabel"></span><span class="hint" id="targetHint"></span></label>
+      <select class="kk-input" id="target"></select>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label" id="outputLabel"></div>
+    <div class="checks">
+      <label><input type="checkbox" id="translated" checked><span id="outputTranslated"></span></label>
+      <label><input type="checkbox" id="bilingual"><span id="outputBilingual"></span></label>
+    </div>
+    <span class="hint" id="outputHint"></span>
+  </div>
+
+  <div class="actions">
+    <button class="kk-button kk-primary" id="start" disabled></button>
+    <button class="kk-button" id="cancel" style="display:none"></button>
+    <span class="grow"></span>
+    <span class="status" id="status"></span>
+  </div>
+
+  <div class="progress" id="progress">
+    <div class="bar" id="bar"><i id="barFill"></i></div>
+    <div class="progress-text">
+      <span class="stage" id="stage"></span>
+      <span class="counter" id="counter"></span>
+    </div>
+  </div>
+  <div class="result" id="result"></div>
+
+  <script src="dropdown.js"></script>
+  <script src="translate.js"></script>
+</body>
+</html>

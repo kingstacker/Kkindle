@@ -17,3 +17,22 @@ artifacts/
 /debug-*.ps1
 /debug-senddiag/
 .opensquilla/
+
+# Plugin packaging output
+dist/
+
+# Local signing material and credentials
+.env
+.env.*
+*.p12
+*.pfx
+*.pem
+*.key
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.p8
+*.keystore
+*.jks
+AuthKey_*.p8
+*.keychain-db

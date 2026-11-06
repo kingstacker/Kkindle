@@ -71,8 +71,6 @@ public partial class MainWindow
         ["字体", "font", "typeface", "字号", "字形"],
         ["邮箱", "email", "mail", "邮件", "smtp", "收件地址"],
         ["人工智能", "ai", "模型", "问答", "密钥", "api"],
-        ["翻译", "translation", "translate", "译文"],
-        ["拼音", "pinyin", "注音"],
         ["外观", "theme", "主题"],
         ["kindle", "推送", "发送", "send to kindle", "usb"],
         ["备份", "backup", "恢复", "restore", "导出备份"],
@@ -80,7 +78,6 @@ public partial class MainWindow
         ["代理", "proxy", "代理服务器", "google proxy"],
         ["快捷键", "shortcut", "keyboard shortcut", "热键"],
         ["calibre", "格式转换", "电子书转换", "converter"],
-        ["zlibrary", "z-library", "图书下载", "下载账号"],
         ["目录", "directory", "folder", "存储路径", "数据路径"],
         ["诊断", "diagnostics", "日志", "log export"],
         ["高级", "advanced", "mcp", "集成", "integration"],
@@ -109,6 +106,9 @@ public partial class MainWindow
         ShowStage3Page(SettingsPage, SettingsNavigationButton);
         SettingsDataPathText.Text = _paths.Data;
         InitializeMcpSettings();
+        // Re-scan the plugins directory: a plugin updated on disk (or unpacked
+        // by hand) should show its new version and pages without restarting.
+        RefreshPluginContributions();
         ShowSettingsSection(_activeSettingsCategory);
     }
 
@@ -168,6 +168,7 @@ public partial class MainWindow
             ["Reading"] = SettingsReadingSection,
             ["Kindle"] = SettingsKindleSection,
             ["Data"] = SettingsDataSection,
+            ["Plugins"] = SettingsPluginsSection,
             ["About"] = SettingsAboutSection,
             ["Advanced"] = SettingsAdvancedSection
         };
@@ -186,7 +187,7 @@ public partial class MainWindow
             SettingsScrollViewer.Offset = default;
         _activeSettingsCategory = tag;
         UpdateS3SettingsActions();
-        Button[] buttons = [SettingsGeneralButton, SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsAdvancedButton, SettingsAboutButton];
+        Button[] buttons = [SettingsGeneralButton, SettingsLibraryButton, SettingsReadingButton, SettingsKindleButton, SettingsDataButton, SettingsPluginsButton, SettingsAdvancedButton, SettingsAboutButton];
         foreach (var button in buttons)
         {
             var active = string.Equals(button.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase);
@@ -313,6 +314,7 @@ public partial class MainWindow
             ("Reading", SettingsReadingButton.Content?.ToString() ?? T("阅读"), SettingsReadingSection),
             ("Kindle", SettingsKindleButton.Content?.ToString() ?? T("Kindle"), SettingsKindleSection),
             ("Data", SettingsDataButton.Content?.ToString() ?? T("数据"), SettingsDataSection),
+            ("Plugins", SettingsPluginsButton.Content?.ToString() ?? T("插件"), SettingsPluginsSection),
             ("Advanced", SettingsAdvancedButton.Content?.ToString() ?? T("高级"), SettingsAdvancedSection),
             ("About", SettingsAboutButton.Content?.ToString() ?? T("关于"), SettingsAboutSection)
         };

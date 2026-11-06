@@ -35,11 +35,14 @@
             </Border>
           </Border>
           <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center" Spacing="8">
-            <Button Name="DoubanButton" Classes="primary" Content="从豆瓣获取" Click="OnDoubanClick" IsVisible="False" />
-            <TextBlock Name="RatingText" Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+            <Button Content="更换封面" Click="OnChangeCoverClick" />
           </StackPanel>
         </Grid>
 
+        <StackPanel Classes="field">
+          <TextBlock Text="在线评分" />
+          <TextBox Name="RatingBox" Classes="field" PlaceholderText="0–10，留空表示无评分" />
+        </StackPanel>
         <StackPanel Classes="field">
           <TextBlock Text="书名" />
           <TextBox Name="TitleBox" Classes="field" />

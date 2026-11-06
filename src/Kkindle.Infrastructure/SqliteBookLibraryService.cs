@@ -92,8 +92,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
                 Isbn TEXT NULL,
                 PageCount TEXT NULL,
                 Binding TEXT NULL,
-                DoubanRating REAL NULL,
-                DoubanRatingCount INTEGER NULL,
+                OnlineRating REAL NULL,
+                OnlineRatingCount INTEGER NULL,
                 Tags TEXT NOT NULL DEFAULT '',
                 Category TEXT NOT NULL DEFAULT '',
                 IsFavorite INTEGER NOT NULL DEFAULT 0,
@@ -364,13 +364,13 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         command.CommandText = usePinyinSearch
             ? """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
-                   Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
+                   Publisher, PublishDate, Isbn, PageCount, Binding, OnlineRating, OnlineRatingCount
             FROM Books
             ORDER BY UpdatedAt DESC, Title COLLATE NOCASE;
             """
             : """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
-                   Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
+                   Publisher, PublishDate, Isbn, PageCount, Binding, OnlineRating, OnlineRatingCount
             FROM Books
             WHERE $query = '' OR Title LIKE $like OR Authors LIKE $like OR Tags LIKE $like OR Series LIKE $like
             ORDER BY UpdatedAt DESC, Title COLLATE NOCASE;
@@ -516,7 +516,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT b.Id, b.Title, b.Authors, b.Series, b.SeriesIndex, b.Description, b.Tags, b.Category, b.IsFavorite, b.ReadingStatus, b.CoverPath, b.CreatedAt, b.UpdatedAt,
-                   b.Publisher, b.PublishDate, b.Isbn, b.PageCount, b.Binding, b.DoubanRating, b.DoubanRatingCount
+                   b.Publisher, b.PublishDate, b.Isbn, b.PageCount, b.Binding, b.OnlineRating, b.OnlineRatingCount
             FROM Books b
             {where}
             ORDER BY {GetLibrarySortSql(sortMode)}
@@ -2567,8 +2567,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             Isbn = reader.IsDBNull(15) ? null : reader.GetString(15),
             PageCount = reader.IsDBNull(16) ? null : reader.GetString(16),
             Binding = reader.IsDBNull(17) ? null : reader.GetString(17),
-            DoubanRating = reader.IsDBNull(18) ? null : reader.GetDouble(18),
-            DoubanRatingCount = reader.IsDBNull(19) ? null : reader.GetInt32(19)
+            OnlineRating = reader.IsDBNull(18) ? null : reader.GetDouble(18),
+            OnlineRatingCount = reader.IsDBNull(19) ? null : reader.GetInt32(19)
         };
     }
 
@@ -2674,7 +2674,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT b.Id, b.Title, b.Authors, b.Series, b.SeriesIndex, b.Description, b.Tags, b.Category, b.IsFavorite, b.ReadingStatus, b.CoverPath, b.CreatedAt, b.UpdatedAt,
-                   b.Publisher, b.PublishDate, b.Isbn, b.PageCount, b.Binding, b.DoubanRating, b.DoubanRatingCount
+                   b.Publisher, b.PublishDate, b.Isbn, b.PageCount, b.Binding, b.OnlineRating, b.OnlineRatingCount
             FROM Books b INNER JOIN BookFiles f ON f.BookId = b.Id WHERE f.Sha256 = $hash LIMIT 1;
             """;
         command.Parameters.AddWithValue("$hash", hash);
@@ -2687,7 +2687,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
-                   Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
+                   Publisher, PublishDate, Isbn, PageCount, Binding, OnlineRating, OnlineRatingCount
             FROM Books WHERE Title = $title COLLATE NOCASE AND Authors = $authors COLLATE NOCASE LIMIT 1;
             """;
         command.Parameters.AddWithValue("$title", title);
@@ -2704,7 +2704,7 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
-                   Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount
+                   Publisher, PublishDate, Isbn, PageCount, Binding, OnlineRating, OnlineRatingCount
             FROM Books WHERE Id = $id LIMIT 1;
             """;
         command.Parameters.AddWithValue("$id", bookId.ToString());
@@ -2762,9 +2762,9 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO Books (Id, Title, Authors, Series, SeriesIndex, Description, Tags, Category, IsFavorite, ReadingStatus, CoverPath, CreatedAt, UpdatedAt,
-                               Publisher, PublishDate, Isbn, PageCount, Binding, DoubanRating, DoubanRatingCount)
+                               Publisher, PublishDate, Isbn, PageCount, Binding, OnlineRating, OnlineRatingCount)
             VALUES ($id, $title, $authors, $series, $seriesIndex, $description, $tags, $category, $isFavorite, $readingStatus, $coverPath, $createdAt, $updatedAt,
-                    $publisher, $publishDate, $isbn, $pageCount, $binding, $doubanRating, $doubanRatingCount);
+                    $publisher, $publishDate, $isbn, $pageCount, $binding, $onlineRating, $onlineRatingCount);
             """;
         AddBookParameters(command, book);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -2782,8 +2782,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             UPDATE Books SET Title=$title, Authors=$authors, Series=$series, SeriesIndex=$seriesIndex, Description=$description,
                 Tags=$tags, Category=$category, IsFavorite=$isFavorite, ReadingStatus=$readingStatus,
                 CoverPath=$coverPath, UpdatedAt=$updatedAt, Publisher=$publisher, PublishDate=$publishDate,
-                Isbn=$isbn, PageCount=$pageCount, Binding=$binding, DoubanRating=$doubanRating,
-                DoubanRatingCount=$doubanRatingCount WHERE Id=$id;
+                Isbn=$isbn, PageCount=$pageCount, Binding=$binding, OnlineRating=$onlineRating,
+                OnlineRatingCount=$onlineRatingCount WHERE Id=$id;
             """;
         AddBookParameters(command, book);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -2802,8 +2802,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         command.Parameters.AddWithValue("$isbn", (object?)book.Isbn ?? DBNull.Value);
         command.Parameters.AddWithValue("$pageCount", (object?)book.PageCount ?? DBNull.Value);
         command.Parameters.AddWithValue("$binding", (object?)book.Binding ?? DBNull.Value);
-        command.Parameters.AddWithValue("$doubanRating", (object?)book.DoubanRating ?? DBNull.Value);
-        command.Parameters.AddWithValue("$doubanRatingCount", (object?)book.DoubanRatingCount ?? DBNull.Value);
+        command.Parameters.AddWithValue("$onlineRating", (object?)book.OnlineRating ?? DBNull.Value);
+        command.Parameters.AddWithValue("$onlineRatingCount", (object?)book.OnlineRatingCount ?? DBNull.Value);
         command.Parameters.AddWithValue("$tags", book.Tags ?? string.Empty);
         command.Parameters.AddWithValue("$category", book.Category ?? string.Empty);
         command.Parameters.AddWithValue("$isFavorite", book.IsFavorite ? 1 : 0);
@@ -2821,6 +2821,12 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
         await using (var reader = await inspect.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken)) existing.Add(reader.GetString(1));
 
+        // Older libraries named the online rating columns after the site the
+        // data originally came from. Rename them in place so existing values
+        // survive the upgrade.
+        await RenameLegacyColumnsAsync(connection, existing, "RatingCount", "OnlineRatingCount", cancellationToken);
+        await RenameLegacyColumnsAsync(connection, existing, "Rating", "OnlineRating", cancellationToken);
+
         foreach (var definition in new[]
         {
             (Name: "Category", Sql: "ALTER TABLE Books ADD COLUMN Category TEXT NOT NULL DEFAULT '';"),
@@ -2831,8 +2837,8 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             (Name: "Isbn", Sql: "ALTER TABLE Books ADD COLUMN Isbn TEXT NULL;"),
             (Name: "PageCount", Sql: "ALTER TABLE Books ADD COLUMN PageCount TEXT NULL;"),
             (Name: "Binding", Sql: "ALTER TABLE Books ADD COLUMN Binding TEXT NULL;"),
-            (Name: "DoubanRating", Sql: "ALTER TABLE Books ADD COLUMN DoubanRating REAL NULL;"),
-            (Name: "DoubanRatingCount", Sql: "ALTER TABLE Books ADD COLUMN DoubanRatingCount INTEGER NULL;")
+            (Name: "OnlineRating", Sql: "ALTER TABLE Books ADD COLUMN OnlineRating REAL NULL;"),
+            (Name: "OnlineRatingCount", Sql: "ALTER TABLE Books ADD COLUMN OnlineRatingCount INTEGER NULL;")
         })
         {
             if (existing.Contains(definition.Name)) continue;
@@ -2840,6 +2846,31 @@ public sealed partial class SqliteBookLibraryService : IBookLibraryService
             alter.CommandText = definition.Sql;
             await alter.ExecuteNonQueryAsync(cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Renames the single legacy column that ends with <paramref name="suffix"/>
+    /// to its current name. The Books table only ever had one such column per
+    /// suffix, so the match is unambiguous.
+    /// </summary>
+    private static async Task RenameLegacyColumnsAsync(
+        SqliteConnection connection,
+        HashSet<string> existing,
+        string suffix,
+        string target,
+        CancellationToken cancellationToken)
+    {
+        if (existing.Contains(target)) return;
+        var legacy = existing.FirstOrDefault(name =>
+            name.Length > suffix.Length
+            && name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            && !name.Equals(target, StringComparison.OrdinalIgnoreCase));
+        if (legacy is null) return;
+        var rename = connection.CreateCommand();
+        rename.CommandText = $"ALTER TABLE Books RENAME COLUMN \"{legacy.Replace("\"", "\"\"")}\" TO \"{target}\";";
+        await rename.ExecuteNonQueryAsync(cancellationToken);
+        existing.Remove(legacy);
+        existing.Add(target);
     }
 
     private static async Task InsertFileAsync(

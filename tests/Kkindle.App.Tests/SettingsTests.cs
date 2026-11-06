@@ -107,29 +107,6 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     });
 
     [Fact]
-    public Task BookContextMenuFeaturesDefaultToOnAndPersistWhenDisabled() => Run(async () =>
-    {
-        await using var scope = await TestWindow.Create();
-        var translationToggle = scope.Get<ToggleSwitch>("TranslationContextMenuEnabledCheck");
-        var pinyinToggle = scope.Get<ToggleSwitch>("PinyinContextMenuEnabledCheck");
-        var pinyinLocalOnlyToggle = scope.Get<ToggleSwitch>("PinyinLocalOnlyCheck");
-        Assert.True(translationToggle.IsChecked);
-        Assert.True(pinyinToggle.IsChecked);
-        Assert.True(pinyinLocalOnlyToggle.IsChecked);
-
-        translationToggle.IsChecked = false;
-        pinyinToggle.IsChecked = false;
-        pinyinLocalOnlyToggle.IsChecked = false;
-        scope.Window.Close();
-        await Until(() => !scope.Window.IsVisible);
-
-        var stored = await new AppSettingsStore(scope.Paths).LoadAsync();
-        Assert.False(stored.Translation.ContextMenuEnabled);
-        Assert.False(stored.PinyinContextMenuEnabled);
-        Assert.False(stored.PinyinLocalOnly);
-    });
-
-    [Fact]
     public Task SendToKindleTogglePersistsWithoutToolbarButton() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
@@ -165,19 +142,6 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         var stored = await new AppSettingsStore(scope.Paths).LoadAsync();
         Assert.False(stored.ShowSyncStatusIcon);
         Assert.False(stored.ShowLibraryPresenceIcon);
-    });
-
-    [Fact]
-    public Task PinyinEngineSelectionPersists() => Run(async () =>
-    {
-        await using var scope = await TestWindow.Create();
-        var selector = scope.Get<ComboBox>("PinyinEngineSelector");
-        Assert.Equal(0, selector.SelectedIndex);
-        selector.SelectedIndex = 1;
-        scope.Window.Close();
-        await Until(() => !scope.Window.IsVisible);
-        Assert.Equal(PinyinBookEngineCatalog.G2PWId,
-            (await new AppSettingsStore(scope.Paths).LoadAsync()).PinyinEngineId);
     });
 
     [Fact]
@@ -664,7 +628,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         scope.Window.MouseUp(labelPoint, MouseButton.Left, RawInputModifiers.None);
         Assert.True(toggle.IsChecked);
         Assert.True(toggle.Bounds.Height >= 44);
-        foreach (var name in new[] { "NetworkEnabledCheck", "GridGalleryDisplayCheck", "PinyinContextMenuEnabledCheck", "PinyinLocalOnlyCheck", "S3SecretKeyBox",
+        foreach (var name in new[] { "NetworkEnabledCheck", "GridGalleryDisplayCheck", "S3SecretKeyBox",
                      "MainReaderAiApiKeyBox", "KindleEmailPasswordBox", "PreferredOpenFormatBox" })
             Assert.False(string.IsNullOrWhiteSpace(ControlAutomationPeer.CreatePeerForElement(scope.Get<Control>(name))!.GetName()), name);
     });

@@ -2,6 +2,8 @@ using System.IO.Compression;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using Kkindle.Core;
@@ -13,6 +15,113 @@ namespace Kkindle.Ui.Tests;
 
 public sealed partial class SettingsTests
 {
+    [Fact]
+    public Task DetailCoverRightClickOpensChangeCoverMenu() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        scope.Get<ListBox>("BookGrid").SelectedItem = scope.Window.ViewModel.Books[0];
+        await Until(() => scope.Get<Border>("LibraryDetailPane").IsVisible);
+        await Task.Delay(600);
+        await Render();
+
+        var frame = scope.Get<Border>("DetailCoverFrame");
+        var menu = Assert.IsType<ContextMenu>(frame.ContextMenu);
+        var item = Assert.Single(menu.Items.OfType<MenuItem>());
+        foreach (var hasCover in new[] { true, false })
+        {
+            if (!hasCover)
+            {
+                scope.Get<Image>("DetailCoverImage").Source = null;
+                scope.Get<TextBlock>("DetailCoverPlaceholder").IsVisible = true;
+            }
+            await Render();
+            var point = frame.TranslatePoint(new Point(frame.Bounds.Width / 2, frame.Bounds.Height / 2), scope.Window)!.Value;
+            scope.Window.MouseDown(point, MouseButton.Right);
+            scope.Window.MouseUp(point, MouseButton.Right);
+            await Until(() => menu.IsOpen);
+            Assert.Equal("更换封面", item.Header);
+            menu.Close();
+        }
+    });
+
+    [Fact]
+    public Task InstalledPluginAddsBookActionsToTheLibrary() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        await SeedLayoutLibrary(scope);
+        Assert.False(scope.Get<Button>("DetailPluginActionsButton").IsVisible);
+
+        var package = WriteTestPlugin();
+        var manager = scope.Field<Kkindle.Infrastructure.Plugins.PluginManager>("_pluginManager");
+        var installed = manager.Install(package);
+        Assert.Equal("com.example.layout", installed.Id);
+        scope.Call("RefreshPluginContributions");
+        await Render();
+
+        Assert.True(scope.Get<Button>("DetailPluginActionsButton").IsVisible);
+        var panel = scope.Get<StackPanel>("PluginsPanel");
+        Assert.Single(panel.Children);
+        Assert.Contains(panel.GetVisualDescendants().OfType<Button>(),
+            button => Avalonia.Automation.AutomationProperties.GetName(button) == UiText.Get("打开"));
+        Assert.False(scope.Get<TextBlock>("PluginsEmptyText").IsVisible);
+        scope.Call("ShowSettingsSection", "Plugins");
+        await Render();
+        Assert.True(scope.Get<StackPanel>("SettingsPluginsSection").IsVisible);
+        Assert.Equal("Plugins", scope.Get<Button>("SettingsPluginsButton").Tag);
+        var card = scope.Window.ViewModel.Books[0];
+        scope.Get<ListBox>("BookGrid").SelectedItem = card;
+        await Until(() => scope.Get<Border>("LibraryDetailPane").IsVisible);
+        await Render();
+
+        var menu = (ContextMenu)scope.Call("BuildBookContextMenu", card)!;
+        Assert.Contains(menu.Items.OfType<MenuItem>(),
+            item => (item.Header as string) == "匹配书籍详情");
+
+        manager.SetEnabled(installed.Id, false);
+        scope.Call("RefreshPluginContributions");
+        await Render();
+        Assert.False(scope.Get<Button>("DetailPluginActionsButton").IsVisible);
+
+        manager.SetEnabled(installed.Id, true);
+        manager.Uninstall(installed.Id);
+        scope.Call("RefreshPluginContributions");
+        await Render();
+        Assert.False(scope.Get<Button>("DetailPluginActionsButton").IsVisible);
+        File.Delete(package);
+    });
+
+    private static string WriteTestPlugin()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"kkindle-test-plugin-{Guid.NewGuid():N}.kkplugin");
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        AddEntry(archive, "manifest.json",
+            """
+            {
+              "id": "com.example.layout",
+              "name": "布局测试插件",
+              "version": "1.0.0",
+              "apiVersion": 1,
+              "permissions": { "library": "write", "import": true, "secrets": true, "storage": true },
+              "contributes": {
+                "bookActions": [ { "id": "match", "title": "匹配书籍详情", "page": "ui/app.html" } ],
+                "app": { "title": "布局工具", "page": "ui/library.html" }
+              }
+            }
+            """);
+        AddEntry(archive, "ui/app.html", "<html><body>test</body></html>");
+        AddEntry(archive, "ui/library.html", "<html><body>library</body></html>");
+        return path;
+
+        static void AddEntry(ZipArchive archive, string name, string content)
+        {
+            var entry = archive.CreateEntry(name);
+            using var stream = entry.Open();
+            var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+    }
+
     [Fact]
     public Task SyncStatusesSurviveLibraryCardRebuild() => Run(async () =>
     {
@@ -90,17 +199,12 @@ public sealed partial class SettingsTests
         Assert.True(shelfRight <= detailLeft, "The detail pane must not cover books.");
         Assert.True(grid.Bounds.Width <= shelf.Bounds.Width + 1);
         Assert.Contains("EPUB", scope.Get<TextBlock>("DetailFormatText").Text);
-        // Douban lookup belongs to developer mode.
-        Assert.False(scope.Get<Button>("DetailDoubanButton").IsVisible);
-        Assert.False(scope.Get<ToggleSwitch>("AutoDoubanMatchCheck").IsVisible);
-        scope.Call("UnlockZLibraryAdvancedOptions");
-        await Render();
-        Assert.True(scope.Get<Button>("DetailDoubanButton").IsEffectivelyVisible);
+        // Plugin book actions only appear once an enabled plugin contributes them.
+        Assert.False(scope.Get<Button>("DetailPluginActionsButton").IsVisible);
         var detailButtons = new[]
         {
             scope.Get<Button>("LibraryDetailCloseButton"),
             scope.Get<Button>("EditBookReflectionButton"),
-            scope.Get<Button>("DetailDoubanButton"),
             scope.Get<Button>("DetailFavoriteButton"),
             scope.Get<Button>("DetailReadingStatusButton")
         };

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>书籍信息示例</title>
+  <style>
+    body { padding: 20px 22px; font-size: 14px; }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+    .lead { font-size: 12px; color: var(--kk-muted); margin: 0 0 14px; line-height: 1.55; }
+    .book { border-top: 1px solid var(--kk-hairline); padding: 12px 0; }
+    .book h2 { font-size: 15px; font-weight: 600; margin: 0 0 6px; overflow-wrap: anywhere; }
+    dl { display: grid; grid-template-columns: 88px 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+    dt { color: var(--kk-muted); }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .empty, .error { padding: 24px 0; color: var(--kk-muted); }
+    .error { color: var(--kk-danger); }
+  </style>
+</head>
+<body>
+  <h1>书籍信息示例</h1>
+  <p class="lead">这个插件只声明了读取书库的权限，用 <code>kkindle.library.getBooks()</code> 读取本次打开的书籍。</p>
+  <div id="list"></div>
+  <script src="app.js"></script>
+</body>
+</html>

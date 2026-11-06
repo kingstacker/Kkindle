@@ -26,7 +26,7 @@ public static class KindleThumbnailService
         var fileName = await ReadThumbnailFileNameAsync(bookPath, cancellationToken);
         if (fileName is null) return null;
 
-        // A library-managed cover (e.g. a freshly matched Douban one) wins
+        // A library-managed cover (e.g. a freshly matched online one) wins
         // over whatever is still embedded in the book file.
         if (!string.IsNullOrWhiteSpace(coverOverridePath))
         {

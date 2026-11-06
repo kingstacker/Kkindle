@@ -1,0 +1,24 @@
+{
+  "id": "com.example.book-info",
+  "name": "书籍信息示例",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "author": "Kkindle",
+  "description": "最小示例插件：读取选中书籍的信息并展示，适合作为自己插件的起点。",
+  "icon": "ui/icon.svg",
+  "permissions": {
+    "library": "read"
+  },
+  "contributes": {
+    "bookActions": [
+      {
+        "id": "info",
+        "title": "查看书籍信息",
+        "page": "ui/app.html",
+        "multiple": true,
+        "width": 720,
+        "height": 620
+      }
+    ]
+  }
+}

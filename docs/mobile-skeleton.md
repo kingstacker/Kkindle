@@ -65,6 +65,9 @@ its key inside the app sandbox, and `IOSFileImportSource` copies documents
 picked through the system picker into the cache. `IOSGlassTabBar` supplies the
 native bar described below.
 
+Device build, signing, install and physical-device XCUITest instructions live in
+[ios-development.md](ios-development.md).
+
 On iOS 26 `IOSGlassTabBar` hosts a native `UITabBar`, so UIKit controls its
 Liquid Glass material, selection, and accessibility. Segmented groups are
 hosted by `IOSNativeSegmentControl` for the same reason (see below). The shared shell reserves
@@ -110,19 +113,10 @@ The reader hides its listening button when a host has no TTS engine and player.
   edited. `MobileCollections` holds the shared actions.
 - `BookDetailPage` shows metadata and progress, and handles favorite, 加入收藏夹,
   rename, delete and sending to Kindle. `BookEditPage` edits the same fields as
-  the desktop detail pane. In developer mode, 从豆瓣获取 searches Douban (with
-  covers), lets the reader pick which fields to take, fills the form, and
-  writes only on save.
+  the desktop detail pane.
 - Developer mode: tap 我的 → 版本 five times (again to leave). As on desktop,
   where clicking the version five times does the same, it lasts for the current
-  run and holds features outside the normal product: Douban lookup and
-  Z-Library (on desktop also automatic Douban matching on import).
-- `ZLibraryPage` searches Z-Library (format filter, covers, paging) and
-  `ZLibraryDownloader` downloads into the library like the desktop app: import
-  the file, then write the page's details (title, author, publisher, year,
-  series, edition, ISBN, pages, language, description, cover) with
-  `ZLibraryMetadata.Apply`. Books already in the library are not downloaded
-  again. The account shares the desktop's protected settings file.
+  run and holds features outside the normal product.
 - `NativeSegmentGroup` hosts UIKit's segmented control, which is a platform
   view drawn above the whole Avalonia scene and therefore cannot be clipped by
   a scrolling page or covered by a sheet. Whenever any part of it leaves the
@@ -295,10 +289,6 @@ Verified on the `Kkindle_Pixel` emulator (Android 15, x86_64, Release build):
 - PDF selection, highlights and notes; pinch zoom (desktop preview, two
   synthetic touch points; adb cannot pinch)
 - sending to Kindle through a local SMTP server, with the book attached
-- Douban search with covers, field selection and saving, against Douban itself
-- Z-Library login, search, format filter, download with details written, and
-  duplicate detection, against a local mock of its API (no real account was
-  available)
 - 收藏夹: create, add several books, remove by long press, rename, merge and
   dissolve, from both the library's long press and the collection page
 - Keystore migration keeping stored credentials readable

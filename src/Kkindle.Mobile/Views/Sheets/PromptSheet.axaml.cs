@@ -16,7 +16,8 @@ public partial class PromptSheet : UserControl
         string confirmText,
         Func<string, Task> onConfirm,
         string? initialText = null,
-        string? placeholder = null)
+        string? placeholder = null,
+        bool isPassword = false)
     {
         _onConfirm = onConfirm;
         InitializeComponent();
@@ -26,6 +27,7 @@ public partial class PromptSheet : UserControl
         if (initialText is null && placeholder is null) return;
 
         InputBox.IsVisible = true;
+        if (isPassword) InputBox.PasswordChar = '●';
         InputBox.Text = initialText;
         InputBox.PlaceholderText = placeholder;
         Loaded += (_, _) => InputBox.Focus();

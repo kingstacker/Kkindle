@@ -435,6 +435,12 @@
             <Setter Property="Background" Value="{DynamicResource ReaderSelectedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource ReaderInkBrush}" />
         </Style>
+        <Style Selector="Button.readerSelectionAction.pluginReaderAction">
+            <Setter Property="Width" Value="NaN" />
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="MaxWidth" Value="160" />
+            <Setter Property="Padding" Value="9,0" />
+        </Style>
         <Style Selector="Button.bookReflectionFormattingAction">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Background" Value="Transparent" />
@@ -847,6 +853,30 @@
             <Setter Property="Background" Value="#A61F1F" />
             <Setter Property="Foreground" Value="#FFFFFF" />
             <Setter Property="BorderBrush" Value="#A61F1F" />
+        </Style>
+        <!-- A detail field that opens a menu: same underlined footprint as the
+             pane's TextBoxes, so it reads as another editable value. -->
+        <Style Selector="Button.detailSelect">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="0,6,0,6" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.detailSelect:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.detailSelect:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
         </Style>
 
         <Style Selector="Button.icon">
@@ -2803,35 +2833,6 @@
             <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
             <Setter Property="BorderThickness" Value="2,0,0,0" />
-        </Style>
-
-        <!-- The Douban picker draws the selected state on the candidate card
-             itself. Keep the ListBoxItem shell transparent so its bottom
-             margin cannot leak the Fluent accent colour as a stray bar. -->
-        <Style Selector="ListBox.doubanCandidateList ListBoxItem">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Margin" Value="0" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="VerticalContentAlignment" Value="Top" />
-            <Setter Property="Template">
-                <ControlTemplate>
-                    <ContentPresenter Content="{TemplateBinding Content}"
-                                      ContentTemplate="{TemplateBinding ContentTemplate}"
-                                      HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                      VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
-                </ControlTemplate>
-            </Setter>
-        </Style>
-        <Style Selector="ListBox.doubanCandidateList ListBoxItem:selected,
-                         ListBox.doubanCandidateList ListBoxItem:pointerover,
-                         ListBox.doubanCandidateList ListBoxItem:selected:pointerover">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-        </Style>
-        <Style Selector="ListBox.doubanCandidateList ListBoxItem:selected Border.doubanCandidateRow">
-            <Setter Property="BoxShadow" Value="{DynamicResource CardHoverShadow}" />
         </Style>
 
         <!-- These TOC state overrides must follow the generic ListBoxItem

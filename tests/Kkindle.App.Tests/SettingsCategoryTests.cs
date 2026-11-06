@@ -18,7 +18,7 @@ public sealed partial class SettingsTests
         {
             ("UiLanguageBox", "General"), ("MainThemeBox", "General"),
             ("NetworkEnabledCheck", "General"), ("TranslationGoogleProxyPane", "General"),
-            ("SettingsAccountExpander", "Library"), ("SettingsCalibreExpander", "Library"),
+            ("SettingsCalibreExpander", "Library"),
             ("SettingsMcpExpander", "Advanced"), ("SettingsDiagnosticsExpander", "Advanced"),
             ("ExportSoftwareLogsButton", "Advanced"), ("SettingsSendToKindleExpander", "Kindle")
         })
@@ -30,9 +30,5 @@ public sealed partial class SettingsTests
         scope.Call("OpenSettingsExpander", "Advanced", scope.Get<Expander>("SettingsDiagnosticsExpander"));
         await Render();
         Capture(scope.Window, "settings-diagnostics-single-title");
-        scope.Call("ZLibraryAccountButton_Click", null, new RoutedEventArgs());
-        await Render();
-        Assert.True(scope.Get<Control>("SettingsLibrarySection").IsEffectivelyVisible);
-        Assert.True(scope.Get<Expander>("SettingsAccountExpander").IsExpanded);
     });
 }

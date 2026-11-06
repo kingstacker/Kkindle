@@ -20,11 +20,15 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
+using Kkindle.Infrastructure.Plugins;
 
 namespace Kkindle;
 
 public partial class MainWindow : Window
 {
+    private byte[]? _pendingDetailCover;
+    private Bitmap? _pendingDetailCoverPreview;
+
     private const string MaximizeGlyphData = "M 0.5,0.5 H 9.5 V 9.5 H 0.5 Z";
     private const string RestoreGlyphData = "M 2.5,0.5 H 9.5 V 7.5 M 0.5,2.5 H 7.5 V 9.5 H 0.5 Z";
     private const string SidebarChevronDownData = "M 4,6 L 8,10 L 12,6";
@@ -72,11 +76,11 @@ public partial class MainWindow : Window
 
     private readonly ApplicationModules _modules;
     private readonly AppPaths _paths;
+    private readonly PluginManager _pluginManager;
     private readonly string _rootConfigurationDirectory;
     private readonly IBookLibraryService _library;
     private readonly IBookFormatConverter _formatConverter;
     private readonly ReaderFormatCacheService _readerFormatCache;
-    private readonly DoubanMetadataService _douban;
     private readonly IKindleDeviceService? _kindle;
     private IDeviceChangeNotifier? _deviceChangeNotifier;
     private readonly DeviceModelStore _deviceModelStore;
@@ -110,8 +114,6 @@ public partial class MainWindow : Window
     private readonly TtsService _readerTts;
     private readonly EpubReaderPreparationService _epubReader;
     private readonly IReaderHostFactory _readerHostFactory;
-    private readonly ZLibraryService _zLibraryService;
-    private readonly ZLibrarySettingsStore _zLibrarySettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
     private readonly KindleEmailSender _kindleEmailSender;
     private readonly ISyncService _s3SyncService;
@@ -122,7 +124,6 @@ public partial class MainWindow : Window
     private long _bookSyncStatusRefreshVersion;
     private readonly UpdateService? _updateService;
     private AppSettings _appSettings = new();
-    private ZLibrarySettings _zLibrarySettings = new();
     private KindleEmailSettings _kindleEmailSettings = new();
     private S3SyncStoredSettings _s3SyncStoredSettings = new(
         Guid.NewGuid().ToString("N"),
@@ -131,10 +132,6 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _embeddingModelDownloadCancellation;
     private Task? _embeddingModelDownloadTask;
     private bool _embeddingModelDownloadBusy;
-    private CancellationTokenSource? _g2pwModelDownloadCancellation;
-    private Task? _g2pwModelDownloadTask;
-    private bool _g2pwModelDownloadBusy;
-    private bool _updatingPinyinEngineSelector;
     private string? _deviceDisplayName;
     private Button? _activeNavigationSectionButton;
     private IReaderHost? _readerActiveHost;
@@ -161,12 +158,6 @@ public partial class MainWindow : Window
     private bool _conversionInProgress;
     private bool _automaticReaderFormatGenerationInProgress;
     private CancellationTokenSource? _conversionCancellation;
-    private TaskCompletionSource<DoubanBookCandidate?>? _doubanCandidateCompletion;
-    private TaskCompletionSource<DoubanUpdateChoices?>? _doubanApplyCompletion;
-    private DoubanBookCandidate? _doubanSelectedCandidate;
-    private DoubanBookMetadata? _doubanPreviewMetadata;
-    private CancellationTokenSource? _doubanMatchCancellation;
-    private bool _doubanResearchPending;
     private TaskCompletionSource<IReadOnlyDictionary<string, IReadOnlyCollection<string>>?>? _importFormatSelectionCompletion;
     private TaskCompletionSource<ImportConflictResolution>? _importConflictCompletion;
     private readonly List<(string FilePath, ToggleSwitch Toggle)> _importFormatSelectionRows = [];
@@ -194,11 +185,10 @@ public partial class MainWindow : Window
         AppPaths paths,
         IBookLibraryService library,
         IBookFormatConverter? formatConverter = null,
-        DoubanMetadataService? douban = null,
         AppServices? services = null,
         AppSettings? startupSettings = null)
         : this(DesktopApplicationBootstrap.Create(
-            paths, library, formatConverter, douban, services, startupSettings), services)
+            paths, library, formatConverter, services, startupSettings), services)
     {
     }
 
@@ -209,6 +199,7 @@ public partial class MainWindow : Window
         ObjectDisposedException.ThrowIf(modules.IsDisposed, modules);
         _modules = modules;
         _paths = modules.Paths;
+        _pluginManager = modules.Plugins;
         // Clear the previous process's task records as the window starts, even
         // if the user does not open the task-history flyout during this run.
         _ = BackgroundTasks;
@@ -217,7 +208,6 @@ public partial class MainWindow : Window
         _appSettings = modules.StartupSettings;
         _formatConverter = modules.Library.FormatConverter;
         _readerFormatCache = modules.Reader.FormatCache;
-        _douban = modules.Library.Douban;
         _kindle = services?.KindleDeviceService;
         _deviceModelStore = modules.Integrations.DeviceModels;
         _kindleAuxiliaryCacheStore = modules.Integrations.DeviceCache;
@@ -264,8 +254,6 @@ public partial class MainWindow : Window
         _epubReader = modules.Reader.Preparation;
         _readerHostFactory = services?.FormatReaderHostFactory ?? new DesktopReaderHostFactory(services?.PdfDocumentFactory);
         _kindleWebFileInput = services?.KindleWebFileInput;
-        _zLibraryService = modules.Integrations.ZLibrary;
-        _zLibrarySettingsStore = modules.Integrations.ZLibrarySettings;
         _kindleEmailSettingsStore = modules.Integrations.KindleEmailSettings;
         _kindleEmailSender = modules.Integrations.KindleEmail;
         _s3SyncService = modules.Sync.Service;
@@ -287,7 +275,6 @@ public partial class MainWindow : Window
         // state as the book-library context menu.
         if (ReaderMoreButton.Flyout is MenuFlyout readerMoreMenu)
             AttachInstantMenuHover(readerMoreMenu);
-        InitializeBookTranslationControls();
         InitializeReaderEmbeddingModelSelectors();
         InitializeReaderAiTurnNavigation();
         // AcceptsReturn lets the TextBox handle Enter before a normal bubbled
@@ -483,6 +470,7 @@ public partial class MainWindow : Window
         Opened += (_, _) => InitializeDeviceChangeNotifier(services?.CreateDeviceChangeNotifier);
         SetEjectButtonsEnabled(false);
         Opened += (_, _) => EnsureInteractiveControlToolTips();
+        Opened += (_, _) => InitializePlugins();
         BookGrid.TemplateApplied += (_, _) => AttachBookGridAutoHideScrollbar();
         BookList.TemplateApplied += (_, _) => AttachBookListAutoHideScrollbar();
         Dispatcher.UIThread.Post(UpdateBookGridLayout, DispatcherPriority.Loaded);
@@ -631,13 +619,12 @@ public partial class MainWindow : Window
             RefreshLocalizedFilterItems();
             ViewModel.RefreshView();
         }
-        RefreshLocalizedZLibraryFilterItems();
         RefreshDeviceShelfLanguage();
         RefreshLocalizedReadingMaterialsSourceFilter();
         UpdateLibraryUi();
         if (_selectedCard is not null)
         {
-            DetailCollectionsText.Text = DescribeBookCollections(_selectedCard);
+            UpdateDetailCollectionsSelector(_selectedCard);
             UpdateDetailActionIcons(_selectedCard.Book.IsFavorite, _selectedCard.Book.ReadingStatus);
             if (LibraryDetailPane.IsVisible)
                 UpdateBookReflectionPreview(_selectedBookReflection);
@@ -651,7 +638,6 @@ public partial class MainWindow : Window
         _ = ObserveReaderTaskAsync(
             RefreshReaderEmbeddingModelStatusAsync(_lifetimeCancellation.Token));
         UpdateCalibreDetectionStatus();
-        UpdateZLibraryAccountStatus();
         UpdateDiagnosticsTexts();
         foreach (var diagnostic in PlatformDiagnostics)
             diagnostic.RefreshLocalizedProperties();
@@ -725,7 +711,6 @@ public partial class MainWindow : Window
 
     public ObservableCollection<BookCollectionFolderViewModel> CollectionFolders { get; } = [];
     public BulkObservableCollection<BookCollectionFolderViewModel> FilteredCollectionFolders { get; } = [];
-    public ObservableCollection<DoubanCandidateViewModel> DoubanCandidates { get; } = [];
 
     private enum LibraryViewMode
     {
@@ -1074,18 +1059,9 @@ public partial class MainWindow : Window
         _calibreDetectionCancellation?.Dispose();
         _calibreDetectionCancellation = null;
         _conversionCancellation?.Cancel();
-        CancelPinyinGeneration();
-        CancelBookTranslation();
         CancelReaderTranslationRequest();
         _transferCancellation?.Cancel();
         _isTransferring = false;
-        _doubanCandidateCompletion?.TrySetResult(null);
-        _doubanCandidateCompletion = null;
-        _doubanApplyCompletion?.TrySetResult(null);
-        _doubanApplyCompletion = null;
-        _doubanMatchCancellation?.Cancel();
-        _doubanMatchCancellation?.Dispose();
-        _doubanMatchCancellation = null;
         _messageCompletion?.TrySetResult(true);
         _messageCompletion = null;
         _confirmationCompletion?.TrySetResult(false);
@@ -1109,7 +1085,6 @@ public partial class MainWindow : Window
         _readerNavigationCancellation?.Cancel();
         _readerSession.Cancel();
         _embeddingModelDownloadCancellation?.Cancel();
-        _g2pwModelDownloadCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
         if (_embeddingModelDownloadTask is { } embeddingModelDownloadTask)
         {
@@ -1123,22 +1098,10 @@ public partial class MainWindow : Window
                 // model download. Its cancellation token has already fired.
             }
         }
-        if (_g2pwModelDownloadTask is { } g2pwModelDownloadTask)
-        {
-            try
-            {
-                await g2pwModelDownloadTask.WaitAsync(TimeSpan.FromSeconds(3));
-            }
-            catch
-            {
-                // Closing the window must not be held up by a slow model download.
-            }
-        }
         _librarySearchDebounce?.Cancel();
         _librarySearchDebounce?.Dispose();
         _librarySearchDebounce = null;
         _lifetimeCancellation.Dispose();
-        _doubanBatchService?.Dispose();
         _readerTts.EnvironmentChanged -= ReaderTts_EnvironmentChanged;
         _readerTts.StateChanged -= ReaderTts_StateChanged;
         _readerTts.Dispose();
@@ -1146,9 +1109,7 @@ public partial class MainWindow : Window
         _readerSession.Dispose();
         _readerActiveHost?.Dispose();
         _readerPreloadHost?.Dispose();
-        ShutdownZLibrary();
         foreach (var folder in CollectionFolders) folder.Dispose();
-        foreach (var item in DoubanCandidates) item.Dispose();
         foreach (var item in _allStage3ReadingMaterials) item.Dispose();
         ViewModel.Dispose();
         _modules.Dispose();
@@ -1529,13 +1490,14 @@ public partial class MainWindow : Window
 
     private void SelectedCard_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(BookCardViewModel.CoverImage) || _selectedCard is null) return;
+        if (e.PropertyName != nameof(BookCardViewModel.CoverImage) || _selectedCard is null || _pendingDetailCover is not null) return;
         DetailCoverImage.Source = _selectedCard.CoverImage;
         DetailCoverPlaceholder.IsVisible = _selectedCard.CoverImage is null;
     }
 
     private void SelectBook(BookCardViewModel card)
     {
+        ClearPendingDetailCover();
         if (_selectedCard is not null) _selectedCard.PropertyChanged -= SelectedCard_PropertyChanged;
         _selectedCard = card;
         card.PropertyChanged += SelectedCard_PropertyChanged;
@@ -1545,9 +1507,9 @@ public partial class MainWindow : Window
         DetailTitleText.Text = card.Title;
         DetailAuthorsText.Text = card.Authors;
         DetailFormatText.Text = $"{card.FormatLabel} · {card.ReadingStateLabel}";
-        DetailDoubanRatingBox.Text = card.Book.DoubanRating is null
+        DetailOnlineRatingBox.Text = card.Book.OnlineRating is null
             ? string.Empty
-            : T("{0:0.0}（{1} 人评价）", card.Book.DoubanRating, card.Book.DoubanRatingCount ?? 0);
+            : card.Book.OnlineRating.Value.ToString("0.################", System.Globalization.CultureInfo.InvariantCulture);
         DetailStateText.Text = card.ReadingStateLabel;
         DetailOrganizationText.Text = card.OrganizationLabel;
         DetailPublicationText.Text = card.PublicationLabel;
@@ -1555,7 +1517,7 @@ public partial class MainWindow : Window
         DetailDescriptionText.Text = card.DescriptionLabel;
         DetailTagsBox.Text = card.Book.Tags;
         DetailCategoryBox.Text = card.Book.Category;
-        DetailCollectionsText.Text = DescribeBookCollections(card);
+        UpdateDetailCollectionsSelector(card);
         DetailDescriptionBox.Text = card.Book.Description ?? string.Empty;
         DetailSeriesBox.Text = card.Book.Series ?? string.Empty;
         DetailPublisherBox.Text = card.Book.Publisher ?? string.Empty;
@@ -1596,6 +1558,11 @@ public partial class MainWindow : Window
         return customCollectionNames.Length > 0
             ? string.Join("、", customCollectionNames)
             : T("未收藏");
+    }
+
+    private void UpdateDetailCollectionsSelector(BookCardViewModel? card)
+    {
+        DetailCollectionsValue.Text = card is null ? string.Empty : DescribeBookCollections(card);
     }
 
     // The pane uses one render-only translation. Its content is populated
@@ -1790,18 +1757,19 @@ public partial class MainWindow : Window
         LibraryDetailPane.RenderTransform = new TranslateTransform(0, 0);
         LibraryDetailPane.Opacity = 1;
         DetailCoverImage.Source = null;
+        ClearPendingDetailCover();
         DetailCoverPlaceholder.IsVisible = true;
         DetailTitleText.Text = T("请选择一本书");
         DetailAuthorsText.Text = string.Empty;
         DetailFormatText.Text = string.Empty;
-        DetailDoubanRatingBox.Text = string.Empty;
+        DetailOnlineRatingBox.Text = string.Empty;
         DetailStateText.Text = string.Empty;
         DetailOrganizationText.Text = string.Empty;
         DetailPublicationText.Text = string.Empty;
         DetailIdentifierText.Text = string.Empty;
         DetailTagsBox.Text = string.Empty;
         DetailCategoryBox.Text = string.Empty;
-        DetailCollectionsText.Text = string.Empty;
+        UpdateDetailCollectionsSelector(null);
         DetailDescriptionBox.Text = string.Empty;
         DetailSeriesBox.Text = string.Empty;
         DetailPublisherBox.Text = string.Empty;
@@ -2030,19 +1998,6 @@ public partial class MainWindow : Window
             HideTaskProgressPopup();
             await RefreshCollectionsAsync();
             UpdateLibraryUi();
-            if (IsDeveloperMode && _appSettings.AutoDoubanMatchOnImport && result.BookDetailsAvailable)
-            {
-                var importedIds = result.Items
-                    .Where(item => item.Succeeded && item.Added && item.BookId is not null)
-                    .Select(item => item.BookId!.Value)
-                    .ToHashSet();
-                var importedCards = ViewModel.Books
-                    .Where(card => card.Book is not null && importedIds.Contains(card.Book.Id))
-                    .ToArray();
-                if (importedCards.Length > 0)
-                    await RunDoubanBatchMatchAsync(importedCards);
-            }
-
             // ViewModel.ImportAsync rebuilds the cards before returning, so the
             // library-change notification may have refreshed the old card
             // instances. Recalculate against the cards now shown; otherwise a
@@ -2572,9 +2527,7 @@ public partial class MainWindow : Window
         }
 
         if (_conversionInProgress
-            || _automaticReaderFormatGenerationInProgress
-            || _pinyinGenerationInProgress
-            || _bookTranslationInProgress)
+            || _automaticReaderFormatGenerationInProgress)
         {
             await ShowMessageAsync(T("无法重命名书籍"), T("当前有书籍任务正在进行，请完成后再重命名。"));
             return;
@@ -2790,28 +2743,8 @@ public partial class MainWindow : Window
         menu.Items.Add(convertMenu);
         menu.Items.Add(new Separator());
 
-        var pinyinFile = FindPinyinBookFile(card.Book.Files);
-        var pinyinContextMenuEnabled = PinyinContextMenuEnabledCheck?.IsChecked
-            ?? _appSettings.PinyinContextMenuEnabled;
-        if (pinyinContextMenuEnabled == true)
-        {
-            var pinyinMenuItem = CreateMenuItem(
-                T("书籍注音"),
-                () => GeneratePinyinBookAsync(card));
-            pinyinMenuItem.IsEnabled = pinyinFile is null && SelectPinyinSourceFile(card.Book.Files) is not null;
-            menu.Items.Add(pinyinMenuItem);
+        if (AddPluginBookActionMenuItems(menu, card))
             menu.Items.Add(new Separator());
-        }
-
-        var translationContextMenuEnabled = TranslationContextMenuEnabledCheck?.IsChecked
-            ?? _appSettings.Translation.ContextMenuEnabled;
-        if (translationContextMenuEnabled == true
-            && card.Book.Files.Any(file =>
-                file.Format.Equals("epub", StringComparison.OrdinalIgnoreCase)))
-        {
-            menu.Items.Add(CreateMenuItem(T("书籍翻译"), () => TranslateBookFromContextAsync(card)));
-            menu.Items.Add(new Separator());
-        }
 
         menu.Items.Add(CreateBookVariantMenuItem(
             T("发送到设备"),
@@ -2843,17 +2776,17 @@ public partial class MainWindow : Window
                 BookLibraryDefaults.UncollectedCollectionName,
                 StringComparison.Ordinal))
             .ToArray();
+        var exclusiveCollections = _appSettings.CollectionsMutuallyExclusive;
         foreach (var folder in customCollections)
         {
-            var item = new MenuItem
+            var item = new MenuItem { Header = folder.Name, Tag = folder };
+            if (!exclusiveCollections)
             {
-                Header = folder.Name,
-                ToggleType = MenuItemToggleType.CheckBox,
-                IsChecked = card.Book.CollectionIds.Contains(folder.Collection.Id),
-                Tag = folder
-            };
+                item.ToggleType = MenuItemToggleType.CheckBox;
+                item.IsChecked = card.Book.CollectionIds.Contains(folder.Collection.Id);
+            }
             ApplyLegacyMenuItemSize(item);
-            item.Click += async (_, _) => await ToggleBookCollectionAsync(card, folder);
+            item.Click += async (_, _) => await ChangeBookCollectionAsync(card, folder, exclusiveCollections);
             collectionMenu.Items.Add(item);
         }
         if (customCollections.Length > 0)
@@ -2865,7 +2798,7 @@ public partial class MainWindow : Window
             try
             {
                 var collection = await _library.CreateCollectionAsync(name, _lifetimeCancellation.Token);
-                await _library.AddBookToCollectionAsync(card.Book.Id, collection.Id, _lifetimeCancellation.Token);
+                await AssignBookToCollectionAsync(card, collection.Id);
                 await RefreshLibraryAsync();
                 SetTaskStatus(T("已创建并加入收藏夹“{0}”。", name));
             }
@@ -3262,6 +3195,135 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Puts the book into one collection, dropping its other memberships first
+    /// when the settings ask for mutually exclusive collections. The library
+    /// itself allows several memberships, so the rule lives in the UI.
+    /// </summary>
+    private async Task AssignBookToCollectionAsync(BookCardViewModel card, Guid collectionId)
+    {
+        if (_appSettings.CollectionsMutuallyExclusive)
+        {
+            foreach (var existing in card.Book.CollectionIds.Where(id => id != collectionId).ToArray())
+                await _library.RemoveBookFromCollectionAsync(card.Book.Id, existing, _lifetimeCancellation.Token);
+        }
+        if (!card.Book.CollectionIds.Contains(collectionId))
+            await _library.AddBookToCollectionAsync(card.Book.Id, collectionId, _lifetimeCancellation.Token);
+    }
+
+    private async Task ClearBookCollectionsAsync(BookCardViewModel card)
+    {
+        foreach (var existing in card.Book.CollectionIds.ToArray())
+            await _library.RemoveBookFromCollectionAsync(card.Book.Id, existing, _lifetimeCancellation.Token);
+    }
+
+    private void DetailCollectionsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_selectedCard is null || _updatingDetails) return;
+        var menu = BuildDetailCollectionsMenu(_selectedCard);
+        AttachInstantMenuHover(menu);
+        menu.PlacementTarget = DetailCollectionsButton;
+        menu.Placement = PlacementMode.BottomEdgeAlignedLeft;
+        menu.Open(DetailCollectionsButton);
+    }
+
+    /// <summary>
+    /// Collections offered by the detail pane's selector. With mutually
+    /// exclusive collections the entries carry no tick marks (choosing one
+    /// replaces the previous one); otherwise each entry is a checkbox that
+    /// toggles that membership.
+    /// </summary>
+    private ContextMenu BuildDetailCollectionsMenu(BookCardViewModel card)
+    {
+        var menu = new ContextMenu();
+        var exclusive = _appSettings.CollectionsMutuallyExclusive;
+        var customCollections = CollectionFolders
+            .Where(folder => !IsUncollectedFolder(folder))
+            .ToArray();
+
+        foreach (var folder in customCollections)
+        {
+            var item = new MenuItem { Header = folder.Name, Tag = folder };
+            if (!exclusive)
+            {
+                item.ToggleType = MenuItemToggleType.CheckBox;
+                item.IsChecked = card.Book.CollectionIds.Contains(folder.Collection.Id);
+            }
+            ApplyLegacyMenuItemSize(item);
+            item.Click += async (_, _) => await ChangeBookCollectionAsync(card, folder, exclusive);
+            menu.Items.Add(item);
+        }
+        if (customCollections.Length == 0)
+            menu.Items.Add(new MenuItem { Header = T("还没有收藏夹。"), IsEnabled = false });
+
+        if (exclusive && customCollections.Length > 0)
+            menu.Items.Add(CreateMenuItem(T("未收藏"), () => ClearDetailCollectionsAsync(card)));
+
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem(T("新建收藏夹…"), async () =>
+        {
+            var name = await PromptCollectionNameAsync();
+            if (string.IsNullOrWhiteSpace(name)) return;
+            try
+            {
+                var collection = await _library.CreateCollectionAsync(name, _lifetimeCancellation.Token);
+                await AssignBookToCollectionAsync(card, collection.Id);
+                await RefreshLibraryAsync();
+                SetTaskStatus(T("已创建并加入收藏夹“{0}”。", name));
+            }
+            catch (Exception exception)
+            {
+                SetTaskStatus(T("创建收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            }
+        }));
+
+        return menu;
+    }
+
+    private async Task ChangeBookCollectionAsync(
+        BookCardViewModel card,
+        BookCollectionFolderViewModel folder,
+        bool exclusive)
+    {
+        if (!exclusive)
+        {
+            await ToggleBookCollectionAsync(card, folder);
+            return;
+        }
+        try
+        {
+            await AssignBookToCollectionAsync(card, folder.Collection.Id);
+            await RefreshLibraryAsync();
+            SetTaskStatus(T("已加入“{0}”。", folder.Name));
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("更新收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法更新收藏夹"), UiText.Localize(exception.Message));
+        }
+    }
+
+    private async Task ClearDetailCollectionsAsync(BookCardViewModel card)
+    {
+        try
+        {
+            await ClearBookCollectionsAsync(card);
+            await RefreshLibraryAsync();
+            SetTaskStatus(T("已移出所有收藏夹。"));
+        }
+        catch (Exception exception)
+        {
+            SetTaskStatus(T("更新收藏夹失败：{0}", UiText.Localize(exception.Message)));
+            await ShowMessageAsync(T("无法更新收藏夹"), UiText.Localize(exception.Message));
+        }
+    }
+
+    private static bool IsUncollectedFolder(BookCollectionFolderViewModel folder) =>
+        string.Equals(
+            folder.Collection.Name,
+            BookLibraryDefaults.UncollectedCollectionName,
+            StringComparison.Ordinal);
+
     private async Task SaveBookMetadataAsync(BookCardViewModel card, Func<Book, string> applyChanges)
     {
         var entered = false;
@@ -3291,12 +3353,6 @@ public partial class MainWindow : Window
         string targetFormat,
         BookFile? requestedSource = null)
     {
-        if (_pinyinGenerationInProgress)
-        {
-            await ShowMessageAsync(T("格式转换"), T("已有一本书正在进行书籍注音，请稍候。"));
-            return;
-        }
-
         if (_conversionInProgress)
         {
             await ShowMessageAsync(T("格式转换"), T("已有一本书正在转换，请稍候。"));
@@ -3438,7 +3494,7 @@ public partial class MainWindow : Window
             .ToArray();
         if (books.Length == 0)
             return new AutomaticReaderFormatGenerationResult(0, []);
-        if (_conversionInProgress || _automaticReaderFormatGenerationInProgress || _pinyinGenerationInProgress)
+        if (_conversionInProgress || _automaticReaderFormatGenerationInProgress)
             return new AutomaticReaderFormatGenerationResult(
                 0,
                 [T("已有格式转换正在进行，未启动 EPUB/AZW3 自动补齐。")]);
@@ -3519,446 +3575,6 @@ public partial class MainWindow : Window
         int GeneratedCount,
         IReadOnlyList<string> Failures);
 
-    private async Task MatchDoubanAsync(BookCardViewModel card)
-    {
-        if (_doubanMatchCancellation is not null)
-        {
-            SetTaskStatus(T("豆瓣匹配正在进行中，请稍候。"));
-            return;
-        }
-        if (!_appSettings.NetworkEnabled)
-        {
-            await ShowMessageAsync(T("网络功能已关闭"), T("请先在应用设置中允许网络功能，再使用豆瓣匹配。"));
-            return;
-        }
-
-        // Same cleaning as batch matching: import metadata noise (subtitles,
-        // bracketed series info, stuffed author strings) makes Douban's strict
-        // keyword search miss otherwise obvious hits.
-        var searchTitle = CleanDoubanTitle(card.Book.Title);
-        var searchAuthor = CleanDoubanAuthor(card.Book.Authors);
-        if (string.IsNullOrWhiteSpace(searchTitle)) searchTitle = card.Book.Title.Trim();
-        DoubanSearchBox.Text = searchTitle;
-        _doubanResearchPending = false;
-
-        var cancellation = new CancellationTokenSource();
-        _doubanMatchCancellation = cancellation;
-        try
-        {
-            SetTaskStatus(T("正在搜索《{0}》的豆瓣信息…", searchTitle));
-            ShowTaskProgressPopup();
-            TaskProgressPopupBar.IsIndeterminate = true;
-            TaskProgressPopupText.Text = T("正在搜索《{0}》的豆瓣信息…", searchTitle);
-            await SearchAndShowDoubanCandidatesAsync(searchTitle, searchAuthor, cancellation.Token);
-
-            while (true)
-            {
-                var candidate = await ChooseDoubanCandidateAsync();
-
-                if (_doubanResearchPending)
-                {
-                    // The user edited the keywords in the overlay; search again
-                    // and keep the dialog open with the refreshed list.
-                    _doubanResearchPending = false;
-                    var query = DoubanSearchBox.Text?.Trim() ?? string.Empty;
-                    if (query.Length > 0)
-                        await SearchAndShowDoubanCandidatesAsync(query, null, cancellation.Token);
-                    continue;
-                }
-                if (candidate is null)
-                {
-                    SetTaskStatus(T("已取消豆瓣匹配。"));
-                    return;
-                }
-                _doubanSelectedCandidate = candidate;
-
-                SetTaskStatus(T("正在读取《{0}》的豆瓣详情…", candidate.Title));
-                var metadata = await _douban.GetDetailsAsync(candidate, cancellation.Token);
-                var choices = await ConfirmDoubanMetadataAsync(metadata, candidate);
-                if (choices?.GoBack == true) continue;
-                if (choices is null)
-                {
-                    SetTaskStatus(T("已取消豆瓣匹配。"));
-                    return;
-                }
-
-                var book = card.Book;
-                if (choices.UpdateTitle && !string.IsNullOrWhiteSpace(metadata.Title)) book.Title = metadata.Title.Trim();
-                if (choices.UpdateAuthors && !string.IsNullOrWhiteSpace(metadata.Authors)) book.Authors = metadata.Authors.Trim();
-                if (choices.UpdateSeries && !string.IsNullOrWhiteSpace(metadata.Series)) book.Series = metadata.Series.Trim();
-                if (choices.UpdateDescription && !string.IsNullOrWhiteSpace(metadata.Description)) book.Description = metadata.Description.Trim();
-                if (choices.UpdatePublication)
-                {
-                    if (!string.IsNullOrWhiteSpace(metadata.Publisher)) book.Publisher = metadata.Publisher.Trim();
-                    if (!string.IsNullOrWhiteSpace(metadata.PublishDate)) book.PublishDate = metadata.PublishDate.Trim();
-                    if (!string.IsNullOrWhiteSpace(metadata.Isbn)) book.Isbn = metadata.Isbn.Trim();
-                    if (!string.IsNullOrWhiteSpace(metadata.Pages)) book.PageCount = metadata.Pages.Trim();
-                    if (!string.IsNullOrWhiteSpace(metadata.Binding)) book.Binding = metadata.Binding.Trim();
-                    if (metadata.Rating is not null) book.DoubanRating = metadata.Rating;
-                    book.DoubanRatingCount = metadata.RatingCount;
-                }
-
-                if (choices.UpdateCover && !string.IsNullOrWhiteSpace(metadata.CoverUrl))
-                {
-                    try
-                    {
-                        SetTaskStatus(T("正在下载并保存豆瓣封面…"));
-                        var coverBytes = await _douban.DownloadCoverAsync(metadata.CoverUrl, cancellation.Token);
-                        _paths.EnsureDirectories();
-                        var coverName = $"{book.Id:N}-douban.jpg";
-                        var coverPath = Path.Combine(_paths.Covers, coverName);
-                        var temporaryPath = coverPath + ".tmp";
-                        await File.WriteAllBytesAsync(temporaryPath, coverBytes, cancellation.Token);
-                        File.Move(temporaryPath, coverPath, overwrite: true);
-                        book.CoverPath = Path.GetRelativePath(_paths.Data, coverPath);
-                    }
-                    catch (Exception exception)
-                    {
-                        SetTaskStatus(T("豆瓣信息已读取，但封面下载失败：{0}", UiText.Localize(exception.Message)));
-                    }
-                }
-
-                await _library.UpdateMetadataAsync(book, _lifetimeCancellation.Token);
-                await RefreshLibraryAsync();
-                SetTaskStatus(T("已用豆瓣信息更新《{0}》。", book.Title));
-                return;
-            }
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-            SetTaskStatus(T("豆瓣匹配已取消。"));
-        }
-        catch (Exception exception)
-        {
-            SetTaskStatus(T("豆瓣匹配失败：{0}", UiText.Localize(exception.Message)));
-            await ShowMessageAsync(T("豆瓣匹配失败"), UiText.Localize(exception.Message));
-        }
-        finally
-        {
-            TaskProgressPopupBar.IsIndeterminate = false;
-            HideTaskProgressPopup();
-            DoubanCandidateOverlay.IsVisible = false;
-            DoubanPreviewOverlay.IsVisible = false;
-            _doubanApplyCompletion?.TrySetResult(null);
-            _doubanApplyCompletion = null;
-            _doubanPreviewMetadata = null;
-            _doubanSelectedCandidate = null;
-            DoubanPreviewCoverImage.Source = null;
-            DisposeDoubanCandidates();
-            if (ReferenceEquals(_doubanMatchCancellation, cancellation)) _doubanMatchCancellation = null;
-            cancellation.Dispose();
-        }
-    }
-
-    // Runs one Douban query and refreshes the candidate overlay (list plus
-    // covers). Empty results or failures keep the dialog open with a status
-    // message so the keywords can be corrected and searched again; only
-    // access-verification blocks bubble up to abort the whole match.
-    private async Task SearchAndShowDoubanCandidatesAsync(
-        string title,
-        string? authors,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            TaskProgressPopupText.Text = T("正在搜索豆瓣“{0}”…", title);
-            SetTaskStatus(T("正在搜索豆瓣“{0}”…", title));
-            var candidates = await _douban.SearchAsync(title, authors, cancellationToken);
-            if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(authors))
-            {
-                // Dirty author strings ("【日】伊坂幸太郎", translators mixed
-                // in) poison the query; retry with the title alone.
-                candidates = await _douban.SearchAsync(title, null, cancellationToken);
-            }
-            DisposeDoubanCandidates();
-            foreach (var item in candidates)
-                DoubanCandidates.Add(new DoubanCandidateViewModel(item));
-            if (candidates.Count > 0)
-            {
-                TaskProgressPopupText.Text = T("正在加载豆瓣候选封面…");
-                SetTaskStatus(T("正在加载豆瓣候选封面…"));
-                await LoadDoubanCandidateCoversAsync(cancellationToken);
-                SetTaskStatus(T("豆瓣返回 {0} 条结果，请选择匹配条目。", candidates.Count));
-            }
-            else
-            {
-                SetTaskStatus(T("豆瓣没有返回“{0}”的结果，可修改关键词后重新搜索。", title));
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (InvalidOperationException exception)
-            when (exception.Message.Contains("访问验证") || exception.Message.Contains("限制了访问"))
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            SetTaskStatus(T("豆瓣搜索失败：{0}", UiText.Localize(exception.Message)));
-        }
-    }
-
-    private void DoubanResearchButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(DoubanSearchBox.Text)) return;
-        _doubanResearchPending = true;
-        _doubanCandidateCompletion?.TrySetResult(null);
-    }
-
-    private void DoubanSearchBox_KeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key is not Key.Enter) return;
-        e.Handled = true;
-        DoubanResearchButton_Click(sender, e);
-    }
-
-    private Task<DoubanBookCandidate?> ChooseDoubanCandidateAsync()
-    {
-        DoubanPreviewOverlay.IsVisible = false;
-        DoubanCandidateList.SelectedIndex = DoubanCandidates.Count > 0 ? 0 : -1;
-        SetDoubanCandidateButtonsEnabled(DoubanCandidateList.SelectedItem is DoubanCandidateViewModel);
-        ShowOverlay(DoubanCandidateOverlay);
-        _doubanCandidateCompletion?.TrySetResult(null);
-        _doubanCandidateCompletion = new TaskCompletionSource<DoubanBookCandidate?>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        return _doubanCandidateCompletion.Task;
-    }
-
-    private Task<DoubanUpdateChoices?> ConfirmDoubanMetadataAsync(
-        DoubanBookMetadata metadata,
-        DoubanBookCandidate candidate)
-    {
-        _doubanPreviewMetadata = metadata;
-        DoubanCandidateOverlay.IsVisible = false;
-        DoubanPreviewSummaryText.Text = BuildDoubanSummary(metadata);
-        DoubanPreviewStatusText.Text = T("未勾选的本地字段不会被修改");
-        DoubanPreviewCoverImage.Source = DoubanCandidates
-            .FirstOrDefault(item => item.Candidate.SubjectId == candidate.SubjectId)
-            ?.CoverImage;
-
-        DoubanUpdateTitleCheck.IsChecked = !string.IsNullOrWhiteSpace(metadata.Title);
-        DoubanUpdateAuthorsCheck.IsChecked = !string.IsNullOrWhiteSpace(metadata.Authors);
-        DoubanUpdateSeriesCheck.IsChecked = !string.IsNullOrWhiteSpace(metadata.Series);
-        DoubanUpdateSeriesCheck.IsEnabled = !string.IsNullOrWhiteSpace(metadata.Series);
-        DoubanUpdateDescriptionCheck.IsChecked = !string.IsNullOrWhiteSpace(metadata.Description);
-        DoubanUpdateDescriptionCheck.IsEnabled = !string.IsNullOrWhiteSpace(metadata.Description);
-        DoubanUpdateCoverCheck.IsChecked = !string.IsNullOrWhiteSpace(metadata.CoverUrl);
-        DoubanUpdateCoverCheck.IsEnabled = !string.IsNullOrWhiteSpace(metadata.CoverUrl);
-        var hasPublicationData = !string.IsNullOrWhiteSpace(metadata.Publisher)
-            || !string.IsNullOrWhiteSpace(metadata.PublishDate)
-            || !string.IsNullOrWhiteSpace(metadata.Isbn)
-            || !string.IsNullOrWhiteSpace(metadata.Pages)
-            || !string.IsNullOrWhiteSpace(metadata.Binding)
-            || metadata.Rating is not null;
-        DoubanUpdatePublicationCheck.IsChecked = hasPublicationData;
-        DoubanUpdatePublicationCheck.IsEnabled = hasPublicationData;
-
-        ShowOverlay(DoubanPreviewOverlay);
-        DoubanPreviewOverlay.Focus();
-
-        // Candidate covers are decorative; a failure must never block the
-        // metadata confirmation flow.
-        if (DoubanPreviewCoverImage.Source is null
-            && !string.IsNullOrWhiteSpace(candidate.CoverUrl)
-            && _doubanMatchCancellation is { } cancellation)
-        {
-            _ = LoadDoubanPreviewCoverAsync(candidate.CoverUrl, cancellation.Token);
-        }
-
-        _doubanApplyCompletion?.TrySetResult(null);
-        _doubanApplyCompletion = new TaskCompletionSource<DoubanUpdateChoices?>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        return _doubanApplyCompletion.Task;
-    }
-
-    private async Task LoadDoubanPreviewCoverAsync(string url, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var bytes = await _douban.DownloadCoverAsync(url, cancellationToken);
-            if (bytes.Length == 0) return;
-            await using var stream = new MemoryStream(bytes, writable: false);
-            var bitmap = new Bitmap(stream);
-            if (!ReferenceEquals(_doubanPreviewMetadata, null))
-                DoubanPreviewCoverImage.Source = bitmap;
-            else
-                bitmap.Dispose();
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch
-        {
-            // Covers are decorative; never fail the preview for a bad image.
-        }
-    }
-
-    private async Task LoadDoubanCandidateCoversAsync(CancellationToken cancellationToken)
-    {
-        var downloads = DoubanCandidates.Select(async item =>
-        {
-            if (string.IsNullOrWhiteSpace(item.Candidate.CoverUrl))
-                return (Item: item, Bytes: (byte[]?)null);
-            try
-            {
-                var bytes = await _douban.DownloadCoverAsync(item.Candidate.CoverUrl, cancellationToken);
-                return (Item: item, Bytes: (byte[]?)bytes);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch
-            {
-                return (Item: item, Bytes: (byte[]?)null);
-            }
-        });
-
-        var covers = await Task.WhenAll(downloads);
-        foreach (var (item, bytes) in covers)
-        {
-            if (bytes is null || bytes.Length == 0) continue;
-            await using var stream = new MemoryStream(bytes, writable: false);
-            item.CoverImage = new Bitmap(stream);
-        }
-    }
-
-    private void DisposeDoubanCandidates()
-    {
-        foreach (var item in DoubanCandidates) item.Dispose();
-        DoubanCandidates.Clear();
-    }
-
-    private static string BuildDoubanSummary(DoubanBookMetadata metadata)
-    {
-        static string Fallback(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();
-        var rows = new List<string>
-        {
-            T("书名：{0}", metadata.Title),
-            T("作者：{0}", Fallback(metadata.Authors)),
-            T("译者：{0}", Fallback(metadata.Translators)),
-            T("出版社：{0}", Fallback(metadata.Publisher)),
-            T("出版年：{0}", Fallback(metadata.PublishDate)),
-            T("ISBN：{0}", Fallback(metadata.Isbn)),
-            T("页数 / 装帧：{0} / {1}", Fallback(metadata.Pages), Fallback(metadata.Binding)),
-            T("定价：{0}", Fallback(metadata.Price)),
-            T("系列：{0}", Fallback(metadata.Series)),
-            metadata.Rating is null ? T("豆瓣评分：暂无") : T("豆瓣评分：{0:0.0}（{1} 人评价）", metadata.Rating, metadata.RatingCount),
-            string.Empty,
-            T("简介：{0}", Fallback(metadata.Description))
-        };
-        return string.Join(Environment.NewLine, rows);
-    }
-
-    private void DoubanCandidateList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (DoubanCandidateList.SelectedItem is DoubanCandidateViewModel item)
-        {
-            _doubanSelectedCandidate = item.Candidate;
-            SetDoubanCandidateButtonsEnabled(true);
-        }
-        else
-        {
-            SetDoubanCandidateButtonsEnabled(false);
-        }
-    }
-
-    private void SetDoubanCandidateButtonsEnabled(bool enabled)
-    {
-        DoubanCandidateApplyButton.IsEnabled = enabled;
-    }
-
-    private void DoubanCandidateList_DoubleTapped(object? sender, TappedEventArgs e)
-    {
-        if (DoubanCandidateList.SelectedItem is DoubanCandidateViewModel)
-            DoubanCandidateApplyButton_Click(sender, new RoutedEventArgs());
-    }
-
-    private void DoubanPreviewSourceButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (_doubanPreviewMetadata is null) return;
-        OpenDoubanUrl(_doubanPreviewMetadata.Url);
-    }
-
-    private void OpenDoubanUrl(string? url)
-    {
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(url))
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        }
-        catch (Exception exception)
-        {
-            SetTaskStatus(T("无法打开豆瓣详情页：{0}", UiText.Localize(exception.Message)));
-        }
-    }
-
-    private void DoubanCandidateApplyButton_Click(object? sender, RoutedEventArgs e)
-    {
-        var candidate = (DoubanCandidateList.SelectedItem as DoubanCandidateViewModel)?.Candidate;
-        DoubanCandidateOverlay.IsVisible = false;
-        _doubanCandidateCompletion?.TrySetResult(candidate);
-        _doubanCandidateCompletion = null;
-    }
-
-    private void DoubanCandidateCancelButton_Click(object? sender, RoutedEventArgs e)
-    {
-        DoubanCandidateOverlay.IsVisible = false;
-        DoubanPreviewOverlay.IsVisible = false;
-        _doubanResearchPending = false;
-        _doubanCandidateCompletion?.TrySetResult(null);
-        _doubanApplyCompletion?.TrySetResult(null);
-        _doubanCandidateCompletion = null;
-        _doubanApplyCompletion = null;
-        _doubanMatchCancellation?.Cancel();
-    }
-
-    private void DoubanPreviewApplyButton_Click(object? sender, RoutedEventArgs e)
-    {
-        DoubanPreviewOverlay.IsVisible = false;
-        _doubanApplyCompletion?.TrySetResult(new DoubanUpdateChoices(
-            GoBack: false,
-            UpdateTitle: DoubanUpdateTitleCheck.IsChecked == true,
-            UpdateAuthors: DoubanUpdateAuthorsCheck.IsChecked == true,
-            UpdateSeries: DoubanUpdateSeriesCheck.IsChecked == true,
-            UpdateDescription: DoubanUpdateDescriptionCheck.IsChecked == true,
-            UpdateCover: DoubanUpdateCoverCheck.IsChecked == true,
-            UpdatePublication: DoubanUpdatePublicationCheck.IsChecked == true));
-        _doubanApplyCompletion = null;
-    }
-
-    private void DoubanPreviewBackButton_Click(object? sender, RoutedEventArgs e)
-    {
-        DoubanPreviewOverlay.IsVisible = false;
-        _doubanApplyCompletion?.TrySetResult(new DoubanUpdateChoices(
-            GoBack: true,
-            UpdateTitle: false,
-            UpdateAuthors: false,
-            UpdateSeries: false,
-            UpdateDescription: false,
-            UpdateCover: false,
-            UpdatePublication: false));
-        _doubanApplyCompletion = null;
-    }
-
-    private void DoubanPreviewOverlay_KeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Escape) return;
-        e.Handled = true;
-        DoubanCandidateCancelButton_Click(sender, new RoutedEventArgs());
-    }
-
-    private sealed record DoubanUpdateChoices(
-        bool GoBack,
-        bool UpdateTitle,
-        bool UpdateAuthors,
-        bool UpdateSeries,
-        bool UpdateDescription,
-        bool UpdateCover,
-        bool UpdatePublication);
-
     // The library shell owns the modal overlays (confirmation, collection name,
     // import prompts, ...) while the reader is a sibling layered above that
     // shell. An overlay opened from inside the shell therefore stayed behind
@@ -3974,8 +3590,6 @@ public partial class MainWindow : Window
             ConfirmationOverlay,
             CollectionNameOverlay,
             DeviceModelInputOverlay,
-            DoubanCandidateOverlay,
-            DoubanPreviewOverlay,
             TxtImportRulesOverlay,
             ImportFormatSelectionOverlay,
             ImportConflictOverlay
@@ -4414,7 +4028,6 @@ public partial class MainWindow : Window
         if (e.Handled || OnboardingOverlay.IsVisible || MessageOverlay.IsVisible
             || ConfirmationOverlay.IsVisible || CollectionNameOverlay.IsVisible
             || DevicePromptOverlay.IsVisible || DeviceModelInputOverlay.IsVisible
-            || DoubanCandidateOverlay.IsVisible || DoubanPreviewOverlay.IsVisible
             || ImportFormatSelectionOverlay.IsVisible || ImportConflictOverlay.IsVisible)
             return;
         if (TryHandleReaderPdfHistoryKey(e)) return;
@@ -5355,12 +4968,60 @@ public partial class MainWindow : Window
         await UpdateReadingStatusAsync(_selectedCard, nextStatus);
     }
 
+    private void ClearPendingDetailCover()
+    {
+        _pendingDetailCover = null;
+        _pendingDetailCoverPreview?.Dispose();
+        _pendingDetailCoverPreview = null;
+    }
+
+    private async void DetailChangeCoverButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var card = _selectedCard;
+        if (card is null) return;
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = T("选择封面图片"),
+                AllowMultiple = false,
+                FileTypeFilter = [FilePickerFileTypes.ImageAll]
+            });
+            if (files.Count == 0 || !ReferenceEquals(card, _selectedCard)) return;
+            await using var stream = await files[0].OpenReadAsync();
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory, _lifetimeCancellation.Token);
+            var bytes = memory.ToArray();
+            using var imageStream = new MemoryStream(bytes);
+            var preview = new Bitmap(imageStream);
+            if (!ReferenceEquals(card, _selectedCard)) { preview.Dispose(); return; }
+            ClearPendingDetailCover();
+            using var png = new MemoryStream();
+            preview.Save(png, PngBitmapEncoderOptions.Default);
+            _pendingDetailCover = png.ToArray();
+            _pendingDetailCoverPreview = preview;
+            DetailCoverImage.Source = preview;
+            DetailCoverPlaceholder.IsVisible = false;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            await ShowMessageAsync(T("无法读取封面"), UiText.Localize(exception.Message));
+        }
+    }
+
     private async void SaveDetailsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => await SaveDetailsAsync();
 
     private async Task SaveDetailsAsync()
     {
         if (_selectedCard is null) return;
+        if (!BookDetailEditing.TryParseRating(DetailOnlineRatingBox.Text, out var rating))
+        {
+            await ShowMessageAsync(T("评分无效"), T("请输入 0 到 10 之间的评分，或留空清除评分。"));
+            return;
+        }
+        var card = _selectedCard;
+        var pendingCover = _pendingDetailCover;
         var title = DetailTitleText.Text?.Trim();
         var authors = DetailAuthorsText.Text?.Trim();
         var tags = DetailTagsBox.Text?.Trim() ?? string.Empty;
@@ -5372,8 +5033,27 @@ public partial class MainWindow : Window
         var isbn = DetailIsbnBox.Text?.Trim();
         var pageCount = DetailPageCountBox.Text?.Trim();
         var binding = DetailBindingBox.Text?.Trim();
-        await SaveBookMetadataAsync(_selectedCard, book =>
+        string? coverPath = null;
+        if (pendingCover is not null)
         {
+            try
+            {
+                _paths.EnsureDirectories();
+                var path = Path.Combine(_paths.Covers, $"{card.Book.Id:N}-manual-{Guid.NewGuid():N}.png");
+                await File.WriteAllBytesAsync(path, pendingCover, _lifetimeCancellation.Token);
+                coverPath = Path.GetRelativePath(_paths.Data, path);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                await ShowMessageAsync(T("无法保存封面"), UiText.Localize(exception.Message));
+                return;
+            }
+        }
+        await SaveBookMetadataAsync(card, book =>
+        {
+            if (book.OnlineRating != rating) book.OnlineRatingCount = null;
+            book.OnlineRating = rating;
+            if (coverPath is not null) book.CoverPath = coverPath;
             if (!string.IsNullOrWhiteSpace(title)) book.Title = title;
             if (!string.IsNullOrWhiteSpace(authors)) book.Authors = authors;
             book.Tags = tags;
@@ -5387,12 +5067,6 @@ public partial class MainWindow : Window
             book.Binding = binding;
             return T("书籍信息已保存。");
         });
-    }
-
-    private async void DoubanMatchButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (IsDeveloperMode && _selectedCard is not null)
-            await MatchDoubanAsync(_selectedCard);
     }
 
     private void ConfirmationCancelButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -5415,8 +5089,13 @@ public partial class MainWindow : Window
         var name = CollectionNameBox.Text?.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            SetTaskStatus(T("收藏夹名称不能为空。"));
-            await ShowMessageAsync(T("名称不能为空"), T("请输入收藏夹名称。"));
+            if (CollectionNameBox.PasswordChar != '\0')
+                await ShowMessageAsync(T("密码不能为空"), T("请输入密码"));
+            else
+            {
+                SetTaskStatus(T("收藏夹名称不能为空。"));
+                await ShowMessageAsync(T("名称不能为空"), T("请输入收藏夹名称。"));
+            }
             return;
         }
         CompleteCollectionName(name);

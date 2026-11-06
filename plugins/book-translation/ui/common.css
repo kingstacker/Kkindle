@@ -1,0 +1,67 @@
+* { box-sizing: border-box; }
+body { padding: 22px 24px; margin: 0; }
+h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; line-height: 1.35; overflow-wrap: anywhere; }
+.lead { font-size: 12px; color: var(--kk-muted); margin: 0 0 14px; line-height: 1.55; }
+
+/* Settings-style rows: text on the left, control on the right, hairline between groups. */
+.section { border-top: 1px solid var(--kk-hairline); padding: 6px 0; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; align-items: center; min-height: 48px; padding: 6px 0; }
+.row > label, .row > .label { font-size: 14px; line-height: 1.45; }
+.hint { display: block; font-size: 12px; color: var(--kk-muted); margin-top: 2px; line-height: 1.5; font-weight: 400; }
+.hint:empty { display: none; }
+.row > input, .row > select, .row > .kk-button, .row > .kk-dd { width: 100%; }
+.row > input[type=number] { text-align: right; }
+
+/* Page-drawn dropdowns (dropdown.js): the native select is the hidden value
+   store, so the popup follows the app's styling on every platform. */
+.kk-dd { position: relative; width: 100%; }
+.kk-dd > select { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.kk-dd-button { width: 100%; min-height: 32px; padding: 0 10px; border: 1px solid var(--kk-ink);
+  background: var(--kk-paper); color: var(--kk-ink); font: inherit; font-size: 13px; text-align: left;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
+.kk-dd-button:disabled { opacity: .45; cursor: default; }
+.kk-dd-button:focus-visible { outline: 1px solid var(--kk-ink); outline-offset: 1px; }
+.kk-dd-chevron { width: 12px; height: 12px; flex: none; }
+.kk-dd-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 280px;
+  overflow: auto; padding: 4px 0; background: var(--kk-paper); border: 1px solid var(--kk-strong-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .12); z-index: 20; }
+.kk-dd-menu[hidden] { display: none; }
+.kk-dd-option { position: relative; display: block; width: 100%; padding: 7px 12px 7px 30px; border: 0;
+  background: transparent; color: var(--kk-ink); font: inherit; font-size: 13px; text-align: left;
+  white-space: nowrap; cursor: pointer; }
+.kk-dd-option:hover, .kk-dd-option:focus-visible { background: var(--kk-hover); outline: none; }
+.kk-dd-option.selected::before { content: "✓"; position: absolute; left: 11px; }
+
+/* Output choices: square checkboxes laid out like the main window's option lists. */
+.checks { display: flex; gap: 22px; flex-wrap: wrap; }
+.checks label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.stack label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+.section > .label { font-size: 14px; padding-top: 8px; }
+.section > .checks { padding: 10px 0 4px; }
+.section > .hint { padding-bottom: 8px; }
+
+/* Toggle rows reuse the host .kk-row look; keep them flush with the grid rows. */
+.section > .kk-row { margin: 0 -8px; }
+
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--kk-hairline); }
+.actions .grow { flex: 1; }
+
+.progress { margin-top: 18px; display: none; }
+.progress.visible { display: block; }
+.bar { height: 3px; background: var(--kk-hairline); overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--kk-ink); transition: width .2s ease; }
+.bar.indeterminate > i { width: 35% !important; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(310%); } }
+.progress-text { display: flex; gap: 10px; justify-content: space-between; font-size: 12px; color: var(--kk-muted); margin-top: 8px; line-height: 1.5; }
+.progress-text .stage { color: var(--kk-ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-text .counter { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.result { margin-top: 14px; padding: 10px 12px; border-left: 2px solid var(--kk-ink); background: var(--kk-hover);
+  font-size: 13px; line-height: 1.6; display: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.result.visible { display: block; }
+.result .files { display: block; font-size: 12px; color: var(--kk-muted); margin-top: 4px; }
+.result.error { border-left-color: var(--kk-danger); color: var(--kk-danger); }
+.status { font-size: 12px; color: var(--kk-muted); line-height: 1.5; }
+.status:empty { display: none; }
+.status.error { color: var(--kk-danger); }

@@ -389,8 +389,8 @@ public sealed class S3SyncTests
                 command.CommandText = """
                     INSERT INTO Books (
                         Id, Title, Authors, Series, SeriesIndex, Description, Publisher,
-                        PublishDate, Isbn, PageCount, Binding, DoubanRating,
-                        DoubanRatingCount, Tags, Category, IsFavorite, ReadingStatus,
+                        PublishDate, Isbn, PageCount, Binding, OnlineRating,
+                        OnlineRatingCount, Tags, Category, IsFavorite, ReadingStatus,
                         CoverPath, CreatedAt, UpdatedAt)
                     VALUES
                         ($canonical, '同一本书', '同一作者', NULL, NULL, NULL, NULL,

@@ -19,7 +19,7 @@
 
 现在新增版本为 1 的 `ReaderContentPosition`，保存正文字符偏移、图片序号、备用页索引和滚动视口内位置。`NativeReaderHost` 在关闭或保存时捕获内容位置，重开后根据当前全局排版重新定位。保存的章节片段不会覆盖精确位置；尚未完成恢复或正在加载的宿主不会把旧进度改写为章首。正文偏移沿用原 XHTML 文本坐标，没有插入占位字符。
 
-相关位置：[内容位置模型](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.Core/ReaderContentPosition.cs:9)、[进度保存](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.App/MainWindow.Reader.cs:1032)、[恢复调用](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.App/MainWindow.ReaderInteraction.cs:1554)、[原生捕获与恢复](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.App/NativeReaderHost.cs:702)。书签跳转、重复书签判定和角标也使用内容位置，支持切换排版后定位到相同文字或图片。
+相关位置：[内容位置模型](src/Kkindle.Core/ReaderContentPosition.cs:9)、[进度保存](src/Kkindle.App/MainWindow.Reader.cs:1032)、[恢复调用](src/Kkindle.App/MainWindow.ReaderInteraction.cs:1554)、[原生捕获与恢复](src/Kkindle.App/NativeReaderHost.cs:702)。书签跳转、重复书签判定和角标也使用内容位置，支持切换排版后定位到相同文字或图片。
 
 `ReaderProgress`、`ReaderBookmarks` 增加可空的 `ContentPositionJson`，迁移先检查 `PRAGMA table_info`，可重复初始化而不覆盖旧记录。S3 快照增加可选字段，导入和导出均携带新位置；来自旧客户端的新记录会清除过时的内容位置，避免把较新的数值进度与较旧的锚点混用。缺失、损坏或未知版本的位置数据会回退到旧字段，不阻止整条记录读取。
 
@@ -31,7 +31,10 @@
 
 图片序号按内容顺序计数，同一图片文件出现多次仍可区分，不保存缓存绝对路径。回归覆盖四种排版、缓存目录变化，以及图片前的文字重排导致页数变化的情况。图片内容锚点参与会话内重排和持久化恢复，页索引仅作最后回退。旧版已经保存为 0 且没有其他位置线索的图片进度，无法追溯还原丢失的页码。
 
-修复前的原始测量数据保留于 [persisted-position-findings.json](C:/Users/kings/Desktop/01_Projects/Kkindle/artifacts/kreader-review/position-probe/output/persisted-position-findings.json)。该文件记录旧行为，不代表当前实现。修复后的验证使用真实 `NativeReaderHost`、SQLite 读写和 MainWindow 的打开、关闭、重开与书签跳转流程。
+修复前的原始测量数据保留于本地
+`artifacts/kreader-review/position-probe/output/persisted-position-findings.json`。
+该文件记录旧行为，不代表当前实现。修复后的验证使用真实 `NativeReaderHost`、
+SQLite 读写和 MainWindow 的打开、关闭、重开与书签跳转流程。
 
 ## 上一轮修复继续保留
 
@@ -43,13 +46,13 @@
 | P2 | 原生滚动模式捕获书签位置时强制写入 `FlowMode=1`，与滚动刷新报告的 `FlowMode=0` 不一致，书签角标显示不稳定。 | 从宿主实际分页状态取得阅读模式。 |
 | P2 | AI/TTS 设置初始化内部吞掉取消异常后，外层阅读器初始化仍继续启动会话计时器；已取消的打开请求还可能进入失败清理路径。 | 在初始化入口、各异步阶段之后验证会话取消；打开请求取消后不再对当前阅读器执行错误清理。 |
 
-主要代码：[NativeReaderHost.cs](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.App/NativeReaderHost.cs:304)、[NativePdfReaderHost.cs](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.App/NativePdfReaderHost.cs:126)、[初始化链路](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.App/MainWindow.ReaderInteraction.cs:1387)、[书签位置](C:/Users/kings/Desktop/01_Projects/Kkindle/src/Kkindle.App/MainWindow.ReaderFeatures.cs:843)。
+主要代码：[NativeReaderHost.cs](src/Kkindle.App/NativeReaderHost.cs:304)、[NativePdfReaderHost.cs](src/Kkindle.App/NativePdfReaderHost.cs:126)、[初始化链路](src/Kkindle.App/MainWindow.ReaderInteraction.cs:1387)、[书签位置](src/Kkindle.App/MainWindow.ReaderFeatures.cs:843)。
 
 ## 验证范围与结果
 
 环境为 Windows x64、.NET SDK 10.0.400、Avalonia 12.1.1、SkiaSharp 3.119.4。UI 测试采用 Avalonia Headless 和真实 Skia 渲染。EPUB 使用 `NativeReaderHost`，PDF 使用 `NativePdfReaderHost`；旧 WebView 诊断中的 `SKIPPED` 结果未计为验证通过。
 
-阅读器测试位于 [ReaderStabilityTests.cs](C:/Users/kings/Desktop/01_Projects/Kkindle/tests/Kkindle.App.Tests/ReaderStabilityTests.cs)，共 38 项，其中本次新增 20 项。存储兼容测试位于 [ReaderContentPositionTests.cs](C:/Users/kings/Desktop/01_Projects/Kkindle/tests/Kkindle.Tests/ReaderContentPositionTests.cs)，同步往返测试位于 [S3SyncTests.cs](C:/Users/kings/Desktop/01_Projects/Kkindle/tests/Kkindle.Tests/S3SyncTests.cs:14)。覆盖滚动、单页、双页、竖排、字体和视口变化、重复图片、旧数据库、异常元数据以及新旧快照。
+阅读器测试位于 [ReaderStabilityTests.cs](tests/Kkindle.App.Tests/ReaderStabilityTests.cs)，共 38 项，其中本次新增 20 项。存储兼容测试位于 [ReaderContentPositionTests.cs](tests/Kkindle.Tests/ReaderContentPositionTests.cs)，同步往返测试位于 [S3SyncTests.cs](tests/Kkindle.Tests/S3SyncTests.cs:14)。覆盖滚动、单页、双页、竖排、字体和视口变化、重复图片、旧数据库、异常元数据以及新旧快照。
 
 | 验证 | 结果 | 记录 |
 | --- | --- | --- |
@@ -68,4 +71,4 @@
 
 同步使用 `/E`，排除 `data/`、`backups/` 和 `kkindle-crash.log`，没有删除目标目录内容；robocopy 退出码为 3。同步前后 9,560 个受保护文件的路径、大小和修改时间一致。最终 `git diff --check` 通过。
 
-EXE：[Kkindle.exe](C:/Users/kings/Desktop/01_Projects/Kkindle/artifacts/Kkindle-debug-win-x64-latest/Kkindle.exe)。本次发布、同步日志和核验数据使用 `artifacts/kreader-review/position-fix-publish-debug.log`、`position-fix-sync-debug.log`、`position-fix-sync-verification.json`。
+EXE 位于本地 `artifacts/Kkindle-debug-win-x64-latest/Kkindle.exe`。本次发布、同步日志和核验数据使用 `artifacts/kreader-review/position-fix-publish-debug.log`、`position-fix-sync-debug.log`、`position-fix-sync-verification.json`。

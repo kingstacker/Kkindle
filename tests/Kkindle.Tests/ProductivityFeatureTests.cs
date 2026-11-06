@@ -412,7 +412,7 @@ public sealed class ProductivityFeatureTests
     }
 
     [Fact]
-    public async Task LibraryPersistsProductivityAndDoubanMetadata()
+    public async Task LibraryPersistsProductivityAndRatingMetadata()
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -432,8 +432,8 @@ public sealed class ProductivityFeatureTests
             book.Isbn = "9787100040945";
             book.PageCount = "376";
             book.Binding = "平装";
-            book.DoubanRating = 8.3;
-            book.DoubanRatingCount = 81342;
+            book.OnlineRating = 8.3;
+            book.OnlineRatingCount = 81342;
             await service.UpdateMetadataAsync(book);
 
             var restored = Assert.Single(await service.SearchAsync());
@@ -445,8 +445,8 @@ public sealed class ProductivityFeatureTests
             Assert.Equal("9787100040945", restored.Isbn);
             Assert.Equal("376", restored.PageCount);
             Assert.Equal("平装", restored.Binding);
-            Assert.Equal(8.3, restored.DoubanRating);
-            Assert.Equal(81342, restored.DoubanRatingCount);
+            Assert.Equal(8.3, restored.OnlineRating);
+            Assert.Equal(81342, restored.OnlineRatingCount);
         }
         finally { TestHelpers.TryDelete(root); }
     }
@@ -468,12 +468,13 @@ public sealed class ProductivityFeatureTests
                         Id TEXT PRIMARY KEY, Title TEXT NOT NULL, Authors TEXT NOT NULL,
                         Series TEXT NULL, SeriesIndex REAL NULL, Description TEXT NULL,
                         Tags TEXT NOT NULL DEFAULT '', CoverPath TEXT NULL,
+                        SiteRating REAL NULL, SiteRatingCount INTEGER NULL,
                         CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL);
                     CREATE TABLE BookFiles (
                         Id TEXT PRIMARY KEY, BookId TEXT NOT NULL, Format TEXT NOT NULL,
                         RelativePath TEXT NOT NULL, Size INTEGER NOT NULL, Sha256 TEXT NOT NULL UNIQUE);
-                    INSERT INTO Books (Id, Title, Authors, Tags, CreatedAt, UpdatedAt)
-                    VALUES ($id, 'Legacy', 'Author', '', $now, $now);
+                    INSERT INTO Books (Id, Title, Authors, Tags, SiteRating, SiteRatingCount, CreatedAt, UpdatedAt)
+                    VALUES ($id, 'Legacy', 'Author', '', 8.6, 4321, $now, $now);
                     """;
                 command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
                 command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
@@ -487,6 +488,9 @@ public sealed class ProductivityFeatureTests
             Assert.Equal(string.Empty, book.Category);
             Assert.False(book.IsFavorite);
             Assert.Equal(LibraryReadingStatus.Unread, book.ReadingStatus);
+            // Legacy rating columns are renamed in place, values intact.
+            Assert.Equal(8.6, book.OnlineRating);
+            Assert.Equal(4321, book.OnlineRatingCount);
         }
         finally { TestHelpers.TryDelete(root); }
     }

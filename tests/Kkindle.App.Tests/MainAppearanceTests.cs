@@ -164,30 +164,6 @@ public sealed partial class SettingsTests
         scope.Get<Grid>("ConfirmationOverlay").IsVisible = false;
     });
 
-    [Fact]
-    public Task ExistingProgressWindowsRepaintWhenTheMainThemeChanges() => Run(async () =>
-    {
-        await using var scope = await TestWindow.Create();
-        var progressType = typeof(MainWindow).Assembly.GetType("Kkindle.PinyinBookProgressWindow")!;
-        var progress = (Window)Activator.CreateInstance(progressType, "主题测试", false)!;
-        try
-        {
-            progress.Show(scope.Window);
-            var originalBackground = progress.Background;
-            var summary = progress.GetVisualDescendants().OfType<TextBlock>().First(x => x.Text == "本地注音  ·  仅本地生成");
-            foreach (var theme in new[] { AppTheme.Beige, AppTheme.Green, AppTheme.Classic })
-            {
-                scope.Get<ComboBox>("MainThemeBox").SelectedIndex = (int)theme;
-                await Render();
-                Assert.Same(originalBackground, progress.Background);
-                Assert.Equal(ResourceColor("PaperBrush"), ColorOf(progress.Background));
-                Assert.Equal(ResourceColor("MutedInkBrush"), ColorOf(summary.Foreground));
-                Assert.True(Contrast(ColorOf(summary.Foreground), ColorOf(progress.Background)) >= 4.5);
-            }
-        }
-        finally { progress.Close(); }
-    });
-
     private static Color ColorOf(IBrush? brush) => Assert.IsAssignableFrom<ISolidColorBrush>(brush).Color;
     private static Color ResourceColor(string key) => ColorOf((IBrush)Application.Current!.Resources[key]!);
 

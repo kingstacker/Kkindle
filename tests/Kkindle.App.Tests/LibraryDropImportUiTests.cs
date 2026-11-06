@@ -16,7 +16,7 @@ public sealed partial class SettingsTests
         {
             UiLanguage = "zh-CN", OnboardingCompleted = true, NetworkEnabled = false,
             AutoUpdateCheckEnabled = false, AutoConnectDevice = false,
-            AutoGenerateEpubAndAzw3OnImport = false, AutoDoubanMatchOnImport = false
+            AutoGenerateEpubAndAzw3OnImport = false
         });
         var pdf = PdfFixture.Write(scope.Paths.Data);
         var txt = Path.Combine(scope.Paths.Data, "拖入%20测试.TXT");

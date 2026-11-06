@@ -7,6 +7,36 @@ namespace Kkindle.Infrastructure;
 
 public sealed partial class S3SyncService
 {
+    /// <summary>
+    /// Snapshots written before the rating fields were renamed keep the old
+    /// names as opaque extension data. Adopt their values into the typed
+    /// fields so a sync does not silently drop ratings; the opaque copy stays
+    /// in place for clients that still read the old name.
+    /// </summary>
+    private static void AdoptLegacyRatingFields(S3SyncSnapshot snapshot)
+    {
+        foreach (var book in snapshot.Books.Concat(snapshot.ReadingMaterialBooks))
+        {
+            if (book.ExtensionData is not { Count: > 0 } fields) continue;
+            foreach (var (name, value) in fields)
+            {
+                if (value.ValueKind != JsonValueKind.Number) continue;
+                if (book.OnlineRatingCount is null
+                    && name.EndsWith("RatingCount", StringComparison.OrdinalIgnoreCase)
+                    && value.TryGetInt32(out var count))
+                {
+                    book.OnlineRatingCount = count;
+                }
+                else if (book.OnlineRating is null
+                    && name.EndsWith("Rating", StringComparison.OrdinalIgnoreCase)
+                    && value.TryGetDouble(out var rating))
+                {
+                    book.OnlineRating = rating;
+                }
+            }
+        }
+    }
+
     private static void ValidateSnapshotCompatibility(S3SyncSnapshot snapshot)
     {
         var minimum = snapshot.MinimumReaderVersion ?? snapshot.Version;

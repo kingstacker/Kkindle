@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>生成注音书</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <h1 id="title">生成注音书</h1>
+  <p class="lead" id="lead"></p>
+
+  <div class="section">
+    <div class="row">
+      <label for="engine"><span id="engineLabel"></span><span class="hint" id="engineHint"></span></label>
+      <select class="kk-input" id="engine">
+        <option value="dotnet-g2p" id="engineLocal"></option>
+        <option value="g2pw" id="engineG2pw"></option>
+      </select>
+    </div>
+    <div class="row" id="modelRow">
+      <label><span id="modelLabel"></span><span class="hint" id="modelStatus"></span></label>
+      <button class="kk-button" id="download"></button>
+    </div>
+    <div class="row">
+      <label for="style"><span id="styleLabel"></span><span class="hint" id="styleHint"></span></label>
+      <select class="kk-input" id="style">
+        <option value="tone-marked" id="styleMarked"></option>
+        <option value="tone-number" id="styleNumber"></option>
+        <option value="none" id="styleNone"></option>
+      </select>
+    </div>
+    <label class="kk-row" for="aiReview">
+      <span class="kk-row-text"><strong id="aiLabel"></strong><span id="aiHint"></span></span>
+      <input type="checkbox" class="kk-switch" id="aiReview" checked>
+    </label>
+  </div>
+
+  <div class="actions">
+    <button class="kk-button kk-primary" id="start" disabled></button>
+    <button class="kk-button" id="cancel" style="display:none"></button>
+    <span class="grow"></span>
+    <span class="status" id="status"></span>
+  </div>
+
+  <div class="progress" id="progress">
+    <div class="bar" id="bar"><i id="barFill"></i></div>
+    <div class="progress-text">
+      <span class="stage" id="stage"></span>
+      <span class="counter" id="counter"></span>
+    </div>
+  </div>
+  <div class="result" id="result"></div>
+
+  <script src="dropdown.js"></script>
+  <script src="pinyin.js"></script>
+</body>
+</html>

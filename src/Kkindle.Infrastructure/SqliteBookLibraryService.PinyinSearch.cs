@@ -73,7 +73,7 @@ public sealed partial class SqliteBookLibraryService
         var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT b.Id, b.Title, b.Authors, b.Series, b.SeriesIndex, b.Description, b.Tags, b.Category, b.IsFavorite, b.ReadingStatus, b.CoverPath, b.CreatedAt, b.UpdatedAt,
-                   b.Publisher, b.PublishDate, b.Isbn, b.PageCount, b.Binding, b.DoubanRating, b.DoubanRatingCount
+                   b.Publisher, b.PublishDate, b.Isbn, b.PageCount, b.Binding, b.OnlineRating, b.OnlineRatingCount
             FROM Books b
             {where}
             ORDER BY {GetLibrarySortSql(sortMode)};

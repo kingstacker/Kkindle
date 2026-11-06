@@ -19,7 +19,7 @@ public partial class MainWindow
 
     private async void ReaderSelectionTranslationButton_Click(object? sender, RoutedEventArgs e)
     {
-        var settings = ReadBookTranslationSettingsFromControls();
+        var settings = BookTranslationSettings.Normalize(_appSettings.Translation);
         _readerTranslationProvider = settings.Provider switch
         {
             BookTranslationProvider.BingFree => ReaderTranslationProvider.Bing,

@@ -60,8 +60,8 @@ internal sealed class S3SyncBook : S3SyncExtensibleData
     public string? Isbn { get; set; }
     public string? PageCount { get; set; }
     public string? Binding { get; set; }
-    public double? DoubanRating { get; set; }
-    public int? DoubanRatingCount { get; set; }
+    public double? OnlineRating { get; set; }
+    public int? OnlineRatingCount { get; set; }
     public string Tags { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public bool IsFavorite { get; set; }
@@ -232,7 +232,6 @@ internal sealed class S3SyncAppSettings : S3SyncExtensibleData
     public bool AiEnabled { get; set; } = true;
     public bool AutoUpdateCheckEnabled { get; set; } = true;
     public bool DevelopmentUpdateCheckEnabled { get; set; }
-    public bool AutoDoubanMatchOnImport { get; set; }
     public bool CompareKindleLibraryEnabled { get; set; } = true;
     public bool GridGalleryDisplay { get; set; }
     public bool ShowSyncStatusIcon { get; set; } = true;
